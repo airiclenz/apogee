@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -148,6 +149,12 @@ type Config struct {
 	// MUST honour it — a Gate that ignores cancellation holds Close open.
 	Gate func(context.Context) error
 	// Notify receives every Event. nil ⇒ events are discarded.
+	//
+	// It is NEVER called on the goroutine that called Add, Stop or Close: every Event is
+	// emitted from a goroutine this Scheduler owns. That is a contract rather than an
+	// implementation detail, because the Driver this library exists to serve routes its
+	// Notify back into a single-threaded event loop (ADR 0031) — and a Notify called
+	// re-entrantly from Add would have that loop waiting for itself.
 	Notify func(Event)
 	// Clock is the Scheduler's sense of time; nil ⇒ the wall clock and real tickers.
 	Clock Clock
@@ -174,7 +181,8 @@ type Scheduler struct {
 	done      chan struct{}
 
 	// mu guards the live set and every counter on it. Seams are NEVER called while it is
-	// held: a Notify that called List would deadlock its own Scheduler.
+	// held: a Notify that called List would deadlock its own Scheduler. Nor are they called
+	// on a caller's goroutine — see Config.Notify.
 	mu      sync.Mutex
 	minted  int
 	entries map[string]*entry
@@ -192,6 +200,11 @@ type entry struct {
 	// Scheduler's root, so Close ends it too.
 	stopCtx    context.Context
 	stopCancel context.CancelFunc
+
+	// stopped records that Stop — rather than Close — ended this Schedule. It is what tells the
+	// loop goroutine, which sees only a cancelled stopCtx, whether to emit EventStopped on its
+	// way out: Stop is announced and Close is silent (see Close).
+	stopped atomic.Bool
 
 	// notifyMu serializes this Schedule's own Events, so the loop goroutine and its Firing
 	// goroutine never interleave inside a single Notify call.
@@ -258,8 +271,9 @@ func (s *Scheduler) Add(spec Spec) (string, error) {
 	s.order = append(s.order, e.id)
 	s.mu.Unlock()
 
-	// Emitted before the loop starts, so EventCreated is always a Schedule's first Event.
-	s.emit(e, Event{Kind: EventCreated})
+	// EventCreated is emitted by the loop rather than here, so that Add returns without ever
+	// entering the Notify seam on its caller's goroutine (Config.Notify). It is still every
+	// Schedule's first Event: the loop emits it before it can observe a tick.
 	s.wg.Add(1)
 	go s.loop(e)
 	return e.id, nil
@@ -269,6 +283,10 @@ func (s *Scheduler) Add(spec Spec) (string, error) {
 // in is cancelled so the pending Firing is abandoned. A Firing that has already STARTED is
 // left to finish and still reports its completion — Stop ends the cycle, not the run in
 // flight, which is a fresh agent mid-task and belongs to Close's context (ADR 0033).
+//
+// It returns as soon as the Schedule is off the live set; EventStopped follows from the
+// Schedule's own goroutine, so a caller is never inside Notify (Config.Notify). List agrees
+// immediately either way — the entry is gone before Stop returns.
 //
 // It returns ErrNotFound for an id no live Schedule answers to.
 func (s *Scheduler) Stop(id string) error {
@@ -287,8 +305,11 @@ func (s *Scheduler) Stop(id string) error {
 	}
 	s.mu.Unlock()
 
+	// The flag is set BEFORE the cancel it explains, so the loop cannot wake on a cancelled
+	// stopCtx and read it as a Close. EventStopped is the loop's to emit, which keeps Stop off
+	// the Notify seam for the same reason Add stays off it (Config.Notify).
+	e.stopped.Store(true)
 	e.stopCancel()
-	s.emit(e, Event{Kind: EventStopped})
 	return nil
 }
 
@@ -345,10 +366,17 @@ func (s *Scheduler) loop(e *entry) {
 	defer s.wg.Done()
 	defer e.ticker.Stop()
 
+	s.emit(e, Event{Kind: EventCreated})
+
 	ticks := e.ticker.C()
 	for {
 		select {
 		case <-e.stopCtx.Done():
+			// Stop ends a cycle with a notice; Close ends every cycle silently, because the
+			// Driver is going away and notices into a dying surface are noise (see Close).
+			if e.stopped.Load() {
+				s.emit(e, Event{Kind: EventStopped})
+			}
 			return
 		case <-ticks:
 			s.tick(e)

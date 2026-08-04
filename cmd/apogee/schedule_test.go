@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -363,4 +365,92 @@ func TestScheduleAutoBlockedFollowsTheHostBackend(t *testing.T) {
 		t.Errorf("auto blocked=%v on a host reporting AutoEligible=%v; the two must be opposites",
 			blocked, caps.AutoEligible())
 	}
+}
+
+// ----------------------------------------------------------------------------
+// The composition the two halves' unit tests cannot see
+// ----------------------------------------------------------------------------
+
+// loopSender is tea.Program.Send's blocking discipline without a terminal: an unbuffered channel
+// that only the program's Update loop drains. The real Send is exactly this (charm.land/bubbletea
+// tea.go: `case p.msgs <- msg`), and it is the reason a Notify called on the Update goroutine
+// hangs the whole program rather than merely arriving late.
+type loopSender struct{ msgs chan tea.Msg }
+
+func (s loopSender) Send(msg tea.Msg) { s.msgs <- msg }
+
+// A Schedule created from the Update loop must not hang the program.
+//
+// This is the composition neither half's own tests can reach: internal/tui drives a fake Scheduler
+// that never emits, and internal/schedule drives a buffered recorder that never blocks, so both
+// suites pass while the two together deadlock. `/schedule 10m ...` was that deadlock — Add emitted
+// EventCreated on its caller's goroutine, the caller was the Update loop, and Bridge.NotifySchedule
+// waited for the loop to take a message it could only take after Add returned.
+//
+// The Update loop is simulated rather than run because the claim is about ONE goroutine: whatever
+// creates a Schedule must be free to go on draining messages afterwards.
+func TestCreatingAScheduleFromTheUpdateLoopDoesNotHangTheProgram(t *testing.T) {
+	bridge := tui.NewBridge()
+	sender := loopSender{msgs: make(chan tea.Msg)}
+	bridge.Bind(sender)
+
+	schedules, err := schedule.New(schedule.Config{
+		Fire:   func(context.Context, schedule.Firing) (schedule.Outcome, error) { return schedule.Outcome{}, nil },
+		Notify: bridge.NotifySchedule,
+	})
+	if err != nil {
+		t.Fatalf("schedule.New: %v", err)
+	}
+	t.Cleanup(schedules.Close)
+
+	// The Update loop: it is INSIDE this call, so it is not draining sender.msgs meanwhile —
+	// precisely the state the TUI is in while folding a submitted /schedule line.
+	type result struct {
+		id  string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		id, addErr := schedules.Add(schedule.Spec{
+			Cycle: 10 * time.Minute, Prompt: "What time is it?", Mode: modePlan,
+		})
+		done <- result{id, addErr}
+	}()
+
+	var got result
+	select {
+	case got = <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Add never returned from the Update loop: the program is deadlocked, " +
+			"which is what /schedule 10m did to the TUI")
+	}
+	if got.err != nil {
+		t.Fatalf("Add: %v", got.err)
+	}
+
+	// The loop resumes draining, and the notice it was never able to take now arrives.
+	select {
+	case msg := <-sender.msgs:
+		if _, ok := msg.(tea.Msg); !ok || msg == nil {
+			t.Fatalf("scheduler notice = %#v, want a message the Update loop can fold", msg)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no scheduler notice ever reached the program")
+	}
+
+	// Stop is the same hazard on the same goroutine, and must clear it the same way.
+	stopped := make(chan error, 1)
+	go func() { stopped <- schedules.Stop(got.id) }()
+	select {
+	case stopErr := <-stopped:
+		if stopErr != nil {
+			t.Fatalf("Stop: %v", stopErr)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop never returned from the Update loop: the program is deadlocked")
+	}
+	go func() {
+		for range sender.msgs {
+		}
+	}()
 }

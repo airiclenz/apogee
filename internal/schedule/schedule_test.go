@@ -690,3 +690,72 @@ func TestMintedIDsAreUnique(t *testing.T) {
 		t.Errorf("ids collide without randomness: %q and %q", a, b)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The Notify goroutine contract (Config.Notify)
+// ----------------------------------------------------------------------------
+
+// Add and Stop must never enter the Notify seam on the goroutine that called them. The Driver
+// this library is built for routes Notify into a single-threaded event loop, so a re-entrant
+// emit is that loop waiting for itself — the whole program stops, which is what a `/schedule`
+// typed into the TUI once did.
+//
+// The property is asserted with a Notify that BLOCKS, because that is the shape of the seam
+// that breaks: a recorder with a buffer (every other test here) cannot tell the two designs
+// apart. What is proven is not "Notify happens later" but "Add does not wait for it".
+func TestAddAndStopNeverEnterNotifyOnTheCallersGoroutine(t *testing.T) {
+	// Unbuffered and unread, exactly like the tea.Program channel that failed: anything that
+	// emits on the caller's goroutine parks here forever.
+	held := make(chan Event)
+	clk := newFakeClock()
+	s, err := New(Config{
+		Fire:   func(context.Context, Firing) (Outcome, error) { return Outcome{}, nil },
+		Notify: func(e Event) { held <- e },
+		Clock:  clk,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	returned := make(chan string, 1)
+	go func() {
+		id, addErr := s.Add(testSpec("nightly"))
+		if addErr != nil {
+			t.Errorf("Add: %v", addErr)
+		}
+		returned <- id
+	}()
+
+	var id string
+	select {
+	case id = <-returned:
+	case <-time.After(testWait):
+		t.Fatal("Add never returned: it is waiting inside the Notify seam it called itself")
+	}
+
+	if ev := <-held; ev.Kind != EventCreated || ev.ScheduleID != id {
+		t.Fatalf("first event = %q for %q, want %q for %q", ev.Kind, ev.ScheduleID, EventCreated, id)
+	}
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.Stop(id) }()
+	select {
+	case stopErr := <-stopped:
+		if stopErr != nil {
+			t.Fatalf("Stop: %v", stopErr)
+		}
+	case <-time.After(testWait):
+		t.Fatal("Stop never returned: it is waiting inside the Notify seam it called itself")
+	}
+
+	if ev := <-held; ev.Kind != EventStopped {
+		t.Fatalf("event after Stop = %q, want %q", ev.Kind, EventStopped)
+	}
+
+	// Close joins the loop goroutine, which must not be parked in a send nobody will take.
+	go func() {
+		for range held {
+		}
+	}()
+	s.Close()
+}

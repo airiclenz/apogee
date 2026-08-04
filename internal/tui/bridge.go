@@ -97,8 +97,9 @@ func (b *Bridge) Bind(p programSender) { b.prog.bind(p) }
 // a Firing narrates from the scheduler's own goroutine, and that goroutine needs exactly what a
 // worker needs — a send that is safe before the program exists and safe from anywhere afterwards.
 //
-// It is a report and never a rendezvous: nothing waits for the Update loop to fold it, so a
-// scheduler goroutine is never held up by a busy renderer.
+// It is safe from any scheduler goroutine and from none of the program's own: the send waits
+// for the Update loop to take the message (see programRef.send), which is why internal/schedule
+// emits every Event off the goroutine that called Add or Stop.
 func (b *Bridge) NotifySchedule(ev schedule.Event) { b.prog.send(scheduleEventMsg{Event: ev}) }
 
 // programRef is a concurrency-safe, late-bound handle to the running program. send runs on
@@ -120,8 +121,14 @@ func (r *programRef) bind(s programSender) { r.box.Store(&senderBox{sender: s}) 
 
 // send forwards msg to the bound program. Before Bind it is a no-op — which never happens
 // in production (Emit/Approve fire only from the worker, launched after Bind) but keeps the
-// seam safe to drive in isolation. It never blocks: Send is async (phase-2 detail plan §3
-// C2), so a deadlock here is structurally impossible.
+// seam safe to drive in isolation.
+//
+// It BLOCKS until the program's Update loop takes the message: tea.Program.Send writes to an
+// unbuffered channel that only that loop drains. Every caller here is therefore some other
+// goroutine — the worker, a scheduler goroutine — and calling it from inside Update would
+// hang the program forever, waiting for the loop that is waiting for it. That is not a
+// theoretical hazard: internal/schedule guarantees its Notify never runs on the caller's
+// goroutine precisely so that creating a Schedule from Update cannot reach here.
 func (r *programRef) send(msg tea.Msg) {
 	if box := r.box.Load(); box != nil {
 		box.sender.Send(msg)
