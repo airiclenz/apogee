@@ -9,6 +9,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // TestOncePersistsAFiringUnderItsScheduleIdentity is the item's headline: one Firing lands
@@ -245,6 +246,168 @@ func TestOnceRejectsModesThatNeedAHuman(t *testing.T) {
 				t.Errorf("the Upstream saw %d requests; a rejected mode must error before any request", up.calls())
 			}
 		})
+	}
+}
+
+// TestOnceReportsTheFinalAnswer is owner decision 1's floor: the Firing's answer comes back
+// on the Result, so a Driver can show it without decoding the saved record. It is caught off
+// the event stream, not the snapshot, so an UNPERSISTED Firing reports it just the same —
+// which is the whole reason the capture does not live on the persisting path.
+func TestOnceReportsTheFinalAnswer(t *testing.T) {
+	t.Parallel()
+
+	const answer = "the build is green and every test passed"
+
+	tests := []struct {
+		name  string
+		store bool
+	}{
+		{"persisted", true},
+		{"unpersisted", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			up := newUpstream(t, alwaysFinal(answer))
+			spec := planSpec(up.url, "check the build")
+			if tt.store {
+				spec.Store = session.NewStore(t.TempDir())
+			}
+
+			res, err := Once(context.Background(), spec)
+			if err != nil {
+				t.Fatalf("Once: %v", err)
+			}
+			if res.FinalText != answer {
+				t.Errorf("Result.FinalText = %q, want %q", res.FinalText, answer)
+			}
+			if tt.store && res.SessionID == "" {
+				t.Error("Result.SessionID is empty; the firing was not persisted")
+			}
+		})
+	}
+}
+
+// TestOnceReportsTheLastMessageNotTheFirst pins "final" in the contract: a Firing that
+// narrates its plan, calls a tool and only then answers reports the ANSWER. The narration
+// rides an assistant message that ends no Exchange, so it must never stand in for the
+// Firing's result.
+func TestOnceReportsTheLastMessageNotTheFirst(t *testing.T) {
+	t.Parallel()
+
+	const (
+		narration = "I will try to write the report first"
+		answer    = "I could not write the file, so here is what I found instead"
+	)
+
+	tool := &gatingTool{}
+	registry := domain.NewToolRegistry()
+	if err := registry.Register(tool); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	up := newUpstream(t, func(w http.ResponseWriter, req request) {
+		if req.lastRoleIs(domain.RoleTool) {
+			writeFinal(w, answer)
+			return
+		}
+		writeToolCallWithText(w, narration, "call_1", tool.Name(), `{"path":"out.txt"}`)
+	})
+
+	spec := planSpec(up.url, "write the report")
+	spec.Config.Mode = domain.ModeAuto
+	spec.Config.ConfineToWorkspace = true
+	spec.Config.Confiner = stubConfiner{}
+	spec.Config.Tools = registry
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	res, err := Once(ctx, spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if res.Turns != 2 {
+		t.Fatalf("Result.Turns = %d, want 2 (the tool Turn, then the answering Turn)", res.Turns)
+	}
+	if res.FinalText != answer {
+		t.Errorf("Result.FinalText = %q, want the last message %q", res.FinalText, answer)
+	}
+}
+
+// TestOnceReportsNoAnswerWhenCancelled covers the empty half of the contract: a Firing
+// stopped before any assistant message has no answer to report, and reports none rather
+// than something older.
+func TestOnceReportsNoAnswerWhenCancelled(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// The Firing is cancelled the moment its first request lands, so the Upstream never
+	// answers and no assistant message is ever committed.
+	up := newUpstream(t, func(http.ResponseWriter, request) { cancel() })
+
+	res, err := Once(ctx, planSpec(up.url, "think about it"))
+	if err == nil {
+		t.Fatal("Once returned no error; a cancelled firing must report one")
+	}
+	if res.FinalText != "" {
+		t.Errorf("Result.FinalText = %q, want empty — the firing never reached an answer", res.FinalText)
+	}
+}
+
+// TestOnceIgnoresASubAgentsAnswer pins the top-level half of the contract behaviourally: a
+// sub-agent's message reports to its PARENT, never to the Firing's caller. The script
+// delegates, lets the sub-agent answer, then cancels the parent before it can answer for
+// itself — so the sub-agent's message is the only one the tap ever sees, and a capture that
+// did not filter on Depth would hand its words back as the Firing's own.
+func TestOnceIgnoresASubAgentsAnswer(t *testing.T) {
+	t.Parallel()
+
+	const (
+		delegated = "list every open issue"
+		subAnswer = "the sub-agent found four open issues"
+	)
+
+	registry := domain.NewToolRegistry()
+	if err := registry.Register(tools.NewSubAgent()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	up := newUpstream(t, func(w http.ResponseWriter, req request) {
+		switch {
+		case req.lastRoleIs(domain.RoleTool):
+			// The parent is back with the delegated result. Stop it here, before it can
+			// answer: the sub-agent's message must be the only one on the stream.
+			cancel()
+		case req.lastTextHas(delegated):
+			writeFinal(w, subAnswer) // the sub-agent's own fresh conversation
+		default:
+			writeToolCall(w, "call_1", tools.SubAgentToolName, `{"task":"`+delegated+`"}`)
+		}
+	})
+
+	events := &recordingSink{}
+	spec := planSpec(up.url, "summarise the day")
+	spec.Config.Tools = registry
+	spec.Config.Events = events
+
+	res, _ := Once(ctx, spec)
+
+	if !events.saw(1, subAnswer) {
+		t.Fatalf("no depth-1 message reached the sink; the script proves nothing (saw %+v)", events.messages())
+	}
+	if events.saw(0, subAnswer) {
+		t.Fatalf("the sub-agent's answer arrived at depth 0; the script proves nothing (saw %+v)", events.messages())
+	}
+	if res.FinalText != "" {
+		t.Errorf("Result.FinalText = %q, want empty — a sub-agent's answer is its parent's, "+
+			"never the Firing's", res.FinalText)
 	}
 }
 

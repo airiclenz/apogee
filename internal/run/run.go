@@ -58,6 +58,14 @@ type Result struct {
 	SessionID string
 	// Title is the record's title — the Spec's, or the one Once derived.
 	Title string
+	// FinalText is the Firing's answer: the text of the run's final TOP-LEVEL assistant
+	// message, empty when the run produced none (cancelled mid-tool, errored before an
+	// answer). Two halves to its contract, and a caller must honour both. It is RAW model
+	// output — a surface escape-strips it at its own render seam, this library does not
+	// (ADR 0010: the answer crosses as plain data). And it is top-level ONLY: a
+	// sub-agent's message (Depth > 0) reports to its parent, not to the Firing's caller,
+	// so it never fills this field.
+	FinalText string
 	// Turns is how many Turns the Exchange took (the final Turn's index plus one).
 	Turns int
 	// Denied is how many gated actions the fail-safe denier refused. A non-zero count on a
@@ -95,9 +103,10 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	// Pin the delegates that assume a human, whatever the Spec carried: the denier refuses
 	// every gate without parking, and nil Asker/Presenter unregister ask_user and
 	// present_document. The tap wraps the caller's sink (nil ⇒ a discard) so a Firing has
-	// the EventSink construction requires and the record can relight its context gauge.
+	// the EventSink construction requires, the record can relight its context gauge and the
+	// Result can carry the answer.
 	den := &denier{}
-	tap := &usageTap{inner: spec.Config.Events}
+	tap := &eventTap{inner: spec.Config.Events}
 	cfg := spec.Config
 	cfg.Approver = den
 	cfg.Asker = nil
@@ -122,10 +131,11 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	}
 
 	res := Result{
-		Title:  spec.title(startedAt),
-		Turns:  step.TurnIndex + 1,
-		Denied: den.count(),
-		Err:    runErr,
+		Title:     spec.title(startedAt),
+		FinalText: tap.finalText(),
+		Turns:     step.TurnIndex + 1,
+		Denied:    den.count(),
+		Err:       runErr,
 	}
 	if spec.Store == nil {
 		return res, runErr
@@ -234,32 +244,53 @@ func (d *denier) count() int {
 	return d.n
 }
 
-// usageTap is the EventSink Once installs: it forwards every Event to the caller's sink
-// (nil ⇒ discarded, so a Firing needs no observer to satisfy Config.Events) and remembers
-// the latest top-level UsageEvent's token total. That total becomes the record's CtxUsed,
-// so a resumed Firing relights the context gauge exactly as an interactive session does —
-// the fill is not in the snapshot, but it costs one type assertion to catch in flight.
-type usageTap struct {
+// eventTap is the EventSink Once installs: it forwards every Event to the caller's sink
+// (nil ⇒ discarded, so a Firing needs no observer to satisfy Config.Events) and catches the
+// two facts the Result cannot recover once the run is over — the latest top-level
+// UsageEvent's token total and the latest top-level MessageEvent's text.
+//
+// The total becomes the record's CtxUsed, so a resumed Firing relights the context gauge
+// exactly as an interactive session does; the text becomes Result.FinalText, the Firing's
+// answer. Neither is read back off the snapshot: the fill is not in the snapshot at all,
+// and the answer must reach an UNPERSISTED run's Result too (there is no snapshot on that
+// path). Both cost one type assertion to catch in flight.
+//
+// Both readings are top-level only (Depth == 0): a sub-agent's usage belongs to its
+// parent's Turn, and a sub-agent's message is reported back to its parent, never to the
+// Firing's caller.
+type eventTap struct {
 	inner domain.EventSink
 
 	mu    sync.Mutex
 	total int
+	final string
 }
 
-// Emit records a top-level usage total and forwards the event unchanged.
-func (t *usageTap) Emit(e domain.Event) {
-	if u, ok := e.(domain.UsageEvent); ok && u.Depth == 0 {
+// Emit records a top-level usage total and answer, and forwards the event unchanged.
+func (t *eventTap) Emit(e domain.Event) {
+	switch ev := e.(type) {
+	case domain.UsageEvent:
+		if ev.Depth != 0 {
+			break
+		}
 		// Prefer the server's total; fall back to prompt+completion when it omits the sum
 		// (the same degrade the interactive gauge applies).
-		total := u.TotalTokens
+		total := ev.TotalTokens
 		if total == 0 {
-			total = u.PromptTokens + u.CompletionTokens
+			total = ev.PromptTokens + ev.CompletionTokens
 		}
 		if total > 0 {
 			t.mu.Lock()
 			t.total = total
 			t.mu.Unlock()
 		}
+	case domain.MessageEvent:
+		if ev.Depth != 0 {
+			break
+		}
+		t.mu.Lock()
+		t.final = ev.Text
+		t.mu.Unlock()
 	}
 	if t.inner != nil {
 		t.inner.Emit(e)
@@ -267,8 +298,16 @@ func (t *usageTap) Emit(e domain.Event) {
 }
 
 // fill reports the last observed context fill, 0 when the Upstream reported no usage.
-func (t *usageTap) fill() int {
+func (t *eventTap) fill() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.total
+}
+
+// finalText reports the last observed top-level assistant message, "" when the run produced
+// none.
+func (t *eventTap) finalText() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.final
 }

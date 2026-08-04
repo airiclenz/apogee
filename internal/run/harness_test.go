@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -34,6 +35,7 @@ type upstream struct {
 // request is the decoded subset of one chat-completions body the tests assert on.
 type request struct {
 	Roles []string // the role of each message, in order
+	Texts []string // the content of each message, in order (a null content reads as "")
 	Tools []string // the names of the tools offered on the menu
 }
 
@@ -51,6 +53,13 @@ func (r request) userMsgs() int {
 // lastRoleIs reports whether the request's final message carries role want.
 func (r request) lastRoleIs(want domain.Role) bool {
 	return len(r.Roles) > 0 && r.Roles[len(r.Roles)-1] == string(want)
+}
+
+// lastTextHas reports whether the request's final message contains want. It is how a script
+// tells a SUB-AGENT's fresh conversation from its parent's: the two look identical by role
+// (one user message), but the sub-agent's carries the delegated task.
+func (r request) lastTextHas(want string) bool {
+	return len(r.Texts) > 0 && strings.Contains(r.Texts[len(r.Texts)-1], want)
 }
 
 // offers reports whether name is on the request's tool menu.
@@ -108,6 +117,9 @@ func decodeRequest(r *http.Request) request {
 	var decoded struct {
 		Messages []struct {
 			Role string `json:"role"`
+			// A pointer, exactly as the provider marshals it: a tool-call-only assistant
+			// message serialises its content as JSON null.
+			Content *string `json:"content"`
 		} `json:"messages"`
 		Tools []struct {
 			Function struct {
@@ -119,10 +131,14 @@ func decodeRequest(r *http.Request) request {
 
 	req := request{
 		Roles: make([]string, len(decoded.Messages)),
+		Texts: make([]string, len(decoded.Messages)),
 		Tools: make([]string, len(decoded.Tools)),
 	}
 	for i, m := range decoded.Messages {
 		req.Roles[i] = m.Role
+		if m.Content != nil {
+			req.Texts[i] = *m.Content
+		}
 	}
 	for i, tl := range decoded.Tools {
 		req.Tools[i] = tl.Function.Name
@@ -146,6 +162,14 @@ func writeToolCall(w http.ResponseWriter, id, name, args string) {
 	}}}}}})
 	sseData(w, sseChunk{Choices: []sseChoice{{FinishReason: "tool_calls"}}})
 	_, _ = io.WriteString(w, "data: [DONE]\n\n")
+}
+
+// writeToolCallWithText streams one Turn that both SAYS something and asks for a tool — the
+// shape a model takes when it narrates before it calls. The prose is committed on the
+// assistant message but ends no Exchange, so this Turn is not the run's final answer.
+func writeToolCallWithText(w http.ResponseWriter, text, id, name, args string) {
+	sseData(w, sseChunk{Choices: []sseChoice{{Delta: sseDelta{Content: text}}}})
+	writeToolCall(w, id, name, args)
 }
 
 // sseData writes v as one SSE data event. Writes are best-effort for the same
@@ -195,6 +219,45 @@ func planSpec(endpoint, prompt string) Spec {
 // at pins a clock at ts.
 func at(ts time.Time) func() time.Time {
 	return func() time.Time { return ts }
+}
+
+// ---------------------------------------------------------------------------
+
+// recordingSink is a caller-supplied EventSink that keeps every assistant message the run
+// emitted, with its nesting depth. It exists so a test can prove a sub-agent's message
+// really REACHED the tap before asserting the Result ignored it — without that, a script
+// whose sub-agent silently never ran would pass vacuously.
+type recordingSink struct {
+	mu   sync.Mutex
+	msgs []domain.MessageEvent
+}
+
+// Emit keeps the assistant messages and discards everything else.
+func (s *recordingSink) Emit(e domain.Event) {
+	m, ok := e.(domain.MessageEvent)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	s.msgs = append(s.msgs, m)
+	s.mu.Unlock()
+}
+
+// saw reports whether a message with exactly this text arrived at this depth.
+func (s *recordingSink) saw(depth int, text string) bool {
+	for _, m := range s.messages() {
+		if m.Depth == depth && m.Text == text {
+			return true
+		}
+	}
+	return false
+}
+
+// messages returns what was observed, under the lock.
+func (s *recordingSink) messages() []domain.MessageEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]domain.MessageEvent(nil), s.msgs...)
 }
 
 // ---------------------------------------------------------------------------
