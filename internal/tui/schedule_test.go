@@ -209,6 +209,38 @@ func TestScheduleBareListsWhatIsLive(t *testing.T) {
 	}
 }
 
+// Every fire time this surface prints is spelled in the machine's OWN zone. The Status carries an
+// instant, not a spelling — the Scheduler's Clock is the host's wall clock today, but nothing in the
+// type says so and a UTC-located instant reaching a row must still read as the human's clock — so
+// the conversion is pinned here rather than left to whatever zone the seam happened to hand over.
+//
+// The fixture is built from LOCAL's own offset: one instant, expressed in a zone 90 minutes ahead of
+// wherever the test runs, so the assertion says the same thing on any machine's TZ.
+func TestScheduleFireTimesSpellTheLocalWallClock(t *testing.T) {
+	t.Parallel()
+
+	local := time.Date(2026, 8, 4, 23, 0, 0, 0, time.Local)
+	_, offset := local.Zone()
+	away := local.In(time.FixedZone("away", offset+90*60))
+	if away.Format("15:04") == local.Format("15:04") {
+		t.Fatalf("the fixture no longer distinguishes the zones: away %s, local %s", away, local)
+	}
+
+	if got, want := clockOf(away), local.Format("15:04"); got != want {
+		t.Errorf("clockOf = %q, want the local wall clock %q", got, want)
+	}
+
+	st := liveStatus("sch-1", "nightly tidy", time.Hour, domain.ModePlan)
+	st.NextFire = away
+	note := scheduleStatusNote([]schedule.Status{st})
+	if want := "next " + local.Format("15:04"); !strings.Contains(note, want) {
+		t.Errorf("/schedule row = %q, want it to carry %q", note, want)
+	}
+	if foreign := "next " + away.Format("15:04"); strings.Contains(note, foreign) {
+		t.Errorf("/schedule row = %q, must not carry the foreign spelling %q", note, foreign)
+	}
+}
+
 // With nothing live the same verb teaches the grammar instead of printing an empty table.
 func TestScheduleBareWithNoneTeachesTheForm(t *testing.T) {
 	m := scheduleModel(t, &fakeScheduler{}, "")

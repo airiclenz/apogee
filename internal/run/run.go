@@ -175,12 +175,18 @@ const titleMax = 50
 // title is the record's title for this Firing: the Spec's own when set, else the Schedule
 // form "<name> — <HH:MM>" in LOCAL time (a human reads a schedule's runs in their own
 // clock, and the record's timestamps carry the UTC truth), else the first-prompt heuristic.
+//
+// The local conversion is FORCED here rather than inherited from the instant handed in: Now
+// is an injectable seam, a Driver's clock may hand this a UTC-located time (the Scheduler's
+// own does under test), and a title is the one thing on a record a human reads as a clock.
+// Which zone it is SPELLED in is therefore this function's decision, not its caller's — while
+// the stamps beside it (Meta.CreatedAt / UpdatedAt) stay UTC, untouched by this.
 func (s Spec) title(now time.Time) string {
 	if s.Title != "" {
 		return s.Title
 	}
 	if s.ScheduleName != "" {
-		return s.ScheduleName + " — " + now.Format("15:04")
+		return s.ScheduleName + " — " + now.Local().Format("15:04")
 	}
 	return promptTitle(s.Prompt, now)
 }
@@ -196,7 +202,9 @@ func (s Spec) title(now time.Time) string {
 func promptTitle(text string, now time.Time) string {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" || strings.HasPrefix(trimmed, "```") {
-		return "Session " + now.Format("2006-01-02")
+		// Local for the same reason the clock form is (title): the date a human reads is the
+		// date it was where they are, not the one the caller's clock happened to carry.
+		return "Session " + now.Local().Format("2006-01-02")
 	}
 	firstLine := trimmed
 	if i := strings.IndexByte(trimmed, '\n'); i >= 0 {

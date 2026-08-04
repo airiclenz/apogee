@@ -440,3 +440,42 @@ func TestSpecTitle(t *testing.T) {
 		})
 	}
 }
+
+// TestSpecTitleSpellsTheLocalWallClock pins the DISPLAY conversion both dated title forms make: the
+// title is what a human reads a Firing by — in the block's record pointer and in /sessions — so it
+// is spelled in the machine's own zone whatever zone the instant handed in carries. Now is an
+// injectable seam and a Driver's clock may well be UTC-located, which is exactly the case this
+// covers; the record's own stamps are unaffected and stay UTC.
+//
+// The fixture is built from LOCAL's own offset — one instant, expressed in a zone 90 minutes ahead
+// of wherever the test runs — so it asserts the same thing on any machine's TZ, and it is placed
+// late enough in the day that the two spellings disagree about the date as well as the minute.
+func TestSpecTitleSpellsTheLocalWallClock(t *testing.T) {
+	t.Parallel()
+
+	local := time.Date(2026, 8, 4, 23, 0, 0, 0, time.Local)
+	_, offset := local.Zone()
+	away := local.In(time.FixedZone("away", offset+90*60))
+	if away.Format("2006-01-02 15:04") == local.Format("2006-01-02 15:04") {
+		t.Fatalf("the fixture no longer distinguishes the zones: away %s, local %s", away, local)
+	}
+
+	tests := []struct {
+		name string
+		spec Spec
+		want string
+	}{
+		{"the schedule's clock form", Spec{ScheduleName: "Nightly", Prompt: "ignored"},
+			"Nightly — " + local.Format("15:04")},
+		{"the dated fallback", Spec{Prompt: "```go\nfunc main() {}"},
+			"Session " + local.Format("2006-01-02")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.spec.title(away); got != tt.want {
+				t.Errorf("title = %q, want the local spelling %q", got, tt.want)
+			}
+		})
+	}
+}

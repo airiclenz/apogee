@@ -926,6 +926,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A scheduled run's title is spelled in your own time zone by construction, not by luck.** The
+  `<schedule name> — HH:MM` title a Firing's record is saved under — the one its block points at and
+  `/sessions` lists it by — was formatted in whatever zone the instant behind it carried, and the
+  clock behind it is an injectable seam: a caller handing the runner a UTC-located clock got a UTC
+  title. It now converts to local at the format seam, the way the `next HH:MM` in `/schedule`'s
+  listing and its created notice always have. Storage is deliberately untouched — a record's
+  `createdAt` / `updatedAt` stamps and every piece of scheduling arithmetic stay UTC, which is where
+  they belong — and both display paths are now pinned by tests that hold on any machine's `TZ`.
+
 - **A cloned repository can no longer quietly redefine one of your own skills — your library wins,
   and the copy that lost is named.** Skills are discovered from three layered dirs, and until now
   the project's `.apogee/skills` outranked your global `<apogee home>/skills` on an id clash. A repo
