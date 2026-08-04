@@ -37,7 +37,7 @@ var (
 	colModeAllowEdits = lipgloss.Color("#58a6ff") // allow-edits — blue
 	colModeAuto       = lipgloss.Color("#f0883e") // auto — orange
 
-	colSkill   = lipgloss.Color("#8957e5") // skills — violet: the sent block's chips and the prompt's inline /token accent
+	colSkill   = lipgloss.Color("#8957e5") // skills — violet: the prompt's inline /token accent (skillToken) and its twin inside a sent block (skillAccent)
 	colFileRef = lipgloss.Color("#58a6ff") // the prompt's inline @file token accent — blue, the tone a reference reads as
 
 	colPromptToggle = lipgloss.Color("#8db4e6") // the collapsed prompt's see-more / see-less marker — light gray-blue: an apogee affordance that reads as chrome inside the block, not as more of what the human wrote
