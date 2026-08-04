@@ -46,6 +46,11 @@ func gitRepo(t *testing.T) string {
 		}
 	}
 	run("init", "-b", "main")
+	// The env vars above cover only this helper's own git calls; the tools under
+	// test run git with the scrubbed host env (safeGitEnv), which carries no
+	// identity on CI runners — a repo-local identity keeps their commits working.
+	run("config", "user.name", "Test")
+	run("config", "user.email", "test@example.com")
 	if err := writeFileForTest(root, "README.md", "hello\n"); err != nil {
 		t.Fatalf("seed file: %v", err)
 	}
