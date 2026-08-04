@@ -1,15 +1,18 @@
 package skills
 
 import (
+	"errors"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
 
-// build assembles a catalog directly from skills, bypassing disk, for catalog-shape tests.
+// build assembles a catalog directly from skills, bypassing disk, for catalog-shape tests. Each
+// skill is given a synthetic source path, since set records the file a collision would displace.
 func build(skills ...Skill) *Catalog {
 	c := newCatalog()
 	for _, s := range skills {
-		c.set(s)
+		c.set(s, filepath.Join("/src", s.ID, "SKILL.md"))
 	}
 	return c
 }
@@ -62,6 +65,47 @@ func TestCatalogResolveSkillsToDomain(t *testing.T) {
 	}
 	if got[0].ID != "x" || got[0].DisplayName != "X" || got[0].Body != "the body" {
 		t.Errorf("ResolveSkills mapped fields wrong: %+v", got[0])
+	}
+}
+
+// A replaced skill is recorded, not forgotten (ADR 0032). set is the single choke point every
+// source dir funnels through, so pinning it here covers the cross-source and same-source cases
+// alike: the loser's own file is named, and the cause carries the winner's path.
+func TestCatalogSetRecordsTheDisplacedSkill(t *testing.T) {
+	c := newCatalog()
+	loser := filepath.Join("/ws", ".apogee", "skills", "dup", "SKILL.md")
+	winner := filepath.Join("/home", "skills", "dup", "SKILL.md")
+	c.set(Skill{ID: "dup", DisplayName: "Dup", Summary: "s", Body: "LOSER"}, loser)
+	c.set(Skill{ID: "dup", DisplayName: "Dup", Summary: "s", Body: "WINNER"}, winner)
+
+	if got, _ := c.Get("dup"); got.Body != "WINNER" {
+		t.Errorf("live skill body = %q, want the last writer to win", got.Body)
+	}
+	skipped := c.Skipped()
+	if len(skipped) != 1 {
+		t.Fatalf("Skipped() = %d entries, want 1 shadow record: %+v", len(skipped), skipped)
+	}
+	if skipped[0].Path != loser {
+		t.Errorf("shadow record Path = %q, want the LOSING file %q", skipped[0].Path, loser)
+	}
+	var shadow ShadowedError
+	if !errors.As(skipped[0].Err, &shadow) {
+		t.Fatalf("shadow record cause = %v, want a ShadowedError reachable via errors.As", skipped[0].Err)
+	}
+	if shadow.By != winner {
+		t.Errorf("ShadowedError.By = %q, want the winning file %q", shadow.By, winner)
+	}
+}
+
+// A skill with no id collision records nothing: set must not manufacture a shadow entry for the
+// ordinary case, or every clean scan would grow a phantom failures section.
+func TestCatalogSetWithoutCollisionRecordsNothing(t *testing.T) {
+	c := build(
+		Skill{ID: "one", DisplayName: "One", Summary: "s"},
+		Skill{ID: "two", DisplayName: "Two", Summary: "s"},
+	)
+	if got := c.Skipped(); len(got) != 0 {
+		t.Errorf("Skipped() = %+v, want empty when no id collided", got)
 	}
 }
 

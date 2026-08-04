@@ -266,7 +266,16 @@ house ADR shape of `docs/adr/0031-*.md`: `---` / `Status: accepted` / `---` fron
 
 ---
 
-## 4. The loader honours the new precedence and records every shadowed skill
+## 4. The loader honours the new precedence and records every shadowed skill — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-03): recording the loser "through `addSkip`" as the item specifies has one
+consequence the item does not state — `Catalog.skipError` joins every recorded skip, so `Load` now
+returns a non-nil soft error on a pure collision, where nothing failed to load. This is the literal
+reading and it is left as-is (both callers already drop that error: `NewProvider` discards it and
+`wire.go:487` discards `Reload`'s), rather than teaching `skipError` to filter on cause. The renamed
+`TestLoadHomeOverridesWorkspaceOnIDCollision` therefore drops the original's `t.Fatalf` on the soft
+error; its "one skill, not both" assertion is kept as required. `Load`'s doc comment now says a
+record is not necessarily a failure.
 
 **Depends on item 3** (cites ADR 0032 from code comments and `CONTEXT.md`).
 

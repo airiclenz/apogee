@@ -57,3 +57,27 @@ func (e SkipError) Error() string { return fmt.Sprintf("skills: skip %s: %s", e.
 
 // Unwrap exposes the cause, so errors.Is/As reach through the skip to what actually failed.
 func (e SkipError) Unwrap() error { return e.Err }
+
+// ShadowedError is the cause recorded when a SKILL.md LOST an id collision: another file of the
+// same id — in a higher-priority source dir, or later in the same one — is the copy that is live.
+//
+// It is NOT a load failure. The file was read and parsed fine and yielded a valid Skill; it just
+// is not the one the catalog serves for that id. A reader keying on it (errors.As through the
+// SkipError) must therefore say "shadowed", not "could not load" — the two send the human to
+// different fixes, and only this one has a second file worth naming.
+//
+// Recording it at all is ADR 0032: with the user's global library now winning any cross-source
+// collision, a workspace skill can lose one, and a substitution nobody is told about is exactly
+// the defect that ADR closed. The same record covers two folders colliding inside ONE source dir,
+// which used to lose one silently — against this package's own "soft must not mean silent"
+// contract (doc.go).
+type ShadowedError struct {
+	// By is the absolute path of the winning SKILL.md — the copy that is actually live, so a
+	// report can show the human which file the id now resolves to.
+	By string
+}
+
+// Error renders the cause as a bare human-facing line naming the winning file.
+func (e ShadowedError) Error() string {
+	return fmt.Sprintf("shadowed by the skill of the same id at %s", e.By)
+}

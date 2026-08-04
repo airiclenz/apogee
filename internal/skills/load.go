@@ -39,8 +39,10 @@ type Sources struct {
 // Load discovers skills from the layered source dirs and returns the assembled Catalog. The
 // returned *Catalog is always non-nil and usable — a missing source dir is skipped and a
 // malformed skill is skipped — so a caller may safely ignore the error and still get a working
-// (possibly partial) catalog. The error, when non-nil, joins the per-skill soft failures for a
-// caller that wants one error value; it never signals "the catalog is unusable".
+// (possibly partial) catalog. The error, when non-nil, joins everything the scan recorded for a
+// caller that wants one error value; it never signals "the catalog is unusable". Not every record
+// is a failure: a skill that lost an id collision (ShadowedError) parsed fine and is simply not the
+// live copy, which is why the /skills report partitions on the cause rather than on the channel.
 //
 // Dropping that error loses nothing: the same failures are recorded ON the catalog
 // (Catalog.Skipped), so the caller that ignores the error can still tell the human WHICH skill
@@ -54,19 +56,27 @@ func Load(src Sources) (*Catalog, error) {
 }
 
 // sourceDirs lists the skill dirs in increasing priority (later overrides earlier on an id
-// collision), mirroring the oracle's order: the global library, the project's .apogee/skills,
-// then the project's bare skills/ (gated by UseProjectSkills). An empty Home/Workspace drops
-// its dirs rather than producing a bogus relative path.
+// collision): the project's .apogee/skills, then the project's bare skills/ (gated by
+// UseProjectSkills), and the user's global library LAST. Home going last is the ADR 0032 rule —
+// the user's own library wins any cross-source id collision, so a cloned repo can contribute a
+// NEW skill id but can never silently replace a skill the user invokes by muscle memory. The
+// workspace dirs keep their relative order among themselves. An empty Home/Workspace drops its
+// dirs rather than producing a bogus relative path.
+//
+// This is a deliberate, documented deviation from the apogee-code oracle's order, which this
+// function used to mirror: a SKILL.md written for either tool still loads in both — only
+// collision RESOLUTION differs (ADR 0032). Every displaced skill is recorded rather than dropped
+// (Catalog.set), so the trade is visible in the /skills report instead of silent.
 func sourceDirs(src Sources) []string {
 	var dirs []string
-	if src.Home != "" {
-		dirs = append(dirs, filepath.Join(src.Home, "skills"))
-	}
 	if src.Workspace != "" {
 		dirs = append(dirs, filepath.Join(src.Workspace, ".apogee", "skills"))
 		if src.UseProjectSkills {
 			dirs = append(dirs, filepath.Join(src.Workspace, "skills"))
 		}
+	}
+	if src.Home != "" {
+		dirs = append(dirs, filepath.Join(src.Home, "skills"))
 	}
 	return dirs
 }
@@ -136,7 +146,7 @@ func loadSkillFile(cat *Catalog, fsys fs.FS, dir, p string) {
 		return
 	}
 	sk.Dir = filepath.Join(dir, filepath.FromSlash(skillDirRel))
-	cat.set(sk)
+	cat.set(sk, abs)
 }
 
 // absSkillPath resolves a walk-relative SKILL.md path back to a host path under dir, so a

@@ -860,6 +860,26 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A cloned repository can no longer quietly redefine one of your own skills — your library wins,
+  and the copy that lost is named.** Skills are discovered from three layered dirs, and until now
+  the project's `.apogee/skills` outranked your global `<apogee home>/skills` on an id clash. A repo
+  shipping `.apogee/skills/<id>/SKILL.md` under the display name and summary of a skill you had used
+  for months therefore replaced it outright: you typed `/<id>`, the repo's instructions were
+  prepended to that turn with full agent authority, and the `/skill` picker showed a single row with
+  *your* wording on it. Two changes close that.
+  - **Your global library is now the highest-priority source.** A project can still contribute a
+    skill id you do not have — that is the point of the extension — but it can never take over one
+    you do. The two project dirs keep their order between themselves: the bare `skills/` dir (still
+    only read when `use-project-skills` is on) still outranks `.apogee/skills`.
+  - **A shadowed skill is recorded instead of forgotten.** Whichever copy loses a clash is kept on
+    the catalog with the winning file's path, so `/skills` can show you both. That also covers two
+    skill folders inside a *single* dir declaring the same id — a case that silently dropped one
+    until now.
+
+  Decided in `docs/adr/0032-the-user-skill-library-outranks-the-workspace.md`, which also records
+  the deliberate divergence from apogee-code here: a `SKILL.md` written for either tool still loads
+  in both, only clash resolution differs.
+
 - **The `autofix` Mechanism no longer runs a formatter outside every guard apogee has — and it no
   longer runs the one formatter that executes code from the repository it is formatting.** When
   `autofix` repaired a syntax-broken file the model was about to write, it shelled out to the

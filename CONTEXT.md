@@ -567,9 +567,12 @@ _Avoid_: "attachment", "upload" (a reference is read live from the workspace, no
 **Skill**:
 A reusable block of instructions the user *invokes* from a message — a folder holding a `SKILL.md`
 (YAML frontmatter — id, display name, summary — plus a Markdown body).
-Skills are discovered from layered dirs (the global `<apogee home>/skills`, the project's
-`.apogee/skills`, and — when `use-project-skills` is on — the project's `skills/`), the later
-source winning a name clash. A skill is invoked by naming its id as a **`/token`** in the message
+Skills are discovered from layered dirs (the project's `.apogee/skills`, — when
+`use-project-skills` is on — the project's `skills/`, and the global `<apogee home>/skills`), the
+**user's global library winning any cross-source id clash** while the two project dirs keep their
+order between themselves; a repo may contribute a new skill but never replace one of the user's,
+and every shadowed copy is recorded so `/skills` names both files. A skill is invoked by naming
+its id as a **`/token`** in the message
 text — `/code-audit please check the parser` — at a word boundary and whitespace-delimited,
 exactly parallel to an `@path`. The token **stays in the text** the model reads, and only a token
 the catalog confirms is a reference: any other `/word` inside a message is prose (a path survives
@@ -578,7 +581,8 @@ untouched), and a **command verb shadows** a skill of the same id. Like an `@fil
 and prepends each body to *that one* user message, so a skill never persists as a system-prompt
 edit. The TUI parses and offers (one merged `/` menu, plus the `/skill <name>` picker that writes
 the token for you, and `/skills` to browse the catalog); the agent resolves. See
-[ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md).
+[ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md) and
+[ADR 0032](docs/adr/0032-the-user-skill-library-outranks-the-workspace.md).
 _Avoid_: "plugin", "tool" (a skill is prompt text, not executable; it adds no capability — it
 steers the model), "attachment"/"chip" (a skill is text *in* the message, not state beside it —
 the chip strip was retired with ADR 0027). Distinct from a **Mechanism** (a catalogued,

@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -44,22 +45,85 @@ func TestLoadDiscoversSkillFolders(t *testing.T) {
 	}
 }
 
-func TestLoadWorkspaceOverridesHomeOnIDCollision(t *testing.T) {
+// ADR 0032: the user's global library wins a cross-source id collision, so a cloned repo cannot
+// substitute its own instructions for a skill the user invokes by muscle memory. The loser is
+// still one skill, not two, and it is RECORDED — the substitution the old order made silently is
+// now nameable in the /skills report.
+func TestLoadHomeOverridesWorkspaceOnIDCollision(t *testing.T) {
 	home := t.TempDir()
 	ws := t.TempDir()
 	writeSkill(t, filepath.Join(home, "skills"), "dup", "---\nid: dup\nsummary: home version\n---\nFROM HOME")
 	writeSkill(t, filepath.Join(ws, ".apogee", "skills"), "dup", "---\nid: dup\nsummary: ws version\n---\nFROM WORKSPACE")
 
-	cat, err := Load(Sources{Home: home, Workspace: ws})
-	if err != nil {
-		t.Fatalf("Load soft error: %v", err)
-	}
+	cat, _ := Load(Sources{Home: home, Workspace: ws}) // a shadow record joins into the soft error
 	dup, _ := cat.Get("dup")
-	if dup.Body != "FROM WORKSPACE" {
-		t.Errorf("collision winner body = %q, want the workspace version to override home", dup.Body)
+	if dup.Body != "FROM HOME" {
+		t.Errorf("collision winner body = %q, want the user's global library to win", dup.Body)
 	}
 	if got := len(cat.List()); got != 1 {
-		t.Errorf("collision produced %d skills, want 1 (the override, not both)", got)
+		t.Errorf("collision produced %d skills, want 1 (the winner, not both)", got)
+	}
+	assertShadowed(t, cat,
+		filepath.Join(ws, ".apogee", "skills", "dup", "SKILL.md"),
+		filepath.Join(home, "skills", "dup", "SKILL.md"))
+}
+
+// The intra-workspace order is deliberately unchanged by ADR 0032: only the global library moved.
+// The bare skills/ dir still outranks .apogee/skills — and that loser is recorded too.
+func TestLoadBareProjectSkillsStillBeatDotApogeeOnCollision(t *testing.T) {
+	ws := t.TempDir()
+	writeSkill(t, filepath.Join(ws, ".apogee", "skills"), "dup", "---\nid: dup\nsummary: dot version\n---\nFROM DOT")
+	writeSkill(t, filepath.Join(ws, "skills"), "dup", "---\nid: dup\nsummary: bare version\n---\nFROM BARE")
+
+	cat, _ := Load(Sources{Workspace: ws, UseProjectSkills: true})
+	dup, _ := cat.Get("dup")
+	if dup.Body != "FROM BARE" {
+		t.Errorf("collision winner body = %q, want the bare skills/ dir to outrank .apogee/skills", dup.Body)
+	}
+	assertShadowed(t, cat,
+		filepath.Join(ws, ".apogee", "skills", "dup", "SKILL.md"),
+		filepath.Join(ws, "skills", "dup", "SKILL.md"))
+}
+
+// The same-source case: two folders in ONE dir declaring the same id. This lost one silently
+// before ADR 0032 — against the package's own "soft must not mean silent" contract — and the
+// walk's lexical order decides, so the later folder is the live copy.
+func TestLoadRecordsCollisionWithinOneSourceDir(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "aaa", "---\nid: dup\nsummary: first\n---\nFROM AAA")
+	writeSkill(t, filepath.Join(home, "skills"), "zzz", "---\nid: dup\nsummary: second\n---\nFROM ZZZ")
+
+	cat, _ := Load(Sources{Home: home})
+	if got := len(cat.List()); got != 1 {
+		t.Fatalf("same-dir collision produced %d skills, want 1: %+v", got, cat.List())
+	}
+	dup, _ := cat.Get("dup")
+	if dup.Body != "FROM ZZZ" {
+		t.Errorf("collision winner body = %q, want the later-walked folder", dup.Body)
+	}
+	assertShadowed(t, cat,
+		filepath.Join(home, "skills", "aaa", "SKILL.md"),
+		filepath.Join(home, "skills", "zzz", "SKILL.md"))
+}
+
+// assertShadowed checks the catalog recorded exactly one shadowing, naming loser as the file that
+// lost and winner as the copy that is live — reached through errors.As, which is how the /skills
+// report tells a shadowed skill from one that genuinely could not load.
+func assertShadowed(t *testing.T, cat *Catalog, loser, winner string) {
+	t.Helper()
+	skipped := cat.Skipped()
+	if len(skipped) != 1 {
+		t.Fatalf("Skipped() = %d entries, want 1 shadow record: %+v", len(skipped), skipped)
+	}
+	if skipped[0].Path != loser {
+		t.Errorf("shadow record Path = %q, want the shadowed file %q", skipped[0].Path, loser)
+	}
+	var shadow ShadowedError
+	if !errors.As(skipped[0].Err, &shadow) {
+		t.Fatalf("shadow cause = %v, want a ShadowedError reachable via errors.As", skipped[0].Err)
+	}
+	if shadow.By != winner {
+		t.Errorf("ShadowedError.By = %q, want the winning file %q", shadow.By, winner)
 	}
 }
 

@@ -13,28 +13,43 @@ import (
 // different seams: the TUI's /skill picker (List/Get/Skipped) and the agent loop (ResolveSkills,
 // the domain.SkillResolver it satisfies). The same *Catalog is injected into both — it is
 // read-only after Load, so sharing it across the UI and the loop goroutine is safe (no method
-// mutates byID or skipped).
+// mutates byID, pathByID or skipped).
 //
 // The failures ride along WITH the loaded skills rather than beside them so a reader can never
 // pair a fresh listing with a stale set of failures: Provider swaps the whole *Catalog under one
 // atomic pointer, which makes "19 loaded, 1 skipped" always one scan's answer.
 type Catalog struct {
-	byID    map[string]Skill
-	skipped []SkipError
+	byID map[string]Skill
+	// pathByID is the SKILL.md each live skill was loaded from, kept only so a later collision
+	// can name the file it is displacing. It is deliberately not exposed: Skill.Dir already
+	// carries the folder for consumers, and this map exists for the shadow record alone.
+	pathByID map[string]string
+	skipped  []SkipError
 }
 
 // newCatalog returns an empty catalog ready for set. Load always returns a non-nil *Catalog —
 // even an empty one — so a nil pointer never reaches a domain.SkillResolver field (a typed-nil
 // interface there would pass a `!= nil` guard yet panic on call).
 func newCatalog() *Catalog {
-	return &Catalog{byID: map[string]Skill{}}
+	return &Catalog{byID: map[string]Skill{}, pathByID: map[string]string{}}
 }
 
-// set inserts (or replaces) a skill by ID. A replacement is the layering rule: load.go walks
-// the source dirs in priority order, so the last writer of an ID — the highest-priority source
-// — wins (a workspace skill overrides a global one).
-func (c *Catalog) set(s Skill) {
+// set inserts (or replaces) a skill by ID, remembering the absolute SKILL.md path it came from.
+// A replacement is the layering rule: load.go walks the source dirs in increasing priority, so
+// the last writer of an ID — the highest-priority source — wins. Under ADR 0032 that is the
+// user's global library over either workspace source.
+//
+// The displaced skill is never dropped silently. Its SKILL.md is recorded through the same skip
+// channel as a malformed file, carrying a ShadowedError that names the winner, so /skills can
+// report both which copy is live and which was shadowed. This also closes the same-source case —
+// two folders in one dir with colliding ids — which used to lose one without a word, against this
+// package's own "soft must not mean silent" contract (doc.go).
+func (c *Catalog) set(s Skill, path string) {
+	if prev, ok := c.pathByID[s.ID]; ok {
+		c.addSkip(SkipError{Path: prev, Err: ShadowedError{By: path}})
+	}
 	c.byID[s.ID] = s
+	c.pathByID[s.ID] = path
 }
 
 // addSkip records one SKILL.md discovery could not load, in walk order.
