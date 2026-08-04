@@ -1282,7 +1282,7 @@ func saveNotes(m Model) []string {
 func TestNewModelReplaysResumedScrollback(t *testing.T) {
 	t.Parallel()
 	var src transcript
-	src.addUser("first question", nil, nil)
+	src.addUser("first question", nil)
 	src.addNote("a recorded note")
 	blob, err := encodeTranscript(&src)
 	if err != nil {
@@ -1486,7 +1486,7 @@ func TestModelFlushesThroughSeamOnCleanQuit(t *testing.T) {
 	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) { return marker, nil }}
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, eng, host)
-	m.transcript.addUser("hello", nil, nil) // give it content worth saving
+	m.transcript.addUser("hello", nil) // give it content worth saving
 
 	next, cmd := ctrlCQuit(t, m)
 	// quit() only arms quitting on the branch that does NOT return tea.Quit, so this is the
@@ -1522,7 +1522,7 @@ func TestQuitFlushWaitsForAnInFlightRename(t *testing.T) {
 	host := &fakeSessionHost{}
 	storeMeta(host, "s1", "old title", "/ws", time.Now(), 0, nil)
 	m := newSessionModel(t, &fakeEngine{}, host)
-	m.transcript.addUser("hello", nil, nil)
+	m.transcript.addUser("hello", nil)
 
 	// A rename goes out and is left in flight: its Cmd is held rather than run.
 	renameCmd := m.renameSession("s1", "a better name")
@@ -1594,7 +1594,7 @@ func TestModelPrePromptNoteNeverSaves(t *testing.T) {
 		t.Errorf("Save calls before the first prompt = %d; want 0 — a slash-command note is not a conversation", n)
 	}
 
-	m.transcript.addUser("now do something", nil, nil)
+	m.transcript.addUser("now do something", nil)
 
 	cmd := m.saveAtIdle()
 	if cmd == nil {
@@ -1619,7 +1619,7 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 	}}
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, eng, host)
-	m.transcript.addUser("hi", nil, nil)
+	m.transcript.addUser("hi", nil)
 	m.state = stateRunning
 	m.cancel = func() {}
 
@@ -1647,7 +1647,7 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 // A nil host (session saving disabled) must not break the quit path.
 func TestModelQuitWithoutSaver(t *testing.T) {
 	m := newTestModel(t) // testOpts carries no Sessions
-	m.transcript.addUser("hi", nil, nil)
+	m.transcript.addUser("hi", nil)
 	_, cmd := ctrlCQuit(t, m)
 	if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
 		t.Error("quit with no saver did not exit")
@@ -1660,7 +1660,7 @@ func TestModelPerTurnSaveEncodesTranscript(t *testing.T) {
 	marker := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"turn":1}`)}
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
-	m.transcript.addUser("summarise the plan", nil, nil)
+	m.transcript.addUser("summarise the plan", nil)
 	m.ctxUsed = 4096
 
 	m, cmd := stepCmd(t, m, turnSnapshotMsg{Sess: marker})
@@ -1705,7 +1705,7 @@ func TestModelSavesAtIdleOnExchangeDone(t *testing.T) {
 	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) { return marker, nil }}
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, eng, host)
-	m.transcript.addUser("hello", nil, nil)
+	m.transcript.addUser("hello", nil)
 	m.state = stateRunning
 	m.cancel = func() {}
 
@@ -1725,7 +1725,7 @@ func TestModelSavesAtIdleOnExchangeDone(t *testing.T) {
 func TestModelSaveSingleFlightCoalesces(t *testing.T) {
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
-	m.transcript.addUser("hi", nil, nil)
+	m.transcript.addUser("hi", nil)
 
 	s1 := domain.Session{State: json.RawMessage(`{"n":1}`)}
 	s2 := domain.Session{State: json.RawMessage(`{"n":2}`)}
@@ -1771,7 +1771,7 @@ func TestSessionBrowserWritesQueueBehindAnInFlightSave(t *testing.T) {
 	host := &fakeSessionHost{}
 	storeMeta(host, "s1", "old title", "/ws", time.Now(), 0, nil)
 	m := newSessionModel(t, &fakeEngine{}, host)
-	m.transcript.addUser("hi", nil, nil)
+	m.transcript.addUser("hi", nil)
 
 	// A per-Turn save goes out and is left in flight: its Cmd is held rather than run.
 	m, saveCmd := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{State: json.RawMessage(`{"n":1}`)}})
@@ -1823,7 +1823,7 @@ func TestSessionBrowserWritesQueueBehindAnInFlightSave(t *testing.T) {
 func TestSavesDoNotCoalesceAcrossARetarget(t *testing.T) {
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
-	m.transcript.addUser("hi", nil, nil)
+	m.transcript.addUser("hi", nil)
 
 	// One save in flight, a second coalescing behind it, then the retarget, then a third save — which
 	// belongs to the session the retarget opens, not to the one the first two describe.
@@ -1875,7 +1875,7 @@ func TestSavesDoNotCoalesceAcrossARetarget(t *testing.T) {
 func TestModelSaveFailureNotesTransitions(t *testing.T) {
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
-	m.transcript.addUser("hi", nil, nil)
+	m.transcript.addUser("hi", nil)
 	sess := domain.Session{State: json.RawMessage(`{}`)}
 
 	m = driveOneSave(t, m, sess) // save 1 succeeds — no note
@@ -2692,9 +2692,9 @@ func TestFollowsTailOfLongStreamedReply(t *testing.T) {
 // leaves the scroll offset exactly where they put it.
 func TestDetachedRepaintHoldsPosition(t *testing.T) {
 	m := newTestModel(t) // 80x24
-	m.transcript.addUser("first question", nil, nil)
+	m.transcript.addUser("first question", nil)
 	m.transcript.commitAssistant(strings.Repeat("filler above. ", 80), 0)
-	m.transcript.addUser("STICKY-PROMPT", nil, nil)
+	m.transcript.addUser("STICKY-PROMPT", nil)
 	for i := 0; i < 30; i++ {
 		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
 	}
@@ -2719,7 +2719,7 @@ func TestDetachedRepaintHoldsPosition(t *testing.T) {
 // following resumes — the invariant "detached ⇔ off the bottom" stays total.
 func TestShrinkingContentReattachesFollow(t *testing.T) {
 	m := newTestModel(t) // 80x24
-	m.transcript.addUser("a question", nil, nil)
+	m.transcript.addUser("a question", nil)
 	for i := 0; i < 30; i++ {
 		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
 	}
@@ -2731,7 +2731,7 @@ func TestShrinkingContentReattachesFollow(t *testing.T) {
 	}
 
 	m.transcript.reset() // the transcript shrinks away under the offset, as /clear does
-	m.transcript.addUser("a fresh question", nil, nil)
+	m.transcript.addUser("a fresh question", nil)
 	m.refreshViewport()
 
 	if m.detached {
@@ -2745,7 +2745,7 @@ func TestShrinkingContentReattachesFollow(t *testing.T) {
 // Submitting re-arms follow: sending a prompt means the human is done reading history.
 func TestSubmitReattachesFollow(t *testing.T) {
 	m := newTestModel(t) // 80x24
-	m.transcript.addUser("old question", nil, nil)
+	m.transcript.addUser("old question", nil)
 	for i := 0; i < 30; i++ {
 		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
 	}
@@ -2771,7 +2771,7 @@ func TestSubmitReattachesFollow(t *testing.T) {
 // wheel-up that leaves the bottom detaches: new content must not yank the history back.
 func TestMouseWheelScrollsWhileIdle(t *testing.T) {
 	m := newTestModel(t) // 80x24, stateIdle
-	m.transcript.addUser("question", nil, nil)
+	m.transcript.addUser("question", nil)
 	for i := 0; i < 40; i++ {
 		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
 	}
@@ -2838,7 +2838,7 @@ func TestWheelBackToBottomReattachesFollow(t *testing.T) {
 // detaches. PgUp/PgDn are intercepted in every state, idle included.
 func TestPageDownToBottomReattachesFollow(t *testing.T) {
 	m := newTestModel(t) // 80x24
-	m.transcript.addUser("a question", nil, nil)
+	m.transcript.addUser("a question", nil)
 	for i := 0; i < 40; i++ {
 		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
 	}
@@ -2864,7 +2864,7 @@ func TestPageDownToBottomReattachesFollow(t *testing.T) {
 // view, and does not re-attach it either.
 func TestScrollMidHistoryHoldsPositionOnAppend(t *testing.T) {
 	m := newTestModel(t) // 80x24
-	m.transcript.addUser("a question", nil, nil)
+	m.transcript.addUser("a question", nil)
 	for i := 0; i < 60; i++ {
 		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
 	}
@@ -2919,9 +2919,9 @@ func firstViewLine(m Model) string {
 // reply. The prompt reaches the top row only naturally, once a reply has grown a screenful.
 func TestShortReplyKeepsTheExchangeAtTheTail(t *testing.T) {
 	m := newTestModel(t) // 80x24
-	m.transcript.addUser("FIRST-QUESTION", nil, nil)
+	m.transcript.addUser("FIRST-QUESTION", nil)
 	m.transcript.commitAssistant("a prior short answer", 0)
-	m.transcript.addUser("LATEST-PROMPT", nil, nil)
+	m.transcript.addUser("LATEST-PROMPT", nil)
 	m.transcript.commitAssistant("a short reply", 0)
 	m.refreshViewport()
 
@@ -2942,7 +2942,7 @@ func TestShortReplyKeepsTheExchangeAtTheTail(t *testing.T) {
 // history still one page-up away, rather than opening alone at the top of an emptied screen.
 func TestSubmitAppendsAtTheTailWithoutJumping(t *testing.T) {
 	m := newTestModel(t) // 80x24
-	m.transcript.addUser("OLDEST-PROMPT", nil, nil)
+	m.transcript.addUser("OLDEST-PROMPT", nil)
 	for i := 0; i < 40; i++ {
 		m.transcript.commitAssistant("history paragraph "+strings.Repeat("x", 10), 0)
 	}
@@ -2974,11 +2974,11 @@ func TestSubmitAppendsAtTheTailWithoutJumping(t *testing.T) {
 // header, and the next prompt takes over only once it is the natural top line (position: sticky).
 func TestStickyHeaderHandoffOnScroll(t *testing.T) {
 	m := newTestModel(t) // 80x24
-	m.transcript.addUser("PROMPT-ONE", nil, nil)
+	m.transcript.addUser("PROMPT-ONE", nil)
 	for i := 0; i < 20; i++ {
 		m.transcript.commitAssistant("one reply "+strings.Repeat("x", 10), 0)
 	}
-	m.transcript.addUser("PROMPT-TWO", nil, nil)
+	m.transcript.addUser("PROMPT-TWO", nil)
 	for i := 0; i < 20; i++ {
 		m.transcript.commitAssistant("two reply "+strings.Repeat("y", 10), 0)
 	}
@@ -3016,7 +3016,7 @@ func TestStickyHeaderHandoffOnScroll(t *testing.T) {
 func TestStickyHeaderShowsTheCollapsedPromptShape(t *testing.T) {
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
-	m.transcript.addUser("alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot", nil, nil)
+	m.transcript.addUser("alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot", nil)
 	for i := 0; i < 30; i++ { // reply enough to scroll the prompt off the top
 		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), 0)
 	}

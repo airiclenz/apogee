@@ -15,7 +15,7 @@ import (
 )
 
 // SkillCatalog is the read-only view of the discovered skills the TUI needs: the full sorted
-// list for the /skill picker (List), a by-id lookup for an attached chip's label (Get), and the
+// list for the /skill picker (List), a by-id lookup that resolves an inline "/token" (Get), and the
 // files discovery could not load (Skipped) so /skills can say why a skill is missing instead of
 // silently omitting it. It is satisfied by *skills.Catalog; the TUI depends only on this
 // interface so it stays unit-testable with a fake, and — being an interface — it is a reference
@@ -279,9 +279,9 @@ type Options struct {
 	// the binary's job (it owns the path and the file format), exactly like Save below.
 	SaveHostAcknowledgement func() (path string, err error)
 
-	// Skills is the discovered skill catalog the /skill picker lists and the attached chips
-	// label; nil ⇒ no skills are wired (the picker offers nothing, chips fall back to the raw
-	// ID). The binary backs it with a live skills.Provider and the agent loop resolves the SAME
+	// Skills is the discovered skill catalog the /skill picker lists and an inline "/token"
+	// resolves against; nil ⇒ no skills are wired (the picker offers nothing and no token
+	// resolves). The binary backs it with a live skills.Provider and the agent loop resolves the SAME
 	// provider through Config.Skills, so the body the model sees matches what the picker showed —
 	// including skills ReloadSkills swapped in mid-session.
 	Skills SkillCatalog

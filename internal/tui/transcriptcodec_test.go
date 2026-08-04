@@ -17,7 +17,7 @@ import (
 // ----------------------------------------------------------------------------
 
 // mixedEntries is a scrollback covering every persisted entry kind and the tricky corners a
-// resume must repaint exactly: skills chips on a user send, a nested (depth>0) assistant block,
+// resume must repaint exactly: the skill tokens LOCATED on a user send, a nested (depth>0) assistant block,
 // an enriched tool-call card (summary + coloured details + done, carrying its unexported name),
 // a standalone tool result, a recovered error, a neutral note, and a presented document with a
 // domain Method. It is the fixture behind the round-trip and exclusion tests.
@@ -39,7 +39,7 @@ func mixedEntries() []entry {
 	}
 	toolCard.sanitize()
 	return []entry{
-		{kind: entryUser, text: "read main.go", skills: []string{"reviewer", "go-expert"}},
+		{kind: entryUser, text: "/reviewer read main.go", skillSpans: []skillSpan{{start: 0, end: 9}}},
 		{kind: entryAssistant, text: "Reading it now.", depth: 1},
 		{kind: entryToolCall, callID: "c1", done: true, tool: toolCard},
 		{kind: entryToolResult, text: "error: boom", depth: 2},
@@ -57,7 +57,7 @@ func mixedEntries() []entry {
 
 // TestTranscriptCodecRoundTrip encodes a transcript covering every persisted kind and asserts
 // the decoded entries equal the originals in structure — including the tool card's unexported
-// name and its coloured detail lines, the depth on nested blocks, and the skills.
+// name and its coloured detail lines, the depth on nested blocks, and the send's skill spans.
 func TestTranscriptCodecRoundTrip(t *testing.T) {
 	t.Parallel()
 	tr := &transcript{entries: mixedEntries()}
@@ -164,6 +164,11 @@ func TestTranscriptCodecClosesAnUnfinishedFiringBlock(t *testing.T) {
 // that matters for records already on disk: a v1 blob written before the firing block existed
 // decodes exactly as it did then. Hand-written bytes rather than a re-encode, because what is being
 // tested is an OLD file meeting a map that has since grown a name.
+//
+// The same blob carries the RETIRED "skills" member — the display names a send stored while the
+// block still painted chips — which no field claims any more. It is ignored rather than refused:
+// an old record decodes as the plain send it now paints as, which is the pre-production degrade
+// the inline-accent plan accepted in place of a migration.
 func TestTranscriptCodecDecodesALegacyBlobUnchanged(t *testing.T) {
 	t.Parallel()
 	data := []byte(`{"version":1,"entries":[` +
@@ -177,7 +182,7 @@ func TestTranscriptCodecDecodesALegacyBlobUnchanged(t *testing.T) {
 		t.Fatalf("decodeTranscript: %v", err)
 	}
 	want := []entry{
-		{kind: entryUser, text: "read main.go", skills: []string{"reviewer"}},
+		{kind: entryUser, text: "read main.go"},
 		{kind: entryToolCall, callID: "c1", done: true, tool: toolView{
 			Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
 			Summary: namedSummary(detailLine{Text: "1 - 100"}),
@@ -197,7 +202,7 @@ func TestTranscriptCodecExcludesStartupAndPending(t *testing.T) {
 	t.Parallel()
 	tr := &transcript{}
 	tr.addStartup(startupView{Logo: "APOGEE", Host: "host", Model: "model", Version: "0.8.0"})
-	tr.addUser("hello", nil, nil)
+	tr.addUser("hello", nil)
 	tr.pending = "half-typed answer the user never saw committed"
 	tr.streaming = true
 
@@ -232,7 +237,7 @@ func TestTranscriptCodecExcludesStartupAndPending(t *testing.T) {
 func TestTranscriptCodecExcludesEphemeral(t *testing.T) {
 	t.Parallel()
 	tr := &transcript{}
-	tr.addUser("what is the capital of france", nil, nil)
+	tr.addUser("what is the capital of france", nil)
 	tr.addNote("cancelled")
 	tr.addEphemeralNote("resumed: france question")
 
@@ -272,7 +277,7 @@ func TestTranscriptCodecExcludesEphemeral(t *testing.T) {
 // the fixture's user send is opened here beside its tool call: a prompt deliberately expanded in one
 // session comes back collapsed in the next, like every over-threshold prompt of a replayed
 // transcript. The blocks themselves must still round-trip whole — the state is excluded, not the
-// entry — so the retained body and the send's skills are asserted beside them.
+// entry — so the retained body and the send's skill spans are asserted beside them.
 func TestTranscriptCodecExcludesExpandedState(t *testing.T) {
 	t.Parallel()
 	tr := &transcript{entries: mixedEntries()}
@@ -397,7 +402,7 @@ func TestTranscriptCodecUnknownKindSkipped(t *testing.T) {
 
 // TestTranscriptCodecStripsEscapesOnDecode proves the defence-in-depth strip: ESC bytes salted
 // through every text field of a stored blob are removed on the way back in, across the entry body,
-// skills chips, the tool card (label/target/summary/details/name), a firing block's stored answer
+// the tool card (label/target/summary/details/name), a firing block's stored answer
 // and prompt, and the presented view — a disk file (which could have been hand-edited) can never
 // smuggle a terminal escape into the transcript.
 // The blob is built by encoding entries that carry real ESC bytes: json.Marshal writes them as the
@@ -406,7 +411,7 @@ func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
 	t.Parallel()
 	esc := string(rune(0x1b)) // the ESC control byte
 	tr := &transcript{entries: []entry{
-		{kind: entryUser, text: "hi" + esc + "there", skills: []string{"sa" + esc + "fe"}},
+		{kind: entryUser, text: "hi" + esc + "there"},
 		{
 			kind: entryToolCall, callID: "c1",
 			tool: toolView{
@@ -447,9 +452,6 @@ func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
 	}
 	for _, e := range got {
 		assertNoESC(t, e.text)
-		for _, s := range e.skills {
-			assertNoESC(t, s)
-		}
 		assertNoESC(t, e.tool.Label)
 		assertNoESC(t, e.tool.Target)
 		assertNoESC(t, e.tool.name)
@@ -508,12 +510,15 @@ func TestTranscriptCodecSettlesTheBodyKindOnDecode(t *testing.T) {
 }
 
 // TestTranscriptCodecRoundTripsSkillTokenSpans proves the record keeps WHERE a message invoked its
-// skills, not just which ones: a resumed session paints the same tokens the live one did. Both
-// sent kinds carry them (a flushed send and a delivered interjection), one span per occurrence.
+// skills — which is now ALL it keeps about them: a resumed session paints the same tokens the live
+// one did. Both sent kinds carry them (a flushed send and a delivered interjection), one span per
+// occurrence.
 //
-// It also pins the two degrades the plan accepted instead of a migration: an entry stored before
-// the member existed comes back with no spans and paints plain, and a span that no longer lands in
-// the text it arrives with is dropped rather than slicing out of range.
+// It also pins the three degrades the plan accepted instead of a migration: an entry stored before
+// the member existed comes back with no spans and paints plain, an entry carrying the retired
+// "skills" member decodes as the plain send it now paints as (the member is ignored, not refused),
+// and a span that no longer lands in the text it arrives with is dropped rather than slicing out
+// of range.
 func TestTranscriptCodecRoundTripsSkillTokenSpans(t *testing.T) {
 	t.Parallel()
 	known := knownSkills("refocus")
@@ -521,8 +526,8 @@ func TestTranscriptCodecRoundTripsSkillTokenSpans(t *testing.T) {
 	remark := parseInput("no — /refocus first", known)
 
 	tr := &transcript{}
-	tr.addUser(sent.text, []string{"Refocus"}, sent.skillSpans)
-	tr.addInterjected(remark.text, []string{"Refocus"}, remark.skillSpans)
+	tr.addUser(sent.text, sent.skillSpans)
+	tr.addInterjected(remark.text, remark.skillSpans)
 
 	data, err := encodeTranscript(tr)
 	if err != nil {
@@ -556,8 +561,10 @@ func TestTranscriptCodecRoundTripsSkillTokenSpans(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeTranscript(legacy): %v", err)
 	}
-	if old[0].skillSpans != nil {
-		t.Errorf("a pre-spans entry decoded with spans %v; want none — it paints plain", old[0].skillSpans)
+	// The blob predates spans AND carries the retired display-name member: it must decode as the
+	// plain send it now paints as, the unknown member left on the disk it came from.
+	if want := []entry{{kind: entryUser, text: "/refocus please"}}; !reflect.DeepEqual(old, want) {
+		t.Errorf("a legacy chip-carrying entry decoded as %+v; want the plain send %+v", old, want)
 	}
 
 	corrupt := []byte(`{"version":1,"entries":[{"kind":"user","text":"hi","skillSpans":[{"start":0,"end":900}]}]}`)
@@ -587,7 +594,7 @@ func TestTranscriptCodecGoldenV1(t *testing.T) {
 	tr := &transcript{}
 	tr.addStartup(startupView{Logo: "X", Host: "h", Model: "m"}) // excluded from the wire
 	tr.entries = append(tr.entries,
-		entry{kind: entryUser, text: "hi", skills: []string{"skill-a"}},
+		entry{kind: entryUser, text: "hi"},
 		entry{kind: entryAssistant, text: "hello", depth: 1},
 		entry{
 			kind: entryToolCall, callID: "c1", done: true,
@@ -608,7 +615,7 @@ func TestTranscriptCodecGoldenV1(t *testing.T) {
 		t.Fatalf("encodeTranscript: %v", err)
 	}
 	const golden = `{"version":1,"entries":[` +
-		`{"kind":"user","text":"hi","skills":["skill-a"]},` +
+		`{"kind":"user","text":"hi"},` +
 		`{"kind":"assistant","text":"hello","depth":1},` +
 		`{"kind":"toolCall","callID":"c1","done":true,"tool":{"label":"Read File","verb":"reading","target":"main.go","name":"read_file","summary":{"text":"1 - 10"},"details":[{"kind":1,"text":"+x"}]}},` +
 		`{"kind":"presented","presented":{"title":"Report","path":"out/report.md","method":"shown"}},` +

@@ -122,12 +122,12 @@ func TestPaintCacheDoesNotSurviveAReset(t *testing.T) {
 	th := newTheme()
 	tr := warmed(&transcript{})
 	tr.addStartup(startupView{Host: "localhost", Model: "test"})
-	tr.addUser("the first session's prompt", nil, nil)
+	tr.addUser("the first session's prompt", nil)
 	tr.renderView(th, 80, false) // warm
 
 	tr.reset()
 	tr.addStartup(startupView{Host: "localhost", Model: "test"})
-	tr.addUser("a different session entirely", nil, nil)
+	tr.addUser("a different session entirely", nil)
 	sameRender(t, "after a session switch", tr.renderView(th, 80, false), coldRender(tr, th, 80, false))
 }
 
@@ -148,7 +148,7 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 	th := newTheme()
 	tr := warmed(&transcript{})
 	tr.addStartup(startupView{Host: "localhost", Model: "connecting…", Version: "0.0.0"})
-	tr.addUser("read the two files, then survey the tests", nil, nil)
+	tr.addUser("read the two files, then survey the tests", nil)
 
 	// The frame's own two parameters travel with the script: a step may move either, and every check
 	// after it renders warm and cold at whatever they now are.
@@ -270,7 +270,7 @@ func TestPaintCacheRepaintsOnlyTheStreamingTail(t *testing.T) {
 	tr := warmed(&transcript{})
 	const exchanges = 25 // 25 prompts + 25 answers = 50 settled blocks
 	for i := range exchanges {
-		tr.addUser(fmt.Sprintf("question %d — what does the fold do here?", i), nil, nil)
+		tr.addUser(fmt.Sprintf("question %d — what does the fold do here?", i), nil)
 		tr.apply(domain.MessageEvent{Text: fmt.Sprintf(
 			"Answer %d. The fold turns each `domain.Event` into a transcript entry, and the\n"+
 				"renderer turns entries into lines — long enough that re-parsing it is real work.", i)})
@@ -325,7 +325,7 @@ func BenchmarkRenderViewStreaming(b *testing.B) {
 	build := func() *transcript {
 		tr := &transcript{}
 		for i := range 25 {
-			tr.addUser(fmt.Sprintf("question %d — what does the fold do here?", i), nil, nil)
+			tr.addUser(fmt.Sprintf("question %d — what does the fold do here?", i), nil)
 			tr.apply(domain.MessageEvent{Text: fmt.Sprintf(
 				"Answer %d. The fold turns each `domain.Event` into a transcript entry, and the\n"+
 					"renderer turns entries into lines — long enough that re-parsing it is real work.", i)})

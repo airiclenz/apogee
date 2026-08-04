@@ -94,10 +94,10 @@ type entry struct {
 	callID    string
 	tool      toolView
 	done      bool
-	expanded  bool     // view-only block state: false = collapsed (the default); never persisted
-	ephemeral bool     // display-only: rendered, never persisted (see encodeTranscript)
-	skills    []string // entryUser / entryInterjected: display names of the skills this message invoked
-	// entryUser / entryInterjected: where those invocations sit IN text — one span per occurrence
+	expanded  bool // view-only block state: false = collapsed (the default); never persisted
+	ephemeral bool // display-only: rendered, never persisted (see encodeTranscript)
+	// entryUser / entryInterjected: where the skills this message invoked sit IN text — one span
+	// per occurrence
 	skillSpans []skillSpan
 	presented  presentedView
 	startup    startupView // entryStartup only: the one-time start-up box's logo + session facts
@@ -113,8 +113,11 @@ type entry struct {
 // session paints the same tokens it painted the day they were sent, even if the skill has since
 // been renamed, removed, or shadowed by a workspace that no longer ships it.
 //
-// Every occurrence has its own span, which is exactly where spans part company with entry.skills:
-// a skill named twice in one message is invoked once (the de-duped id list) and painted twice.
+// Every occurrence has its own span, which is exactly where spans part company with the invocation
+// itself: a skill named twice in one message is invoked once (the de-duped id list the engine is
+// handed) and painted twice. Spans are the ONLY thing a sent entry keeps about its skills — the
+// block says what was invoked by lighting up the words the human wrote, so there is nothing left
+// for a display name to do here.
 type skillSpan struct{ start, end int }
 
 // spansWithin keeps the spans that still LOCATE a run of text — well formed, and inside its bounds
@@ -168,21 +171,17 @@ type startupView struct {
 }
 
 // addUser appends a user message — the text the human submitted to open or continue the
-// Exchange, plus the display names of any skills attached to it (rendered as chips on the
-// block so the attachment stays visible after the send; nil when none) and spans, where those
-// invocations sit in text ([skillSpan]; nil when none). Called from the submit
-// path, not the event fold. The skill display names are untrusted (they come from a
-// repo-supplied SKILL.md front-matter), so they are escape-stripped like model text — an
-// attacker cannot smuggle a terminal control sequence into the transcript through a chip.
+// Exchange, plus spans, where any skill invocations sit in that text ([skillSpan]; nil when none),
+// so the block can light the tokens up where they were said. Called from the submit path, not the
+// event fold.
 //
 // The spans must be offsets into THIS text: a caller that composes the message from several
 // parsed inputs (joinedInterjections) re-bases them onto the composition, and spansWithin drops
 // any that still fail to land.
-func (t *transcript) addUser(text string, skills []string, spans []skillSpan) {
+func (t *transcript) addUser(text string, spans []skillSpan) {
 	t.entries = append(t.entries, entry{
 		kind:       entryUser,
 		text:       text,
-		skills:     stripEscapesAll(skills),
 		skillSpans: spansWithin(text, spans),
 	})
 }
@@ -195,16 +194,13 @@ func (t *transcript) addUser(text string, skills []string, spans []skillSpan) {
 // the sticky header (renderView records only entryUser blocks as such), because the prompt the
 // on-screen work belongs to is still the one that opened the Exchange.
 //
-// It carries the skills the remark invoked — their display names and their spans — exactly as
-// addUser does, and for the same reason: a skill rides an interjection (ADR 0027), so the
-// delivered block must record what the model was given, and a delivered remark differs from a
-// flushed one only in when it landed. The display names are escape-stripped on the same
-// untrusted-input grounds.
-func (t *transcript) addInterjected(text string, skills []string, spans []skillSpan) {
+// It carries the spans of the skills the remark invoked exactly as addUser does, and for the same
+// reason: a skill rides an interjection (ADR 0027), so the delivered block must record what the
+// model was given, and a delivered remark differs from a flushed one only in when it landed.
+func (t *transcript) addInterjected(text string, spans []skillSpan) {
 	t.entries = append(t.entries, entry{
 		kind:       entryInterjected,
 		text:       text,
-		skills:     stripEscapesAll(skills),
 		skillSpans: spansWithin(text, spans),
 	})
 }
@@ -682,7 +678,7 @@ func stripEscapes(s string) string {
 }
 
 // stripEscapesAll escape-strips every string in xs, returning a new slice (nil for nil), so a
-// batch of untrusted labels (attached-skill display names) is sanitized in one call.
+// batch of untrusted labels (an approval request's choices) is sanitized in one call.
 func stripEscapesAll(xs []string) []string {
 	if xs == nil {
 		return nil

@@ -52,7 +52,7 @@ func feed(events ...domain.Event) *transcript {
 // shape. The whole scrollback is asserted exactly.
 func TestTranscriptToolTurnGolden(t *testing.T) {
 	tr := &transcript{}
-	tr.addUser("read main.go", nil, nil)
+	tr.addUser("read main.go", nil)
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Turn: 0}, Text: "Let me "})
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Turn: 0}, Text: "read it."})
 	tr.apply(domain.ToolCallEvent{
@@ -256,7 +256,7 @@ func TestTranscriptTrimsCommittedBlankLines(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tr := &transcript{}
-			tr.addUser("ping", nil, nil)
+			tr.addUser("ping", nil)
 			tr.apply(domain.MessageEvent{Text: tc.text})
 			if got := plainRender(tr); got != want {
 				t.Errorf("transcript mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -390,7 +390,7 @@ func TestTranscriptBlankMessageCommitsNothing(t *testing.T) {
 // just-opened empty buffer still renders its lone marker so the human sees streaming has begun.
 func TestTranscriptStreamingPreviewTrimsTrailingBlanks(t *testing.T) {
 	tr := &transcript{}
-	tr.addUser("ping", nil, nil)
+	tr.addUser("ping", nil)
 	tr.apply(domain.TokenEvent{Text: "thinking\n\n"})
 	want := strings.Join([]string{"❯ ping", "", "✦ thinking"}, "\n")
 	if got := plainRender(tr); got != want {
@@ -416,8 +416,8 @@ const escOSC52 = "\x1b]52;c;cGFyaQ==\a"
 // escCSI is a clear-screen + cursor-home CSI payload.
 const escCSI = "\x1b[2J\x1b[H"
 
-// entryDisplayStrings returns every string of an entry that can reach the terminal — the body, the
-// skill chips, all five fields of a tool card, and the presentation entry's own facts. The
+// entryDisplayStrings returns every string of an entry that can reach the terminal — the body, all
+// five fields of a tool card, and the presentation entry's own facts. The
 // assertions below walk THIS rather than e.text alone: the per-call-site discipline this test
 // replaced passed while a tool card's target and summary carried live escapes, precisely because
 // the assertion only looked at the text field.
@@ -428,7 +428,6 @@ func entryDisplayStrings(e entry) []string {
 		e.presented.Title, e.presented.Path, e.presented.Location, e.presented.Reason,
 		e.startup.Host, e.startup.Model,
 	}
-	out = append(out, e.skills...)
 	for _, d := range e.tool.Details.all() {
 		out = append(out, d.Text)
 	}
@@ -488,16 +487,11 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 		}
 	})
 
-	t.Run("attached skill display name", func(t *testing.T) {
-		tr := &transcript{}
-		tr.addUser("please review", []string{"Review" + osc52 + "Skill"}, nil)
-		assertTranscriptNoESC(t, tr)
-		// The name is no longer painted (the chip row is retired), so the benign halves are asserted
-		// where the stripping now has to hold: on the entry the transcript kept.
-		if got := tr.entries[0].skills; len(got) != 1 || !strings.Contains(got[0], "Review") || !strings.Contains(got[0], "Skill") {
-			t.Errorf("stripping ate the benign skill name: %q", got)
-		}
-	})
+	// An attached skill's display name was once a producer here too — it rode the send as a chip
+	// label. It is not one any more: a sent block records its invocations as spans into the human's
+	// own text (item 3 of the inline-accent plan), so no repo-supplied string reaches the transcript
+	// on that path at all. Where a display name still IS shown — the /skills catalogue — it is
+	// covered by its own case below.
 
 	// The target is pulled verbatim out of the model's own JSON arguments — a hostile model's
 	// cheapest reach to the screen, and foldActivity paints it before any gate runs.
@@ -1168,9 +1162,9 @@ func TestToolResultGroupsByCallID(t *testing.T) {
 func TestToggleExpandedTargetsCollapsibleKinds(t *testing.T) {
 	fixture := func() *transcript {
 		tr := &transcript{}
-		tr.addUser("read a.go", nil, nil)
+		tr.addUser("read a.go", nil)
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
-		tr.addInterjected("the other a.go", nil, nil)
+		tr.addInterjected("the other a.go", nil)
 		tr.entries = append(tr.entries, entry{kind: entryAssistant, text: "reading it now"})
 		tr.addNote("cancelled")
 		tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
@@ -1214,7 +1208,7 @@ func TestToggleExpandedTargetsCollapsibleKinds(t *testing.T) {
 func TestTranscriptReset(t *testing.T) {
 	tr := &transcript{}
 	tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
-	tr.addUser("hello", nil, nil)
+	tr.addUser("hello", nil)
 	tr.appendToken("streamed ") // sets streaming=true and grows pending
 	tr.debug = true
 
@@ -1258,15 +1252,15 @@ func TestTranscriptHasPrompt(t *testing.T) {
 		}},
 		{name: "error notice", build: func(tr *transcript) { tr.addError("loop", "upstream refused", 0) }},
 		{name: "interjection with no opening prompt", build: func(tr *transcript) {
-			tr.addInterjected("wrong file", nil, nil)
+			tr.addInterjected("wrong file", nil)
 		}},
-		{name: "user message", build: func(tr *transcript) { tr.addUser("hello", nil, nil) }, want: true},
+		{name: "user message", build: func(tr *transcript) { tr.addUser("hello", nil) }, want: true},
 		{name: "user message after a pile of chrome", build: func(tr *transcript) {
 			tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
 			tr.addEphemeralNote("context: AGENTS.md")
 			tr.addNote("confinement: workspace")
 			tr.addError("loop", "upstream refused", 0)
-			tr.addUser("hello", nil, nil)
+			tr.addUser("hello", nil)
 		}, want: true},
 	}
 
@@ -1287,8 +1281,8 @@ func TestTranscriptHasPrompt(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // TestSentBlocksRecordSkillTokenSpans pins what a sent block keeps about the skills it invoked:
-// not just WHICH ones (the de-duped display names) but WHERE they were said — one span per
-// occurrence, so a skill named twice lights up twice while it is still invoked once. The spans are
+// WHERE they were said and nothing else — one span per occurrence, so a skill named twice lights
+// up twice while the engine is still handed one de-duped invocation. The spans are
 // the parse layer's own offsets into the very text that becomes the entry, which is what lets the
 // block paint the token instead of restating it beside the text.
 func TestSentBlocksRecordSkillTokenSpans(t *testing.T) {
@@ -1299,7 +1293,7 @@ func TestSentBlocksRecordSkillTokenSpans(t *testing.T) {
 		t.Parallel()
 		parsed := parseInput("/refocus then read main.go", known)
 		tr := &transcript{}
-		tr.addUser(parsed.text, []string{"Refocus"}, parsed.skillSpans)
+		tr.addUser(parsed.text, parsed.skillSpans)
 
 		e := tr.entries[0]
 		want := []skillSpan{{start: 0, end: 8}}
@@ -1315,7 +1309,7 @@ func TestSentBlocksRecordSkillTokenSpans(t *testing.T) {
 		t.Parallel()
 		parsed := parseInput("no — /code-audit instead", known)
 		tr := &transcript{}
-		tr.addInterjected(parsed.text, []string{"Code Audit"}, parsed.skillSpans)
+		tr.addInterjected(parsed.text, parsed.skillSpans)
 
 		e := tr.entries[0]
 		if len(e.skillSpans) != 1 {
@@ -1326,21 +1320,18 @@ func TestSentBlocksRecordSkillTokenSpans(t *testing.T) {
 		}
 	})
 
-	t.Run("a skill invoked twice is two spans and one name", func(t *testing.T) {
+	t.Run("a skill invoked twice is two spans and one invocation", func(t *testing.T) {
 		t.Parallel()
 		parsed := parseInput("/refocus and then /refocus again", known)
 		if want := []string{"refocus"}; !reflect.DeepEqual(parsed.skillIDs, want) {
 			t.Errorf("skillIDs = %v, want the de-duped %v", parsed.skillIDs, want)
 		}
 		tr := &transcript{}
-		tr.addUser(parsed.text, []string{"Refocus"}, parsed.skillSpans)
+		tr.addUser(parsed.text, parsed.skillSpans)
 
 		e := tr.entries[0]
 		if len(e.skillSpans) != 2 {
 			t.Fatalf("stored %d spans, want one per occurrence: %v", len(e.skillSpans), e.skillSpans)
-		}
-		if len(e.skills) != 1 {
-			t.Errorf("stored %d display names, want the one de-duped skill: %v", len(e.skills), e.skills)
 		}
 		for _, sp := range e.skillSpans {
 			if got := e.text[sp.start:sp.end]; got != "/refocus" {
@@ -1352,7 +1343,7 @@ func TestSentBlocksRecordSkillTokenSpans(t *testing.T) {
 	t.Run("a span that does not land in the text is dropped", func(t *testing.T) {
 		t.Parallel()
 		tr := &transcript{}
-		tr.addUser("short", nil, []skillSpan{{start: 0, end: 99}, {start: -1, end: 3}, {start: 4, end: 4}})
+		tr.addUser("short", []skillSpan{{start: 0, end: 99}, {start: -1, end: 3}, {start: 4, end: 4}})
 		if got := tr.entries[0].skillSpans; got != nil {
 			t.Errorf("kept unlandable spans %v; want them dropped so the block paints plain", got)
 		}

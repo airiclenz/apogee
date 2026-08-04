@@ -292,7 +292,7 @@ func TestUserBlockRowsAreOneSquareLineEach(t *testing.T) {
 			th := newTheme()
 			th.measure = widthAuthority{method: pm.method}
 
-			paint := renderUserBlock(th, glyphUser+" ", text, nil, nil, width, true)
+			paint := renderUserBlock(th, glyphUser+" ", text, nil, width, true)
 			if len(paint.lines) == 0 {
 				t.Fatalf("the user block rendered nothing at all")
 			}
@@ -966,24 +966,24 @@ func TestCollapsedPromptPaintsThreeRowsWithAnInlineMarker(t *testing.T) {
 	}{
 		{
 			name:   "a four-row prompt keeps three rows and counts the fourth",
-			build:  func(tr *transcript) { tr.addUser("alpha\nbravo\ncharlie\ndelta", nil, nil) },
+			build:  func(tr *transcript) { tr.addUser("alpha\nbravo\ncharlie\ndelta", nil) },
 			want:   []string{"❯ alpha", "  bravo", "  charlie"},
 			marker: "see more (+1 line)…",
 		},
 		{
 			name:   "a long prompt counts every row it hides",
-			build:  func(tr *transcript) { tr.addUser("a\nb\nc\nd\ne\nf\ng\nh\ni\nj", nil, nil) },
+			build:  func(tr *transcript) { tr.addUser("a\nb\nc\nd\ne\nf\ng\nh\ni\nj", nil) },
 			want:   []string{"❯ a", "  b", "  c"},
 			marker: "see more (+7 lines)…",
 		},
 		{
 			name:  "exactly three rows is not over the threshold",
-			build: func(tr *transcript) { tr.addUser("alpha\nbravo\ncharlie", nil, nil) },
+			build: func(tr *transcript) { tr.addUser("alpha\nbravo\ncharlie", nil) },
 			want:  []string{"❯ alpha", "  bravo", "  charlie"},
 		},
 		{
 			name:  "a short prompt paints as it always has",
-			build: func(tr *transcript) { tr.addUser("alpha", nil, nil) },
+			build: func(tr *transcript) { tr.addUser("alpha", nil) },
 			want:  []string{"❯ alpha"},
 		},
 		{
@@ -991,13 +991,13 @@ func TestCollapsedPromptPaintsThreeRowsWithAnInlineMarker(t *testing.T) {
 			// leaves 17 for the row, ellipsis included — the whole of what "truncated to leave a
 			// gap" means, with the margin paid for out of the content and never out of the marker.
 			name:   "the third row is truncated to make room for the marker",
-			build:  func(tr *transcript) { tr.addUser("alpha\nbravo\n"+long, nil, nil) },
+			build:  func(tr *transcript) { tr.addUser("alpha\nbravo\n"+long, nil) },
 			want:   []string{"❯ alpha", "  bravo", "  " + strings.Repeat("x", 14) + "…"},
 			marker: "see more (+5 lines)…",
 		},
 		{
 			name:   "an interjection collapses by the same rule",
-			build:  func(tr *transcript) { tr.addInterjected("alpha\nbravo\ncharlie\ndelta", nil, nil) },
+			build:  func(tr *transcript) { tr.addInterjected("alpha\nbravo\ncharlie\ndelta", nil) },
 			want:   []string{"⧖ alpha", "  bravo", "  charlie"},
 			marker: "see more (+1 line)…",
 		},
@@ -1035,7 +1035,7 @@ func TestCollapsedPromptPaintsThreeRowsWithAnInlineMarker(t *testing.T) {
 func TestExpandedPromptPaintsItsWholeBodyAndTrailsSeeLess(t *testing.T) {
 	const width = 40
 	tr := &transcript{}
-	tr.addUser("alpha\nbravo\ncharlie\ndelta\necho", nil, nil)
+	tr.addUser("alpha\nbravo\ncharlie\ndelta\necho", nil)
 
 	collapsed := promptRows(t, tr, width)
 	if len(collapsed) != promptCollapsedRows {
@@ -1074,7 +1074,7 @@ func TestExpandedPromptPaintsItsWholeBodyAndTrailsSeeLess(t *testing.T) {
 // either way — holding the flag is not the same as showing it.
 func TestUnderThresholdPromptIgnoresItsExpandedState(t *testing.T) {
 	tr := &transcript{}
-	tr.addUser("alpha\nbravo", nil, nil)
+	tr.addUser("alpha\nbravo", nil)
 
 	collapsed := renderPlain(tr, 40)
 	if !tr.setExpanded(0, true) {
@@ -1094,7 +1094,7 @@ func TestUnderThresholdPromptIgnoresItsExpandedState(t *testing.T) {
 func TestPromptCollapseFollowsThePaintWidth(t *testing.T) {
 	const narrow = 24
 	tr := &transcript{}
-	tr.addUser("the quick brown fox jumps over the lazy dog and keeps on running", nil, nil)
+	tr.addUser("the quick brown fox jumps over the lazy dog and keeps on running", nil)
 
 	if wide := promptRows(t, tr, 100); len(wide) != 1 || strings.Contains(wide[0], "see more") {
 		t.Fatalf("the prompt did not paint whole at width 100:\n%s", strings.Join(wide, "\n"))
@@ -1122,8 +1122,9 @@ func TestPromptCollapseFollowsThePaintWidth(t *testing.T) {
 // the token inside the text (TestSentBlockAccentsItsSkillTokens).
 func TestPromptWithSkillsPaintsNoChipRow(t *testing.T) {
 	const width = 44
+	const text = "/review alpha\nbravo\ncharlie\ndelta"
 	tr := &transcript{}
-	tr.addUser("alpha\nbravo\ncharlie\ndelta", []string{"coding-standards"}, nil)
+	tr.addUser(text, []skillSpan{spanOf(t, text, "/review", 1)})
 
 	rows := promptRows(t, tr, width)
 	if len(rows) != promptCollapsedRows {
@@ -1202,7 +1203,7 @@ func TestSentBlockAccentsItsSkillTokens(t *testing.T) {
 	const width = 44
 	const text = "/review this diff"
 	tr := &transcript{}
-	tr.addUser(text, []string{"Review"}, []skillSpan{spanOf(t, text, "/review", 1)})
+	tr.addUser(text, []skillSpan{spanOf(t, text, "/review", 1)})
 
 	rows := tr.renderLines(th, width)
 	if len(rows) != 1 {
@@ -1222,7 +1223,7 @@ func TestSentBlockAccentsEveryOccurrence(t *testing.T) {
 	th := newTheme()
 	const text = "/review this diff and /review that one"
 	tr := &transcript{}
-	tr.addUser(text, []string{"Review"}, []skillSpan{
+	tr.addUser(text, []skillSpan{
 		spanOf(t, text, "/review", 1),
 		spanOf(t, text, "/review", 2),
 	})
@@ -1240,7 +1241,7 @@ func TestAccentedSkillTokenStraddlesASoftWrap(t *testing.T) {
 	const width = 12 // the token is wider than the row left of the marker, so the block breaks it
 	const text = "/coding-standards"
 	tr := &transcript{}
-	tr.addUser(text, []string{"Coding Standards"}, []skillSpan{spanOf(t, text, text, 1)})
+	tr.addUser(text, []skillSpan{spanOf(t, text, text, 1)})
 
 	block := strings.Join(tr.renderLines(th, width), "\n")
 	opener := accentOpener(t, th.skillAccent)
@@ -1263,7 +1264,7 @@ func TestCollapsedBlockAccentsOnlyWhatItShows(t *testing.T) {
 	t.Run("a token on a hidden row paints nothing", func(t *testing.T) {
 		const text = "alpha\nbravo\ncharlie\ndelta /review"
 		tr := &transcript{}
-		tr.addUser(text, []string{"Review"}, []skillSpan{spanOf(t, text, "/review", 1)})
+		tr.addUser(text, []skillSpan{spanOf(t, text, "/review", 1)})
 
 		block := strings.Join(tr.renderLines(th, width), "\n")
 		if runs := accentRuns(block, accentOpener(t, th.skillAccent)); len(runs) != 0 {
@@ -1274,7 +1275,7 @@ func TestCollapsedBlockAccentsOnlyWhatItShows(t *testing.T) {
 	t.Run("a token on the marker row paints, and the marker keeps its own colour", func(t *testing.T) {
 		const text = "alpha\nbravo\ncharlie /review\ndelta"
 		tr := &transcript{}
-		tr.addUser(text, []string{"Review"}, []skillSpan{spanOf(t, text, "/review", 1)})
+		tr.addUser(text, []skillSpan{spanOf(t, text, "/review", 1)})
 
 		rows := tr.renderLines(th, width)
 		if len(rows) != promptCollapsedRows {
@@ -1298,7 +1299,7 @@ func TestCollapsedBlockAccentsOnlyWhatItShows(t *testing.T) {
 func TestPromptMarkerCarriesTheHighlightStyle(t *testing.T) {
 	th := newTheme()
 	tr := &transcript{}
-	tr.addUser("alpha\nbravo\ncharlie\ndelta", nil, nil)
+	tr.addUser("alpha\nbravo\ncharlie\ndelta", nil)
 
 	row := tr.renderLines(th, 40)[promptCollapsedRows-1]
 	marker := promptSeeMore(1)
@@ -1380,7 +1381,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 			name:  "a truncated body marks its header and its remainder marker",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
-				tr.addUser("run the tests", nil, nil)
+				tr.addUser("run the tests", nil)
 				run(tr, "c1", "go test ./...", "ok   a\nok   b\nok   c\nPASS", 0)
 			},
 			want: []blockMark{
@@ -1394,7 +1395,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 			name:  "an expanded block keeps its header and loses its marker",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
-				tr.addUser("run the tests", nil, nil)
+				tr.addUser("run the tests", nil)
 				run(tr, "c1", "go test ./...", "ok   a\nok   b\nok   c\nPASS", 0)
 				if !tr.toggleExpanded(1) {
 					t.Fatal("toggleExpanded(1) = false; want the tool-call entry expanded")
@@ -1527,14 +1528,14 @@ func TestPromptBlockIsOneClickSurface(t *testing.T) {
 	}{
 		{
 			name:  "an over-threshold prompt marks every row it paints",
-			build: func(_ *testing.T, tr *transcript) { tr.addUser(huge, nil, nil) },
+			build: func(_ *testing.T, tr *transcript) { tr.addUser(huge, nil) },
 			want:  targetHeader,
 		},
 		{
 			// State-independent, for the tool block's reason: this is the click that closes it again.
 			name: "an expanded prompt keeps its marks, see-less row included",
 			build: func(t *testing.T, tr *transcript) {
-				tr.addUser(huge, nil, nil)
+				tr.addUser(huge, nil)
 				if !tr.setExpanded(0, true) {
 					t.Fatal("setExpanded(0, true) = false; want the prompt expanded")
 				}
@@ -1543,12 +1544,12 @@ func TestPromptBlockIsOneClickSurface(t *testing.T) {
 		},
 		{
 			name:  "an interjection is a click surface by the same rule",
-			build: func(_ *testing.T, tr *transcript) { tr.addInterjected(huge, nil, nil) },
+			build: func(_ *testing.T, tr *transcript) { tr.addInterjected(huge, nil) },
 			want:  targetHeader,
 		},
 		{
 			name:  "an under-threshold prompt is no target at all",
-			build: func(_ *testing.T, tr *transcript) { tr.addUser("alpha\nbravo\ncharlie", nil, nil) },
+			build: func(_ *testing.T, tr *transcript) { tr.addUser("alpha\nbravo\ncharlie", nil) },
 			want:  targetNone,
 		},
 	}
@@ -2101,7 +2102,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 // example of what layout.md sketches.
 func TestTranscriptLayoutGolden(t *testing.T) {
 	tr := &transcript{}
-	tr.addUser("read the docs, then run the tests", nil, nil)
+	tr.addUser("read the docs, then run the tests", nil)
 	tr.apply(domain.TokenEvent{Text: "Reading the docs first."})
 	tr.apply(domain.TokenEvent{Text: "\n\n"}) // the model's own padding: trimmed at commit
 	readCall(tr, "c1", "README.md", 1, 154, 0)

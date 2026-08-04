@@ -686,7 +686,7 @@ func TestPasteIgnoredWhereInputIsInert(t *testing.T) {
 func modelWithTranscript(t *testing.T, prompt string) Model {
 	t.Helper()
 	m := newTestModel(t) // 80x24
-	m.transcript.addUser(prompt, nil, nil)
+	m.transcript.addUser(prompt, nil)
 	m.refreshViewport()
 	return m
 }
@@ -808,7 +808,7 @@ func modelWithToolBlock(t *testing.T, output string) Model {
 	t.Helper()
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
-	m.transcript.addUser("run the tests", nil, nil)
+	m.transcript.addUser("run the tests", nil)
 	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: output}})
@@ -950,7 +950,7 @@ func TestTranscriptToggleKeepsTheClickedHeaderRow(t *testing.T) {
 			// the header up by every line the expansion added.
 			m := newTestModel(t)
 			m.transcript.reset()
-			m.transcript.addUser("run the tests", nil, nil)
+			m.transcript.addUser("run the tests", nil)
 			for i := range 20 {
 				m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), 0)
 			}
@@ -970,7 +970,7 @@ func TestTranscriptToggleKeepsTheClickedHeaderRow(t *testing.T) {
 		{"scrolled up, detached", func(t *testing.T) Model {
 			m := newTestModel(t)
 			m.transcript.reset()
-			m.transcript.addUser("run the tests", nil, nil)
+			m.transcript.addUser("run the tests", nil)
 			for i := range 20 { // scrollback above the block, so it can be scrolled up TO
 				m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), 0)
 			}
@@ -1042,7 +1042,7 @@ func modelWithTwoToolBlocks(t *testing.T) Model {
 	t.Helper()
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
-	m.transcript.addUser("run the tests", nil, nil)
+	m.transcript.addUser("run the tests", nil)
 	for i, output := range []string{"ok   a\nok   b\nok   c\nPASS", "ok   d\nok   e\nok   f\nPASS"} {
 		id := fmt.Sprintf("c%d", i+1)
 		m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
@@ -1129,7 +1129,7 @@ func modelWithLiveToolBlock(t *testing.T) Model {
 		t.Fatalf("precondition: state = %v after a submit, want running", m.state)
 	}
 	m.transcript.reset() // drop the seeded start-up box and the send: the block sits high enough to aim at
-	m.transcript.addUser("survey the tests", nil, nil)
+	m.transcript.addUser("survey the tests", nil)
 	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 		ID: "s1", Tool: subAgentToolName, Arguments: []byte(`{"prompt":"survey the tests"}`)}})
 	m.transcript.apply(domain.ToolCallEvent{ // inside the run, and still waiting for its result
@@ -1180,7 +1180,7 @@ func modelWithHugePrompt(t *testing.T) Model {
 	t.Helper()
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
-	m.transcript.addUser(hugePromptBody, nil, nil)
+	m.transcript.addUser(hugePromptBody, nil)
 	m.transcript.commitAssistant("a short reply", 0)
 	m.refreshViewport()
 	return m
@@ -1270,7 +1270,7 @@ func TestTranscriptSelectionWinsOverTheSkillAccent(t *testing.T) {
 	const text = "/review this diff"
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
-	m.transcript.addUser(text, []string{"Review"}, []skillSpan{{start: 0, end: len("/review")}})
+	m.transcript.addUser(text, []skillSpan{{start: 0, end: len("/review")}})
 	m.refreshViewport()
 
 	line := promptBlockLine(t, m, 0)
@@ -1297,7 +1297,7 @@ func TestTranscriptPromptToggleKeepsTheClickedRow(t *testing.T) {
 	for i := range 20 { // scrollback above the prompt, so the tail is a real scroll position
 		m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), 0)
 	}
-	m.transcript.addUser(hugePromptBody, nil, nil)
+	m.transcript.addUser(hugePromptBody, nil)
 	for i := range 5 { // the block stays on screen at the tail, with room below it
 		m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), 0)
 	}
@@ -1332,7 +1332,7 @@ func TestTranscriptPromptToggleKeepsTheClickedRow(t *testing.T) {
 // what is on screen without moving (or clearing) the selection.
 func TestTranscriptSelectionSurvivesWheelScroll(t *testing.T) {
 	m := newTestModel(t)
-	m.transcript.addUser("top prompt", nil, nil)
+	m.transcript.addUser("top prompt", nil)
 	for i := 0; i < 40; i++ {
 		m.transcript.commitAssistant("reply "+strings.Repeat("x", 5), 0)
 	}
@@ -1637,7 +1637,7 @@ func TestTranscriptHighlightPersistsWhileStreaming(t *testing.T) {
 // from here on, not what keeps a drag alive.
 func TestNotedBeatRepaintKeepsSelection(t *testing.T) {
 	m := wireHeartbeat(t, testOpts, &fakeHeartbeat{})
-	m.transcript.addUser("hello world", nil, nil)
+	m.transcript.addUser("hello world", nil)
 	m.refreshViewport()
 	m = armTranscriptSelection(t, m, promptRow(t, m))
 
@@ -1727,7 +1727,7 @@ func TestSpanUnchangedTable(t *testing.T) {
 // selection clears the other, so the prompt and transcript selections never coexist.
 func TestPromptAndTranscriptSelectionsAreExclusive(t *testing.T) {
 	m := newTestModel(t)
-	m.transcript.addUser("hello world", nil, nil)
+	m.transcript.addUser("hello world", nil)
 	m.input.SetValue("prompt text")
 	m.layout() // sizes the input box and populates m.lines
 
@@ -1884,7 +1884,7 @@ func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
 	base := func(t *testing.T) Model {
 		t.Helper()
 		m := newTestModel(t)
-		m.transcript.addUser("HEADERPROMPT", nil, nil)
+		m.transcript.addUser("HEADERPROMPT", nil)
 		for i := 0; i < 40; i++ {
 			m.transcript.commitAssistant("reply "+strings.Repeat("x", 5), 0)
 		}

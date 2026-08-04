@@ -616,9 +616,9 @@ func TestNilCatalogGuards(t *testing.T) {
 	if got := m.promptEditor.submitParse(m.knownSkillID); len(got.skillIDs) != 0 {
 		t.Errorf("skillIDs = %v with a nil catalog, want none", got.skillIDs)
 	}
-	// A chip with an unresolvable id still falls back to the raw id on the sent block.
-	if names := m.skillDisplayNames([]string{"ghost"}); !reflect.DeepEqual(names, []string{"ghost"}) {
-		t.Errorf("skillDisplayNames = %v, want the raw id as the fallback", names)
+	// The one place the question is answered says no, rather than reaching through the nil catalog.
+	if m.knownSkillID("ghost") {
+		t.Error("knownSkillID = true with a nil catalog; want no id to resolve")
 	}
 }
 

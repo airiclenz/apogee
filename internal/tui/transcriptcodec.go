@@ -51,13 +51,17 @@ type wireEnvelope struct {
 // members so a non-tool / non-presented entry serializes without them. The in-progress pending
 // buffer, the one-time start-up box and any display-only (ephemeral) entry never reach here (see
 // encodeTranscript).
+//
+// A member can also be RETIRED within transcriptVersion, on the mirror of the additive rule: a v1
+// blob written while sent blocks still carried skill display-name chips holds a "skills" member,
+// no field here claims it any more, and json.Unmarshal ignores what it cannot place — so such a
+// record decodes as the plain send it now paints as, its invocations recorded by SkillSpans alone.
 type wireEntry struct {
 	Kind       string          `json:"kind"`
 	Text       string          `json:"text,omitempty"`
 	Depth      int             `json:"depth,omitempty"`
 	CallID     string          `json:"callID,omitempty"`
 	Done       bool            `json:"done,omitempty"`
-	Skills     []string        `json:"skills,omitempty"`
 	SkillSpans []wireSkillSpan `json:"skillSpans,omitempty"`
 	Tool       *wireToolView   `json:"tool,omitempty"`
 	Presented  *wirePresented  `json:"presented,omitempty"`
@@ -211,7 +215,6 @@ func toWireEntry(e *entry, kind string) wireEntry {
 		Depth:      e.depth,
 		CallID:     e.callID,
 		Done:       e.done,
-		Skills:     e.skills,
 		SkillSpans: toWireSkillSpans(e.skillSpans),
 	}
 	if e.kind == entryToolCall || e.kind == entrySchedule {
@@ -283,7 +286,6 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 		depth:  w.Depth,
 		callID: w.CallID,
 		done:   w.Done,
-		skills: stripEscapesAll(w.Skills),
 	}
 	// The offsets were measured against the text as SENT, and the text above has just been
 	// re-stripped as untrusted disk input, so a span is kept only while it still locates a run of

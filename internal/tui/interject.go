@@ -251,7 +251,7 @@ func (m *Model) foldInterjected(items []queuedInterjection) {
 	delivered := make(map[int]bool, len(items))
 	for _, it := range items {
 		delivered[it.id] = true
-		m.transcript.addInterjected(it.input.Text, m.skillDisplayNames(it.input.SkillIDs), it.skillSpans)
+		m.transcript.addInterjected(it.input.Text, it.skillSpans)
 	}
 	kept := make([]queuedInterjection, 0, len(m.pendingInterjections))
 	for _, row := range m.pendingInterjections {
@@ -301,7 +301,7 @@ func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
 	in, spans := m.joinedInterjections(parsedInput{})
 	m.pendingInterjections = nil
 	m.detached = false // the flushed prompt re-arms follow-the-tail, exactly as a typed one does
-	m.transcript.addUser(in.Text, m.skillDisplayNames(in.SkillIDs), spans)
+	m.transcript.addUser(in.Text, spans)
 	m.layout() // the strip above the box loses its rows; the new prompt opens at the top
 	return m.launchExchange(in)
 }

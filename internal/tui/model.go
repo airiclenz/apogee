@@ -1123,7 +1123,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	m.promptEditor.reset()         // empties the textarea and closes the overlay
 	m, record = m.recordSend(sent) // the send is committed: this line is recallable from here on
 	m.detached = false             // a fresh prompt re-arms follow-the-tail: sending means "done reading history"
-	m.transcript.addUser(in.Text, m.skillDisplayNames(in.SkillIDs), spans)
+	m.transcript.addUser(in.Text, spans)
 	// The first prompt of a fresh Session record also NAMES it: one cosmetic out-of-band completion
 	// fired here, in parallel with the Exchange this prompt starts, so a single-slot server answers
 	// it between Turns 1 and 2 (autotitle.go). It drives no engine and enters no transcript — it
@@ -1204,28 +1204,6 @@ func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 	m.setActivity(actThinking, "", 0)
 	tick := m.spin.arm()
 	return m, tea.Batch(cmd, tick)
-}
-
-// skillDisplayNames resolves the invoked skill IDs to their display names (falling back to the
-// raw ID when the catalog can't resolve it), for the chips rendered on the sent user block. A
-// nil/empty input yields nil, so the block carries no chip row.
-func (m Model) skillDisplayNames(ids []string) []string {
-	if len(ids) == 0 {
-		return nil
-	}
-	names := make([]string, 0, len(ids))
-	for _, id := range ids {
-		name := id
-		if m.opts.Skills != nil {
-			if sk, ok := m.opts.Skills.Get(id); ok {
-				name = sk.DisplayName
-			}
-		}
-		// The display name is untrusted (repo-supplied SKILL.md front-matter), so escape-strip it
-		// here too (the transcript boundary strips again — cheap defense in depth).
-		names = append(names, stripEscapes(name))
-	}
-	return names
 }
 
 // startNewSession closes the current session into history and resets the TUI to a fresh one. /clear and
@@ -1377,7 +1355,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// A draft the accept path left standing in the box is still a DRAFT — it carries its own
 		// tokens when it is eventually sent, and nothing is silently borrowed from it here.
 		m.detached = false // the canned turn re-arms follow-the-tail, exactly as a typed prompt does
-		m.transcript.addUser("/continue", nil, nil)
+		m.transcript.addUser("/continue", nil)
 		m.layout()
 		m.box = newInterjectBox()
 		cmd, cancel := startExchange(m.parent, m.eng,

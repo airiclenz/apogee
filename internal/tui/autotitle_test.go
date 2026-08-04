@@ -290,7 +290,7 @@ func TestAutoTitleQueuesBehindAnInFlightSave(t *testing.T) {
 	host := &fakeSessionHost{}
 	host.Activate(session.Meta{ID: "s1"})
 	m := newTitlingModel(t, host, &titleSeam{}, true)
-	m.transcript.addUser("fix the broken parser in tokenizer.go", nil, nil)
+	m.transcript.addUser("fix the broken parser in tokenizer.go", nil)
 
 	// A per-Turn save goes out and is left in flight: its Cmd is held rather than run.
 	m, saveCmd := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{State: []byte(`{"turn":2}`)}})
@@ -359,7 +359,7 @@ func TestTitleSurvivesARenameOfARecordNotOnDiskYet(t *testing.T) {
 
 	// The record reaches disk; the next successful save re-applies the title it could not write.
 	host.failRenames(nil)
-	m.transcript.addUser("fix the broken parser in tokenizer.go", nil, nil)
+	m.transcript.addUser("fix the broken parser in tokenizer.go", nil)
 	m, cmd = stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{}})
 	if cmd == nil {
 		t.Fatal("the per-Turn snapshot scheduled no save")
@@ -841,7 +841,7 @@ func TestRenameBareExcludesInterjections(t *testing.T) {
 
 		m, _ = sendPrompt(t, m, "fix the broken parser in tokenizer.go")
 		// The delivery fold records a mid-Exchange remark exactly this way (interject.go).
-		m.transcript.addInterjected("no, the other tokenizer", nil, nil)
+		m.transcript.addInterjected("no, the other tokenizer", nil)
 		m = idle(t, m)
 		m, _ = sendPrompt(t, m, "now rework the token cache")
 		m = idle(t, m)
@@ -863,7 +863,7 @@ func TestRenameBareExcludesInterjections(t *testing.T) {
 		host := &fakeSessionHost{}
 		host.Activate(session.Meta{ID: "s1", Title: "heuristic title"})
 		m := newTitlingModel(t, host, &titleSeam{reply: "a generated name"}, false)
-		m.transcript.addInterjected("no, the other tokenizer", nil, nil)
+		m.transcript.addInterjected("no, the other tokenizer", nil)
 
 		m, cmd := sendPrompt(t, m, "/rename")
 		if cmd != nil {

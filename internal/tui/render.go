@@ -263,14 +263,14 @@ func renderEntryLines(th theme, e entry, width int, blink bool) blockPaint {
 	inner := railedWidth(width, e.depth)
 	switch e.kind {
 	case entryUser:
-		return renderUserBlock(th, glyphUser+" ", e.text, e.skills, e.skillSpans, inner, e.expanded).railed(th, e.depth)
+		return renderUserBlock(th, glyphUser+" ", e.text, e.skillSpans, inner, e.expanded).railed(th, e.depth)
 	case entryInterjected:
 		// The human's mid-Exchange remark: the same block the prompt gets — it is the same voice —
 		// under the ⧖ marker that says it arrived while the model was already working (ADR 0025).
 		// Its skill tokens light up the sent block's way, for the same reason: a skill rides an
 		// interjection (ADR 0027), and the record of what the model was given must not depend on
 		// whether the remark was delivered mid-run or flushed into a new Exchange.
-		return renderUserBlock(th, glyphInterject+" ", e.text, e.skills, e.skillSpans, inner, e.expanded).railed(th, e.depth)
+		return renderUserBlock(th, glyphInterject+" ", e.text, e.skillSpans, inner, e.expanded).railed(th, e.depth)
 	case entryAssistant:
 		marker := glyphAssistant + " "
 		body := renderMarkdownBody(th, e.text, inner-th.measure.Width(marker))
@@ -463,7 +463,7 @@ func subAgentGist(head entry, span []entry) string {
 // The mark is state-INDEPENDENT for the tool block's reason: an expanded prompt keeps it, which is
 // the click that closes it again. A body inside the cap marks nothing at all, so a click on an
 // ordinary prompt keeps its selection meaning.
-func renderUserBlock(th theme, marker, text string, skills []string, spans []skillSpan, width int, expanded bool) blockPaint {
+func renderUserBlock(th theme, marker, text string, spans []skillSpan, width int, expanded bool) blockPaint {
 	var out []string
 	trailer := ""
 	collapsible := false

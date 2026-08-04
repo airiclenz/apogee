@@ -137,7 +137,7 @@ func TestSessionBrowserEmptyStoreNotesNoOverlay(t *testing.T) {
 // activates the session — routes subsequent saves to the loaded id.
 func TestSessionBrowserResumeHappyPath(t *testing.T) {
 	var src transcript
-	src.addUser("what is the capital of france", nil, nil)
+	src.addUser("what is the capital of france", nil)
 	src.apply(domain.MessageEvent{Text: "Paris."})
 	blob, err := encodeTranscript(&src)
 	if err != nil {
@@ -207,7 +207,7 @@ func TestSessionBrowserResumeHappyPath(t *testing.T) {
 // restore reprints is re-derived exactly as the resume line is and must compound no more than it.
 func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
 	var src transcript
-	src.addUser("what is the capital of france", nil, nil)
+	src.addUser("what is the capital of france", nil)
 	src.apply(domain.MessageEvent{Text: "Paris."})
 	blob, err := encodeTranscript(&src)
 	if err != nil {
@@ -259,7 +259,7 @@ func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
 // restore) gets the interrupted note appended.
 func TestSessionBrowserResumeInterruptedNote(t *testing.T) {
 	var src transcript
-	src.addUser("start a long task", nil, nil)
+	src.addUser("start a long task", nil)
 	blob, err := encodeTranscript(&src)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
@@ -436,7 +436,7 @@ func TestSessionBrowserDeleteActiveQueuesTheRotate(t *testing.T) {
 // become the one saves resolve against.
 func TestSessionBrowserResumeQueuesTheActivate(t *testing.T) {
 	var src transcript
-	src.addUser("what is the capital of france", nil, nil)
+	src.addUser("what is the capital of france", nil)
 	blob, err := encodeTranscript(&src)
 	if err != nil {
 		t.Fatalf("encode: %v", err)

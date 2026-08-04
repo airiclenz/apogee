@@ -130,9 +130,24 @@ CHANGELOG entry: item 4 owns every doc amendment, and its list may want one adde
 
 **Commit:** `feat(tui): paint skill tokens inline in sent blocks, retire the chip row`
 
-## 3. Retire the display-name plumbing
+## 3. Retire the display-name plumbing — ✅ DONE (2026-08-04)
 
 Depends on item 2.
+
+NOTES (2026-08-04): four unlisted follow-ons, all of them the removal's own wake. (a) `renderUserBlock`
+lost the `skills` parameter item 2 left it (its NOTES named this item as the owner). (b) two tests whose
+SUBJECT was the removed function had to be re-targeted rather than merely re-typed:
+transcript_test.go's `TestTranscriptStripsTerminalEscapes/attached_skill_display_name` is deleted — the
+untrusted display name no longer reaches the transcript at all, so a comment names the retired producer
+and points at the surviving one (the `/skills` catalogue case) — and skill_test.go's `TestNilCatalogGuards`
+third assertion now guards `knownSkillID`, the nil-catalog reader that outlived `skillDisplayNames`.
+(c) two fixtures said "a send that invoked a skill" through names alone and now say it with a token and
+its span (`mixedEntries`, `TestPromptWithSkillsPaintsNoChipRow`), or they would have stopped describing
+a skill send. (d) three comments naming the retired role were corrected where they stood: `SkillCatalog.Get`
+and `Options.Skills` (tui.go — "an attached chip's label" is now token resolution) and `stripEscapesAll`
+(transcript.go — its remaining batch is an approval's choices). No surprise from the legacy degrade,
+so nothing to report there: a decoded empty-text-with-chips entry paints NO rows at all (not an empty
+block) and the entries around it render untouched — verified against the codec before this note.
 
 **What:** With the chip row gone, the entry's display names have no consumer.
 
