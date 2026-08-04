@@ -164,6 +164,24 @@ leaves) is a trivial rename batch unblocked since the popup plan archived — ri
 any TUI wave; the rest wait for their paired grills (#1, #4, #10, #11 → C7/C11; #2, #7 →
 composition-root work near C5/C6; #5, #6, #8, #12 → standalone smalls batch).
 
+**Addendum 2026-08-04 — constraints from ADRs 0031/0033 (post-date the review, which was
+written against ADRs 0001–0030).** Checked candidate-by-candidate: no collisions — every
+candidate is in-process structure work, and the north star's invariants gate surfaces and
+layering, which the review does not touch. Three grills gain a siting constraint:
+
+- **G4 / C5:** the binding-set value must live engine-side, not in `cmd/apogee` — the
+  scheduler plan's `internal/run` (`docs/plans/2026-08-03 - 08`) constructs a fresh Agent per
+  Firing, a third construction site the review did not know about, and it must apply the same
+  validated path. Sequencing pressure both ways: whichever of C5 / the scheduler plan lands
+  second absorbs the other's construction site.
+- **G4 / C6:** the key table lives in `cmd/apogee` (config layout is a Driver concern per
+  ADR 0031), but its `apply(*options)` step must not weld engine-bound keys to the TUI's
+  options struct — `apogee headless` in the same binary would inherit a TUI-shaped config path.
+- **G3 / C7:** the extracted upstream-binding module stays Driver orchestration *over* C5's
+  engine value (the split the report already draws, now with an ADR reason): beat fold,
+  rebind timing, and server-switch policy are the interactive Driver's composition; what swaps
+  together is the engine's.
+
 ## 7. Additional review / research still needed
 
 - **Grills G1–G6** (§6) — the only "additional review" the candidates need; the report carries
