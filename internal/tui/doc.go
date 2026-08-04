@@ -434,7 +434,10 @@
 // centered in place of the rule runes it would otherwise draw there, and which is where
 // [Model.topRule] gets both the name (the landed one, else the first prompt's heuristic, else none)
 // and the cell arithmetic that centers and clips it;
-// picker.go the modal single-select overlay behind /model and /server, and
+// recall.go prompt recall — the per-workspace list of sent inputs the box walks with ↑/↓, where
+// this package owns only WHEN (one load at start-up, one fire-and-forget append per send) while
+// internal/recall owns the file and cmd/apogee owns which directory and which workspace
+// ([Options.Recall]); picker.go the modal single-select overlay behind /model and /server, and
 // popup.go the one bordered pane every overlay — those two, the autocomplete dropdown, the ask
 // and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go
 // this narration.

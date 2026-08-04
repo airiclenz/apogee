@@ -20,6 +20,7 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/present"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/recall"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
@@ -526,6 +527,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// payload for a --resume/--continue start (nil on a fresh start), so newModel repaints the
 		// stored scrollback beneath the start-up box and relights the gauge.
 		Sessions: host,
+		// Prompt recall: this workspace's own list of sent inputs, which the box walks with ↑/↓.
+		// The workspace is bound HERE — the renderer resolves no paths — and the store is always
+		// wired, because an empty recall file and an unwired seam look identical to the human
+		// until they have sent something.
+		Recall: newRecallHost(roots.prompts, roots.workspace),
 		// The naming half of the same records: the seam that turns a first prompt into a title, and
 		// the `auto-title:` key that says whether a new session names itself without being asked.
 		// The seam is wired either way — the key is a preference about automatism, not a ban on the
@@ -877,6 +883,37 @@ func (h *sessionHost) ActiveID() string {
 	return h.active.id
 }
 
+// ----------------------------------------------------------------------------
+// The prompt-recall host (the composition root's half of the recall seam)
+// ----------------------------------------------------------------------------
+
+// recallHost adapts a recall.Store to the TUI's [tui.RecallHost] seam by BINDING the workspace this
+// run resolved. That binding is the whole of the adapter's reason to exist: the store is
+// workspace-keyed (one JSONL file per project) while the renderer knows only "this box", and
+// resolving a workspace path is the composition root's job (ADR 0001), never the renderer's.
+//
+// Both methods forward whatever the store reports; deciding that a recall failure is survivable is
+// the TUI's call, made once at its own seam, so nothing is swallowed on this side.
+type recallHost struct {
+	store     *recall.Store
+	workspace string
+}
+
+// recallHost satisfies the prompt-recall seam the TUI drives.
+var _ tui.RecallHost = (*recallHost)(nil)
+
+// newRecallHost builds the host over the recall directory dir, bound to the absolute workspace
+// path. It touches no disk: recall.New creates the directory on the first recorded prompt.
+func newRecallHost(dir, workspace string) *recallHost {
+	return &recallHost{store: recall.New(dir), workspace: workspace}
+}
+
+// AppendPrompt records text as this workspace's newest sent input.
+func (h *recallHost) AppendPrompt(text string) error { return h.store.Append(h.workspace, text) }
+
+// LoadPrompts returns this workspace's recorded inputs, oldest→newest.
+func (h *recallHost) LoadPrompts() ([]string, error) { return h.store.Load(h.workspace) }
+
 // resolveResume loads the session a start restores from, or returns nil when neither --resume nor
 // --continue is set. --resume tries its value as a store id first (the handle /sessions lists) and
 // falls back to a file path (which still reads a pre-plan bare envelope); --continue resumes this
@@ -987,6 +1024,7 @@ type stateRoots struct {
 	sessions  string
 	validated string
 	probe     string
+	prompts   string
 	workspace string
 }
 
@@ -1038,7 +1076,13 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 		// resolver reads back (ADR 0021 §3). Named by internal/library rather than joined
 		// here, because the resolver has to find the same directory from the apogee home
 		// alone when it is reached from the engine's construction path.
-		probe:     library.ProbeDir(absHome),
+		probe: library.ProbeDir(absHome),
+		// Prompt recall: one JSONL file per workspace, keyed by a digest of its path
+		// (internal/recall). It lives under the apogee home rather than in the project tree —
+		// what the human typed is theirs, not the repository's — and, like every root here, it is
+		// a path only: internal/recall creates the directory on the first prompt it records, so a
+		// run that sends nothing leaves no trace.
+		prompts:   filepath.Join(absHome, "prompts"),
 		workspace: absWorkspace,
 	}, nil
 }

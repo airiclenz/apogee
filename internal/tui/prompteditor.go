@@ -57,6 +57,12 @@ type promptEditor struct {
 	// stale. It and the Model's transcriptSel never coexist (region arbitration in the mouse
 	// handlers).
 	sel promptSel
+
+	// recall is the prompt-recall state (recall.go): this workspace's recorded inputs, loaded once
+	// at start-up from [Options.Recall]. The zero value is "nothing to recall", which is where an
+	// unwired host leaves it — a plain value with a replaced-never-mutated slice, so it copies with
+	// the Model like sel above (ADR 0011).
+	recall promptRecall
 }
 
 // The prompt's two placeholders — what the empty box invites, which is not the same thing while a

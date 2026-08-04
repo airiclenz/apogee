@@ -128,7 +128,22 @@ passes; `make check` passes.
 
 **Commit:** `feat(recall): per-workspace prompt-recall store`
 
-## 3. Recall host seam and startup load
+## 3. Recall host seam and startup load — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): three notes on the literal text. (a) The Tests line asks that `stateRoots`
+"creates the prompts dir"; it cannot — `resolveRoots` computes paths only by documented design
+("directory creation is deferred to the writer that needs them") and item 2's store already creates
+it lazily on the first `Append`. So `TestResolveRootsOverride` pins the PATH (`<home>/prompts`) and
+a new `TestRecallHostBindsWorkspace` pins that the first append is what makes the directory, that a
+second host over the same roots reads the same file back, and that another workspace recalls
+nothing. (b) `appendRecallCmd` landed with this item — the What describes appends as
+fire-and-forget swallowed-error Cmds, so the seam is incomplete without it — but it is wired to NO
+call site: item 4 owns every send path, so "no key behaviour yet" holds. It is covered by its own
+test rather than left dead. (c) `promptRecall` is introduced here carrying only `entries` (the
+"recall state" this item's load writes into); item 4 adds the position and `active` flag its walk
+needs. The type lives in the new `internal/tui/recall.go` beside the Msg and the Cmds, with the
+field on `promptEditor` — the `promptSel`/`mouse.go` precedent — and `doc.go`'s
+"names every file in it" narration gained its line.
 
 **What:** Depends on item 2. Give the TUI a recall seam shaped like `SessionHost`
 (`internal/tui/tui.go:37-62`): a `RecallHost` interface defined in

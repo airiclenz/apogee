@@ -62,6 +62,32 @@ type SessionHost interface {
 	ActiveID() string
 }
 
+// RecallHost is the prompt-recall seam the TUI drives: record an input the human sent
+// (AppendPrompt) and read back what this workspace has already recorded (LoadPrompts), which is
+// what the prompt box walks with Up/Down. It is defined here — like [SessionHost] — so the
+// renderer stays unit-testable with a fake while the composition root owns the store, the file
+// format, and the directory it lives in.
+//
+// The WORKSPACE is pre-bound by the host side and appears in neither method. Recall is
+// per-workspace (internal/recall keys its files on the absolute path), and resolving that path is
+// exactly the kind of ambient lookup the renderer does not do (the [Options.ConfigHome] posture):
+// binding it once at the composition root leaves this surface with one workspace it cannot get
+// wrong.
+//
+// A nil host means recall is unwired: nothing is loaded at start-up, nothing is recorded, and the
+// arrows keep their cursor duty — the pre-recall behaviour every hand-built test Options relies on.
+// Both methods are called OFF the Update loop on Cmd goroutines (they touch disk), so an
+// implementation must be safe to call from one; neither error is ever fatal, because recall is a
+// convenience and a session must never fail over one.
+type RecallHost interface {
+	// AppendPrompt records text as this workspace's newest sent input. Fire-and-forget: the
+	// caller swallows the error, since a prompt that failed to record has still been sent.
+	AppendPrompt(text string) error
+	// LoadPrompts returns this workspace's recorded inputs oldest→newest. An error leaves recall
+	// simply empty.
+	LoadPrompts() ([]string, error)
+}
+
 // Scheduler is the scheduling seam the TUI drives: put a standing instruction on the clock
 // (Add), take one off it (Stop), and list what is live (List) — the whole of what a surface
 // needs from the scheduler library (ADR 0033). It is defined here like [SessionHost] and typed
@@ -275,6 +301,14 @@ type Options struct {
 	// owns the path, id minting, and on-disk format, keeping the file I/O out of the renderer
 	// while the "is it safe to snapshot" decision stays with the Model that owns the Engine.
 	Sessions SessionHost
+
+	// Recall is the prompt-recall host (the store-backed [RecallHost] the binary wires with this
+	// run's workspace already bound); nil ⇒ recall is off and the arrows never leave cursor duty.
+	// The Model drives it exactly twice: one load at start-up, and one fire-and-forget append per
+	// input sent — both off the Update loop, both best-effort, so neither can interrupt a session.
+	// The binary owns the directory and the on-disk format, keeping the file I/O out of the
+	// renderer as [Sessions] does.
+	Recall RecallHost
 
 	// GenerateTitle names a Session record from a WINDOW of the user's requests, oldest first — the
 	// cosmetic, out-of-band naming completion (ADR 0022 addendum, 2026-07-31). The automatic call at

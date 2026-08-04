@@ -423,16 +423,21 @@ func steadyCursor(ta *textarea.Model, shape tea.CursorShape) {
 	ta.SetStyles(s)
 }
 
-// Init fires the first heartbeat, and that is the whole of its work. The window is sized by the
-// first WindowSizeMsg the program sends, the input's focus STATE is set at construction (newModel —
-// Init holds a copy, so it could not set it here), and the caret needs no start-up Cmd either: the
-// virtual cursor is retired, so there is no blink to schedule and nothing to animate (steadyCursor,
-// View). The spinner likewise ticks only while running. The beat goes out immediately rather than
-// after one Interval, because startup discovery IS the first beat (the binary no longer probes
-// before painting): the sooner it lands, the sooner the footer stops saying "connecting…". With the
-// monitor unwired beatCmd is nil, so an unwired TUI starts no chain at all — exactly as before.
+// Init fires the first heartbeat and reads this workspace's prompt recall, and that is the whole of
+// its work. The window is sized by the first WindowSizeMsg the program sends, the input's focus
+// STATE is set at construction (newModel — Init holds a copy, so it could not set it here), and the
+// caret needs no start-up Cmd either: the virtual cursor is retired, so there is no blink to
+// schedule and nothing to animate (steadyCursor, View). The spinner likewise ticks only while
+// running. The beat goes out immediately rather than after one Interval, because startup discovery
+// IS the first beat (the binary no longer probes before painting): the sooner it lands, the sooner
+// the footer stops saying "connecting…".
+//
+// The two are batched rather than sequenced because neither waits on the other — the recall read is
+// a file the box needs before the first ↑, the beat a network probe the footer needs. Both Cmds are
+// nil when their seam is unwired, and tea.Batch drops nils and collapses to the single survivor (or
+// to nil), so an unwired TUI still starts nothing at all — exactly as before.
 func (m Model) Init() tea.Cmd {
-	return m.beatCmd()
+	return tea.Batch(m.beatCmd(), m.loadRecallCmd())
 }
 
 // ----------------------------------------------------------------------------
@@ -684,6 +689,13 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// Sessions.Load(id) returned: restore the record into the live engine and repaint its
 		// scrollback, or note the failure with the view left untouched (sessions.go).
 		return m, m.resumeLoaded(msg)
+
+	case recallLoadedMsg:
+		// Recall.LoadPrompts() returned (Init's start-up read): install what this workspace has
+		// sent before as the box's recall state (recall.go). It repaints nothing — the entries are
+		// invisible until an arrow asks for one — so no layout follows.
+		m.foldRecallLoaded(msg)
+		return m, nil
 
 	case spinnerTickMsg:
 		// Keep the chain alive only while running, and only for the current generation: dropping

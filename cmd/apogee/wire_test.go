@@ -672,8 +672,64 @@ func TestResolveRootsOverride(t *testing.T) {
 	if want := filepath.Join(home, "sessions"); roots.sessions != want {
 		t.Errorf("sessions = %q; want %q", roots.sessions, want)
 	}
+	if want := filepath.Join(home, "prompts"); roots.prompts != want {
+		t.Errorf("prompts = %q; want %q", roots.prompts, want)
+	}
 	if roots.workspace != workspace {
 		t.Errorf("workspace = %q; want %q", roots.workspace, workspace)
+	}
+}
+
+// The prompt-recall host binds THIS run's workspace onto the store and creates the prompts
+// directory on the first recorded prompt — resolveRoots names the path, the store makes it, so a
+// session that sends nothing leaves no trace under the apogee home.
+func TestRecallHostBindsWorkspace(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	workspace := t.TempDir()
+
+	roots, err := resolveRoots(home, workspace)
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+
+	host := newRecallHost(roots.prompts, roots.workspace)
+	if _, err := os.Stat(roots.prompts); !os.IsNotExist(err) {
+		t.Errorf("constructing the recall host created %q; the directory is the store's to make lazily", roots.prompts)
+	}
+
+	loaded, err := host.LoadPrompts()
+	if err != nil {
+		t.Fatalf("LoadPrompts on a fresh home: %v", err)
+	}
+	if len(loaded) != 0 {
+		t.Errorf("a fresh workspace recalled %v; want nothing", loaded)
+	}
+
+	if err := host.AppendPrompt("first prompt"); err != nil {
+		t.Fatalf("AppendPrompt: %v", err)
+	}
+	if _, err := os.Stat(roots.prompts); err != nil {
+		t.Fatalf("the prompts dir was not created by the first append: %v", err)
+	}
+
+	// A second host over the SAME roots reads the same file back — the proof the workspace binding
+	// is what keys it, not the host instance.
+	again, err := newRecallHost(roots.prompts, roots.workspace).LoadPrompts()
+	if err != nil {
+		t.Fatalf("LoadPrompts after an append: %v", err)
+	}
+	if len(again) != 1 || again[0] != "first prompt" {
+		t.Errorf("recalled %v; want [first prompt]", again)
+	}
+
+	// Another workspace under the same home recalls nothing: recall is per-workspace.
+	other, err := newRecallHost(roots.prompts, t.TempDir()).LoadPrompts()
+	if err != nil {
+		t.Fatalf("LoadPrompts for another workspace: %v", err)
+	}
+	if len(other) != 0 {
+		t.Errorf("another workspace recalled %v; want nothing", other)
 	}
 }
 
