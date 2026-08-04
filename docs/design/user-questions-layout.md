@@ -1,4 +1,6 @@
-
+> **Status:** the owner's pinned mockup for the two decision surfaces — implemented by
+> `docs/plans/2026-08-04 - 03 - user-questions-menu-layout-plan.md`, whose ratified design calls
+> amend it where the two differ; `layout.md` carries the rules that came out of it.
 
 Arrow keys (up and down) navigate.
 Enter selects the item and sends the answer.

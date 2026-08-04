@@ -314,10 +314,26 @@ hanging indent inside the box; `TestModelAskChoicesRoundTrip` (~1090),
 
 **Commit:** `feat(tui): ask prompt adopts the menu layout with wrapped choice rows`
 
-## 7. Reconcile layout.md with the new decision surfaces
+## 7. Reconcile layout.md with the new decision surfaces — ✅ DONE (2026-08-04)
 
 Depends on items 4, 5, and 6. This item owns **all** prose amendments — earlier items
 change no docs beyond code comments.
+
+NOTES (2026-08-04): the re-derived arithmetic came out of the real panes rather than off the item's text, and
+it moved two of the passages further than the item anticipated. `popupBudget` floors the BODY at one row
+whenever a pane is seated (`maxBody = avail - maxRows`, `maxRows ≤ avail-1`), so with `popupBorderChrome`
+the approval prompt has one body line AND one decision row at every window it is drawn in: its marker is
+never on the title row, and the "with none left it moves onto the title row" case is now the browser/picker/
+dropdown's and the ask prompt's ROW count. That is also why the narrow-ladder example is re-anchored on the
+`/sessions` browser (`saved sessions  (all workspaces)  … +8` → `saved session…  … +8`) — the approval's
+border title can no longer reach the state that example illustrates — and why the old line about the ask
+"counting its four answers beside the question line it also dropped" became a plain statement that the four
+answers ride the border while the question keeps its row. Widths in the amended prose are rendered, not
+estimated. Two calls beyond the item's list: `CONTEXT.md` is left untouched — its Approval and Ask-user
+entries describe the delegates and the free-text/permission distinction, none of which the restyle changes,
+and neither carries a key legend or a title string to correct — and a CHANGELOG `### Changed` entry was
+added under `[Unreleased]`, since this item owns all prose and the feature is user-visible (no release
+heading, no version field touched).
 
 **What:** Update `layout.md` wherever it describes the old surfaces, keeping its voice and
 prose style: the row-budget/give-way passages naming the approval and ask prompts

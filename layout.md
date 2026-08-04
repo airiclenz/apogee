@@ -194,38 +194,72 @@ costs the session area rather than the pane beside it; the session area keeps a 
 out of the remainder; and only the surplus past all three makes a pane taller than its floor, split
 evenly when more than one is open.
 
-**The smallest honest pane is four rows: its two borders, its title, and its key hint.** That is
-the floor for every pane alike — a pane out of budget shows no rows AND no prose, rather than
-keeping one row back for either. It still says what it is and how to act, which is the least a
-pane can be and still be worth drawing; what it cannot do is claim a fifth row the frame has not
-got. Under the eight rows of fixed chrome below the session area, that puts the shortest terminal
-a pane can be drawn in at all at **twelve rows** — and at twelve the session area is already gone,
-so the frame is exactly the pane and the chrome together.
+**The smallest honest pane is four rows, and what those four buy is the pane's own business.**
+Four is the floor for every pane alike, because the allocation cannot know which rows a pane is
+about to draw — a floor one row generous seats a pane that then fills it, where a floor one row
+short would seat one that cannot be drawn. What differs is the chrome each pane spends out of them.
+The `/sessions` browser, the picker and the dropdown spend all four — two borders, a title row and a
+key hint — so at the floor they show no rows AND no prose, rather than keeping one row back for
+either; they still say what they are and how to act, which is the least a pane can be and still be
+worth drawing. The **approval prompt** spends two: its name rides the top border and it draws no
+hint row at all, its shortcut letters being written beside the options they take, so the other two
+rows are one line of body and one decision row. The **ask prompt** spends three — two borders and
+its hint — and puts the fourth into the first line of the question, its name having gone into the
+question itself. What no pane may do is claim a fifth row the frame has not got. Under the eight
+rows of fixed chrome below the session area, that puts the shortest terminal a pane can be drawn in
+at all at **twelve rows** — and at twelve the session area is already gone, so the frame is exactly
+the pane and the chrome together.
 
 **What shrinking never buys is silence.** Prose a pane cannot seat is counted out in the
 `… (+N more lines)` marker, and that marker outranks the prose itself: with one body row left it
-IS the body, and with none left — the twelve-to-fifteen-row case, where the four-row floor is the
-whole pane — it moves onto the **title row**, after the pane's name. So the approval prompt on a
-half-height tmux pane reads `approve write_file?  … (+12 more lines)`: the tool the decision turns
-on, and the fact that there is more to read than the window can show. A pane may lose the text; it
-may not lose the reader's knowledge that there was text.
+IS the body, and with none left it moves onto the **title row**, after the pane's name. Which of
+the two a pane does follows from the chrome it spends. The approval prompt is never in the second
+case — the two rows it does not spend on chrome are one body row and one decision row at every
+window it is drawn in — so on a half-height tmux pane it reads
+
+```
+╭──────────────────────────── Approve write_file? ─────────────────────────────╮
+│ … (+10 more lines)                                                           │
+│ ❯ Allow                      [a]                                             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+— the tool the decision turns on carried by the border, the fact that there is more to read than the
+window can show on the row beneath it, and the decision itself still on the screen to be taken. A
+pane may lose the text; it may not lose the reader's knowledge that there was text.
 
 **The rows are counted the same way, when there is no window for them at all.** A row window the
 pane did get scrolls around the selection, so the entries outside it are one keypress away and need
-no marker. A window of **zero** rows is the other thing entirely — every choice or entry gone, and
-the key hint still offering `↑↓ select` to pick between them — so those rows are counted onto the
-title row too, in the **same** marker: `saved sessions  (all workspaces)  … (+8 more lines)`, and
-the ask prompt at twelve rows counts its four answers there beside the question line it also
-dropped. One marker states the whole of what the pane is holding back, because a title row too
-narrow to seat one count has no room for two.
+no marker — and now that a row can wrap, a row is seated whole or not at all, so a window that
+cannot pay for all three lines of an answer shows the answers it can rather than the first two
+thirds of one. The approval prompt at twelve rows is that case and not this one: `❯ Allow` is on
+the screen and the other three options are one ↑ or ↓ away. A window of **zero** rows is the other
+thing entirely — every choice or entry gone, and the key hint still offering `↑↓ select` to pick
+between them — so those rows are counted onto the title row too, in the **same** marker:
+`saved sessions  (all workspaces)  … (+8 more lines)`. The ask prompt is the pane where that title
+row IS the top border, having no title of its own to draw, so at twelve rows the four answers it
+could seat none of are counted there instead:
+
+```
+╭───────────────────────────── … (+4 more lines) ──────────────────────────────╮
+│ which way should I take this refactor?                                       │
+│ ↑↓ select · ⏎ send · type for a custom answer · esc cancel                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+One marker states everything the pane has no row of its own to state on, because a title row too
+narrow to seat one count has no room for two; where the body still holds a row, its own count stays
+there and the title's speaks for the rows.
 
 **Narrowness does not buy silence either.** A half-height pane is usually a half-width one too, and
 the title row is composed **to** the pane's width rather than composed long and clipped to it — a
 clipped row would drop the count off its end and put the silence straight back. The width is spent
 in the order the row is read for: the pane's name, then the count, then the words around the count.
-So the marker sheds its noun before it sheds its number (`approve write_file?  … +12` at 42 columns
-and below), and past that the **name** is what gives way to an ellipsis (`approve writ…  … +12`),
-never the number. On a pane too narrow for even a clipped name, the count is the whole row.
+So the marker sheds its noun before it sheds its number
+(`saved sessions  (all workspaces)  … +8` from the low fifties down), and past that the **name** is
+what gives way to an ellipsis (`saved session…  … +8` at 24 columns), never the number. On a pane
+too narrow for even a clipped name, the count is the whole row — which is the ask prompt's border at
+every width, its name having gone into the question below it.
 
 ---
 
@@ -909,7 +943,10 @@ inner width with a trailing `…`. That truncation is **whole-row**, never colum
 narrow terminal loses the rightmost tiers rather than scrambling the alignment of the ones still on
 screen. A row with a single cell has no columns to align and renders exactly as it did before
 columns existed: `@`'s file suggestions, an armed rename buffer in the `/sessions` browser, and the
-ask and approval prompts.
+ask prompt's answers. The **approval prompt's rows are two-cell** — the option and its `[a]`-style
+shortcut — so the letters stack into a right-hand column the module derives rather than the prompt
+hand-pads, and a pane too narrow for both loses the shortcut cell off the right by the same
+whole-row truncation every other grammar takes. The key it drew still answers the prompt.
 
 **`/model`'s launcher accept is the one that does not finish on the spot.** Picking a Launch
 profile takes the actuation latch and hands the pane's decision to a blocking launcher verb: the

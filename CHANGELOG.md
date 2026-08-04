@@ -677,6 +677,31 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The two prompts that ask you something are menus now.** An approval used to be a paragraph with a
+  legend under it (`a allow · s always · d deny`), and an ask prompt a question under an
+  `the assistant is asking:` heading. Both are menu boxes: the tool the decision turns on rides the
+  top border — `╭────── Approve terminal? ──────╮` — the options are rows you walk with `↑/↓`, `❯`
+  marks the one `⏎` sends, and the others sit dim behind a `·`. Nothing you knew stopped working:
+  `a`, `s` and `d` still answer an approval the moment you press them, `esc` still cancels the run,
+  and typing under an ask still swaps to a free-text answer of your own.
+  - **The approval's shortcut letters moved beside the options they take** — `Allow [a]`,
+    `Always allow this session [s]`, `Deny [d]`, `Cancel [esc]`, aligned in a column of their own —
+    so the legend row is gone and the pane spends that row on what you are deciding about instead.
+    On the shortest terminal a pane is drawn in at all, that is the difference between seeing a
+    decision row and seeing none.
+  - **A terminal approval shows the command rather than JSON.** `Reason:` and `Command:` label the
+    body and the shell line sits indented under the second. Every other tool still shows its raw
+    arguments as JSON — and so does a terminal call carrying anything besides the command, a working
+    directory or a timeout included, because what you decide against must be what the tool will
+    actually receive.
+  - **An ask prompt's answers may be prose.** A long option wraps with a hanging indent instead of
+    being cut off, a blank line separates one answer from the next, and the tool no longer asks the
+    model for short single-line choices. An answer is seated whole or not at all, so a short window
+    scrolls rather than offering you two thirds of a sentence to decide on.
+
+  Mocked up in `docs/design/user-questions-layout.md`; specced in `layout.md` (What "height" means,
+  The Column contract).
+
 - **A skill you invoked is the coloured token in your own text now, not a tag row under it.** A sent
   prompt used to say it twice: the message with `/refocus` in it, and then a violet `✦ Refocus` row
   beneath naming the same skill again. Now the `/refocus` inside the block is simply painted in the
