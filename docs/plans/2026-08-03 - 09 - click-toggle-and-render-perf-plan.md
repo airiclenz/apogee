@@ -120,7 +120,32 @@ makes the release a no-op then.
 
 **Commit:** `fix(tui): a motionless press survives live-block repaints`
 
-## 3. Coalesce adjacent TokenEvents in the event sink
+## 3. Coalesce adjacent TokenEvents in the event sink — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): branch (1) of the owner's ruling — a SYNCHRONOUS flush at the Step boundary —
+was taken, so the coalescing window never outlives the Step that opened it and the invariant stated
+at `worker.go` (the per-Turn snapshot's ordering) and `messages.go` (`turnSnapshotMsg`) stays TRUE
+as written; branch (2)'s deferred flush was not needed. It cost the one deviation from "all inside
+`internal/tui/sink.go`": `teaSink.flush()` has to be REACHED from where a Step returns, so the
+worker's drive functions take a `flush func()` (called on every path out of `eng.Step`, the cancel
+path included — a Turn Esc interrupted emits nothing further, so no boundary event could flush it),
+the `Model` carries it as `flushEvents`, and `Run` wires it to the Bridge's sink. Existing call
+sites pass `nil` (a drive with no sink behind it). Two comments were made precise rather than
+amended-for-falseness — `worker.go`'s "delivered synchronously inside the Step" and the same claim
+on `turnSnapshotMsg` — because the flush, not Emit, is now what makes them true.
+
+NOTES (2026-08-04): the `tea.Program.Send`-after-shutdown question is settled by reading the module
+(charm.land/bubbletea/v2@v2.0.7): `Send` is `select { case <-p.ctx.Done(): case p.msgs <- msg: }`
+(tea.go:1183), `p.ctx` is created in `NewProgram` (tea.go:614) — so it is never nil — and `Run`
+cancels it unconditionally via `defer p.cancel()` (tea.go:1005), as do `shutdown`/`Kill`. A send
+after the program stopped therefore returns immediately as a documented no-op: no panic, no block.
+No shutdown guard was added — a window that fires after shutdown already drops its buffered text,
+which is exactly what a guard would do, and the sink still has no shutdown seam to close.
+
+NOTES (2026-08-04): one existing test outside the item's list needed adapting —
+`TestBridgeBindRoutesSinkAndApprover` (`bridge_test.go`) emits one lone token and read the
+program's messages inside the same call; that token now arrives when its window closes, so the test
+waits for the delivery before asserting. No assertion was weakened.
 
 **What.** `teaSink.Emit` (`internal/tui/sink.go:29`) forwards one `eventMsg` per
 provider SSE delta (`internal/agent/loop.go:511` emits per visible byte-run), and every

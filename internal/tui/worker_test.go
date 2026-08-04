@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func TestDriveExchangeRunsToExchangeBoundary(t *testing.T) {
 		),
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "hi"}, nil, nil)
+	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "hi"}, nil, nil, nil)
 
 	done, ok := msg.(exchangeDoneMsg)
 	if !ok {
@@ -70,7 +71,7 @@ func TestDriveExchangeNotifiesPerTurn(t *testing.T) {
 		}
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "hi"}, nil, notify)
+	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "hi"}, nil, notify, nil)
 
 	if _, ok := msg.(exchangeDoneMsg); !ok {
 		t.Fatalf("terminal msg = %T; want exchangeDoneMsg", msg)
@@ -80,6 +81,95 @@ func TestDriveExchangeNotifiesPerTurn(t *testing.T) {
 	}
 	if string(got[0].State) != `{"turn":0}` || string(got[1].State) != `{"turn":1}` {
 		t.Errorf("per-Turn snapshots = %q,%q; want turn 0 then turn 1", got[0].State, got[1].State)
+	}
+}
+
+// TestStepBoundaryFlushesCoalescedTokens pins the invariant token coalescing must not break: every
+// Event a Step emitted has reached the Update loop by the time anything the worker sends about that
+// Step does. The sink's window outlives the test, so nothing can arrive by timer here — the tokens
+// the program holds when the Turn's snapshot is sent, and when the drive returns, are there because
+// the Step boundary flushed them.
+func TestStepBoundaryFlushesCoalescedTokens(t *testing.T) {
+	t.Parallel()
+	sink, prog := newBufferingSink(t)
+	eng := &fakeEngine{
+		stepFn: func(_ context.Context, call int) (domain.StepResult, error) {
+			base := domain.EventBase{Turn: call}
+			sink.Emit(domain.TokenEvent{EventBase: base, Text: "tok"})
+			sink.Emit(domain.TokenEvent{EventBase: base, Text: "en"})
+			if call == 0 {
+				return domain.StepResult{Status: domain.StatusTurnComplete}, nil
+			}
+			return domain.StepResult{Status: domain.StatusExchangeComplete}, nil
+		},
+	}
+
+	atSnapshot := -1
+	notify := func(msg tea.Msg) {
+		if _, ok := msg.(turnSnapshotMsg); ok {
+			atSnapshot = len(prog.events())
+		}
+	}
+
+	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "hi"}, nil, notify, sink.flush)
+
+	if _, ok := msg.(exchangeDoneMsg); !ok {
+		t.Fatalf("terminal msg = %T; want exchangeDoneMsg", msg)
+	}
+	if atSnapshot != 1 {
+		t.Errorf("events delivered when the Turn's snapshot was sent = %d; want that Turn's merged token (1)", atSnapshot)
+	}
+	want := []domain.Event{
+		domain.TokenEvent{EventBase: domain.EventBase{Turn: 0}, Text: "token"},
+		domain.TokenEvent{EventBase: domain.EventBase{Turn: 1}, Text: "token"},
+	}
+	if got := prog.events(); !reflect.DeepEqual(got, want) {
+		t.Errorf("events = %#v; want %#v", got, want)
+	}
+	if stillBuffering(sink) {
+		t.Error("a token was still buffered after the drive returned; it would land after the Model folded the Exchange")
+	}
+}
+
+// TestCancelledStepFlushesCoalescedTokens is the mid-stream Esc that made this flush necessary. A
+// cancelled Turn returns emitting no further Event (internal/agent/loop.go), so no boundary event
+// can push the buffer out: without the Step-boundary flush the tail would ride the window timer and
+// land after the Model folded cancelledMsg — after finishWorker zeroed the generation clock, which
+// the late token would re-latch, timing the NEXT turn's tok/s across the human's idle time.
+func TestCancelledStepFlushesCoalescedTokens(t *testing.T) {
+	t.Parallel()
+	sink, prog := newBufferingSink(t)
+	eng := &fakeEngine{
+		stepFn: func(ctx context.Context, _ int) (domain.StepResult, error) {
+			sink.Emit(domain.TokenEvent{Text: "half a rep"})
+			<-ctx.Done()
+			sink.Emit(domain.TokenEvent{Text: "ly"}) // the last delta before the loop reports the cancel
+			return domain.StepResult{Status: domain.StatusCancelled}, nil
+		},
+	}
+
+	cmd, cancel := startExchange(context.Background(), eng, domain.UserInput{Text: "go"}, nil, nil, sink.flush)
+
+	out := make(chan tea.Msg, 1)
+	go func() { out <- cmd() }()
+
+	cancel()
+
+	select {
+	case msg := <-out:
+		if _, ok := msg.(cancelledMsg); !ok {
+			t.Fatalf("msg = %T; want cancelledMsg", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not return after cancel (deadlock)")
+	}
+
+	want := []domain.Event{domain.TokenEvent{Text: "half a reply"}}
+	if got := prog.events(); !reflect.DeepEqual(got, want) {
+		t.Errorf("events = %#v; want %#v", got, want)
+	}
+	if stillBuffering(sink) {
+		t.Error("a token was still buffered when the cancelled drive returned; it would re-latch the generation clock")
 	}
 }
 
@@ -103,7 +193,7 @@ func TestDriveResumeStepsWithoutSubmit(t *testing.T) {
 		}
 	}
 
-	msg := driveResume(context.Background(), eng, nil, notify)
+	msg := driveResume(context.Background(), eng, nil, notify, nil)
 
 	if _, ok := msg.(exchangeDoneMsg); !ok {
 		t.Fatalf("terminal msg = %T; want exchangeDoneMsg", msg)
@@ -131,7 +221,7 @@ func TestStartResumeCancelYieldsCancelledMsg(t *testing.T) {
 		},
 	}
 
-	cmd, cancel := startResume(context.Background(), eng, nil, nil)
+	cmd, cancel := startResume(context.Background(), eng, nil, nil, nil)
 
 	out := make(chan tea.Msg, 1)
 	go func() { out <- cmd() }()
@@ -164,7 +254,7 @@ func TestDriveExchangeSubmitError(t *testing.T) {
 		},
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{}, nil, nil)
+	msg := driveExchange(context.Background(), eng, domain.UserInput{}, nil, nil, nil)
 
 	e, ok := msg.(errMsg)
 	if !ok {
@@ -188,7 +278,7 @@ func TestDriveExchangeStepError(t *testing.T) {
 		},
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{}, nil, nil)
+	msg := driveExchange(context.Background(), eng, domain.UserInput{}, nil, nil, nil)
 
 	e, ok := msg.(errMsg)
 	if !ok {
@@ -213,7 +303,7 @@ func TestStartExchangeCancelYieldsCancelledMsg(t *testing.T) {
 		},
 	}
 
-	cmd, cancel := startExchange(context.Background(), eng, domain.UserInput{Text: "go"}, nil, nil)
+	cmd, cancel := startExchange(context.Background(), eng, domain.UserInput{Text: "go"}, nil, nil, nil)
 
 	out := make(chan tea.Msg, 1)
 	go func() { out <- cmd() }()

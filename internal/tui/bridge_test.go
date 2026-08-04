@@ -42,6 +42,9 @@ func TestBridgeBindRoutesSinkAndApprover(t *testing.T) {
 		t.Errorf("decision = %q; want %q", got, domain.ApprovalAllowForSession)
 	}
 	prog.wait()
+	// The token is coalesced inside the sink, so it arrives when its window closes rather
+	// than inside Emit — wait for it before reading what the program received.
+	waitForEvents(t, prog, 1)
 
 	// Both the eventMsg and the approvalReqMsg reached the same bound program.
 	var sawEvent, sawApproval bool
@@ -112,7 +115,9 @@ func TestSeamConcurrentEmitApproveCancel(t *testing.T) {
 		},
 	}
 
-	cmd, cancel := startExchange(context.Background(), eng, domain.UserInput{Text: "go"}, nil, nil)
+	// The worker carries the Bridge's own Step-boundary flush, as Run wires it: the flush then
+	// races the window timer and six Emit goroutines here, which is exactly what -race must clear.
+	cmd, cancel := startExchange(context.Background(), eng, domain.UserInput{Text: "go"}, nil, nil, b.sink.flush)
 
 	var wg sync.WaitGroup
 	var workerMsg tea.Msg

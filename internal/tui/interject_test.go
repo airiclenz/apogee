@@ -81,7 +81,7 @@ func TestWorkerDrainsBoxBetweenSteps(t *testing.T) {
 		return domain.StepResult{Status: domain.StatusExchangeComplete}, nil
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "go"}, box, rec.notify)
+	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "go"}, box, rec.notify, nil)
 
 	if _, ok := msg.(exchangeDoneMsg); !ok {
 		t.Fatalf("terminal msg = %T; want exchangeDoneMsg", msg)
@@ -139,7 +139,7 @@ func TestWorkerEmptyBoxDeliversNothing(t *testing.T) {
 				),
 			}
 
-			msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "go"}, tc.box, rec.notify)
+			msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "go"}, tc.box, rec.notify, nil)
 
 			if _, ok := msg.(exchangeDoneMsg); !ok {
 				t.Fatalf("terminal msg = %T; want exchangeDoneMsg", msg)
@@ -173,7 +173,7 @@ func TestWorkerInterjectErrorHoldsRemainder(t *testing.T) {
 		return domain.StepResult{Status: domain.StatusExchangeComplete}, nil
 	}
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "go"}, box, rec.notify)
+	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "go"}, box, rec.notify, nil)
 
 	if _, ok := msg.(exchangeDoneMsg); !ok {
 		t.Fatalf("terminal msg = %T; want exchangeDoneMsg (a refused interjection never fails the Exchange)", msg)
@@ -223,7 +223,7 @@ func TestDrainWaitsForTheExchangeToOpen(t *testing.T) {
 	// The ⏎ that stages this one lands in the window between submit() and the worker's first Step.
 	box.push(staged(1, "also check the tests"))
 
-	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "go"}, box, rec.notify)
+	msg := driveExchange(context.Background(), eng, domain.UserInput{Text: "go"}, box, rec.notify, nil)
 
 	if _, ok := msg.(exchangeDoneMsg); !ok {
 		t.Fatalf("terminal msg = %T; want exchangeDoneMsg", msg)
@@ -263,7 +263,7 @@ func TestResumeDrainsBeforeItsFirstStep(t *testing.T) {
 		return domain.StepResult{Status: domain.StatusExchangeComplete}, nil
 	}
 
-	msg := driveResume(context.Background(), eng, box, rec.notify)
+	msg := driveResume(context.Background(), eng, box, rec.notify, nil)
 
 	if _, ok := msg.(exchangeDoneMsg); !ok {
 		t.Fatalf("terminal msg = %T; want exchangeDoneMsg", msg)
@@ -298,7 +298,7 @@ func TestCancelledDriveSkipsTheDrain(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Esc landed while the Turn ran: the worker reaches the boundary already cancelled
 
-	msg := driveResume(ctx, eng, box, rec.notify)
+	msg := driveResume(ctx, eng, box, rec.notify, nil)
 
 	if _, ok := msg.(cancelledMsg); !ok {
 		t.Fatalf("terminal msg = %T; want cancelledMsg", msg)

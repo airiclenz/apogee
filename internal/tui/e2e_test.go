@@ -219,7 +219,7 @@ func (h *uiHarness) runExchange(t *testing.T, ctx context.Context, m Model, eng 
 	t.Helper()
 
 	m.transcript.addUser(text, nil)
-	cmd, cancel := startExchange(ctx, eng, domain.UserInput{Text: text}, nil, nil)
+	cmd, cancel := startExchange(ctx, eng, domain.UserInput{Text: text}, nil, nil, nil)
 	defer cancel()
 	m.cancel = cancel
 	m.state = stateRunning

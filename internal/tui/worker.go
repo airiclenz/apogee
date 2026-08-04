@@ -27,10 +27,12 @@ import (
 // between Steps (a nil box is simply an Exchange nothing can be interjected into). notify sends a
 // per-Turn snapshot and the interjection-delivery report into the running program (Run wires it to
 // the Bridge's late-bound sender); a nil notify disables per-Turn saves, which is exactly what the
-// seam tests that drive driveExchange in isolation pass.
-func startExchange(parent context.Context, eng Engine, input domain.UserInput, box *interjectBox, notify func(tea.Msg)) (tea.Cmd, context.CancelFunc) {
+// seam tests that drive driveExchange in isolation pass. flush empties the sink's token-coalescing
+// buffer at each Step boundary (Run wires it to the Bridge's sink; nil is a drive with no sink
+// behind it) — see stepToBoundary.
+func startExchange(parent context.Context, eng Engine, input domain.UserInput, box *interjectBox, notify func(tea.Msg), flush func()) (tea.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
-	cmd := func() tea.Msg { return driveExchange(ctx, eng, input, box, notify) }
+	cmd := func() tea.Msg { return driveExchange(ctx, eng, input, box, notify, flush) }
 	return cmd, cancel
 }
 
@@ -67,10 +69,10 @@ func startCompact(parent context.Context, eng Engine) (tea.Cmd, context.CancelFu
 // launches this only from the /continue drive when eng.InExchange() (model.go); the single-worker
 // invariant keeps eng driven from one goroutine, so C1 still holds. It takes an interjection box
 // for the same reason startExchange does — a resumed Exchange is a running Exchange, and the human
-// may type into it.
-func startResume(parent context.Context, eng Engine, box *interjectBox, notify func(tea.Msg)) (tea.Cmd, context.CancelFunc) {
+// may type into it — and the same Step-boundary flush.
+func startResume(parent context.Context, eng Engine, box *interjectBox, notify func(tea.Msg), flush func()) (tea.Cmd, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
-	cmd := func() tea.Msg { return driveResume(ctx, eng, box, notify) }
+	cmd := func() tea.Msg { return driveResume(ctx, eng, box, notify, flush) }
 	return cmd, cancel
 }
 
@@ -82,13 +84,13 @@ func startResume(parent context.Context, eng Engine, box *interjectBox, notify f
 //
 // It is one of the two callers of eng's drive methods (driveResume is the other); only one worker
 // ever runs at a time, which is what preserves the single-goroutine contract (C1).
-func driveExchange(ctx context.Context, eng Engine, input domain.UserInput, box *interjectBox, notify func(tea.Msg)) tea.Msg {
+func driveExchange(ctx context.Context, eng Engine, input domain.UserInput, box *interjectBox, notify func(tea.Msg), flush func()) tea.Msg {
 	if err := eng.Submit(input); err != nil {
 		return errMsg{Err: err}
 	}
 	// Submit only QUEUES the input: the Exchange opens inside the first Step, so this drive enters
 	// the loop with no Exchange to interject into (see stepToBoundary's exchangeOpen).
-	return stepToBoundary(ctx, eng, box, false, notify)
+	return stepToBoundary(ctx, eng, box, false, notify, flush)
 }
 
 // driveResume Steps an already-open Exchange to its quiescent boundary and returns the single
@@ -98,11 +100,11 @@ func driveExchange(ctx context.Context, eng Engine, input domain.UserInput, box 
 // mid-task). The restored engine is already inExchange, so re-Stepping continues the unfinished
 // Turn rather than opening a new one; per-Turn notify, cancel, and terminal handling are identical
 // to driveExchange because both run stepToBoundary.
-func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func(tea.Msg)) tea.Msg {
+func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func(tea.Msg), flush func()) tea.Msg {
 	// The restored Exchange is already open (the model launches this only when eng.InExchange()),
 	// so unlike driveExchange this drive may deliver before its very first Step — a row staged
 	// between the /continue keypress and that Step has a live Exchange to land in.
-	return stepToBoundary(ctx, eng, box, true, notify)
+	return stepToBoundary(ctx, eng, box, true, notify, flush)
 }
 
 // stepToBoundary is the shared Step loop both drive paths run — driveExchange after its Submit,
@@ -111,13 +113,20 @@ func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func
 // model folds: cancelledMsg on a user stop, exchangeDoneMsg on the final boundary (and on any
 // future terminal status). The StepStatus set is open; only StatusTurnComplete continues.
 //
+// Every Step is followed immediately by flush, before its outcome is read: the teaSink coalesces
+// adjacent tokens behind a short window (sink.go), and this is the boundary that makes that window
+// a within-Step affair. It runs on EVERY path out of a Step — a fault, a completed Turn, a cancel —
+// because the cancel path is the one no event would cover: a Turn Esc interrupted mid-stream emits
+// nothing further, so the tail of the stream would otherwise ride the window timer and land after
+// the Model had already folded cancelledMsg (see teaSink.flush).
+//
 // After each committed Turn it snapshots the engine and hands the snapshot to notify for a per-Turn
 // save (the session system's every-Turn cadence). The snapshot is valid here because between Steps
 // this worker is the engine's single driver (agent.go). It is sent AFTER the Turn's Events — the
-// teaSink delivered them synchronously inside the Step that just returned — so the Model folds it
-// into a transcript consistent with the snapshot (the events-before-notify ordering the existing
-// exchangeDoneMsg path already relies on). A Snapshot error simply skips that Turn's save; the loop
-// keeps stepping.
+// teaSink delivered them as the Step ran, and the flush above emptied whatever it still held before
+// this line is reached — so the Model folds it into a transcript consistent with the snapshot (the
+// events-before-notify ordering the existing exchangeDoneMsg path already relies on). A Snapshot
+// error simply skips that Turn's save; the loop keeps stepping.
 //
 // Before each Step it also empties the interjection mailbox into the open Exchange
 // (deliverInterjections): the same between-Steps window Snapshot occupies, now carrying the human's
@@ -133,13 +142,19 @@ func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func
 // stops, and the row — already out of the mailbox — never gets another chance at delivery, so a
 // row staged later would reach the model FIRST. Skipping the drain before the Submit path's first
 // Step keeps the mailbox FIFO and the delivery order the order the human typed in.
-func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, exchangeOpen bool, notify func(tea.Msg)) tea.Msg {
+func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, exchangeOpen bool, notify func(tea.Msg), flush func()) tea.Msg {
 	for {
 		if exchangeOpen {
 			deliverInterjections(ctx, eng, box, notify)
 		}
 		exchangeOpen = true // whatever the entry state, the Exchange is open from the first Step on
 		res, err := eng.Step(ctx)
+		// The Step has returned, so everything it emitted belongs to the Update loop now — before
+		// this Step's outcome reaches the Model by any route. A nil flush is a drive with no sink
+		// behind it (the seam tests).
+		if flush != nil {
+			flush()
+		}
 		if err != nil {
 			return errMsg{Err: err}
 		}

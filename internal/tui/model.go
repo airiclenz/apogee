@@ -50,6 +50,12 @@ type Model struct {
 	sessions SessionHost   // persists the session per-Turn, at idle, and on quit; nil ⇒ off
 	notify   func(tea.Msg) // sends a Msg into the running program from the worker goroutine (the per-Turn snapshot)
 
+	// flushEvents empties the teaSink's token-coalescing buffer (sink.go). The worker calls it the
+	// moment each Step returns, so a coalesced token can never be delivered after the Step that
+	// emitted it — see stepToBoundary. Only Run can wire it, because the Bridge owns the sink; it
+	// stays nil in the model tests, which inject eventMsg past the sink entirely.
+	flushEvents func()
+
 	// Session-record write single-flight (the per-Turn save pipeline AND the /sessions verbs).
 	// Every write to the store — Save, Rename, Delete — runs off the Update loop on a Cmd
 	// goroutine, and no two of them may overlap: Store.Rename is a read-modify-write of the whole
@@ -1116,7 +1122,7 @@ func (m Model) refuseIdleOnlyCommand() (tea.Model, tea.Cmd) {
 // re-derives it (activity.go).
 func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 	m.box = newInterjectBox()
-	cmd, cancel := startExchange(m.parent, m.eng, in, m.box, m.notify)
+	cmd, cancel := startExchange(m.parent, m.eng, in, m.box, m.notify, m.flushEvents)
 	m.cancel = cancel
 	m.state = stateRunning
 	m.setPlaceholder(runningPlaceholder) // the empty box now invites a queued message, not a send
@@ -1283,7 +1289,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			// opening a new one. Drive Step-only from the boundary (startResume) — no Submit, no new
 			// user block; the interrupted note already stands, so the transcript is left untouched.
 			m.box = newInterjectBox() // a resumed Exchange is a running one; it takes interjections too
-			cmd, cancel := startResume(m.parent, m.eng, m.box, m.notify)
+			cmd, cancel := startResume(m.parent, m.eng, m.box, m.notify, m.flushEvents)
 			m.cancel = cancel
 			m.state = stateRunning
 			m.setPlaceholder(runningPlaceholder)
@@ -1300,7 +1306,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		m.layout()
 		m.box = newInterjectBox()
 		cmd, cancel := startExchange(m.parent, m.eng,
-			domain.UserInput{Text: "Please continue"}, m.box, m.notify)
+			domain.UserInput{Text: "Please continue"}, m.box, m.notify, m.flushEvents)
 		m.cancel = cancel
 		m.state = stateRunning
 		m.setPlaceholder(runningPlaceholder)

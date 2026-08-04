@@ -121,8 +121,9 @@ type compactDoneMsg struct {
 // worker sends it after each StatusTurnComplete (driveExchange), snapshotting the engine between
 // Steps — the single-driver boundary at which Snapshot is valid mid-Exchange (agent.go) — so the
 // Model can persist per-Turn and a crash loses at most one Turn. It is sent AFTER that Turn's
-// Events: the teaSink delivered them synchronously inside Step before it returned, so the
-// transcript the Model holds when this folds is consistent with the snapshot it carries.
+// Events: the teaSink delivered them as the Step ran, and the worker empties its coalescing buffer
+// the moment the Step returns — before this Msg is sent — so the transcript the Model holds when
+// this folds is consistent with the snapshot it carries.
 type turnSnapshotMsg struct {
 	Sess domain.Session
 }

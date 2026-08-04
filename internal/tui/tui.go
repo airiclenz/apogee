@@ -630,7 +630,13 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	// late-bound program sender (the same programRef the Sink pushes Events through), so the
 	// Model persists between Steps without any exported API. Bind (below) resolves it to the
 	// live program before the first worker can fire.
-	program := tea.NewProgram(newModel(ctx, eng, opts, br.prog.send), tea.WithContext(ctx))
+	m := newModel(ctx, eng, opts, br.prog.send)
+	// The Step-boundary flush: the Sink coalesces adjacent tokens behind a short window, and the
+	// worker empties that buffer the instant a Step returns, so no token is ever delivered after
+	// the Step that emitted it (worker.go, sink.go). It is wired HERE rather than through newModel
+	// because the sink is the Bridge's, and Run is where the two meet.
+	m.flushEvents = br.sink.flush
+	program := tea.NewProgram(m, tea.WithContext(ctx))
 	// Bind before Run: the program exists now, and the first Send cannot occur until a
 	// worker is launched, which only happens after the user submits into the running loop.
 	br.Bind(program)
