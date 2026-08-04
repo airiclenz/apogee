@@ -162,6 +162,10 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		prevBlockDepth = depth
 	}
 
+	// Drop memoised paints for entries the transcript no longer has (paintcache.go). It runs
+	// before the loop so a render never reads a row about a block that is gone.
+	t.paints.prune(len(t.entries))
+
 	prevDepth := 0
 	for i := 0; i < len(t.entries); i++ {
 		e := t.entries[i]
@@ -181,7 +185,14 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		// exactly as it always has, so every inner block keeps its OWN state and a nested run
 		// collapses inside an expanded parent by this same rule, at every depth.
 		if span := subAgentSpan(t.entries, i); span > 0 {
-			appendBlock(false, e.depth, i, renderSubAgentRun(th, e, t.entries[i+1:i+1+span], width, blink))
+			// The paint covers the head AND its span: the collapsed summary counts the work behind
+			// the header (subAgentSummary) and the star asks the span whether anything is still open,
+			// so a nested entry arriving or landing its result is a different block (paintcache.go).
+			key := t.blockKey(shapeSubAgentRun, i, span+1, th, width, blink,
+				!e.done || anyOpenCall(t.entries[i+1:i+1+span]))
+			appendBlock(false, e.depth, i, t.paintBlock(i, key, func() blockPaint {
+				return renderSubAgentRun(th, e, t.entries[i+1:i+1+span], width, blink)
+			}))
 			if !e.expanded {
 				i += span
 			}
@@ -195,15 +206,24 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			// has landed and whose last has not is still working, and the one star over them all says
 			// so. The run is entries[i:i+len(run)] by construction (toolCallRun walks adjacent
 			// entries forward), so the views' own entries are what the rule reads.
-			block := renderToolBlock(th, run, railedWidth(width, e.depth), blockState{
-				expanded: e.expanded,
-				live:     anyOpenCall(t.entries[i : i+len(run)]),
-				blink:    blink,
-			}).railed(th, e.depth)
+			key := t.blockKey(shapeToolRun, i, len(run), th, width, blink,
+				anyOpenCall(t.entries[i:i+len(run)]))
+			block := t.paintBlock(i, key, func() blockPaint {
+				return renderToolBlock(th, run, railedWidth(width, e.depth), blockState{
+					expanded: e.expanded,
+					live:     key.live,
+					blink:    blink,
+				}).railed(th, e.depth)
+			})
 			appendBlock(false, e.depth, i, block)
 			i += len(run) - 1
 		} else {
-			appendBlock(e.kind == entryUser, e.depth, i, renderEntryLines(th, e, width, blink))
+			// A tool call is the only single-entry kind with a live star, and entrySchedule paints
+			// static by construction (renderEntryLines), so everything else keys as settled.
+			key := t.blockKey(shapeEntry, i, 1, th, width, blink, e.kind == entryToolCall && !e.done)
+			appendBlock(e.kind == entryUser, e.depth, i, t.paintBlock(i, key, func() blockPaint {
+				return renderEntryLines(th, e, width, blink)
+			}))
 		}
 		prevDepth = e.depth
 	}

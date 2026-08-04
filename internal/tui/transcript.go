@@ -33,6 +33,12 @@ type transcript struct {
 	// fact about the RUN rather than about the conversation, so reset preserves it as it does debug.
 	// The zero value shortens nothing, which is what a hand-built test transcript gets.
 	ws workspaceRoot
+	// paints memoises the per-block paints renderView produced last time, so a repaint mid-stream
+	// costs the live tail rather than the whole scrollback (paintcache.go). It is a POINTER for the
+	// reason entries is a shared backing array: the Model is copied by value on every Update (ADR
+	// 0011), and every copy has to reach the one cache. It is nil on a hand-built transcript, which
+	// renders uncached — every cache method is nil-safe.
+	paints *paintCache
 }
 
 // entryKind tags a transcript entry so the renderer can prefix and style it. The set
@@ -253,6 +259,11 @@ func (t *transcript) reset() {
 	t.entries = nil
 	t.pending = ""
 	t.streaming = false
+	// The block-paint cache is keyed by ENTRY INDEX, and this is the one path that makes an index
+	// mean something else: the caller re-fills the list (a fresh start-up box, a replayed
+	// scrollback) before anything renders again, so pruning against the entry count at the next
+	// render would find index 3 occupied and hand back the previous session's paint (paintcache.go).
+	t.paints.clear()
 	// t.debug and t.ws are deliberately preserved across a session reset.
 }
 
