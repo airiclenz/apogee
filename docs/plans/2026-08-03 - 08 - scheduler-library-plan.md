@@ -470,9 +470,21 @@ the choice as a NOTES line.
 
 ---
 
-## 7. `/sessions` labels a Firing under its Schedule
+## 7. `/sessions` labels a Firing under its Schedule — ✅ DONE (2026-08-04)
 
 Depends on item 2 (fields) — independent of items 3–6.
+
+NOTES (2026-08-04): three choices inside the item's semantics. (a) The tag joins the TITLE cell
+(`<title> · ⟳ <name>`) rather than claiming a tier of its own — `sessionRowCells`' own doc already
+argues that case for the all-workspaces workspace base ("it belongs with the title it qualifies"),
+and the schedule name qualifies the same title; a column of its own would also have put the
+delete-confirm cell one tier further out. (b) No cap is placed on the tag's own width, so this item
+added no new measuring site: the glyph is `⟳` (U+27F3), which measures one cell under BOTH width
+methods, and an over-long name degrades exactly as an over-long title already does — whole-row
+truncation in the painter's measure inside the popup module (ADR 0030). The width contract is
+proven end-to-end under both methods (`paintMethods`/`paintedAs`) rather than re-implemented here.
+(c) Docs: the `/sessions` bullet list in `README.md` and a paragraph in `layout.md` beside the
+`/schedule` panes. CHANGELOG untouched — item 8 owns it.
 
 **What:**
 

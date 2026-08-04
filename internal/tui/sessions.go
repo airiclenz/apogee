@@ -53,6 +53,13 @@ const sessionBrowserHint = "↑/↓ select · ⏎ resume · r rename · d delete
 // while nothing is armed.
 const deleteConfirmCell = "delete? y/n"
 
+// scheduleTagGlyph leads the tag a row carries when its record is one Firing of a Schedule
+// (ADR 0033): a circling arrow, for the standing instruction that will run again. It is one
+// terminal cell wide in EITHER width method — it carries no variation selector, so the two
+// measures agree about it (ADR 0030) — which is what keeps a labelled row costing the title
+// column exactly what it looks like it costs, whatever measure the painter is on.
+const scheduleTagGlyph = "⟳"
+
 // interruptedNote is the transcript note appended when a resumed session was interrupted
 // mid-task (the engine reports InExchange after the restore). It tells the human how to pick the
 // work back up; the step-only /continue drive that actually resumes it is item 8's work.
@@ -487,17 +494,29 @@ func sessionRows(b sessionBrowser, workspace string, now time.Time) []popupRow {
 // it qualifies, and a fourth column carrying it would push the two facts every row states out of
 // line behind an optional one only some rows fill.
 //
-// Both facts the Meta supplies — the title and the workspace path behind its base — are escape-
-// stripped here, exactly as the pickers strip every cell they build from launcher text
-// (launchProfileRows). A Meta is untrusted DISK input: List() reads session files that no codec has
-// sanitized (transcriptcodec strips the record's transcript on the way back in, never its Meta), so
-// a title carrying "\x1bc" would otherwise reach the pane as a live RIS terminal reset — the popup
-// module strips nothing and truncates ANSI-preservingly — and would also lie to the column math,
-// since an ESC byte occupies no display cell but does occupy the string.
+// A record one Firing of a Schedule wrote (Meta.ScheduleName set — ADR 0033) carries that
+// Schedule's name as a tag in the SAME title cell, for the same reason and at the same price: it
+// says which standing instruction produced this run, so it belongs with the title it qualifies
+// rather than in a tier of its own past the two facts every row states. It is worth stating even
+// though a Firing is saved under a "<schedule> — <HH:MM>" title, because a title is the one fact of
+// a record the human can rewrite (the r verb) and the tag is what survives that. Nothing else about
+// the row moves: a Firing orders, resumes, renames and deletes like any other record, and a record
+// with no schedule identity renders exactly as it did before there were Schedules.
+//
+// Every fact the Meta supplies — the title, the workspace path behind its base, and a Firing's
+// schedule name — is escape-stripped here, exactly as the pickers strip every cell they build from
+// launcher text (launchProfileRows). A Meta is untrusted DISK input: List() reads session files
+// that no codec has sanitized (transcriptcodec strips the record's transcript on the way back in,
+// never its Meta), so a title carrying "\x1bc" would otherwise reach the pane as a live RIS
+// terminal reset — the popup module strips nothing and truncates ANSI-preservingly — and would also
+// lie to the column math, since an ESC byte occupies no display cell but does occupy the string.
 func sessionRowCells(meta session.Meta, currentWorkspace string, all bool, now time.Time) popupRow {
 	title := stripEscapes(meta.Title)
 	if all && meta.Workspace != currentWorkspace {
 		title += " · " + stripEscapes(workspaceBase(meta.Workspace))
+	}
+	if meta.ScheduleName != "" {
+		title += " · " + scheduleTagGlyph + " " + stripEscapes(meta.ScheduleName)
 	}
 	return popupRow{
 		title,

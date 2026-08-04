@@ -766,6 +766,117 @@ func TestSessionRowCells(t *testing.T) {
 	}
 }
 
+// A record one Firing of a Schedule wrote carries its Schedule's name as a tag in the title cell
+// (ADR 0033), so a scheduled run reads as one of a series rather than as a session nobody remembers
+// starting — and it carries it in the all-workspaces view too, beside the workspace base, since the
+// two qualify the same title. A record with no schedule identity is untouched: three cells, no tag,
+// exactly what the browser rendered before there were Schedules.
+func TestSessionRowCellsScheduleTag(t *testing.T) {
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	firing := session.Meta{
+		ID:           "sess-1",
+		Title:        "nightly sweep — 03:00",
+		UpdatedAt:    now.Add(-5 * time.Minute),
+		UserMsgs:     1,
+		Workspace:    "/home/me/proj",
+		ScheduleID:   "sch-1",
+		ScheduleName: "nightly sweep",
+	}
+
+	want := popupRow{"nightly sweep — 03:00 · ⟳ nightly sweep", "· 5m ago", "· 1 msg"}
+	if got := sessionRowCells(firing, "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
+		t.Errorf("firing cells = %v, want the schedule tag in the title cell (%v)", got, want)
+	}
+	// The foreign-workspace view states both qualifiers, in the order the title is read for: which
+	// workspace, then which standing instruction.
+	want = popupRow{"nightly sweep — 03:00 · proj · ⟳ nightly sweep", "· 5m ago", "· 1 msg"}
+	if got := sessionRowCells(firing, "/home/me/other", true, now); !reflect.DeepEqual(got, want) {
+		t.Errorf("foreign firing cells = %v, want %v", got, want)
+	}
+	// A plain record has no identity to state, so it states none — no tag, no empty tier.
+	plain := session.Meta{Title: "a task", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 1, Workspace: "/home/me/proj"}
+	want = popupRow{"a task", "· 5m ago", "· 1 msg"}
+	if got := sessionRowCells(plain, "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
+		t.Errorf("plain cells = %v, want the row unchanged by schedules (%v)", got, want)
+	}
+}
+
+// A schedule name reaches the pane off the same untrusted disk record the title does — no codec
+// sanitizes a Meta on the way back in — so it is escape-stripped with it, and no ESC survives into
+// the laid-out line.
+func TestSessionRowCellsScheduleTagStripsEscapes(t *testing.T) {
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	b := sessionBrowser{
+		open: true,
+		metas: []session.Meta{{
+			ID:           "sess-1",
+			Title:        "a firing",
+			UpdatedAt:    now.Add(-5 * time.Minute),
+			UserMsgs:     1,
+			Workspace:    "/ws/a",
+			ScheduleID:   "sch-1",
+			ScheduleName: "reset \x1bc me",
+		}},
+	}
+
+	rows := sessionRows(b, "/ws/a", now)
+	want := []popupRow{{"a firing · ⟳ reset c me", "· 5m ago", "· 1 msg"}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("rows = %v, want the ESC bytes gone from the tag (%v)", rows, want)
+	}
+	for i, ln := range layoutPopupRows(newTheme(), rows) {
+		if strings.ContainsRune(ln, 0x1b) {
+			t.Errorf("rendered row %d = %q carries a raw ESC into the pane", i, ln)
+		}
+	}
+}
+
+// A tagged row is held to the pane's width contract exactly as every other row is, and in the
+// measure the painter is actually using: under BOTH width methods every line of the open pane is
+// exactly the window width, an over-wide tagged row truncates to an ellipsis instead of wrapping,
+// and the plain row beside it keeps its own facts. ⟳ measures one cell either way, so the tag
+// itself can never be the thing the two measures disagree about (ADR 0030).
+func TestSessionBrowserScheduleTagHoldsTheWidthContract(t *testing.T) {
+	for _, pm := range paintMethods {
+		t.Run(pm.name, func(t *testing.T) {
+			now := time.Now()
+			host := &fakeSessionHost{}
+			host.seed(session.Record{Meta: session.Meta{
+				ID:           "sess-1",
+				Title:        strings.Repeat("verylongtitle ", 8),
+				Workspace:    "/ws/a",
+				UpdatedAt:    now,
+				UserMsgs:     1,
+				ScheduleID:   "sch-1",
+				ScheduleName: strings.Repeat("verylongschedulename ", 4),
+			}})
+			storeMeta(host, "sess-2", "a plain session", "/ws/a", now.Add(-time.Hour), 0, nil)
+			m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+			m = paintedAs(t, m, pm.method)
+			m = openBrowser(t, m)
+
+			pane := m.renderSessionBrowser()
+			lines := popupLines(pane)
+			const wantLines = 2 + 1 + 2 + 1 // borders + title + two session rows + hint
+			if len(lines) != wantLines {
+				t.Fatalf("pane has %d lines, want %d (a tagged row must truncate, not wrap):\n%s",
+					len(lines), wantLines, strip(pane))
+			}
+			for i, ln := range lines {
+				if w := paintedWidth(ln, pm.method); w != m.width {
+					t.Errorf("pane line %d is %d cells, want %d: %q", i, w, m.width, strip(ln))
+				}
+			}
+			if !strings.Contains(strip(pane), "…") {
+				t.Errorf("the over-wide tagged row was not truncated to an ellipsis:\n%s", strip(pane))
+			}
+			if !strings.Contains(strip(pane), "a plain session") {
+				t.Errorf("the plain row lost its own facts beside the tagged one:\n%s", strip(pane))
+			}
+		})
+	}
+}
+
 // A stored title is untrusted DISK input — List() hands the browser whatever bytes are in the
 // session file, and no codec sanitizes a Meta on the way back in — so every cell the browser builds
 // from one is escape-stripped, exactly as the pickers strip the launcher's text. A title carrying

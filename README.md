@@ -182,6 +182,10 @@ gauge, instead of opening an empty view over a model that still remembers.
   opens a code fence. A bare `/rename` later re-reads the session — your opening
   request plus the most recent ones — and names it for what it has become, so
   one that moved on to another task gets named for where it ended up.
+- A run of a `/schedule` saves its own session, so it browses like every other:
+  the browser tags it `⟳ <schedule>` beside its title, so a run reads as one of a
+  series rather than as a session nobody remembers starting. Ordering, resume,
+  rename and delete treat it exactly like a session you held yourself.
 - `/clear` (or `/new`) closes the current session into history and starts a fresh
   one — neither deletes; discarding is an explicit `d` in the browser.
 - A session killed mid-task resumes to the last completed turn and says so;

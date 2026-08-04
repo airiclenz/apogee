@@ -853,6 +853,15 @@ anything, so the hint under them reads `⏎ choose` and, for the stop pane, `⏎
 only panes that open while the model is working, and they claim the keyboard there exactly as they
 do at idle.
 
+**A firing browses like any other session, and says whose it is.** Each run of a schedule saves a
+record of its own, so it appears in the `/sessions` browser among the sessions the human held
+themselves — tagged `· ⟳ <schedule>` inside its TITLE cell, after the workspace base the
+all-workspaces view puts there. It is a qualifier of the title rather than a tier of its own, for
+the reason the workspace base is: it says which standing instruction produced this run, and it is
+the fact that survives a rename out of the `<schedule> — <HH:MM>` title a firing is saved under.
+Nothing else about the row moves — it orders, resumes, renames and deletes like every other record,
+and a record with no schedule identity renders exactly as it did before there were schedules.
+
 **The Column contract.** Every one of those grammars is a row of **cells**, and the pop-up module —
 not the code that produced the row — owns the alignment, alongside its marker, highlight, windowing
 and truncation. A column is as wide as its widest cell measured in painted display cells (the width
