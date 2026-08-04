@@ -1,7 +1,8 @@
 # Plan — Wave 3: the decision-gated fixes (audit 2026-08-01)
 
 **Date:** 2026-08-03
-**Status:** not started
+**Status:** complete — all five items (1–5) landed 2026-08-03/2026-08-04; not yet archived (see
+*Closing notes* for the version-bump and roadmap bookkeeping that archiving settles).
 **Goal:** land the two audit findings the roadmap deliberately parked behind an owner decision —
 `autofix`'s external-formatter spawn, which today runs outside every execution guard, and the
 skills load order, where a repo-supplied skill silently outranks the user's own library. Both
