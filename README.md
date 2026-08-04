@@ -6,6 +6,8 @@
   </picture>
 </p>
 
+<!-- demo GIF / screenshots land here (pending the menu-layout work) -->
+
 A terminal-based coding agent built for **small, locally-run LLMs** (~4B–35B).
 
 Apogee is a single, cross-platform tool that drops into any IDE's integrated
@@ -51,10 +53,11 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 **`v0.10.x` on `main` — pre-production.** The release line was deliberately reset
 from `1.x` to `0.x` (2026-07-23): the old numbering overstated maturity, and under
 SemVer a `0.x` version makes no API-stability promise — the Go API is still allowed
-to move while the tool hardens. One consequence: build from source (prebuilt
-binaries are not published yet), **not** `go install …@latest` — proxy.golang.org
-retains the retired `v1.x` module versions immutably, so that still resolves to
-old `v1.7.0`.
+to move while the tool hardens. One consequence: install from source — a clone
+plus `make build`, or `go install github.com/airiclenz/apogee/cmd/apogee@main` —
+but **not** `go install …@latest`: proxy.golang.org retains the retired `v1.x`
+module versions immutably, so `@latest` still resolves to old `v1.7.0`. Prebuilt
+binaries are not published yet.
 
 Functionally the loop is complete: full tool suite, MCP client, sub-agents, skills,
 and OS-confined Auto mode on **all three** platforms — Linux landlock, macOS
@@ -66,11 +69,15 @@ unbounded; apogee says so at startup, `apogee probe` answers "what would Auto do
 this box?" without running an agent, and `/confine` is the way out (see
 [Auto mode's blast radius](#auto-modes-blast-radius)).
 
-Newest on `main`: the **session system** — every session autosaves per turn and is
-browsable, resumable, and crash-safe (see [Sessions](#sessions)). Current work is
-per-model bench validation of the mechanism catalogue: the full catalogue is
-ported, and the first Validated set (`gemma-4-e4b-it-qat`) ships with the binary.
-See [`docs/plans/`](docs/plans/) and the [`CHANGELOG`](CHANGELOG.md) for what's
+Newest on `main`: **scheduled prompts** — `/schedule` puts a prompt on a cycle,
+and each firing runs headless and saves its own browsable session (see
+[Sessions](#sessions)) — plus a wave of transcript polish: prompt recall (`↑`),
+prompt and tool blocks that collapse and expand, markdown tables rendered as
+tables, and the session's name written on the top rule. The mechanism catalogue
+is fully ported (21 mechanisms) and the first Validated set
+(`gemma-4-e4b-it-qat`) ships with the binary; current work is per-model bench
+validation of that catalogue alongside TUI layout refinement. See
+[`docs/plans/`](docs/plans/) and the [`CHANGELOG`](CHANGELOG.md) for what's
 next.
 
 ## Key capabilities
@@ -98,6 +105,10 @@ next.
   --continue` reopens this workspace's latest session, `/sessions` browses them all,
   and a resumed session repaints its full scrollback; an interrupted task picks up
   where it stopped with `/continue`. See [Sessions](#sessions).
+- **Scheduled prompts** — `/schedule` runs a prompt on a cycle for as long as apogee
+  is open: each firing runs headless in Plan or Auto mode and saves its own session,
+  browsable like any other (tagged `⟳` in `/sessions`); `/schedule-stop` takes one
+  off the clock.
 - **Four autonomy modes** — Plan (read-only), Ask-Before (writes need approval),
   Allow-Edits (workspace-scoped writes auto-approved), Auto (autonomous, confined
   at the OS level via Linux landlock / macOS seatbelt / a Windows low-integrity
@@ -167,7 +178,9 @@ untouched.
 
 The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
 the model works — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
-prompts you have already sent in this workspace, `esc` stops a run, `⌃c` quits.
+prompts you have already sent in this workspace, `esc` stops a run, `⌃c` quits. Beyond
+the box, `⇧⇥` cycles the autonomy mode — Plan → Ask-Before → Allow-Edits → Auto — at
+any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript.
 
 ## Sessions
 
@@ -239,8 +252,9 @@ still wins (an enabled non-off-ramp mechanism does not fire under bypass). The s
 catalogued mechanisms are enabled by ID from the Go API through
 `Config.EnableMechanisms` (with `apogee.CataloguedMechanisms()` to enumerate them), so
 a library embedder arms the identical stack without the config file. The
-catalogue fills in as the port waves land — see
-[`docs/design/mechanism-catalogue.md`](docs/design/mechanism-catalogue.md).
+catalogue currently counts **21** mechanisms — see
+[`docs/design/mechanism-catalogue.md`](docs/design/mechanism-catalogue.md) for
+what each one does.
 
 Automatic context **Compaction** keeps a long session from overflowing the model's
 window: when the conversation history outgrows its budgeted share, apogee folds the
@@ -582,6 +596,11 @@ where `/usr/local/bin` belongs to root — it stops and prints the two ways to f
 either `sudo install -m 0755 ./apogee /usr/local/bin/apogee` or an explicit
 `make install PREFIX=~/.local/bin` plus the line that puts that directory on your
 `PATH`. `PREFIX` overrides the search entirely.
+
+No clone at all? `go install github.com/airiclenz/apogee/cmd/apogee@main` builds and
+installs straight from the tip of `main` into your Go bin dir (pin a commit with
+`@<sha>` instead). Only `@latest` is off-limits — proxy.golang.org immutably retains
+the retired `v1.x` module versions, so `@latest` resolves to stale `v1.7.0`.
 
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` does the same thing — the
 Makefile just gives the common commands one-word names. Releases are cross-compiled to
