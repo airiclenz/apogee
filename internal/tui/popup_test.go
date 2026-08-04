@@ -251,32 +251,53 @@ func TestRenderPopupEmptyTitleAndHintDropRows(t *testing.T) {
 	}
 }
 
-// popupRowWindow shows every row when the list fits the cap, keeps the window capped and roughly
+// popupRowHeightsOfOne is a list of total one-line rows: the shape every pane but a wrapping one
+// hands the window, where counting lines and counting rows are the same count.
+func popupRowHeightsOfOne(total int) []int {
+	heights := make([]int, total)
+	for i := range heights {
+		heights[i] = 1
+	}
+	return heights
+}
+
+// popupRowWindow shows every row when the list fits the budget, keeps the window capped and roughly
 // centred on a mid-list selection, and clamps at both ends — the cases the old inline windowing
-// satisfied.
+// satisfied, unchanged now that the budget is spent in painted LINES. Past them: a wrapped row costs
+// its real height, a separator between two seated rows costs a line of the same budget, and a row is
+// seated whole or not at all — down to the budget that cannot seat the selected row itself, which is
+// the empty window renderPopup counts onto the title row.
 func TestPopupRowWindow(t *testing.T) {
 	cases := []struct {
-		name                    string
-		selected, total, capRow int
-		wantStart, wantEnd      int
+		name               string
+		selected           int
+		heights            []int
+		gap, budget        int
+		wantStart, wantEnd int
 	}{
-		{"fits under cap", 3, 5, 8, 0, 5},
-		{"exactly at cap", 4, 8, 8, 0, 8},
-		{"mid centred", 10, 30, 8, 6, 14},
-		{"clamp at start", 1, 30, 8, 0, 8},
-		{"clamp at end", 29, 30, 8, 22, 30},
+		{"fits under cap", 3, popupRowHeightsOfOne(5), 0, 8, 0, 5},
+		{"exactly at cap", 4, popupRowHeightsOfOne(8), 0, 8, 0, 8},
+		{"mid centred", 10, popupRowHeightsOfOne(30), 0, 8, 6, 14},
+		{"clamp at start", 1, popupRowHeightsOfOne(30), 0, 8, 0, 8},
+		{"clamp at end", 29, popupRowHeightsOfOne(30), 0, 8, 22, 30},
+		{"no selection anchors at the top", -1, popupRowHeightsOfOne(30), 0, 8, 0, 8},
+		{"empty list", 0, nil, 0, 8, 0, 0},
+		{"wrapped rows spend their real height", 0, []int{3, 2, 1}, 0, 5, 0, 2},
+		{"separators cost a line each", 0, popupRowHeightsOfOne(3), 1, 4, 0, 2},
+		{"a row is seated whole or not at all", 1, []int{1, 3, 1}, 0, 3, 1, 2},
+		{"a budget under the selected row's height seats nothing", 1, []int{1, 3, 1}, 0, 2, 0, 0},
 	}
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			start, end := popupRowWindow(c.selected, c.total, c.capRow)
+			start, end := popupRowWindow(c.selected, c.heights, c.gap, c.budget)
 			if start != c.wantStart || end != c.wantEnd {
-				t.Errorf("popupRowWindow(%d,%d,%d) = [%d,%d), want [%d,%d)",
-					c.selected, c.total, c.capRow, start, end, c.wantStart, c.wantEnd)
+				t.Errorf("popupRowWindow(%d,%v,gap %d,budget %d) = [%d,%d), want [%d,%d)",
+					c.selected, c.heights, c.gap, c.budget, start, end, c.wantStart, c.wantEnd)
 			}
-			if end-start > c.capRow {
-				t.Errorf("window [%d,%d) exceeds cap %d", start, end, c.capRow)
+			if spent := popupRowBlockLines(c.heights[start:end], c.gap); spent > c.budget {
+				t.Errorf("window [%d,%d) paints %d lines, past the %d-line budget", start, end, spent, c.budget)
 			}
 		})
 	}
@@ -1172,5 +1193,229 @@ func TestRenderPopupMenuRowsKeepColumnsAligned(t *testing.T) {
 		if off != offsets[0] {
 			t.Errorf("row %d's shortcut column starts at %d, want %d (the column the first row opened)", i, off, offsets[0])
 		}
+	}
+}
+
+// popupContent strips a rendered popup line of its ANSI styling and its border chrome but KEEPS the
+// content's own leading spaces — popupInterior trims them, and the hanging indent under a wrapped
+// row's marker is exactly what these assertions are about.
+func popupContent(line string) string {
+	s := strings.TrimSuffix(strings.TrimPrefix(strip(line), "│"), "│")
+	s = strings.TrimPrefix(s, " ") // the box's one-cell left padding, not the content's indent
+	return strings.TrimRight(s, " ")
+}
+
+// popupStyledLines are the rendered lines carrying style's SGR — the probe that says which lines a
+// selection cue reached, without a byte golden of the styling itself (styleSGR).
+func popupStyledLines(lines []string, sgr string) []string {
+	var out []string
+	for _, ln := range lines {
+		if strings.Contains(ln, sgr) {
+			out = append(out, ln)
+		}
+	}
+	return out
+}
+
+// popupWrapSpec is a menu of answers written as SENTENCES — the shape a decision surface takes once
+// a model may offer prose (docs/design/user-questions-layout.md's multi-option mockup): two options
+// that fit a line and one that no pane seats on one, the long one selected.
+func popupWrapSpec() popupSpec {
+	return popupSpec{
+		rows: singleCellRows([]string{
+			"Just do it all in one shot and commit once.",
+			"Commit each piece as you go and run make check after every commit.",
+			"Implement the config redesign first, commit it, then do the TUI part in a separate commit.",
+		}),
+		menuRows: true,
+		wrapRows: true,
+		rowGap:   true,
+		selected: 2,
+		maxRows:  -1,
+	}
+}
+
+// A row too wide for the pane BREAKS instead of eliding, and its continuation lines hang at exactly
+// the marker's two cells — so the tail of an option lands under the head of it, no option ends in an
+// ellipsis, and every line is still exactly the width the box was drawn at.
+func TestRenderPopupWrappedRowsHangUnderTheirMarker(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	const width = 48
+	spec := popupWrapSpec()
+	lines := popupLines(renderPopup(th, spec, width))
+
+	if len(lines) <= 2+len(spec.rows) {
+		t.Fatalf("popup is %d lines: nothing wrapped:\n%s", len(lines), strip(strings.Join(lines, "\n")))
+	}
+	for i, ln := range lines {
+		if w := lipgloss.Width(ln); w != width {
+			t.Errorf("line %d is %d cells, want %d: %q", i, w, width, strip(ln))
+		}
+	}
+	if joined := strip(strings.Join(lines, "\n")); strings.Contains(joined, "…") {
+		t.Errorf("a wrapping row still elided:\n%s", joined)
+	}
+
+	var flat []string
+	for _, ln := range lines[1 : len(lines)-1] { // the content rows, borders excluded
+		content := popupContent(ln)
+		if content == "" {
+			continue // a rowGap separator
+		}
+		if !strings.HasPrefix(content, glyphUser) && !strings.HasPrefix(content, glyphMenuUnselected) {
+			if !strings.HasPrefix(content, strings.Repeat(" ", popupRowIndent)) ||
+				strings.HasPrefix(content, strings.Repeat(" ", popupRowIndent+1)) {
+				t.Errorf("continuation line %q does not hang at %d cells, under the marker's own column", content, popupRowIndent)
+			}
+		}
+		flat = append(flat, strings.TrimLeft(content, glyphUser+glyphMenuUnselected+" "))
+	}
+
+	whole := strings.Join(strings.Fields(strings.Join(flat, " ")), " ")
+	for _, row := range spec.rows {
+		if !strings.Contains(whole, row[0]) {
+			t.Errorf("option %q did not survive the wrap:\n%s", row[0], whole)
+		}
+	}
+}
+
+// rowGap sets consecutive rows one blank line apart and nothing else: no separator opens the list
+// and none closes it, where the box's own padding already stands. With the flag off the list is the
+// unbroken block it has always been.
+func TestRenderPopupRowGapSeparatesRowsOnly(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	base := popupSpec{
+		rows:     singleCellRows([]string{"one", "two", "three"}),
+		menuRows: true,
+		selected: 0,
+		maxRows:  -1,
+	}
+
+	spec := base
+	spec.rowGap = true
+	lines := popupLines(renderPopup(th, spec, 40))
+	if got, want := len(lines), 2+len(spec.rows)+2; got != want {
+		t.Fatalf("gapped list is %d lines, want %d (3 rows + 2 separators + 2 borders):\n%s",
+			got, want, strip(strings.Join(lines, "\n")))
+	}
+	for i, ln := range lines[1 : len(lines)-1] {
+		blank := popupContent(ln) == ""
+		if want := i%2 == 1; blank != want {
+			t.Errorf("content line %d blank = %v, want %v (separators sit BETWEEN rows only): %q",
+				i, blank, want, popupContent(ln))
+		}
+	}
+
+	if got, want := len(popupLines(renderPopup(th, base, 40))), 2+len(base.rows); got != want {
+		t.Errorf("rowGap off is %d lines, want %d: the list gained a separator it did not ask for", got, want)
+	}
+}
+
+// The selection covers the WHOLE of a wrapped row — every line of it, in either cue — because a row
+// lit on its first line and plain on its second reads as two rows, one of them somebody else's.
+func TestRenderPopupWrappedSelectionCoversEveryLine(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	const width = 48
+	selected := popupWrapSpec().rows[2][0]
+
+	for name, tc := range map[string]struct {
+		menu bool
+		sgr  string
+	}{
+		"menu accent":   {menu: true, sgr: styleSGR(th.popupAccent)},
+		"highlight bar": {menu: false, sgr: styleSGR(th.userBlock)},
+	} {
+		name, tc := name, tc
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			spec := popupWrapSpec()
+			spec.menuRows = tc.menu
+			lit := popupStyledLines(popupLines(renderPopup(th, spec, width)), tc.sgr)
+			if len(lit) < 2 {
+				t.Fatalf("the selected row wrapped but only %d line(s) carry its cue", len(lit))
+			}
+			var b strings.Builder
+			for _, ln := range lit {
+				b.WriteString(strings.TrimLeft(popupContent(ln), glyphUser+" ") + " ")
+			}
+			if whole := strings.Join(strings.Fields(b.String()), " "); whole != selected {
+				t.Errorf("the cue covers %q, want the whole selected option %q", whole, selected)
+			}
+		})
+	}
+}
+
+// The row budget is spent in painted LINES once rows can wrap and be separated: the block never
+// outgrows the budget the frame handed it, the rows a scrolling window leaves out stay quiet (they
+// are one keypress away), and a budget that cannot seat even the selected row seats NOTHING and says
+// so on the title row — the same accounting a budget of zero has always had, one step earlier.
+func TestRenderPopupWrappedRowsSpendTheBudgetInLines(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	const width = 48
+	const title = "how to continue?"
+
+	t.Run("a capped window fits its lines", func(t *testing.T) {
+		t.Parallel()
+		spec := popupWrapSpec()
+		spec.title = title
+		spec.selected = 0
+		spec.maxRows = 4
+		lines := popupLines(renderPopup(th, spec, width))
+		rowLines := len(lines) - (2 + 1) // borders + title row
+		if rowLines > spec.maxRows {
+			t.Errorf("row block paints %d lines, past its %d-line budget:\n%s",
+				rowLines, spec.maxRows, strip(strings.Join(lines, "\n")))
+		}
+		if rowLines < 1 {
+			t.Fatalf("row block paints nothing on a budget that seats a row:\n%s", strip(strings.Join(lines, "\n")))
+		}
+		if got := popupInterior(lines[1]); got != title {
+			t.Errorf("title row = %q, want the bare title: the rows outside a scrolling window are reachable", got)
+		}
+	})
+
+	t.Run("a budget under the selected row's height counts every row", func(t *testing.T) {
+		t.Parallel()
+		spec := popupWrapSpec()
+		spec.title = title
+		spec.maxRows = 1 // the selected option wraps past one line, so no whole row fits
+		lines := popupLines(renderPopup(th, spec, width))
+		if got, want := len(lines), 2+1; got != want {
+			t.Fatalf("pane is %d lines, want %d (borders + title, no row seated):\n%s",
+				got, want, strip(strings.Join(lines, "\n")))
+		}
+		if got, want := popupInterior(lines[1]), title+"  … (+3 more lines)"; got != want {
+			t.Errorf("title row = %q, want %q: a row too tall to seat is still counted", got, want)
+		}
+	})
+}
+
+// Both flags off is the rendering every other pane has: the representative spec is byte-identical to
+// its golden, and a long row still elides onto its ONE line rather than breaking.
+func TestRenderPopupWrapAndGapOffAreUnchanged(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+
+	spec := popupTitleSpec()
+	spec.wrapRows = false
+	spec.rowGap = false
+	if off := strip(renderPopup(th, spec, 40)); off != popupTitleRowGolden {
+		t.Errorf("flags off drifted from the list rendering:\ngot:\n%s\n\nwant:\n%s", off, popupTitleRowGolden)
+	}
+
+	long := popupWrapSpec()
+	long.wrapRows = false
+	long.rowGap = false
+	lines := popupLines(renderPopup(th, long, 48))
+	if got, want := len(lines), 2+len(long.rows); got != want {
+		t.Fatalf("flags off rendered %d lines, want %d (one line a row):\n%s",
+			got, want, strip(strings.Join(lines, "\n")))
+	}
+	if !strings.Contains(strip(strings.Join(lines, "\n")), "…") {
+		t.Errorf("flags off: the long row was not elided:\n%s", strip(strings.Join(lines, "\n")))
 	}
 }

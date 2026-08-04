@@ -115,7 +115,19 @@ with rows and a selection.
 
 **Commit:** `feat(tui): popup painter learns menu-style rows (pointer + accent, no bar)`
 
-## 3. Painter: wrapped multi-line rows and blank separators
+## 3. Painter: wrapped multi-line rows and blank separators — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): the hidden-row count stays ALL-OR-NOTHING — a partially shown (scrolled) list still
+reports nothing, contrary to this item's parenthetical, because `layout.md` (precedence source 2) rules
+that the rows outside a window the pane did get are "one keypress away and need no marker" and that only a
+window seating NO row is counted onto the title. What the line accounting adds is one new way to reach that
+zero case: a budget too small for even the selected row's own height seats nothing and counts every row,
+rather than painting two thirds of an answer. The window authority itself is now line-based rather than
+row-based (`popupRowWindow(selected, heights, gap, budget)`, one function instead of two, verified to
+return the identical window for one-line rows with no gap); the wrapping is `wrapText`, the body block's
+own break, applied at `inner - popupRowIndent` so the hanging indent is a rectangle under the marker
+column. `popupRowIndent` (2) and the per-line styling split (`popupRowLine`) are additions the item's text
+implies but does not name.
 
 **What:** Extend `internal/tui/popup.go` so menu-style rows can wrap and be separated by
 blank lines, both opt-in via `popupSpec` fields (e.g. `wrapRows bool`, `rowGap bool`),

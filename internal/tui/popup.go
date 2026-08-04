@@ -35,6 +35,13 @@ import (
 //     themselves: callers hand over the FULL row list plus the global selected index, and
 //     renderPopup lays the rows out, windows around the selection, and truncates every content
 //     line to the inner budget, so no line can ever wrap the box.
+//   - A row is ONE painted line unless the spec asks for more: popupSpec.wrapRows word-wraps a row
+//     too wide for the pane onto continuation lines indented under its own first cell
+//     (popupRowIndent) instead of eliding its tail, and popupSpec.rowGap sets consecutive rows one
+//     blank line apart. Both are opt-in, and both are paid for out of the SAME row budget: the
+//     window is measured in painted LINES (popupRowWindow), a row is seated only when every line of
+//     it fits, and the separators between the seated rows are counted too — so a wrapped option is
+//     never half on the screen and a pane never outgrows the rows the frame budgeted it.
 //   - A row is a popupRow — a slice of CELLS, not a pre-concatenated string — and the module lays
 //     the cells of every row out as vertically aligned columns (layoutPopupRows): each column is
 //     as wide as its widest cell measured in DISPLAY cells over ALL rows (not just the visible
@@ -104,7 +111,8 @@ type popupRow []string
 // body is plain, escape-stripped prose the module word-wraps to the inner budget and caps at
 // maxBodyRows (an empty body adds no rows); rows are the escape-stripped cell rows the module
 // aligns into columns; selected indexes rows (−1 = no highlight); maxRows caps the scroll window
-// around the selection. The two caps read the same way: negative shows everything, and ZERO shows
+// around the selection, in the LINES that window paints — the same number as rows until wrapRows or
+// rowGap makes a row cost more than one. The two caps read the same way: negative shows everything, and ZERO shows
 // nothing — a window with no rows left to spare saying so (popupBudget) rather than the pane
 // quietly showing all of them. Zero is the reading that keeps a pane inside the shortest window it
 // can be drawn in at all, where its border, title and hint are the whole budget — and where a
@@ -132,6 +140,23 @@ type popupRow []string
 // the ❯ and the accent say the same thing in the width of one glyph, and every row that is not the
 // answer stays out of the way. It is opt-in for exactly that reason: the flag off is the picker's
 // rendering, unchanged down to the two-space marker (contract 3).
+//
+// wrapRows lets a row BREAK instead of eliding: a row wider than the pane word-wraps onto
+// continuation lines hanging under its own first cell (popupRowIndent), the way the body block
+// already breaks, so a long option arrives whole rather than ending in an ellipsis
+// (docs/design/user-questions-layout.md). It is the difference between a list of NAMES and a list of
+// SENTENCES. A picker offers file paths and session titles — things a human recognises from the
+// start of them, where the ellipsis costs a tail already identified — while a decision surface
+// offers prose written for this one question, where the tail is often the whole of the point ("…
+// the config change is the riskier part — get it stable first"). A decision must not be taken
+// against half a sentence, so a surface that asks in sentences wraps them; every other pane keeps
+// the one-line row and the elision that has always fitted it.
+//
+// rowGap sets consecutive rows one blank line apart — never before the first or after the last,
+// where the box's own padding already does that job. It is what keeps a wrapped list READABLE: once
+// a row can be three lines long, the only thing telling the eye where one option ends and the next
+// begins is the marker column, and a blank line says it without being read. A list whose every row
+// is one line needs none of that and pays no line for it.
 type popupSpec struct {
 	title         string
 	titleInBorder bool
@@ -139,6 +164,8 @@ type popupSpec struct {
 	maxBodyRows   int
 	rows          []popupRow
 	menuRows      bool
+	wrapRows      bool
+	rowGap        bool
 	selected      int
 	hint          string
 	maxRows       int
@@ -331,29 +358,48 @@ func singleCellRows(labels []string) []popupRow {
 // moves through a long list. Every composed line is truncated to inner, so a wide row can never
 // wrap the box.
 //
+// A row is one line unless the spec asks for more (popupSpec.wrapRows, popupSpec.rowGap), and then
+// the window is spent in LINES: a row is seated only when every line of it fits, and each separator
+// between two seated rows costs a line of the same budget. Whole rows or none of them, because half
+// an option on the screen is worse than the scroll that reaches the whole of it.
+//
 // The hidden count is ALL-OR-NOTHING on purpose, and it is not the body's rule with the words
 // changed. A window granted at least one row scrolls around the selection (popupRowWindow): the
 // rows outside it are one keypress away, so they are off-screen rather than hidden, and a marker
-// counting them would cost a row of the very list it is describing. A window granted ZERO rows is
+// counting them would cost a row of the very list it is describing. A window that seats NO row is
 // the case scrolling cannot answer — every choice or entry gone, no way to reach one, and a hint
 // still offering ↑↓ to select among them — so THAT is what the pane owes an accounting for, and
 // renderPopup carries the count to the title row (popupTitleLine), the one row the pane always has.
+// With wrapped rows that case is reachable one step earlier than a zero budget: a budget of two
+// lines and a three-line answer seats nothing either, and it is counted the same way rather than
+// shown two thirds of.
 func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style) ([]string, int) {
-	rows := layoutPopupRows(th, spec.rows)
+	blocks := popupRowBlocks(th, layoutPopupRows(th, spec.rows), spec.wrapRows, inner)
+	heights := popupRowHeights(blocks)
 
-	capRows := spec.maxRows
-	if capRows < 0 {
-		capRows = len(rows) // negative shows every row (popupRowWindow returns [0, total) when total ≤ cap)
+	gap := 0
+	if spec.rowGap {
+		gap = 1
 	}
-	start, end := popupRowWindow(spec.selected, len(rows), capRows)
+	capLines := spec.maxRows
+	if capLines < 0 {
+		capLines = popupRowBlockLines(heights, gap) // negative spends whatever the whole list needs
+	}
+	start, end := popupRowWindow(spec.selected, heights, gap, capLines)
 	if start == end {
 		// No row on the screen: with rows on offer this is the budget's call, and the pane owes the
 		// human the count (an empty offering owes nothing — there is no list to hide).
-		return nil, len(rows)
+		return nil, len(blocks)
 	}
 
-	out := make([]string, 0, end-start)
+	out := make([]string, 0, capLines)
 	for i := start; i < end; i++ {
+		if gap > 0 && i > start {
+			// A bare line, not a styled one: drawTitledBox pads every content line out on the box's own
+			// field, so the empty string paints as a full-width black row — the separator is the pane
+			// showing through, which is exactly what a gap between two options should be.
+			out = append(out, "")
+		}
 		selected := i == spec.selected
 		marker := "  "
 		switch {
@@ -365,25 +411,91 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 			// not the text.
 			marker = glyphMenuUnselected + " "
 		}
-		row := truncateToWidth(th, marker+rows[i], inner)
-		switch {
-		case selected && spec.menuRows:
-			// No squareLine here, deliberately: the accent is on the CHOSEN WORDS, so it stops where
-			// they do and the rest of the row stays the pane's own black (drawTitledBox pads it out on
-			// that field like every other content line). Padding the row first would light the empty
-			// tail as well and hand the menu back the bar it exists to avoid.
-			out = append(out, blackFill.Render(th.popupAccent.Render(row)))
-		case selected:
-			// Squared in the authority's measure before the style is applied, the way renderUserBlock
-			// pads its own rows: the highlight bar spans the full inner width on the block's OWN
-			// dark-gray field rather than the pane's black, and a lipgloss Width would fold the row
-			// instead of padding it whenever the two measures disagree about it (ADR 0030 §5).
-			out = append(out, th.userBlock.Render(squareLine(th.measure, row, inner)))
-		default:
-			out = append(out, blackFill.Render(th.statusFaint.Render(row)))
+		for j, text := range blocks[i] {
+			// The marker leads the row's FIRST line and a blank of the same width leads every
+			// continuation, so a wrapped option's tail lands under its own head rather than under the
+			// pointer — one option reads as one block of text, and the marker column stays a column.
+			lead := marker
+			if j > 0 {
+				lead = strings.Repeat(" ", popupRowIndent)
+			}
+			out = append(out, popupRowLine(th, spec, blackFill, truncateToWidth(th, lead+text, inner), selected, inner))
 		}
 	}
 	return out, 0
+}
+
+// popupRowLine styles ONE painted line of a row — the whole row when it did not wrap, and every line
+// of it when it did, so a selected answer is lit or barred over its full height rather than on its
+// first line with its tail reading as somebody else's row.
+func popupRowLine(th theme, spec popupSpec, blackFill lipgloss.Style, row string, selected bool, inner int) string {
+	switch {
+	case selected && spec.menuRows:
+		// No squareLine here, deliberately: the accent is on the CHOSEN WORDS, so it stops where
+		// they do and the rest of the row stays the pane's own black (drawTitledBox pads it out on
+		// that field like every other content line). Padding the row first would light the empty
+		// tail as well and hand the menu back the bar it exists to avoid.
+		return blackFill.Render(th.popupAccent.Render(row))
+	case selected:
+		// Squared in the authority's measure before the style is applied, the way renderUserBlock
+		// pads its own rows: the highlight bar spans the full inner width on the block's OWN
+		// dark-gray field rather than the pane's black, and a lipgloss Width would fold the row
+		// instead of padding it whenever the two measures disagree about it (ADR 0030 §5).
+		return th.userBlock.Render(squareLine(th.measure, row, inner))
+	default:
+		return blackFill.Render(th.statusFaint.Render(row))
+	}
+}
+
+// popupRowIndent is the width of the marker column every row leads with — glyphUser,
+// glyphMenuUnselected or two blank cells, one cell plus the space after it either way — and so also
+// the HANGING INDENT a wrapped row's continuation lines carry (popupSpec.wrapRows). It is what a
+// wrapped row is wrapped TO: the text budget is the pane's inner width less this, on the first line
+// and every line after it alike, so the block of text is a rectangle under the marker rather than a
+// paragraph that steps left where the pointer stops.
+const popupRowIndent = 2
+
+// popupRowBlocks composes each laid-out row into the plain text lines it will paint: one line per
+// row as it always was, or — with wrap set (popupSpec.wrapRows) — the word-wrapped lines of a row
+// too wide for the marker column and the pane's inner width together. The wrap is wrapText, the same
+// break the body block gets, so a row and a body paragraph divide their words the same way; the
+// non-wrapping path returns the row untouched and leaves the elision to the caller's truncateToWidth,
+// which is what keeps a picker's rendering byte-identical to the one it had before rows could wrap.
+func popupRowBlocks(th theme, rows []string, wrap bool, inner int) [][]string {
+	blocks := make([][]string, len(rows))
+	for i, row := range rows {
+		if !wrap {
+			blocks[i] = []string{row}
+			continue
+		}
+		blocks[i] = wrapText(th, row, max(1, inner-popupRowIndent))
+	}
+	return blocks
+}
+
+// popupRowHeights is how many painted lines each composed row costs — the number the window spends
+// its budget in (popupRowWindow).
+func popupRowHeights(blocks [][]string) []int {
+	heights := make([]int, len(blocks))
+	for i, block := range blocks {
+		heights[i] = len(block)
+	}
+	return heights
+}
+
+// popupRowBlockLines is what showing the WHOLE list would cost: every row's lines plus a separator
+// between each adjacent pair (gap = 0 when the spec asks for none). It is the budget an uncapped row
+// list (maxRows < 0) is windowed against, so "show everything" and "show what fits" go through the
+// one windowing path rather than two.
+func popupRowBlockLines(heights []int, gap int) int {
+	total := 0
+	for _, h := range heights {
+		total += h
+	}
+	if len(heights) > 1 {
+		total += gap * (len(heights) - 1)
+	}
+	return total
 }
 
 // popupBodyLines word-wraps spec.body into styled, black-filled content lines for the pane, sitting
@@ -512,21 +624,56 @@ func popupTitleLine(th theme, title string, hidden, inner int) string {
 	return title + popupGutter + marker
 }
 
-// popupRowWindow returns the [start, end) slice of a list of total rows to show at once, capped
-// at capRows and scrolled to keep the selection roughly centred so a long list never overflows
-// the pane.
-func popupRowWindow(selected, total, capRows int) (int, int) {
-	if total <= capRows {
-		return 0, total
+// popupRowWindow returns the [start, end) slice of a row list to show at once: the rows whose
+// painted LINES fit inside budget lines together, gap lines apart, scrolled to keep the selection
+// roughly centred so a long list never overflows the pane. heights holds every row's line count in
+// order — one apiece until popupSpec.wrapRows makes some of them taller — and gap is the separator
+// popupSpec.rowGap asks for, 0 when it asks for none.
+//
+// It counts LINES rather than rows because that is what the pane is short of: the budget it is
+// handed (popupSpec.maxRows) comes from a frame allocation measured in terminal rows (popupBudget),
+// and a list whose rows can wrap would otherwise promise four of them and paint nine. On the list
+// every other pane has — one line a row, no separators — counting lines is counting rows, and this
+// returns the very window it returned before it knew the difference.
+//
+// The window grows OUT OF the selected row, alternately upwards and downwards, and takes a row only
+// when its whole height and the separator before it still fit: a row is seated entirely or not at
+// all, so the pane never paints the first two lines of a three-line answer and leaves the human to
+// decide against the half of it that is on the screen. When one side runs out — of rows or of budget
+// — the other keeps growing, which is what clamps the window at the ends of the list.
+//
+// An empty window is the honest answer to a budget that cannot seat even the selected row: the pane
+// shows no rows at all and renderPopup carries their count onto the title row (popupTitleLine),
+// rather than showing a fraction of an option and saying nothing about the rest.
+func popupRowWindow(selected int, heights []int, gap, budget int) (int, int) {
+	total := len(heights)
+	if total == 0 {
+		return 0, 0
 	}
-	start := selected - capRows/2
-	if start < 0 {
-		start = 0
+	// A selection outside the list (−1: no highlight, the ask prompt once free text is typed) anchors
+	// the window at the top, which is where a list with no cursor in it is read from.
+	anchor := clampInt(selected, 0, total-1)
+	if heights[anchor] > budget {
+		return 0, 0
 	}
-	if start+capRows > total {
-		start = total - capRows
+
+	start, end, spent := anchor, anchor+1, heights[anchor]
+	for {
+		grew := false
+		if start > 0 && spent+gap+heights[start-1] <= budget {
+			spent += gap + heights[start-1]
+			start--
+			grew = true
+		}
+		if end < total && spent+gap+heights[end] <= budget {
+			spent += gap + heights[end]
+			end++
+			grew = true
+		}
+		if !grew {
+			return start, end
+		}
 	}
-	return start, start + capRows
 }
 
 // truncateToWidth clips s to at most width DISPLAY cells, ending in an ellipsis when it had to cut
