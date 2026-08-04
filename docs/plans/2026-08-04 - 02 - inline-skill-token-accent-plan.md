@@ -74,9 +74,22 @@ change yet (existing chip-row tests still pass untouched).
 
 **Commit:** `feat(tui): record skill token spans on sent transcript entries`
 
-## 2. Paint the tokens inline and retire the chip row
+## 2. Paint the tokens inline and retire the chip row — ✅ DONE (2026-08-04)
 
 Depends on item 1.
+
+NOTES (2026-08-04): three things beyond the item's literal list. (a) `theme.skillChip` went with
+`renderSkillChip` — it was that badge's own style and had no other user, so leaving it would have
+been dead code no later item claims; the new style is `th.skillAccent` (`colSkill` on `colDarkGray`)
+and `glyphSkill`'s comment lost its "sent block's chips" half (the glyph itself stays, for the `/`
+menu). (b) `promptMarkerContentCells` was extracted out of `promptMarkerRow` so the accent can be
+clamped to the see-more row's own truncated content in the same arithmetic that truncates it —
+otherwise a token on that row could recolour the marker. (c) an unlisted test needed re-targeting:
+transcript_test.go's `TestTranscriptStripsTerminalEscapes/attached_skill_display_name` asserted the
+benign halves of the name SURVIVE IN THE PAINT, which the chip row's removal makes impossible; it
+now asserts them on the entry the transcript kept. `renderUserBlock` still takes `skills` and
+ignores it — item 3 owns removing that parameter with the rest of the display-name plumbing. No
+CHANGELOG entry: item 4 owns every doc amendment, and its list may want one added.
 
 **What:** The visible change, confined to rendering and its tests.
 

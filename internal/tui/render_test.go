@@ -292,7 +292,7 @@ func TestUserBlockRowsAreOneSquareLineEach(t *testing.T) {
 			th := newTheme()
 			th.measure = widthAuthority{method: pm.method}
 
-			paint := renderUserBlock(th, glyphUser+" ", text, nil, width, true)
+			paint := renderUserBlock(th, glyphUser+" ", text, nil, nil, width, true)
 			if len(paint.lines) == 0 {
 				t.Fatalf("the user block rendered nothing at all")
 			}
@@ -1116,35 +1116,178 @@ func TestPromptCollapseFollowsThePaintWidth(t *testing.T) {
 	splitMarker(t, rows[len(rows)-1], promptSeeMore(body-promptCollapsedRows), narrow)
 }
 
-// TestCollapsedPromptKeepsItsChipRow holds the chip row out of the collapse in both states: it is
-// the record of what the model was actually given, so it is never counted among the collapsed rows
-// and never hidden — and the see-less marker closes the whole block, chips included.
-func TestCollapsedPromptKeepsItsChipRow(t *testing.T) {
+// TestPromptWithSkillsPaintsNoChipRow is the retired chip row's epitaph: a send that invoked a
+// skill is exactly its body rows in both states — promptCollapsedRows collapsed, the body plus the
+// see-less row expanded — with no trailing ✦ row of any kind. What records the invocation now is
+// the token inside the text (TestSentBlockAccentsItsSkillTokens).
+func TestPromptWithSkillsPaintsNoChipRow(t *testing.T) {
 	const width = 44
 	tr := &transcript{}
 	tr.addUser("alpha\nbravo\ncharlie\ndelta", []string{"coding-standards"}, nil)
 
 	rows := promptRows(t, tr, width)
-	if len(rows) != promptCollapsedRows+1 {
-		t.Fatalf("collapsed block painted %d rows; want %d body rows plus the chip row:\n%s",
+	if len(rows) != promptCollapsedRows {
+		t.Fatalf("collapsed block painted %d rows; want exactly its %d body rows:\n%s",
 			len(rows), promptCollapsedRows, strings.Join(rows, "\n"))
 	}
 	splitMarker(t, rows[promptCollapsedRows-1], promptSeeMore(1), width)
-	if want := glyphSkill + " coding-standards"; !strings.Contains(rows[promptCollapsedRows], want) {
-		t.Errorf("the chip row is not the collapsed block's last row: %q", rows[promptCollapsedRows])
-	}
 
 	if !tr.setExpanded(0, true) {
 		t.Fatal("setExpanded(0, true) = false; want the prompt expanded")
 	}
 	rows = promptRows(t, tr, width)
-	if len(rows) != 6 { // four body rows, the chip row, then the see-less row
-		t.Fatalf("expanded block painted %d rows; want 6:\n%s", len(rows), strings.Join(rows, "\n"))
+	if len(rows) != 5 { // four body rows, then the see-less row that closes the block
+		t.Fatalf("expanded block painted %d rows; want 5:\n%s", len(rows), strings.Join(rows, "\n"))
 	}
-	if want := glyphSkill + " coding-standards"; !strings.Contains(rows[4], want) {
-		t.Errorf("the chip row moved: %q", rows[4])
+	splitMarker(t, rows[4], promptSeeLess, width)
+	for i, row := range rows {
+		if strings.Contains(row, glyphSkill) {
+			t.Errorf("row %d still badges the skill: %q", i, row)
+		}
 	}
-	splitMarker(t, rows[5], promptSeeLess, width)
+}
+
+// spanOf states where want sits in text as the [skillSpan] a send records for it. nth counts from
+// one, so a test can name the SECOND invocation of a twice-named skill.
+func spanOf(t *testing.T, text, want string, nth int) skillSpan {
+	t.Helper()
+	at, from := -1, 0
+	for n := 0; n < nth; n++ {
+		i := strings.Index(text[from:], want)
+		if i < 0 {
+			t.Fatalf("%q holds fewer than %d occurrences of %q", text, nth, want)
+		}
+		at = from + i
+		from = at + len(want)
+	}
+	return skillSpan{start: at, end: at + len(want)}
+}
+
+// accentRuns returns the glyph runs the skill accent covers in a painted block, in paint order: the
+// text between the SGR that opens each accented span and the escape that closes it. shadeCells
+// strips what it re-renders, so a run carries no escapes of its own and the runs are exactly the
+// cells that lit up — a test can therefore assert the accent's EXTENT and not merely its presence.
+//
+// EMPTY runs are dropped: shading a row twice makes the cut re-emit the style it found active with
+// nothing between it and the next SGR, which paints no cell and is not a second accent.
+func accentRuns(block, opener string) []string {
+	var out []string
+	for rest := block; ; {
+		i := strings.Index(rest, opener)
+		if i < 0 {
+			return out
+		}
+		rest = rest[i+len(opener):]
+		run := rest
+		if j := strings.IndexByte(rest, '\x1b'); j >= 0 {
+			run, rest = rest[:j], rest[j:]
+		} else {
+			rest = ""
+		}
+		if run != "" {
+			out = append(out, run)
+		}
+		if rest == "" {
+			return out
+		}
+	}
+}
+
+// TestSentBlockAccentsItsSkillTokens is the chip row's replacement rule: the "/token" the human
+// typed is painted in the skill violet where it stands, and nothing else on the row is — the block
+// still reads as the sentence that was sent (ISSUES, "sent prompts with skills"; layout.md,
+// "Tokens light up when they resolve").
+func TestSentBlockAccentsItsSkillTokens(t *testing.T) {
+	th := newTheme()
+	const width = 44
+	const text = "/review this diff"
+	tr := &transcript{}
+	tr.addUser(text, []string{"Review"}, []skillSpan{spanOf(t, text, "/review", 1)})
+
+	rows := tr.renderLines(th, width)
+	if len(rows) != 1 {
+		t.Fatalf("the block painted %d rows; want the one its text wraps to:\n%s", len(rows), strings.Join(rows, "\n"))
+	}
+	if got := accentRuns(rows[0], accentOpener(t, th.skillAccent)); !reflect.DeepEqual(got, []string{"/review"}) {
+		t.Errorf("the accent covers %q; want the token alone", got)
+	}
+	if got := strip(rows[0]); !strings.HasPrefix(got, glyphUser+" "+text) {
+		t.Errorf("the block's own text changed under the accent: %q", got)
+	}
+}
+
+// A token invoked twice is painted twice: the SPANS drive the accent, not the de-duped name list,
+// so both occurrences light up.
+func TestSentBlockAccentsEveryOccurrence(t *testing.T) {
+	th := newTheme()
+	const text = "/review this diff and /review that one"
+	tr := &transcript{}
+	tr.addUser(text, []string{"Review"}, []skillSpan{
+		spanOf(t, text, "/review", 1),
+		spanOf(t, text, "/review", 2),
+	})
+
+	block := strings.Join(tr.renderLines(th, 44), "\n")
+	if got := accentRuns(block, accentOpener(t, th.skillAccent)); !reflect.DeepEqual(got, []string{"/review", "/review"}) {
+		t.Errorf("the accent covers %q; want both invocations", got)
+	}
+}
+
+// A token the block had to break across a soft-wrap is accented on BOTH rows — the prompt box's
+// own rule for a wrapped token (TestAccentedTokenWrapsAcrossRows), against the transcript's wrap.
+func TestAccentedSkillTokenStraddlesASoftWrap(t *testing.T) {
+	th := newTheme()
+	const width = 12 // the token is wider than the row left of the marker, so the block breaks it
+	const text = "/coding-standards"
+	tr := &transcript{}
+	tr.addUser(text, []string{"Coding Standards"}, []skillSpan{spanOf(t, text, text, 1)})
+
+	block := strings.Join(tr.renderLines(th, width), "\n")
+	opener := accentOpener(t, th.skillAccent)
+	if lit := rowsWithAccent(block, opener); len(lit) != 2 {
+		t.Fatalf("a wrapped token lit %d rows, want both halves: %v", len(lit), lit)
+	}
+	runs := accentRuns(block, opener)
+	if got := strings.Join(runs, ""); got != text {
+		t.Errorf("the two accented halves are %q, joining to %q; want the whole token", runs, got)
+	}
+}
+
+// The collapse rules the accent: a token on a row the collapse hid paints nothing, and a token on
+// the truncated row carrying the see-more marker stays inside that row's own content — the marker
+// is apogee talking, and an accent that reached it would recolour that voice.
+func TestCollapsedBlockAccentsOnlyWhatItShows(t *testing.T) {
+	th := newTheme()
+	const width = 44
+
+	t.Run("a token on a hidden row paints nothing", func(t *testing.T) {
+		const text = "alpha\nbravo\ncharlie\ndelta /review"
+		tr := &transcript{}
+		tr.addUser(text, []string{"Review"}, []skillSpan{spanOf(t, text, "/review", 1)})
+
+		block := strings.Join(tr.renderLines(th, width), "\n")
+		if runs := accentRuns(block, accentOpener(t, th.skillAccent)); len(runs) != 0 {
+			t.Errorf("a hidden row's token painted %q", runs)
+		}
+	})
+
+	t.Run("a token on the marker row paints, and the marker keeps its own colour", func(t *testing.T) {
+		const text = "alpha\nbravo\ncharlie /review\ndelta"
+		tr := &transcript{}
+		tr.addUser(text, []string{"Review"}, []skillSpan{spanOf(t, text, "/review", 1)})
+
+		rows := tr.renderLines(th, width)
+		if len(rows) != promptCollapsedRows {
+			t.Fatalf("the collapsed block painted %d rows; want %d", len(rows), promptCollapsedRows)
+		}
+		marker := rows[promptCollapsedRows-1]
+		if got := accentRuns(marker, accentOpener(t, th.skillAccent)); !reflect.DeepEqual(got, []string{"/review"}) {
+			t.Errorf("the marker row's accent covers %q; want the token alone", got)
+		}
+		if !strings.Contains(marker, th.promptToggle.Render(promptSeeMore(1))) {
+			t.Errorf("the see-more marker lost its own styling to the accent:\n%q", marker)
+		}
+	})
 }
 
 // TestPromptMarkerCarriesTheHighlightStyle pins the marker's look: it is painted in the theme's own
@@ -1370,8 +1513,8 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 }
 
 // TestPromptBlockIsOneClickSurface pins the prompt's half of the target rule (D8): a block with two
-// shapes to move between is a click surface WHOLE — every row it paints, the marker row, the chip
-// row and the see-less row among them — and a block with one shape is no target on any row. Each
+// shapes to move between is a click surface WHOLE — every row it paints, the marker row and the
+// see-less row among them — and a block with one shape is no target on any row. Each
 // case renders a transcript holding that block alone, so "every row of the block" and "every
 // rendered line" are the same set and a row that quietly changed its mind fails here.
 func TestPromptBlockIsOneClickSurface(t *testing.T) {
@@ -1385,13 +1528,6 @@ func TestPromptBlockIsOneClickSurface(t *testing.T) {
 		{
 			name:  "an over-threshold prompt marks every row it paints",
 			build: func(_ *testing.T, tr *transcript) { tr.addUser(huge, nil, nil) },
-			want:  targetHeader,
-		},
-		{
-			// The chip row is not part of what collapses, but it IS part of what a click lands on:
-			// the toggle surface is the block, not the body.
-			name:  "the chip row is marked with the rest of the block",
-			build: func(_ *testing.T, tr *transcript) { tr.addUser(huge, []string{"coding-standards"}, nil) },
 			want:  targetHeader,
 		},
 		{
@@ -1413,11 +1549,6 @@ func TestPromptBlockIsOneClickSurface(t *testing.T) {
 		{
 			name:  "an under-threshold prompt is no target at all",
 			build: func(_ *testing.T, tr *transcript) { tr.addUser("alpha\nbravo\ncharlie", nil, nil) },
-			want:  targetNone,
-		},
-		{
-			name:  "a chip row with no body hides nothing and marks nothing",
-			build: func(_ *testing.T, tr *transcript) { tr.addUser("", []string{"coding-standards"}, nil) },
 			want:  targetNone,
 		},
 	}

@@ -65,7 +65,7 @@ const (
 	glyphSubRail         = "│"
 	glyphSubLabel        = "⤷"
 	glyphBullet          = "•" // a markdown bullet-list item (- / * / +)
-	glyphSkill           = "✦" // marks a skill: the sent block's chips and the "/" menu's skill rows
+	glyphSkill           = "✦" // marks a skill: the "/" menu's skill rows (the sent block marks its own by colouring the token, not by badging it)
 	glyphPresented       = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
 	glyphInterject       = "⧖" // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
 	glyphTableRule       = "─" // one cell of a markdown table's horizontal rule — under the header row and between adjacent body rows alike (mdtable.go)
@@ -139,7 +139,7 @@ type theme struct {
 	toolLabel    lipgloss.Style // the tool label inside that header (bold, orange — the colCode tone inline code and the auto-mode marker already carry)
 	toolDetail   lipgloss.Style // the ┝/┕ branch detail lines (dim)
 	subRail      lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (the toolLabel orange — one tone for the whole sub-agent frame)
-	skillChip    lipgloss.Style // an invoked-skill chip on a sent user block (white on violet)
+	skillAccent  lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
 	skillToken   lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)
 	fileToken    lipgloss.Style // a RESOLVING inline "@path" token in the prompt box (blue on the box's black)
 	selection    lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
@@ -199,10 +199,13 @@ func newTheme() theme {
 		toolLabel:    lipgloss.NewStyle().Bold(true).Foreground(colCode),
 		toolDetail:   lipgloss.NewStyle().Foreground(colFaint),
 		subRail:      lipgloss.NewStyle().Foreground(colCode),
-		skillChip:    lipgloss.NewStyle().Foreground(colWhite).Background(colSkill),
-		// The two inline token accents invert the chip: the colour moves to the FOREGROUND and the
-		// background stays the box's own black, so an accented token reads as one word of the
-		// sentence it stands in rather than as a badge pasted over the field.
+		// The inline token accents are one act on two fields: the skill's violet moves to the
+		// FOREGROUND and the background stays whatever the token is standing on — the prompt box's
+		// black while the message is being typed, the user block's dark gray once it is sent — so an
+		// accented token reads as one word of the sentence it stands in rather than as a badge pasted
+		// over the field. Carrying the field is not cosmetic: a style with the wrong background cuts a
+		// notch of the other colour through the block wherever a token lands.
+		skillAccent:  lipgloss.NewStyle().Foreground(colSkill).Background(colDarkGray),
 		skillToken:   lipgloss.NewStyle().Foreground(colSkill).Background(colBlack),
 		fileToken:    lipgloss.NewStyle().Foreground(colFileRef).Background(colBlack),
 		selection:    lipgloss.NewStyle().Foreground(colWhite).Background(colSelection),

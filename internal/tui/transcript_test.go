@@ -492,8 +492,10 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 		tr := &transcript{}
 		tr.addUser("please review", []string{"Review" + osc52 + "Skill"}, nil)
 		assertTranscriptNoESC(t, tr)
-		if got := plainRender(tr); !strings.Contains(got, "Review") || !strings.Contains(got, "Skill") {
-			t.Errorf("stripping ate the benign skill name:\n%s", got)
+		// The name is no longer painted (the chip row is retired), so the benign halves are asserted
+		// where the stripping now has to hold: on the entry the transcript kept.
+		if got := tr.entries[0].skills; len(got) != 1 || !strings.Contains(got[0], "Review") || !strings.Contains(got[0], "Skill") {
+			t.Errorf("stripping ate the benign skill name: %q", got)
 		}
 	})
 

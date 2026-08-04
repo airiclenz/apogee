@@ -454,14 +454,18 @@ func TestSubmitBareSkillTokenSends(t *testing.T) {
 	if eng.submitted[0].Text != "/clean-code" {
 		t.Errorf("submitted text = %q, want the token itself", eng.submitted[0].Text)
 	}
-	if got := plain(m.View()); !strings.Contains(got, "Clean Code") {
-		t.Errorf("transcript should chip the invoked skill:\n%s", got)
+	if got := plain(m.View()); !strings.Contains(got, "/clean-code") {
+		t.Errorf("the sent block does not show the token that stands for the skill:\n%s", got)
+	}
+	if !strings.Contains(m.View().Content, m.th.skillAccent.Render("/clean-code")) {
+		t.Error("the sent token is not painted in the skill accent")
 	}
 }
 
-// A message sent with text and a skill token keeps the skill visible on its user block after the
-// send (ISSUES #5: the attachment used to vanish once the input cleared).
-func TestSentUserBlockShowsSkillChipsWithText(t *testing.T) {
+// A message sent with text and a skill token keeps the invocation visible on its user block after
+// the send (ISSUES #5: the attachment used to vanish once the input cleared) — and it is visible as
+// the ACCENTED token inside the text, not as a chip beside it.
+func TestSentUserBlockAccentsTheSkillToken(t *testing.T) {
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
 	m.input.SetValue("/clean-code fix the parser")
@@ -469,11 +473,14 @@ func TestSentUserBlockShowsSkillChipsWithText(t *testing.T) {
 	drainCmd(t, m, cmd)
 
 	got := plain(m.View())
-	if !strings.Contains(got, "fix the parser") {
-		t.Errorf("sent text missing from the transcript:\n%s", got)
+	if !strings.Contains(got, "/clean-code fix the parser") {
+		t.Errorf("the sent message missing from the transcript:\n%s", got)
 	}
-	if !strings.Contains(got, "Clean Code") {
-		t.Errorf("invoked skill not shown on the sent user block (ISSUES #5):\n%s", got)
+	if strings.Contains(got, glyphSkill+" Clean Code") {
+		t.Errorf("the sent block still badges the skill on a chip row:\n%s", got)
+	}
+	if !strings.Contains(m.View().Content, m.th.skillAccent.Render("/clean-code")) {
+		t.Errorf("the invoked token is not painted in the skill accent (ISSUES #5):\n%s", got)
 	}
 }
 
@@ -541,10 +548,10 @@ func TestStagedInterjectionCarriesSkillIDs(t *testing.T) {
 	}
 }
 
-// The DELIVERED interjection records its skills exactly as a flushed send does: the ⧖ block
-// carries the same chip row the ❯ block gets, because the two differ only in when the message
-// landed. The delivery fold used to drop the ids on the floor (addInterjected took text alone).
-func TestDeliveredInterjectionShowsSkillChips(t *testing.T) {
+// The DELIVERED interjection records its skills exactly as a flushed send does: the ⧖ block paints
+// the same accented token the ❯ block does, because the two differ only in when the message landed.
+// The delivery fold used to drop the ids on the floor (addInterjected took text alone).
+func TestDeliveredInterjectionAccentsTheSkillToken(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.state = stateRunning
 	m.box = newInterjectBox()
@@ -557,11 +564,14 @@ func TestDeliveredInterjectionShowsSkillChips(t *testing.T) {
 	if last.kind != entryInterjected {
 		t.Fatalf("tail entry = %+v; want the delivered remark as an interjected block", last)
 	}
-	if !reflect.DeepEqual(last.skills, []string{"Review"}) {
-		t.Errorf("delivered block skills = %v, want [Review] — the invoked skill must be recorded", last.skills)
+	if want := (skillSpan{start: 0, end: len("/review")}); !reflect.DeepEqual(last.skillSpans, []skillSpan{want}) {
+		t.Errorf("delivered block spans = %v, want %v — the invocation must be located in the text", last.skillSpans, want)
 	}
-	if got := plain(m.View()); !strings.Contains(got, glyphSkill+" Review") {
-		t.Errorf("the delivered remark shows no skill chip:\n%s", got)
+	if got := plain(m.View()); strings.Contains(got, glyphSkill+" Review") {
+		t.Errorf("the delivered remark still badges the skill on a chip row:\n%s", got)
+	}
+	if !strings.Contains(m.View().Content, m.th.skillAccent.Render("/review")) {
+		t.Error("the delivered remark's token is not painted in the skill accent")
 	}
 }
 

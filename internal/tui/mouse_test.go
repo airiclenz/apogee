@@ -1173,22 +1173,22 @@ func TestTranscriptClickTogglesALiveBlockAcrossTheBlink(t *testing.T) {
 // prompt that collapses, and therefore the one whose every row is a click target (render.go).
 const hugePromptBody = "alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot"
 
-// modelWithHugePrompt builds a ready idle model holding one over-threshold prompt — chips and all,
-// so the chip row is among the rows a test can aim at — and a short reply beneath it. The seeded
-// start-up box is dropped so the block sits high enough to be on screen at any parked offset.
+// modelWithHugePrompt builds a ready idle model holding one over-threshold prompt and a short reply
+// beneath it. The seeded start-up box is dropped so the block sits high enough to be on screen at
+// any parked offset.
 func modelWithHugePrompt(t *testing.T) Model {
 	t.Helper()
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
-	m.transcript.addUser(hugePromptBody, []string{"coding-standards"}, nil)
+	m.transcript.addUser(hugePromptBody, nil, nil)
 	m.transcript.commitAssistant("a short reply", 0)
 	m.refreshViewport()
 	return m
 }
 
 // promptBlockLine returns the rendered line at offset rows into the latest user block, checking it
-// is inside the block as painted — a test aiming at "the chip row" must fail loudly if the block
-// stopped painting one rather than silently clicking somewhere else.
+// is inside the block as painted — a test aiming at a row of the block must fail loudly if the
+// block stopped painting that many rather than silently clicking somewhere else.
 func promptBlockLine(t *testing.T, m Model, offset int) int {
 	t.Helper()
 	if len(m.userBlocks) == 0 {
@@ -1203,13 +1203,12 @@ func promptBlockLine(t *testing.T, m Model, offset int) int {
 
 // TestTranscriptClickTogglesThePromptBlock is the prompt's own toggle rule (layout.md, "Collapsed
 // and expanded blocks"): the WHOLE block is the click surface, so a motionless click on any of its
-// rows — the first, the truncated row carrying the see-more marker, the chip row that is not part of
-// the body at all — opens the prompt, and a second click on that same row closes it again.
+// rows — the first, the truncated row carrying the see-more marker — opens the prompt, and a second
+// click on that same row closes it again.
 func TestTranscriptClickTogglesThePromptBlock(t *testing.T) {
 	rows := map[string]int{
 		"the block's first row": 0,
 		"the marker row":        promptCollapsedRows - 1,
-		"the chip row":          promptCollapsedRows,
 	}
 	for name, offset := range rows {
 		t.Run(name, func(t *testing.T) {
@@ -1260,6 +1259,31 @@ func TestTranscriptDragFromAPromptRowStillSelects(t *testing.T) {
 	}
 	if blockExpanded(t, m, line) {
 		t.Fatal("a drag that started on the prompt toggled it; motion must win")
+	}
+}
+
+// TestTranscriptSelectionWinsOverTheSkillAccent is the two overlays' composition order on the
+// transcript — the prompt box's own rule (TestSelectionWinsOverTheAccent) read on the other
+// surface. The block paints its skill accent as it renders; the drag-selection shades the composed
+// frame afterwards, so a selected token reads as SELECTED rather than keeping its violet.
+func TestTranscriptSelectionWinsOverTheSkillAccent(t *testing.T) {
+	const text = "/review this diff"
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	m.transcript.addUser(text, []string{"Review"}, []skillSpan{{start: 0, end: len("/review")}})
+	m.refreshViewport()
+
+	line := promptBlockLine(t, m, 0)
+	row := screenRow(t, m, line)
+	m = step(t, m, leftClick(0, row))
+	m = step(t, m, leftDrag(m.th.measure.Width(glyphUser+" "+text), row))
+
+	frame := m.View().Content
+	if run := shadedRun(t, frame); !strings.Contains(run, "/review") {
+		t.Errorf("the selection does not cover the accented token: %q", run)
+	}
+	if strings.Contains(frame, m.th.skillAccent.Render("/review")) {
+		t.Error("the accent survived under a selection covering the whole token")
 	}
 }
 
