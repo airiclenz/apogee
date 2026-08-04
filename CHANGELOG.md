@@ -41,7 +41,7 @@ point is a **minor** bump, not a breaking change.
   last of them.** A pasted spec or a long instruction used to bury everything around it under a wall
   of your own text — every wrapped row of it, every time you scrolled past. Now the block paints its
   first three rows, truncates the third far enough to make room, and counts what it is holding back
-  at the right edge; a click anywhere in the block — the chip row included — opens it whole, with a
+  at the right edge; a click anywhere in the block opens it whole, with a
   `see less…` row closing it again. Dragging across a prompt still selects text exactly as before:
   only a motionless click toggles.
   - **Collapsed is the default, always** — the prompt you just sent included, and every prompt of a
@@ -50,8 +50,8 @@ point is a **minor** bump, not a breaking change.
   - **The trigger is measured at paint time against the width being painted**, so widening the window
     can open a prompt that was collapsed and narrowing it can collapse one that was not. The entry
     itself never changes — the same body is simply laid out to a different column count.
-  - **Interjections (`⧖`) collapse by the same rule**, and the skill chips a send carries are never
-    among what is hidden: they are the record of what the model was actually given.
+  - **Interjections (`⧖`) collapse by the same rule** — a remark delivered to a working model is
+    the same shape in the scrollback as a prompt you sent at idle.
   - **The sticky header shows the block as it is painted**, so a collapsed prompt sticks as its
     three-row shape and a deliberately opened one sticks open — undone by the same one click.
 
@@ -677,6 +677,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A skill you invoked is the coloured token in your own text now, not a tag row under it.** A sent
+  prompt used to say it twice: the message with `/refocus` in it, and then a violet `✦ Refocus` row
+  beneath naming the same skill again. Now the `/refocus` inside the block is simply painted in the
+  skill violet — exactly as it lit up in the prompt box before you pressed `⏎` — so one surface says
+  it once. Queued interjections (`⧖`) read the same way, a skill named twice in one message is
+  accented at both places, and a selection dragged across the block still wins over the colour.
+  - **The colour is recorded with the message rather than looked up when it is drawn.** Where each
+    token sits is captured at send time and saved with the session, so re-opening that session later
+    paints what the send actually resolved to even if the skill has been renamed or deleted since —
+    the block stays an honest record of what the model was given. Prompts sent before this release
+    carry no such marks and paint plain.
+
+  Ruled in ADR 0027's 2026-08-04 addendum; specced in `layout.md` ("Collapsed and expanded blocks",
+  "The prompt box's mini-language").
+
 - **A streaming reply no longer re-renders the whole transcript for every token.** A local model
   streaming at speed pinned a core — and the GPU behind the terminal's compositor with it, which is
   what made the fan audible for the length of a run — because each SSE delta became its own screen
@@ -886,9 +901,9 @@ point is a **minor** bump, not a breaking change.
 - **The attached-skill chip strip above the prompt box is gone.** A skill is text in your message
   now (`/skill-id`), not state parked beside it, so the strip has nothing left to show: no chips,
   no Backspace-to-pop-a-chip, no attachment silently carried into `/continue` or dropped by
-  `/compact`. The **sent** message still shows its violet `✦ name` chips in the transcript — that
-  is the record of what you asked for, and it is now built from the tokens your message actually
-  contained. Removing a skill is deleting its token.
+  `/compact`. The **sent** message still shows what you invoked — the `/token` itself, painted in
+  the skill violet right there in the transcript. That is the record of what you asked for, and it
+  is built from the tokens your message actually contained. Removing a skill is deleting its token.
 
 - **Autocomplete completes the token at your cursor, not the last word of the box.** This was a
   deliberate deferral (`TODO.md`, "cursor-position-free, robust"); it turned out to be the reason a
@@ -1969,9 +1984,9 @@ point is a **minor** bump, not a breaking change.
 
 - **A delivered mid-run message now shows the skills it invoked, exactly as a sent one does.** The
   `⧖` block written when the model picks up a queued message carried its text alone, so the violet
-  `✦ name` chips that record what you invoked appeared only when the message happened to be flushed
-  into a new turn instead — the same message, two different records, depending on timing. The
-  delivered block now carries the same chip row.
+  `/token` accent that records what you invoked appeared only when the message happened to be
+  flushed into a new turn instead — the same message, two different records, depending on timing.
+  The delivered block now paints its tokens the same way.
 
 - **The transcript now follows the model's output — and stays put where you scrolled to.** Every
   repaint used to re-pin the view to the last user prompt, so the moment an answer outgrew the

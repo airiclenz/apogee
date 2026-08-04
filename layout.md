@@ -408,17 +408,25 @@ gray-blue on the block's own field — so what apogee is saying inside the block
 the human wrote. It stops **one column short of the block's right edge** rather than running flush
 to it: the marker carries a background, and a highlight touching the boundary reads as clipped
 text. That column is the block's own field, and it is paid for out of the content the row can hold,
-never out of the marker. Expanded, the body paints in full — no
-content row is ever truncated to make room — and `see less…` closes the block on a trailing row of
-its own, after the skill chips. The chip row is never collapsed away, never truncated and never
-counted among the hidden rows: it is the record of what the model was actually given.
+never out of the marker. Expanded, the body paints in full — no content row is ever truncated to
+make room — and `see less…` closes the block on a trailing row of its own.
+
+**A skill a send invoked is painted where it stands.** The block carries no tag row naming it: the
+`/token` inside the block's own text is painted in the skill violet — the same colour the prompt box
+gives a token that resolves, drawn on the block's own field rather than the box's black, so the
+block still reads as one band — and the text of the send *is* the record of what the model was given.
+The accent is painted onto the rows the block SHOWS, which makes it fall out of the collapse rather
+than argue with it — a token on a row the cap hid simply is not painted, a token straddling a
+soft-wrap is accented on every visible row it spans, and a token on the truncated third row is held
+inside that row's own content so it can never reach across the gap and recolour the `see more` marker.
+A drag-selection drawn over the block wins, as everywhere: selection is painted last.
 
 The trigger is measured **at paint time, against the width being painted** — the same render-time
 act on retained facts every truncation here is — so widening the window can open a prompt that was
 collapsed and narrowing it can collapse one that was not, with nothing about the entry changing.
-**The whole block is the toggle surface**: every row it paints, the marker row and the chip row
-included, so a motionless click anywhere in it flips the state in both directions, a drag from any
-of those rows is a drag-select like any other, and the clicked row keeps its screen position across
+**The whole block is the toggle surface**: every row it paints, the marker row and the `see less…`
+row included, so a motionless click anywhere in it flips the state in both directions, a drag from
+any of those rows is a drag-select like any other, and the clicked row keeps its screen position across
 the toggle. Collapsed is the default here too — the prompt just sent as much as every prompt of a
 resumed session — and the state is the view's alone, never persisted. The sticky header shows the
 block's **rendered state** and special-cases nothing: a collapsed huge prompt sticks as its
@@ -946,8 +954,14 @@ verdict rather than decoration: a typo simply never lights. Both accents are dra
 own black, so the field still reads as one band, and a token wrapped across rows is painted on
 every row it spans. A drag-selection drawn over a token wins — selection is painted last.
 
-**What is not here any more.** There is no strip of attached-skill chips above the box. A skill is
-its `/token` in the text now, so the message says what it invokes without a second surface
-repeating it. The transcript's sent user block still carries its violet `✦ name` chips — and so
-does a delivered `⧖` interjection block, which is the same record — because that is the record of
-a send, not the state of the editor.
+**What is not here any more.** There is no strip of attached-skill chips above the box, and no
+`✦ name` tag row under the sent block either. A skill is its `/token` in the text now, so the
+message says what it invokes without a second surface repeating it — and the transcript answers the
+same way: the sent user block, and a delivered `⧖` interjection block with it, paints the `/token`
+where it stands in the skill violet, mirroring "Tokens light up when they resolve." above. What the
+colour answers to is what differs. In the box it is a live verdict, re-derived against the catalog
+on every keystroke. In the transcript it is a **persisted** one: the spans are captured at send
+time and stored on the entry, so a replayed session paints exactly what that send resolved to even
+if the skill has since been renamed or deleted, and the render path asks the catalog nothing. The
+`/` menu's `✦` rows stay as described above — there the glyph tells a skill from a command in a
+list of both, which is the one job left to it.

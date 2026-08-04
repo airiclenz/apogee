@@ -641,7 +641,9 @@ the token for you, and `/skills` to browse the catalog); the agent resolves. See
 [ADR 0032](docs/adr/0032-the-user-skill-library-outranks-the-workspace.md).
 _Avoid_: "plugin", "tool" (a skill is prompt text, not executable; it adds no capability — it
 steers the model), "attachment"/"chip" (a skill is text *in* the message, not state beside it —
-the chip strip was retired with ADR 0027). Distinct from a **Mechanism** (a catalogued,
+chips are retired from every surface: the strip above the box went with ADR 0027 and the sent
+block's `✦ name` row with its 2026-08-04 addendum, which paints the `/token` in the skill violet
+where it stands instead). Distinct from a **Mechanism** (a catalogued,
 self-regulating loop behaviour).
 
 **Tool-result capping**:

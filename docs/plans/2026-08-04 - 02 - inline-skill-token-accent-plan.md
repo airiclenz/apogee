@@ -169,9 +169,22 @@ block) and the entries around it render untouched — verified against the codec
 
 **Commit:** `refactor(tui): retire skill display-name plumbing from the transcript`
 
-## 4. Amend the documents
+## 4. Amend the documents — ✅ DONE (2026-08-04)
 
 Depends on item 3. This item owns every doc amendment — no other item touches docs.
+
+NOTES (2026-08-04): CHANGELOG.md was amended too, which the list below does not name — item 2's NOTES
+deferred the question here ("its list may want one added") and the repo convention makes a user-visible
+change a CHANGELOG matter. Under `[Unreleased]`: a new `### Changed` entry (the tag row is gone, the
+token is painted, the spans are persisted), plus the four still-unreleased claims this plan falsified,
+each rewritten to the end state the release will actually ship — two `### Added` claims of the
+prompt-collapse feature ("a click anywhere in the block — the chip row included" and "the skill chips a
+send carries are never among what is hidden") and two `### Changed` claims of the earlier skill-token work
+("the **sent** message still shows its violet `✦ name` chips in the transcript" and "the delivered block
+now carries the same chip row"), the latter two now saying the sent and delivered blocks paint the invoked
+`/token` in the skill violet. Released sections were left as the historical record they are. No version
+identifier touched. TODO.md:94's "the chip strip retired" also stands: it records what the 2026-07-28
+landing did, and that is still what it did.
 
 **What:**
 - layout.md § "Collapsed and expanded blocks" (:401–415, :419): remove the chip-row
