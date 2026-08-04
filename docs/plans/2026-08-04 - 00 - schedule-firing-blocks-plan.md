@@ -75,7 +75,7 @@ review, unlike the five above):**
    kind must obey; ADR 0030 (widths come from the painter's measure); ADR 0011 +
    `internal/tui/doc.go` (the value-copied Model; per-entry state through the shared entries
    slice, the `setExpanded` pattern).
-5. [ADR 0025](../adr/0025-esc-cancels-the-exchange-and-interjections-join-it.md) — chronology
+5. [ADR 0025](../adr/0025-interjections-commit-at-the-between-steps-boundary.md) — chronology
    honesty: the block is enriched at the position EventFired appended it.
 6. ADR 0010 — layering: `internal/run` and `internal/schedule` never import `internal/tui`; the
    answer crosses as plain data and the TUI sanitizes at its own seam.
@@ -337,7 +337,22 @@ includes it).
 
 ---
 
-## 6. Close-out — the docs trail
+## 6. Close-out — the docs trail — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): three deviations from the item's literal text. **The CHANGELOG lines land INSIDE
+the still-unreleased `/schedule` entry** rather than as a new top-level bullet: that entry ships in the
+same release as the block, so a separate bullet would narrate a change to something no user has seen,
+and its `The transcript narrates it` sub-bullet — which said fired/finished/failed are notes — is what
+the block falsifies, so it was reworded into the block's story (with the lifecycle notes kept as their
+own sub-bullet) and the plumbing sentence rides the `Under that surface` bullet. **README was left
+alone**: its two `/schedule` mentions are the command-table row and the `/sessions` tag bullet — neither
+describes the firing notices — so the item's "otherwise leave alone" applies. **One cross-reference did
+not resolve and was fixed**: this plan's ADR 0025 link named
+`0025-esc-cancels-the-exchange-and-interjections-join-it.md`, which does not exist; the file is
+`0025-interjections-commit-at-the-between-steps-boundary.md`. ADR 0033's Consequences DO state the
+notice shape ("commands, pickers, status rows and notices"), so it gained the dated scoping addendum.
+The local-time fix's own `### Fixed` entry (commit e6d9e26) was left untouched and nothing added here
+restates it.
 
 Depends on items 1–5.
 

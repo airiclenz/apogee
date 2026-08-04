@@ -604,16 +604,32 @@ point is a **minor** bump, not a breaking change.
     never queued, never two at once. A tick that lands while *you* are mid-exchange waits for the
     session to go quiet rather than contending with the task in front of you, and further ticks
     arriving during that wait are skipped the same way, so at most one firing is ever pending.
-  - **The transcript narrates it.** Created (with cycle, mode and next fire), firing now, finished
-    (with the saved run's title), tick skipped, stopped, failed — each as a note that stays in the
-    session record, because each records something that actually happened while you had this session
-    open.
+  - **A firing's answer comes to you, in a block you can open.** What a run actually *said* is the
+    payoff of putting a prompt on a cycle, and it lives in a session record you would have to go and
+    open. So every firing gets one expandable block in the chat instead — the tool block's shape and
+    behaviour under a header of its own, `⟳ Schedule` beside the schedule's name. It appears the
+    moment the run starts, carrying `firing now` and the prompt it was given, and the *same* block is
+    filled in when the run returns: it stays where it was announced rather than jumping to where it
+    finished. Collapsed, it shows the answer's first line over the usual `… +N more lines`; opened, it
+    carries the whole answer, the prompt beneath it, one stats line (`2 turns · 4s`, plus a
+    `· N denied` cell only when a gated action was really refused) and the record pointer —
+    `saved as "…" — find it in /sessions` — dropped when nothing was persisted. A failed firing words
+    its header `error: …` and shows no answer, but keeps the stats and any record the run salvaged.
+    The `⟳` never blinks: the spinner belongs to the work *you* are doing, and this session is idle
+    while a firing runs.
+  - **The block is scrollback, so it is saved and repainted like everything else** — and one still
+    open when apogee closed comes back closed, saying so in its own words rather than claiming a run
+    is in flight that died with the program that scheduled it.
+  - **Created (with cycle, mode and next fire), tick skipped and stopped stay one-line notes** —
+    lifecycle facts with no body, where a block would be an empty drawer. Notes and blocks alike stay
+    in the session record, because each records something that actually happened while you had this
+    session open.
   - **Schedules die with apogee.** Nothing is written to `config.yaml` and nothing survives a quit —
     "while apogee is open, re-run this every N minutes" is the whole promise, deliberately. Durable
     schedules are the future daemon's value-add over the very same library.
 
   See [ADR 0033](docs/adr/0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md);
-  the three panes and the browser's tag are specced in `layout.md`.
+  the three panes, the firing block and the browser's tag are specced in `layout.md`.
 
 - **Under that surface: a scheduler library and a one-firing headless runner.** The TUI owns nothing
   but input and display here. `internal/schedule` owns every when-and-how decision — the cycle floor,
@@ -625,7 +641,12 @@ point is a **minor** bump, not a breaking change.
   by this feature. The session record gains two optional `Meta` fields carrying the schedule's id and
   name — empty on every ordinary session, what the `/sessions` tag reads — and because older builds
   ignore unknown fields and never write them, records round-trip both ways with **no `RecordVersion`
-  bump**.
+  bump**. What the block shows crosses those same seams as plain data, so a Driver that is not this
+  TUI gets all of it too: the runner reports a firing's final answer — the top-level one, never a
+  sub-agent's — beside its turn count and how many actions its fail-safe denier refused, and the
+  scheduler times the run on its own injected clock and puts that elapsed on the finished **and** the
+  failed event, along with whatever outcome a failed run salvaged. The library reads none of it; it
+  carries it.
 
 ### Changed
 
