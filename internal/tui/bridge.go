@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/schedule"
 )
 
 // ----------------------------------------------------------------------------
@@ -89,6 +90,16 @@ func (b *Bridge) Presenter() domain.Presenter {
 // Bind connects the live program. Run calls it once, before the program processes any
 // input that could launch a worker, so every later Emit/Approve reaches a bound program.
 func (b *Bridge) Bind(p programSender) { b.prog.bind(p) }
+
+// NotifySchedule carries one scheduler Event into the running program — the value the composition
+// root installs as schedule.Config.Notify (ADR 0033). It rides the SAME late-bound programRef the
+// Sink's Events and the worker's snapshots travel, which is the whole reason it lives on the Bridge:
+// a Firing narrates from the scheduler's own goroutine, and that goroutine needs exactly what a
+// worker needs — a send that is safe before the program exists and safe from anywhere afterwards.
+//
+// It is a report and never a rendezvous: nothing waits for the Update loop to fold it, so a
+// scheduler goroutine is never held up by a busy renderer.
+func (b *Bridge) NotifySchedule(ev schedule.Event) { b.prog.send(scheduleEventMsg{Event: ev}) }
 
 // programRef is a concurrency-safe, late-bound handle to the running program. send runs on
 // the worker goroutine (via Emit/Approve); bind runs once on the program goroutine inside

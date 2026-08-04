@@ -20,6 +20,7 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/present"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
@@ -407,6 +408,41 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// regenerates on demand even with the toggle off (Ratified design 7).
 	titles := newTitleWiring(holder.Binding, roots.workspace)
 
+	// The scheduler this session's Schedules live in (ADR 0033), built beside the naming call for
+	// the same reason: both are out-of-band work against the single-slot server the session is bound
+	// to, and both read that binding at CALL time rather than capturing it. Three seams make it
+	// live — a runner that composes one headless Firing from the current binding (schedule.go), a
+	// Gate that holds a due Firing until this session is quiescent, and a Notify that carries the
+	// scheduler's narration into the running program through the Bridge the Sink already uses.
+	//
+	// New's only refusal is a Config with no runner, which this one has; the error is returned
+	// rather than ignored because a scheduler that failed to build must not be handed on as a
+	// working seam.
+	firings := scheduleWiring{
+		base:         cfg,
+		opts:         opts,
+		roots:        roots,
+		manualIDs:    manualIDs,
+		pinnedWindow: pinnedWindow,
+		binding:      holder.Binding,
+		store:        store,
+	}
+	gate := newIdleGate()
+	schedules, err := schedule.New(schedule.Config{
+		Fire:   firings.fire,
+		Gate:   gate.wait,
+		Notify: bridge.NotifySchedule,
+	})
+	if err != nil {
+		return fmt.Errorf("apogee: build the scheduler: %w", err)
+	}
+	// A TUI-hosted Schedule dies with the TUI — the honest v1 promise (ADR 0033): Close takes every
+	// Schedule off the clock, cancels the context its Firings run under and joins their goroutines,
+	// so nothing this session started outlives the alternate screen. Registered after the Agent's
+	// own Close, so it runs BEFORE it: the firings let go of the process while everything they were
+	// composed from still stands.
+	defer schedules.Close()
+
 	// The prompt caret's shape. applyConfig already refused a name this build does not know, so the
 	// error here cannot fire; ignoring it keeps the parse a single expression, and ParseCursorShape
 	// answers an unknown name with the default anyway — a caret is drawn either way.
@@ -496,6 +532,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// call — so `/rename` regenerates on demand regardless.
 		GenerateTitle: titles.generate,
 		AutoTitle:     opts.autoTitle,
+		// The scheduler surface (ADR 0033): the seam /schedule and /schedule-stop drive, the reason
+		// auto is unavailable on this host (empty ⇒ it is available, and the picker offers it), and
+		// the activity report the Gate above releases a due Firing on. All three are wired together
+		// or not at all — the renderer's nil check on the seam speaks for the set.
+		Schedules: schedules,
+		ScheduleAutoBlocked: scheduleAutoBlocked(
+			probe.BackendName(confiner), confiner.Capabilities(), opts.confineToWorkspace),
+		ReportActivity: gate.report,
 		// agent.InExchange() reads the resumed Agent's open-Exchange state (false on a fresh start,
 		// or a cleanly-closed resume; true only when the stored snapshot died mid-task), so newModel
 		// appends the interrupted note and /continue picks the work back up.

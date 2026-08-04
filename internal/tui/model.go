@@ -147,6 +147,12 @@ type Model struct {
 	lastCtrlC time.Time // when the last Ctrl+C landed; a second within the window quits
 	quitting  bool      // a quit whose exit is deferred: to the worker's terminal Msg while busy (C4), else to the closing flush reaching disk (quit)
 
+	// activityBusy is the last value published through [Options.ReportActivity] — the high-water
+	// mark that turns a per-Update reading into a per-TRANSITION report (schedule.go). Its zero
+	// value is the truth about a fresh Model: a session at its prompt is not busy, so the first
+	// report a listener ever gets is the one that says it started working.
+	activityBusy bool
+
 	// The interjection queue — what the human typed while the model worked (ADR 0025). It is
 	// kept in two reconciled copies, which is what lets one goroutine own each half:
 	//
@@ -427,7 +433,15 @@ func (m Model) Init() tea.Cmd {
 // window size, and the spinner tick — and nothing else. It mutates the local copy and
 // returns it. It contains no agent logic: a submit launches the worker (C1), the seam Msgs
 // move the state machine and render, and the stop key cancels (C4).
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+//
+// The deferred report is the one thing every fold below shares. Each case returns from its own
+// arm — there is no common tail — so publishing this session's activity from a defer is what makes
+// [Options.ReportActivity] TOTAL rather than a list of transition sites a later change has to
+// remember to extend (schedule.go). It is pure bookkeeping: it reads the folded model, calls the
+// seam only when the value moved, and returns the model carrying the new high-water mark.
+func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
+	defer func() { next = reportActivity(next) }()
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height

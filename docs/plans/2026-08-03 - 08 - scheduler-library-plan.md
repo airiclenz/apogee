@@ -394,9 +394,39 @@ blob).
 
 ---
 
-## 6. Composition root — wire the scheduler live
+## 6. Composition root — wire the scheduler live — ✅ DONE (2026-08-04)
 
 Depends on items 3, 4, 5.
+
+NOTES (2026-08-04): the two judgement calls the dispatch left open, plus two findings.
+(a) **The Gate seam** is `tui.Options.ReportActivity func(busy bool)`, published from a DEFER in
+`Model.Update`: every arm of that switch returns from its own case, so a defer is the only total
+choke point — publishing at the transition sites instead would mean six `state = stateRunning`
+assignments and every path that drains the interjection queue, and one missed site is a schedule
+that never fires again. The published value is `Model.quiescent()` = no worker owns the engine AND
+no launcher verb owns the server AND no typed row is staged. The middle term is an addition beyond
+the item's "engine idle": a profile load restarts the very server a Firing would dial, and the Model
+already pairs `actuation.inFlight` with `busy()` at every "is the engine mine right now" read
+(`observeBinding`). The binary's half is `idleGate` — a channel-per-transition so a waiter is
+released by ctx too, which is what keeps `Scheduler.Close` joinable.
+(b) **The end-to-end test lands in `cmd/apogee`** (`schedule_test.go`), which does host it cheaply:
+the Fire seam runs against a scripted upstream and its record is asserted in the store, and
+`runRoot` with a recording launcher proves the wired seam creates a Schedule and that the deferred
+`Close` has made it `ErrClosed` by the time runRoot returns (the quit path, joined under `-race`).
+No tick is advanced there — the clock is the library's seam and its policy is already proven on a
+fake clock in item 4. The publishing half and the `Bridge.NotifySchedule` route are proven in
+`internal/tui` because `Model` is unexported, which is the same split
+`confinement_e2e_test.go` already takes.
+(c) The item names `resolveLadderAuto`'s eligibility half; **no such function exists** — the launch
+ladder never REFUSES Auto (ADR 0012: it gates what it cannot fence). The eligibility half is
+therefore `Capabilities().AutoEligible()` + `confine-to-workspace`, implemented as the pure
+`scheduleAutoBlocked` mirroring `probe.DegradedNotice`'s cell, since a Firing's Approver has no
+approval rung to fall back to.
+(d) A Firing's Config re-resolves its **per-model** half through `rebindSpecFor` rather than reusing
+launch-time values: a session that rebound mid-run would otherwise fire the launch model's system
+prompt (ADR 0023) and validated set (ADR 0016) at the model it has since moved to. The observed
+context window is passed as unknown — only the TUI tracks it — so an unpinned Firing runs with the
+Budget inactive, which for one bounded prompt is the honest degrade rather than a guess.
 
 **What:**
 

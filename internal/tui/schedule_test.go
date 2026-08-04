@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -600,6 +601,105 @@ func TestNonArgumentVerbsCarryNoTail(t *testing.T) {
 	parsed := parseInput("/clear everything", nil)
 	if parsed.rest != "" || parsed.args != nil {
 		t.Errorf("parsed = {args:%v rest:%q}, want both empty", parsed.args, parsed.rest)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The activity report (the host Gate's half)
+// ----------------------------------------------------------------------------
+
+// activityModel is a model whose activity reports land in the returned slice pointer, in order.
+func activityModel(t *testing.T, reports *[]bool) Model {
+	t.Helper()
+	opts := testOpts
+	opts.ReportActivity = func(busy bool) { *reports = append(*reports, busy) }
+	return newTestModelEng(t, &fakeEngine{}, opts)
+}
+
+// The seam reports TRANSITIONS, not frames: a session says it started working once, says it
+// stopped once, and says nothing at all about the stream in between.
+func TestReportActivityPublishesTransitionsOnly(t *testing.T) {
+	var reports []bool
+	m := activityModel(t, &reports)
+	if len(reports) != 0 {
+		t.Fatalf("reports on a fresh idle model = %v, want none — the gate is already open", reports)
+	}
+
+	m.input.SetValue("check the build")
+	m = step(t, m, keyEnter())
+	if got := []bool{true}; !slices.Equal(reports, got) {
+		t.Fatalf("reports after submit = %v, want %v", reports, got)
+	}
+
+	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "working"}})
+	m = step(t, m, eventMsg{Event: domain.MessageEvent{Text: "working"}})
+	if got := []bool{true}; !slices.Equal(reports, got) {
+		t.Errorf("reports after two events = %v, want the unchanged %v — the gate would thrash", reports, got)
+	}
+
+	m = step(t, m, exchangeDoneMsg{Result: domain.StepResult{Status: domain.StatusExchangeComplete}})
+	if got := []bool{true, false}; !slices.Equal(reports, got) {
+		t.Errorf("reports after the exchange ended = %v, want %v", reports, got)
+	}
+	if m.state != stateIdle {
+		t.Errorf("state = %v, want idle", m.state)
+	}
+}
+
+// A stop leaves what the human typed staged for the next ⏎ (ADR 0025), so the session is between
+// two halves of one thought — and a Firing released there would land on top of the message about to
+// go out. The report stays busy until the queue is gone.
+func TestReportActivityHoldsWhileAQueueIsHeld(t *testing.T) {
+	var reports []bool
+	m := activityModel(t, &reports)
+
+	m.input.SetValue("check the build")
+	m = step(t, m, keyEnter())
+	m.input.SetValue("and the tests too")
+	m = step(t, m, keyEnter()) // staged as an interjection, not sent
+	if len(m.pendingInterjections) != 1 {
+		t.Fatalf("staged rows = %d, want 1", len(m.pendingInterjections))
+	}
+
+	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+	if m.state != stateIdle {
+		t.Fatalf("state after the cancel = %v, want idle", m.state)
+	}
+	if got := []bool{true}; !slices.Equal(reports, got) {
+		t.Errorf("reports = %v, want %v — the held queue is still work waiting to go out", reports, got)
+	}
+	if m.quiescent() {
+		t.Error("quiescent() is true with a row still staged; a firing would contend with the next ⏎")
+	}
+}
+
+// The composition root's Notify seam: one scheduler Event, sent from the scheduler's own goroutine
+// through the Bridge, arrives as the Msg the Update loop folds into a note.
+func TestBridgeNotifyScheduleReachesTheTranscript(t *testing.T) {
+	br := NewBridge()
+	// An unbound Bridge is the startup window before Run binds the program; a Firing that narrated
+	// there must be dropped rather than panic.
+	br.NotifySchedule(schedule.Event{Kind: schedule.EventFired, ScheduleName: "nightly tidy"})
+
+	prog := newStubProgram()
+	br.Bind(prog)
+	br.NotifySchedule(schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleName: "nightly tidy",
+		Outcome: schedule.Outcome{RecordID: "s1", Title: "nightly tidy — 14:05"},
+	})
+
+	msgs := prog.messages()
+	if len(msgs) != 1 {
+		t.Fatalf("the bound program received %d Msgs, want the one sent after Bind", len(msgs))
+	}
+	ev, ok := msgs[0].(scheduleEventMsg)
+	if !ok {
+		t.Fatalf("the program received %T, want a scheduleEventMsg", msgs[0])
+	}
+
+	m := step(t, scheduleModel(t, &fakeScheduler{}, ""), ev)
+	if got, want := lastNote(m), "schedule nightly tidy — finished: nightly tidy — 14:05"; got != want {
+		t.Errorf("note = %q, want %q", got, want)
 	}
 }
 

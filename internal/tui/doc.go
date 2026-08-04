@@ -402,7 +402,8 @@
 // The rest of the package, one line each, so this narration names every file in it: tui.go is the
 // seam boundary the binary sees ([Run], [Options], and the [Engine], [SkillCatalog] and
 // [SessionHost] interfaces); bridge.go the late-bound programRef every seam sends the running
-// program through; sink.go the Event→Msg [teaSink]; messages.go the plain values those sends carry
+// program through — including [Bridge.NotifySchedule], the composition root's own way in, which is
+// how a Firing narrates from the scheduler's goroutine without the renderer knowing one exists; sink.go the Event→Msg [teaSink]; messages.go the plain values those sends carry
 // into Update; approver.go and asker.go the two cross-goroutine rendezvous that park a Step on a
 // human ([uiApprover] on an approval decision, [uiAsker] on a typed answer); worker.go the
 // cancellable engine driver; model.go the [Model] itself — the lifecycle state machine, the
@@ -413,7 +414,10 @@
 // /skill and @file tokens with; transcript.go the append-only scrollback model and transcriptcodec.go its
 // versioned wire form inside a saved session record; sessions.go the /sessions history browser;
 // schedule.go the /schedule surface — the status note, the cycle/mode/stop pickers and the notices
-// the scheduler's own Events become, with every when-and-how decision left to internal/schedule;
+// the scheduler's own Events become, with every when-and-how decision left to internal/schedule,
+// plus the one thing this package publishes rather than renders: [Options.ReportActivity], the
+// busy/idle fact the binary's Gate holds a due Firing on, computed by [Model.quiescent] and sent
+// from a defer in [Model.Update] so no fold can forget a transition (ADR 0033);
 // autotitle.go the state machine behind a session's NAME — one cosmetic out-of-band completion
 // ([Options.GenerateTitle]) fired at the first prompt's submit, in parallel with the Exchange it
 // starts, which never reaches the Engine (ADR 0011), is not a Turn, enters no transcript, applies

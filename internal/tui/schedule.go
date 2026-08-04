@@ -235,6 +235,50 @@ func (m Model) liveSchedules() []schedule.Status {
 }
 
 // ----------------------------------------------------------------------------
+// The activity report (the host Gate's half)
+// ----------------------------------------------------------------------------
+
+// reportActivity publishes next's activity through [Options.ReportActivity] when it has MOVED since
+// the last report, and returns the model carrying the new high-water mark. [Model.Update] defers it,
+// so every fold in the program passes through here exactly once and no transition can be forgotten.
+//
+// It takes and returns a tea.Model because that is what a deferred rewrite of Update's return value
+// can see. Anything that is not a Model is handed straight back untouched — an impossible case
+// today (every arm returns a Model), and the safe answer if that ever stops being true.
+func reportActivity(next tea.Model) tea.Model {
+	m, ok := next.(Model)
+	if !ok {
+		return next
+	}
+	busy := !m.quiescent()
+	if busy == m.activityBusy {
+		return next
+	}
+	m.activityBusy = busy
+	if m.opts.ReportActivity != nil {
+		m.opts.ReportActivity(busy)
+	}
+	return m
+}
+
+// quiescent reports whether nothing this session owns is in flight: no worker drives the engine
+// (m.busy covers a running Exchange and both blocked rendezvous), no launcher verb owns the server,
+// and no row the human typed is still waiting to go out.
+//
+// The three terms are the three ways a Firing could collide with the human's own work. The first is
+// the Exchange, and it is deliberately the WHOLE Exchange rather than a Turn boundary (ADR 0025).
+// The second is the actuation latch: a profile load restarts the very server a Firing would dial,
+// and the Model already pairs it with busy() wherever it asks "is the engine mine right now"
+// (observeBinding). The third is the interjection queue: rows held over from a stop or a fault are a
+// message the next ⏎ sends, so the session is between two halves of one thought rather than done.
+//
+// stateErrored with nothing queued IS quiescent: the worker has unwound and the engine is idle, and
+// a human reading a failure is not a reason to hold a standing instruction back.
+func (m Model) quiescent() bool {
+	return !m.busy() && !m.actuation.inFlight && len(m.pendingInterjections) == 0
+}
+
+// ----------------------------------------------------------------------------
 // The event fold
 // ----------------------------------------------------------------------------
 

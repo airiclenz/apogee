@@ -433,6 +433,22 @@ type Options struct {
 	// keeps internal/platform out of here) and the value stands for the process lifetime.
 	ScheduleAutoBlocked string
 
+	// ReportActivity publishes what this session is DOING, as a fact and never as a request: true
+	// while a worker owns the Agent (an Exchange, a compaction, a blocked approval or question), a
+	// launcher verb owns the server, or a row the human typed is still waiting to go out — false at
+	// the boundary where none of that holds. It is called from the Update loop on TRANSITIONS of that
+	// value, so a listener sees each change once and nothing between them.
+	//
+	// It exists for the scheduler's Gate (ADR 0033). A Firing is a SECOND Agent against the same
+	// single-slot server, so a due one waits for this session to be quiescent rather than contending
+	// with the task in front of the human — and the release point is the Exchange's end rather than a
+	// Turn's, because Exchanges span Turns (ADR 0025) and a Firing let go mid-Exchange is exactly the
+	// contention the Gate exists to prevent. The renderer publishes and decides nothing: what the
+	// value MEANS for a Firing is the binary's Gate, and the cycle policy behind it is the library's.
+	//
+	// nil ⇒ nobody is listening, which is the whole of the degrade.
+	ReportActivity func(busy bool)
+
 	// Resumed is the startup-replay payload when this run resumes a stored session (--resume or
 	// --continue); nil on a fresh start. newModel seeds the start-up box as usual, then repaints
 	// the resumed scrollback beneath it and relights the context gauge from the stored fill — or,
