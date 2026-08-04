@@ -22,36 +22,6 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
 
 **Remaining:**
 
-- **`/schedule` command** — a `/schedule` command with an attached prompt that re-runs that
-  prompt each time a chosen cycle time passes (picked from a popup question or a set of
-  pre-defined cycle times); `/schedule-stop` ends it. Each firing runs in a **fresh context
-  window**; the runs should be saved as sessions, marked / grouped under their schedule in the
-  `/sessions` history. **Enriched 2026-08-03 from the north-star grill
-  ([ADR 0031](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md)):**
-  - **Layering (the hard constraint):** the scheduler is a **library** (e.g. `internal/schedule`)
-    and the TUI is merely its first Driver surface — the `/schedule` command may own nothing but
-    the popup and the in-transcript notices; everything that decides *when and how* a run fires
-    (cycle timing, re-run semantics, overlap policy, session grouping) must be importable by a
-    daemon that does not exist yet. If a firing ever injects model-visible content (a
-    scheduled-run preamble, prior-run context), library placement is mandatory per ADR 0031
-    invariant 4 (benchable all the way up), not merely tidy.
-  - **One firing is a headless run:** construct a fresh agent through the public API, run the
-    prompt, persist the session record — the same act as the deferred `apogee headless` runner
-    (see the **Embeddable agent** / **Driver** entries in `CONTEXT.md`). The TUI host adds only
-    the timer and the display; there is no scheduler-shaped duplication between TUI and daemon.
-  - **Lifetime is the honest TUI semantics:** a TUI-hosted schedule dies with the TUI — "while
-    apogee is open, re-run this every N minutes" is the coherent promise, a feature not a gap.
-    Durable schedules that survive quit are the future daemon's value-add over the *same*
-    library, so building this in the TUI first closes no doors.
-  - **Grill branch points** (still needs grilling; settle these): the overlap policy (skip /
-    queue / run concurrently when a firing is still in flight at the next tick); which Agent
-    modes a schedule may use — an Ask-Before schedule parks on the wait-tolerant Approver until
-    a human notices, so likely Plan or pre-authorized modes only at first; whether the schedule
-    id lands in the session record's browsable `Meta`
-    ([ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md));
-    and fresh-vs-resumed context per firing — the same open question ADR 0031 records for
-    workflow nodes, so grilling `/schedule` part-answers the platform question for free.
-
 - **Naming Sub-Agents** Sub agents should be able to receive a summary / name that identifies what they do. This should be visible in the session chat.
 
 - **[P1] Server / model switching** — **every switch SHIPPED (2026-07-28 the two user-facing ones,
@@ -145,6 +115,17 @@ disposition table but no user-facing override. See *Configurable tool × mode se
   `docs/plans/archived/2026-07-29 - 00 - llama-launcher-integration-plan.md`. The owner-run live
   pass closed with it (six of seven scenarios; (7) waived), so nothing of this half is open —
   a later live failure reopens the item it belongs to, not this entry.
+- **`/schedule` and `/schedule-stop`** — a prompt put on a cycle for as long as apogee is open, and
+  the two library layers under the surface: `internal/schedule` owns every when-and-how decision
+  (the cycle floor, the skip-the-tick overlap policy, the quiescence Gate, lifetime), `internal/run`
+  performs one **Firing** — a fresh Agent, a fail-safe-denier Approver, the record saved at
+  completion — and the TUI owns nothing but the three panes, the status note and the notices. A
+  Firing browses as an ordinary session, tagged `⟳ <schedule>` in `/sessions` off two new optional
+  `Meta` fields — 2026-08-04,
+  [ADR 0033](docs/adr/0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md) +
+  `docs/plans/2026-08-03 - 08 - scheduler-library-plan.md`. It settles all four branch points this
+  bullet parked (overlap, which modes, `Meta`, fresh-vs-resumed) and leaves durability to the future
+  daemon over the *same* library, which is the layering the enrichment asked for.
 
 ---
 

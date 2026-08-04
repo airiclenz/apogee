@@ -505,9 +505,17 @@ truncates within the width authority under both width methods (follow the existi
 
 ---
 
-## 8. Close-out — the TODO trail and the CHANGELOG
+## 8. Close-out — the TODO trail and the CHANGELOG — ✅ DONE (2026-08-04)
 
 Depends on items 1–7.
+
+NOTES (2026-08-04): two small trail choices. (a) The ledger line cites this plan at its LIVE path
+(`docs/plans/2026-08-03 - 08 - …`) rather than the `archived/` one every sibling line carries, so the
+reference resolves at this commit — archiving happens after it, and the repo's own practice is to
+rewrite those paths when the plans move (`91d855b` did exactly that for four ledger lines).
+(b) ADR 0033's Context sentence naming "`TODO.md`'s `/schedule` bullet" is left untouched now that
+the bullet's body has left: an ADR records the brief as it stood at the decision, which is how
+ADRs 0027/0028/0029 already refer to TODO entries whose bodies have since moved on.
 
 **What:**
 

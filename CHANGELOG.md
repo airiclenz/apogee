@@ -571,6 +571,62 @@ point is a **minor** bump, not a breaking change.
   something apogee can express while it runs — the key is the honest substitute. There is no blink
   option; nothing blinks.
 
+- **`/schedule` — put a prompt on a cycle and let it run itself for as long as apogee is open.** A
+  standing instruction rather than a task: `/schedule 30m re-run the tests and note anything new`
+  puts that line on the clock, and every half hour it runs on its own, in a session of its own. One
+  verb, three forms — bare `/schedule` lists what is live (`name · every 30m · plan · next 14:05 ·
+  3 fired`, plus `running now` while one is going), `/schedule <prompt>` asks for the cycle and the
+  mode in the same overlay `/model` and `/server` open (presets `1m` through `4h`, then `plan` or
+  `auto`), and `/schedule <cycle> [auto] <prompt>` creates one outright from any Go duration of 30
+  seconds or more. `/schedule-stop` takes one off the clock: the only live one straight away, a
+  picker over the rows when several are. Both verbs work while the model is busy — a firing is a run
+  of its own, so putting one on the clock needs no quiet moment in this session.
+  - **A firing is a session, not a background job.** Each one builds a **fresh** agent against the
+    server and model you are bound to *at that moment*, submits the prompt, and saves an ordinary
+    session record titled `<schedule> — <HH:MM>` — so it browses, resumes, renames and deletes in
+    `/sessions` exactly like a session you held yourself, tagged `⟳ <schedule>` beside its title so a
+    run reads as one of a series. Nothing carries over between firings: every one starts on an empty
+    context window, which is the point of a cycle rather than one conversation growing forever. What
+    a firing does *not* record is scrollback, so resuming one takes the documented "resumed, no
+    scrollback recorded" path — the conversation is all there, the painted transcript is not.
+  - **`plan` or `auto`, decided when the schedule is created.** The mode is the schedule's own and is
+    independent of whatever mode you later switch this session to; `auto` is gated by the same
+    eligibility ladder that gates *launching* in auto, and where the host has closed it the row is
+    still offered — taking it prints the reason and leaves the pane open, so `plan` is one keypress
+    away and the prompt you typed is not lost. Ask-before and allow-edits schedules are deliberately
+    absent: both exist to consult a human and a firing has none, so its approver **denies** every
+    gated action with a recorded reason instead of parking on it, `ask_user` and `present_document`
+    are unregistered, and a firing's deliverable is a file in the workspace with its path in the
+    conversation. Firings also run without MCP tools — live host connections are not something a
+    second agent may borrow.
+  - **One at a time, and never on top of your own work.** A tick that lands while that schedule's
+    previous firing is still going is **skipped** with a note, and the next tick fires normally —
+    never queued, never two at once. A tick that lands while *you* are mid-exchange waits for the
+    session to go quiet rather than contending with the task in front of you, and further ticks
+    arriving during that wait are skipped the same way, so at most one firing is ever pending.
+  - **The transcript narrates it.** Created (with cycle, mode and next fire), firing now, finished
+    (with the saved run's title), tick skipped, stopped, failed — each as a note that stays in the
+    session record, because each records something that actually happened while you had this session
+    open.
+  - **Schedules die with apogee.** Nothing is written to `config.yaml` and nothing survives a quit —
+    "while apogee is open, re-run this every N minutes" is the whole promise, deliberately. Durable
+    schedules are the future daemon's value-add over the very same library.
+
+  See [ADR 0033](docs/adr/0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md);
+  the three panes and the browser's tag are specced in `layout.md`.
+
+- **Under that surface: a scheduler library and a one-firing headless runner.** The TUI owns nothing
+  but input and display here. `internal/schedule` owns every when-and-how decision — the cycle floor,
+  the skip-the-tick overlap policy, the quiescence gate, the lifetime — behind injected seams and a
+  clock, so a daemon that does not exist yet can drive it without a terminal; `internal/run` performs
+  one firing (fresh agent, denying approver, the record saved once at completion, and on a failed run
+  whatever completed) and is the shared core the deferred `apogee headless` subcommand will be a thin
+  CLI over rather than a second runner. Both stay `internal/`, so the public Go API is **unchanged**
+  by this feature. The session record gains two optional `Meta` fields carrying the schedule's id and
+  name — empty on every ordinary session, what the `/sessions` tag reads — and because older builds
+  ignore unknown fields and never write them, records round-trip both ways with **no `RecordVersion`
+  bump**.
+
 ### Changed
 
 - **`/skills` now tells a skill that lost an id clash apart from one that is broken.** Every skip
