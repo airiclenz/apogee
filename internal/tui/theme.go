@@ -37,12 +37,12 @@ var (
 	colModeAllowEdits = lipgloss.Color("#58a6ff") // allow-edits — blue
 	colModeAuto       = lipgloss.Color("#f0883e") // auto — orange
 
-	colSkill   = lipgloss.Color("#8957e5") // skills — violet: the prompt's inline /token accent (skillToken) and its twin inside a sent block (skillAccent)
-	colFileRef = lipgloss.Color("#58a6ff") // the prompt's inline @file token accent — blue, the tone a reference reads as
+	colSkill   = lipgloss.Color("#f080ff") // skills — violet: the prompt's inline /token accent (skillToken) and its twin inside a sent block (skillAccent)
+	colFileRef = lipgloss.Color("#ade282") // the prompt's inline @file token accent — blue, the tone a reference reads as
 
-	colPromptToggle = lipgloss.Color("#8db4e6") // the collapsed prompt's see-more / see-less marker — light gray-blue: an apogee affordance that reads as chrome inside the block, not as more of what the human wrote
+	colPromptToggle = lipgloss.Color("#b0d2ff") // the collapsed prompt's see-more / see-less marker — light gray-blue: an apogee affordance that reads as chrome inside the block, not as more of what the human wrote
 
-	colGauge = lipgloss.Color("#7c7cf0") // context-fill gauge bar — periwinkle (llama-launcher look)
+	colGauge = lipgloss.Color("#c396ff") // context-fill gauge bar — periwinkle (llama-launcher look)
 
 	colSelection = lipgloss.Color("#3a5fcd") // mouse drag-selection highlight background — blue
 
