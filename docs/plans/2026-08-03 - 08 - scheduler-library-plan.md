@@ -271,7 +271,20 @@ end-to-end, record on disk, skipped without the env var.
 
 ---
 
-## 4. `internal/schedule` — the scheduler library
+## 4. `internal/schedule` — the scheduler library — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): three additions beyond the item's literal text, all inside its semantics.
+(a) `Spec` validation also refuses an empty prompt (`ErrPrompt`) — a Schedule with nothing to
+submit is not a Schedule, and the library owns creation policy. (b) An empty `Spec.Name` is
+DERIVED from the prompt's first line rather than refused, so item 5's `/schedule <cycle> [auto]
+<prompt>` form — which collects no name — needs no naming policy of its own; the derivation is a
+dozen lines of pure string work rather than a shared helper, since the existing title heuristics
+live in `internal/run` and `internal/tui`, both closed to this package by ADR 0010. (c) The
+"injected `now` + timer/ticker factory" seam is one `Clock` interface (`Now` + `NewTicker`)
+rather than two independent fields: a fake `Now` paired with a real ticker is a bug, not a
+configuration. Also: the in-flight flag clears in a deferred call just AFTER the completed event
+goes out, so a surface can observe `completed` marginally before `List` reports the Schedule
+idle — the defer covers a panicking runner, which is worth more than the microsecond.
 
 **What:**
 
