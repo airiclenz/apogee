@@ -5,6 +5,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/schedule"
 )
 
 // ----------------------------------------------------------------------------
@@ -33,6 +34,7 @@ var (
 	_ tea.Msg = recordWriteDoneMsg{}
 	_ tea.Msg = heartbeatTickMsg{}
 	_ tea.Msg = beatMsg{}
+	_ tea.Msg = scheduleEventMsg{}
 )
 
 // eventMsg carries one engine Event into the Update loop. The teaSink wraps every Event
@@ -157,6 +159,19 @@ type heartbeatTickMsg struct{ gen int }
 type beatMsg struct {
 	gen  int
 	beat heartbeat.Beat
+}
+
+// scheduleEventMsg carries one thing that happened to a Schedule into the Update loop: created,
+// fired, completed, skipped, stopped or failed (internal/schedule). The binary hands the library a
+// Notify seam that sends this Msg through the same late-bound programRef the worker's snapshots and
+// the Sink's Events travel (bridge.go), so a Firing's narration reaches the transcript from the
+// scheduler's own goroutine without the renderer knowing one exists.
+//
+// It is a REPORT and never a request: the fold records one note and moves nothing else — no state
+// transition, no worker, no engine call — because a Firing is a separate headless run (ADR 0033) and
+// this session's conversation is not its business.
+type scheduleEventMsg struct {
+	Event schedule.Event
 }
 
 // saveDoneMsg reports the outcome of one asynchronous SessionHost.Save (the per-Turn snapshot, the

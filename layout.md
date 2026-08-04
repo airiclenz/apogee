@@ -815,9 +815,9 @@ everything on either side is untouched.
 
 **Accepting a command RUNS it.** The `/verb` is cut out of the draft and the command fires; the
 rest of what was typed stays in the box with the caret where it belongs. The verbs that need what
-follows them are the exception and complete instead: the three that take arguments — `/confine`,
-`/model` and `/server` (and arguments are only ever read from a whole-line invocation) —
-plus `/skill`, which chains into the picker over the catalog. Accepting a skill row writes that
+follows them are the exception and complete instead: the four that take arguments — `/confine`,
+`/model`, `/server` and `/schedule` (and arguments are only ever read from a whole-line
+invocation) — plus `/skill`, which chains into the picker over the catalog. Accepting a skill row writes that
 skill's own `/id ` token into the text.
 
 **One overlay for "which one?".** `/model` and `/server` with nothing after them open a
@@ -840,6 +840,18 @@ opens at all. When there is nothing to
 pick — no monitor, an unreachable server, nothing advertised yet, nothing but the model already
 bound, no `servers:` block, no launcher config where one was named, no profiles in it, only the
 profile already loaded — the answer is one honest line in the transcript and no empty pane.
+
+**The same overlay asks `/schedule`'s questions.** `/schedule <prompt>` with no cycle in the line
+opens the cycle pane — two columns, `1m`, `— every minute` through `4h`, `— every 4 hours` — and,
+once a row is taken, the mode pane in its place: `plan` and `auto`, each with a `—` gloss of what it
+means for an unattended run, and a third `· unavailable` cell on `auto` where this host's
+Auto-eligibility ladder has closed it. That row is still offered and still selectable; taking it
+prints the reason and leaves the pane open, so `plan` is one keypress away and the prompt need not
+be retyped. `/schedule-stop` with more than one schedule live opens a third pane over them — `name`,
+`— every 1h`, `· plan`, `· running` — and stops the row that is taken. None of the three switches
+anything, so the hint under them reads `⏎ choose` and, for the stop pane, `⏎ stop`. They are the
+only panes that open while the model is working, and they claim the keyboard there exactly as they
+do at idle.
 
 **The Column contract.** Every one of those grammars is a row of **cells**, and the pop-up module —
 not the code that produced the row — owns the alignment, alongside its marker, highlight, windowing
@@ -876,7 +888,9 @@ quiescent engine is not hidden — its row fills the menu's `— idle only` colu
 unselected style, and accepting it anyway prints the note and leaves the draft exactly as it was.
 The tag belongs to the moment rather than to the verb: while the engine is idle no row fills that
 cell, so the column collapses and the menu reads exactly as it does when nothing can be gated. The
-verbs that only report (`/version`, `/skills`, `/confine` with no arguments) run there and then.
+verbs that only report (`/version`, `/skills`, `/confine` with no arguments) run there and then, and
+so do `/schedule` and `/schedule-stop`, which touch no engine at all: a schedule fires as a run of
+its own, so creating or stopping one needs no quiet moment in this session.
 
 **Tokens light up when they resolve.** Inside the box a `/token` is painted in the skill violet
 only when it names a skill in the catalog, and an `@path` in the reference blue only when the path

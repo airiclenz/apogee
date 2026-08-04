@@ -84,7 +84,10 @@
 // TAGGED "— idle only" in the menu and earns commandsAtIdleNote instead of running, and skill and
 // file tokens are simply message content that rides the interjection. /clear (aliased by /new) and
 // /compact drive the engine's context seams ([Engine.ClearContext]/[Engine.Compact]); /version and
-// /skills are pure reports written straight into the scrollback; /confine reports and toggles
+// /skills are pure reports written straight into the scrollback; /schedule and /schedule-stop drive
+// the scheduler library through the [Scheduler] seam and are the first argument-taking verbs that
+// are ALSO live mid-run, because a Schedule fires as a separate headless run and touches this
+// session's engine at no point (schedule.go, ADR 0033); /confine reports and toggles
 // Auto's blast radius through [Engine.SetConfineToWorkspace], the one verb that takes arguments
 // ([parseConfine] owns its "status | off [--save] | on" grammar, and an argument it does not
 // understand is a parse error carrying the usage line — never a silent no-op on the command that
@@ -409,6 +412,8 @@
 // resolve-gated inline accents the prompt box paints its
 // /skill and @file tokens with; transcript.go the append-only scrollback model and transcriptcodec.go its
 // versioned wire form inside a saved session record; sessions.go the /sessions history browser;
+// schedule.go the /schedule surface — the status note, the cycle/mode/stop pickers and the notices
+// the scheduler's own Events become, with every when-and-how decision left to internal/schedule;
 // autotitle.go the state machine behind a session's NAME — one cosmetic out-of-band completion
 // ([Options.GenerateTitle]) fired at the first prompt's submit, in parallel with the Exchange it
 // starts, which never reaches the Engine (ADR 0011), is not a Turn, enters no transcript, applies

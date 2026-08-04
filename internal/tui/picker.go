@@ -12,7 +12,7 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The shared single-select picker overlay (/model and /server)
+// The shared single-select picker overlay (/model, /server, /schedule)
 // ----------------------------------------------------------------------------
 //
 // The /sessions browser's simpler sibling: a modal list with one highlight, ⏎ to take the
@@ -49,6 +49,15 @@ import (
 // two shapes above. Its rows are also the one offering read at open rather than derived per frame,
 // because they live in the launcher's config file rather than in Model state.
 //
+// /schedule brings three kinds more, and they are the overlay's first that answer a question
+// instead of re-pointing the session (ADR 0033): a cycle picker and a mode picker, asked in that
+// order for a "/schedule <prompt>" with no cycle token, and a stop picker over the live Schedules.
+// The two-question flow is what the picker's [scheduleDraft] exists for — the prompt and the chosen
+// cycle ride the overlay's own state to the accept that finally creates the Schedule — and the stop
+// picker's rows are derived per frame like /model's, so a Schedule that fired, finished or was
+// stopped under the open pane moves with it. Their verbs and their wording live in schedule.go;
+// what lives here is only what every kind shares.
+//
 // Whichever offering /model lists, what the session is already on is NOT in it: a row that switches
 // nothing is not a choice, and pickerHint's "⏎ switch" would be a promise it could not keep. /server
 // keeps its "· current" row instead, because where the session IS is half of what a server list is
@@ -60,9 +69,12 @@ import (
 type pickerKind int
 
 const (
-	pickerModel  pickerKind = iota // the models the Upstream advertises — /model without a launcher
-	pickerServer                   // the servers config.yaml names — /server, over m.opts.Servers
-	pickerLoad                     // the Launch profiles the launcher defines — /model with one
+	pickerModel        pickerKind = iota // the models the Upstream advertises — /model without a launcher
+	pickerServer                         // the servers config.yaml names — /server, over m.opts.Servers
+	pickerLoad                           // the Launch profiles the launcher defines — /model with one
+	pickerCycle                          // how often a new Schedule fires — /schedule's first popup
+	pickerScheduleMode                   // the mode that Schedule's Firings run in — /schedule's second
+	pickerScheduleStop                   // the live Schedules — /schedule-stop with more than one
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -80,6 +92,11 @@ type picker struct {
 	// a profile added in the launcher's own TUI a moment ago is offered here — without turning a
 	// keypress into a file read. A plain slice of plain values, safe in the copied Model.
 	profiles []LaunchProfileChoice
+	// draft is the half-built Schedule /schedule's two popups carry between them: the prompt the
+	// human typed, and the cycle the first popup took. It is what makes a two-question flow one
+	// state — plain values only, so the copied Model stays copyable (ADR 0011) — and it is cleared
+	// with the rest of the overlay when the second popup accepts or esc closes either one.
+	draft scheduleDraft
 }
 
 // maxPickerRows caps how many rows the overlay shows at once; a longer list scrolls a window around
@@ -87,8 +104,23 @@ type picker struct {
 // transcript off a short terminal.
 const maxPickerRows = 8
 
-// pickerHint is the one-line key legend shown at the foot of the overlay.
+// pickerHint is the one-line key legend shown at the foot of the overlay, for the three kinds that
+// MOVE this session (/model, /server) — "switch" is the honest verb only where accepting a row
+// re-points the session at something else.
 const pickerHint = "↑/↓ select · ⏎ switch · esc close"
+
+// pickerHintFor names what ⏎ does on the open kind. /schedule's two popups answer a question rather
+// than move anything (the Schedule is created after the LAST of them), and /schedule-stop's ⏎ ends
+// something — three verbs, because a legend that promised a switch would be wrong on all three.
+func pickerHintFor(k pickerKind) string {
+	switch k {
+	case pickerCycle, pickerScheduleMode:
+		return "↑/↓ select · ⏎ choose · esc close"
+	case pickerScheduleStop:
+		return "↑/↓ select · ⏎ stop · esc close"
+	}
+	return pickerHint
+}
 
 // currentRowCell marks the server row the session is already on. It is plain text, not styling:
 // the popup module takes rows escape-stripped and styles them whole (faint, or the highlight bar on
@@ -479,7 +511,8 @@ func (m Model) pickerNote(note string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// pickerKey routes a keypress while the picker is open (idle only): ↑/↓ move the highlight (wrapping,
+// pickerKey routes a keypress while the picker is open (at idle, and — for /schedule's kinds, whose
+// verb is live mid-run — while a worker works): ↑/↓ move the highlight (wrapping,
 // the sessionBrowser posture), ⏎ takes the highlighted row, esc closes. It always fully consumes the
 // key — the picker is modal. The count is re-derived and the selection re-clamped on every key,
 // because the rows underneath can have changed since the last one.
@@ -521,6 +554,12 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 		return m.switchToServer(m.opts.Servers[m.picker.selected])
 	case pickerLoad:
 		return m.startProfileLoad(m.picker.profiles[m.picker.selected].Name)
+	case pickerCycle:
+		return m.acceptCycle(scheduleCycles[m.picker.selected])
+	case pickerScheduleMode:
+		return m.acceptScheduleMode(scheduleModes[m.picker.selected])
+	case pickerScheduleStop:
+		return m.acceptScheduleStop()
 	}
 	return m, nil
 }
@@ -563,6 +602,12 @@ func (m Model) pickerCount() int {
 		return len(m.opts.Servers)
 	case pickerLoad:
 		return len(m.picker.profiles)
+	case pickerCycle:
+		return len(scheduleCycles)
+	case pickerScheduleMode:
+		return len(scheduleModes)
+	case pickerScheduleStop:
+		return len(m.liveSchedules())
 	}
 	return 0
 }
@@ -608,7 +653,7 @@ func (m Model) renderPicker() string {
 		title:    m.pickerTitle(),
 		rows:     rows,
 		selected: selected,
-		hint:     pickerHint,
+		hint:     pickerHintFor(m.picker.kind),
 		maxRows:  shown,
 	}, m.width)
 }
@@ -625,6 +670,12 @@ func (m Model) pickerTitle() string {
 		return "switch server"
 	case pickerLoad:
 		return loadPickerTitle
+	case pickerCycle:
+		return "schedule — how often"
+	case pickerScheduleMode:
+		return "schedule — autonomy mode"
+	case pickerScheduleStop:
+		return "stop a schedule"
 	}
 	return ""
 }
@@ -642,6 +693,12 @@ func (m Model) pickerRows() []popupRow {
 		return m.serverRows()
 	case pickerLoad:
 		return m.launchProfileRows()
+	case pickerCycle:
+		return cycleRows()
+	case pickerScheduleMode:
+		return scheduleModeRows(m.opts.ScheduleAutoBlocked)
+	case pickerScheduleStop:
+		return scheduleStopRows(m.liveSchedules())
 	}
 	return nil
 }

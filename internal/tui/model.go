@@ -516,6 +516,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, m.input.Focus()
 
+	case scheduleEventMsg:
+		// The scheduler narrating one of its Schedules (ADR 0033). Like presentedMsg it is a
+		// record rather than a gate: it appends one note and touches neither the state machine
+		// nor the running Turn, because the Firing it describes is a separate headless run that
+		// this session's conversation knows nothing about.
+		m = m.foldScheduleEvent(msg.Event)
+		m.refreshViewport()
+		return m, nil
+
 	case presentedMsg:
 		// The worker's Presenter finished walking the ladder and hands the Update loop rung 0
 		// itself: the transcript entry carrying the document's path (ADR 0019 §2). It asks for
@@ -772,9 +781,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.sessionBrowserKey(msg)
 	}
 
-	// The /model and /server picker is the browser's simpler sibling and claims keys the same way:
-	// while it is open (idle only) the selection, the accept and esc are all its own (picker.go).
-	if m.state == stateIdle && m.picker.open {
+	// The picker is the browser's simpler sibling and claims keys the same way: while it is open the
+	// selection, the accept and esc are all its own (picker.go). It claims them in BOTH live states,
+	// because /schedule opens its cycle and mode popups mid-Exchange as well — the verb is
+	// whileRunning (commandSpecs), and an overlay that renders without taking keys would be a modal
+	// the human cannot answer. The older kinds are unaffected: their verbs are idle-only, and a
+	// picker cannot be open when a worker STARTS, since it owns ⏎ for as long as it is up.
+	if (m.state == stateIdle || m.state == stateRunning) && m.picker.open {
 		return m.pickerKey(msg)
 	}
 
@@ -1336,6 +1349,19 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// Synchronous like /version: re-scan the source dirs and print the catalog as a note
 		// (skills.go). No upstream call, no worker — it only reports what discovery found.
 		return m.runSkills()
+
+	case "schedule":
+		// List the live Schedules, or put a prompt on a cycle — directly from the argument form,
+		// or through the cycle/mode popups (schedule.go). Live mid-run like the reporting verbs:
+		// it drives the scheduler library and never this session's engine, and a Firing is a
+		// separate headless run over its own Agent (ADR 0033). It takes the line's RAW tail: the
+		// prompt is the human's text, and a Firing submits it verbatim.
+		return m.runSchedule(parsed.rest)
+
+	case "schedule-stop":
+		// Take a Schedule off the clock: the only live one directly, or the one picked from the
+		// overlay (schedule.go). Live mid-run for the same reason /schedule is.
+		return m.runScheduleStop()
 
 	case "compact":
 		// Compaction is a real upstream call (summary generation), so it rides a worker goroutine

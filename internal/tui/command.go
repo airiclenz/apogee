@@ -27,7 +27,9 @@ const (
 // parsedInput is the result of classifying one raw input line. For kindCommand, command
 // names the recognised verb (without the leading slash); args carries the verb's argument tokens
 // for every takesArgs verb (nil for the rest, which ignore what follows them, as they always
-// have); confine carries the dedicated argument parse of a /confine line (zero value — a status
+// have); rest carries the SAME arguments unsplit — the line's raw tail, for the one verb whose
+// argument is prose rather than tokens (/schedule's prompt, which must reach the model spaced and
+// lined as it was typed); confine carries the dedicated argument parse of a /confine line (zero value — a status
 // report — for every other verb) and err is set when a
 // recognised verb was given arguments it does not understand. An arguments error stays a
 // kindCommand: the router reports the usage line rather than sending the line to the agent or
@@ -40,6 +42,7 @@ type parsedInput struct {
 	kind     inputKind
 	command  string
 	args     []string
+	rest     string
 	confine  confineArgs
 	err      error
 	text     string
@@ -100,6 +103,14 @@ type commandSpec struct {
 // and naming what they act on removes it at the source. A verb the human cannot discover is a verb
 // they will not find.
 //
+// /schedule and /schedule-stop are the standing-instruction pair (ADR 0033): the first puts a prompt
+// on a cycle, the second takes one off it. They are the only verbs here that are BOTH argument-taking
+// and safe while a worker works — a Schedule is created in the scheduler library and fires as a
+// separate headless run, so nothing they do touches this session's engine, and the tick that would
+// contend with a live Exchange is deferred by the host's Gate rather than by this table. /schedule's
+// prompt form reads the raw tail of the line rather than its tokens (parsedInput.rest), because a
+// prompt is text the human wrote, not a token list to be re-spaced.
+//
 // Order is display order, and it is ALPHABETICAL — declared here in the literal rather than sorted
 // at render time, because this table is the registry and the order the dropdown reads is one of the
 // things it declares. A menu the human can scan without knowing the table is worth more than any
@@ -118,6 +129,8 @@ var commandSpecs = []commandSpec{
 	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true},
 	{name: "new", summary: "start a fresh conversation (same as /clear)"},
 	{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true},
+	{name: "schedule", summary: "run a prompt on a cycle (bare = list what is live)", takesArgs: true, whileRunning: true},
+	{name: "schedule-stop", summary: "take a schedule off the clock", whileRunning: true},
 	{name: "server", summary: "switch to another configured server", takesArgs: true},
 	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
 	{name: "skill", summary: "pick a skill by name (writes its /token)", menuOnly: true},
@@ -138,10 +151,12 @@ var commandSpecs = []commandSpec{
 // is extracted.
 func parseInput(raw string, known func(string) bool) parsedInput {
 	trimmed := strings.TrimSpace(raw)
-	if cmd, args, ok := matchCommand(trimmed); ok {
+	if cmd, rest, ok := matchCommand(trimmed); ok {
 		parsed := parsedInput{kind: kindCommand, command: cmd}
+		args := strings.Fields(rest)
 		if spec, found := commandByName(cmd); found && spec.takesArgs {
-			parsed.args = args // a verb that does not read its arguments carries none (commandSpec)
+			// A verb that does not read its arguments carries neither form (commandSpec).
+			parsed.args, parsed.rest = args, rest
 		}
 		if cmd == "confine" {
 			parsed.confine, parsed.err = parseConfine(args)
@@ -236,15 +251,17 @@ func (p parsedInput) safeWhileRunning() bool {
 }
 
 // matchCommand reports the recognised command verb when trimmed's first whitespace token is
-// "/<verb>" for a non-menuOnly verb of commandSpecs, together with the remaining
-// whitespace-separated argument tokens. Only a takesArgs verb reads them (parseInput hands those
-// on as parsedInput.args); for every other verb they are surplus and ignored (as they always were).
+// "/<verb>" for a non-menuOnly verb of commandSpecs, together with everything that followed it —
+// the line's RAW tail, split into argument tokens by the caller. Only a takesArgs verb reads it
+// (parseInput hands it on as parsedInput.args and .rest); for every other verb it is surplus and
+// ignored (as it always was). Splitting is left to the caller because one verb wants the tail
+// unsplit: /schedule's argument is a prompt, and re-joining tokens would re-space the human's text.
 // The verb itself is delimited by a space or
 // a tab, never a newline — so a multi-line message whose first line is "/clear" stays a message,
 // as it did before arguments existed.
-func matchCommand(trimmed string) (string, []string, bool) {
+func matchCommand(trimmed string) (string, string, bool) {
 	if !strings.HasPrefix(trimmed, "/") {
-		return "", nil, false
+		return "", "", false
 	}
 	first, rest := trimmed, ""
 	if i := strings.IndexAny(trimmed, " \t"); i >= 0 {
@@ -252,9 +269,9 @@ func matchCommand(trimmed string) (string, []string, bool) {
 	}
 	c, ok := commandByName(strings.TrimPrefix(first, "/"))
 	if !ok || c.menuOnly { // menuOnly verbs are offered by the dropdown, never parsed (see commandSpec)
-		return "", nil, false
+		return "", "", false
 	}
-	return c.name, strings.Fields(rest), true
+	return c.name, rest, true
 }
 
 // ----------------------------------------------------------------------------

@@ -144,6 +144,8 @@ blue for a file your workspace has — so a typo is visible before you send.
 | `/skills` | List the discovered skills — id, name and summary | ✅ |
 | `/version` | Show the apogee version | ✅ |
 | `/confine` | Report or change Auto's blast radius — see [below](#auto-modes-blast-radius) | ✅ report only |
+| `/schedule` | Run a prompt on a cycle — bare lists what is live, `/schedule <prompt>` asks for the cycle and mode, `/schedule <cycle> [auto] <prompt>` creates one outright | ✅ |
+| `/schedule-stop` | Take a schedule off the clock — the only one straight away, a picker when several are live | ✅ |
 | `/clear` (or `/new`) | Close this session into history and start a fresh one | — |
 | `/compact` | Summarise the conversation to reclaim context | — |
 | `/continue` | Ask the model to keep going | — |

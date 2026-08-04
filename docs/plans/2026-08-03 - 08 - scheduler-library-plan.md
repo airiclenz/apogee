@@ -328,9 +328,27 @@ goroutines; events arrive in per-schedule order.
 
 ---
 
-## 5. TUI surface — `/schedule`, `/schedule-stop`, pickers, notices
+## 5. TUI surface — `/schedule`, `/schedule-stop`, pickers, notices — ✅ DONE (2026-08-04)
 
 Depends on item 4.
+
+NOTES (2026-08-04): five choices beyond the item's literal text, all inside its semantics.
+(a) `matchCommand` now returns the line's RAW tail instead of pre-split tokens and `parsedInput`
+gained `rest` beside `args` — a prompt is text a human wrote and a Firing submits verbatim, so
+re-joining `strings.Fields` would silently re-space it; splitting moved to the one caller that wants
+tokens, leaving a single splitter. (b) The picker's key routing widened from idle-only to
+idle-or-running: the item makes both verbs `whileRunning`, and `/schedule <prompt>` mid-Exchange
+would otherwise render a modal that claims no keys. The older kinds are unaffected — their verbs are
+idle-only, and a picker cannot be open when a worker starts. (c) The seam is typed against
+`internal/schedule` (Spec/Status/Event) rather than projected TUI values — the `SessionHost`
+/`internal/session` posture, which keeps the library the single owner of every policy the surface
+would otherwise restate. (d) The verbs stay SILENT on success: the item lists `created` and
+`stopped` among the rendered event notices, so a confirmation from the command path too would
+double every one of them; the created notice reads the cycle/mode/next-fire off `List()`.
+(e) `pickerHintFor` replaces the shared `⏎ switch` legend for the three new kinds — none of them
+switches anything. Docs: `README.md`'s command table, `layout.md` (the arg-taking verbs, the
+while-running verbs, a paragraph on the three new panes) and `internal/tui/doc.go`. CHANGELOG
+untouched — item 8 owns it.
 
 **What:**
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -59,6 +60,28 @@ type SessionHost interface {
 	Rename(id, title string) error
 	// ActiveID reports the active session's ID, or "" before the first Save has minted one.
 	ActiveID() string
+}
+
+// Scheduler is the scheduling seam the TUI drives: put a standing instruction on the clock
+// (Add), take one off it (Stop), and list what is live (List) — the whole of what a surface
+// needs from the scheduler library (ADR 0033). It is defined here like [SessionHost] and typed
+// against internal/schedule (the Spec the pickers compose and the Status the rows render), so
+// the renderer stays unit-testable with a fake while the composition root owns the runner, the
+// Gate and the clock. It is satisfied by *schedule.Scheduler.
+//
+// Every when-and-how DECISION stays behind it: the cycle floor, the mode validation, the
+// overlap policy and the naming of an unnamed Schedule are the library's (schedule.Spec), which
+// is why this surface pre-checks none of them and words the errors it gets back instead.
+//
+// A nil Scheduler means scheduling is unwired: /schedule and /schedule-stop say so in a note,
+// exactly as a nil GenerateTitle makes a bare /rename report that naming is unavailable.
+type Scheduler interface {
+	// Add validates spec, puts the Schedule on the clock and returns its id.
+	Add(spec schedule.Spec) (string, error)
+	// Stop takes the Schedule with this id off the clock.
+	Stop(id string) error
+	// List reports every live Schedule in creation order.
+	List() []schedule.Status
 }
 
 // ----------------------------------------------------------------------------
@@ -387,6 +410,28 @@ type Options struct {
 	// nil ⇒ unwired; see LaunchProfiles.
 	UnloadServer func(endpoint string) (ActuationResult, error)
 	StopServer   func(endpoint string) (ActuationResult, error)
+
+	// Schedules is the scheduler this session's Schedules live in (the [Scheduler] seam the binary
+	// backs with a live schedule.Scheduler); nil ⇒ scheduling is unwired and both verbs say so.
+	// The Model drives it synchronously on the Update loop — Add, Stop and List touch no engine
+	// and open no Exchange, which is why /schedule may be typed mid-task.
+	//
+	// It is wired TOGETHER with the event route that answers it: the binary hands the library a
+	// Notify seam that sends a scheduleEventMsg into the running program, and the notices those
+	// events render are the only confirmation a created or stopped Schedule gets — this surface
+	// deliberately adds no second sentence of its own (scheduleEventNote).
+	Schedules Scheduler
+
+	// ScheduleAutoBlocked is why a Schedule may NOT be created in auto mode on this host — the
+	// reason half of the same Auto-eligibility ladder that gates launching in auto (ADR 0033,
+	// decision 3: a schedule's mode is chosen explicitly and is never silently escalated). Empty ⇒
+	// auto schedules are allowed.
+	//
+	// One string is both the gate and the wording, so the disabled picker row and the refusal the
+	// `auto` argument earns can never disagree about whether — or why — auto is unavailable. The
+	// binary resolves it (the renderer imports no platform knowledge, exactly as [ConfinementInfo]
+	// keeps internal/platform out of here) and the value stands for the process lifetime.
+	ScheduleAutoBlocked string
 
 	// Resumed is the startup-replay payload when this run resumes a stored session (--resume or
 	// --continue); nil on a fresh start. newModel seeds the start-up box as usual, then repaints
