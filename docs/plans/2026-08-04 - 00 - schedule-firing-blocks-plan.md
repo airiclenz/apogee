@@ -292,7 +292,24 @@ stripped; the header leads with ⟳ and never blinks; an open firing block leave
 
 ---
 
-## 5. `internal/tui` — the block survives the record
+## 5. `internal/tui` — the block survives the record — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): implementer choices. **The interrupted close is `closeInterruptedFiring` in
+`schedule.go`**, not inline in the codec — it is the block's own wording and the decode-side twin of
+`enrichFiring`, so both things that can close a block read together; the codec's arm is one guarded
+call with the reason on it. **The round-trip fixture answers with a MULTI-line answer** because a
+one-line answer's block cannot round-trip byte-for-byte by design: the summary's `quoted` mark is
+deliberately absent from the wire (the codec header's rule, already pinned by
+`TestTranscriptCodecReplaysAPromotedSummaryAsShown`), so a promoted answer comes back as a named
+summary — harmless, since decode respells nothing, but it makes the multi-line shape the honest
+DeepEqual fixture. **The unknown-kind tolerance was verified, not written**: the pre-existing
+`TestTranscriptCodecUnknownKindSkipped` already proves a v1 blob carrying an unrecognised kind drops
+only that entry, which is exactly the older-build case, so nothing about it changed; the new
+`TestTranscriptCodecDecodesALegacyBlobUnchanged` covers the other half (an old file decoding
+identically now that the map has grown a name). **The ESC test was extended rather than duplicated**
+— a finished firing block joined `TestTranscriptCodecStripsEscapesOnDecode`'s fixture, whose loop
+already asserts every entry's tool fields; it is finished on purpose, since an open one is re-worded
+on decode and would prove nothing about the strip.
 
 Depends on item 4.
 

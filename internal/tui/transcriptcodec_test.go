@@ -3,10 +3,13 @@ package tui
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/schedule"
 )
 
 // ----------------------------------------------------------------------------
@@ -69,6 +72,121 @@ func TestTranscriptCodecRoundTrip(t *testing.T) {
 	want := mixedEntries()
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("round-trip mismatch:\n got = %+v\nwant = %+v", got, want)
+	}
+}
+
+// firedBlockEntries is a scrollback holding one finished firing block, built through the fold's own
+// seams (addFiring then enrichFiring) rather than as a literal, for the reason mixedEntries gives:
+// a fixture that skipped the presenters would describe a block the fold never produces.
+//
+// The answer is deliberately MULTI-LINE. That is the shape a record has to bring back whole — the
+// answer leading the body with the summary slot left empty — whereas a one-line answer is promoted
+// onto the branch, and what a resume owes a promoted summary is pinned by
+// TestTranscriptCodecReplaysAPromotedSummaryAsShown rather than restated here.
+func firedBlockEntries() []entry {
+	tr := &transcript{}
+	tr.addFiring(schedule.Event{
+		Kind: schedule.EventFired, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Prompt: "check the log\nand tidy it",
+	})
+	tr.enrichFiring(schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Elapsed: 4 * time.Second,
+		Outcome: schedule.Outcome{
+			RecordID: "s1", Title: "nightly tidy — 14:05",
+			FinalText: "found 3 stale entries\nremoved them", Turns: 2,
+		},
+	})
+	return tr.entries
+}
+
+// TestTranscriptCodecRoundTripsAFiringBlock proves a finished firing block survives the record: it
+// is PERSISTED (a Firing is something that actually happened in this session's lifetime — the
+// ADR 0022 addendum's test — so encodeTranscript must write it, under the "schedule" kind string),
+// and it comes back with every view field, its pairing key, its done mark and its body's settled
+// kind intact.
+func TestTranscriptCodecRoundTripsAFiringBlock(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{entries: firedBlockEntries()}
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	if !strings.Contains(string(data), `"kind":"schedule"`) {
+		t.Fatalf("the firing block did not reach the wire under its kind string: %s", data)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if !reflect.DeepEqual(got, firedBlockEntries()) {
+		t.Errorf("round-trip mismatch:\n got = %+v\nwant = %+v", got, firedBlockEntries())
+	}
+}
+
+// TestTranscriptCodecClosesAnUnfinishedFiringBlock pins the one entry a resume deliberately does not
+// replay as stored: a block still open when the record was written comes back CLOSED, wearing the
+// block's own account of what happened to it. The Firing died with the TUI that scheduled it
+// (ADR 0033) and no completed or failed Event for it will ever arrive, so a replayed block still
+// showing the running marker would be a lie no later fold could correct. What it was announced with
+// — the prompt — stays.
+func TestTranscriptCodecClosesAnUnfinishedFiringBlock(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{}
+	tr.addFiring(schedule.Event{
+		Kind: schedule.EventFired, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Prompt: "check the log",
+	})
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 1 || got[0].kind != entrySchedule {
+		t.Fatalf("decoded %+v; want the one firing block", got)
+	}
+	if !got[0].done {
+		t.Error("done = false; a replayed firing block must not claim its run is still going")
+	}
+	if got[0].tool.Summary.Text != scheduleInterruptedSummary {
+		t.Errorf("summary = %q, want %q", got[0].tool.Summary.Text, scheduleInterruptedSummary)
+	}
+	if want := []string{"prompt: check the log"}; !slices.Equal(firingBody(got[0]), want) {
+		t.Errorf("body = %q, want the prompt it was announced with %q", firingBody(got[0]), want)
+	}
+}
+
+// TestTranscriptCodecDecodesALegacyBlobUnchanged proves the new kind is additive in the direction
+// that matters for records already on disk: a v1 blob written before the firing block existed
+// decodes exactly as it did then. Hand-written bytes rather than a re-encode, because what is being
+// tested is an OLD file meeting a map that has since grown a name.
+func TestTranscriptCodecDecodesALegacyBlobUnchanged(t *testing.T) {
+	t.Parallel()
+	data := []byte(`{"version":1,"entries":[` +
+		`{"kind":"user","text":"read main.go","skills":["reviewer"]},` +
+		`{"kind":"toolCall","callID":"c1","done":true,"tool":{"label":"Read File","verb":"reading",` +
+		`"target":"main.go","name":"read_file","summary":{"text":"1 - 100"},"details":[{"kind":1,"text":"+x"}]}},` +
+		`{"kind":"note","text":"cancelled"}` +
+		`]}`)
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	want := []entry{
+		{kind: entryUser, text: "read main.go", skills: []string{"reviewer"}},
+		{kind: entryToolCall, callID: "c1", done: true, tool: toolView{
+			Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
+			Summary: namedSummary(detailLine{Text: "1 - 100"}),
+			Details: newToolBody([]detailLine{{Kind: detailDiffAdded, Text: "+x"}}),
+		}},
+		{kind: entryNote, text: "cancelled"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("legacy blob decoded differently:\n got = %+v\nwant = %+v", got, want)
 	}
 }
 
@@ -279,8 +397,9 @@ func TestTranscriptCodecUnknownKindSkipped(t *testing.T) {
 
 // TestTranscriptCodecStripsEscapesOnDecode proves the defence-in-depth strip: ESC bytes salted
 // through every text field of a stored blob are removed on the way back in, across the entry body,
-// skills chips, the tool card (label/target/summary/details/name) and the presented view — a disk
-// file (which could have been hand-edited) can never smuggle a terminal escape into the transcript.
+// skills chips, the tool card (label/target/summary/details/name), a firing block's stored answer
+// and prompt, and the presented view — a disk file (which could have been hand-edited) can never
+// smuggle a terminal escape into the transcript.
 // The blob is built by encoding entries that carry real ESC bytes: json.Marshal writes them as the
 // valid escaped form, exactly the on-disk shape a tampered file would hold.
 func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
@@ -294,6 +413,16 @@ func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
 				Label: "Read" + esc + "File", Target: "ma" + esc + "in.go", name: "read" + esc + "_file",
 				Summary: namedSummary(detailLine{Text: "1" + esc + "2"}),
 				Details: newToolBody([]detailLine{{Kind: detailDiffAdded, Text: "+a" + esc + "dd"}}),
+			},
+		},
+		{
+			// A FINISHED firing block, so the stored summary is the one under test: an open one is
+			// re-worded on decode (closeInterruptedFiring) and would prove nothing about the strip.
+			kind: entrySchedule, callID: "sch-1", done: true,
+			tool: toolView{
+				Label: scheduleBlockLabel, Target: "nightly " + esc + "tidy",
+				Summary: namedSummary(detailLine{Text: "the log is cle" + esc + "an"}),
+				Details: newToolBody([]detailLine{{Text: "prompt: check " + esc + "the log"}}),
 			},
 		},
 		{

@@ -99,6 +99,10 @@ type wirePresented struct {
 // deliberately absent: the start-up box is opening chrome re-seeded fresh on resume, never
 // serialized (encodeTranscript skips any kind with no name here), and a "startup" string on
 // decode is unknown and skipped — symmetric.
+//
+// A new name here is ADDITIVE within transcriptVersion and needs no bump (the wireEnvelope rule):
+// an older build simply does not find the string and skips that entry, exactly as it skips a
+// "future-variant" today. "schedule" — the firing block — joined v1 on those terms.
 var entryKindNames = map[entryKind]string{
 	entryUser:        "user",
 	entryAssistant:   "assistant",
@@ -108,6 +112,7 @@ var entryKindNames = map[entryKind]string{
 	entryNote:        "note",
 	entryPresented:   "presented",
 	entryInterjected: "interjected",
+	entrySchedule:    "schedule",
 }
 
 // entryKindByName is the decode-side inverse of entryKindNames, built once at init so decode is
@@ -180,7 +185,9 @@ func decodeTranscript(data []byte) ([]entry, error) {
 
 // toWireEntry projects one committed entry onto its wire form. The tool and presented views are
 // attached only for the kinds that carry them, so every other kind serializes without an empty
-// sub-object.
+// sub-object. A firing block (entrySchedule) is one of the kinds that carry a view: it borrows the
+// toolView slot whole, so it borrows its wire form whole too rather than growing a second one that
+// would have to be kept in step with it.
 func toWireEntry(e *entry, kind string) wireEntry {
 	w := wireEntry{
 		Kind:   kind,
@@ -190,7 +197,7 @@ func toWireEntry(e *entry, kind string) wireEntry {
 		Done:   e.done,
 		Skills: e.skills,
 	}
-	if e.kind == entryToolCall {
+	if e.kind == entryToolCall || e.kind == entrySchedule {
 		w.Tool = toWireToolView(e.tool)
 	}
 	if e.kind == entryPresented {
@@ -230,6 +237,11 @@ func toWirePresented(pv presentedView) *wirePresented {
 
 // fromWireEntry rebuilds one committed entry from its wire form, escape-stripping every text
 // field on the way in. An unrecognised kind returns ok=false so the caller skips it.
+//
+// One kind is not replayed exactly as it was stored: a firing block still open (`!done`) when the
+// record was written comes back CLOSED, because the Firing it announced died with the TUI that
+// scheduled it (ADR 0033, closeInterruptedFiring). Nothing else is rewritten here — the rule is
+// about a fact that changed between the write and the read, not about the wire form.
 func fromWireEntry(w *wireEntry) (entry, bool) {
 	kind, ok := entryKindByName[w.Kind]
 	if !ok {
@@ -248,6 +260,9 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 	}
 	if w.Presented != nil {
 		e.presented = fromWirePresented(w.Presented)
+	}
+	if e.kind == entrySchedule && !e.done {
+		closeInterruptedFiring(&e)
 	}
 	return e, true
 }

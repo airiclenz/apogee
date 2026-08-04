@@ -396,6 +396,12 @@ const scheduleRunningSummary = "firing now"
 // empty on a run that did finish.
 const scheduleNoAnswerSummary = "finished — no answer"
 
+// scheduleInterruptedSummary is what a block that was still open when the session was recorded comes
+// back as on resume (transcriptcodec.go). A Firing dies with the TUI that scheduled it (ADR 0033),
+// so a replayed block still holding the running marker would claim a run is in flight that ended the
+// moment the program did — the record says how far it got, and this says it never got further.
+const scheduleInterruptedSummary = "never finished — schedules die with the TUI"
+
 // schedulePromptLead marks where the prompt starts in the block's body. The body is two quoted
 // voices in a row once the answer lands ahead of it (the model's, then the human's), and this is the
 // one word that tells them apart; it rides the prompt's FIRST line rather than taking a line of its
@@ -431,6 +437,17 @@ func (t *transcript) enrichFiring(ev schedule.Event) bool {
 		}
 	}
 	return false
+}
+
+// closeInterruptedFiring closes a firing block that was still open when its session was written to
+// disk — the decode-side counterpart of enrichFiring, and the only other thing that ends a block. It
+// is a REPLACEMENT rather than an enrichment: there is no outcome to fold in, because the Firing went
+// down with its Driver (ADR 0033) and no Event for it will ever arrive, so the summary the running
+// marker held becomes the block's own account of that (scheduleInterruptedSummary) and the body keeps
+// the prompt it was announced with.
+func closeInterruptedFiring(e *entry) {
+	e.done = true
+	e.tool.Summary = namedSummary(detailLine{Text: scheduleInterruptedSummary})
 }
 
 // presentFiring builds the view a starting Firing is announced with — presentToolCall's job for a
