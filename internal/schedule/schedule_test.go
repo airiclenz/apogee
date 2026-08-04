@@ -489,6 +489,185 @@ func TestAFailingRunnerIsReportedAndTheCadenceSurvives(t *testing.T) {
 	rec.next(t, EventCompleted)
 }
 
+// What an Event carries
+
+// bare asserts an Event carries none of the per-Firing detail fields. The lifecycle events
+// are facts about the SCHEDULE — nothing ran, so there is no prompt to show, no outcome to
+// report and nothing to time.
+func bare(t *testing.T, e Event) {
+	t.Helper()
+	if e.Prompt != "" {
+		t.Errorf("%s event carried prompt %q, want none", e.Kind, e.Prompt)
+	}
+	if e.Outcome != (Outcome{}) {
+		t.Errorf("%s event carried outcome %+v, want none", e.Kind, e.Outcome)
+	}
+	if e.Elapsed != 0 {
+		t.Errorf("%s event carried elapsed %s, want none", e.Kind, e.Elapsed)
+	}
+}
+
+// TestThePromptRidesEventFiredAndLifecycleEventsStayBare proves the prompt rides EventFired:
+// a surface must be able to show what was submitted without a second read of the live
+// Status, which a Schedule that has since been stopped would no longer answer. It rides that
+// one event and no other.
+func TestThePromptRidesEventFiredAndLifecycleEventsStayBare(t *testing.T) {
+	t.Parallel()
+
+	clk, rec := newFakeClock(), newRecorder()
+	release := make(chan struct{})
+	s := start(t, clk, rec, blockingFire(make(chan struct{}, 1), release, Outcome{RecordID: "rec-1"}), nil)
+
+	spec := testSpec("nightly")
+	spec.Prompt = "  check the build\nand summarise what broke  "
+	// The prompt the Schedule holds — normalization trims the edges and nothing else, and
+	// what the event carries is exactly what the Firing submits.
+	const want = "check the build\nand summarise what broke"
+
+	id, err := s.Add(spec)
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	bare(t, rec.next(t, EventCreated))
+
+	clk.tick(t, 0)
+	fired := rec.next(t, EventFired)
+	if fired.Prompt != want {
+		t.Errorf("fired event carried prompt %q, want %q", fired.Prompt, want)
+	}
+	if fired.Outcome != (Outcome{}) || fired.Elapsed != 0 {
+		t.Errorf("fired event carried %+v / %s, want neither yet", fired.Outcome, fired.Elapsed)
+	}
+
+	// The tick that lands on the busy Schedule.
+	clk.tick(t, 0)
+	bare(t, rec.next(t, EventSkipped))
+
+	close(release)
+	if got := rec.next(t, EventCompleted); got.Prompt != "" {
+		t.Errorf("completed event carried prompt %q, want none — the fired event already did", got.Prompt)
+	}
+
+	if err := s.Stop(id); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	bare(t, rec.next(t, EventStopped))
+}
+
+// TestElapsedIsMeasuredAroundFireOnTheSchedulersClock proves the Firing's wall time is the
+// LIBRARY's measurement, taken on the Scheduler's own Clock: every Driver gets the same
+// number without measuring it itself, and a fake clock pins it exactly. It also proves the
+// whole widened Outcome crosses untouched — the library reads none of it.
+func TestElapsedIsMeasuredAroundFireOnTheSchedulersClock(t *testing.T) {
+	t.Parallel()
+
+	clk, rec := newFakeClock(), newRecorder()
+	const took = 90 * time.Second
+	reported := Outcome{
+		RecordID:  "rec-1",
+		Title:     "nightly — 09:01",
+		FinalText: "the build is green",
+		Turns:     3,
+		Denied:    1,
+	}
+	fire := func(context.Context, Firing) (Outcome, error) {
+		clk.advance(took)
+		return reported, nil
+	}
+	s := start(t, clk, rec, fire, nil)
+
+	if _, err := s.Add(testSpec("nightly")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if got := rec.next(t, EventCreated); got.Elapsed != 0 {
+		t.Errorf("created event carried elapsed %s, want none", got.Elapsed)
+	}
+
+	clk.tick(t, 0)
+	if got := rec.next(t, EventFired); got.Elapsed != 0 {
+		t.Errorf("fired event carried elapsed %s, want none", got.Elapsed)
+	}
+
+	done := rec.next(t, EventCompleted)
+	if done.Elapsed != took {
+		t.Errorf("completed event carried elapsed %s, want %s", done.Elapsed, took)
+	}
+	if done.Outcome != reported {
+		t.Errorf("completed event carried %+v, want the runner's report %+v", done.Outcome, reported)
+	}
+}
+
+// TestAFailedFiringCarriesItsSalvagedOutcomeAndElapsed proves the failure path stops
+// discarding what the runner salvaged: a partial record is exactly what a human wants to
+// open after a Firing died, and the error text is not a structure a surface can point at.
+func TestAFailedFiringCarriesItsSalvagedOutcomeAndElapsed(t *testing.T) {
+	t.Parallel()
+
+	clk, rec := newFakeClock(), newRecorder()
+	const took = 45 * time.Second
+	boom := errors.New("the upstream refused mid-turn")
+	salvaged := Outcome{RecordID: "rec-partial", Title: "nightly — 09:01", Turns: 2}
+	fire := func(context.Context, Firing) (Outcome, error) {
+		clk.advance(took)
+		return salvaged, boom
+	}
+	s := start(t, clk, rec, fire, nil)
+
+	if _, err := s.Add(testSpec("nightly")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	rec.next(t, EventCreated)
+
+	clk.tick(t, 0)
+	rec.next(t, EventFired)
+
+	got := rec.next(t, EventFailed)
+	if !errors.Is(got.Err, boom) {
+		t.Errorf("failed event carried %v, want %v", got.Err, boom)
+	}
+	if got.Outcome != salvaged {
+		t.Errorf("failed event carried %+v, want the salvaged outcome %+v", got.Outcome, salvaged)
+	}
+	if got.Elapsed != took {
+		t.Errorf("failed event carried elapsed %s, want %s", got.Elapsed, took)
+	}
+}
+
+// TestAGateRefusalCarriesNeitherOutcomeNorElapsed pins the other failure: a Gate that refuses
+// never reached the runner, so there is nothing to report and nothing to time. Elapsed
+// measures the Fire seam, not the wait in front of it.
+func TestAGateRefusalCarriesNeitherOutcomeNorElapsed(t *testing.T) {
+	t.Parallel()
+
+	clk, rec := newFakeClock(), newRecorder()
+	refused := errors.New("the host will not release")
+	fire := func(context.Context, Firing) (Outcome, error) {
+		t.Error("the runner ran despite the Gate refusing")
+		return Outcome{RecordID: "rec-1"}, nil
+	}
+	s := start(t, clk, rec, fire, func(context.Context) error {
+		clk.advance(time.Minute)
+		return refused
+	})
+
+	if _, err := s.Add(testSpec("nightly")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	rec.next(t, EventCreated)
+
+	clk.tick(t, 0)
+	got := rec.next(t, EventFailed)
+	if !errors.Is(got.Err, refused) {
+		t.Errorf("failed event carried %v, want %v", got.Err, refused)
+	}
+	if got.Outcome != (Outcome{}) {
+		t.Errorf("failed event carried %+v, want a zero outcome", got.Outcome)
+	}
+	if got.Elapsed != 0 {
+		t.Errorf("failed event carried elapsed %s, want none", got.Elapsed)
+	}
+}
+
 // Creation policy
 
 // TestAddRefusesASpecNoFiringCanRun pins the library's creation policy — the floor under the

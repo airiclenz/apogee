@@ -70,14 +70,22 @@ type Firing struct {
 	Mode domain.Mode
 }
 
-// Outcome is what the runner reports back about a completed Firing. It is deliberately thin
-// — the ids a surface needs to point a human at the saved run, nothing the runner knows
-// that the Scheduler would only pass through.
+// Outcome is the runner's report about one Firing, passed through. The library reads none
+// of these fields — it stays runner-agnostic (ADR 0033) and carries them only so a surface
+// can show a human what the Firing did without a seam of its own onto the runner.
 type Outcome struct {
 	// RecordID is the saved session record's id, empty when the runner persisted nothing.
 	RecordID string
 	// Title is the saved record's title.
 	Title string
+	// FinalText is the Firing's answer: the run's final assistant text, empty when it
+	// produced none. It is RAW model output — a surface escape-strips it at its own render
+	// seam, this library does not (ADR 0010: the answer crosses as plain data).
+	FinalText string
+	// Turns is how many Turns the Firing took.
+	Turns int
+	// Denied is how many gated actions the Firing's fail-safe denier refused.
+	Denied int
 }
 
 // Status is one live Schedule as a surface displays it.
@@ -131,8 +139,19 @@ type Event struct {
 	// ScheduleID and ScheduleName identify the Schedule it happened to.
 	ScheduleID   string
 	ScheduleName string
-	// Outcome carries the saved run on EventCompleted, and is zero otherwise.
+	// Prompt carries the Firing's prompt on EventFired, and is empty otherwise. It rides the
+	// Event rather than being looked up because a surface must be able to show what was
+	// submitted without a second seam read — and because the Schedule may have been stopped
+	// by the time that surface looks.
+	Prompt string
+	// Outcome carries the saved run on EventCompleted, whatever the runner reported beside
+	// its error on EventFailed, and is zero otherwise.
 	Outcome Outcome
+	// Elapsed is how long the Fire seam took, measured on the Scheduler's own Clock so every
+	// Driver gets the same number and a fake clock pins it. It is set on EventCompleted and
+	// EventFailed for a Firing that actually ran, and is zero otherwise — including on the
+	// EventFailed of a Gate refusal, which never reached the runner.
+	Elapsed time.Duration
 	// Err carries the failure on EventFailed, and is nil otherwise.
 	Err error
 }
@@ -430,19 +449,24 @@ func (s *Scheduler) run(e *entry) {
 	s.mu.Lock()
 	e.fired++
 	s.mu.Unlock()
-	s.emit(e, Event{Kind: EventFired})
+	s.emit(e, Event{Kind: EventFired, Prompt: e.spec.Prompt})
 
+	started := s.clock.Now()
 	out, err := s.fire(s.ctx, Firing{
 		ScheduleID:   e.id,
 		ScheduleName: e.spec.Name,
 		Prompt:       e.spec.Prompt,
 		Mode:         e.spec.Mode,
 	})
+	elapsed := s.clock.Now().Sub(started)
 	if err != nil {
-		s.emit(e, Event{Kind: EventFailed, Err: err})
+		// The Outcome rides the failure too: a runner that salvaged a partial record still
+		// has something a surface can point a human at, and discarding it here would make the
+		// partial save unreachable outside the error text.
+		s.emit(e, Event{Kind: EventFailed, Outcome: out, Elapsed: elapsed, Err: err})
 		return
 	}
-	s.emit(e, Event{Kind: EventCompleted, Outcome: out})
+	s.emit(e, Event{Kind: EventCompleted, Outcome: out, Elapsed: elapsed})
 }
 
 // landed clears the in-flight flag, which reopens the Schedule to its next tick.

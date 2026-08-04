@@ -138,7 +138,7 @@ type instead — flag which as a NOTES line.
 
 ---
 
-## 2. `internal/schedule` — the Outcome grows up and Events learn time
+## 2. `internal/schedule` — the Outcome grows up and Events learn time — ✅ DONE (2026-08-04)
 
 **What:**
 
