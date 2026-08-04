@@ -175,17 +175,21 @@ func recordProbeFingerprint(m probe.Model, roots stateRoots, opts options, save 
 	// signature is recorded beside it. A defective previous record is not a comparison;
 	// LoadProbeRecord returns the reason for THIS caller to surface, and printing it here is
 	// the warning the command's own Long text promises for v1-format records.
+	//
+	// Both dates taken off that record below are for the REPORT to print, so both are spelled in
+	// the machine's own zone — the same conversion the `probed at` line makes, and for the same
+	// reason. The record itself is untouched: what SaveProbeRecord writes stays UTC.
 	prev, warning, ok := library.LoadProbeRecord(roots.probe, m.Endpoint, m.Model)
 	if warning != "" {
 		printErr(warning)
 	}
 	if ok {
 		if prev.Behavior != m.Behavior {
-			out.Changed = prev.ProbedAt.Format(time.RFC3339)
+			out.Changed = prev.ProbedAt.Local().Format(time.RFC3339)
 		}
 		// The record still in force should this run write nothing below — a successful
 		// write replaces it and clears this again.
-		out.Previous = prev.ProbedAt.Format(time.RFC3339)
+		out.Previous = prev.ProbedAt.Local().Format(time.RFC3339)
 	}
 
 	if !save {

@@ -231,7 +231,11 @@ func TestProbeModelNoSaveNamesTheSurvivingRecord(t *testing.T) {
 	srv := modelUpstream(t)
 	configHome := t.TempDir()
 	dir := library.ProbeDir(configHome)
-	probedAt := mustTime(t, "2026-01-02T03:04:05Z")
+	// Seeded in a zone that is NOT local's, so the date the effect line prints proves the display
+	// converts to the reader's own clock on any machine's TZ (the stored stamp is unaffected —
+	// asserted below by Equal, which compares instants rather than spellings).
+	local := time.Date(2026, 1, 2, 23, 0, 0, 0, time.Local)
+	probedAt := awayFromLocal(t, local)
 
 	if _, err := library.SaveProbeRecord(dir, library.ProbeRecord{
 		Endpoint:   srv.URL,
@@ -245,8 +249,11 @@ func TestProbeModelNoSaveNamesTheSurvivingRecord(t *testing.T) {
 	report := runProbeModel(t, configHome, "--endpoint", srv.URL, "--no-save")
 
 	if !strings.Contains(report,
-		"none new — the record from 2026-01-02T03:04:05Z continues to apply; this run recorded nothing") {
-		t.Errorf("the effect line must name the surviving record:\n%s", report)
+		"none new — the record from "+local.Format(time.RFC3339)+" continues to apply; this run recorded nothing") {
+		t.Errorf("the effect line must name the surviving record in local time:\n%s", report)
+	}
+	if foreign := probedAt.Format(time.RFC3339); strings.Contains(report, foreign) {
+		t.Errorf("the effect line carries the stored zone's spelling %q:\n%s", foreign, report)
 	}
 	if strings.Contains(report, "identity stays at the label tier") {
 		t.Errorf("the report denies a record that is still on disk:\n%s", report)
@@ -340,19 +347,26 @@ func TestProbeModelReportsAChangedModelBehindTheLabel(t *testing.T) {
 	srv := modelUpstream(t)
 	configHome := t.TempDir()
 	dir := library.ProbeDir(configHome)
+	// As in the surviving-record test: a stored zone that is not local's, so "changed since <date>"
+	// is proved to reach the reader in the reader's own clock whatever the machine's TZ.
+	local := time.Date(2026, 1, 2, 23, 0, 0, 0, time.Local)
+	probedAt := awayFromLocal(t, local)
 
 	if _, err := library.SaveProbeRecord(dir, library.ProbeRecord{
 		Endpoint:   srv.URL,
 		ModelLabel: "battery-model",
-		ProbedAt:   mustTime(t, "2026-01-02T03:04:05Z"),
+		ProbedAt:   probedAt,
 		Behavior:   "probe:1:tools",
 	}); err != nil {
 		t.Fatalf("seed previous record: %v", err)
 	}
 
 	report := runProbeModel(t, configHome, "--endpoint", srv.URL)
-	if !strings.Contains(report, "the model behind this label changed since 2026-01-02T03:04:05Z") {
-		t.Errorf("report does not flag the changed model:\n%s", report)
+	if !strings.Contains(report, "the model behind this label changed since "+local.Format(time.RFC3339)) {
+		t.Errorf("report does not flag the changed model in local time:\n%s", report)
+	}
+	if foreign := probedAt.Format(time.RFC3339); strings.Contains(report, foreign) {
+		t.Errorf("the changed line carries the stored zone's spelling %q:\n%s", foreign, report)
 	}
 }
 
@@ -907,6 +921,20 @@ func TestProbeModelLiveSmoke(t *testing.T) {
 	if strings.Contains(report, "the battery did not complete") {
 		t.Errorf("the live battery did not complete against %s:\n%s", endpoint, report)
 	}
+}
+
+// awayFromLocal expresses a local wall clock in a zone 90 minutes off local's own offset. A record
+// seeded with the result round-trips through the store carrying THAT offset, so a test can tell the
+// local spelling of the instant from the stored one on any machine's TZ — including a machine whose
+// TZ is UTC, where a UTC fixture would make the two indistinguishable and the assertion vacuous.
+func awayFromLocal(t *testing.T, local time.Time) time.Time {
+	t.Helper()
+	_, offset := local.Zone()
+	away := local.In(time.FixedZone("away", offset+90*60))
+	if away.Format(time.RFC3339) == local.Format(time.RFC3339) {
+		t.Fatalf("the fixture no longer distinguishes the zones: away %s, local %s", away, local)
+	}
+	return away
 }
 
 // mustTime parses an RFC3339 timestamp for a seeded record.

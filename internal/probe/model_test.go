@@ -46,11 +46,41 @@ func TestModelReportStatesTheFindings(t *testing.T) {
 		"suggested model profile",
 		"  model-profile:",
 		"    tool-call-format: native",
-		"2026-07-22T09:00:00Z",
+		// The dated claim, in the spelling the reader gets — see
+		// TestModelReportSpellsTheProbedAtTimeLocally for the zone itself.
+		m.ProbedAt.Local().Format(time.RFC3339),
 	} {
 		if !strings.Contains(m.Report(), want) {
 			t.Errorf("report does not state %q:\n%s", want, m.Report())
 		}
+	}
+}
+
+// The `probed at` line is the one instant this report prints, and it is spelled in the machine's
+// OWN zone. The value behind it is stored UTC by construction (GatherModel stamps it, the record
+// on disk keeps it), so leaving the display to inherit that zone would hand every reader outside
+// UTC a clock that is not theirs — the same defect the scheduler's titles carried.
+//
+// The fixture is built from LOCAL's own offset — one instant, expressed in a zone 90 minutes off
+// wherever the test runs — so it asserts the same thing on any machine's TZ, and the foreign
+// spelling is rejected explicitly: dropping the conversion is a failure, not a coin flip.
+func TestModelReportSpellsTheProbedAtTimeLocally(t *testing.T) {
+	t.Parallel()
+	m := gatherModel(t, script{nativeTools: true}, "fake-model")
+
+	local := time.Date(2026, 7, 22, 23, 0, 0, 0, time.Local)
+	_, offset := local.Zone()
+	m.ProbedAt = local.In(time.FixedZone("away", offset+90*60))
+	if m.ProbedAt.Format(time.RFC3339) == local.Format(time.RFC3339) {
+		t.Fatalf("the fixture no longer distinguishes the zones: away %s, local %s", m.ProbedAt, local)
+	}
+
+	report := m.Report()
+	if want := field("probed at", local.Format(time.RFC3339)); !strings.Contains(report, want) {
+		t.Errorf("report does not state %q:\n%s", want, report)
+	}
+	if foreign := m.ProbedAt.Format(time.RFC3339); strings.Contains(report, foreign) {
+		t.Errorf("report carries the foreign spelling %q:\n%s", foreign, report)
 	}
 }
 

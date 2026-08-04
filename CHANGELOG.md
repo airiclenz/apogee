@@ -947,6 +947,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`apogee probe model` dates itself in your own time zone.** The report's `probed at` line, and
+  the two dates its record section names — `changed since …` when a model swapped behind an
+  unchanged label, and `the record from … continues to apply` under `--no-save` — were printed in
+  UTC, because UTC is how the instant is stored and the display simply inherited it. All three now
+  convert at the format seam, the same fix the scheduler's titles just had. The spelling stays
+  RFC3339, so the offset is right there in the line and the reading is never ambiguous. Nothing
+  about storage moves: the probe record on disk keeps its UTC `probed-at` stamp, and the tests
+  pinning the three lines are built from local's own offset, so they hold on any machine's `TZ`.
+
 - **A scheduled run's title is spelled in your own time zone by construction, not by luck.** The
   `<schedule name> — HH:MM` title a Firing's record is saved under — the one its block points at and
   `/sessions` lists it by — was formatted in whatever zone the instant behind it carried, and the

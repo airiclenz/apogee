@@ -49,6 +49,10 @@ type Model struct {
 // makes the write the reason `probe model` is an ACT rather than a report: writing a Medium
 // fingerprint promotes a model from "a Validated set is offered" to "a Validated set is
 // applied" (ADR 0016 §5). Every field here is something the report must say out loud.
+//
+// Changed and Previous are DISPLAY strings the caller has already spelled, and it spells them in
+// the machine's LOCAL zone like every other instant this report prints. The record they describe
+// keeps its UTC stamp on disk — only the reading moves.
 type SaveOutcome struct {
 	// Requested is false under --no-save: the battery ran in full and nothing was written.
 	Requested bool
@@ -136,7 +140,11 @@ func (m Model) Report() string {
 		"upstream",
 		field("endpoint", orUnknown(m.Endpoint)),
 		field("model", orUnknown(m.Model)),
-		field("probed at", m.ProbedAt.Format(time.RFC3339)),
+		// The instant is STORED in UTC (GatherModel stamps it so, and the record on disk keeps
+		// that spelling); it is READ here by a human, beside a clock that is theirs, so the
+		// display converts. RFC3339 stays — it is this surface's established spelling for an
+		// instant, and it keeps the offset visible, so the local reading is never ambiguous.
+		field("probed at", m.ProbedAt.Local().Format(time.RFC3339)),
 		"",
 		"capabilities",
 	}
