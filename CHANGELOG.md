@@ -1011,6 +1011,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A tab-indented line in a code block keeps its own line.** The same tab that used to spill a sent
+  prompt past its block did it to fenced code too, and there it cost more than a stray column: a
+  reply pasting tab-indented Go, a Makefile recipe or a diff had the line measured as if the tab were
+  nothing, so it overran the width and the screen broke it wherever it happened to run out — an
+  unindented, unaligned second row that is not where the code block would have wrapped it. Tabs are
+  expanded before the block measures anything now, so a long code line breaks at the block's own edge
+  and stays indented and coloured as code across the break.
+
 - **A sent prompt containing a tab stays inside its block, and its skill token keeps its colour.** A
   tab weighs nothing when the transcript measures a line and four columns once the block is painted,
   so a prompt carrying one composed four cells more than it had room for: the row spilled past the

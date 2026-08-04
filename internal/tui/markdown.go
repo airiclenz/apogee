@@ -138,12 +138,21 @@ func renderListItem(th theme, li listItem, width int) []string {
 // renderCodeBlock renders a fenced code block's body: each source line indented two columns and
 // styled in the code colour, hard-wrapped (not reflowed) so the code's own line structure
 // survives. A blank source line stays blank.
+//
+// Tabs are expanded before the wrap measures them, for the reason expandTabs (render.go) states:
+// th.mdCodeBlock.Render rewrites a TAB into four spaces on its way past, after this wrap has
+// counted it as nothing, so a tab-indented line — a Go snippet, a Makefile recipe — used to come
+// back four cells per tab over the width the block was given, and the viewport folded it into two
+// painted rows, breaking exactly the line structure the hard wrap is here to keep. This is the one
+// wrapped surface that does not go through wrapText, which settles its own tabs; the hard wrap it
+// uses instead is the whole point of the block, so the expansion is done here rather than by
+// borrowing the reflow.
 func renderCodeBlock(th theme, code []string, width int) []string {
 	const indent = "  "
 	cw := max(1, width-len(indent))
 	var out []string
 	for _, cl := range code {
-		for _, seg := range strings.Split(th.measure.Hardwrap(cl, cw, true), "\n") {
+		for _, seg := range strings.Split(th.measure.Hardwrap(expandTabs(cl), cw, true), "\n") {
 			out = append(out, indent+th.mdCodeBlock.Render(seg))
 		}
 	}

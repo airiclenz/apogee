@@ -526,6 +526,66 @@ func TestPaintedTabBearingUserBlockKeepsItsWidthAndItsAccent(t *testing.T) {
 	}
 }
 
+// A fenced code line carrying a TAB paints inside the width its block was given — the same defect
+// class as the user block above, on the one wrapped surface that does not go through wrapText.
+//
+// renderCodeBlock hard-wraps the source line itself (th.measure.Hardwrap, so the code's own line
+// structure survives instead of being reflowed) and only then hands each segment to
+// th.mdCodeBlock.Render. Both ends of that measured the tab as nothing — the authority because a
+// control byte has no display width, the painter because ultraviolet drops it — while the style in
+// between rewrote it into four spaces on its way past (maybeConvertTabs). So the wrap kept whole a
+// line it had no room left on, and the row came back four cells per tab over the cap: 47 columns at
+// a transcript width of 44 (probed). The viewport then folded that one row into two painted ones —
+// an unindented, unstyled continuation that is not the break renderCodeBlock would have made, on
+// the one surface whose whole purpose is to keep the code's own line structure. The block expands
+// its tabs before the wrap measures them now (expandTabs), the same fix and the same helper as the
+// user block's, so the break is the block's own and it falls at the cap.
+//
+// The two rows below are therefore the assertion, not a compromise: a line still over the width
+// once its tabs are spaces is a line that genuinely does not fit, and the block breaking it is
+// exactly right. There is no fixture that keeps one row here — a line short enough to survive the
+// expansion never had the defect in the first place.
+//
+// Reachable from any assistant reply with a tab inside a fence — a model pasting Go, a Makefile
+// recipe, a tab-indented diff.
+//
+// Both measures are swept because both painted the defect: a tab weighs the same nothing in each,
+// so this is not a case the two disagree about — it is one they were both being lied to about.
+func TestPaintedTabBearingCodeBlockKeepsItsWidth(t *testing.T) {
+	const width = 44
+	// The transcript pays two columns for the ✦ marker gutter and the code block two more for its
+	// own indent, so the source line is measured against 40. A tab-indented statement of 39 visible
+	// cells measures 39 there and 43 once the style has expanded the tab — the line that fits by the
+	// authority's count and overruns by the painter's, and that the block now breaks in two itself.
+	code := "\t" + strings.Repeat("x", 39) // one tab-indented statement, 39 visible cells
+	source := "```go\n" + code + "\n```"
+
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			th := newTheme()
+			th.measure = widthAuthority{method: tc.method}
+
+			tr := &transcript{}
+			tr.commitAssistant(source, 0)
+
+			rows := tr.renderLines(th, width)
+			if len(rows) != 2 {
+				t.Fatalf("the block composed %d rows, want the two its own wrap breaks the line into:\n%s",
+					len(rows), strings.Join(mapStrip(rows), "\n"))
+			}
+			for i, ln := range rows {
+				plain := strip(ln)
+				if got := paintedWidth(plain, tc.method); got > width {
+					t.Errorf("row %d paints %d columns, over the block's %d: %q", i, got, width, plain)
+				}
+				if strings.Contains(plain, "\t") {
+					t.Errorf("row %d still carries a tab for a style to rewrite: %q", i, plain)
+				}
+			}
+		})
+	}
+}
+
 // The stacked start-up card fits its own info rows to the card's content budget, so a value too wide
 // to be shown whole ends in the elision marker rather than simply stopping at the border.
 //
