@@ -9,6 +9,8 @@ The tool header needs to indicate if a tool in the session chat is expanded or c
 
 - [ ] `/new` should not be recorded as a recallable prompt
 
+- [ ] `/skill` is not needed anymore - remove it.
+
 - [ ] Currently I cannot see how much of it's context a sub agent has used.
 
 - [ ] keyboard path for collapse/expand: a block-cursor mode (↑/↓ move a highlighted block, enter toggles, esc leaves). Deliberately deferred from the collapse wave — layout.md "Collapsed and expanded blocks" keeps toggling mouse-only for now, on the same precedent that keeps transcript selection mouse-only.
