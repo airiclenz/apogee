@@ -169,7 +169,12 @@ the ADR it would be purely self-referential; decisions 1–7 are numbered in ADR
 
 ---
 
-## 2. Schedule identity on the session record's `Meta`
+## 2. Schedule identity on the session record's `Meta` — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): the tags are `json:"scheduleID,omitempty"` / `json:"scheduleName,omitempty"`
+rather than the item's literal bare `json:",omitempty"` — the item's own parenthetical ("match the
+file's existing tag style") wins, since every other `Meta` field names its key explicitly in
+lowerCamel, and `internal/tui/transcriptcodec.go`'s `callID` sets the repo's ID-suffix casing.
 
 **What:**
 

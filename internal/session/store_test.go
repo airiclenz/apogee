@@ -589,3 +589,126 @@ func TestSaveLoadPreservesTheToolOutcomeMarker(t *testing.T) {
 		t.Errorf("user message restored as ToolOutcome %q, want it unrecorded", got)
 	}
 }
+
+// firingRecord is sampleRecord marked as one Firing of a Schedule (ADR 0033).
+func firingRecord(id string, updated time.Time) Record {
+	rec := sampleRecord(id, updated)
+	rec.Meta.Title = "nightly sweep — 03:00"
+	rec.Meta.ScheduleID = "20260803T030000Z-cafebabe"
+	rec.Meta.ScheduleName = "nightly sweep"
+	return rec
+}
+
+// A Firing's schedule identity survives Save/Load and surfaces in List — the browser labels a
+// scheduled run from Meta alone, without decoding the conversation.
+func TestScheduleIdentityRoundTrips(t *testing.T) {
+	t.Parallel()
+	st := NewStore(t.TempDir())
+
+	want := firingRecord("20260803T030000Z-aaaabbbb", time.Date(2026, 8, 3, 3, 0, 0, 0, time.UTC))
+	if err := st.Save(want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := st.Load(want.Meta.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Meta.ScheduleID != want.Meta.ScheduleID || got.Meta.ScheduleName != want.Meta.ScheduleName {
+		t.Errorf("loaded schedule identity = %q/%q, want %q/%q",
+			got.Meta.ScheduleID, got.Meta.ScheduleName, want.Meta.ScheduleID, want.Meta.ScheduleName)
+	}
+
+	metas, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("List returned %d metas, want 1", len(metas))
+	}
+	if metas[0].ScheduleID != want.Meta.ScheduleID || metas[0].ScheduleName != want.Meta.ScheduleName {
+		t.Errorf("listed schedule identity = %q/%q, want %q/%q",
+			metas[0].ScheduleID, metas[0].ScheduleName, want.Meta.ScheduleID, want.Meta.ScheduleName)
+	}
+}
+
+// A record written before the fields existed — no scheduleID/scheduleName keys on disk — loads
+// as an ordinary session with both empty, and a plain Save writes neither key back (omitempty),
+// so an older build reading the file sees exactly what it wrote.
+func TestRecordWithoutScheduleIdentityIsAnOrdinarySession(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := NewStore(dir)
+
+	legacy := fmt.Sprintf(
+		`{"recordVersion":%d,"meta":{"id":"20260724T120000Z-eeeeffff","title":"greet the world","createdAt":"2026-07-24T11:00:00Z","updatedAt":"2026-07-24T12:00:00Z","userMsgs":3},"session":{"Version":%d,"State":{"k":"v"}}}`,
+		RecordVersion, domain.SessionVersion)
+	if err := os.WriteFile(filepath.Join(dir, "20260724T120000Z-eeeeffff.json"), []byte(legacy), filePerm); err != nil {
+		t.Fatalf("write pre-schedule record: %v", err)
+	}
+
+	got, err := st.Load("20260724T120000Z-eeeeffff")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Meta.ScheduleID != "" || got.Meta.ScheduleName != "" {
+		t.Errorf("pre-schedule record loaded with identity %q/%q, want both empty",
+			got.Meta.ScheduleID, got.Meta.ScheduleName)
+	}
+
+	plain := sampleRecord("20260724T130000Z-11112222", time.Date(2026, 7, 24, 13, 0, 0, 0, time.UTC))
+	if err := st.Save(plain); err != nil {
+		t.Fatalf("Save plain: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, plain.Meta.ID+".json"))
+	if err != nil {
+		t.Fatalf("read plain record: %v", err)
+	}
+	for _, key := range []string{"scheduleID", "scheduleName"} {
+		if bytes.Contains(data, []byte(key)) {
+			t.Errorf("plain record wrote %q; the fields are omitempty on an ordinary session: %s", key, data)
+		}
+	}
+}
+
+// Schedule identity is a compatible addition, not a schema change: a Firing's record is stamped
+// with the current RecordVersion, so no reader trips the forward-reject sentinel over it, and the
+// two keys are plain JSON strings in the wrapper's meta.
+func TestScheduleIdentityKeepsTheRecordVersion(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := NewStore(dir)
+
+	rec := firingRecord("20260803T040000Z-ccccdddd", time.Date(2026, 8, 3, 4, 0, 0, 0, time.UTC))
+	if err := st.Save(rec); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, rec.Meta.ID+".json"))
+	if err != nil {
+		t.Fatalf("read record: %v", err)
+	}
+	var onDisk struct {
+		RecordVersion int `json:"recordVersion"`
+		Meta          struct {
+			ScheduleID   string `json:"scheduleID"`
+			ScheduleName string `json:"scheduleName"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(data, &onDisk); err != nil {
+		t.Fatalf("decode stored bytes: %v", err)
+	}
+	if onDisk.RecordVersion != RecordVersion {
+		t.Errorf("stored recordVersion = %d, want %d (schedule identity must not bump it)",
+			onDisk.RecordVersion, RecordVersion)
+	}
+	if onDisk.Meta.ScheduleID != rec.Meta.ScheduleID || onDisk.Meta.ScheduleName != rec.Meta.ScheduleName {
+		t.Errorf("stored identity = %q/%q, want %q/%q",
+			onDisk.Meta.ScheduleID, onDisk.Meta.ScheduleName, rec.Meta.ScheduleID, rec.Meta.ScheduleName)
+	}
+	if _, err := st.Load(rec.Meta.ID); errors.Is(err, ErrRecordVersion) {
+		t.Errorf("Load tripped ErrRecordVersion on a Firing's record: %v", err)
+	} else if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+}

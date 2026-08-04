@@ -78,15 +78,22 @@ func validateID(id string) error {
 
 // Meta is the browsable summary of one stored session — everything the history browser
 // shows without decoding the conversation.
+//
+// ScheduleID and ScheduleName are the schedule identity (ADR 0033): both empty on an
+// ordinary session, both set on a record that is one Firing of a Schedule. They are
+// deliberately NOT a RecordVersion bump — the addition is compatible in both directions,
+// since an older build ignores the unknown keys on load and simply never writes them.
 type Meta struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	Workspace string    `json:"workspace,omitempty"` // resolved root; "" on legacy records
-	Model     string    `json:"model,omitempty"`
-	UserMsgs  int       `json:"userMsgs"`
-	CtxUsed   int       `json:"ctxUsed,omitempty"` // last observed context fill, for the gauge relight
+	ID           string    `json:"id"`
+	Title        string    `json:"title"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+	Workspace    string    `json:"workspace,omitempty"` // resolved root; "" on legacy records
+	Model        string    `json:"model,omitempty"`
+	ScheduleID   string    `json:"scheduleID,omitempty"`   // "" unless this record is a Firing
+	ScheduleName string    `json:"scheduleName,omitempty"` // the Schedule's display name
+	UserMsgs     int       `json:"userMsgs"`
+	CtxUsed      int       `json:"ctxUsed,omitempty"` // last observed context fill, for the gauge relight
 }
 
 // Record is the on-disk shape: the metadata wrapper around the two opaque payloads.
