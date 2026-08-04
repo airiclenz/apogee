@@ -32,13 +32,13 @@ var (
 
 	// The autonomy-mode footer markers, warming up the privilege ladder (least → most
 	// autonomous): plan turquoise-green, ask-before green, allow-edits blue, auto orange.
-	colModePlan       = lipgloss.Color("#2ee6c5") // plan — turquoise green
+	colModePlan       = lipgloss.Color("#2afefa") // plan — turquoise green
 	colModeAskBefore  = lipgloss.Color("#3fb950") // ask-before — green
 	colModeAllowEdits = lipgloss.Color("#58a6ff") // allow-edits — blue
 	colModeAuto       = lipgloss.Color("#f0883e") // auto — orange
 
-	colSkill   = lipgloss.Color("#f080ff") // skills — violet: the prompt's inline /token accent (skillToken) and its twin inside a sent block (skillAccent)
-	colFileRef = lipgloss.Color("#ade282") // the prompt's inline @file token accent — blue, the tone a reference reads as
+	colSkill   = lipgloss.Color("#b1baff") // skills — violet: the prompt's inline /token accent (skillToken) and its twin inside a sent block (skillAccent)
+	colFileRef = lipgloss.Color("#cdffa4") // the prompt's inline @file token accent — blue, the tone a reference reads as
 
 	colPromptToggle = lipgloss.Color("#b0d2ff") // the collapsed prompt's see-more / see-less marker — light gray-blue: an apogee affordance that reads as chrome inside the block, not as more of what the human wrote
 
