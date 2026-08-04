@@ -1011,6 +1011,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A markdown table whose cell holds a tab keeps its columns straight.** A reply pasting a table
+  with a tab inside one cell drew that row four columns too wide: the cell was measured as if the
+  tab were nothing, nothing styled it on the way out, and the screen turned it into four spaces
+  after every column width had been settled — so the row's `│` came down beside the `┼` of the rule
+  above it instead of through it, and the whole table read as broken rather than as one long row.
+  The cells are expanded before the columns are measured now, so a tab-bearing cell sits in its
+  column and the table's rules and dividers line up.
+
 - **A tab-indented line in a code block keeps its own line.** The same tab that used to spill a sent
   prompt past its block did it to fenced code too, and there it cost more than a stray column: a
   reply pasting tab-indented Go, a Makefile recipe or a diff had the line measured as if the tab were

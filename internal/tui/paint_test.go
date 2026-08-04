@@ -586,6 +586,80 @@ func TestPaintedTabBearingCodeBlockKeepsItsWidth(t *testing.T) {
 	}
 }
 
+// A markdown table whose BODY cell carries a TAB paints the columns it composed, and its divider
+// keeps the column the rule above it crosses in — the third site of the defect class the two tests
+// above fix, and the one where nothing styles the text at all.
+//
+// The user block and the code block were both handed to a lipgloss style right after they were
+// measured, so their tabs became four spaces while the frame was still being composed. A table body
+// cell is not styled by anybody: renderInline copies an unmarked cell byte for byte (mdtable.go),
+// so the tab outlived tableColumnWidths' measure, the wrap, the pad and joinScrollbar's square, and
+// the first style it ever met was the viewport's own Render over the whole frame
+// (bubbles/v2@v2.1.0/viewport/viewport.go:746) — after every column width in the table had been
+// settled. The row therefore paints four cells per tab wider than it composed, and everything to
+// the right of the tab moves with it: the body row's │ lands right of the ┼ in the rule above,
+// which is the table's frame coming apart rather than one row running long. renderTable expands the
+// cells before they are rendered now (expandTabs), the same helper as the two above.
+//
+// The assertion is composed-against-painted rather than a width alone, because a raw tab measures
+// the same nothing in BOTH of the package's measures — a cap test on the composed row would pass
+// while the screen showed the break. The composed side is m.lines, the transcript rows the block
+// itself built, because that is the last point at which the tab is still a tab: by the time View
+// has run, the viewport's style has already spent the four cells, so the frame string agrees with
+// the paint about a width neither of them told the table about.
+//
+// Reachable from any assistant reply whose table cell holds a tab.
+//
+// Both measures are swept because both painted the defect: the tab weighs the same nothing in each,
+// so this is not a case the two disagree about — it is one they were both being lied to about.
+func TestPaintedTabBearingTableCellKeepsItsColumns(t *testing.T) {
+	// A short transcript on purpose: with nothing to scroll the gutter is blank, so a painted row
+	// ends at its own last glyph and its width is the table's own rather than the window's.
+	source := strings.Join([]string{
+		"| h | k |",
+		"| --- | --- |",
+		"| d\t" + strings.Repeat("y", 36) + " | z |",
+	}, "\n")
+
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m := step(t, newTestModel(t), eventMsg{Event: domain.MessageEvent{Text: source}})
+			m = paintedAs(t, m, tc.method)
+
+			painted := paintFrame(t, m, tc.method)
+
+			// The rule row names the table: the header is the line above it and the body the line
+			// below, so the three are found without counting rows off the top of the viewport.
+			rule := -1
+			for i, row := range painted[:m.viewport.Height()] {
+				if strings.Contains(row, glyphTableCross) {
+					rule = i
+					break
+				}
+			}
+			if rule < 1 || rule+1 >= len(painted) {
+				t.Fatalf("no table rule row on screen — the fixture is not a rendered table:\n%s",
+					strings.Join(painted[:m.viewport.Height()], "\n"))
+			}
+
+			for _, row := range []int{rule - 1, rule, rule + 1} {
+				want := m.th.measure.Width(trimRight(strip(m.lines[m.drawnLineAt(row)])))
+				if got := paintedWidth(trimRight(painted[row]), tc.method); got != want {
+					t.Errorf("row %d composes %d columns and paints %d: %q", row, want, got, painted[row])
+				}
+			}
+
+			cross := paintedColumn(painted[rule], glyphTableCross, tc.method)
+			for _, row := range []int{rule - 1, rule + 1} {
+				if got := paintedColumn(painted[row], glyphTableColumn, tc.method); got != cross {
+					t.Errorf("row %d paints its %s in column %d, want the rule's %s column %d: %q",
+						row, glyphTableColumn, got, glyphTableCross, cross, painted[row])
+				}
+			}
+		})
+	}
+}
+
 // The stacked start-up card fits its own info rows to the card's content budget, so a value too wide
 // to be shown whole ends in the elision marker rather than simply stopping at the border.
 //

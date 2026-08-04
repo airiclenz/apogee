@@ -247,15 +247,29 @@ func renderTable(th theme, tbl mdTable, width int) ([]string, bool) {
 		return nil, false
 	}
 
+	// The cells are markdown SOURCE, and a source TAB is settled before anything measures it, for
+	// the reason expandTabs (render.go) gives: a tab weighs nothing in every measure this file
+	// takes and four cells in every lipgloss style that passes the row afterwards.
+	//
+	// A BODY cell is the surface that needed it. Nothing styles one — renderInline copies an
+	// unmarked cell byte for byte — so its tab outlived the column measure (tableColumnWidths),
+	// the wrap, the pad and the row square, and the first style it ever met was the viewport's own
+	// over the whole frame (bubbles/v2@v2.1.0/viewport/viewport.go:746), which rewrote it into
+	// four spaces on the way to the screen. The row then painted four cells per tab wider than the
+	// table it belongs to — 47 columns at a composed 43 — and its │ landed four columns right of
+	// the ┼ in the rule above it, which is the table's frame coming apart rather than a stray
+	// column. The HEADER is expanded here too: it escapes today only because th.mdBold.Render
+	// happens to expand it BEFORE tableColumnWidths measures, and the column widths must not rest
+	// on that ordering.
 	header := make([]string, len(tbl.header))
 	for i, cell := range tbl.header {
-		header[i] = th.mdBold.Render(renderInline(th, cell))
+		header[i] = th.mdBold.Render(renderInline(th, expandTabs(cell)))
 	}
 	rows := make([][]string, len(tbl.rows))
 	for i, row := range tbl.rows {
 		cells := make([]string, len(row))
 		for j, cell := range row {
-			cells[j] = renderInline(th, cell)
+			cells[j] = renderInline(th, expandTabs(cell))
 		}
 		rows[i] = cells
 	}
