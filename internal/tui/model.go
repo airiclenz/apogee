@@ -3114,7 +3114,28 @@ func squareOnField(measure widthAuthority, field lipgloss.Style, s string, w int
 // startupBorder and popupBorder carry. Where the width cannot pay for the padding the PADDING gives
 // way before the border does, so a box that is drawn at all is exactly width columns wide; narrower
 // than its own two border glyphs there is no box to draw and the answer is no rows.
+//
+// A surface that would rather carry its name IN the top border than on a row of its own asks
+// drawTitledBox for it; this is that same function with nothing to splice.
 func drawBox(measure widthAuthority, style lipgloss.Style, content []string, width int) []string {
+	return drawTitledBox(measure, style, content, width, "", lipgloss.NewStyle())
+}
+
+// drawTitledBox is drawBox with a name spliced INTO the top border — ╭────── Approve terminal? ──────╮
+// — for a surface that would rather spend the row on what the human is deciding about than on a
+// heading of its own (popupSpec.titleInBorder). The title is centred between two runs of the
+// border's own rune with one space each side, so the box still closes itself at exactly width
+// columns: the corners, the two dash runs, and the label are measured in the authority the rest of
+// the box is drawn in, never in lipgloss's (ADR 0030). An EMPTY title is the plain border drawBox
+// has always drawn, which is what makes drawBox exactly this function with nothing to splice — one
+// border assembly, so a titled box and a plain one cannot drift apart. A title too wide for the
+// span is dropped rather than overflowed; every caller fits it first (renderPopup composes it TO
+// the pane's inner width), so the fallback is a backstop and not a silent elision.
+//
+// titleStyle is how the name is painted; it is re-backgrounded onto the top border's own field so
+// the spliced label carries a background like every other cell of the box (the pane is filled
+// solid black — a bare cell in the middle of the border would read as a hole in it).
+func drawTitledBox(measure widthAuthority, style lipgloss.Style, content []string, width int, title string, titleStyle lipgloss.Style) []string {
 	edges := style.GetHorizontalBorderSize()
 	if width < edges {
 		return nil
@@ -3137,8 +3158,19 @@ func drawBox(measure widthAuthority, style lipgloss.Style, content []string, wid
 	lead := left.Render(border.Left) + field.Render(strings.Repeat(" ", padLeft))
 	tail := field.Render(strings.Repeat(" ", padRight)) + right.Render(border.Right)
 
+	topRow := top.Render(border.TopLeft + strings.Repeat(border.Top, span) + border.TopRight)
+	if title != "" {
+		label := " " + title + " " // one space each side: the name is set off the border, not welded to it
+		if w := measure.Width(label); w <= span {
+			dashes := (span - w) / 2 // centred, an odd cell going to the right — the mockup's own drawing
+			topRow = top.Render(border.TopLeft+strings.Repeat(border.Top, dashes)) +
+				titleStyle.Background(style.GetBorderTopBackground()).Render(label) +
+				top.Render(strings.Repeat(border.Top, span-w-dashes)+border.TopRight)
+		}
+	}
+
 	rows := make([]string, 0, len(content)+2) //nolint:mnd // +2: the top and bottom border rows
-	rows = append(rows, top.Render(border.TopLeft+strings.Repeat(border.Top, span)+border.TopRight))
+	rows = append(rows, topRow)
 	for _, ln := range content {
 		rows = append(rows, lead+squareOnField(measure, field, ln, inner)+tail)
 	}
@@ -3913,6 +3945,13 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // the ROWS priority — they are what the human acts on — and lets the body have what is left,
 // overflowing into the explicit "… (+N more lines)" marker.
 //
+// chrome is what that frame costs the pane, and it is the CALLER's because only the caller knows the
+// spec it is about to compose: popupChrome for a pane whose title takes a row of its own, and
+// popupTitleBorderChrome for one whose title rides the top border (popupSpec.titleInBorder), where
+// the row the border took back is spent on the pane's own content rather than left unclaimed. It is
+// also what "seated" is measured against, so a pane is refused only on a grant its own chrome cannot
+// fit in.
+//
 // BOTH caps floor at ZERO rather than at a comfortable minimum, and that is the point of them: a
 // row floor of 6 on a window with 4 rows to give promised a pane the frame could not hold, and the
 // surplus came off the bottom — the input box and the footer, off the alt screen. A body floor of
@@ -3924,12 +3963,12 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // names itself in the title and says how to act in the hint — and when the zero budget dropped
 // prose, that title row also carries the "… (+N more lines)" marker (popupTitleLine), so shrinking
 // costs the body but never the fact that there is one.
-func (m Model) popupBudget(p framePane, rows, rowCap int) (maxBody, maxRows int, seated bool) {
+func (m Model) popupBudget(p framePane, rows, rowCap, chrome int) (maxBody, maxRows int, seated bool) {
 	granted := m.frameRowPlan(m.openPanes().with(p)).panes[p]
-	if granted < popupChrome {
+	if granted < chrome {
 		return 0, 0, false
 	}
-	avail := granted - popupChrome
+	avail := granted - chrome
 	maxRows = min(rows, rowCap, max(0, avail-1))
 	maxBody = max(0, avail-maxRows)
 	return maxBody, maxRows, true
@@ -3968,7 +4007,7 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 		parts = append(parts, stripEscapes(args))
 	}
 
-	maxBodyRows, _, seated := m.popupBudget(panePrompt, 0, 0) // no rows on the prompt, so no row budget either
+	maxBodyRows, _, seated := m.popupBudget(panePrompt, 0, 0, popupChrome) // no rows on the prompt, so no row budget either
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
@@ -4010,7 +4049,7 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 
 	// Budget against the live layout so a long question or choice set never pushes the input box
 	// off-screen (D2); the rows get priority and the body takes what is left (see popupBudget).
-	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, len(req.Choices), maxAskChoiceRows)
+	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, len(req.Choices), maxAskChoiceRows, popupChrome)
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}

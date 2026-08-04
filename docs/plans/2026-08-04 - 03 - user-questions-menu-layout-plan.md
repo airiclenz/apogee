@@ -41,7 +41,18 @@
 
 ---
 
-## 1. Painter: title embedded in the top border
+## 1. Painter: title embedded in the top border — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): the title is spliced by COMPOSING the top border row in the box painter that
+already owns border assembly (new `drawTitledBox` in `internal/tui/model.go`, with `drawBox` now its
+untitled call), not by post-processing `drawBox`'s already-styled top line — that line is an ANSI
+stream, and splicing into it would put a second border assembly in the tree. The width authority
+still measures and fits the title exactly as the item asks (`popupTitleLine` → `truncateToWidth` at
+the pane's inner width, then centred in `th.measure`). Chrome accounting is per-spec:
+`popupBudget` gained a `chrome` parameter (existing callers pass `popupChrome`, a title-in-border
+caller passes the new `popupTitleBorderChrome`); `frameRowPlan`'s per-pane floor stays `popupChrome`,
+which cannot know a spec's title placement and is deliberately one row generous. The commit line's
+"previously untracked" files were already committed before this item ran.
 
 **What:** Add an opt-in title-in-border mode to the shared popup painter
 `internal/tui/popup.go` (`renderPopup`, ~line 120; spec struct `popupSpec` ~line 104).

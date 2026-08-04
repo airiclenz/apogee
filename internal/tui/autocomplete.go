@@ -739,7 +739,7 @@ func (m Model) renderAutocomplete() string {
 	for i, it := range ac.items {
 		rows[i] = it.cells
 	}
-	_, shown, seated := m.popupBudget(paneDropdown, len(rows), maxAutocompleteItems)
+	_, shown, seated := m.popupBudget(paneDropdown, len(rows), maxAutocompleteItems, popupChrome)
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}

@@ -871,3 +871,175 @@ func TestRenderPopupSingleCellRowsAreUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// popupTitleRowGolden is a titled pane as it has always been painted — the name on the first
+// content row, the top border an unbroken run of the border rune. It is the guard on
+// titleInBorder being OPT-IN: every pane that does not ask for the new placement (the picker, the
+// /sessions browser, the autocomplete dropdown, and both prompts as of this item) must keep this
+// exact layout. ANSI is stripped so the golden pins the layout rather than the machine's colour
+// profile.
+const popupTitleRowGolden = `╭──────────────────────────────────────╮
+│ saved sessions                       │
+│ a body line that is long enough to   │
+│ wrap once at forty cells             │
+│   first row                          │
+│ ❯ second row                         │
+│ esc close                            │
+╰──────────────────────────────────────╯`
+
+// popupTitleInBorderGolden is that same spec with the title moved INTO the top border: the name
+// centred between two runs of the border rune with one space each side, and the content block one
+// row shorter for it — the pane's own drawing of docs/design/user-questions-layout.md's mockup.
+const popupTitleInBorderGolden = `╭─────────── saved sessions ───────────╮
+│ a body line that is long enough to   │
+│ wrap once at forty cells             │
+│   first row                          │
+│ ❯ second row                         │
+│ esc close                            │
+╰──────────────────────────────────────╯`
+
+// popupTitleSpec is the representative spec both goldens above are drawn from: a title, a wrapping
+// body, a selected row among several, and a hint — every block a pane can hold, so a regression in
+// any of them surfaces here.
+func popupTitleSpec() popupSpec {
+	return popupSpec{
+		title:       "saved sessions",
+		body:        "a body line that is long enough to wrap once at forty cells",
+		maxBodyRows: -1,
+		rows:        singleCellRows([]string{"first row", "second row"}),
+		selected:    1,
+		hint:        "esc close",
+		maxRows:     8,
+	}
+}
+
+// The flag decides ONE thing — where the name is drawn — and it decides it completely: off, the
+// pane is byte-for-byte the layout it has always had; on, the name is spliced into the top border
+// and the row it used to occupy goes back to the pane.
+func TestRenderPopupTitleInBorder(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+
+	off := strip(renderPopup(th, popupTitleSpec(), 40))
+	if off != popupTitleRowGolden {
+		t.Errorf("titleInBorder off drifted from the title-row rendering:\ngot:\n%s\n\nwant:\n%s", off, popupTitleRowGolden)
+	}
+
+	spec := popupTitleSpec()
+	spec.titleInBorder = true
+	on := strip(renderPopup(th, spec, 40))
+	if on != popupTitleInBorderGolden {
+		t.Errorf("titleInBorder on:\ngot:\n%s\n\nwant:\n%s", on, popupTitleInBorderGolden)
+	}
+	for _, ln := range strings.Split(on, "\n")[1:] {
+		if strings.Contains(ln, "saved sessions") {
+			t.Errorf("the title is still on a content row as well as in the border: %q", ln)
+		}
+	}
+}
+
+// The spliced border is a border like any other: every line of the pane is exactly the width it was
+// drawn at — the title's spaces and its two dash runs add up to the same span the plain border
+// fills — and no cell of it is left on the terminal's default background, so the name does not read
+// as a hole punched in the frame.
+func TestRenderPopupTitleInBorderKeepsTheBoxContract(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	spec := popupTitleSpec()
+	spec.titleInBorder = true
+	for _, width := range []int{24, 40, 61, 98} {
+		out := renderPopup(th, spec, width)
+		for i, ln := range popupLines(out) {
+			if w := lipgloss.Width(ln); w != width {
+				t.Errorf("width %d: line %d is %d cells, want %d: %q", width, i, w, width, strip(ln))
+			}
+			if col, ok := firstCellWithoutBackground(ln); !ok {
+				t.Errorf("width %d: line %d has a bare (no-background) cell at column %d: %q", width, i, col, strip(ln))
+			}
+		}
+	}
+}
+
+// An empty title with the flag on opens the pane on a plain, unbroken border — the untitled box a
+// surface whose body is its own heading asks for — and still spends no content row on a heading.
+func TestRenderPopupTitleInBorderEmptyTitleIsPlain(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	spec := popupTitleSpec()
+	spec.titleInBorder = true
+	spec.title = ""
+	const width = 40
+	lines := popupLines(renderPopup(th, spec, width))
+	want := "╭" + strings.Repeat("─", width-2) + "╮"
+	if got := strip(lines[0]); got != want {
+		t.Errorf("empty title with the flag on drew %q, want the plain border %q", got, want)
+	}
+	if got, want := popupInterior(lines[1]), "a body line that is long enough to"; got != want {
+		t.Errorf("first content row is %q, want the body's first line %q — the title still cost a row", got, want)
+	}
+}
+
+// Narrowness elides an embedded title exactly as it elides a title ROW: the name is fitted to the
+// pane's inner width first (truncateToWidth), so a title wider than the box it names is cut to an
+// ellipsis rather than pushing the border past the terminal's last column.
+func TestRenderPopupTitleInBorderElidesOnANarrowPane(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	spec := popupSpec{
+		title:         "a title far wider than this pane can ever seat",
+		titleInBorder: true,
+		selected:      -1,
+		hint:          "esc close",
+	}
+	const width = 24
+	top := strip(popupLines(renderPopup(th, spec, width))[0])
+	if lipgloss.Width(top) != width {
+		t.Fatalf("titled border is %d cells, want %d: %q", lipgloss.Width(top), width, top)
+	}
+	if !strings.Contains(top, "…") {
+		t.Errorf("a title too wide for the pane was not elided: %q", top)
+	}
+	if strings.Contains(top, "seat") {
+		t.Errorf("the elided title kept its tail: %q", top)
+	}
+}
+
+// The honesty guarantee follows the title wherever it is drawn: a pane that had to drop prose
+// counts the dropped lines on the row that carries its name, and moving that name into the border
+// moves the count with it. A pane cannot go quiet about what it is hiding by changing where its
+// title sits.
+func TestRenderPopupTitleInBorderCarriesTheElisionCount(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	spec := popupSpec{
+		title:         "Approve write_file?",
+		titleInBorder: true,
+		body:          "a reason long enough to need several wrapped lines at this width, none of which the pane can seat",
+		maxBodyRows:   0, // the shortest window: no row left for prose (popupBudget)
+		selected:      -1,
+		hint:          "esc cancel",
+	}
+	top := strip(popupLines(renderPopup(th, spec, 60))[0])
+	if !elisionMarkerPattern.MatchString(top) {
+		t.Errorf("the border title dropped the elision count for a body it could not show: %q", top)
+	}
+}
+
+// A title-in-border pane is one row shorter than the same pane with a title row — that is the whole
+// point of the placement — and the chrome constant the budget reserves says the same thing, so the
+// row the border took back is spent on the pane's content rather than left unclaimed
+// ([Model.popupBudget]).
+func TestPopupTitleInBorderChromeIsOneRowShorter(t *testing.T) {
+	t.Parallel()
+	if popupTitleBorderChrome != popupChrome-1 {
+		t.Errorf("popupTitleBorderChrome = %d, want %d (one row less than popupChrome)", popupTitleBorderChrome, popupChrome-1)
+	}
+	th := newTheme()
+	spec := popupTitleSpec()
+	rowsOff := len(popupLines(renderPopup(th, spec, 40)))
+	spec.titleInBorder = true
+	rowsOn := len(popupLines(renderPopup(th, spec, 40)))
+	if rowsOn != rowsOff-1 {
+		t.Errorf("title-in-border pane is %d rows, want %d (one less than the %d-row titled pane)", rowsOn, rowsOff-1, rowsOff)
+	}
+}

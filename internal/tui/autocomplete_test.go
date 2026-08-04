@@ -149,7 +149,7 @@ func TestAutocompleteSelectionStaysOnScreenAtEveryBudget(t *testing.T) {
 		if len(m.autocomplete.items) != len(commandSpecs) {
 			t.Fatalf("the \"/\" menu offered %d rows, want every verb (%d)", len(m.autocomplete.items), len(commandSpecs))
 		}
-		if _, shown, _ := m.popupBudget(paneDropdown, len(m.autocomplete.items), maxAutocompleteItems); shown < 1 {
+		if _, shown, _ := m.popupBudget(paneDropdown, len(m.autocomplete.items), maxAutocompleteItems, popupChrome); shown < 1 {
 			t.Fatalf("a %d-row window with %d staged granted no dropdown rows — test premise broken", c.height, c.staged)
 		}
 

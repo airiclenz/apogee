@@ -83,6 +83,15 @@ import (
 // cannot give this many rows is not drawn at all.
 const popupChrome = 4
 
+// popupTitleBorderChrome is that same irreducible height for a pane that carries its name IN the top
+// border (popupSpec.titleInBorder): the title rides a row the box was drawing anyway, so the pane's
+// floor is its two borders and its hint row — one row less than popupChrome. It is the chrome such a
+// pane hands [Model.popupBudget], which is what spends the freed row on the pane's own content
+// instead of leaving it unclaimed. The frame's per-pane floor stays popupChrome ([Model.frameRowPlan]):
+// the allocation cannot know a pane's title placement, and a floor one row generous seats a pane the
+// budget then fills, where a floor one row short would seat one it cannot draw.
+const popupTitleBorderChrome = popupChrome - 1
+
 // popupRow is one row of a popup as its columns: the escape-stripped cells the module lays out
 // into vertically aligned columns. Every row of one spec follows that popup kind's fixed column
 // schema — an absent optional tier is an empty cell, which still pads, so the columns after it
@@ -101,14 +110,25 @@ type popupRow []string
 // dropped body AND a dropped row list are both reported on the title row instead
 // (popupTitleLine), so the cap costs the prose and the choices but never the knowledge that there
 // are some.
+//
+// titleInBorder moves the title OFF its own content row and into the top border, centred between
+// the border's own runes with one space each side — ╭────── Approve terminal? ──────╮ — so a
+// decision surface spends the row on what the decision turns on instead of on a heading
+// (docs/design/user-questions-layout.md). It costs the pane a row less than a title row does
+// (popupTitleBorderChrome), and with an EMPTY title it opens the pane on a plain unbroken border,
+// which is how a surface whose body is its own heading (the ask prompt's question) drops the
+// heading without dropping the box. It changes where the title is drawn and nothing about what it
+// says: the elision marker rides the border title exactly as it rides the title row
+// (popupTitleLine), so a pane cannot go quiet about content it hid by moving its name into the frame.
 type popupSpec struct {
-	title       string
-	body        string
-	maxBodyRows int
-	rows        []popupRow
-	selected    int
-	hint        string
-	maxRows     int
+	title         string
+	titleInBorder bool
+	body          string
+	maxBodyRows   int
+	rows          []popupRow
+	selected      int
+	hint          string
+	maxRows       int
 }
 
 // renderPopup paints the bordered selector pane described by spec at the given TOTAL width
@@ -157,8 +177,10 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 		hidden += hiddenBody
 	}
 
+	title := popupTitleLine(th, spec.title, hidden, inner)
+
 	lines := make([]string, 0, len(body)+len(rows)+2) //nolint:mnd // +2: the optional title and hint rows
-	if title := popupTitleLine(th, spec.title, hidden, inner); title != "" {
+	if title != "" && !spec.titleInBorder {
 		lines = append(lines, blackFill.Render(th.presentTitle.Render(truncateToWidth(th, title, inner))))
 	}
 	lines = append(lines, body...)
@@ -168,12 +190,24 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 		lines = append(lines, blackFill.Render(th.statusFaint.Render(truncateToWidth(th, spec.hint, inner))))
 	}
 
+	// A title-in-border spec spends no content row on its name: the composed title row — the name and
+	// whatever elision it owes (popupTitleLine), the same string the title ROW would have carried —
+	// goes to the box instead, and drawTitledBox splices it into the top border. It is fitted to the
+	// SAME budget a title row is fitted to: the two spaces that set the name off the border cost
+	// exactly the two padding cells a content row would have spent on it, so inner is the honest
+	// width either way and the box's every-line-is-exactly-width contract holds at every width the
+	// pane can be drawn at. An empty title leaves the border plain.
+	borderTitle := ""
+	if spec.titleInBorder {
+		borderTitle = truncateToWidth(th, title, inner)
+	}
+
 	// drawBox rather than th.popupBorder.Width(width).Render: the pane's own rows are DRAWN, squared
 	// to the inner width in the painter's measure, so one composed line is always one painted row and
 	// the pane is exactly as tall as the frame budgeted for it. lipgloss.JoinVertical went with it —
 	// it left-aligned by padding every row out to the widest row IT measured, which is the same
 	// GraphemeWidth pad one level in.
-	return strings.Join(drawBox(th.measure, th.popupBorder, lines, width), "\n")
+	return strings.Join(drawTitledBox(th.measure, th.popupBorder, lines, width, borderTitle, th.presentTitle), "\n")
 }
 
 // popupGutter separates two adjacent popup columns: two spaces, the minimum gap between the widest

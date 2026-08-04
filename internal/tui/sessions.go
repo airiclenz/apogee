@@ -454,7 +454,7 @@ func (m Model) renderSessionBrowser() string {
 	// case the pane has to speak up about: the module counts the dropped entries onto the title row
 	// (popupTitleLine), because a browser showing no sessions at all would otherwise be
 	// indistinguishable from a workspace that has none.
-	_, maxRows, seated := m.popupBudget(paneBrowser, len(spec.rows), maxSessionRows)
+	_, maxRows, seated := m.popupBudget(paneBrowser, len(spec.rows), maxSessionRows, popupChrome)
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
