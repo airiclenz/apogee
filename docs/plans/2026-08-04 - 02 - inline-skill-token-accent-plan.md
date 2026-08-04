@@ -37,7 +37,14 @@
   sticky-header code (it re-uses already-painted lines, model.go:3035); every other
   ISSUES.md entry; version bumps.
 
-## 1. Record skill-token spans on sent transcript entries
+## 1. Record skill-token spans on sent transcript entries — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): the interjection call sites needed more than a pass-through — `queuedInterjection`
+gained a `skillSpans` field (spans stay off `domain.UserInput`, as decided) and `joinedInterjections`
+now returns them RE-BASED onto the joined text, whose separator became the `interjectionJoin` const;
+pinned by a third test, `TestJoinedInterjectionsRebasesSkillSpans` (interject_test.go). Also added
+`spansWithin`: `addUser`/`addInterjected`/decode drop a span that does not land in its own text, so a
+legacy or corrupt record paints plain instead of slicing out of range at item 2.
 
 **What:** Capture the byte-offset spans of resolving `/tokens` at parse time and store
 them on the transcript entry, alongside the existing display names — chips keep

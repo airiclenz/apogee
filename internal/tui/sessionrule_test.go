@@ -265,7 +265,7 @@ func TestTopRuleCarriesSessionName(t *testing.T) {
 		t.Parallel()
 		m := newTestModel(t)
 		const prompt = "fix the broken parser in tokenizer.go"
-		m.transcript.addUser(prompt, nil)
+		m.transcript.addUser(prompt, nil, nil)
 
 		if row := ansi.Strip(m.topRule()); !strings.Contains(row, prompt) {
 			t.Errorf("top rule = %q, want the heuristic name %q derived from the opening request",
@@ -276,7 +276,7 @@ func TestTopRuleCarriesSessionName(t *testing.T) {
 	t.Run("clear returns the row to a plain rule", func(t *testing.T) {
 		t.Parallel()
 		m := newTestModel(t)
-		m.transcript.addUser("fix the broken parser in tokenizer.go", nil)
+		m.transcript.addUser("fix the broken parser in tokenizer.go", nil, nil)
 		m.nameSession("the hairline wave")
 
 		m, _ = sendPrompt(t, m, "/clear")

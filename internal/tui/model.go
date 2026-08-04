@@ -1110,17 +1110,20 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		m.transcript.addNote("discarded the interrupted work — continuing fresh from your message")
 	}
 	in := domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: parsed.skillIDs}
+	// Where the /tokens sit in the text that is about to become the block — the parse's own offsets
+	// for a plain send, re-based onto the composition when the held rows join it below.
+	spans := parsed.skillSpans
 	if held {
 		// The held rows and the box become one unmarked user message (joinedInterjections), which
 		// is what keeps the derived Exchange opening trivially correct: exactly one of them opens
 		// the Exchange, whether the human sent one message or five.
-		in = m.joinedInterjections(parsed)
+		in, spans = m.joinedInterjections(parsed)
 		m.pendingInterjections = nil
 	}
 	m.promptEditor.reset()         // empties the textarea and closes the overlay
 	m, record = m.recordSend(sent) // the send is committed: this line is recallable from here on
 	m.detached = false             // a fresh prompt re-arms follow-the-tail: sending means "done reading history"
-	m.transcript.addUser(in.Text, m.skillDisplayNames(in.SkillIDs))
+	m.transcript.addUser(in.Text, m.skillDisplayNames(in.SkillIDs), spans)
 	// The first prompt of a fresh Session record also NAMES it: one cosmetic out-of-band completion
 	// fired here, in parallel with the Exchange this prompt starts, so a single-slot server answers
 	// it between Turns 1 and 2 (autotitle.go). It drives no engine and enters no transcript — it
@@ -1374,7 +1377,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// A draft the accept path left standing in the box is still a DRAFT — it carries its own
 		// tokens when it is eventually sent, and nothing is silently borrowed from it here.
 		m.detached = false // the canned turn re-arms follow-the-tail, exactly as a typed prompt does
-		m.transcript.addUser("/continue", nil)
+		m.transcript.addUser("/continue", nil, nil)
 		m.layout()
 		m.box = newInterjectBox()
 		cmd, cancel := startExchange(m.parent, m.eng,

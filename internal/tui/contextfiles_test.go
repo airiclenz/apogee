@@ -164,7 +164,7 @@ func TestContextFilesNoticeNeverPersisted(t *testing.T) {
 		SystemShare:    3900,
 	}
 	m := newTestModelEng(t, &fakeEngine{contextReport: report}, testOpts)
-	m.transcript.addUser("what is the capital of france", nil) // the conversation the record IS for
+	m.transcript.addUser("what is the capital of france", nil, nil) // the conversation the record IS for
 
 	if got := contextNotes(m); len(got) != 3 {
 		t.Fatalf("context notes = %v, want all three shown (loaded, unreadable, Budget warn)", got)

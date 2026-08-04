@@ -218,7 +218,7 @@ func (h *uiHarness) Send(msg tea.Msg) { h.inbox <- msg }
 func (h *uiHarness) runExchange(t *testing.T, ctx context.Context, m Model, eng Engine, text string) (Model, tea.Msg) {
 	t.Helper()
 
-	m.transcript.addUser(text, nil)
+	m.transcript.addUser(text, nil, nil)
 	cmd, cancel := startExchange(ctx, eng, domain.UserInput{Text: text}, nil, nil, nil)
 	defer cancel()
 	m.cancel = cancel

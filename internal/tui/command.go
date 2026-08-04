@@ -35,19 +35,22 @@ const (
 // kindCommand: the router reports the usage line rather than sending the line to the agent or
 // silently doing nothing. For kindMessage, text is the line (trimmed, with @tokens and /skill
 // tokens left in place so the model sees what was referenced), fileRefs holds the extracted
-// workspace-relative paths and skillIDs the extracted skill references. For kindUnknownSlash,
+// workspace-relative paths, skillIDs the extracted skill references, and skillSpans the byte
+// ranges those references occupy IN text — one per occurrence, which is what a sent block paints
+// its inline accent from ([skillSpan]). For kindUnknownSlash,
 // text is the lone token as typed (leading slash included) — the refusal note names it back
 // (unknownSlashNote) and nothing else on the value is set.
 type parsedInput struct {
-	kind     inputKind
-	command  string
-	args     []string
-	rest     string
-	confine  confineArgs
-	err      error
-	text     string
-	fileRefs []string
-	skillIDs []string
+	kind       inputKind
+	command    string
+	args       []string
+	rest       string
+	confine    confineArgs
+	err        error
+	text       string
+	fileRefs   []string
+	skillIDs   []string
+	skillSpans []skillSpan
 }
 
 // commandSpec is one verb of the "/" namespace: what the parser does with it and what the
@@ -166,8 +169,19 @@ func parseInput(raw string, known func(string) bool) parsedInput {
 	if token, ok := soleUnknownSlash(trimmed, known); ok {
 		return parsedInput{kind: kindUnknownSlash, text: token}
 	}
+	// The skill grammar is scanned ONCE and read twice — the ids that travel with the message, the
+	// spans that paint it — and both offsets and text come from the same trimmed line, since
+	// extractFileRefs hands the text back unchanged. That is what makes skillSpans offsets into
+	// parsedInput.text, and so into the entry the submit path stores.
 	text, refs := extractFileRefs(trimmed)
-	return parsedInput{kind: kindMessage, text: text, fileRefs: refs, skillIDs: extractSkillRefs(trimmed, known)}
+	skills := skillRefSpans(trimmed, known)
+	return parsedInput{
+		kind:       kindMessage,
+		text:       text,
+		fileRefs:   refs,
+		skillIDs:   spanNames(skills),
+		skillSpans: skillTokenSpans(skills),
+	}
 }
 
 // soleUnknownSlash reports the lone "/word" of an input that is nothing but that word and names
@@ -436,6 +450,21 @@ func spanNames(spans []refSpan) []string {
 		names = append(names, sp.name)
 	}
 	return names
+}
+
+// skillTokenSpans reduces located tokens to the bare byte ranges a sent block paints — the other
+// half of the refSpan pair, and the half spanNames throws away. It keeps one span per OCCURRENCE
+// where spanNames de-dupes by name, because painting is about where the words are: a skill named
+// twice is invoked once and lights up twice.
+func skillTokenSpans(spans []refSpan) []skillSpan {
+	if len(spans) == 0 {
+		return nil
+	}
+	out := make([]skillSpan, 0, len(spans))
+	for _, sp := range spans {
+		out = append(out, skillSpan{start: sp.start, end: sp.end})
+	}
+	return out
 }
 
 // extractFileRefs returns s unchanged plus the workspace-relative paths its @file references name

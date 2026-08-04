@@ -763,7 +763,7 @@ func TestBlinkingStarDropsOnlyTheSelectionsSpanningIt(t *testing.T) {
 
 	// Row 0 is a settled user block and the live header sits below it: the flip is none of the
 	// span's business.
-	elsewhere := live(t, func(m *Model) { m.transcript.addUser("run the tests", nil) })
+	elsewhere := live(t, func(m *Model) { m.transcript.addUser("run the tests", nil, nil) })
 	elsewhere = step(t, elsewhere, spinnerTickMsg{gen: elsewhere.spin.gen})
 	if !elsewhere.transcriptSel.active {
 		t.Error("the star's flip dropped a selection over settled lines it never touched")

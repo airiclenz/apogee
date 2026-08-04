@@ -137,7 +137,7 @@ const seededAssistantText = "the number is 7"
 // reset test starts with more than the lone start-up box. It takes *Model so the mutation lands on
 // the caller's value.
 func seedConversation(m *Model) {
-	m.transcript.addUser("remember the number 7", nil)
+	m.transcript.addUser("remember the number 7", nil, nil)
 	m.transcript.apply(domain.MessageEvent{Text: seededAssistantText})
 }
 

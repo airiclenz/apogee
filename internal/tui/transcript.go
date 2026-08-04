@@ -97,8 +97,40 @@ type entry struct {
 	expanded  bool     // view-only block state: false = collapsed (the default); never persisted
 	ephemeral bool     // display-only: rendered, never persisted (see encodeTranscript)
 	skills    []string // entryUser / entryInterjected: display names of the skills this message invoked
-	presented presentedView
-	startup   startupView // entryStartup only: the one-time start-up box's logo + session facts
+	// entryUser / entryInterjected: where those invocations sit IN text — one span per occurrence
+	skillSpans []skillSpan
+	presented  presentedView
+	startup    startupView // entryStartup only: the one-time start-up box's logo + session facts
+}
+
+// skillSpan is one invoked "/token" LOCATED in a sent message's text: the byte range [start,end)
+// the token occupies, so the block can paint that very run of the text in the skill colour instead
+// of restating the invocation beside it.
+//
+// It is a send-time VERDICT, captured where the parse layer resolved the token against the catalog
+// (parseInput → [refSpan]) and carried with the message from then on — never a lookup the painter
+// repeats. That is what makes it the record of what the model was actually given: a replayed
+// session paints the same tokens it painted the day they were sent, even if the skill has since
+// been renamed, removed, or shadowed by a workspace that no longer ships it.
+//
+// Every occurrence has its own span, which is exactly where spans part company with entry.skills:
+// a skill named twice in one message is invoked once (the de-duped id list) and painted twice.
+type skillSpan struct{ start, end int }
+
+// spansWithin keeps the spans that still LOCATE a run of text — well formed, and inside its bounds
+// — and drops the rest. It is the transcript boundary's check on an offset, the counterpart of
+// stripEscapes on a string: spans arrive from the parse layer, but also from a session file on
+// disk, whose text is re-stripped on the way in (fromWireEntry) and so need no longer be byte-for-
+// byte the text the offsets were measured against. A dropped span simply paints nothing, which is
+// the plain block an entry recorded before spans existed already renders as.
+func spansWithin(text string, spans []skillSpan) []skillSpan {
+	var kept []skillSpan
+	for _, sp := range spans {
+		if sp.start >= 0 && sp.start < sp.end && sp.end <= len(text) {
+			kept = append(kept, sp)
+		}
+	}
+	return kept
 }
 
 // presentedView is the presentation model of a shown document (entryPresented only): the
@@ -137,12 +169,22 @@ type startupView struct {
 
 // addUser appends a user message — the text the human submitted to open or continue the
 // Exchange, plus the display names of any skills attached to it (rendered as chips on the
-// block so the attachment stays visible after the send; nil when none). Called from the submit
+// block so the attachment stays visible after the send; nil when none) and spans, where those
+// invocations sit in text ([skillSpan]; nil when none). Called from the submit
 // path, not the event fold. The skill display names are untrusted (they come from a
 // repo-supplied SKILL.md front-matter), so they are escape-stripped like model text — an
 // attacker cannot smuggle a terminal control sequence into the transcript through a chip.
-func (t *transcript) addUser(text string, skills []string) {
-	t.entries = append(t.entries, entry{kind: entryUser, text: text, skills: stripEscapesAll(skills)})
+//
+// The spans must be offsets into THIS text: a caller that composes the message from several
+// parsed inputs (joinedInterjections) re-bases them onto the composition, and spansWithin drops
+// any that still fail to land.
+func (t *transcript) addUser(text string, skills []string, spans []skillSpan) {
+	t.entries = append(t.entries, entry{
+		kind:       entryUser,
+		text:       text,
+		skills:     stripEscapesAll(skills),
+		skillSpans: spansWithin(text, spans),
+	})
 }
 
 // addInterjected appends a message the human interjected into the running Exchange, at the point
@@ -153,12 +195,18 @@ func (t *transcript) addUser(text string, skills []string) {
 // the sticky header (renderView records only entryUser blocks as such), because the prompt the
 // on-screen work belongs to is still the one that opened the Exchange.
 //
-// It carries the skills the remark invoked exactly as addUser does, and for the same reason: a
-// skill rides an interjection (ADR 0027), so the delivered block must record what the model was
-// given, and a delivered remark differs from a flushed one only in when it landed. The display
-// names are escape-stripped on the same untrusted-input grounds.
-func (t *transcript) addInterjected(text string, skills []string) {
-	t.entries = append(t.entries, entry{kind: entryInterjected, text: text, skills: stripEscapesAll(skills)})
+// It carries the skills the remark invoked — their display names and their spans — exactly as
+// addUser does, and for the same reason: a skill rides an interjection (ADR 0027), so the
+// delivered block must record what the model was given, and a delivered remark differs from a
+// flushed one only in when it landed. The display names are escape-stripped on the same
+// untrusted-input grounds.
+func (t *transcript) addInterjected(text string, skills []string, spans []skillSpan) {
+	t.entries = append(t.entries, entry{
+		kind:       entryInterjected,
+		text:       text,
+		skills:     stripEscapesAll(skills),
+		skillSpans: spansWithin(text, spans),
+	})
 }
 
 // addNote appends a neutral note (e.g. "cancelled") — a transcript record of a UI-level

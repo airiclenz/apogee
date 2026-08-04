@@ -197,7 +197,7 @@ func TestTranscriptCodecExcludesStartupAndPending(t *testing.T) {
 	t.Parallel()
 	tr := &transcript{}
 	tr.addStartup(startupView{Logo: "APOGEE", Host: "host", Model: "model", Version: "0.8.0"})
-	tr.addUser("hello", nil)
+	tr.addUser("hello", nil, nil)
 	tr.pending = "half-typed answer the user never saw committed"
 	tr.streaming = true
 
@@ -232,7 +232,7 @@ func TestTranscriptCodecExcludesStartupAndPending(t *testing.T) {
 func TestTranscriptCodecExcludesEphemeral(t *testing.T) {
 	t.Parallel()
 	tr := &transcript{}
-	tr.addUser("what is the capital of france", nil)
+	tr.addUser("what is the capital of france", nil, nil)
 	tr.addNote("cancelled")
 	tr.addEphemeralNote("resumed: france question")
 
@@ -504,6 +504,69 @@ func TestTranscriptCodecSettlesTheBodyKindOnDecode(t *testing.T) {
 	if !truncated || len(shown) != diffDetailCap {
 		t.Errorf("decoded diff body paints %d lines (truncated=%v); want the diff cap of %d",
 			len(shown), truncated, diffDetailCap)
+	}
+}
+
+// TestTranscriptCodecRoundTripsSkillTokenSpans proves the record keeps WHERE a message invoked its
+// skills, not just which ones: a resumed session paints the same tokens the live one did. Both
+// sent kinds carry them (a flushed send and a delivered interjection), one span per occurrence.
+//
+// It also pins the two degrades the plan accepted instead of a migration: an entry stored before
+// the member existed comes back with no spans and paints plain, and a span that no longer lands in
+// the text it arrives with is dropped rather than slicing out of range.
+func TestTranscriptCodecRoundTripsSkillTokenSpans(t *testing.T) {
+	t.Parallel()
+	known := knownSkills("refocus")
+	sent := parseInput("/refocus and later /refocus again", known)
+	remark := parseInput("no — /refocus first", known)
+
+	tr := &transcript{}
+	tr.addUser(sent.text, []string{"Refocus"}, sent.skillSpans)
+	tr.addInterjected(remark.text, []string{"Refocus"}, remark.skillSpans)
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	// The member and its field names are part of the record now, so pin them (the leading token of
+	// the send is 8 bytes at offset 0).
+	if want := `"skillSpans":[{"start":0,"end":8}`; !strings.Contains(string(data), want) {
+		t.Errorf("wire blob does not carry %s:\n%s", want, data)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("decoded %d entries; want the send and the interjection", len(got))
+	}
+	for i, want := range [][]skillSpan{sent.skillSpans, remark.skillSpans} {
+		if !reflect.DeepEqual(got[i].skillSpans, want) {
+			t.Errorf("entry %d spans = %v, want %v", i, got[i].skillSpans, want)
+		}
+		for _, sp := range got[i].skillSpans {
+			if tok := got[i].text[sp.start:sp.end]; tok != "/refocus" {
+				t.Errorf("entry %d span %v locates %q after the round trip; want the token", i, sp, tok)
+			}
+		}
+	}
+
+	legacy := []byte(`{"version":1,"entries":[{"kind":"user","text":"/refocus please","skills":["Refocus"]}]}`)
+	old, err := decodeTranscript(legacy)
+	if err != nil {
+		t.Fatalf("decodeTranscript(legacy): %v", err)
+	}
+	if old[0].skillSpans != nil {
+		t.Errorf("a pre-spans entry decoded with spans %v; want none — it paints plain", old[0].skillSpans)
+	}
+
+	corrupt := []byte(`{"version":1,"entries":[{"kind":"user","text":"hi","skillSpans":[{"start":0,"end":900}]}]}`)
+	bad, err := decodeTranscript(corrupt)
+	if err != nil {
+		t.Fatalf("decodeTranscript(corrupt): %v", err)
+	}
+	if bad[0].skillSpans != nil {
+		t.Errorf("a span past the end of its text survived decode: %v", bad[0].skillSpans)
 	}
 }
 

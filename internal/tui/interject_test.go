@@ -1408,6 +1408,39 @@ func TestIdleEnterMergesEditorLast(t *testing.T) {
 	}
 }
 
+// TestJoinedInterjectionsRebasesSkillSpans: a flush composes several messages into ONE block, so
+// the token offsets each row measured in its own text have to move onto the composition. Left
+// un-rebased, a second row's accent would paint a run of the first row's prose — the spans are
+// byte offsets into the joined text, and only the join knows where each row landed in it.
+func TestJoinedInterjectionsRebasesSkillSpans(t *testing.T) {
+	t.Parallel()
+	known := knownSkills("refocus", "code-audit")
+	held := parseInput("/refocus the docs", known)
+	tail := parseInput("then /code-audit it", known)
+
+	m := Model{pendingInterjections: []queuedInterjection{{
+		id:         1,
+		raw:        "/refocus the docs",
+		input:      domain.UserInput{Text: held.text, SkillIDs: held.skillIDs},
+		skillSpans: held.skillSpans,
+	}}}
+
+	in, spans := m.joinedInterjections(tail)
+
+	if len(spans) != 2 {
+		t.Fatalf("joined spans = %v; want one per token, both rows", spans)
+	}
+	for i, want := range []string{"/refocus", "/code-audit"} {
+		sp := spans[i]
+		if sp.end > len(in.Text) {
+			t.Fatalf("span %v runs past the joined text %q", sp, in.Text)
+		}
+		if got := in.Text[sp.start:sp.end]; got != want {
+			t.Errorf("span %v locates %q in the joined text; want %q", sp, got, want)
+		}
+	}
+}
+
 // TestQuitDeferredBeatsFlush: a quit requested while the model works exits at the terminal fold.
 // It must not be overtaken by the flush — staged rows are session-ephemeral, and opening a fresh
 // Exchange into a program that is leaving would either be abandoned or delay the exit.

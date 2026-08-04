@@ -52,14 +52,30 @@ type wireEnvelope struct {
 // buffer, the one-time start-up box and any display-only (ephemeral) entry never reach here (see
 // encodeTranscript).
 type wireEntry struct {
-	Kind      string         `json:"kind"`
-	Text      string         `json:"text,omitempty"`
-	Depth     int            `json:"depth,omitempty"`
-	CallID    string         `json:"callID,omitempty"`
-	Done      bool           `json:"done,omitempty"`
-	Skills    []string       `json:"skills,omitempty"`
-	Tool      *wireToolView  `json:"tool,omitempty"`
-	Presented *wirePresented `json:"presented,omitempty"`
+	Kind       string          `json:"kind"`
+	Text       string          `json:"text,omitempty"`
+	Depth      int             `json:"depth,omitempty"`
+	CallID     string          `json:"callID,omitempty"`
+	Done       bool            `json:"done,omitempty"`
+	Skills     []string        `json:"skills,omitempty"`
+	SkillSpans []wireSkillSpan `json:"skillSpans,omitempty"`
+	Tool       *wireToolView   `json:"tool,omitempty"`
+	Presented  *wirePresented  `json:"presented,omitempty"`
+}
+
+// wireSkillSpan is the serialized form of a [skillSpan]: the byte range one invoked "/token"
+// occupies in the entry's own Text. Offsets travel rather than the token text, because the text is
+// the record and a span only points into it — which is also why decode re-checks a span against
+// the text it arrives with (fromWireEntry → spansWithin) instead of trusting the file.
+//
+// The member is ADDITIVE within transcriptVersion and needs no bump: a blob written before it
+// decodes with no spans and its blocks paint plain, and an older build ignores a member it does
+// not know. Both are the pre-production degrade the plan accepted — no migration.
+// Neither offset takes omitempty: start 0 is the ordinary case (a message opening with its token),
+// and a half-written span would read as a live one. The slice member carries the omission instead.
+type wireSkillSpan struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
 }
 
 // wireToolView is the serialized form of a [toolView], including its unexported name — the raw
@@ -190,12 +206,13 @@ func decodeTranscript(data []byte) ([]entry, error) {
 // would have to be kept in step with it.
 func toWireEntry(e *entry, kind string) wireEntry {
 	w := wireEntry{
-		Kind:   kind,
-		Text:   e.text,
-		Depth:  e.depth,
-		CallID: e.callID,
-		Done:   e.done,
-		Skills: e.skills,
+		Kind:       kind,
+		Text:       e.text,
+		Depth:      e.depth,
+		CallID:     e.callID,
+		Done:       e.done,
+		Skills:     e.skills,
+		SkillSpans: toWireSkillSpans(e.skillSpans),
 	}
 	if e.kind == entryToolCall || e.kind == entrySchedule {
 		w.Tool = toWireToolView(e.tool)
@@ -204,6 +221,19 @@ func toWireEntry(e *entry, kind string) wireEntry {
 		w.Presented = toWirePresented(e.presented)
 	}
 	return w
+}
+
+// toWireSkillSpans projects an entry's skill-token spans onto the wire — nil for nil, so a message
+// that invoked no skill serializes without the member at all.
+func toWireSkillSpans(spans []skillSpan) []wireSkillSpan {
+	if len(spans) == 0 {
+		return nil
+	}
+	out := make([]wireSkillSpan, 0, len(spans))
+	for _, sp := range spans {
+		out = append(out, wireSkillSpan{Start: sp.start, End: sp.end})
+	}
+	return out
 }
 
 // toWireToolView projects a toolView (its unexported name included) onto the wire.
@@ -255,6 +285,10 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 		done:   w.Done,
 		skills: stripEscapesAll(w.Skills),
 	}
+	// The offsets were measured against the text as SENT, and the text above has just been
+	// re-stripped as untrusted disk input, so a span is kept only while it still locates a run of
+	// what came back — a corrupt or shortened record paints plain rather than slicing out of range.
+	e.skillSpans = spansWithin(e.text, fromWireSkillSpans(w.SkillSpans))
 	if w.Tool != nil {
 		e.tool = fromWireToolView(w.Tool)
 	}
@@ -265,6 +299,19 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 		closeInterruptedFiring(&e)
 	}
 	return e, true
+}
+
+// fromWireSkillSpans rebuilds the skill-token spans from the wire, verbatim. Nothing is validated
+// here — that is the caller's job, which alone holds the text the offsets must land in.
+func fromWireSkillSpans(ws []wireSkillSpan) []skillSpan {
+	if len(ws) == 0 {
+		return nil
+	}
+	out := make([]skillSpan, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, skillSpan{start: w.Start, end: w.End})
+	}
+	return out
 }
 
 // fromWireToolView rebuilds a toolView from the wire and finishes it through the presenter's own

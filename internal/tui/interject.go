@@ -15,7 +15,7 @@ import (
 // ----------------------------------------------------------------------------
 
 // queuedInterjection is one message the human typed while the model was working, staged for
-// delivery into the running Exchange. It carries three things because three different consumers
+// delivery into the running Exchange. It carries four things because four different consumers
 // need different halves of it:
 //
 //   - id names the row across the two copies of the queue — the Model's display slice and the
@@ -27,10 +27,15 @@ import (
 //   - input is the parsed form the engine consumes; its @file references resolve at DELIVERY,
 //     inside Agent.Interject, so the model reads a file as it stands then rather than as it
 //     stood when the remark was typed.
+//   - skillSpans is where input.Text carries its "/tokens" ([skillSpan]) — display's half, kept
+//     off domain.UserInput because the engine has no use for an offset (the wire-silent boundary,
+//     ADR 0031) and captured HERE because a delivered row becomes a transcript block later, by
+//     which time the parse that located them is long gone.
 type queuedInterjection struct {
-	id    int
-	raw   string
-	input domain.UserInput
+	id         int
+	raw        string
+	input      domain.UserInput
+	skillSpans []skillSpan
 }
 
 // interjectBox is the per-Exchange mailbox: the Update goroutine pushes staged rows into it and
@@ -180,7 +185,8 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 		// The row carries the full parse — the skill /tokens included. A skill is message content
 		// like an @ref, so it rides the interjection and is resolved at delivery (agent/interject.go
 		// prepends the bodies exactly as the loop does at open).
-		input: domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: parsed.skillIDs},
+		input:      domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: parsed.skillIDs},
+		skillSpans: parsed.skillSpans,
 	}
 	// The display copy and the mailbox are written together, which is what makes the two halves
 	// reconcilable: the row exists for the human the moment it exists for the worker.
@@ -245,7 +251,7 @@ func (m *Model) foldInterjected(items []queuedInterjection) {
 	delivered := make(map[int]bool, len(items))
 	for _, it := range items {
 		delivered[it.id] = true
-		m.transcript.addInterjected(it.input.Text, m.skillDisplayNames(it.input.SkillIDs))
+		m.transcript.addInterjected(it.input.Text, m.skillDisplayNames(it.input.SkillIDs), it.skillSpans)
 	}
 	kept := make([]queuedInterjection, 0, len(m.pendingInterjections))
 	for _, row := range m.pendingInterjections {
@@ -292,10 +298,10 @@ func (m Model) flushAfterCompletion(done tea.Cmd) (tea.Model, tea.Cmd) {
 // half-typed line is not something they asked to send — it stays in the box, and the staged rows
 // (which they did press ⏎ on) are what goes.
 func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
-	in := m.joinedInterjections(parsedInput{})
+	in, spans := m.joinedInterjections(parsedInput{})
 	m.pendingInterjections = nil
 	m.detached = false // the flushed prompt re-arms follow-the-tail, exactly as a typed one does
-	m.transcript.addUser(in.Text, m.skillDisplayNames(in.SkillIDs))
+	m.transcript.addUser(in.Text, m.skillDisplayNames(in.SkillIDs), spans)
 	m.layout() // the strip above the box loses its rows; the new prompt opens at the top
 	return m.launchExchange(in)
 }
@@ -315,12 +321,24 @@ func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
 // It joins each row's PARSED text, not the verbatim editor line kept for the Backspace pop: a row
 // delivered mid-run sends exactly that text, and a row that merely happened to be flushed instead
 // must not reach the model differently for it.
-func (m Model) joinedInterjections(tail parsedInput) domain.UserInput {
+//
+// It returns the display's half beside the engine's: the rows' skill spans RE-BASED onto the
+// composition, since each row located its "/tokens" in its own text and the block this composes is
+// one message. The offsets are byte counts of the joined string — every seated text plus the
+// separator that follows it — which is why the join runs through interjectionJoin rather than a
+// literal here and a literal there.
+func (m Model) joinedInterjections(tail parsedInput) (domain.UserInput, []skillSpan) {
 	texts := make([]string, 0, len(m.pendingInterjections)+1)
 	var refs, ids []string
+	var spans []skillSpan
+	offset := 0 // where the NEXT seated text will begin in the joined string
 	seenRef, seenID := make(map[string]bool), make(map[string]bool)
-	add := func(text string, fileRefs, skillIDs []string) {
+	add := func(text string, fileRefs, skillIDs []string, skillSpans []skillSpan) {
 		if text != "" {
+			for _, sp := range skillSpans {
+				spans = append(spans, skillSpan{start: sp.start + offset, end: sp.end + offset})
+			}
+			offset += len(text) + len(interjectionJoin)
 			texts = append(texts, text)
 		}
 		for _, ref := range fileRefs {
@@ -337,11 +355,17 @@ func (m Model) joinedInterjections(tail parsedInput) domain.UserInput {
 		}
 	}
 	for _, row := range m.pendingInterjections {
-		add(row.input.Text, row.input.FileRefs, row.input.SkillIDs)
+		add(row.input.Text, row.input.FileRefs, row.input.SkillIDs, row.skillSpans)
 	}
-	add(tail.text, tail.fileRefs, tail.skillIDs)
-	return domain.UserInput{Text: strings.Join(texts, "\n\n"), FileRefs: refs, SkillIDs: ids}
+	add(tail.text, tail.fileRefs, tail.skillIDs, tail.skillSpans)
+	return domain.UserInput{Text: strings.Join(texts, interjectionJoin), FileRefs: refs, SkillIDs: ids}, spans
 }
+
+// interjectionJoin separates the staged rows a flush composes into one message: a blank line, so
+// several remarks read as several paragraphs rather than one run-on. It is a named constant because
+// the span re-basing counts its bytes (joinedInterjections) — a separator changed in one of the two
+// places and not the other would slide every accent after the first row.
+const interjectionJoin = "\n\n"
 
 // noteHeldQueue records that a stop or a loop error left the queue standing. It is called from the
 // two terminal folds that do NOT flush, so it fires exactly once per hold — at the transition into
