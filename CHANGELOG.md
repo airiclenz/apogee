@@ -1011,6 +1011,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A sent prompt containing a tab stays inside its block, and its skill token keeps its colour.** A
+  tab weighs nothing when the transcript measures a line and four columns once the block is painted,
+  so a prompt carrying one composed four cells more than it had room for: the row spilled past the
+  block's right edge, split itself across two rows on the way to the screen, and the violet accent on
+  an invoked `/token` slid four columns to the left of the token — colouring the tail of the word
+  before it instead. Tabs are expanded to spaces before anything measures them now, so the block
+  paints exactly the width it was given and the accent lands on the token, on every terminal.
+
 - **Backspace and Del delete the prompt text you selected with the mouse.** Dragging across text in
   the input box and pressing Backspace used to make the highlight vanish and take exactly one
   character with it — the selected text survived, and you deleted it by hand. Both keys now remove

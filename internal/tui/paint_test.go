@@ -478,6 +478,54 @@ func TestPaintedBoxRowsAreNotFolded(t *testing.T) {
 	}
 }
 
+// A user block whose text carries a TAB paints at the width it was given, and its skill accent
+// lands on the token — the same defect class as the fold above, one step further down.
+//
+// A tab is zero cells to the width authority and zero to the painter as well (ultraviolet drops the
+// control byte), so those two never disagreed. lipgloss did: th.userBlock.Render rewrites "\t" into
+// four spaces on its way past (maybeConvertTabs), after squareLine padded the row to exactly the
+// block's width and before the painter sees any of it. The row came back four cells over — 48 at a
+// width of 44 — which the viewport then folded into two painted rows, and the accent, shaded at
+// cells counted with the tab still weighing nothing, covered "  b /re" instead of "/review": three
+// cells of somebody else's text and half the token, four columns left of where the token is painted.
+// wrapText expands the tabs itself now, before anything measures them (expandTabs).
+//
+// Both measures are swept because both painted the defect: the tab weighs the same nothing in each,
+// so this is not a case the two disagree about — it is one they were both being lied to about.
+func TestPaintedTabBearingUserBlockKeepsItsWidthAndItsAccent(t *testing.T) {
+	const width = 44
+	const text = "a\tb /review c" // one tab, and a token to the right of it for the accent to miss
+
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			th := newTheme()
+			th.measure = widthAuthority{method: tc.method}
+
+			tr := &transcript{}
+			tr.addUser(text, []skillSpan{spanOf(t, text, "/review", 1)})
+
+			rows := tr.renderLines(th, width)
+			if len(rows) != 1 {
+				t.Fatalf("the block painted %d rows, want the one its text wraps to:\n%s",
+					len(rows), strings.Join(mapStrip(rows), "\n"))
+			}
+			for i, ln := range rows {
+				plain := strip(ln)
+				if got := paintedWidth(plain, tc.method); got != width {
+					t.Errorf("row %d paints %d columns, want the block's %d: %q", i, got, width, plain)
+				}
+				if strings.Contains(plain, "\t") {
+					t.Errorf("row %d still carries a tab for a style to rewrite: %q", i, plain)
+				}
+			}
+			runs := accentRuns(rows[0], accentOpener(t, th.skillAccent))
+			if len(runs) != 1 || runs[0] != "/review" {
+				t.Errorf("the accent covers %q; want the token alone", runs)
+			}
+		})
+	}
+}
+
 // The stacked start-up card fits its own info rows to the card's content budget, so a value too wide
 // to be shown whole ends in the elision marker rather than simply stopping at the border.
 //

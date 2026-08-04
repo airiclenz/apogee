@@ -464,6 +464,12 @@ func subAgentGist(head entry, span []entry) string {
 // the click that closes it again. A body inside the cap marks nothing at all, so a click on an
 // ordinary prompt keeps its selection meaning.
 func renderUserBlock(th theme, marker, text string, spans []skillSpan, width int, expanded bool) blockPaint {
+	// The spans are stated in the text's OWN offsets, so they are re-based before the text is
+	// expanded, and the expanded text is what both the wrap and the accent map are handed — a block
+	// whose rows held spaces where the spans still counted a tab would light up the wrong run
+	// (expandTabs).
+	spans = expandTabsInSpans(text, spans)
+	text = expandTabs(text)
 	var out []string
 	trailer := ""
 	collapsible := false
@@ -1279,6 +1285,10 @@ func wrapText(th theme, text string, limit int) []string {
 	if limit < 1 {
 		limit = 1
 	}
+	// Tabs are settled BEFORE the break is chosen: a tab the wrap counts as nothing is four cells
+	// once a style has been past the line, and the cap above would then hold in the measure and
+	// break in the paint (expandTabs).
+	text = expandTabs(text)
 	wrapped := strings.Split(th.measure.Wrap(text, limit, ""), "\n")
 	out := make([]string, 0, len(wrapped))
 	for _, ln := range wrapped {
@@ -1294,6 +1304,58 @@ func wrapText(th theme, text string, limit int) []string {
 			segs = segs[1:]
 		}
 		out = append(out, segs...)
+	}
+	return out
+}
+
+// tabCells is how many spaces one TAB becomes when this package expands it: lipgloss's own
+// tabWidthDefault (lipgloss/v2@v2.0.5/style.go:14, maybeConvertTabs), so a line handed to a style
+// with its tabs already expanded paints exactly what that style would have made of it anyway.
+const tabCells = 4
+
+// expandTabs replaces every TAB in s with the spaces a lipgloss style would otherwise put there.
+//
+// A TAB is ZERO cells to the width authority, and zero to the painter too — ultraviolet drops the
+// control byte rather than advancing to a tab stop — so on that pair alone the two agree and there
+// would be nothing to settle. What breaks the agreement is what sits BETWEEN them: every
+// lipgloss.Style.Render rewrites "\t" into tabCells spaces on its way past (maybeConvertTabs), after
+// the authority measured the line and before the painter ever sees it. A user block therefore
+// composed four cells more than it had measured, per tab in the text: the row overran the width the
+// block was given, the viewport folded that one row into two painted ones, and the skill accent —
+// shaded at cells counted in the authority's measure — landed four columns left of the token it
+// names.
+//
+// Expanding before anything measures is what puts the three back in step: the authority counts the
+// spaces, the style finds no tab left to rewrite, and the painter paints the very cells that were
+// counted. This is not the content normalisation ADR 0030 rules out — that ruling is about VS16,
+// where folding the content would change what the user sees and would overrule the terminal's own
+// measure. A tab has no display width for anyone to have an opinion about, and the spaces are what
+// the block was already painting; only the counting of them was wrong.
+func expandTabs(s string) string {
+	if !strings.Contains(s, "\t") {
+		return s
+	}
+	return strings.ReplaceAll(s, "\t", strings.Repeat(" ", tabCells))
+}
+
+// expandTabsInSpans re-bases spans — byte offsets into text — onto expandTabs(text): every TAB
+// before an offset grows the text by tabCells-1 bytes, so the offset moves by that much per tab
+// preceding it. Call it while text still holds its tabs, on the way to handing the expanded text to
+// the wrap and to the accent map, so both address the same string.
+//
+// Offsets are clamped to text before they are counted against, so a span that never went through
+// the transcript boundary's own check (spansWithin) cannot slice out of range here either.
+func expandTabsInSpans(text string, spans []skillSpan) []skillSpan {
+	if len(spans) == 0 || !strings.Contains(text, "\t") {
+		return spans
+	}
+	shift := func(off int) int {
+		off = clampInt(off, 0, len(text))
+		return off + strings.Count(text[:off], "\t")*(tabCells-1)
+	}
+	out := make([]skillSpan, 0, len(spans))
+	for _, sp := range spans {
+		out = append(out, skillSpan{start: shift(sp.start), end: shift(sp.end)})
 	}
 	return out
 }
