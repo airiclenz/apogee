@@ -153,9 +153,25 @@ rows correctly); `wrapRows`/`rowGap` off → byte-identical output.
 
 **Commit:** `feat(tui): popup painter learns wrapped rows and row separators`
 
-## 4. Approval prompt becomes a navigable menu
+## 4. Approval prompt becomes a navigable menu — ✅ DONE (2026-08-04)
 
 Depends on items 1 and 2.
+
+NOTES (2026-08-04): the pane hands `popupBudget` a NEW chrome constant — `popupBorderChrome`
+(`internal/tui/popup.go`, `popupTitleBorderChrome - 1`) — rather than the `popupTitleBorderChrome`
+item 1's note anticipated for a title-in-border caller. That constant budgets for a hint row, and
+this pane draws neither a title row NOR a hint row (the legend is dropped per the ratified call), so
+its two borders are its whole frame; `popupBudget` documents chrome as the CALLER's precisely because
+only the caller knows which rows its spec draws, and the honest value is what puts a decision row on
+the screen between 12 and 15 terminal rows instead of leaving the freed row unclaimed. `approvalKeys`
+is now DERIVED from the new `approvalMenu` list (`approvalMenuKeys`) instead of standing as a second
+literal map, so the letters the keys accept and the `[a]`-style cells the pane paints cannot drift —
+the map's name and behaviour are unchanged. Beyond the tests the item names, the chrome and label
+changes forced three more: `TestModelApprovalNamesTheProseItCannotShow` (its placement assertion now
+reads the border row, and its unreachable no-body-budget branch became the body's floor-of-one-row
+marker), `TestDecisionSurfaceStaysOnTheFrame`'s approval probe, and `TestModelSeamMessageTransitions`'
+lower-case "allow"/"deny" check. The hidden-row count stays all-or-nothing (item 3), so a window
+seating only some of the four options scrolls rather than counting them onto the border title.
 
 **What:** Rebuild the approval prompt on the new painter capabilities. In
 `internal/tui/model.go`:

@@ -1415,7 +1415,7 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 		probe string // the identity the decision turns on; only the pane writes it
 		raise func(t *testing.T, m Model, draft int) Model
 	}{
-		{"approval prompt", "approve write_file?", func(t *testing.T, m Model, draft int) Model {
+		{"approval prompt", "Approve write_file?", func(t *testing.T, m Model, draft int) Model {
 			t.Helper()
 			m.state = stateRunning
 			m = withDraft(t, m, draft)

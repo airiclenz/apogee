@@ -143,6 +143,11 @@ type Model struct {
 	pending    *approvalReqMsg    // the in-flight Approval while awaitingApproval (P2.4 acts on it)
 	pendingAsk *askReqMsg         // the in-flight ask_user question while awaitingAsk (P3.11)
 	askSel     int                // the highlighted ask_user choice index while awaitingAsk (D5); bare int, no no-copy type (ADR 0011)
+	// approvalSel is the highlighted approvalMenu row while awaitingApproval: the row ↑/↓ move and
+	// ⏎ takes. It resets to 0 — Allow, the mockup's default — on every incoming request rather than
+	// persisting across them, because a menu that remembers where the last decision was left points
+	// at Deny for a call the human has not read yet. A bare int, no no-copy type (ADR 0011).
+	approvalSel int
 	// askDraft holds what was in the input box when an ask_user question BORROWED it: the question
 	// empties the box for the answer (D5 pre-selects the first choice on an empty box), and an
 	// unsent message the human was part-way through typing is not the question's to throw away.
@@ -524,6 +529,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// on msg.Reply (the C3 rendezvous; P2.4).
 		m.state = stateAwaitingApproval
 		m.pending = &msg
+		m.approvalSel = 0       // the menu opens on Allow for every request (docs/design/user-questions-layout.md)
 		m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
 		m.layout()              // the pane the decision turns on outranks the draft's extra rows
 		return m, nil
@@ -887,6 +893,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case stateAwaitingAsk:
 			// Submit the typed answer back to the blocked ask_user tool (P3.11).
 			return m.submitAnswer()
+		case stateAwaitingApproval:
+			// Take the approval menu's highlighted row. The menu IS the decision surface now — the
+			// legend that used to spell the letters out is gone, so ⏎ on the pointed-at row is the
+			// way in for a human who has not learnt a/s/d yet (resolveApproval).
+			return m.resolveApproval()
 		case stateErrored:
 			// Dismiss the error and return to idle so the next message can be sent. With a queue
 			// held by the fault (ADR 0025) that is deliberately TWO presses: this one clears the
@@ -896,7 +907,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.state = stateIdle
 			return m, nil
 		default:
-			return m, nil // no-op while awaiting approval (a/d/s own the keyboard)
+			return m, nil
 		}
 	case "shift+tab":
 		// Cycle the autonomy mode one rung up the privilege ladder (wraps Auto → Plan). Live in
@@ -1017,31 +1028,96 @@ func (m Model) scrollViewport(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// approvalKeys maps a decision keypress to the ApprovalDecision it sends. The set mirrors the
-// awaitingApproval hint legend (a allow · d deny · s allow-session).
-var approvalKeys = map[string]domain.ApprovalDecision{
-	"a": domain.ApprovalAllow,
-	"d": domain.ApprovalDeny,
-	"s": domain.ApprovalAllowForSession,
+// approvalOption is one row of the approval menu: the label the human reads, the key that takes it
+// without navigating there first, and what taking it does. A row either sends a decision back over
+// the rendezvous or CANCELS the run — cancels is what tells the two apart, because no fourth
+// ApprovalDecision was added for it (the ratified design leaves the engine's Approver contract
+// untouched). The Cancel row IS the Esc key written down: the same stopWorker path, spelled out for
+// a human who has no legend left to learn it from.
+type approvalOption struct {
+	label string
+	key   string // the keypress that takes this row directly; also the text of its shortcut cell
+	// decision is what the row replies, meaningless when cancels is set.
+	decision domain.ApprovalDecision
+	cancels  bool
+}
+
+// approvalMenu is the approval prompt's decision menu in the order it is painted
+// (docs/design/user-questions-layout.md). It is the ONE list the pane and the keys both read — the
+// rows renderPopup draws, the shortcut cells beside them, the order ↑/↓ walk, and (through
+// approvalKeys) the letters that take a row without walking to it — so a row can never be paintable
+// and unreachable, or reachable and unpainted.
+var approvalMenu = []approvalOption{
+	{label: "Allow", key: "a", decision: domain.ApprovalAllow},
+	{label: "Always allow this session", key: "s", decision: domain.ApprovalAllowForSession},
+	{label: "Deny", key: "d", decision: domain.ApprovalDeny},
+	{label: "Cancel", key: "esc", cancels: true},
+}
+
+// approvalKeys maps a decision keypress to the ApprovalDecision it sends: the menu's own rows,
+// indexed by the letter each one advertises in its shortcut cell, so the two can never drift. The
+// Cancel row is absent by construction — it sends no decision, and Esc is claimed before the
+// approval routing is reached (handleKey's "esc" case) precisely so the cancel path is one path.
+var approvalKeys = approvalMenuKeys()
+
+func approvalMenuKeys() map[string]domain.ApprovalDecision {
+	keys := make(map[string]domain.ApprovalDecision, len(approvalMenu))
+	for _, opt := range approvalMenu {
+		if !opt.cancels {
+			keys[opt.key] = opt.decision
+		}
+	}
+	return keys
 }
 
 // handleApprovalKey resolves a pending Approval while awaitingApproval. A decision key sends
-// its verdict back over the rendezvous reply channel (buffered cap 1, so the send never
-// blocks — messages.go) and returns the model to running so the worker's blocked Step
-// resumes; the spinner tick is re-armed because the chain died when the prompt went up. Any
-// other key scrolls the transcript so the human can review context before ruling. The
-// decision's transcript record arrives for free as the loop's observational ApprovalEvent
-// (C3; P2.3), so this renders the prompt's resolution, not the record.
+// its verdict back over the rendezvous reply channel (sendApproval); ↑/↓ move the menu's highlight,
+// clamped and non-wrapping, the way the ask prompt's choice arrows move (D5), leaving ⏎ to take
+// what they point at (resolveApproval). Any other key scrolls the transcript so the human can
+// review context before ruling — the prompt stays soft-modal, with PgUp/PgDn intercepted upstream
+// so the transcript is still reachable now that ↑/↓ belong to the menu. The decision's transcript
+// record arrives for free as the loop's observational ApprovalEvent (C3; P2.3), so this renders the
+// prompt's resolution, not the record.
 func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if decision, ok := approvalKeys[msg.String()]; ok && m.pending != nil {
-		m.pending.Reply <- decision
-		m.pending = nil
-		m.state = stateRunning
-		m.layout() // the pane is gone: a draft the prompt had clamped grows back (draftRowsCeiling)
-		tick := m.spin.arm()
-		return m, tick
+		return m.sendApproval(decision)
+	}
+	switch msg.String() {
+	case "up":
+		m.approvalSel = clampInt(m.approvalSel-1, 0, len(approvalMenu)-1)
+		return m, nil
+	case "down":
+		m.approvalSel = clampInt(m.approvalSel+1, 0, len(approvalMenu)-1)
+		return m, nil
 	}
 	return m.scrollViewport(msg)
+}
+
+// resolveApproval takes the menu row approvalSel points at — what ⏎ means on this pane. A decision
+// row replies like its letter would; the Cancel row takes the Esc path instead, cancelling the
+// in-flight worker and leaving the prompt standing until the worker reports back with its
+// cancelledMsg (finishWorker clears it), exactly as Esc has always behaved here.
+func (m Model) resolveApproval() (tea.Model, tea.Cmd) {
+	if m.pending == nil {
+		return m, nil
+	}
+	opt := approvalMenu[clampInt(m.approvalSel, 0, len(approvalMenu)-1)]
+	if opt.cancels {
+		m.stopWorker()
+		return m, nil
+	}
+	return m.sendApproval(opt.decision)
+}
+
+// sendApproval hands one verdict back over the pending request's rendezvous reply channel (buffered
+// cap 1, so the send never blocks — messages.go) and returns the model to running so the worker's
+// blocked Step resumes; the spinner tick is re-armed because the chain died when the prompt went up.
+func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cmd) {
+	m.pending.Reply <- decision
+	m.pending = nil
+	m.state = stateRunning
+	m.layout() // the pane is gone: a draft the prompt had clamped grows back (draftRowsCeiling)
+	return m, m.spin.arm()
 }
 
 // submit parses the input through the chat mini-language and routes it: a recognised
@@ -3978,10 +4054,20 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int) (maxBody, maxR
 // above the input box (the shared popup module; D7/D8): the title carries the RAW tool name
 // verbatim (not the friendly transcript label — the approval flow is a security surface, so the
 // human sees exactly the tool that will run), the body carries a non-empty Reason then the
-// pretty-printed Arguments, and the hint carries the decision legend. Every model-authored string
-// (tool name, reason, args) is escape-stripped at this call site; stripEscapes removes only the
-// ESC byte, so the raw tool name is preserved verbatim. Empty/null arguments add no body. Only the
-// top-level (Depth == 0) prompt is rendered this phase.
+// pretty-printed Arguments, and the decisions themselves are the pane's ROWS.
+//
+// It is a MENU rather than a legend (docs/design/user-questions-layout.md): the title rides the top
+// border, the four options of approvalMenu are menu-style rows with their shortcut letters aligned
+// in a second column, and the hint row that used to spell "a allow · d deny · …" is gone — the
+// letters are now written beside the options they take, where the eye already is. That is what pays
+// for the rows: the title row and the hint row the pane no longer draws are two rows back, so its
+// chrome is its two borders and nothing else (popupBorderChrome) and the menu costs the frame no
+// more than the legend did.
+//
+// Every model-authored string (tool name, reason, args) is escape-stripped at this call site;
+// stripEscapes removes only the ESC byte, so the raw tool name is preserved verbatim. The menu's own
+// rows are ours, not the model's, so nothing there needs stripping. Empty/null arguments add no
+// body. Only the top-level (Depth == 0) prompt is rendered this phase.
 //
 // The guarantee this security surface holds is NOT that the whole reason is always on the screen —
 // no pane can promise that on a terminal with four rows to give. It is that the human is never
@@ -4007,16 +4093,28 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 		parts = append(parts, stripEscapes(args))
 	}
 
-	maxBodyRows, _, seated := m.popupBudget(panePrompt, 0, 0, popupChrome) // no rows on the prompt, so no row budget either
+	rows := make([]popupRow, len(approvalMenu))
+	for i, opt := range approvalMenu {
+		// Two cells, so the module's column layout stacks the shortcuts into their own right-hand
+		// column whatever the labels measure — the mockup's alignment, derived rather than hand-padded.
+		rows[i] = popupRow{opt.label, "[" + opt.key + "]"}
+	}
+
+	// The whole menu or as much of it as the window can seat; no cap of our own, because four rows is
+	// the whole offering rather than a window onto a longer list.
+	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, len(rows), len(rows), popupBorderChrome)
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
 	spec := popupSpec{
-		title:       "approve " + stripEscapes(req.Tool) + "?",
-		body:        strings.Join(parts, "\n\n"), // reason and args separated by one blank line; no stray blanks when one is absent
-		maxBodyRows: maxBodyRows,
-		selected:    -1, // no rows on the approval prompt
-		hint:        "a allow · d deny · s allow-session · esc cancel",
+		title:         "Approve " + stripEscapes(req.Tool) + "?",
+		titleInBorder: true,
+		body:          strings.Join(parts, "\n\n"), // reason and args separated by one blank line; no stray blanks when one is absent
+		maxBodyRows:   maxBodyRows,
+		rows:          rows,
+		menuRows:      true,
+		selected:      clampInt(m.approvalSel, 0, len(rows)-1),
+		maxRows:       rowsShown,
 	}
 	return renderPopup(m.th, spec, m.width)
 }

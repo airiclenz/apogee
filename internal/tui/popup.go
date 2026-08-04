@@ -100,6 +100,15 @@ const popupChrome = 4
 // budget then fills, where a floor one row short would seat one it cannot draw.
 const popupTitleBorderChrome = popupChrome - 1
 
+// popupBorderChrome is that height for a pane that draws NEITHER a title row nor a hint row: its
+// name rides the top border (popupSpec.titleInBorder) and how to act on it is written into its own
+// rows rather than into a legend beneath them (the approval menu's shortcut column). Its two border
+// lines are the whole of its frame, so every row the frame grants past them is the pane's to spend.
+// It is what such a pane hands [Model.popupBudget] — the parameter is the CALLER's precisely because
+// only the caller knows which rows its spec will draw, and a pane that budgeted for a hint row it
+// does not paint leaves the row unclaimed at exactly the window where it has fewest to spare.
+const popupBorderChrome = popupTitleBorderChrome - 1
+
 // popupRow is one row of a popup as its columns: the escape-stripped cells the module lays out
 // into vertically aligned columns. Every row of one spec follows that popup kind's fixed column
 // schema — an absent optional tier is an empty cell, which still pads, so the columns after it

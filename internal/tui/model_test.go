@@ -403,8 +403,8 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 		if m.pending == nil {
 			t.Fatal("pending approval not stored")
 		}
-		if got := plain(m.View()); !strings.Contains(got, "allow") || !strings.Contains(got, "deny") {
-			t.Errorf("approval hint not shown:\n%s", got)
+		if got := plain(m.View()); !strings.Contains(got, "Allow") || !strings.Contains(got, "Deny") {
+			t.Errorf("approval menu rows not shown:\n%s", got)
 		}
 	})
 
@@ -709,7 +709,10 @@ func TestModelApprovalPromptRender(t *testing.T) {
 	}
 }
 
-// A non-decision key while a prompt is up neither resolves the gate nor leaves the state.
+// A key that is neither a shortcut nor a menu key falls through to the transcript scroll and
+// resolves nothing — the prompt stays soft-modal. It is worth pinning now that ↑/↓ and ⏎ ARE live
+// here: the menu claims those three and nothing else, so an unrelated letter must still leave the
+// gate, the pointer and the state exactly where they were.
 func TestModelApprovalIgnoresOtherKeys(t *testing.T) {
 	m, reply := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 
@@ -725,6 +728,9 @@ func TestModelApprovalIgnoresOtherKeys(t *testing.T) {
 	}
 	if m.pending == nil {
 		t.Error("pending approval cleared by a non-decision key")
+	}
+	if m.approvalSel != 0 {
+		t.Errorf("a non-menu key moved the pointer to row %d", m.approvalSel)
 	}
 }
 
@@ -752,24 +758,163 @@ func TestModelApprovalCancelClearsPrompt(t *testing.T) {
 	}
 }
 
-// The rebuilt approval prompt paints through the popup module: the raw tool name in the title,
-// the decision legend in the hint, and the pretty-printed args in the body (item 4; D7).
+// The approval prompt paints as a MENU (docs/design/user-questions-layout.md): the raw tool name in
+// the TOP BORDER, the four decisions as menu rows with the pointer on Allow and their shortcut
+// letters aligned in a second column, the pretty-printed args still in the body — and no legend row
+// at all, the letters now being written beside the options they take.
 func TestModelApprovalPromptPopupChrome(t *testing.T) {
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{
 		Tool:      "write_file",
 		Reason:    "write",
 		Arguments: json.RawMessage(`{"path":"notes.txt"}`),
 	})
-	got := plain(m.View())
+	rows := strings.Split(ansiPattern.ReplaceAllString(m.approvalPrompt(m.pending.Request), ""), "\n")
+	got := strings.Join(rows, "\n")
+
+	// The name rides the border rather than a row of its own: asserted on the TOP LINE, so a title
+	// that quietly went back to costing a content row fails here rather than passing on a substring.
+	if !strings.Contains(rows[0], "Approve write_file?") {
+		t.Errorf("top border does not carry the capitalized tool name:\n%s", got)
+	}
+	if strings.Contains(got, "a allow · d deny · s allow-session · esc cancel") {
+		t.Errorf("the old hint legend is still drawn; the shortcut column replaces it:\n%s", got)
+	}
 	for _, want := range []string{
-		"approve write_file?",                             // title carries the raw tool name
-		"a allow · d deny · s allow-session · esc cancel", // decision legend (the hint)
-		"reason: write",                                   // reason on the body's lead line
-		"notes.txt",                                       // pretty-printed args in the body
+		"❯ Allow",                     // the pointer opens on the first row (the mockup's default)
+		"· Always allow this session", // the rest of the menu is dotted, not barred
+		"· Deny",
+		"· Cancel",
+		"reason: write", // reason on the body's lead line (item 5 restyles the label)
+		"notes.txt",     // pretty-printed args in the body
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("approval popup missing %q:\n%s", want, got)
 		}
+	}
+
+	// The shortcut cells are a COLUMN — laid out by the painter's column authority, not padded by
+	// hand — so every one of them starts at the same display offset whatever its label measures.
+	col, seen := -1, 0
+	for _, row := range rows {
+		if !strings.Contains(row, glyphUser+" ") && !strings.Contains(row, glyphMenuUnselected+" ") {
+			continue // not a menu row
+		}
+		i := strings.Index(row, "[")
+		if i < 0 {
+			t.Fatalf("menu row %q carries no shortcut cell:\n%s", row, got)
+		}
+		// In DISPLAY cells, not bytes: ❯ is three bytes and · is two, so a byte offset would call an
+		// aligned column crooked (and a crooked one aligned).
+		if at := lipgloss.Width(row[:i]); col >= 0 && at != col {
+			t.Errorf("shortcut cell at column %d, want %d — the cells are not aligned:\n%s", at, col, got)
+		} else {
+			col = at
+		}
+		seen++
+	}
+	if seen != len(approvalMenu) {
+		t.Errorf("drew %d menu rows, want %d:\n%s", seen, len(approvalMenu), got)
+	}
+}
+
+// ⏎ takes the row the pointer is on: Allow without navigating, and whatever ↓ walked to after it.
+// This is the way in for a human who has not learnt the letters — the legend that used to teach them
+// is gone, so the menu itself has to be operable.
+func TestModelApprovalEnterTakesTheSelectedRow(t *testing.T) {
+	cases := []struct {
+		name string
+		down int
+		want domain.ApprovalDecision
+	}{
+		{"no navigation → allow", 0, domain.ApprovalAllow},
+		{"↓ → allow for session", 1, domain.ApprovalAllowForSession},
+		{"↓↓ → deny", 2, domain.ApprovalDeny},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, reply := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
+			for range tc.down {
+				m = step(t, m, keyDown())
+			}
+
+			m, cmd := stepCmd(t, m, keyEnter())
+
+			select {
+			case got := <-reply:
+				if got != tc.want {
+					t.Errorf("decision = %q, want %q", got, tc.want)
+				}
+			default:
+				t.Fatal("⏎ sent no decision on the reply channel")
+			}
+			if m.state != stateRunning {
+				t.Errorf("state = %v, want running after the decision", m.state)
+			}
+			if m.pending != nil {
+				t.Error("pending approval not cleared after the decision")
+			}
+			if cmd == nil {
+				t.Error("spinner tick not re-armed on the return to running")
+			}
+		})
+	}
+}
+
+// ⏎ on the Cancel row is the Esc key written down: it cancels the in-flight worker and sends NO
+// decision, and the prompt stands until the worker reports back — the same structural path Esc has
+// always taken here (TestModelApprovalCancelClearsPrompt), because no fourth ApprovalDecision exists.
+func TestModelApprovalEnterOnCancelStopsTheWorker(t *testing.T) {
+	m, reply := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
+	cancelled := false
+	m.cancel = func() { cancelled = true }
+
+	for range len(approvalMenu) - 1 { // walk to the last row: Cancel
+		m = step(t, m, keyDown())
+	}
+	m = step(t, m, keyEnter())
+
+	if !cancelled {
+		t.Error("⏎ on the Cancel row did not cancel the in-flight worker")
+	}
+	select {
+	case got := <-reply:
+		t.Errorf("the Cancel row sent %q on the reply channel; cancelling is not a decision", got)
+	default:
+	}
+	if m.state != stateAwaitingApproval {
+		t.Errorf("state = %v, want still awaitingApproval until the worker reports back", m.state)
+	}
+
+	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+	if m.state != stateIdle || m.pending != nil {
+		t.Errorf("state = %v (pending %v), want idle with the prompt cleared", m.state, m.pending)
+	}
+}
+
+// ↑/↓ are clamped and do not wrap, matching the ask prompt's choice arrows: ↑ at the top stays on
+// Allow rather than jumping to Cancel, which on a security surface is the difference between a
+// stray keypress and a stopped run.
+func TestModelApprovalArrowsClampWithoutWrapping(t *testing.T) {
+	m, _ := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
+
+	m = step(t, m, keyUp())
+	if m.approvalSel != 0 {
+		t.Errorf("↑ on the first row moved to %d; the menu must not wrap", m.approvalSel)
+	}
+	for range len(approvalMenu) + 2 {
+		m = step(t, m, keyDown())
+	}
+	if want := len(approvalMenu) - 1; m.approvalSel != want {
+		t.Errorf("↓ past the last row selects %d, want it clamped to %d", m.approvalSel, want)
+	}
+
+	// A fresh request opens on Allow again rather than inheriting where the last one was left.
+	m = step(t, m, approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "run_terminal_command"},
+		Reply:   make(chan domain.ApprovalDecision, 1),
+	})
+	if m.approvalSel != 0 {
+		t.Errorf("a new request opened on row %d, want the menu reset to Allow", m.approvalSel)
 	}
 }
 
@@ -866,11 +1011,11 @@ func TestModelApprovalLongArgsCapsBody(t *testing.T) {
 // gone and NO marker anywhere: a decision on what a tool is about to do, taken against text the
 // pane had silently dropped. The two properties are pinned together here on purpose, because either
 // one alone is satisfiable by breaking the other: the pane must fit the window it is drawn in AND
-// account for every line it is not showing. Between 12 and 15 rows the budget grants no body row at
-// all, so the count rides the title — the row the pane always has, beside the tool name the
-// decision turns on.
+// account for every line it is not showing. Between 12 and 15 rows the budget grants the body its
+// floor of a single row, and on prose this long that row is the count itself — every line dropped
+// and every one of them named, under a border that still carries the tool the decision turns on.
 //
-// It runs at narrowOverlayWindow as well as at 80 columns, because the title row was the one place
+// It runs at narrowOverlayWindow as well as at 80 columns, because the marker row was the one place
 // the accounting could still be lost: composed at full length and clipped to the pane's width, it
 // dropped the count off its end at 42 columns and below, so a terminal that was short AND narrow —
 // the same split pane — silently went back to the state this test exists to forbid.
@@ -893,8 +1038,8 @@ func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
 					t.Errorf("approval pane is %d rows on a %d-row viewport (+%d): the input box goes off the frame\n%s",
 						got, m.viewport.Height(), got-m.viewport.Height(), flat)
 				}
-				if !strings.Contains(flat, "approve write_file?") {
-					t.Errorf("pane does not carry the tool name the decision turns on:\n%s", flat)
+				if !strings.Contains(rows[0], "Approve write_file?") {
+					t.Errorf("top border does not carry the tool name the decision turns on:\n%s", flat)
 				}
 				// Either the whole body is on the screen — its last line is the args' lone close
 				// brace, the one tail no wrap can break up — or the pane counts out what is missing,
@@ -904,15 +1049,14 @@ func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
 					t.Errorf("pane shows neither the whole body nor a marker for the lines it hid:\n%s", flat)
 				}
 
-				// On a window with no body budget the marker has nowhere to go but the title row, which
-				// is exactly the case the finding was about — assert the placement, not just presence.
-				if maxBody, _, _ := m.popupBudget(panePrompt, 0, 0, popupChrome); maxBody == 0 {
-					if got, want := len(rows), 4; got != want { // 2 borders + title + hint
-						t.Fatalf("pane with no body budget is %d rows, want %d:\n%s", got, want, flat)
-					}
-					title := strings.Trim(rows[1], "│ ")
-					if !strings.HasPrefix(title, "approve write_file?") || !elisionMarkerPattern.MatchString(title) {
-						t.Errorf("title row = %q, want the tool name followed by the elision marker", title)
+				// At the floor the body budget is its irreducible ONE row, and on prose this long that
+				// row IS the marker: every line of the reason and the arguments dropped, and the pane
+				// stating how many. Assert the placement, not just the presence — that is what the
+				// finding was about, and the row it lands on has moved now that the title rides the
+				// border and the decisions themselves take the rows below.
+				if maxBody, _, _ := m.popupBudget(panePrompt, len(approvalMenu), len(approvalMenu), popupBorderChrome); maxBody == 1 {
+					if first := strings.Trim(rows[1], "│ "); !elisionMarkerPattern.MatchString(first) {
+						t.Errorf("body row = %q, want the marker counting the prose the pane dropped:\n%s", first, flat)
 					}
 				}
 			})
