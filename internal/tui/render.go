@@ -231,13 +231,14 @@ func (t *transcript) renderLines(th theme, width int) []string {
 // left of its rail gutter, then each line is prefixed by the rail (P3.14) so the nested block
 // reads as a framed sub-section.
 //
-// Two kinds carry a click surface, for the one reason: they have two states to toggle between. A
-// tool call marks its header line and the remainder marker beneath it; a prompt tall enough to
-// collapse marks EVERY row it paints, chip row included, because there the whole block is the
-// toggle (layout.md, "Collapsed and expanded blocks"). Every other kind comes back as plainPaint: a
-// note or an answer paints one way whatever is asked of it, and a click there keeps its selection
-// meaning. blink narrows further still — a tool call is the only entry that can still be WAITING
-// for something, so it is the only header with a star to blink (layout.md, "The live star").
+// Three kinds carry a click surface, for the one reason: they have two states to toggle between. A
+// tool call and a scheduled Firing mark their header line and the remainder marker beneath it — one
+// block painter, so one click surface; a prompt tall enough to collapse marks EVERY row it paints,
+// chip row included, because there the whole block is the toggle (layout.md, "Collapsed and
+// expanded blocks"). Every other kind comes back as plainPaint: a note or an answer paints one way
+// whatever is asked of it, and a click there keeps its selection meaning. blink narrows further
+// still — a tool call is the only entry that can still be WAITING for something, so it is the only
+// header with a star to blink (layout.md, "The live star").
 func renderEntryLines(th theme, e entry, width int, blink bool) blockPaint {
 	inner := railedWidth(width, e.depth)
 	switch e.kind {
@@ -259,6 +260,17 @@ func renderEntryLines(th theme, e entry, width int, blink bool) blockPaint {
 			expanded: e.expanded,
 			live:     !e.done,
 			blink:    blink,
+		}).railed(th, e.depth)
+	case entrySchedule:
+		// A Firing wears the tool block's shape under the /sessions tag's ⟳ (layout.md, "The firing
+		// block"), so one Firing reads the same in the chat and in the browser. live and blink stay
+		// false BY CONSTRUCTION rather than by accident: the spinner belongs to the worker driving
+		// this session's Exchange and the session is idle while a Firing runs, so an animated header
+		// here would claim work is happening in this session. What says the run is going is the
+		// block's own static summary (schedule.go, scheduleRunningSummary).
+		return renderToolBlock(th, []toolView{e.tool}, inner, blockState{
+			expanded: e.expanded,
+			glyph:    scheduleTagGlyph,
 		}).railed(th, e.depth)
 	case entryToolResult:
 		return plainPaint(railLines(th, renderOrphanResult(th, e.text, inner), e.depth))
@@ -762,11 +774,17 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 // about the frame (the spinner's phase this repaint was asked for — spinnerAnim.blink). Only their
 // conjunction paints ✧, so a settled block is immune to the phase and a live one needs no clock of
 // its own.
+//
+// glyph replaces the header's leading star outright, for a block that borrows this shape without
+// borrowing the star's meaning — today the scheduled Firing's ⟳ (renderEntryLines). Its ZERO VALUE
+// is the star, so every existing caller keeps the glyph it always painted without saying so, and a
+// block that names one has no live state to express: a Firing runs in a session of its own.
 type blockState struct {
 	expanded bool
 	elides   bool
 	live     bool
 	blink    bool
+	glyph    string
 }
 
 // star is the glyph the block's header leads with (layout.md, "The live star"): ✦ for a block that
@@ -774,7 +792,14 @@ type blockState struct {
 // not. The zero value is a settled block at the settled phase, which is why every caller with
 // nothing running — a stray result's block, a width probe — keeps the star the transcript has
 // always led with without saying so.
+//
+// An overridden glyph answers before the live/blink conjunction is even asked, which is what makes a
+// borrowed block's header STATIC by construction rather than by its caller remembering to leave two
+// fields false.
 func (s blockState) star() string {
+	if s.glyph != "" {
+		return s.glyph
+	}
 	if s.live && s.blink {
 		return glyphAssistantHollow
 	}

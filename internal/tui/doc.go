@@ -379,8 +379,12 @@
 // ([renderDetails] — the stray-result and unregistered-tool fallbacks). So a block of one is
 // byte-identical in shape to a block of many and does not reshape when a second call joins it —
 // the reason the standalone and grouped paths were converged rather than kept in sync — and a
-// body of one line lays out exactly like a body of ten. TestTranscriptLayoutGolden pins the whole
-// rendered scrollback.
+// body of one line lays out exactly like a body of ten. A scheduled Firing borrows that whole shape
+// through the same painter under a leading glyph of its own — ⟳ rather than the star
+// ([blockState]'s glyph override, whose zero value is the star; schedule.go, layout.md's "The firing
+// block") — so the surface is one grammar while the MEANING stays a tool call's alone: the entry
+// kind is entrySchedule, and grouping, the sub-agent span and the live status line go on keying on
+// entryToolCall (ADR 0033). TestTranscriptLayoutGolden pins the whole rendered scrollback.
 //
 // A card's FACTS arrive as data; only its WORDING is this package's (post-v0.8 architecture
 // deepening, review candidate 03). toolpresent.go used to reconstruct what a tool had done by

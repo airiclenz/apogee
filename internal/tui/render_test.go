@@ -6,10 +6,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -1611,6 +1613,162 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ----------------------------------------------------------------------------
+// The firing block: the tool block's shape under a static ⟳ (layout.md, "The firing block")
+// ----------------------------------------------------------------------------
+
+// firingBlock folds one Schedule's whole Firing into a fresh transcript — announced by its
+// EventFired, closed by the Event that ends the run — so what these tests paint is the block the
+// surface's own fold builds (schedule.go) rather than a hand-dressed view.
+func firingBlock(answer string) *transcript {
+	tr := &transcript{}
+	tr.addFiring(schedule.Event{
+		Kind: schedule.EventFired, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Prompt: "check the log",
+	})
+	tr.enrichFiring(schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Elapsed: 4 * time.Second,
+		Outcome: schedule.Outcome{
+			RecordID: "s1", Title: "nightly tidy — 14:05", FinalText: answer, Turns: 2,
+		},
+	})
+	return tr
+}
+
+// The two states a Firing's reader cares about, in the shape layout.md gives them: collapsed, the
+// answer's first line is visible over the `… +N more lines` remainder — whether the answer rode the
+// branch or leads the body, which is the whole point of following the outcome's two-halves grammar —
+// and expanded, the block shows the answer whole with the prompt, the stats and the record pointer
+// beneath it. It is one transcript toggled rather than two fixtures, because that is the claim:
+// nothing about the entry changes but the flag the painter reads.
+func TestFiringBlockCollapsesToTheAnswersFirstLine(t *testing.T) {
+	cases := []struct {
+		name                        string
+		answer                      string
+		wantCollapsed, wantExpanded []string
+	}{
+		{
+			name:   "a multi-line answer leads the body",
+			answer: "found 3 stale entries\nremoved them",
+			wantCollapsed: []string{
+				"⟳ Schedule",
+				"  ┕ nightly tidy",
+				"    found 3 stale entries",
+				"    … +4 more lines",
+			},
+			wantExpanded: []string{
+				"⟳ Schedule",
+				"  ┕ nightly tidy",
+				"    found 3 stale entries",
+				"    removed them",
+				"    prompt: check the log",
+				"    2 turns · 4s",
+				`    saved as "nightly tidy — 14:05" — find it in /sessions`,
+			},
+		},
+		{
+			name:   "a one-line answer rides the branch beside the Schedule's name",
+			answer: "the log is clean",
+			wantCollapsed: []string{
+				"⟳ Schedule",
+				"  ┕ nightly tidy the log is clean",
+				"    prompt: check the log",
+				"    … +2 more lines",
+			},
+			wantExpanded: []string{
+				"⟳ Schedule",
+				"  ┕ nightly tidy the log is clean",
+				"    prompt: check the log",
+				"    2 turns · 4s",
+				`    saved as "nightly tidy — 14:05" — find it in /sessions`,
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := firingBlock(tc.answer)
+
+			if got, want := renderPlain(tr, 80), strings.Join(tc.wantCollapsed, "\n"); got != want {
+				t.Errorf("default paint mismatch (collapsed is the default):\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+			if !tr.toggleExpanded(0) {
+				t.Fatal("toggleExpanded(0) = false; want the firing block toggled")
+			}
+			if got, want := renderPlain(tr, 80), strings.Join(tc.wantExpanded, "\n"); got != want {
+				t.Errorf("expanded paint mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
+// The ⟳ is STATIC (layout.md, "The firing block"): the spinner belongs to the worker driving this
+// session's Exchange and the session is idle while a Firing runs, so the header paints the same at
+// both blink phases — most of all while the Firing is still going, which is the one frame a star
+// would have blinked in.
+func TestFiringBlockHeaderNeverBlinks(t *testing.T) {
+	open := &transcript{}
+	open.addFiring(schedule.Event{
+		Kind: schedule.EventFired, ScheduleID: "sch-1", ScheduleName: "nightly tidy", Prompt: "check the log",
+	})
+	for _, tc := range []struct {
+		name string
+		tr   *transcript
+	}{
+		{"a Firing still running", open},
+		{"a Firing that returned", firingBlock("the log is clean")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const want = "⟳ Schedule"
+			if got := headerStar(t, tc.tr, false); got != want {
+				t.Errorf("header at the settled phase = %q, want %q", got, want)
+			}
+			if got := headerStar(t, tc.tr, true); got != want {
+				t.Errorf("header at the flipped phase = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// The block borrows the tool block's SHAPE and none of its meaning (ADR 0033), so neither derivation
+// that folds entries into a bigger block may admit it: a Firing between two reads breaks their group
+// instead of joining it, and no sub-agent span opens behind one. Both are pinned with a block
+// DRESSED as exactly what each rule looks for — the reads' own label in the groupable shape, the
+// sub-agent tool name over deeper entries — so a rule that stopped checking the entry kind fails
+// here rather than quietly regrouping the transcript.
+func TestFiringBlockJoinsNoToolGrouping(t *testing.T) {
+	fired := schedule.Event{
+		Kind: schedule.EventFired, ScheduleID: "sch-1", ScheduleName: "nightly tidy", Prompt: "check the log",
+	}
+
+	t.Run("it breaks a run of same-label calls", func(t *testing.T) {
+		tr := &transcript{}
+		readCall(tr, "c1", "main.go", 1, 154, 0)
+		tr.addFiring(fired)
+		readCall(tr, "c2", "util.go", 1, 42, 0)
+		tr.entries[1].tool.Label = tr.entries[0].tool.Label
+		tr.entries[1].tool.Details = toolBody{}
+
+		if run := toolCallRun(tr.entries, 0); len(run) != 1 {
+			t.Errorf("toolCallRun over the first read = %d views, want 1 — a Firing breaks the run", len(run))
+		}
+		if run := toolCallRun(tr.entries, 1); run != nil {
+			t.Errorf("toolCallRun at the firing block = %v, want nil — it heads no group of its own", run)
+		}
+	})
+
+	t.Run("it opens no sub-agent span", func(t *testing.T) {
+		tr := &transcript{}
+		tr.addFiring(fired)
+		tr.entries[0].tool.name = subAgentToolName
+		readCall(tr, "c1", "a.go", 1, 5, 1)
+
+		if got := subAgentSpan(tr.entries, 0); got != 0 {
+			t.Errorf("subAgentSpan at the firing block = %d, want 0 — no run hides behind a Firing", got)
+		}
+	})
 }
 
 // A command whose output is a single line puts that line where every other one-line outcome goes:

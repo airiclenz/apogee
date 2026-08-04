@@ -49,6 +49,7 @@ const (
 	entryPresented
 	entryStartup
 	entryInterjected
+	entrySchedule
 )
 
 // entry is one committed line-block in the transcript. text is the body (for the text
@@ -57,6 +58,14 @@ const (
 // callID matches the result by ToolCall.ID, and done marks the call once its result has
 // arrived (so a re-used tool pairs each result with the right call). A presented document
 // carries no text at all: its facts live in presented, the view render.go composes from.
+//
+// A scheduled Firing (entrySchedule) borrows those same three slots and nothing else: its tool
+// holds the firing block's view, its callID is the SCHEDULE's id — the key the completed / failed
+// Event pairs by, one open block per Schedule since a Schedule fires serially — and done marks the
+// Firing returned (schedule.go, foldScheduleEvent). It is deliberately not an entryToolCall: a
+// Firing is a separate headless run rather than this session's tool, so the pairing the live status
+// line, the tool-call grouping and the sub-agent span all key on stays uncontaminated by it
+// (ADR 0033).
 //
 // ephemeral marks an entry as display-only: it renders exactly like its kind normally does, but
 // encodeTranscript never writes it to the session record. It generalizes the entryStartup
@@ -498,8 +507,10 @@ func (t *transcript) hasOpenToolCall() bool {
 }
 
 // hasBlockState reports whether an entry kind owns a collapsed/expanded block state — the gate
-// setExpanded and toggleExpanded both answer through. Three kinds do: a tool call, whose retained
-// body is capped when the block is collapsed, and the human's own two voices — the prompt
+// setExpanded and toggleExpanded both answer through. Four kinds do: a tool call and a scheduled
+// Firing (entrySchedule), whose retained bodies are capped when the block is collapsed — the Firing
+// is painted by the same block painter, so it collapses and expands by the tool block's rule — and
+// the human's own two voices — the prompt
 // (entryUser) and the interjection (entryInterjected), which read as one block and collapse by one
 // rule — whose bodies collapse to a fixed row count when they run long (layout.md, "Collapsed and
 // expanded blocks"). Every other kind — an assistant answer, a note, the start-up box — paints one
@@ -510,7 +521,7 @@ func (t *transcript) hasOpenToolCall() bool {
 // against the current width, and any answer kept here would be stale by the next resize.
 func hasBlockState(kind entryKind) bool {
 	switch kind {
-	case entryToolCall, entryUser, entryInterjected:
+	case entryToolCall, entrySchedule, entryUser, entryInterjected:
 		return true
 	default:
 		return false

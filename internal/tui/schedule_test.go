@@ -452,9 +452,14 @@ func TestScheduleRunsWhileTheWorkerWorks(t *testing.T) {
 // The event notices
 // ----------------------------------------------------------------------------
 
-// Every Event the library emits reaches the scrollback as a note, and the created one reads the
-// cycle, the mode and the next fire off the live listing — the Schedule is on the clock by the time
-// its own creation is folded.
+// Every Event that is not a Firing's own reaches the scrollback as a note, byte for byte as it
+// always did, and the created one reads the cycle, the mode and the next fire off the live listing —
+// the Schedule is on the clock by the time its own creation is folded.
+//
+// EventFired is absent: a Firing that starts is announced as a BLOCK instead
+// (TestScheduleFiringOpensABlock). Completed and failed keep their lines here because this table
+// folds each Event into a fresh model, which is precisely the no-open-block case — a Gate refusal's
+// failure — where the fold falls back to the note.
 func TestScheduleEventsRenderAsNotes(t *testing.T) {
 	sch := &fakeScheduler{live: []schedule.Status{
 		liveStatus("sch-1", "nightly tidy", time.Hour, domain.ModePlan),
@@ -470,8 +475,6 @@ func TestScheduleEventsRenderAsNotes(t *testing.T) {
 			"schedule nightly tidy — every 1h · plan · next 14:05"},
 		{"created without a live row", schedule.Event{Kind: schedule.EventCreated, ScheduleID: "gone", ScheduleName: "ghost"},
 			"schedule ghost — created"},
-		{"fired", schedule.Event{Kind: schedule.EventFired, ScheduleName: "nightly tidy"},
-			"schedule nightly tidy — firing now"},
 		{"completed", schedule.Event{Kind: schedule.EventCompleted, ScheduleName: "nightly tidy",
 			Outcome: schedule.Outcome{RecordID: "s1", Title: "nightly tidy — 14:05"}},
 			"schedule nightly tidy — finished: nightly tidy — 14:05"},
@@ -523,6 +526,267 @@ func TestScheduleNoticesSurviveTheTranscriptBlob(t *testing.T) {
 	}
 	if !kept {
 		t.Errorf("the completed notice did not survive the blob: %v", entries)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The firing block
+// ----------------------------------------------------------------------------
+//
+// A Firing is one block that grows: EventFired announces it with the prompt, and the Event that ends
+// the run enriches that same block with the answer, what it cost, and where the record is. The tests
+// below read the ENTRY — the kind, the pairing key, and which half of the view each line landed in —
+// because that split is the block's grammar; what the painter does with it is render_test's.
+
+// firingBody is a firing block's retained body lines, in order.
+func firingBody(e entry) []string {
+	out := make([]string, 0, e.tool.Details.len())
+	for _, d := range e.tool.Details.all() {
+		out = append(out, d.Text)
+	}
+	return out
+}
+
+// fireSchedule folds one EventFired into m — the open block every enrichment test starts from.
+func fireSchedule(t *testing.T, m Model, id, name, prompt string) Model {
+	t.Helper()
+	return step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventFired, ScheduleID: id, ScheduleName: name, Prompt: prompt,
+	}})
+}
+
+// A starting Firing appends one block and no note: its own entry kind, the ScheduleID as the pairing
+// key, the Schedule's name on the branch, the static running marker beside it, and the prompt as the
+// body — open (`!done`) until the run returns.
+func TestScheduleFiringOpensABlock(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	before := len(m.transcript.entries)
+
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log\nand tidy it")
+
+	if got := len(m.transcript.entries); got != before+1 {
+		t.Fatalf("entries = %d, want %d — one block, and no note beside it", got, before+1)
+	}
+	e := lastEntry(t, m)
+	if e.kind != entrySchedule {
+		t.Fatalf("kind = %v, want entrySchedule", e.kind)
+	}
+	if e.callID != "sch-1" {
+		t.Errorf("callID = %q, want the ScheduleID — it is the pairing key", e.callID)
+	}
+	if e.done {
+		t.Error("done = true, want an open block until the Firing returns")
+	}
+	if e.tool.Label != scheduleBlockLabel || e.tool.Target != "nightly tidy" {
+		t.Errorf("header = %q / %q, want %q / the Schedule's name", e.tool.Label, e.tool.Target, scheduleBlockLabel)
+	}
+	if e.tool.Summary.Text != scheduleRunningSummary {
+		t.Errorf("summary = %q, want the static running marker %q", e.tool.Summary.Text, scheduleRunningSummary)
+	}
+	want := []string{"prompt: check the log", "and tidy it"}
+	if got := firingBody(e); !slices.Equal(got, want) {
+		t.Errorf("body = %q, want the prompt %q", got, want)
+	}
+}
+
+// The Firing returns and its block is enriched IN PLACE — same entry, no second block, no note — with
+// a one-line answer promoted onto the branch as QUOTED text (nothing respells an answer), the prompt
+// still beneath it, then what the run cost and where the record is.
+func TestScheduleFiringCompletesInPlace(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+	index := len(m.transcript.entries) - 1
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Elapsed: 4 * time.Second,
+		Outcome: schedule.Outcome{
+			RecordID: "s1", Title: "nightly tidy — 14:05", FinalText: "the log is clean", Turns: 2,
+		},
+	}})
+
+	if got := len(m.transcript.entries); got != index+1 {
+		t.Fatalf("entries = %d, want %d — the block is enriched where it was announced", got, index+1)
+	}
+	e := m.transcript.entries[index]
+	if !e.done {
+		t.Error("done = false, want the block closed by the Firing's return")
+	}
+	if e.tool.Summary.Text != "the log is clean" {
+		t.Errorf("summary = %q, want the one-line answer on the branch", e.tool.Summary.Text)
+	}
+	if !e.tool.Summary.quoted {
+		t.Error("the answer rode the branch as the block's OWN words — it is quoted model text")
+	}
+	want := []string{"prompt: check the log", "2 turns · 4s", `saved as "nightly tidy — 14:05" — find it in /sessions`}
+	if got := firingBody(e); !slices.Equal(got, want) {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+// A multi-line answer cannot ride the branch, so it LEADS the body with the summary slot left empty —
+// the outputDetail grammar — which is what leaves the answer's first line visible in the collapsed
+// paint. The prompt keeps its place after it.
+func TestScheduleFiringMultiLineAnswerLeadsTheBody(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Elapsed: 90 * time.Second,
+		Outcome: schedule.Outcome{FinalText: "found 3 stale entries\nremoved them", Turns: 1, Denied: 2},
+	}})
+
+	e := lastEntry(t, m)
+	if e.tool.Summary.Text != "" {
+		t.Errorf("summary = %q, want it empty — a multi-line answer is a body", e.tool.Summary.Text)
+	}
+	want := []string{"found 3 stale entries", "removed them", "prompt: check the log", "1 turn · 1m30s · 2 denied"}
+	if got := firingBody(e); !slices.Equal(got, want) {
+		t.Errorf("body = %q, want the answer ahead of the prompt %q", got, want)
+	}
+}
+
+// Two Schedules firing at once enrich the right blocks: the pairing is the ScheduleID, exactly as a
+// tool result pairs by call id, so an answer can never land in another Schedule's block.
+func TestScheduleFiringPairsByScheduleID(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "tidy the logs")
+	m = fireSchedule(t, m, "sch-2", "inbox sweep", "sweep the inbox")
+	first, second := len(m.transcript.entries)-2, len(m.transcript.entries)-1
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-2", ScheduleName: "inbox sweep",
+		Outcome: schedule.Outcome{FinalText: "inbox is empty"},
+	}})
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Outcome: schedule.Outcome{FinalText: "logs are tidy"},
+	}})
+
+	if got := m.transcript.entries[first].tool.Summary.Text; got != "logs are tidy" {
+		t.Errorf("the first block's answer = %q, want its own", got)
+	}
+	if got := m.transcript.entries[second].tool.Summary.Text; got != "inbox is empty" {
+		t.Errorf("the second block's answer = %q, want its own", got)
+	}
+}
+
+// A failed Firing words its own summary and keeps everything it salvaged: the stats it got to, and
+// the partial record's pointer when one saved. It shows no answer — an "error:" line above a partial
+// answer would read as a result.
+func TestScheduleFiringFailsInItsBlock(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventFailed, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Elapsed: 8 * time.Second, Err: fmt.Errorf("the driver went away"),
+		Outcome: schedule.Outcome{RecordID: "s1", Title: "nightly tidy — 14:05", FinalText: "half an answer", Turns: 3},
+	}})
+
+	e := lastEntry(t, m)
+	if !e.done {
+		t.Error("done = false, want the block closed by the failure")
+	}
+	if want := "error: the driver went away"; e.tool.Summary.Text != want {
+		t.Errorf("summary = %q, want %q", e.tool.Summary.Text, want)
+	}
+	if e.tool.Summary.quoted {
+		t.Error("the error line is the block's OWN wording, not quoted text")
+	}
+	want := []string{"prompt: check the log", "3 turns · 8s", `saved as "nightly tidy — 14:05" — find it in /sessions`}
+	if got := firingBody(e); !slices.Equal(got, want) {
+		t.Errorf("body = %q, want the salvaged facts and no answer: %q", got, want)
+	}
+}
+
+// A failure with no open block is a Firing that never started — the Gate refused it — so it lands as
+// the note it always was rather than inventing a block for a run that did not happen.
+func TestScheduleFailureWithoutABlockStaysANote(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventFailed, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Err: fmt.Errorf("the gate refused"),
+	}})
+
+	if e := lastEntry(t, m); e.kind != entryNote {
+		t.Fatalf("kind = %v, want entryNote", e.kind)
+	}
+	if want := "schedule nightly tidy — failed: the gate refused"; lastNote(m) != want {
+		t.Errorf("note = %q, want %q", lastNote(m), want)
+	}
+}
+
+// The block's own wording, case by case: a run that answered nothing still says so, an unpersisted
+// run points nowhere, and a record saved without a title still says the run is on disk.
+func TestScheduleFiringWordsWhatItHas(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		outcome     schedule.Outcome
+		wantSummary string
+		wantTail    []string
+	}{
+		{"no answer", schedule.Outcome{Turns: 1}, scheduleNoAnswerSummary, []string{"1 turn · 0s"}},
+		{"unpersisted", schedule.Outcome{FinalText: "done", Turns: 1}, "done", []string{"1 turn · 0s"}},
+		{"saved untitled", schedule.Outcome{RecordID: "s1", FinalText: "done", Turns: 1}, "done",
+			[]string{"1 turn · 0s", "saved — find it in /sessions"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := scheduleModel(t, &fakeScheduler{}, "")
+			m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+			m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+				Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+				Outcome: tc.outcome,
+			}})
+
+			e := lastEntry(t, m)
+			if e.tool.Summary.Text != tc.wantSummary {
+				t.Errorf("summary = %q, want %q", e.tool.Summary.Text, tc.wantSummary)
+			}
+			want := append([]string{"prompt: check the log"}, tc.wantTail...)
+			if got := firingBody(e); !slices.Equal(got, want) {
+				t.Errorf("body = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// Everything the block shows is untrusted — the Schedule's name and its prompt are a human's typed
+// text, the answer is raw model output (ADR 0010: the library hands it over unsanitized) — so no ESC
+// byte survives the fold in any of the three.
+func TestScheduleFiringStripsEscapes(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly \x1b]52;c;x\x07tidy", "check \x1bthe log")
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Outcome: schedule.Outcome{FinalText: "clean \x1b[2Jenough", Title: "t \x1bitle", RecordID: "s1"},
+	}})
+
+	e := lastEntry(t, m)
+	if strings.ContainsRune(e.tool.Target+detailsText(e.tool), 0x1b) {
+		t.Errorf("an ESC byte reached the block: %q / %q", e.tool.Target, detailsText(e.tool))
+	}
+}
+
+// The firing block is NOT a tool call, and the one piece of session state that would prove otherwise
+// is the live status line's: an open Firing must leave hasOpenToolCall false, or the session would
+// claim a tool of its own is running while it sits idle. Its block state is real, though — the same
+// click that opens a tool block opens this one.
+func TestScheduleFiringIsNoToolCall(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+
+	if m.transcript.hasOpenToolCall() {
+		t.Error("hasOpenToolCall = true, want an open Firing to be no tool call of this session's")
+	}
+	index := len(m.transcript.entries) - 1
+	if !hasBlockState(entrySchedule) {
+		t.Fatal("hasBlockState(entrySchedule) = false, want the block to collapse and expand")
+	}
+	if !m.transcript.toggleExpanded(index) || !m.transcript.entries[index].expanded {
+		t.Error("toggling the firing block did not expand it")
 	}
 }
 

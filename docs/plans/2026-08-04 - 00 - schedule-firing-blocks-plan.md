@@ -201,7 +201,40 @@ tests use).
 
 ---
 
-## 4. `internal/tui` — the firing block
+## 4. `internal/tui` — the firing block — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): implementer choices, part A. **The glyph seam (owner left it to the
+implementer):** `blockState` gains a `glyph string` override whose ZERO VALUE keeps today's ✦/✧ star,
+read in `blockState.star()` before the live/blink conjunction; the `entrySchedule` arm passes
+`scheduleTagGlyph` (`⟳`, already a const in `sessions.go`) and leaves `live`/`blink` false, so a
+firing block can never blink and no existing caller changes. **Placement:** the block's presenters
+and the two transcript methods (`addFiring` / `enrichFiring`) live in `internal/tui/schedule.go`
+rather than in `toolpresent.go` / `transcript.go` — the render.go precedent for transcript methods
+outside their own file — which keeps the `internal/schedule` import out of `transcript.go` and the
+whole surface in one file. **`finishDisplay` takes the ZERO `workspaceRoot`:** nothing the block shows
+names a path the way a tool target does, and the plan's own parenthetical says the name, prompt and
+answer are never respelled — so the sanitize half runs and the shortening half is a no-op by
+construction rather than by luck. **The prompt's first body line carries a `prompt: ` lead:** once the
+answer lands ahead of it the body is two quoted voices in a row, and this is what tells them apart; it
+rides the first line rather than taking one of its own so the collapsed paint's single body row still
+carries prompt text. **An empty answer is worded `finished — no answer`** rather than reused from
+`outputDetail`'s `(no output)`, which is a command's phrase and not a Firing's.
+
+NOTES (2026-08-04): checkpoint — PART A done (the `entrySchedule` kind + `hasBlockState`, the fold's
+fired/completed/failed transitions and the pairing, the presenters and wording, the fold tests, and
+the existing note table updated) / PART B remaining (the `render.go` arm + the glyph seam above,
+`layout.md`, and the rendering test groups: collapsed vs expanded paint, the ⟳ header that never
+blinks, and the `toolCallRun` / `subAgentSpan` no-contamination pins).
+
+NOTES (2026-08-04): PART B done as recorded above — `blockState.glyph` answers inside `star()` BEFORE
+the live/blink conjunction, so the firing block's header is static by construction rather than by its
+caller leaving two fields false (proven by mutation: moving the check after the conjunction and
+setting `live`/`blink` in the arm blinks the header and fails the test). The three paint test groups
+landed in `render_test.go` beside the block painter they exercise — part A's fold tests already
+pointed there — and each was proven load-bearing by mutation (dropping the glyph override, and
+dropping the `entryToolCall` checks in `toolCallRun` / `subAgentSpan`). `internal/tui/doc.go` gained
+one sentence recording the borrowed shape, since its renderToolBlock paragraph is the package's
+account of that painter.
 
 Depends on item 2 (the Event fields); shows real answers once item 3 lands.
 

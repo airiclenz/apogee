@@ -282,22 +282,45 @@ func (m Model) quiescent() bool {
 // The event fold
 // ----------------------------------------------------------------------------
 
-// foldScheduleEvent records one thing that happened to a Schedule as a transcript note. It moves
-// nothing else: a Firing is a separate run with its own session record, so its narration is
+// foldScheduleEvent records one thing that happened to a Schedule in the scrollback. A FIRING gets
+// a block: EventFired appends it and EventCompleted / EventFailed enrich that same block in place —
+// addToolResult's pairing pattern under an entry kind of its own — so one run reads as one thing
+// that grew an answer, at the position it was announced (ADR 0025). Every other Event stays the
+// one-line note it always was: created, skipped and stopped are lifecycle facts with no body, and a
+// block around them would be an empty drawer.
+//
+// A completed or failed Event with NO open block falls back to its note. That is not a defensive
+// afterthought: a Gate refusal fails a Firing that never started, so nothing was ever announced for
+// it to enrich, and the failure still has to be said.
+//
+// It moves nothing else: a Firing is a separate run with its own session record, so its narration is
 // scrollback here and never state.
 //
-// The notes are PERSISTED (addNote, not addEphemeralNote): each records something that actually
-// happened in this session's lifetime — the ADR 0022 addendum's test — unlike the re-derived chrome
-// a resume rebuilds for itself.
+// Both shapes are PERSISTED (addNote / addFiring, not addEphemeralNote): each records something that
+// actually happened in this session's lifetime — the ADR 0022 addendum's test — unlike the
+// re-derived chrome a resume rebuilds for itself.
 func (m Model) foldScheduleEvent(ev schedule.Event) Model {
+	switch ev.Kind {
+	case schedule.EventFired:
+		m.transcript.addFiring(ev)
+		return m
+	case schedule.EventCompleted, schedule.EventFailed:
+		if m.transcript.enrichFiring(ev) {
+			return m
+		}
+	}
 	m.transcript.addNote(m.scheduleEventNote(ev))
 	return m
 }
 
-// scheduleEventNote words one Event. The Event carries identity and outcome only, so the created
-// line reads the rest off the live listing — the Schedule is on the clock by the time its
-// EventCreated is folded, and stating the cycle, the mode and the next fire is what makes the
+// scheduleEventNote words one Event as a one-line note. The Event carries identity and outcome only,
+// so the created line reads the rest off the live listing — the Schedule is on the clock by the time
+// its EventCreated is folded, and stating the cycle, the mode and the next fire is what makes the
 // confirmation worth reading. A Schedule that is somehow gone by then still gets its line, shorter.
+//
+// EventFired has no arm here: a Firing that starts is always announced as a block (foldScheduleEvent),
+// so the only wording it needs is the block's own. Completed and failed keep theirs for the
+// no-open-block fallback.
 func (m Model) scheduleEventNote(ev schedule.Event) string {
 	head := "schedule " + ev.ScheduleName + " — "
 	switch ev.Kind {
@@ -308,8 +331,6 @@ func (m Model) scheduleEventNote(ev schedule.Event) string {
 			}, " · ")
 		}
 		return head + "created"
-	case schedule.EventFired:
-		return head + "firing now"
 	case schedule.EventCompleted:
 		if ev.Outcome.Title != "" {
 			return head + "finished: " + ev.Outcome.Title
@@ -343,6 +364,181 @@ func scheduleErrText(err error) string {
 		return "no reason given"
 	}
 	return err.Error()
+}
+
+// ----------------------------------------------------------------------------
+// The firing block
+// ----------------------------------------------------------------------------
+//
+// One Firing, one block, with the tool block's shape and none of its meaning: the answer the run
+// produced is the payoff, and the prompt, the stats and the record it left behind hang beneath it
+// for whoever wants them. The kind is its own (entrySchedule) rather than entryToolCall precisely
+// because the shape is shared — a Firing is a separate headless run, not this session's tool call,
+// so the live status line, the tool-call grouping and the sub-agent span must go on keying on the
+// tool kind alone (ADR 0033).
+//
+// Everything below is PURE apart from the two transcript methods: the wording is table-testable
+// without a Model, as the notes above it are.
+
+// scheduleBlockLabel titles the firing block's header line, where a tool block carries its friendly
+// tool label. It names the standing instruction rather than the run, because the Schedule's own name
+// leads the branch beneath it.
+const scheduleBlockLabel = "Schedule"
+
+// scheduleRunningSummary is what the block's summary slot holds between the Firing's start and its
+// return. It is STATIC by design (no spinner, no blinking star): the spinner belongs to the worker
+// driving this session's Exchange, and the session is idle while a Firing runs — a block that
+// animated would claim work is happening here.
+const scheduleRunningSummary = "firing now"
+
+// scheduleNoAnswerSummary is the summary a Firing that produced no answer earns — a run cancelled
+// mid-tool, or one that only acted. It is the block's own words, so the slot never goes silently
+// empty on a run that did finish.
+const scheduleNoAnswerSummary = "finished — no answer"
+
+// schedulePromptLead marks where the prompt starts in the block's body. The body is two quoted
+// voices in a row once the answer lands ahead of it (the model's, then the human's), and this is the
+// one word that tells them apart; it rides the prompt's FIRST line rather than taking a line of its
+// own so the collapsed paint's single body row still carries prompt text.
+const schedulePromptLead = "prompt: "
+
+// addFiring appends the block one starting Firing gets, carrying the ScheduleID as its pairing key
+// (entry.callID) and the prompt as its body. It is left `!done`: the block is open until the
+// Firing's completed or failed Event enriches it, which is what enrichFiring scans for.
+func (t *transcript) addFiring(ev schedule.Event) {
+	t.entries = append(t.entries, entry{
+		kind:   entrySchedule,
+		callID: ev.ScheduleID,
+		tool:   presentFiring(ev),
+	})
+}
+
+// enrichFiring folds a returned Firing into its own block and reports whether it found one. It scans
+// from the tail for the open (`!done`) firing block with that ScheduleID — a Schedule fires serially
+// (ADR 0033), so at most one of its blocks is ever open — and enriches it IN PLACE, leaving it where
+// EventFired put it: the block is a record of when the Firing ran, not of when it finished
+// (ADR 0025). It is addToolResult's rule with the Schedule's id for a call id.
+//
+// false is the caller's cue to fall back to a note (foldScheduleEvent): a Firing the Gate refused
+// never announced itself, so there is no block, and there is nothing here to invent one from.
+func (t *transcript) enrichFiring(ev schedule.Event) bool {
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		e := &t.entries[i]
+		if e.kind == entrySchedule && !e.done && e.callID == ev.ScheduleID {
+			e.tool.enrichWithFiring(ev)
+			e.done = true
+			return true
+		}
+	}
+	return false
+}
+
+// presentFiring builds the view a starting Firing is announced with — presentToolCall's job for a
+// Firing: the Schedule's name leads the branch, the static running marker rides beside it, and the
+// prompt is the body. It leaves through finishDisplay exactly as a tool call does, so the name and
+// the prompt are escape-stripped before they reach the terminal (a Schedule is named from a prompt a
+// human typed, and the prompt is that text itself).
+//
+// The workspace root is deliberately NOT threaded through it: nothing here names a path the way a
+// tool call's target does — the target is a Schedule's name and the body is quoted text — so there
+// is no spelling to shorten, and finishDisplay's shortening half runs against the zero root.
+func presentFiring(ev schedule.Event) toolView {
+	tv := toolView{
+		Label:   scheduleBlockLabel,
+		Target:  ev.ScheduleName,
+		Summary: namedSummary(detailLine{Text: scheduleRunningSummary}),
+		Details: newToolBody(promptDetails(ev.Prompt)),
+	}
+	tv.finishDisplay(workspaceRoot{})
+	return tv
+}
+
+// enrichWithFiring folds the Firing's outcome into the view — enrichWithResult's job for a Firing,
+// and the same deferred sanitize seam, because everything it lands is the model's own text or an
+// error quoting it.
+//
+// The answer takes the summary slot when it fits on one line and leads the body when it does not
+// (firingAnswer), which is what makes the answer's first line visible in the collapsed paint either
+// way. Everything the block already held — the prompt — keeps its place beneath, and the two facts a
+// human judges a Firing by close it: what it cost, and where the record is.
+//
+// A failure words the summary itself and shows no answer: the error is what happened, and a partial
+// answer under an "error:" line would read as a result. The stats and any salvaged record pointer
+// still land, because a failed Firing that got half way is exactly the one worth opening.
+func (tv *toolView) enrichWithFiring(ev schedule.Event) {
+	defer tv.finishDisplay(workspaceRoot{})
+	lines := make([]detailLine, 0, tv.Details.len()+3)
+	if ev.Kind == schedule.EventFailed {
+		tv.Summary = namedSummary(detailLine{Text: "error: " + scheduleErrText(ev.Err)})
+	} else {
+		answer := firingAnswer(ev.Outcome.FinalText)
+		tv.Summary = answer.Summary
+		lines = append(lines, answer.Details...)
+	}
+	lines = append(lines, tv.Details.all()...)
+	lines = append(lines, detailLine{Text: firingStats(ev)})
+	if ev.Outcome.RecordID != "" {
+		lines = append(lines, detailLine{Text: firingRecordLine(ev.Outcome.Title)})
+	}
+	tv.Details = newToolBody(lines)
+}
+
+// firingAnswer splits the Firing's answer into the two halves outputDetail's grammar dictates: an
+// answer that comes to one line is PROMOTED onto the branch as the quoted summary, and a longer one
+// becomes the body's leading lines with the summary slot left empty (the collapsed paint then shows
+// its first line plus the remainder marker). It is the same rule a command's output takes, for the
+// same reason — the text is the model's and the block quotes it, so no seam respells it.
+//
+// An answer that is nothing at all is the one case outputDetail would word as a tool's "(no output)".
+// A Firing is not a command, so it is worded here instead.
+func firingAnswer(answer string) toolOutcome {
+	if strings.TrimSpace(answer) == "" {
+		return summaryOnly(scheduleNoAnswerSummary)
+	}
+	return outputDetail(answer)
+}
+
+// promptDetails is the prompt as body lines: verbatim but for the per-line clip every retained body
+// line takes, with the lead marking the first. A prompt is never empty in practice (the library
+// refuses a Spec without one), and an Event that carries none simply gets no body.
+func promptDetails(prompt string) []detailLine {
+	if strings.TrimSpace(prompt) == "" {
+		return nil
+	}
+	lines := splitLines(strings.TrimRight(prompt, "\n"))
+	out := make([]detailLine, 0, len(lines))
+	for i, ln := range lines {
+		text := clipDetail(ln)
+		if i == 0 {
+			text = schedulePromptLead + text
+		}
+		out = append(out, detailLine{Text: text})
+	}
+	return out
+}
+
+// firingStats is the one line a returned Firing costs: how many Turns it took and how long it ran,
+// always, and how many gated actions its fail-safe denier refused — only when there were any, since
+// a denial in an unattended run is an alarm rather than a statistic. The elapsed time is the
+// SCHEDULER's measurement (schedule.Event.Elapsed), spelled the way every other duration on this
+// surface is (formatCycle).
+func firingStats(ev schedule.Event) string {
+	cells := []string{plural(ev.Outcome.Turns, "turn"), formatCycle(ev.Elapsed)}
+	if ev.Outcome.Denied > 0 {
+		cells = append(cells, fmt.Sprintf("%d denied", ev.Outcome.Denied))
+	}
+	return strings.Join(cells, " · ")
+}
+
+// firingRecordLine points at the session record the Firing left behind, by the title /sessions lists
+// it under — the block's answer to "where is the rest of it". Opening it from here is future work
+// (the plan's out-of-scope list), so the line names the browser that can. A record that saved without
+// a title still gets a line: the pointer's job is to say the run is on disk.
+func firingRecordLine(title string) string {
+	if title == "" {
+		return "saved — find it in /sessions"
+	}
+	return fmt.Sprintf("saved as %q — find it in /sessions", title)
 }
 
 // ----------------------------------------------------------------------------

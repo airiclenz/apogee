@@ -448,6 +448,26 @@ header drops when the glyph flips, which is the keep-if-unchanged rule doing its
 a line that changed. When the result lands the glyph settles to `✦` and the block repaints once,
 final.
 
+**The firing block.** A scheduled Firing wears this same shape and is deliberately not a tool call
+of this session's: its header leads with `⟳ Schedule` — the glyph `/sessions` tags a Firing's record
+with, so one run reads the same in the chat and in the browser — and the Schedule's name leads the
+branch. The block appears when the Firing starts, carrying `firing now` beside that name and the
+prompt as its body, and the *same* block is enriched in place when the run returns: it stays where
+it was announced rather than moving to where it finished. The payoff is the run's **answer**, split
+by the ordinary two-halves rule — an answer that comes to one line rides the branch, quoted; a
+longer one leads the body with the summary slot left empty — so the collapsed paint shows the
+answer's first line either way, over the usual `… +N more lines`. Beneath it the body carries the
+prompt (its first line led by `prompt: `, the one word that tells the two quoted voices apart), one
+stats line (`2 turns · 4s`, and a `· N denied` cell only when a gated action was actually refused),
+and the record pointer (`saved as "…" — find it in /sessions`), dropped when nothing was persisted.
+A failed Firing words its branch `error: …` and shows no answer — a partial answer under an error
+reads as a result — while keeping the stats and any salvaged pointer. The `⟳` is **static**: the
+spinner belongs to the worker driving this session's Exchange and this session is idle while a
+Firing runs, so the header never blinks whatever the frame's phase, and the branch's own word is
+what says the run is going. Everything else a Schedule does — created, skipped, stopped — stays a
+one-line note: those are lifecycle facts with no body, and a block around them would be an empty
+drawer.
+
 ---
 
 ## Markdown tables in assistant text
