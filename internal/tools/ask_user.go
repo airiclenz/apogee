@@ -10,13 +10,13 @@ import (
 
 var askUserSpec = toolSpec{
 	name:        "ask_user",
-	description: "Ask the human a free-text question and get their answer. Use this for a clarification or a decision only the user can make. It is not a tool-approval prompt; it is a direct question to the person. Optionally pass `choices` to offer a few short answer options the human can pick from; they may still type a custom answer instead.",
+	description: "Ask the human a free-text question and get their answer. Use this for a clarification or a decision only the user can make. It is not a tool-approval prompt; it is a direct question to the person. Optionally pass `choices` to offer a few answer options the human can pick from; they may still type a custom answer instead.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["question"],
   "properties": {
     "question": {"type": "string", "description": "The question to ask the human. Use this when you need a clarification or a decision only the user can make."},
-    "choices": {"type": "array", "items": {"type": "string"}, "description": "Optional: 2-5 short, single-line answer options to offer when the question has a natural closed set. The human can always type a custom free-text answer instead, so choices never gate the reply."}
+    "choices": {"type": "array", "items": {"type": "string"}, "description": "Optional: 2-5 answer options to offer when the question has a natural closed set. An option may be a full sentence — the prompt wraps it — so say what the option MEANS rather than compressing it to a word. The human can always type a custom free-text answer instead, so choices never gate the reply."}
   }
 }`),
 }

@@ -1411,11 +1411,12 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 	longProse := strings.Repeat("a long explanation the pane cannot possibly seat in full. ", 12)
 
 	prompts := []struct {
-		name  string
-		probe string // the identity the decision turns on; only the pane writes it
-		raise func(t *testing.T, m Model, draft int) Model
+		name     string
+		probe    string // the identity the decision turns on; only the pane writes it
+		mayElide bool   // …and the pane may state it as a COUNT where the window seats no line of it
+		raise    func(t *testing.T, m Model, draft int) Model
 	}{
-		{"approval prompt", "Approve write_file?", func(t *testing.T, m Model, draft int) Model {
+		{"approval prompt", "Approve write_file?", false, func(t *testing.T, m Model, draft int) Model {
 			t.Helper()
 			m.state = stateRunning
 			m = withDraft(t, m, draft)
@@ -1425,10 +1426,13 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 				Arguments: []byte(`{"path":"/ws/a/main.go","content":"package main"}`),
 			}})
 		}},
-		// The ask prompt's identity is its title, and a title is the one thing a NARROW pane is
-		// allowed to shed an ellipsis off the end of (popupTitleLine) — so the probe is the lead of
-		// it, which survives every width a pane is drawn at.
-		{"ask prompt", "the assistant is", func(t *testing.T, m Model, draft int) Model {
+		// The ask prompt has no title any more (askPrompt): the QUESTION is its identity, so the probe
+		// is the lead of it — and unlike a title, a question is body, which the shortest windows grant
+		// no room at all. There the pane states it as the count on its top border instead
+		// (popupTitleLine), which is the same promise one step down: the human is never left with a
+		// live ⏎ and no sign of what it would answer. The count is looked for in the PANE, not on the
+		// frame, so a marker the transcript or the staged band happens to draw cannot stand in for it.
+		{"ask prompt", "a long explanation", true, func(t *testing.T, m Model, draft int) Model {
 			t.Helper()
 			m.state = stateRunning
 			m = step(t, m, askReqMsg{Request: domain.AskRequest{
@@ -1458,7 +1462,9 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 							if m.frameOverlays().prompt == "" {
 								t.Fatalf("the frame seated no prompt pane at all while its keys are live:\n%s", plainFrame)
 							}
-							if !strings.Contains(plainFrame, p.probe) {
+							pane := ansiPattern.ReplaceAllString(m.frameOverlays().prompt, "")
+							if !strings.Contains(plainFrame, p.probe) &&
+								!(p.mayElide && elisionMarkerPattern.MatchString(pane)) {
 								t.Errorf("the frame does not carry %q — the decision's own identity:\n%s", p.probe, plainFrame)
 							}
 							// The box gave rows back; it did not go away. It is still drawn, still holds the
@@ -1521,16 +1527,16 @@ func TestFrameSurfacesGiveWayInOrder(t *testing.T) {
 		{"band yields to the dropdown", 12, 2, dropdown,
 			[]string{"commands and skills", "2 queued"}, []string{"staged remark 01"}},
 		{"band yields to the prompt", 12, 2, askPrompt,
-			[]string{"the assistant is asking:"}, []string{"staged remark 01"}},
+			[]string{"which way?"}, []string{"staged remark 01"}},
 		// …and both are seated the moment the window can pay for both.
 		{"both fit with room", 20, 2, dropdown,
 			[]string{"commands and skills", "staged remark 01"}, nil},
 		// Two panes wanting the same four rows: the dropdown is the one that gives way, because the
 		// prompt is what the run is blocked on.
 		{"dropdown yields to the prompt", 12, 0, func(m Model) Model { return dropdown(askPrompt(m)) },
-			[]string{"the assistant is asking:"}, []string{"commands and skills"}},
+			[]string{"which way?"}, []string{"commands and skills"}},
 		{"both panes fit with room", 20, 0, func(m Model) Model { return dropdown(askPrompt(m)) },
-			[]string{"the assistant is asking:", "commands and skills"}, nil},
+			[]string{"which way?", "commands and skills"}, nil},
 	}
 
 	for _, c := range cases {
@@ -1570,7 +1576,9 @@ func TestFrameSurfacesGiveWayInOrder(t *testing.T) {
 //
 // It runs at narrowOverlayWindow as well as at 80 columns for the same reason the prose property
 // does: the marker rides the title row here too, and a title row is where a narrow pane loses the
-// count if it is composed long and clipped.
+// count if it is composed long and clipped. The ask prompt is the pane where that title row is now
+// the top BORDER (askPrompt draws no title of its own) — same marker, same accounting, one row
+// higher — so where the count is stated is per-pane and only where it is stated differs.
 func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
 	choices := []string{"yes, go ahead", "no", "ask me again later", "stop and let me drive"}
 
@@ -1579,12 +1587,19 @@ func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
 		probe     string // a label that appears only in the pane's rows
 		rows      int    // the entries on offer, every one of which these windows drop
 		bodyLines int    // the pane's wrapped body, one line at both widths — 0 where it has none
+		chrome    int    // the pane's irreducible rows: everything past them is seated body
+		titleLine int    // the line the marker rides — the title row, or the top border where the title is in it
+		windows   []int  // the terminal heights at which this pane's row window is ZERO
 		render    func(m Model) string
 	}{
-		{"ask prompt", "ask me again later", len(choices), 1, func(m Model) string {
+		// The ask prompt's chrome is three rows, not four: its name went into the question itself, so
+		// the marker rides the top border (line 0) and the row it used to cost is a row of body. That
+		// one extra row is also why its zero-window range stops at 15 — at 16 the pane seats the first
+		// answer and the rest are a keypress away, which is scrolling rather than hiding.
+		{"ask prompt", "ask me again later", len(choices), 1, 3, 0, []int{smallestOverlayWindow, 13, 14, 15}, func(m Model) string {
 			return m.askPrompt(domain.AskRequest{Question: "which way?", Choices: choices})
 		}},
-		{"session browser", "session number 00", 8, 0, func(m Model) string {
+		{"session browser", "session number 00", 8, 0, 4, 1, []int{smallestOverlayWindow, 13, 14, 15, 16}, func(m Model) string {
 			m.sessionBrowser = browserWithSessions(8)
 			return m.renderSessionBrowser()
 		}},
@@ -1592,7 +1607,7 @@ func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
 		// drop reads worst: the human is mid-keystroke and the hint under the empty pane still offers
 		// "↑/↓ select · ⏎/tab accept", so nothing distinguishes a menu the window swallowed from a
 		// filter that matched nothing.
-		{"command dropdown", "/clear", len(commandSpecs), 0, func(m Model) string {
+		{"command dropdown", "/clear", len(commandSpecs), 0, 4, 1, []int{smallestOverlayWindow, 13, 14, 15, 16}, func(m Model) string {
 			m.input.SetValue("/")
 			m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 			return m.renderAutocomplete()
@@ -1601,7 +1616,7 @@ func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
 
 	for _, p := range panes {
 		for _, width := range []int{80, narrowOverlayWindow} {
-			for _, height := range []int{smallestOverlayWindow, 13, 14, 15, 16} {
+			for _, height := range p.windows {
 				t.Run(fmt.Sprintf("%s/%d×%d", p.name, width, height), func(t *testing.T) {
 					m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 					pane := p.render(m)
@@ -1616,14 +1631,15 @@ func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
 						t.Fatalf("the pane seated a row at %d×%d — test premise broken:\n%s", width, height, flat)
 					}
 
-					// Everything past the pane's four irreducible rows (two borders, title, hint) is
-					// body it managed to seat; the rest of the body, and every row, is what the title
-					// owes a count for — one marker for everything the pane is holding back.
-					bodyShown := len(rows) - 4
+					// Everything past the pane's irreducible rows (its two borders, its hint, and its
+					// title where it draws one) is body it managed to seat; the rest of the body, and
+					// every row, is what the title owes a count for — one marker for everything the
+					// pane is holding back.
+					bodyShown := len(rows) - p.chrome
 					if bodyShown < 0 || bodyShown > p.bodyLines {
 						t.Fatalf("pane seated %d body rows of %d — test premise broken:\n%s", bodyShown, p.bodyLines, flat)
 					}
-					title := strings.Trim(rows[1], "│ ")
+					title := strings.Trim(rows[p.titleLine], "│╭╮─ ")
 					if !elisionMarkerPattern.MatchString(title) {
 						t.Fatalf("title row = %q, want the marker for the rows the pane is not showing", title)
 					}

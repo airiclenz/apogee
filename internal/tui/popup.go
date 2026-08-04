@@ -194,7 +194,7 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 		// nothing instead — the same way footerView blanks below 3 columns (plan D3).
 		return ""
 	}
-	inner := max(1, width-frame)
+	inner := popupInnerWidth(th, width)
 
 	// Every content line sits on a solid-black field: the outer border style only paints its own
 	// border and padding cells, so a line whose own styles carry no background would otherwise show
@@ -505,6 +505,29 @@ func popupRowBlockLines(heights []int, gap int) int {
 		total += gap * (len(heights) - 1)
 	}
 	return total
+}
+
+// popupInnerWidth is the content budget inside a pane drawn at the given TOTAL width: the width less
+// whatever the border style spends on itself, floored at one cell (renderPopup, which returns nothing
+// at all below that floor). It is a function rather than an inline subtraction because a CALLER needs
+// it now too — a spec whose rows wrap cannot know what its rows will cost in lines without knowing
+// the width they will be broken to, and a caller measuring against a frame of its own would budget
+// for a pane the painter is not drawing.
+func popupInnerWidth(th theme, width int) int {
+	return max(1, width-th.popupBorder.GetHorizontalFrameSize())
+}
+
+// popupWrappedRowHeights is what each of rows will cost in painted LINES on a wrapping spec
+// (popupSpec.wrapRows) drawn at the given TOTAL width — the per-row costs a caller needs to state its
+// row budget in the LINES popupSpec.maxRows is denominated in ([Model.popupBudget]).
+//
+// It exists because the two halves of that budget are computed in different places: the pane knows
+// how many options it is offering, the painter knows how tall each of them lands, and a pane that
+// handed the frame its row COUNT would ask for three rows and paint eight. It composes exactly the
+// calls renderPopup makes to reach the same numbers, in the same order, so the demand a caller
+// budgets for is the cost the painter then pays.
+func popupWrappedRowHeights(th theme, rows []popupRow, width int) []int {
+	return popupRowHeights(popupRowBlocks(th, layoutPopupRows(th, rows), true, popupInnerWidth(th, width)))
 }
 
 // popupBodyLines word-wraps spec.body into styled, black-filled content lines for the pane, sitting

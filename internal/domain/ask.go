@@ -30,8 +30,9 @@ type AskRequest struct {
 	// Question is the free-text prompt the human answers.
 	Question string
 
-	// Choices is the optional set of short, single-line answers offered to the human alongside
-	// the free-text box; nil/empty means free-text only (the original behaviour). The human may
+	// Choices is the optional set of answers offered to the human alongside the free-text box —
+	// a word or a whole sentence apiece, since the Driver's prompt wraps what it cannot fit on one
+	// line; nil/empty means free-text only (the original behaviour). The human may
 	// always type a custom answer instead, so Choices never gates the reply, and the chosen
 	// label travels back in AskAnswer.Text (D9) — no Choice index is returned.
 	Choices []string

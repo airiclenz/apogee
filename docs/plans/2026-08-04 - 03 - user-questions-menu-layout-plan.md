@@ -256,9 +256,28 @@ for the capitalized labels and still passing.
 
 **Commit:** `feat(tui): approval body renders Reason and Command labels for subprocess calls`
 
-## 6. Ask prompt adopts the menu layout
+## 6. Ask prompt adopts the menu layout — ✅ DONE (2026-08-04)
 
 Depends on items 1, 2, and 3.
+
+NOTES (2026-08-04): `maxAskChoiceRows` caps the window in the lines that many ROWS cost
+(`popupRowBlockLines(heights[:min(n, 8)], gap)`), not as a literal eight-line cap: with a blank line
+between options, eight literal lines would scroll five one-line choices — the top of the schema's own
+2-5 range — on a terminal with room for all of them, and the constant is named for an offering the
+human counts in options. Two painter additions the item's text implies but does not name: the caller
+now has to state its budget in lines the painter has not laid out yet, so `popupWrappedRowHeights`
+(popup.go) composes exactly the calls `renderPopup` makes to reach the same per-row heights, and
+`popupInnerWidth` is the inner-width computation both now share (renderPopup's own subtraction moved
+into it, unchanged); `askRowGap` names the separator's cost. `internal/domain/ask.go`'s **comment** on
+`Choices` was reworded with the schema — the type, and every engine seam, is untouched, but a doc
+comment still promising "short, single-line" answers would contradict the tool description this item
+relaxes. `sanitiseChoices` is unchanged: it neither rejects nor mangles long options, and a literal
+newline is already broken into lines by the painter's `wrapText`. Three test-side consequences:
+`TestOverlayNamesTheRowsItCannotShow`'s ask range is 12-15 rather than 12-16 (the row the dropped
+title bought back lets the pane seat its first answer at 16, which is scrolling, not hiding — item
+3's all-or-nothing count) and it reads the marker off the border row; `TestDecisionSurfaceStaysOnTheFrame`'s
+ask probe is the question, with the elision marker IN THE PANE as the fallback, because a pane with no
+title has no identity line left when the window grants it no body row.
 
 **What:** Restyle the ask prompt per the mockup (lines 25-37). In
 `internal/tui/model.go` `askPrompt` (~line 4023):

@@ -4172,21 +4172,40 @@ func approvalCommandLine(req domain.ApprovalRequest) (string, bool) {
 }
 
 // maxAskChoiceRows caps how many ask_user choice rows the popup shows at once (the
-// maxAutocompleteItems convention); a longer set scrolls its window around the selection.
+// maxAutocompleteItems convention); a longer set scrolls its window around the selection. The
+// window itself is now budgeted in LINES rather than rows (popupRowWindow), so what the pane hands
+// the budget is what this many rows and the blank lines between them COST (askPrompt) — the cap is
+// on the offering, which is what a human counts it in.
 const maxAskChoiceRows = 8
 
+// askRowGap is the one blank line the ask prompt's rowGap sets between two adjacent options — the
+// separator's own cost, which the pane's line budget has to pay for as well as its rows.
+const askRowGap = 1
+
 // askPrompt renders the pending ask_user question as a bordered popup pane above the input box
-// (the shared popup module): the title, the wrapped question body, then any offered choices as
-// selectable rows, and a one-line key hint (P3.11; D5/D6/D8). While the input box is empty and
+// (the shared popup module): the wrapped question body, then any offered choices as selectable
+// menu rows, and a one-line key hint (P3.11; D5/D6/D8). While the input box is empty and
 // choices are offered, ↑/↓ move the highlight and ⏎ sends the highlighted label; the moment the
 // human types, the highlight drops (selected −1) and ⏎ sends the typed text — so the answer mode
 // is always visible in the chrome. Every model-authored string (question, choices) is
-// escape-stripped at this call site. The screen budget is derived from the live layout so a long
-// question or a long choice set never pushes the input box off-screen: rows get priority (they
-// are what the human acts on), the body takes what is left and overflows into the explicit
-// "… (+N more lines)" marker, and on a window that can spare neither the pane shrinks to its
-// title and hint — with that title counting BOTH the question lines and the choices it could not
-// seat (D2), so a hint still offering ↑↓ is never the only trace of an offering the pane dropped.
+// escape-stripped at this call site.
+//
+// The pane carries NO title (docs/design/user-questions-layout.md): "the assistant is asking:" said
+// what the question itself says better, and a heading over a single question is a row spent on
+// nothing. So the top border is plain (popupSpec.titleInBorder with an empty title) and the question
+// is the pane's own heading — which also means the pane's chrome is its two borders and its hint row
+// (popupTitleBorderChrome), one row less than it used to draw. The choices are a MENU like the
+// approval prompt's — ❯ on the answer the ⏎ would send, · on the rest — and they WRAP with a blank
+// line between them, because an ask_user choice is prose written for this one question and a
+// decision must not be taken against half a sentence (popupSpec.menuRows, wrapRows, rowGap).
+//
+// The screen budget is derived from the live layout so a long question or a long choice set never
+// pushes the input box off-screen: rows get priority (they are what the human acts on), the body
+// takes what is left and overflows into the explicit "… (+N more lines)" marker, and on a window
+// that can spare neither the pane shrinks to its borders and hint — with the marker riding the top
+// BORDER now that no title row is drawn, counting BOTH the question lines and the choices it could
+// not seat (D2, popupTitleLine), so a hint still offering ↑↓ is never the only trace of an offering
+// the pane dropped.
 func (m Model) askPrompt(req domain.AskRequest) string {
 	choicesShown := len(req.Choices) > 0 && m.input.Value() == ""
 
@@ -4199,19 +4218,33 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 
 	// Budget against the live layout so a long question or choice set never pushes the input box
 	// off-screen (D2); the rows get priority and the body takes what is left (see popupBudget).
-	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, len(req.Choices), maxAskChoiceRows, popupChrome)
+	//
+	// Both row figures are in the LINES the window will paint, not in choices: an option may now wrap
+	// onto two or three lines and every adjacent pair is a blank line apart, so a pane asking for one
+	// row per choice would promise three answers and paint eight. maxAskChoiceRows stays a cap on the
+	// OFFERING — in this budget, what that many options and their separators cost — because a cap read
+	// as eight LINES would scroll five one-line choices, the top of the schema's own 2-5 range, on a
+	// terminal with the room for all of them.
+	rows := singleCellRows(stripEscapesAll(req.Choices))
+	heights := popupWrappedRowHeights(m.th, rows, m.width)
+	wanted := popupRowBlockLines(heights, askRowGap)
+	capped := popupRowBlockLines(heights[:min(len(heights), maxAskChoiceRows)], askRowGap)
+	maxBodyRows, rowLines, seated := m.popupBudget(panePrompt, wanted, capped, popupTitleBorderChrome)
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
 
 	spec := popupSpec{
-		title:       "the assistant is asking:",
-		body:        stripEscapes(req.Question),
-		maxBodyRows: maxBodyRows,
-		rows:        singleCellRows(stripEscapesAll(req.Choices)),
-		selected:    selected,
-		hint:        hint,
-		maxRows:     rowsShown,
+		titleInBorder: true, // no title at all: an empty one leaves the top border unbroken
+		body:          stripEscapes(req.Question),
+		maxBodyRows:   maxBodyRows,
+		rows:          rows,
+		menuRows:      true,
+		wrapRows:      true,
+		rowGap:        true,
+		selected:      selected,
+		hint:          hint,
+		maxRows:       rowLines,
 	}
 	return renderPopup(m.th, spec, m.width)
 }

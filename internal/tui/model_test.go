@@ -1339,6 +1339,109 @@ func TestModelAskChoicesRoundTrip(t *testing.T) {
 	}
 }
 
+// askPaneLines renders the ask pane for req on a terminal with room to spare and returns its lines
+// with the styling and the border stripped off, so an assertion reads the pane's own text at the
+// column the pane paints it in.
+func askPaneLines(t *testing.T, width int, req domain.AskRequest) []string {
+	t.Helper()
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: width, Height: 40})
+	m = step(t, m, askReqMsg{Request: req, Reply: make(chan domain.AskAnswer, 1)})
+	pane := m.askPrompt(m.pendingAsk.Request)
+	if pane == "" {
+		t.Fatalf("the ask pane rendered nothing at %d columns", width)
+	}
+	return strings.Split(ansiPattern.ReplaceAllString(pane, ""), "\n")
+}
+
+// TestModelAskPromptMenuChrome pins the surface the mockup asks for
+// (docs/design/user-questions-layout.md): no title of its own — the top border is unbroken and the
+// QUESTION is the pane's lead line — and the choices as a menu, ❯ on the answer ⏎ would send, · on
+// the rest, one blank line between each pair. The title row is the row this buys back: a heading
+// reading "the assistant is asking:" over a question the human is already reading said nothing the
+// question did not, and on a twelve-row terminal it cost a row of the question itself.
+func TestModelAskPromptMenuChrome(t *testing.T) {
+	rows := askPaneLines(t, 60, domain.AskRequest{
+		Question: "which way?",
+		Choices:  []string{"left", "right"},
+	})
+	got := strings.Join(rows, "\n")
+
+	// The top border is asserted RUNE by rune rather than by the title's absence: a title that
+	// quietly came back as a border title would pass a substring check on the old wording.
+	if trimmed := strings.Trim(rows[0], "╭─╮"); trimmed != "" {
+		t.Errorf("top border carries %q, want an unbroken border:\n%s", trimmed, got)
+	}
+	if strings.Contains(got, "the assistant is asking:") {
+		t.Errorf("the dropped title is still drawn:\n%s", got)
+	}
+	if lead := strings.TrimSpace(strings.Trim(rows[1], "│")); lead != "which way?" {
+		t.Errorf("first content line = %q, want the question itself:\n%s", lead, got)
+	}
+
+	first, second := paneRowIndex(t, rows, "❯ left"), paneRowIndex(t, rows, "· right")
+	if second != first+2 {
+		t.Errorf("the two options are %d lines apart, want one blank line between them:\n%s", second-first, got)
+	}
+	if sep := strings.TrimSpace(strings.Trim(rows[first+1], "│")); sep != "" {
+		t.Errorf("the line between the options = %q, want it blank:\n%s", sep, got)
+	}
+	// …and nothing but between: a blank line before the first option or after the last would be the
+	// box's own padding drawn twice.
+	if sep := strings.TrimSpace(strings.Trim(rows[first-1], "│")); sep == "" {
+		t.Errorf("a blank line sits before the first option, which the box's padding already gives:\n%s", got)
+	}
+	if sep := strings.TrimSpace(strings.Trim(rows[second+1], "│")); sep == "" {
+		t.Errorf("a blank line sits after the last option, which the box's padding already gives:\n%s", got)
+	}
+}
+
+// TestModelAskLongChoiceWrapsUnderItsMarker is what the schema's relaxed wording rests on: a choice
+// may now be a whole sentence, so the pane BREAKS it instead of eliding it, and its continuation
+// lines hang under the option's own first column rather than under the marker. A decision taken
+// against "implement the config redesign first, commit it, then do the …" is a decision taken
+// against half a sentence.
+func TestModelAskLongChoiceWrapsUnderItsMarker(t *testing.T) {
+	const long = "implement the config redesign first, commit it, then do the TUI part in a separate commit"
+	rows := askPaneLines(t, 50, domain.AskRequest{
+		Question: "how to continue?",
+		Choices:  []string{"just do it all in one shot", long},
+	})
+	got := strings.Join(rows, "\n")
+
+	head := paneRowIndex(t, rows, "· implement")
+	var wrapped []string
+	for _, row := range rows[head:] {
+		text := strings.Trim(row, "│")
+		if strings.TrimSpace(text) == "" || strings.HasPrefix(strings.TrimSpace(text), "↑↓") {
+			break
+		}
+		if len(wrapped) > 0 && !strings.HasPrefix(text, " "+strings.Repeat(" ", popupRowIndent)) {
+			t.Errorf("continuation line %q does not hang under the option's first column:\n%s", text, got)
+		}
+		wrapped = append(wrapped, strings.TrimSpace(text))
+	}
+	if len(wrapped) < 2 {
+		t.Fatalf("the long option did not wrap at all (%d line(s)):\n%s", len(wrapped), got)
+	}
+	// The whole option, and nothing elided out of the middle of it: the rejoined lines ARE the string
+	// the model offered.
+	if rejoined := strings.TrimPrefix(strings.Join(wrapped, " "), "· "); rejoined != long {
+		t.Errorf("the wrapped option reads %q, want the whole of %q:\n%s", rejoined, long, got)
+	}
+}
+
+// paneRowIndex is the index of the pane line carrying want, failing the test when no line does.
+func paneRowIndex(t *testing.T, rows []string, want string) int {
+	t.Helper()
+	for i, row := range rows {
+		if strings.Contains(row, want) {
+			return i
+		}
+	}
+	t.Fatalf("no pane line carries %q:\n%s", want, strings.Join(rows, "\n"))
+	return -1
+}
+
 // Typing a custom answer drops the choice highlight (selected −1) and ⏎ sends the typed text;
 // deleting back to empty restores the highlight and ⏎ then picks it (D5).
 func TestModelAskTypedTextOverridesChoices(t *testing.T) {
