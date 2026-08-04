@@ -823,6 +823,67 @@ func TestPaintedTabBearingStartupCardKeepsItsBorder(t *testing.T) {
 	}
 }
 
+// A tool block whose target carries a TAB opens its summary in the block's own target column — the
+// seventh site of the class the six tests above fix, and the one where the tab never reaches the
+// screen at all.
+//
+// The five before this one all ended with a tab still standing when something painted it. This one
+// does not: renderToolBranch hands the branch line to hangingWrap, and wrapText settles the tabs
+// (expandTabs) before the style ever sees the text. What drifts is the ARITHMETIC done in front of
+// that. renderToolBlock measures the widest target to set the block's column, and renderToolBranch
+// pads each target back out to it — both with th.measure.Width over the raw target, which reads a
+// tab as nothing — and only then is the line wrapped, where the tab becomes four cells that no pad
+// was computed for. So on a tab-bearing row the summary opens four columns per tab right of the
+// column every other row opens its own in (probed: 17 against the column's 13), and the target
+// column is the only thing lining a block's summaries up — there is no rule between them.
+//
+// The tab-free row is the fixture's oracle rather than a constant: its target is the widest, so it
+// IS the column the block measured, and its summary opens one space past it by construction.
+//
+// A target with a tab in it is a real target: a tab is legal in a POSIX filename and the model names
+// the file it wants read, so the block does not get to assume the name is tame.
+//
+// Both measures are swept because both painted the defect: the tab weighs the same nothing in each,
+// so this is not a case the two disagree about — it is one they were both being lied to about.
+func TestPaintedTabBearingToolTargetKeepsItsColumn(t *testing.T) {
+	const width = 80 // wide enough that no branch line wraps, so each row is one row
+	// The em dash opens each summary and appears in neither target, so it names the column the
+	// summary starts in on any row.
+	views := []toolView{
+		{Label: "Read File", Target: "a\tb", Summary: namedSummary(detailLine{Text: "— tabbed"})},
+		{Label: "Read File", Target: "eight_ok", Summary: namedSummary(detailLine{Text: "— plain"})},
+	}
+
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			th := newTheme()
+			th.measure = widthAuthority{method: tc.method}
+
+			lines := renderToolBlock(th, views, width, blockState{}).lines
+			if len(lines) != len(views)+1 {
+				t.Fatalf("the block painted %d rows, want the header and its %d branches:\n%s",
+					len(lines), len(views), strings.Join(mapStrip(lines), "\n"))
+			}
+			branches := lines[1:]
+
+			want := paintedColumn(strip(branches[len(branches)-1]), "—", tc.method) // the tab-free row
+			if want < 0 {
+				t.Fatalf("no summary on the last branch — the fixture is not a summarised block:\n%s",
+					strings.Join(mapStrip(lines), "\n"))
+			}
+			for i, ln := range branches {
+				if got := paintedColumn(strip(ln), "—", tc.method); got != want {
+					t.Errorf("branch %d opens its summary in painted column %d, want the block's target column %d: %q",
+						i, got, want, strip(ln))
+				}
+				if strings.Contains(strip(ln), "\t") {
+					t.Errorf("branch %d still carries a tab for a style to rewrite: %q", i, strip(ln))
+				}
+			}
+		})
+	}
+}
+
 // The stacked start-up card fits its own info rows to the card's content budget, so a value too wide
 // to be shown whole ends in the elision marker rather than simply stopping at the border.
 //

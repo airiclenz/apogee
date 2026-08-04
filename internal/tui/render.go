@@ -883,9 +883,13 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 	}
 	var out blockPaint
 	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", th.toolLabel.Render(views[0].Label), width), header)
+	// The column is measured over EXPANDED targets, for the reason expandTabs gives: a tab weighs
+	// nothing here while the wrap downstream spends four cells on it, so a column set from raw
+	// targets is a column the branch lines cannot land on (renderToolBranch pads to the same
+	// expanded measure).
 	column := 0
 	for _, tv := range views {
-		column = max(column, th.measure.Width(tv.Target))
+		column = max(column, th.measure.Width(expandTabs(tv.Target)))
 	}
 	for i, tv := range views {
 		out.join(renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width, state.expanded))
@@ -1008,9 +1012,15 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 	if tv.Target == "" {
 		return plainPaint(renderDetails(th, branchDetails(tv), width))
 	}
-	text, style := tv.Target, th.toolDetail
+	// The target is expanded before it is measured AND before it is padded, so the pad is computed
+	// over the very string the wrap goes on to hand the style (expandTabs). Measured raw it read as
+	// nothing, wrapText then spent four cells per tab on it, and the summary opened that far right of
+	// the column its siblings opened theirs in — the column being the only thing that lines a block's
+	// summaries up, since nothing is drawn between them.
+	target := expandTabs(tv.Target)
+	text, style := target, th.toolDetail
 	if tv.Summary.Text != "" {
-		pad := strings.Repeat(" ", max(0, column-th.measure.Width(tv.Target)))
+		pad := strings.Repeat(" ", max(0, column-th.measure.Width(target)))
 		text += pad + " " + tv.Summary.Text
 		style = detailStyle(th, tv.Summary.Kind)
 	}

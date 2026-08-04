@@ -1011,6 +1011,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A tool block's summaries line up when a file name holds a tab.** A block pads every target out to
+  its widest one so the outcomes beside them — `1 - 154`, `+2 -2`, an `error: …` — form a straight
+  column down the block. That padding was measured with a tab counting for nothing and then handed to
+  a wrap that turns it into four spaces, so the one branch naming a tab-bearing path opened its
+  summary four columns right of every other branch's — and a block draws nothing between the target
+  and the summary, so the column is the only thing holding them in line. The target is expanded
+  before it is measured and padded now, so every summary in a block starts in the same column.
+
 - **A pop-up's columns, a presented document's path and the start-up card hold their shape around a
   tab.** Three more surfaces measured a tab as nothing while the screen spends four columns on it,
   and each broke differently. In a pop-up — the `/sessions` browser, the `/` and `@` dropdowns, an
