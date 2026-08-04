@@ -53,6 +53,37 @@ wire-silent. See
 _Avoid_: "embedder" (names the linking, not the responsibility of pacing the loop),
 "frontend" / "client" (a Driver owns the loop's pace and state roots, not just a view).
 
+**Schedule**:
+A standing instruction a **Driver** holds for its lifetime — a prompt, a cycle (how often it
+re-runs) and an Agent mode — created in the TUI with `/schedule` and ended with
+`/schedule-stop`. Everything that decides *when and how* it runs (cycle timing, the
+skip-on-overlap policy, the wait for a quiescent host, lifecycle) lives in the scheduler
+**library** (`internal/schedule`); the TUI is merely its first Driver surface, owning only
+input and display, and a future daemon composes the same library. A TUI-hosted Schedule **dies
+with the TUI** — "while apogee is open, re-run this every N minutes" is the whole promise;
+nothing persists to config. A Schedule's mode is **Plan or Auto only** and is chosen explicitly
+at creation, independent of the host session's mode (Auto still gated by the same eligibility
+ladder that gates launching in Auto), so no **Firing** can ever park on an Approval. See
+[ADR 0033](docs/adr/0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md).
+_Avoid_: "cron job" / "job" (nothing is queued and nothing survives quit), "recurring task",
+"timer" (the timer is one part; the Schedule is the standing instruction).
+
+**Firing**:
+One run of a **Schedule**'s prompt: a **fresh** agent constructed through the **Embeddable
+agent**'s public API, the prompt submitted, the loop driven to the quiescent boundary, and the
+result saved as an ordinary **Session record** marked with its Schedule's identity (id and name
+on browsable `Meta`) so the `/sessions` browser can label it. A Firing *is* a **headless run** —
+the same act as the deferred `apogee headless` runner, over the shared core (`internal/run`)
+both use. It carries nothing over from the previous Firing (fresh context; no summary is
+injected — model-visible content would be a Mechanism to bench, not a scheduler feature), its
+Approver is a **fail-safe denier** (a gated action fails visibly and nothing waits for a human),
+its **Asker** and **Presenter** are `nil`, and it saves **once, at completion** — a deliberate
+scoping of ADR 0022's per-Turn cadence to a bounded, unattended run. Firings of one Schedule are
+strictly serial: a tick landing while one is in flight is **skipped**, never queued. See
+[ADR 0033](docs/adr/0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md).
+_Avoid_: "background task" / "detached process" (a Firing is a Session in this process, and it
+ends), "job run", "cron run".
+
 **Sub-agent**:
 A nested, focused agent loop the top-level agent spawns for one delegated sub-task, with
 its own Session and a reduced context Budget. It is itself an instance of the **Embeddable

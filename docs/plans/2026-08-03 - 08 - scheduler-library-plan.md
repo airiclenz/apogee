@@ -129,7 +129,11 @@ it says and record the divergence as a dated NOTES line under the item.
 
 ---
 
-## 1. ADR 0033 + CONTEXT.md terms — the paper trail before the code
+## 1. ADR 0033 + CONTEXT.md terms — the paper trail before the code — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): owner decision 8 ("a new ADR records the decisions") is recorded in ADR 0033
+as a closing sentence of the Decision section rather than as an eighth numbered decision — inside
+the ADR it would be purely self-referential; decisions 1–7 are numbered in ADR voice as written.
 
 **What:**
 

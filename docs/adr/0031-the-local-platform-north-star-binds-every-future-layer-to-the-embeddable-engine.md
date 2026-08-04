@@ -73,6 +73,9 @@ mid-wait today loses only that Step; the session resumes at the quiescent bounda
 the retry unit for nondeterministic steps (Step, Turn, or workflow node); whether a
 workflow node is a fresh session or a resumed one; daemon packaging; the shape of an
 unattended eval harness.
+[ADR 0033](0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md)
+answers the fresh-vs-resumed question for the **scheduled-trigger** case only (fresh per
+firing); the workflow-node case stays open.
 
 ## Considered options
 
