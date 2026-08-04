@@ -884,6 +884,75 @@ func TestPaintedTabBearingToolTargetKeepsItsColumn(t *testing.T) {
 	}
 }
 
+// A tool target carrying a TAB leaves the context gauge on the status row — the eighth site of the
+// class the seven tests above fix, and the one where nothing overruns, nothing wraps and no tab ever
+// reaches the screen.
+//
+// Every site before this one ended with a measure and a paint disagreeing about a row. This one does
+// not: statusLeft composes the phrase through th.statusBar.Render, which rewrites the tab into its
+// four spaces BEFORE th.measure reads the result, so the status line's own arithmetic is honest and
+// the row paints exactly one window wide with or without a tab in it. What is wrong sits further
+// upstream, in the CAP. statusTargetRunes is the promise that the left slot cannot push the gauge
+// off the row, and toolPhrase spends it in RUNES — so a tab, one rune the screen pays four cells
+// for, bought four times the room the cap thought it was selling. A path of 32 runes clipped to the
+// cap painted 91 cells (probed), statusLeft then truthfully truncated that to the whole window, and
+// the gauge the cap exists to protect was gone from an 80-column row.
+//
+// The plain row is the fixture's oracle rather than a constant: its target is the cap's own design
+// case — 32 runes of a path that has no tab in it — so a gauge that survives beside it is the gauge
+// the tab-bearing row is owed.
+//
+// A target with a tab in it is a real target: a tab is legal in a POSIX filename and the model names
+// the file it wants read, so the status line does not get to assume the name is tame.
+//
+// Both measures are swept because the cap is spent in front of both: the tab weighs one rune in
+// either, so this is not a case the two disagree about — it is one they were both being lied to
+// about.
+func TestPaintedTabBearingToolTargetKeepsTheGauge(t *testing.T) {
+	// 16 "a\t" pairs and a suffix: past the cap either way, so the clip is what sets the width. Raw
+	// it is 27 cells and the screen pays 91 for it; expanded, the cap holds it to its own 32.
+	targets := []struct {
+		name string
+		path string
+	}{
+		{"plain — the cap's design case", strings.Repeat("a", 32) + ".go"},
+		{"tab-bearing", strings.Repeat("a\t", 16) + ".go"},
+	}
+
+	for _, tc := range paintMethods {
+		for _, tg := range targets {
+			t.Run(tc.name+"/"+tg.name, func(t *testing.T) {
+				m := paintedAs(t, newTestModel(t), tc.method)
+				m.input.SetValue("hello")
+				m = step(t, m, keyEnter()) // running, so the gauge displaces the hint that would else show
+				m = step(t, m, eventMsg{Event: domain.UsageEvent{
+					PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}})
+				m = step(t, m, eventMsg{Event: domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "read_file",
+					// The JSON escape is what makes the path carry a real TAB once it is unmarshalled.
+					Arguments: []byte(`{"path":"` + strings.ReplaceAll(tg.path, "\t", `\t`) + `"}`),
+				}}})
+
+				gauge := strings.TrimSpace(strip(m.contextGauge()))
+				if gauge == "" {
+					t.Fatal("no gauge lit after a usage event — the fixture protects nothing")
+				}
+				row := strip(m.statusLine())
+				if !strings.Contains(row, gauge) {
+					t.Errorf("the status row dropped the gauge %q the target cap exists to keep on it: %q",
+						gauge, row)
+				}
+				if got := tc.method.StringWidth(row); got != m.width {
+					t.Errorf("status row paints %d columns, want exactly the window's %d: %q", got, m.width, row)
+				}
+				if strings.Contains(row, "\t") {
+					t.Errorf("the status row still carries a tab for a style to rewrite: %q", row)
+				}
+			})
+		}
+	}
+}
+
 // The stacked start-up card fits its own info rows to the card's content budget, so a value too wide
 // to be shown whole ends in the elision marker rather than simply stopping at the border.
 //

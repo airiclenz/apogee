@@ -149,7 +149,16 @@ func toolPhrase(tv toolView) string {
 	if tv.Target == "" {
 		return tv.Verb
 	}
-	return tv.Verb + " · " + clipRunes(tv.Target, statusTargetRunes)
+	// The target is EXPANDED before the cap counts it (expandTabs, render.go). Nothing downstream
+	// mis-measures it — statusLeft composes the phrase through a style, which rewrites the tab into
+	// its four spaces before th.measure reads the result, and the gist's line is wrapped by wrapText,
+	// which settles its own tabs — so the row never overruns and no tab reaches the screen. What the
+	// tab defeats is the CAP itself: statusTargetRunes is spent in runes, and a tab is one rune the
+	// screen pays four cells for, so a target clipped to 32 runes painted up to 139 cells. statusLeft
+	// then truncated that over-wide phrase to the whole window, exactly as it should, and the gauge
+	// this cap exists to keep on the row was dropped from an 80-column status line. Counted over the
+	// expanded target the cap bounds the cells the slot actually spends, which is what it promised.
+	return tv.Verb + " · " + clipRunes(expandTabs(tv.Target), statusTargetRunes)
 }
 
 // setActivity moves the model to a new activity. The elapsed clock restarts only when the

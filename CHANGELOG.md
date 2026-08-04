@@ -1011,6 +1011,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The context gauge stays on the status line when a file name holds a tab.** The status line caps
+  the tool target it shows — "reading · src/main.go" — so that a long path can never push the gauge
+  at the right of the row off the screen. That cap was counted in characters while the screen pays
+  four columns for a tab, so a path holding sixteen of them was let through at four times the width
+  the cap had budgeted, filled the row on its own, and the gauge went missing for as long as the call
+  ran. The cap is counted over the expanded target now, so it bounds the columns the phrase actually
+  spends and the gauge keeps its place. The same phrase reports the open call inside a collapsed
+  sub-agent run, which now shows a tab-bearing name at the same honest length.
+
 - **A tool block's summaries line up when a file name holds a tab.** A block pads every target out to
   its widest one so the outcomes beside them — `1 - 154`, `+2 -2`, an `error: …` — form a straight
   column down the block. That padding was measured with a tab counting for nothing and then handed to
