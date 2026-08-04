@@ -4,15 +4,9 @@ X: Executed
 
 - [ ] Pressing backspace/del on selected text in the prompt editor should delete it.
 
-- [X] when printing markdown tables, cells with much content currently truncate the content if it does not fit. The content needs to be wrapped into another line within the cell. This will probably require the introduction of vertical and horizontal table lines / frames.
-
 - [ ] Currently I cannot see how much of it's context a sub agent has used.
 
 - [ ] Clicking on the header of a tool for collapsing/expanding is not very responsive (very often nothing happens at all) - this seems to be connected to 100% GPU usage when an agent is running. When no local session is in progress the expansion/collapse response is snappy.
-
-- [X] pop-up lists like /sessions, /skills or @file are painted inconsistent. Some have an empty row between the bottom prompt/status section and some have not:
-  - server: unwanted spacer row
-  - session: unwanted spacer row
 
 - [ ] keyboard path for collapse/expand: a block-cursor mode (↑/↓ move a highlighted block, enter toggles, esc leaves). Deliberately deferred from the collapse wave — layout.md "Collapsed and expanded blocks" keeps toggling mouse-only for now, on the same precedent that keeps transcript selection mouse-only.
 
