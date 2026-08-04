@@ -205,6 +205,11 @@ func layoutPopupRows(th theme, rows []popupRow) []string {
 // ansi.StringWidth because the pad computed from this width is painted, and a column measured in a
 // measure the painter is not on lands a cell off on any row carrying VARIATION SELECTOR-16
 // (ADR 0030). A column no row filled measures 0, which is the signal layoutPopupRow collapses it on.
+//
+// A cell's TABs are expanded before it is measured, for the reason expandTabs (render.go) gives: a
+// tab weighs nothing in this measure and four cells in every lipgloss style the row meets on its way
+// to the screen (popupRowLines styles every row it emits). layoutPopupRow expands the same cell as
+// it writes it, so the width measured here and the text padded out to it are the one string.
 func popupColumnWidths(th theme, rows []popupRow) []int {
 	columns := 0
 	for _, row := range rows {
@@ -213,7 +218,7 @@ func popupColumnWidths(th theme, rows []popupRow) []int {
 	widths := make([]int, columns)
 	for _, row := range rows {
 		for i, cell := range row {
-			widths[i] = max(widths[i], th.measure.Width(cell))
+			widths[i] = max(widths[i], th.measure.Width(expandTabs(cell)))
 		}
 	}
 	return widths
@@ -225,6 +230,13 @@ func popupColumnWidths(th theme, rows []popupRow) []int {
 // no row filled costs the pane nothing; an empty cell in a column another row DID fill still pads,
 // which is what keeps the columns after an absent tier aligned. A row shorter than the schema is
 // treated as ending in empty cells, so a producer may leave trailing tiers off.
+//
+// The cell is written with its TABs already expanded — the same expansion popupColumnWidths measured
+// the column with — so the pad computed here lands on the text the pane actually paints. Left raw,
+// the tab reached the pane's own style (popupRowLines) and became four spaces AFTER this row had
+// been padded and the column settled, so every column to the right of it painted four cells right of
+// the column the rows above and below it opened, and the pane's truncation ate that much off the
+// far end of the row (expandTabs, render.go).
 func layoutPopupRow(th theme, row popupRow, widths []int) string {
 	var b strings.Builder
 	written := 0
@@ -237,7 +249,7 @@ func layoutPopupRow(th theme, row popupRow, widths []int) string {
 		}
 		cell := ""
 		if i < len(row) {
-			cell = row[i]
+			cell = expandTabs(row[i])
 		}
 		b.WriteString(cell)
 		if pad := w - th.measure.Width(cell); pad > 0 {

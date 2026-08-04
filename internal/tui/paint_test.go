@@ -660,6 +660,169 @@ func TestPaintedTabBearingTableCellKeepsItsColumns(t *testing.T) {
 	}
 }
 
+// A pop-up row whose cell carries a TAB opens its next column in the same painted cell every other
+// row opens its own — the fourth site of the defect class the three tests above fix, and the one
+// where the drift is sideways rather than long.
+//
+// The pane's columns are measured over the cells (popupColumnWidths) and the cells are padded back
+// out to those widths (layoutPopupRow), both counting a tab as nothing; the row is then handed to
+// the pane's own style (popupRowLines), which rewrites the tab into four spaces before drawBox ever
+// sees it. So the pad was computed for a cell four cells narrower than the one that gets painted,
+// and everything to the right of the tab — the whole of the next column — moves four cells right on
+// that row alone, while the pane's truncation to its inner width eats the same four off the far end.
+// A pop-up is a column layout with no rule between its columns (popupGutter), so the alignment IS
+// the only thing telling the reader where one column ends and the next begins.
+//
+// The width assertion is composed-against-painted rather than a cap, for the reason the table test
+// above states: a raw tab measures the same nothing in BOTH of the package's measures, so the
+// composed row alone would agree with itself while the screen showed the drift. The painted side is
+// taken by handing the row to the very style the pane hands it to, which is the first thing on its
+// path that has an opinion about a tab.
+//
+// Both measures are swept because both painted the defect: the tab weighs the same nothing in each.
+func TestPaintedTabBearingPopupRowKeepsItsColumns(t *testing.T) {
+	rows := []popupRow{
+		{"a\tb", "— tabbed"},    // six cells once the tab is spent, two while it is still one
+		{"eight_ok", "— plain"}, // eight cells in EITHER measure: the first column's width
+	}
+
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			th := newTheme()
+			th.measure = widthAuthority{method: tc.method}
+
+			for i, composed := range layoutPopupRows(th, rows) {
+				want := th.measure.Width(composed)
+				if got := paintedWidth(strip(th.statusFaint.Render(composed)), tc.method); got != want {
+					t.Errorf("row %d composes %d columns and paints %d: %q", i, want, got, composed)
+				}
+			}
+
+			// The drawn pane: no title and no hint, so it is the two border rows and the two rows.
+			pane := popupSpec{rows: rows, selected: 0, maxBodyRows: -1, maxRows: -1}
+			lines := strings.Split(renderPopup(th, pane, 40), "\n")
+			if len(lines) != len(rows)+2 {
+				t.Fatalf("the pane drew %d rows, want the %d it composed:\n%s",
+					len(lines), len(rows)+2, strings.Join(mapStrip(lines), "\n"))
+			}
+			want := paintedColumn(strip(lines[len(lines)-2]), "—", tc.method) // the tab-free row
+			if want < 0 {
+				t.Fatalf("no second column on the last row — the fixture is not a two-column pane:\n%s",
+					strings.Join(mapStrip(lines), "\n"))
+			}
+			for i, ln := range lines[1 : len(lines)-1] {
+				if got := paintedColumn(strip(ln), "—", tc.method); got != want {
+					t.Errorf("row %d opens its second column in painted cell %d, want the pane's %d: %q",
+						i, got, want, strip(ln))
+				}
+			}
+		})
+	}
+}
+
+// A presented document's path line paints the width the transcript composed it at, tab or no tab —
+// the fifth site of the same class, and the one that reaches the screen with no style of its own at
+// all.
+//
+// The path and the URL are emitted RAW on purpose (renderPresentedBlock): no style, no wrap, no
+// clip, because the terminal is what turns them into something clickable. That is exactly what left
+// the tab standing. Nothing in the block measured it as anything, nothing in the transcript did
+// either, and the first thing to have an opinion was the viewport's Render over the whole frame
+// (bubbles/v2@v2.1.0/viewport/viewport.go:746) — four spaces per tab, spent after every line in the
+// frame had been measured, squared and gutter-joined. The row therefore paints wider than the line
+// the model built, which is the transcript's own accounting of its rows being wrong about a row it
+// is showing.
+//
+// A path with a tab in it is a real path: a tab is legal in a POSIX filename and the model names
+// the file, so the block does not get to assume the name is tame.
+func TestPaintedTabBearingPresentedPathKeepsItsWidth(t *testing.T) {
+	const path = "docs/re\tports/architecture-review.html"
+
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m := step(t, newTestModel(t), presentedMsg{Path: path, Method: domain.PresentShown})
+			m = paintedAs(t, m, tc.method)
+
+			painted := paintFrame(t, m, tc.method)
+
+			// The tail of the path names its row without spanning the tab, so the row is found whether
+			// or not the tab has been spent by the time it is painted.
+			row := -1
+			for i, ln := range painted[:m.viewport.Height()] {
+				if strings.Contains(ln, "architecture-review.html") {
+					row = i
+					break
+				}
+			}
+			if row < 0 {
+				t.Fatalf("no path row on screen — the fixture is not a rendered presented block:\n%s",
+					strings.Join(painted[:m.viewport.Height()], "\n"))
+			}
+
+			want := m.th.measure.Width(trimRight(strip(m.lines[m.drawnLineAt(row)])))
+			if got := paintedWidth(trimRight(painted[row]), tc.method); got != want {
+				t.Errorf("the path row composes %d columns and paints %d: %q", want, got, painted[row])
+			}
+		})
+	}
+}
+
+// A start-up card whose host, model or version carries a TAB stays inside its own border — the
+// sixth site of the class, and the one where the overrun breaks a box the reader can see the edge of.
+//
+// The card composes its info rows plain: only the label is styled (startupInfoLine), the value is
+// copied in as it came from config or the CLI. So a tab in a value weighed nothing in every width
+// the card takes — the label column, the info block's own width, the wide/stacked layout switch, the
+// stacked fit, and drawBox's squaring — and was still a tab when the viewport rendered the frame,
+// where it became four cells the card had never budgeted for. The row runs past the card's right
+// border with its own border glyph pushed along in front of it, and once the overrun passes the
+// viewport's width the viewport soft-wraps that one composed row into two painted ones: a box with a
+// row hanging out of the bottom of it, which is the fold drawBox exists to prevent (ADR 0030 §5).
+//
+// The assertion is composed-against-painted, not a cap: drawBox squares in the same measure that
+// reads the tab as nothing, so the composed card is exactly as wide as it means to be and only the
+// paint disagrees. The card's top border is the straight edge the row is held against, because a
+// row that ends anywhere else is a row that has left the box.
+func TestPaintedTabBearingStartupCardKeepsItsBorder(t *testing.T) {
+	opts := testOpts
+	opts.HostAlias = "box\tone:1111" // a host alias is config text; a stray tab is a typo away
+
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m := paintedAs(t, newTestModelEng(t, &fakeEngine{}, opts), tc.method)
+
+			painted := paintFrame(t, m, tc.method)
+
+			// The tail of the alias names the host row without spanning the tab, so the row is found
+			// whether or not the tab has been spent by the time it is painted.
+			top, row := -1, -1
+			for i, ln := range painted[:m.viewport.Height()] {
+				if top < 0 && strings.Contains(ln, "╭") {
+					top = i
+				}
+				if strings.Contains(ln, "one:1111") {
+					row = i
+					break
+				}
+			}
+			if top < 0 || row <= top {
+				t.Fatalf("no host row inside a card on screen — the fixture is not a start-up card:\n%s",
+					strings.Join(painted[:m.viewport.Height()], "\n"))
+			}
+
+			want := m.th.measure.Width(trimRight(strip(m.lines[m.drawnLineAt(row)])))
+			if got := paintedWidth(trimRight(painted[row]), tc.method); got != want {
+				t.Errorf("the host row composes %d columns and paints %d: %q", want, got, painted[row])
+			}
+			if got, edge := paintedWidth(trimRight(painted[row]), tc.method),
+				paintedWidth(trimRight(painted[top]), tc.method); got != edge {
+				t.Errorf("the host row ends in painted column %d and the card's top border in %d: %q",
+					got, edge, painted[row])
+			}
+		})
+	}
+}
+
 // The stacked start-up card fits its own info rows to the card's content budget, so a value too wide
 // to be shown whole ends in the elision marker rather than simply stopping at the border.
 //

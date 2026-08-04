@@ -669,6 +669,15 @@ func accentRow(th theme, row string, index int, accents []skillCellSpan, limit i
 // The marker keeps the title's styling even when there is no title, so the block opens the same
 // way either way.
 func renderPresentedBlock(th theme, v presentedView, width int) []string {
+	// The two raw lines are the one surface in this block that no style and no wrap passes, so a TAB
+	// in a path survived every measure the transcript took of the line and was still a tab when the
+	// viewport rendered the whole frame — which spent four cells on it that nothing had counted
+	// (expandTabs). Settling them here keeps "emitted raw" a statement about styling and wrapping,
+	// which is what makes the token clickable, rather than about a control byte the terminal never
+	// gets to see anyway. The title and the status line go through hangingWrap, which expands its
+	// own.
+	v.Path, v.Location = expandTabs(v.Path), expandTabs(v.Location)
+
 	marker := glyphPresented + " "
 
 	var out []string
@@ -716,6 +725,17 @@ func renderStartupBox(th theme, v startupView, width int) []string {
 	// two layouts actually lay out to. GetHorizontalFrameSize tracks the border + padding, so the
 	// arithmetic follows the style rather than a hard-coded 4.
 	inner := width - th.startupBorder.GetHorizontalFrameSize()
+
+	// The facts are composed into the info rows PLAIN — only the label is styled (startupInfoLine) —
+	// so a TAB in one of them was measured as nothing by every width this card takes (the label
+	// column, the info block's width, the layout switch, the row fit and drawBox's own squaring) and
+	// was still a tab when the viewport rendered the frame, four cells the card had not budgeted for:
+	// the row overran its own border, which then painted right of every other row's (expandTabs).
+	// Expanded here rather than at the row, because the two layouts build their rows separately and
+	// both measure before they compose. A host or a model id comes from config or the CLI, where a
+	// stray tab is a typo away.
+	v.Host, v.Model = expandTabs(v.Host), expandTabs(v.Model)
+	v.Context, v.Version = expandTabs(v.Context), expandTabs(v.Version)
 
 	rows := make([]startupInfoRow, 0, 4)
 	for _, r := range []startupInfoRow{

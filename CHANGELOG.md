@@ -1011,6 +1011,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A pop-up's columns, a presented document's path and the start-up card hold their shape around a
+  tab.** Three more surfaces measured a tab as nothing while the screen spends four columns on it,
+  and each broke differently. In a pop-up — the `/sessions` browser, the `/` and `@` dropdowns, an
+  ask or an approval prompt — a tab in one cell opened that row's next column four cells right of
+  where every other row opened its own, with the far end of the row cut to pay for it, and a pane
+  has no rule between its columns to fall back on. A presented document's path line, emitted raw so
+  the terminal can linkify it, painted four columns wider than the transcript had composed it. And a
+  host, model or version carrying one ran the start-up card's info row past the card's own right
+  border, folding that row in two once the overrun passed the window edge. All three expand tabs
+  before anything measures them now, so a pane's columns stay one straight edge and the card keeps
+  its border.
+
 - **A markdown table whose cell holds a tab keeps its columns straight.** A reply pasting a table
   with a tab inside one cell drew that row four columns too wide: the cell was measured as if the
   tab were nothing, nothing styled it on the way out, and the screen turned it into four spaces
