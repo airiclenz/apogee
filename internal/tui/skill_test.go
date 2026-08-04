@@ -795,14 +795,23 @@ func TestSkillsCommandWithNoCatalog(t *testing.T) {
 	if strings.Contains(note, filepath.Join("~", ".apogee")) {
 		t.Errorf("note names the default home instead of the configured one:\n%s", note)
 	}
+	// The dirs are listed in the order sourceDirs walks (skills/load.go) — increasing priority,
+	// so the global library that wins an id clash (ADR 0032) is the LAST line, not the first.
+	prev := -1
 	for _, want := range []string{
-		filepath.Join("elsewhere", "apogee-home", "skills"),
 		filepath.Join("home", "code", "proj", ".apogee", "skills"),
 		filepath.Join("home", "code", "proj", "skills"),
+		filepath.Join("elsewhere", "apogee-home", "skills"),
 	} {
-		if !strings.Contains(note, want) {
+		at := strings.Index(note, want)
+		if at < 0 {
 			t.Errorf("note does not name the source dir %q:\n%s", want, note)
+			continue
 		}
+		if at < prev {
+			t.Errorf("source dir %q is out of the layered order:\n%s", want, note)
+		}
+		prev = at
 	}
 }
 
@@ -849,6 +858,67 @@ func TestSkillCatalogNoteReportsSkipped(t *testing.T) {
 	}
 	if !strings.Contains(only, "implement-plan") || !strings.Contains(only, "malformed YAML frontmatter") {
 		t.Errorf("the sole finding must still name the skill and the reason:\n%s", only)
+	}
+}
+
+// A shadowed skill is not a broken one: it parsed fine and merely lost an id collision (ADR 0032),
+// so it gets its own section instead of being filed under "found but not loaded" — and that
+// section names BOTH files, because "which of my two copies does /<id> run?" is the only question
+// a shadow raises. Pinned in the mixed shape, where one heading over both would libel the healthy
+// file.
+func TestSkillCatalogNoteSeparatesShadowedFromBroken(t *testing.T) {
+	winner := filepath.Join("/home", ".apogee", "skills", "review", "SKILL.md")
+	bad := skills.SkipError{
+		Path: filepath.Join("/home", ".apogee", "skills", "implement-plan", "SKILL.md"),
+		Err:  errors.New("malformed YAML frontmatter"),
+	}
+	shadowed := skills.SkipError{
+		Path: filepath.Join("/ws", ".apogee", "skills", "review", "SKILL.md"),
+		Err:  skills.ShadowedError{By: winner},
+	}
+
+	note := skillCatalogNote(
+		[]skills.Skill{{ID: "review", DisplayName: "Review"}},
+		[]skills.SkipError{bad, shadowed},
+		"/home/.apogee", "/ws",
+	)
+	for _, want := range []string{
+		"1 skill found but not loaded:", bad.Path, "malformed YAML frontmatter",
+		"1 skill shadowed by another of the same id:", shadowed.Path, winner,
+	} {
+		if !strings.Contains(note, want) {
+			t.Errorf("report is missing %q:\n%s", want, note)
+		}
+	}
+	// Each skip must sit under ITS heading: the failure above the shadow heading, the shadowed
+	// pair below it. Counting them apart is only half the fix if the rows land in the wrong half.
+	shadowHead := strings.Index(note, "shadowed by another of the same id:")
+	if at := strings.Index(note, bad.Path); at > shadowHead {
+		t.Errorf("the load failure is filed under the shadow heading:\n%s", note)
+	}
+	if at := strings.Index(note, shadowed.Path); at < shadowHead {
+		t.Errorf("the shadowed skill is filed under the failure heading:\n%s", note)
+	}
+}
+
+// When every skip is a shadow, nothing failed to load — and the report must not say otherwise.
+// This is the case the single old heading got flatly wrong: a healthy skill reported as broken
+// sends the human to fix a file that has nothing wrong with it.
+func TestSkillCatalogNoteShadowOnlyClaimsNoFailure(t *testing.T) {
+	shadowed := skills.SkipError{
+		Path: filepath.Join("/ws", ".apogee", "skills", "review", "SKILL.md"),
+		Err:  skills.ShadowedError{By: filepath.Join("/home", ".apogee", "skills", "review", "SKILL.md")},
+	}
+	note := skillCatalogNote(
+		[]skills.Skill{{ID: "review", DisplayName: "Review"}},
+		[]skills.SkipError{shadowed},
+		"/home/.apogee", "/ws",
+	)
+	if strings.Contains(note, "not loaded") {
+		t.Errorf("a shadowed skill is reported as a load failure:\n%s", note)
+	}
+	if !strings.Contains(note, "1 skill shadowed by another of the same id:") {
+		t.Errorf("the shadow section is missing its singular heading:\n%s", note)
 	}
 }
 

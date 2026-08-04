@@ -329,7 +329,16 @@ record is not necessarily a failure.
 
 ---
 
-## 5. `/skills` names a shadowed skill as shadowed, not broken
+## 5. `/skills` names a shadowed skill as shadowed, not broken — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): the partition splits `skippedSkillLines` into two renderers rather than
+branching inside it, so the old name is gone: `failedSkillLines` (the unchanged failure section) and
+`shadowedSkillLines`, fed by `partitionSkips` over the shared `shadowedBy` predicate — one place
+answers "which kind of skip is this?", so the split and the rendering cannot disagree.
+`loadedSkillLines` gained an empty-list guard because `skillCatalogNote` now joins its three
+sections through one loop, which would otherwise print a `0 skills available:` header.
+`layout.md` was checked as the item requires and left untouched: it names `/skills` only as a verb
+that reports in place (`:879`) and specifies nothing about the note's shape.
 
 **Depends on item 4** (`ShadowedError` and the recorded pairs).
 

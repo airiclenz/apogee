@@ -573,6 +573,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`/skills` now tells a skill that lost an id clash apart from one that is broken.** Every skip
+  discovery recorded used to be headed `N skills found but not loaded` — true of a malformed
+  `SKILL.md`, and a libel on a shadowed one, which parsed perfectly and simply is not the copy
+  `/<id>` runs. Shadowed skills get their own section now, `N skills shadowed by another of the same
+  id`, with the copy that lost on one line and the file that is live on the next, so "which of my
+  two copies does this run?" is answered with a path you can open. A report whose only skips are
+  shadows no longer claims anything failed to load. The where-we-looked note an empty catalog prints
+  also lists the three source dirs in their new priority order (ADR 0032), your global library last
+  — the one that wins a clash.
+
 - **A markdown table cell that does not fit its column now wraps inside it instead of being cut with
   a `…`.** A long cell used to lose its tail the moment the columns had to be squeezed — the widest
   column shrank, the sentence in it stopped mid-word at a `…`, and what the model actually wrote was

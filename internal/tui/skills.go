@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -53,9 +54,10 @@ func (m Model) runSkills() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// skillCatalogNote renders the /skills report from one scan's two halves: the skills that
-// loaded and the SKILL.md files that did not. list arrives in the catalog's own order (sorted by
-// display name), which is the order the picker shows; skipped arrives in discovery order.
+// skillCatalogNote renders the /skills report from one scan's halves: the skills that loaded, the
+// SKILL.md files that could not be loaded, and the ones that loaded but lost an id collision. list
+// arrives in the catalog's own order (sorted by display name), which is the order the picker shows;
+// skipped arrives in discovery order and is partitioned here on its cause.
 //
 // A skip is reported even when NOTHING loaded: "no skills found" would be a lie when discovery
 // found a skill and refused it, and the case where the library's only skill is the broken one is
@@ -65,23 +67,30 @@ func skillCatalogNote(list []skills.Skill, skipped []skills.SkipError, home, wor
 	if len(list) == 0 && len(skipped) == 0 {
 		return strings.Join(emptyCatalogLines(home, workspace), "\n")
 	}
+	failed, shadowed := partitionSkips(skipped)
 	var lines []string
-	if len(list) > 0 {
-		lines = append(lines, loadedSkillLines(list)...)
-	}
-	if len(skipped) > 0 {
-		if len(lines) > 0 {
-			lines = append(lines, "") // a blank line so the failures read as their own section
+	for _, section := range [][]string{
+		loadedSkillLines(list),
+		failedSkillLines(failed),
+		shadowedSkillLines(shadowed),
+	} {
+		if len(section) == 0 {
+			continue
 		}
-		lines = append(lines, skippedSkillLines(skipped)...)
+		if len(lines) > 0 {
+			lines = append(lines, "") // a blank line so each half reads as its own section
+		}
+		lines = append(lines, section...)
 	}
 	return strings.Join(lines, "\n")
 }
 
 // emptyCatalogLines answers an empty scan. An empty catalog is not a failure — most users start
 // with none — so instead of an apologetic blank the note says where discovery looked, in the
-// layered order sourceDirs walks (skills/load.go): the question a user staring at "no skills" is
-// about to ask. Both roots are INJECTED rather than assumed, for the same reason the loader's
+// layered order sourceDirs walks (skills/load.go) — increasing priority, so the LAST line is the
+// one that wins an id clash (ADR 0032, which put the global library there): the question a user
+// staring at "no skills" is about to ask. Both roots are INJECTED rather than assumed, for the
+// same reason the loader's
 // Sources are (ADR 0001): home is the apogee home this run resolved — `--config` /
 // APOGEE_CONFIG move it, and naming `~/.apogee` at a run that is not using it would send the
 // human to the wrong folder — and workspace is the project root the two project-local dirs hang
@@ -97,15 +106,19 @@ func emptyCatalogLines(home, workspace string) []string {
 	}
 	return []string{
 		"no skills found — a skill is a folder holding a SKILL.md, discovered under:",
-		"  " + filepath.Join(lib, "skills") + "  (your global library)",
 		"  " + filepath.Join(ws, ".apogee", "skills"),
 		"  " + filepath.Join(ws, "skills") + "  (only when use-project-skills is on)",
+		"  " + filepath.Join(lib, "skills") + "  (your global library — wins an id clash)",
 	}
 }
 
 // loadedSkillLines renders the working half: one line per skill — the /id that names it, its
-// display name, and its summary.
+// display name, and its summary. Nothing loaded renders nothing, so the caller's section joiner
+// never emits a "0 skills available:" header over an empty list.
 func loadedSkillLines(list []skills.Skill) []string {
+	if len(list) == 0 {
+		return nil
+	}
 	head := fmt.Sprintf("%d skills available:", len(list))
 	if len(list) == 1 {
 		head = "1 skill available:"
@@ -125,21 +138,75 @@ func loadedSkillLines(list []skills.Skill) []string {
 	return lines
 }
 
-// skippedSkillLines renders the failure half: every SKILL.md discovery found but could not load,
+// shadowedBy reports the winning SKILL.md's path when this skip is a lost id collision rather
+// than a load failure (skills.ShadowedError, reached through the skip's cause). It is the one
+// place the report asks "which kind of skip is this?", so the partition and the rendering can
+// never disagree about it.
+func shadowedBy(sk skills.SkipError) (string, bool) {
+	var shadow skills.ShadowedError
+	if errors.As(sk, &shadow) {
+		return shadow.By, true
+	}
+	return "", false
+}
+
+// partitionSkips splits one scan's skips on their cause: the SKILL.md files that could not be
+// turned into a skill, and the ones that parsed fine and simply lost an id collision (ADR 0032).
+// They travel down the same channel but are not the same news — a failure is a file to go and fix,
+// a shadow is a file that is merely not the copy the id resolves to — so heading them both with
+// "found but not loaded" would send the human hunting for a defect in a healthy file. Each half
+// keeps discovery order.
+func partitionSkips(skipped []skills.SkipError) (failed, shadowed []skills.SkipError) {
+	for _, sk := range skipped {
+		if _, ok := shadowedBy(sk); ok {
+			shadowed = append(shadowed, sk)
+			continue
+		}
+		failed = append(failed, sk)
+	}
+	return failed, shadowed
+}
+
+// failedSkillLines renders the failure half: every SKILL.md discovery found but could not load,
 // named by the ID it WOULD have had, with the reason and the file to go and fix. Discovery skips
 // a bad skill softly so one malformed file cannot sink the catalog; printing the skip here is
 // what keeps soft from meaning silent — otherwise a broken skill and an absent one look
 // identical from the picker, with nowhere to look for the difference.
-func skippedSkillLines(skipped []skills.SkipError) []string {
-	head := fmt.Sprintf("%d skills found but not loaded:", len(skipped))
-	if len(skipped) == 1 {
+func failedSkillLines(failed []skills.SkipError) []string {
+	if len(failed) == 0 {
+		return nil
+	}
+	head := fmt.Sprintf("%d skills found but not loaded:", len(failed))
+	if len(failed) == 1 {
 		head = "1 skill found but not loaded:"
 	}
-	lines := make([]string, 0, 2*len(skipped)+1)
+	lines := make([]string, 0, 2*len(failed)+1)
 	lines = append(lines, head)
-	for _, sk := range skipped {
+	for _, sk := range failed {
 		lines = append(lines, "  "+sk.Name()+" — "+sk.Reason())
 		lines = append(lines, "    "+sk.Path)
+	}
+	return lines
+}
+
+// shadowedSkillLines renders the collision half: one pair per shadowed skill — the copy that lost,
+// then the copy that is live. Both paths are named because that is the whole question a shadow
+// raises ("which of my two files is /<id> actually running?"), and the answer is a file the user
+// can open. Nothing here is broken, so the wording deliberately never says "not loaded".
+func shadowedSkillLines(shadowed []skills.SkipError) []string {
+	if len(shadowed) == 0 {
+		return nil
+	}
+	head := fmt.Sprintf("%d skills shadowed by another of the same id:", len(shadowed))
+	if len(shadowed) == 1 {
+		head = "1 skill shadowed by another of the same id:"
+	}
+	lines := make([]string, 0, 2*len(shadowed)+1)
+	lines = append(lines, head)
+	for _, sk := range shadowed {
+		by, _ := shadowedBy(sk) // partitioned on it above, so it is there
+		lines = append(lines, "  "+sk.Name()+" — "+sk.Path)
+		lines = append(lines, "    the live copy is "+by)
 	}
 	return lines
 }
