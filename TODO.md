@@ -123,9 +123,9 @@ disposition table but no user-facing override. See *Configurable tool × mode se
   Firing browses as an ordinary session, tagged `⟳ <schedule>` in `/sessions` off two new optional
   `Meta` fields — 2026-08-04,
   [ADR 0033](docs/adr/0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md) +
-  `docs/plans/2026-08-03 - 08 - scheduler-library-plan.md`. It settles all four branch points this
-  bullet parked (overlap, which modes, `Meta`, fresh-vs-resumed) and leaves durability to the future
-  daemon over the *same* library, which is the layering the enrichment asked for.
+  `docs/plans/archived/2026-08-03 - 08 - scheduler-library-plan.md`. It settles all four branch
+  points this bullet parked (overlap, which modes, `Meta`, fresh-vs-resumed) and leaves durability
+  to the future daemon over the *same* library, which is the layering the enrichment asked for.
 
 ---
 
