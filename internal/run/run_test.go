@@ -441,41 +441,56 @@ func TestSpecTitle(t *testing.T) {
 	}
 }
 
-// TestSpecTitleSpellsTheLocalWallClock pins the DISPLAY conversion both dated title forms make: the
-// title is what a human reads a Firing by — in the block's record pointer and in /sessions — so it
-// is spelled in the machine's own zone whatever zone the instant handed in carries. Now is an
-// injectable seam and a Driver's clock may well be UTC-located, which is exactly the case this
-// covers; the record's own stamps are unaffected and stay UTC.
-//
-// The fixture is built from LOCAL's own offset — one instant, expressed in a zone 90 minutes ahead
-// of wherever the test runs — so it asserts the same thing on any machine's TZ, and it is placed
-// late enough in the day that the two spellings disagree about the date as well as the minute.
-func TestSpecTitleSpellsTheLocalWallClock(t *testing.T) {
+// The two derived title forms get one test EACH, deliberately, and never a shared table. They are
+// different paths with different callers — a Schedule's Firing, and any other run.Once — and each
+// states its own time zone at its own site in Spec.title. One test per site is what proves that:
+// change the zone of one site and exactly one of these two goes red. A single case covering both
+// would let one path's spelling ride along on the other's, which is the coupling they replaced.
+
+// TestSpecTitleScheduleFormSpellsTheLocalWallClock pins the SCHEDULE path's zone: "<name> — HH:MM"
+// is what a human reads a scheduled run by, in its firing block and in /sessions, so it is spelled
+// against the wall clock they set the schedule by whatever zone the instant handed in carries. Now
+// is an injectable seam and a Driver's clock may well be UTC-located, which is exactly this case.
+// The record's own stamps are unaffected and stay UTC.
+func TestSpecTitleScheduleFormSpellsTheLocalWallClock(t *testing.T) {
 	t.Parallel()
 
-	local := time.Date(2026, 8, 4, 23, 0, 0, 0, time.Local)
+	local, away := titleZoneFixture(t)
+	spec := Spec{ScheduleName: "Nightly", Prompt: "ignored"}
+	want := "Nightly — " + local.Format("15:04")
+	if got := spec.title(away); got != want {
+		t.Errorf("title = %q, want the local spelling %q", got, want)
+	}
+}
+
+// TestSpecTitleDatedFallbackSpellsTheLocalWallClock pins the GENERIC Once path's zone, which is a
+// separate choice from the schedule form's above and reached by every caller whose prompt yields no
+// title: the "Session <date>" label answers "which day did I run this?" for whoever browses their
+// own sessions, so it is their day, not the day the caller's clock happened to be located in.
+func TestSpecTitleDatedFallbackSpellsTheLocalWallClock(t *testing.T) {
+	t.Parallel()
+
+	local, away := titleZoneFixture(t)
+	spec := Spec{Prompt: "```go\nfunc main() {}"} // a code fence has no useful title
+	want := "Session " + local.Format("2006-01-02")
+	if got := spec.title(away); got != want {
+		t.Errorf("title = %q, want the local spelling %q", got, want)
+	}
+}
+
+// titleZoneFixture returns one instant twice: as local's own wall clock, and expressed in a zone 90
+// minutes ahead of wherever the test runs. Building the away zone from LOCAL's own offset is what
+// makes both title tests assert the same thing on any machine's TZ, and 23:00 local puts the two
+// spellings on different dates as well as different minutes, so the date form is pinned as hard as
+// the clock form.
+func titleZoneFixture(t *testing.T) (local, away time.Time) {
+	t.Helper()
+
+	local = time.Date(2026, 8, 4, 23, 0, 0, 0, time.Local)
 	_, offset := local.Zone()
-	away := local.In(time.FixedZone("away", offset+90*60))
+	away = local.In(time.FixedZone("away", offset+90*60))
 	if away.Format("2006-01-02 15:04") == local.Format("2006-01-02 15:04") {
 		t.Fatalf("the fixture no longer distinguishes the zones: away %s, local %s", away, local)
 	}
-
-	tests := []struct {
-		name string
-		spec Spec
-		want string
-	}{
-		{"the schedule's clock form", Spec{ScheduleName: "Nightly", Prompt: "ignored"},
-			"Nightly — " + local.Format("15:04")},
-		{"the dated fallback", Spec{Prompt: "```go\nfunc main() {}"},
-			"Session " + local.Format("2006-01-02")},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := tt.spec.title(away); got != tt.want {
-				t.Errorf("title = %q, want the local spelling %q", got, tt.want)
-			}
-		})
-	}
+	return local, away
 }

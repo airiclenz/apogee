@@ -173,28 +173,37 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 const titleMax = 50
 
 // title is the record's title for this Firing: the Spec's own when set, else the Schedule
-// form "<name> — <HH:MM>" in LOCAL time (a human reads a schedule's runs in their own
-// clock, and the record's timestamps carry the UTC truth), else the first-prompt heuristic.
+// form "<name> — <HH:MM>", else the first-prompt heuristic.
 //
-// The local conversion is FORCED here rather than inherited from the instant handed in: Now
-// is an injectable seam, a Driver's clock may hand this a UTC-located time (the Scheduler's
-// own does under test), and a title is the one thing on a record a human reads as a clock.
-// Which zone it is SPELLED in is therefore this function's decision, not its caller's — while
-// the stamps beside it (Meta.CreatedAt / UpdatedAt) stay UTC, untouched by this.
+// Now is an injectable seam, so the instant handed in carries whatever zone a Driver's clock
+// is located in — the Scheduler's own is UTC-located under test. Which zone a derived title is
+// SPELLED in is therefore a decision each derived form makes FOR ITSELF, on its own line below,
+// never by inheriting the neighbour's: the two forms serve different callers (a Schedule's
+// Firing vs. any Once), so a future change to one must not silently move the other. They happen
+// to agree on local today; they agree by two stated choices, not by one shared conversion. The
+// stamps beside the title (Meta.CreatedAt / UpdatedAt) stay UTC, untouched by either.
 func (s Spec) title(now time.Time) string {
 	if s.Title != "" {
 		return s.Title
 	}
 	if s.ScheduleName != "" {
+		// The Schedule form is LOCAL: a human reads a schedule's runs against the same wall clock
+		// they set the schedule by, and the record's stamps carry the UTC truth beside it.
 		return s.ScheduleName + " — " + now.Local().Format("15:04")
 	}
-	return promptTitle(s.Prompt, now)
+	// The generic Once fallback is LOCAL as well, by its own reasoning: its dated label is read in
+	// /sessions by the person who ran it, and "which day was that?" is their day, not the day the
+	// caller's clock happened to be located in. promptTitle formats what it is given and never
+	// relocates it, so this line is the whole of the zone choice for this path.
+	return promptTitle(s.Prompt, now.Local())
 }
 
 // promptTitle derives a one-line title from the prompt: the first line as-is when it fits,
 // otherwise truncated to titleMax runes at the last word boundary past 60% (falling back to
 // a hard cut) and closed with an ellipsis. A prompt that is empty or opens a code fence has
-// no useful title, so it falls back to a dated label — every record still gets one.
+// no useful title, so it falls back to a dated label — every record still gets one. It formats
+// now in whatever zone now already carries: the zone is its caller's stated choice (see title),
+// never this function's, so nothing here can move a caller's spelling from under it.
 //
 // It duplicates the interactive browser's heuristic rather than sharing it: that one lives
 // in internal/tui, which this package must not import (ADR 0010). The duplication is one
@@ -202,9 +211,7 @@ func (s Spec) title(now time.Time) string {
 func promptTitle(text string, now time.Time) string {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" || strings.HasPrefix(trimmed, "```") {
-		// Local for the same reason the clock form is (title): the date a human reads is the
-		// date it was where they are, not the one the caller's clock happened to carry.
-		return "Session " + now.Local().Format("2006-01-02")
+		return "Session " + now.Format("2006-01-02")
 	}
 	firstLine := trimmed
 	if i := strings.IndexByte(trimmed, '\n'); i >= 0 {
