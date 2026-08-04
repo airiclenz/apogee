@@ -198,9 +198,21 @@ current `RecordVersion` (no sentinel trips).
 
 ---
 
-## 3. `internal/run` — the one-firing headless runner
+## 3. `internal/run` — the one-firing headless runner — ✅ DONE (2026-08-04)
 
 Depends on item 2.
+
+NOTES (2026-08-04): three additions beyond the item's literal text, all inside its semantics.
+(a) `Spec.Now` — an injectable clock (nil ⇒ `time.Now`) so the derived `— <HH:MM>` title and the
+record's timestamps are pinnable in a test, the same seam `session.Store` and the TUI's session
+host already carry. (b) `Config.Events` is pinned too, as a fourth forced delegate: `Once` wraps
+the caller's sink (nil ⇒ discard) so a Firing satisfies construction with no observer — and the
+record's `CtxUsed` comes from that tap's latest top-level `UsageEvent` rather than "from the
+snapshot", since the fill is genuinely not in the snapshot and one type assertion in flight is
+the cheap honest source. (c) A run ending in `StatusCancelled` is reported as `Result.Err`: a
+cancel is not a loop error, but it is why the Firing has no answer, and an unattended caller has
+no other way to tell. ADR 0033 needed no touch-up — its Consequences already record the
+no-scrollback limitation this item's package doc restates.
 
 **What:**
 
