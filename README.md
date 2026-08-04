@@ -84,7 +84,11 @@ next.
   is delivered **into the running task** at the next tool boundary, so a remark like "also
   check the tests" lands while there are still turns left to act on it; anything still
   queued when the task finishes goes out as the next message. `esc` stops everything and
-  holds the queue. Transcript text stays selectable in every state, mid-stream included.
+  holds the queue. `↑` on an empty box walks back through what you have already sent in this
+  workspace — newest first, `↓` forward again, one `↓` past the newest to get the blank box
+  back — so a long prompt is re-sent or edited rather than retyped; the recall list is per
+  workspace and lives in `~/.apogee/prompts/`. Transcript text stays selectable in every
+  state, mid-stream included.
 - **Deliverables you actually see** — `present_document` ends a report-producing task
   by showing the file: opened on your desktop when apogee runs locally, served over a
   one-off link when it runs on a remote box, and always printed as a clickable path

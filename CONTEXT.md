@@ -120,7 +120,8 @@ mode, approvals, Confinement, and MCP connections are **not** in the record — 
 re-confirmed on resume (ADR [0008](docs/adr/0008-stateless-tools-and-non-forkable-external-effects.md)).
 See [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md).
 _Avoid_: "session file" for the Session itself (the *record* is the file; the Session is its
-engine payload), "history" (that is the browser's list of records, not one Session).
+engine payload), "history" (that is the browser's list of records, not one Session — and it is not
+[Prompt recall](#turns-and-stepping) either, which is the prompt box's own list of sent inputs).
 
 **The loop** (the agent loop):
 Apogee's core control flow: build request → call Upstream → parse response → dispatch
@@ -241,6 +242,30 @@ _Avoid_: "steering" / "steer" (ADR 0014's guided-decomposition sense — a Mecha
 model's own primary call, not a human speaking), "scheduled message" (nothing is clock-timed;
 it means deliver-at-the-next-boundary), "queued input" alone (the queue is the staging, the
 Interjection is the message).
+
+**Prompt recall**:
+The per-workspace list of inputs the human has already **sent** from the prompt box, and the walk
+through it the box offers on **↑/↓** — a terminal's own gesture, brought to the box. ↑ on an
+**empty** box loads the newest entry with the caret at its end; further ↑ steps older and stops at
+the oldest; ↓ steps newer; ↓ one past the newest empties the box again, so the walk is always
+reversible. Recall owns the arrows only while the box holds a **freshly recalled entry the human
+has taken no other action in** — typing, editing, pasting, or a click in the box ends recall mode
+and hands ↑/↓ back to the caret, and a recalled `/command` deliberately does **not** open the
+suggestion pane, which would claim those arrows first. It is live where the box is the human's own:
+at idle, and while the agent runs (where ⏎ stages an [Interjection](#turns-and-stepping)). It is
+**not** live under an [Ask-user](#safety-and-autonomy) prompt — there ↑/↓ move the choice
+highlight. What is recorded is what was *sent*: ordinary messages, whole-line `/command`
+invocations, and Interjections — **not** Ask answers, which answer the model's question rather than
+speak the human's own input. Storage is one JSONL file per workspace under the config home
+(`~/.apogee/prompts/<digest-of-workspace-path>.jsonl`, `internal/recall`) — nothing is written into
+the project tree; consecutive duplicates collapse, and a start-up load hands back the newest 1000.
+It is **driver-side state only**
+([ADR 0031](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md)):
+the engine never sees it, and a Driver that wires no recall seam has the feature simply off.
+_Avoid_: "prompt history" / "history" (that word belongs to the [Session](#identity-and-shape)
+browser's list of records — see its own Avoid line), "command history" (`/command` lines are one of
+the three things recorded, not the point), "the buffer" (the box's live text is a draft; recall is
+what has already left it).
 
 ### Safety and autonomy
 

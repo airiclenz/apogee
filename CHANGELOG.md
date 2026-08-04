@@ -10,6 +10,33 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The prompt box remembers what you have sent, and `↑` walks it back.** Press `↑` on an empty box
+  and the newest prompt you sent in this workspace lands in it with the caret at the end; keep
+  pressing to step further back, `↓` to come forward, and one `↓` past the newest empties the box
+  again — the terminal's own gesture, so a long instruction is edited and re-sent rather than
+  retyped. It works the same while the model is running, where `⏎` queues what you recalled as an
+  interjection.
+  - **The arrows go back to the caret the moment you touch anything else.** The walk owns `↑/↓`
+    only while the box holds a freshly recalled line you have taken no other action in; typing,
+    editing, pasting, clicking in the box or resizing the window ends recall mode there and then,
+    and a draft you typed yourself never starts a walk at all. Under an ask, `↑/↓` still move the
+    choice highlight — recall is not offered there.
+  - **A recalled `/command` does not pop the suggestion menu.** That menu claims `↑/↓` before recall
+    ever sees them, so a walk would be stolen by its own first entry; loading an entry dismisses the
+    pane instead, and it comes back the moment you act — which is the same moment the arrows do.
+  - **What is recorded is what you sent**: ordinary messages, whole-line `/command` invocations, and
+    interjections. Answers to the model's own questions are not — they answer it rather than speak
+    your input. A prompt is recallable the instant it is sent, without waiting for anything to be
+    re-read.
+  - **One file per workspace, under your apogee home** — `~/.apogee/prompts/<digest>.jsonl`, owner-
+    only (`0600`), never anything written into the project tree. Consecutive duplicates collapse,
+    the newest 1000 entries are what a start-up load hands back, and the file compacts itself rather
+    than growing without bound. Recall is a convenience and never a failure: an unreadable file
+    costs you the walk and nothing else.
+
+  Defined in `CONTEXT.md` ("Prompt recall") and specced in `layout.md` ("The prompt box's
+  mini-language").
+
 - **A prompt taller than three rows collapses to three, with a `see more (+N lines)…` toggle on the
   last of them.** A pasted spec or a long instruction used to bury everything around it under a wall
   of your own text — every wrapped row of it, every time you scrolled past. Now the block paints its
@@ -968,6 +995,15 @@ point is a **minor** bump, not a breaking change.
   lines)` marker, so the input box the answer is typed into is never pushed off-screen.
 
 ### Fixed
+
+- **Backspace and Del delete the prompt text you selected with the mouse.** Dragging across text in
+  the input box and pressing Backspace used to make the highlight vanish and take exactly one
+  character with it — the selected text survived, and you deleted it by hand. Both keys now remove
+  the whole selected range, in either drag direction, counting runes rather than bytes so a CJK or
+  emoji selection goes as one; the caret lands where the selection started, and it behaves the same
+  while the model is working. With nothing selected the keys are untouched: Backspace on an empty
+  box still takes the newest queued interjection back into the editor, and on a non-empty box it
+  still deletes one character.
 
 - **A click on a tool block's header lands while a reply is streaming.** Collapsing or expanding a
   call during a run was a coin flip — very often nothing happened at all — while the same click on

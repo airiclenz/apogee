@@ -921,6 +921,24 @@ verbs that only report (`/version`, `/skills`, `/confine` with no arguments) run
 so do `/schedule` and `/schedule-stop`, which touch no engine at all: a schedule fires as a run of
 its own, so creating or stopping one needs no quiet moment in this session.
 
+**Prompt recall — ↑ walks what this workspace has already sent.** On an **empty** box ↑ loads the
+newest prompt sent from this workspace, caret at its end; further ↑ steps older and stops at the
+oldest — the key is still recall's there, so a walk that has hit the bottom moves nothing rather
+than jumping the caret; ↓ steps newer, and one ↓ past the newest empties the box again. The box
+grows and shrinks around the recalled text like any other value, so a multi-row prompt comes back
+at its full height. The walk owns ↑/↓ only while the box holds a freshly recalled entry the human
+has taken **no other action in**: any keypress that is not one of those two arrows, and every
+non-key edit — a paste, a click in the box, a window resize, the ask borrowing the box — ends
+recall mode and the arrows are the caret's again. A typed draft never starts a walk. It is live in
+the two states where the box is the human's own, idle and running, and never under an ask, where
+↑/↓ move the choice highlight instead. **A recalled `/command` opens no dropdown**: loading an entry
+dismisses the suggestion pane rather than re-deriving it, because that pane claims ↑/↓ before recall
+ever sees them — the walk would otherwise be stolen by its own first entry. The pane comes back the
+moment the human acts, which is the same moment the arrows do. The empty box advertises the gesture
+in its own legend, in both states: `Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ↑ recall · ⌃c quit`
+at idle, `queue a message…  ⏎ queue · ↑ recall · esc stop` while the model works — a placeholder is
+only ever painted on an empty box, which is exactly the box where ↑ starts a walk.
+
 **Tokens light up when they resolve.** Inside the box a `/token` is painted in the skill violet
 only when it names a skill in the catalog, and an `@path` in the reference blue only when the path
 is in the workspace listing. Everything else stays plain prompt text, so the colour is a live

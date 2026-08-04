@@ -236,7 +236,19 @@ item 1 stay green; a sent prompt is immediately recallable before any reload.
 
 **Commit:** `feat(tui): up-arrow prompt recall in the prompt box`
 
-## 5. Docs: prompt recall enters the domain language
+## 5. Docs: prompt recall enters the domain language — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): three notes on the literal text. (a) "entries for items 1–4" landed as TWO
+CHANGELOG entries, not four: item 1 is a bug fix and got its own `### Fixed` entry; items 2, 3 and 4
+are one user-visible feature (store, seam, keys) and got one `### Added` entry with sub-bullets, in
+this file's convention of writing what the human sees rather than one entry per commit — three
+entries there would have described internals nobody using apogee can observe separately. (b) The
+CONTEXT.md entry sits directly after **Interjection** at the end of "Turns and stepping" — the
+"prompt-box/interjection material" the item names; there is no prompt-box section of its own, and
+the recall entry cross-references Interjection and Ask-user, both of which govern where the walk is
+and is not live. (c) README has no key/interaction table to extend, so the `↑` mention joined the
+existing "Type — and select — while it works" capability bullet, which is the prompt box's only
+prose in that file — no new section was invented, per the item's instruction.
 
 **What:** Depends on item 4 (documents landed behaviour). CONTEXT.md: add a glossary
 entry **Prompt recall** near the prompt-box/interjection material — definition (the
