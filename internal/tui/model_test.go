@@ -784,7 +784,7 @@ func TestModelApprovalPromptPopupChrome(t *testing.T) {
 		"· Always allow this session", // the rest of the menu is dotted, not barred
 		"· Deny",
 		"· Cancel",
-		"reason: write", // reason on the body's lead line (item 5 restyles the label)
+		"Reason: write", // the labelled reason on the body's lead line
 		"notes.txt",     // pretty-printed args in the body
 	} {
 		if !strings.Contains(got, want) {
@@ -974,6 +974,91 @@ func TestModelApprovalArgsKeepIndentation(t *testing.T) {
 	// popup's one-space padding would precede the quote. The two-space run proves it survived.
 	if got := plain(m.View()); !strings.Contains(got, `  "path"`) {
 		t.Errorf("args lost their two-space JSON indentation:\n%s", got)
+	}
+}
+
+// The shell tool's body reads as the command line it is about to run, under a "Command:" label with
+// the line indented beneath it (docs/design/user-questions-layout.md) — not as the JSON envelope
+// that carries it. The argument braces and the quoted key are gone: this is a rendering of the same
+// one fact, not an extra view beside it.
+func TestModelApprovalTerminalShowsCommandBlock(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	reply := make(chan domain.ApprovalDecision, 1)
+	m = step(t, m, approvalReqMsg{
+		Request: domain.ApprovalRequest{
+			Tool:      "terminal",
+			Reason:    "subprocess execution (confinement unavailable on this host)",
+			Arguments: json.RawMessage(`{"command":"cd /ws/a && git status"}`),
+		},
+		Reply: reply,
+	})
+
+	got := ansiPattern.ReplaceAllString(m.approvalPrompt(m.pending.Request), "")
+	for _, want := range []string{
+		"Reason: subprocess execution",
+		"Command:",
+		"  cd /ws/a && git status", // its own line, indented under the label
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("terminal approval body missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `"command"`) {
+		t.Errorf("the JSON envelope is still drawn beside the command block:\n%s", got)
+	}
+}
+
+// Everything the command block cannot state in full falls back to the raw arguments JSON, because
+// that is what keeps the human deciding against what the tool will actually receive: another tool
+// (whose arguments are not a command line), a terminal call whose arguments do not parse or carry no
+// command, and one carrying a FURTHER argument the block has no line for — a workdir naming where
+// the command runs is exactly the fact a command-only body would hide.
+func TestModelApprovalArgsFallBackToJSON(t *testing.T) {
+	cases := []struct {
+		name string
+		req  domain.ApprovalRequest
+		want string
+	}{
+		{
+			"another tool keeps its arguments JSON",
+			domain.ApprovalRequest{Tool: "write_file", Arguments: json.RawMessage(`{"command":"rm -rf /"}`)},
+			`"command": "rm -rf /"`,
+		},
+		{
+			"unparseable terminal arguments",
+			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":`)},
+			`{"command":`,
+		},
+		{
+			"a non-string command",
+			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":42}`)},
+			`"command": 42`,
+		},
+		{
+			"an empty command",
+			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":"   "}`)},
+			`"command": "   "`,
+		},
+		{
+			"a workdir the command block would hide",
+			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":"git status","workdir":"/ws/b"}`)},
+			`"workdir": "/ws/b"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+			reply := make(chan domain.ApprovalDecision, 1)
+			m = step(t, m, approvalReqMsg{Request: tc.req, Reply: reply})
+
+			got := ansiPattern.ReplaceAllString(m.approvalPrompt(m.pending.Request), "")
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("body missing the raw argument %q:\n%s", tc.want, got)
+			}
+			if strings.Contains(got, "Command:") {
+				t.Errorf("body took the command block on arguments it cannot state in full:\n%s", got)
+			}
+		})
 	}
 }
 

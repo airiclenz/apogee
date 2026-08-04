@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"image/color"
 	"os"
@@ -4054,7 +4055,7 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int) (maxBody, maxR
 // above the input box (the shared popup module; D7/D8): the title carries the RAW tool name
 // verbatim (not the friendly transcript label — the approval flow is a security surface, so the
 // human sees exactly the tool that will run), the body carries a non-empty Reason then the
-// pretty-printed Arguments, and the decisions themselves are the pane's ROWS.
+// arguments (approvalArgsBlock), and the decisions themselves are the pane's ROWS.
 //
 // It is a MENU rather than a legend (docs/design/user-questions-layout.md): the title rides the top
 // border, the four options of approvalMenu are menu-style rows with their shortcut letters aligned
@@ -4087,10 +4088,10 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int) (maxBody, maxR
 func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	var parts []string
 	if req.Reason != "" {
-		parts = append(parts, "reason: "+stripEscapes(req.Reason))
+		parts = append(parts, "Reason: "+stripEscapes(req.Reason))
 	}
-	if args := prettyJSON(req.Arguments); args != "" {
-		parts = append(parts, stripEscapes(args))
+	if args := approvalArgsBlock(req); args != "" {
+		parts = append(parts, args)
 	}
 
 	rows := make([]popupRow, len(approvalMenu))
@@ -4117,6 +4118,57 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 		maxRows:       rowsShown,
 	}
 	return renderPopup(m.th, spec, m.width)
+}
+
+// approvalTerminalTool is the canonical name of the shell tool whose approval body reads as a
+// command line rather than as JSON (internal/tools terminalSpec). It is a string rather than a
+// typed constant for this package's standing reason: the view does not import internal/tools
+// (doc.go), so a tool name crosses that seam as the wire value the model itself sends — the same
+// way toolPresenters keys on "terminal".
+const approvalTerminalTool = "terminal"
+
+// approvalCommandIndent is the hanging indent the command line sits under, so the body reads as a
+// label with its value beneath rather than as one run-on line (docs/design/user-questions-layout.md).
+const approvalCommandIndent = "  "
+
+// approvalArgsBlock renders req's arguments for the approval body, escape-stripped: a "Command:"
+// label with the shell command line indented beneath it for the terminal tool, and the
+// pretty-printed arguments JSON — today's rendering — for every other tool.
+//
+// The JSON is the DEFAULT and the fallback, because on this surface the human decides against what
+// the tool will actually receive; the command block is the one case where a friendlier shape shows
+// strictly the same fact, the shell line being the whole of terminal's blast radius. So the block is
+// taken only when the arguments are exactly a non-empty command and nothing else: a malformed
+// object, a missing or non-string command, or any FURTHER argument (a workdir, a timeout) falls back
+// to the JSON rather than deciding on the human's behalf that the extra one does not matter.
+func approvalArgsBlock(req domain.ApprovalRequest) string {
+	if cmd, ok := approvalCommandLine(req); ok {
+		lines := strings.Split(stripEscapes(cmd), "\n")
+		for i, ln := range lines {
+			lines[i] = approvalCommandIndent + ln
+		}
+		return "Command:\n" + strings.Join(lines, "\n")
+	}
+	return stripEscapes(prettyJSON(req.Arguments))
+}
+
+// approvalCommandLine reports the shell command line req would run, and whether the approval body
+// may render it as a command block at all (see approvalArgsBlock for what disqualifies a request).
+// It is DISPLAY-ONLY: domain.ApprovalRequest is unchanged and the decision the human sends is
+// unaffected by which rendering the body took.
+func approvalCommandLine(req domain.ApprovalRequest) (string, bool) {
+	if req.Tool != approvalTerminalTool {
+		return "", false
+	}
+	var args map[string]any
+	if err := json.Unmarshal(req.Arguments, &args); err != nil || len(args) != 1 {
+		return "", false
+	}
+	cmd, ok := args["command"].(string)
+	if !ok || strings.TrimSpace(cmd) == "" {
+		return "", false
+	}
+	return cmd, true
 }
 
 // maxAskChoiceRows caps how many ask_user choice rows the popup shows at once (the

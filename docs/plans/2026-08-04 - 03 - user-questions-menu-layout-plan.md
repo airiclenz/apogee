@@ -214,9 +214,21 @@ holds.
 
 **Commit:** `feat(tui): approval prompt becomes a navigable menu with inline shortcuts`
 
-## 5. Approval body: Reason and Command rendering
+## 5. Approval body: Reason and Command rendering — ✅ DONE (2026-08-04)
 
 Depends on item 4.
+
+NOTES (2026-08-04): the `Command:` block has a THIRD fallback trigger beyond the "malformed/missing"
+pair this item names — any FURTHER argument beside `command` (a `workdir`, a `timeout_seconds`) also
+falls back to the JSON. The item's own reasoning is why: the JSON "keeps the security property that
+the user sees the raw arguments", and the terminal case may drop it only because the shell line is
+the whole of that tool's blast radius. A `workdir` naming where the line runs is not in the line, so
+a command-only body would hide it — the fallback is what makes "display-only" true rather than
+"display-most". The mockup's shape is unaffected: `{"command": …}` alone is what it draws. Also
+disqualifying: a whitespace-only command (read as the missing case — the label would head an empty
+line). The tool is matched by its wire name `"terminal"` as a package-local constant, not imported
+from `internal/tools`, per this package's standing no-import rule (`internal/tui/doc.go`) and exactly
+as `toolPresenters` already keys on it.
 
 **What:** Restyle the approval body per the mockup (lines 11-15). In
 `internal/tui/model.go` `approvalPrompt`: the reason line becomes `Reason: <reason>`
