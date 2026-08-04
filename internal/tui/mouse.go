@@ -389,7 +389,8 @@ func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 // the span.
 //
 // A bare click in the TRANSCRIPT has one further meaning: on a block's click surface it toggles
-// that block (toggleBlockUnder). MOTION is what arbitrates, exactly as it already separates
+// that block (toggleBlockAt), at the line the PRESS anchored on rather than at whatever the release
+// point names by then. MOTION is what arbitrates, exactly as it already separates
 // click-to-position from drag in the prompt — a drag that starts on a header line is a
 // drag-select like any other, because it never reaches this branch.
 func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
@@ -407,8 +408,9 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 		return m.copyFlash(text)
 	case m.transcriptSel.active:
 		if m.transcriptSel.anchor == m.transcriptSel.head {
+			pressed := m.transcriptSel.anchor.line
 			m.transcriptSel.active = false
-			return m.toggleBlockUnder(msg.X, msg.Y)
+			return m.toggleBlockAt(pressed, msg.Y)
 		}
 		text := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
 		if strings.TrimSpace(text) == "" {
@@ -420,27 +422,38 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-// toggleBlockUnder resolves a MOTIONLESS click to the block whose click surface it landed on and
-// changes that block's state (layout.md, "Collapsed and expanded blocks"): a header line toggles
-// its block, and a `… +N more lines` marker expands the block whose body it is counting for —
-// never collapses it, because the marker is a line of the collapsed paint alone, so a click there
-// can only mean "show me the rest". A line that is neither is left exactly as it was: everywhere
-// else in the transcript a click keeps its selection meaning, which is the overwhelmingly common
-// case and the one this returns on first.
+// toggleBlockAt changes the state of the block whose click surface a MOTIONLESS click landed on
+// (layout.md, "Collapsed and expanded blocks"): a header line toggles its block, and a
+// `… +N more lines` marker expands the block whose body it is counting for — never collapses it,
+// because the marker is a line of the collapsed paint alone, so a click there can only mean "show
+// me the rest". A line that is neither is left exactly as it was: everywhere else in the transcript
+// a click keeps its selection meaning, which is the overwhelmingly common case and the one this
+// returns on first.
+//
+// line is the PRESS's own content line, not the release point's, and THAT is what makes the toggle
+// land while a reply streams. The press already stored the scroll-immune answer: transcriptSel.
+// anchor is in content coordinates, which are append-stable by design, whereas re-resolving the
+// release point through pointTranscriptRow reads the LIVE scroll offset — and refreshViewport ends
+// every streamed event at GotoBottom, so in the 50–150 ms a human takes to let a button up the
+// content under a motionless pointer has already moved, and the release names some other line,
+// almost always no target at all. One press, one intent, the same answer at any stream rate.
+//
+// releaseRow stays a SCREEN row because the anchoring half of the rule is a screen fact: the
+// toggled line goes back on the row the pointer is resting on (refreshViewportAnchored), so what
+// the human is looking at holds still while the body appears or goes.
 //
 // The lookup reads the PAINT'S OWN accounting — m.lineTargets, which refreshViewport stashes from
-// the marks the painter made as it emitted each line (render.go) — through the very mapping the
-// selection resolves a click by (pointTranscriptRow). One accounting for what is drawn where, so
-// the block that flips is the block under the cursor and never its neighbour; the length check is
-// the same defence the stash's builder states, since a target index that outlived its line would
-// be a click toggling some other block.
+// the marks the painter made as it emitted each line (render.go). One accounting for what is drawn
+// where, so the block that flips is the block under the cursor and never its neighbour; the bounds
+// check is the same defence the stash's builder states, and it earns its keep twice over here,
+// since an anchor OUTLIVES the paint it was taken in — a collapse elsewhere can leave it past the
+// last marked line, and a stale index would be a click toggling some other block.
 //
 // Nothing here re-derives the transcript: an index the entry list has grown past, or one naming a
 // kind with no block state, answers false from the transcript's own guard and this changes
 // nothing at all.
-func (m Model) toggleBlockUnder(x, y int) (tea.Model, tea.Cmd) {
-	line, _, ok := m.pointTranscriptRow(x, y)
-	if !ok || line >= len(m.lineTargets) {
+func (m Model) toggleBlockAt(line, releaseRow int) (tea.Model, tea.Cmd) {
+	if line < 0 || line >= len(m.lineTargets) {
 		return m, nil
 	}
 	target := m.lineTargets[line]
@@ -456,7 +469,7 @@ func (m Model) toggleBlockUnder(x, y int) (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
-	m.refreshViewportAnchored(line, y)
+	m.refreshViewportAnchored(line, releaseRow)
 	return m, nil
 }
 

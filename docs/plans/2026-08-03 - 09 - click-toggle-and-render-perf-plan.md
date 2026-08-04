@@ -30,7 +30,11 @@
 - **Version policy:** no item touches VERSION or a CHANGELOG release heading; see the
   suggested-bump note at the end.
 
-## 1. Resolve a motionless click from the press anchor, not the release point
+## 1. Resolve a motionless click from the press anchor, not the release point — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): the kept `line >= len(m.lineTargets)` guard gained a `line < 0` lower bound —
+`pointTranscriptRow`'s `ok` used to cover the low end, and without it a negative content line would
+index the slice rather than return.
 
 **What.** In `handleMouseRelease` (`internal/tui/mouse.go:395`), the motionless-click
 branch (`anchor == head`) calls `m.toggleBlockUnder(msg.X, msg.Y)` — re-resolving the

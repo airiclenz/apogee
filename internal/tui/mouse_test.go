@@ -905,6 +905,106 @@ func TestTranscriptToggleKeepsTheClickedHeaderRow(t *testing.T) {
 	}
 }
 
+// streamOneScreen folds enough streamed tokens for the tail to outgrow the viewport, which is what
+// drives refreshViewport's attached path into GotoBottom and slides the content under a motionless
+// pointer. It returns the model the stream left behind.
+func streamOneScreen(t *testing.T, m Model) Model {
+	t.Helper()
+	for range m.viewport.Height() + 4 {
+		m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "a streamed line of reply\n"}})
+	}
+	return m
+}
+
+// expandedFlags snapshots every entry's expanded state, so a test can assert that exactly one block
+// flipped and every other one was left alone.
+func expandedFlags(m Model) []bool {
+	flags := make([]bool, len(m.transcript.entries))
+	for i, e := range m.transcript.entries {
+		flags[i] = e.expanded
+	}
+	return flags
+}
+
+// modelWithTwoToolBlocks builds a ready idle model holding one user prompt and two finished tool
+// blocks, so a test can name a block the click did NOT land on. The start-up box is dropped for the
+// same reason modelWithToolBlock drops it: the blocks then sit high enough to be aimed at.
+func modelWithTwoToolBlocks(t *testing.T) Model {
+	t.Helper()
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	m.transcript.addUser("run the tests", nil)
+	for i, output := range []string{"ok   a\nok   b\nok   c\nPASS", "ok   d\nok   e\nok   f\nPASS"} {
+		id := fmt.Sprintf("c%d", i+1)
+		m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+			ID: id, Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+		m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id, Content: output}})
+	}
+	m.refreshViewport()
+	return m
+}
+
+// TestTranscriptClickTogglesWhileStreaming is the streaming miss's regression test. refreshViewport
+// ends every streamed event at GotoBottom, so in the time a human takes to let the button up the
+// content has scrolled out from under a motionless pointer and the release point names a different
+// line — almost always no target at all, which is why the toggle silently missed. Resolving from
+// the press anchor (content coordinates, which do not move when the view does) is what makes the
+// click land: same press, same intent, same answer at any stream rate.
+func TestTranscriptClickTogglesWhileStreaming(t *testing.T) {
+	m := modelWithToolBlock(t, "ok   a\nok   b\nok   c\nPASS")
+	header := markedLine(t, m, targetHeader)
+	entry := m.lineTargets[header].entry
+	row := screenRow(t, m, header)
+	if m.transcript.entries[entry].expanded {
+		t.Fatal("setup: the block is expanded before any click; collapsed is the default")
+	}
+
+	m = step(t, m, leftClick(2, row))
+	m = streamOneScreen(t, m)
+	if !m.transcriptSel.active {
+		t.Fatal("setup: the press anchor did not survive the stream, so this case tests nothing")
+	}
+	if line, _, ok := m.pointTranscriptRow(2, row); ok && line == header {
+		t.Fatalf("setup: screen row %d still names the pressed header line %d — the stream never scrolled",
+			row, header)
+	}
+
+	m = step(t, m, leftRelease(2, row)) // the same screen cell, different content beneath it
+	if !m.transcript.entries[entry].expanded {
+		t.Fatal("a click whose release outlived a scroll did not toggle the pressed block")
+	}
+}
+
+// TestTranscriptStreamingClickTogglesOnlyThePressedBlock is that rule's other half: the release
+// point names some OTHER block's rows once the stream has scrolled, and none of them may flip. The
+// press decides, alone.
+func TestTranscriptStreamingClickTogglesOnlyThePressedBlock(t *testing.T) {
+	m := modelWithTwoToolBlocks(t)
+	header := markedLine(t, m, targetHeader)
+	pressed := m.lineTargets[header].entry
+	row := screenRow(t, m, header)
+	before := expandedFlags(m)
+
+	m = step(t, m, leftClick(2, row))
+	m = streamOneScreen(t, m)
+	if line, _, ok := m.pointTranscriptRow(2, row); ok && line == header {
+		t.Fatalf("setup: screen row %d still names the pressed header line %d — the stream never scrolled",
+			row, header)
+	}
+
+	m = step(t, m, leftRelease(2, row))
+	for i, was := range before {
+		want := was
+		if i == pressed {
+			want = !was // the pressed block, and only it, changes state
+		}
+		if got := m.transcript.entries[i].expanded; got != want {
+			t.Errorf("entry %d expanded = %v, want %v (only the pressed entry %d may flip)",
+				i, got, want, pressed)
+		}
+	}
+}
+
 // hugePromptBody is a send whose body wraps well past promptCollapsedRows at any test width — the
 // prompt that collapses, and therefore the one whose every row is a click target (render.go).
 const hugePromptBody = "alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot"
