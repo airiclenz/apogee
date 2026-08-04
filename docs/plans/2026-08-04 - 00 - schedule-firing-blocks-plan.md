@@ -169,7 +169,16 @@ untouched.
 
 ---
 
-## 3. `cmd/apogee` — the Fire seam reports everything it knows
+## 3. `cmd/apogee` — the Fire seam reports everything it knows — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): the "recording Notify the existing tests use" did not exist in `cmd/apogee`, so
+the two seam tests bring their own composition harness — a channel Notify plus a hand-driven
+`schedule.Clock` — which is what lets a REAL Scheduler drive the real `fire` without waiting out
+`MinCycle`. The failing-firing cell is a **cancelled** Firing (the Driver going away, ADR 0033)
+rather than a broken upstream: the agent loop absorbs an upstream error into an ErrorEvent and
+`run.Once` then returns no error at all, so cancellation is the only failure that leaves something
+to salvage — and it is the one a Firing actually dies of. Both tests proven load-bearing by
+mutation (zeroing the new fields / restoring `schedule.Outcome{}` on the error path fails them).
 
 Depends on items 1 and 2.
 

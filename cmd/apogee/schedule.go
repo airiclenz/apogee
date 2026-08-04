@@ -95,16 +95,28 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		ScheduleName: f.ScheduleName,
 		Store:        w.store,
 	})
-	if err != nil {
-		// A failed Firing may still have saved what it completed (run.Once saves at completion
-		// either way), and the id of that partial record is the one thing the notice can point a
-		// human at — so it rides the error rather than being dropped with the Outcome.
-		if res.SessionID != "" {
-			return schedule.Outcome{}, fmt.Errorf("%w (partial run saved as %s)", err, res.SessionID)
-		}
-		return schedule.Outcome{}, err
+	// Everything the run learned about itself, mapped onto the scheduler's report in one place so
+	// both ends of this function tell the surface the same story. The library reads none of it — it
+	// is runner-agnostic (ADR 0033) — and a Driver renders the Firing from these fields alone: the
+	// answer without decoding a record, the stats without a second seam onto the run.
+	out := schedule.Outcome{
+		RecordID:  res.SessionID,
+		Title:     res.Title,
+		FinalText: res.FinalText,
+		Turns:     res.Turns,
+		Denied:    res.Denied,
 	}
-	return schedule.Outcome{RecordID: res.SessionID, Title: res.Title}, nil
+	if err != nil {
+		// A failed Firing still reports what it salvaged: run.Once fills its Result with whatever
+		// it managed BEFORE it stopped, and a surface that has already announced this Firing can
+		// point a human at the partial record rather than at nothing. The id ALSO stays in the
+		// error text — that is what a Driver reading only the failure's wording has to go on.
+		if res.SessionID != "" {
+			return out, fmt.Errorf("%w (partial run saved as %s)", err, res.SessionID)
+		}
+		return out, err
+	}
+	return out, nil
 }
 
 // idleGate is the host half of schedule.Config.Gate: the TUI publishes its activity through

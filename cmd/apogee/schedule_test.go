@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -188,6 +189,225 @@ func TestScheduleFiringReportsAPerModelResolutionFailure(t *testing.T) {
 
 	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check", Mode: modePlan}); err == nil {
 		t.Fatal("fire returned nil for a model whose system prompt cannot be read; want the failure")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// What the Fire seam reports back
+// ----------------------------------------------------------------------------
+
+// handClock is the Scheduler's sense of time with the cadence under the test's hand: NewTicker
+// yields a ticker the test fires itself, so a Firing starts the moment it is asked for rather than
+// after MinCycle of real waiting. Now stays the wall clock — nothing here asserts a next-fire time,
+// and the elapsed measurement is pinned on the fake clock in internal/schedule.
+type handClock struct {
+	mu      sync.Mutex
+	tickers []chan time.Time
+}
+
+// Now reports the wall-clock time.
+func (c *handClock) Now() time.Time { return time.Now() }
+
+// NewTicker registers a ticker this clock's tick() delivers to.
+func (c *handClock) NewTicker(time.Duration) schedule.Ticker {
+	ch := make(chan time.Time, 1)
+	c.mu.Lock()
+	c.tickers = append(c.tickers, ch)
+	c.mu.Unlock()
+	return handTicker{ch: ch}
+}
+
+// tick delivers one tick to every ticker handed out so far, dropping it where one is already
+// pending — exactly what a real time.Ticker does to a Schedule that has not taken its last tick.
+func (c *handClock) tick() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, ch := range c.tickers {
+		select {
+		case ch <- time.Now():
+		default:
+		}
+	}
+}
+
+// handTicker is one Schedule's cadence, delivered by the test rather than by time.
+type handTicker struct{ ch chan time.Time }
+
+// C is the channel the test's ticks arrive on.
+func (t handTicker) C() <-chan time.Time { return t.ch }
+
+// Stop is a no-op: a hand-driven ticker stops when the test stops ticking it.
+func (t handTicker) Stop() {}
+
+// scheduleHarness is one composition test's whole world: the wiring a Firing is composed from, a
+// real Scheduler driving the real fire seam, a clock the test ticks, and the Events that came back.
+// It exists because the claim below is about the JOIN — internal/run's tests stop at Result and
+// internal/schedule's fire a stub runner, so only a Scheduler over a genuine fire() shows what a
+// surface actually receives.
+type scheduleHarness struct {
+	scheduler *schedule.Scheduler
+	clock     *handClock
+	events    chan schedule.Event
+	store     *session.Store
+}
+
+// newScheduleHarness composes a Firing against endpoint and puts a Scheduler in front of it.
+func newScheduleHarness(t *testing.T, endpoint string) *scheduleHarness {
+	t.Helper()
+
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	store := session.NewStore(roots.sessions)
+	w := scheduleWiring{
+		base: apogee.Config{
+			WorkspaceDir: roots.workspace,
+			ConfigDir:    roots.config,
+			LibraryDir:   roots.library,
+			SessionsDir:  roots.sessions,
+		},
+		roots:   roots,
+		binding: func() upstreamBinding { return upstreamBinding{Endpoint: endpoint, Model: "bound-model"} },
+		store:   store,
+	}
+
+	clock := &handClock{}
+	// Buffered past the events one Firing emits: Notify runs on goroutines the Scheduler owns, and
+	// a full channel would stall the run rather than the test.
+	events := make(chan schedule.Event, 16)
+	scheduler, err := schedule.New(schedule.Config{
+		Fire:   w.fire,
+		Notify: func(ev schedule.Event) { events <- ev },
+		Clock:  clock,
+	})
+	if err != nil {
+		t.Fatalf("schedule.New: %v", err)
+	}
+	t.Cleanup(scheduler.Close)
+	return &scheduleHarness{scheduler: scheduler, clock: clock, events: events, store: store}
+}
+
+// fire creates one Schedule and delivers its tick. The cycle is nominal — the hand clock decides
+// when it fires, so nothing here waits out MinCycle.
+func (h *scheduleHarness) fire(t *testing.T) {
+	t.Helper()
+
+	if _, err := h.scheduler.Add(schedule.Spec{
+		Name:   "Nightly build",
+		Cycle:  time.Hour,
+		Prompt: "check the build",
+		Mode:   modePlan,
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	h.clock.tick()
+}
+
+// await returns the Event of the wanted kind, bounded so a seam that stops reporting fails the test
+// rather than hanging it.
+func (h *scheduleHarness) await(t *testing.T, want schedule.EventKind) schedule.Event {
+	t.Helper()
+
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case ev := <-h.events:
+			if ev.Kind == want {
+				return ev
+			}
+			if ev.Kind == schedule.EventFailed {
+				t.Fatalf("the firing failed instead of reaching %q: %v", want, ev.Err)
+			}
+		case <-deadline:
+			t.Fatalf("no %q event ever arrived from the fire seam", want)
+		}
+	}
+}
+
+// The seam's headline: what the run learned about itself reaches the surface as data on the Event —
+// the answer, the turn count, the record it left — so a Driver can show the Firing's result without
+// decoding a saved record, and without a seam of its own onto the runner.
+func TestAFiringsAnswerAndStatsCrossTheFireSeam(t *testing.T) {
+	t.Parallel()
+
+	url, _ := firingUpstream(t, "the build is green")
+	h := newScheduleHarness(t, url)
+
+	h.fire(t)
+	ev := h.await(t, schedule.EventCompleted)
+	if ev.Outcome.FinalText != "the build is green" {
+		t.Errorf("Outcome.FinalText = %q, want the firing's answer %q — the answer never crossed the "+
+			"seam, so the chat has nothing to show", ev.Outcome.FinalText, "the build is green")
+	}
+	if ev.Outcome.Turns != 1 {
+		t.Errorf("Outcome.Turns = %d, want 1 for a single-reply firing", ev.Outcome.Turns)
+	}
+	if ev.Outcome.Denied != 0 {
+		t.Errorf("Outcome.Denied = %d, want 0; this firing asked for nothing gated", ev.Outcome.Denied)
+	}
+	if ev.Outcome.RecordID == "" || ev.Outcome.Title == "" {
+		t.Errorf("Outcome record pointer = (%q, %q), want the saved record's id and title",
+			ev.Outcome.RecordID, ev.Outcome.Title)
+	}
+}
+
+// A Firing that dies mid-run still reports what it salvaged. The partial record used to be
+// reachable only by parsing the error text; it now rides the Outcome BESIDE the error, which is
+// what lets a surface point a human at the half-run it already announced.
+func TestAFailedFiringStillCarriesWhatItSalvaged(t *testing.T) {
+	t.Parallel()
+
+	// The failure a Firing actually dies of: its Driver going away mid-run (ADR 0033 — a Schedule
+	// dies with the TUI). An upstream that never answers holds the run open until Close cancels it,
+	// and run.Once words that cancellation as the error while still saving what it had.
+	requested := make(chan struct{}, 1)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case requested <- struct{}{}:
+		default:
+		}
+		select {
+		case <-r.Context().Done(): // the firing's context died; the request dies with it
+		case <-release: // and the handler never outlives the test, whatever the server noticed
+		}
+	}))
+	t.Cleanup(srv.Close)
+	defer close(release)
+
+	h := newScheduleHarness(t, srv.URL)
+	h.fire(t)
+	select {
+	case <-requested:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the firing never reached the upstream")
+	}
+	h.scheduler.Close() // the Driver going away, which cancels the run in flight
+
+	ev := h.await(t, schedule.EventFailed)
+	if ev.Err == nil {
+		t.Fatal("the failed event carries no error")
+	}
+	if ev.Outcome.RecordID == "" {
+		t.Fatal("Outcome.RecordID is empty on a failed firing that saved a partial record; the " +
+			"surface can only reach it by parsing the error text")
+	}
+
+	metas, err := h.store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 1 || metas[0].ID != ev.Outcome.RecordID {
+		t.Fatalf("the store holds %d records; the reported id %q must name the partial one",
+			len(metas), ev.Outcome.RecordID)
+	}
+	if ev.Outcome.Title != metas[0].Title {
+		t.Errorf("Outcome.Title = %q, want the partial record's %q", ev.Outcome.Title, metas[0].Title)
+	}
+	if !strings.Contains(ev.Err.Error(), ev.Outcome.RecordID) {
+		t.Errorf("the error %q no longer names the partial record; a Driver that reads only the "+
+			"wording lost it", ev.Err)
 	}
 }
 
