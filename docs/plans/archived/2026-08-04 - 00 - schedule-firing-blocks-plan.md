@@ -1,7 +1,7 @@
 # Plan — scheduled firings render as expandable blocks in the session chat
 
 **Date:** 2026-08-04
-**Status:** not started
+**Status:** complete — all six items (1–6) landed 2026-08-04.
 **Goal:** replace the one-line firing notes (`schedule <name> — firing now`, `… — finished:
 <title>`) with one expandable tool-call-style block per Firing in the session chat. The block's
 payoff is the Firing's actual **answer** — today it is buried in the saved record and the note
