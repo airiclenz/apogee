@@ -1005,6 +1005,61 @@ func TestTranscriptStreamingClickTogglesOnlyThePressedBlock(t *testing.T) {
 	}
 }
 
+// modelWithLiveToolBlock builds a RUNNING model whose transcript holds a sub-agent run still doing
+// its work: the head call has no report yet and a child call is open inside its span, so the block
+// is LIVE and its star alternates with the spinner phase — every tick rewrites the very header line
+// a press rests on. A run is the live block that is also CLICKABLE: it elides its span
+// (blockState.elides), which marks the header a toggle target however short the head's own report
+// is, where a plain call still in flight has no body to hide and so is no target at all.
+func modelWithLiveToolBlock(t *testing.T) Model {
+	t.Helper()
+	m := newTestModel(t) // 80x24
+	m.input.SetValue("survey the tests")
+	m = step(t, m, keyEnter()) // submit: the state the spinner chain ticks in
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v after a submit, want running", m.state)
+	}
+	m.transcript.reset() // drop the seeded start-up box and the send: the block sits high enough to aim at
+	m.transcript.addUser("survey the tests", nil)
+	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "s1", Tool: subAgentToolName, Arguments: []byte(`{"prompt":"survey the tests"}`)}})
+	m.transcript.apply(domain.ToolCallEvent{ // inside the run, and still waiting for its result
+		EventBase: domain.EventBase{Depth: 1},
+		Call:      domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+	m.refreshViewport()
+	return m
+}
+
+// TestTranscriptClickTogglesALiveBlockAcrossTheBlink is the live-header regression test. A block
+// still holding an open call paints ✦/✧ from the spinner's phase, so the tick rewrites its header
+// every 50–100 ms — and the keep-if-unchanged rule used to zero the press anchor on exactly that
+// line, which is the answer the release needs. Collapsed spans are now exempt (spanUnchanged), so
+// the press outlives the blink and the toggle lands on a running tool like any other.
+func TestTranscriptClickTogglesALiveBlockAcrossTheBlink(t *testing.T) {
+	m := modelWithLiveToolBlock(t)
+	header := markedLine(t, m, targetHeader)
+	entry := m.lineTargets[header].entry
+	row := screenRow(t, m, header)
+	if m.transcript.entries[entry].expanded {
+		t.Fatal("setup: the block is expanded before any click; collapsed is the default")
+	}
+
+	m = step(t, m, leftClick(2, row))
+	painted := m.lines[header]
+	m = step(t, m, spinnerTickMsg{gen: m.spin.gen}) // the star flips: the pressed line is rewritten
+	if m.lines[header] == painted {
+		t.Fatal("setup: the tick left the header line alone, so this case tests nothing")
+	}
+	if !m.transcriptSel.active {
+		t.Fatal("the blinking star zeroed the press before the button came up")
+	}
+
+	m = step(t, m, leftRelease(2, row))
+	if !m.transcript.entries[entry].expanded {
+		t.Fatal("a click held across a star blink did not toggle the live block")
+	}
+}
+
 // hugePromptBody is a send whose body wraps well past promptCollapsedRows at any test width — the
 // prompt that collapses, and therefore the one whose every row is a click target (render.go).
 const hugePromptBody = "alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot"
@@ -1509,6 +1564,21 @@ func TestSpanUnchangedTable(t *testing.T) {
 			"a span past the outgoing lines drops it",
 			span(contentCell{0, 0}, contentCell{2, 1}),
 			[]string{"a", "b"}, []string{"a", "b", "c"}, false,
+		},
+		{
+			"a collapsed span is a click in progress and outlives any change",
+			span(contentCell{1, 2}, contentCell{1, 2}),
+			[]string{"a", "b", "c"}, []string{"a", "X", "c"}, true,
+		},
+		{
+			"a dragged span over those same changed lines still drops",
+			span(contentCell{1, 0}, contentCell{1, 2}),
+			[]string{"a", "b", "c"}, []string{"a", "X", "c"}, false,
+		},
+		{
+			"a collapsed span past the incoming lines is kept too — the release bounds-checks it",
+			span(contentCell{2, 0}, contentCell{2, 0}),
+			[]string{"a", "b", "c"}, []string{"a", "b"}, true,
 		},
 	}
 	for _, c := range cases {

@@ -2628,7 +2628,9 @@ func (m Model) hiddenDraftRows() int {
 // (transcriptSel.spanUnchanged, mouse.go): the predicate is evaluated against the OUTGOING lines
 // before the fresh ones replace them, so a selection over settled text survives the repaint a
 // streamed token causes and one whose own lines were rewritten (the streaming tail, a rewrap) is
-// dropped instead of left pointing at text that has moved.
+// dropped instead of left pointing at text that has moved. A COLLAPSED span — a press whose button
+// is still down — is exempt and always survives: it shades nothing, and the release still needs the
+// line the press named to toggle the block under it (spanUnchanged, mouse.go).
 func (m *Model) refreshViewport() {
 	rendered := m.transcript.renderView(m.th, m.transcriptWidth(), m.spin.blink())
 	if !m.transcriptSel.spanUnchanged(m.lines, rendered.lines) {

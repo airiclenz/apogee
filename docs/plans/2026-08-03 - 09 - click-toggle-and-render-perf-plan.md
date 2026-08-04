@@ -75,7 +75,13 @@ user-prompt see-more blocks) identically.
 
 **Commit:** `fix(tui): resolve a motionless click from the press anchor, not the release point`
 
-## 2. A motionless press survives live-block repaints
+## 2. A motionless press survives live-block repaints — ✅ DONE (2026-08-04)
+
+NOTES (2026-08-04): the regression test's live block is a live SUB-AGENT RUN rather than a plain
+in-flight tool call — a call still waiting for its result hides no body, so `blockHidesWhenCollapsed`
+leaves its header unmarked and it is no toggle target at all; a run elides its span
+(`blockState.elides`), which keeps its header clickable while it is live. The exemption itself is
+kind-blind, as the item asks.
 
 Depends on item 1 (the release path must consume the anchor for keeping it alive to
 matter).

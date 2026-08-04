@@ -36,7 +36,11 @@ import (
 // over settled text keeps extending while the model streams new lines beneath it — and the moment
 // the text under the span does move (the streaming tail growing, a rewrap on resize, a tool call
 // joining its group) the selection drops rather than pointing at something else. That is what
-// makes copy equal sight: the release slices the very lines the rule protected.
+// makes copy equal sight: the release slices the very lines the rule protected. A COLLAPSED span is
+// exempt and survives every repaint — it shades nothing, so it is a click in progress rather than a
+// selection, and the release still needs the line the press named to toggle a block (toggleBlockAt);
+// without the exemption a live block's blinking star rewrote its own header line out from under the
+// press and the toggle was lost.
 //
 // Screen rows become content lines through ONE mapping, Model.contentLineAt (model.go), which the
 // mouse and the highlight both read. It is overlay-aware at BOTH ends of the transcript, and that
@@ -87,14 +91,28 @@ type transcriptSel struct {
 // it spans is identical in the outgoing lines and the incoming ones. It is the keep-if-unchanged
 // rule refreshViewport decides a selection's fate by — true keeps it, false drops it.
 //
-// An inactive selection has nothing to keep, so it reports false. A span reaching past either
-// slice reports false too: the lines it named are no longer all there, which is a change by any
-// reading. Only the LINE range is normalised (anchor above head or below it names the same rows),
-// and the columns need no re-check of their own — identical lines have identical widths, so a
-// column that was valid still is.
+// An inactive selection has nothing to keep, so it reports false. An active COLLAPSED one
+// (anchor == head) is kept whatever moved beneath it, and that exemption is this rule's own purpose
+// read literally: the drop exists so a highlight never stands over text that has since been
+// rewritten, and a collapsed span paints no highlight at all — shadeCells returns on exactly that
+// test. Collapsed, it is not a selection but a CLICK IN PROGRESS: the press's record of the line
+// the human pressed on, which the release consumes to toggle a block (handleMouseRelease →
+// toggleBlockAt). Dropping it threw that answer away — a live block's header alternates ✦/✧ with
+// the spinner phase (blockState.star), rewriting its own line every 50–100 ms, so a press on a
+// running tool's header was zeroed before the button came up and the toggle never fired. A kept
+// anchor may outlive the paint it was taken in — a collapse elsewhere can leave it past the last
+// marked line — and that costs nothing: toggleBlockAt's bounds check makes a stale line a no-op.
+//
+// A DRAGGED span is judged exactly as before. One reaching past either slice reports false: the
+// lines it named are no longer all there, which is a change by any reading. Only the LINE range is
+// normalised (anchor above head or below it names the same rows), and the columns need no re-check
+// of their own — identical lines have identical widths, so a column that was valid still is.
 func (s transcriptSel) spanUnchanged(oldLines, newLines []string) bool {
 	if !s.active {
 		return false
+	}
+	if s.anchor == s.head {
+		return true // a click in progress: it shades nothing, so nothing under it can go stale
 	}
 	top, bot := s.anchor.line, s.head.line
 	if bot < top {
