@@ -244,3 +244,122 @@ func TestRegistryRowInvariants(t *testing.T) {
 		t.Error("the registry lost its api-key row, so the masking invariant above asserts nothing")
 	}
 }
+
+// TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse pins each row's validate hook (configKey.Validate
+// — the write path's guard) to one value it must refuse. It calls the hooks directly rather than through
+// saveConfigSetting because three of them cannot be reached from there: an enum's vocabulary is checked
+// by the kind first, so the mode, spinner and cursor hooks only ever fire on DRIFT between this table's
+// EnumValues and the parse site behind them — which is exactly the case worth having a test for.
+func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		path    string
+		value   string
+		wantMsg string
+	}{
+		{"endpoint", "box:1111", "give a scheme and a host"},
+		{"endpoint", "http://[::1", "invalid endpoint"},
+		{"web-search-endpoint", "%zz", "not a URL"},
+		{"context-window", "-1", "0 or more"},
+		{"present.port", "70000", "0-65535"},
+		{"llama-launcher", "http://box:7331", "looks like a URL"},
+		{"llama-launcher", "   ", "only whitespace"},
+		{"mode", "yolo", "invalid --mode"},
+		{"ui.spinner", "twirl", "invalid ui.spinner"},
+		{"cursor-shape", "sideways", "invalid cursor-shape"},
+	} {
+		t.Run(tt.path+"="+tt.value, func(t *testing.T) {
+			t.Parallel()
+			k := mustKey(tt.path)
+			if k.Validate == nil {
+				t.Fatalf("registry row %q has no validate hook", tt.path)
+			}
+			err := k.Validate(tt.value)
+			if err == nil {
+				t.Fatalf("%s = %q was accepted", tt.path, tt.value)
+			}
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.wantMsg)
+			}
+		})
+	}
+}
+
+// And the other side of it: every value the keys DO take is accepted, including the shapes that look
+// like refusals — the sentinels and the empty values the launcher and search keys document, and the
+// zeros that mean "decide for me". A validator that refused one of those would make a documented
+// config unwritable from the settings surface.
+func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct{ path, value string }{
+		{"endpoint", "http://127.0.0.1:1111"},
+		{"web-search-endpoint", ""},
+		{"web-search-endpoint", "off"},
+		{"web-search-endpoint", "search.example.com/s"}, // scheme-less: the tool heals it to https://
+		{"web-search-endpoint", "https://search.example.com/s"},
+		{"context-window", "0"},
+		{"context-window", "32768"},
+		{"present.port", "0"},
+		{"present.port", "8080"},
+		{"llama-launcher", ""},
+		{"llama-launcher", "off"},
+		{"llama-launcher", "/home/me/.llama-launcher/config.yaml"},
+		{"mode", string(modeAuto)},
+		{"ui.spinner", "glitter"},
+		{"cursor-shape", "bar"},
+	} {
+		t.Run(tt.path+"="+tt.value, func(t *testing.T) {
+			t.Parallel()
+			if err := mustKey(tt.path).Validate(tt.value); err != nil {
+				t.Errorf("%s = %q was refused: %v", tt.path, tt.value, err)
+			}
+		})
+	}
+}
+
+// Every editable key whose kind is not the whole of its contract carries a hook, and every hook belongs
+// to an editable key. The first half is the drift guard: a key added to the table with a range, a URL or
+// a vocabulary behind it must be given its check deliberately rather than inheriting "anything goes"
+// from the kind. The second is the honest converse — a hook on a key no surface can write is a check
+// nothing runs.
+func TestRegistryValidateHooksSitOnEditableKeys(t *testing.T) {
+	t.Parallel()
+	// The editable keys whose kind IS their whole contract: a plain name, a free-text template, an
+	// address this process cannot verify. Listed here so adding a key cannot quietly join them.
+	unchecked := map[string]bool{
+		"api-key": true, "host-alias": true, "model": true,
+		"present.command": true, "present.host": true,
+	}
+	for _, k := range keyRegistry {
+		switch {
+		case k.Validate != nil && !k.Editable:
+			t.Errorf("registry row %q has a validate hook but is not editable; nothing would run it", k.Path)
+		case k.Validate == nil && k.Editable && k.Kind != kindBool && !unchecked[k.Path]:
+			t.Errorf("registry row %q is editable and has no validate hook — give it one, or list it "+
+				"in this test's unchecked set with the reason its kind is the whole contract", k.Path)
+		case k.Validate != nil && unchecked[k.Path]:
+			t.Errorf("registry row %q now has a validate hook; take it out of the unchecked set", k.Path)
+		}
+	}
+}
+
+// TestModeIsTheOnlyKeyAppliedWithoutARestart pins the equivalence the /settings pane's two live-apply
+// decisions rest on. The pane names `mode` when it decides what to APPLY (settings.go's settingsModeKey —
+// the seam Engine.SetMode exists for) but asks RestartRequired when it decides what to SHOW: a row with
+// no restart flag renders its edited value as the value the session is running, and a row with one
+// renders a "(next launch)" marker instead. Both are right today because those are the same one key; a
+// second RestartRequired:false row added without a live seam would silently make the pane claim an edit
+// had taken effect when nothing had applied it, and this test is what names that.
+func TestModeIsTheOnlyKeyAppliedWithoutARestart(t *testing.T) {
+	t.Parallel()
+	for _, k := range keyRegistry {
+		if !k.RestartRequired && k.Path != "mode" {
+			t.Errorf("registry row %q takes effect without a restart; give it a live seam in the "+
+				"/settings pane (internal/tui/settings.go: settingsModeKey) or mark it RestartRequired",
+				k.Path)
+		}
+	}
+	if mustKey("mode").RestartRequired {
+		t.Error("mode is now restart-required, so the pane's live apply would render a marker instead")
+	}
+}

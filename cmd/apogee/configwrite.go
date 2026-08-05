@@ -481,6 +481,9 @@ func saveConfigSetting(path, key, value string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateSettingValue(k, value); err != nil {
+		return err
+	}
 	data, err := readConfigForWrite(path)
 	if err != nil {
 		return err
@@ -515,6 +518,32 @@ func resetConfigSetting(path, key string) error {
 		return nil
 	}
 	return writeConfigAtomically(path, updated)
+}
+
+// validateSettingValue refuses a value the key cannot hold, BEFORE the config file is opened: the
+// kind's own check (renderSettingValue — a bool is true or false, an enum is one of its values) and
+// then the key's validate hook, which is the check startup already makes for that key
+// (configKey.Validate). A value refused here has touched nothing at all — not even the seeding read
+// below — so "invalid" and "written" can never be the same outcome.
+//
+// It runs HERE rather than inside the splice for the message's sake: saveConfigSetting qualifies a
+// splice failure with the config's path, which is what a file-shape refusal needs and what a bad
+// VALUE does not — the settings pane renders this error inline on the row (internal/tui/settings.go),
+// and a leading "update config /long/path/config.yaml:" would push the reason out of the cell. The
+// kind check the splice makes again on its own way through is left where it is: a writer that
+// trusted its caller would be one refactor away from splicing a value nothing checked.
+func validateSettingValue(k configKey, value string) error {
+	_, want, err := renderSettingValue(k, value)
+	if err != nil {
+		return fmt.Errorf("apogee: %w", err)
+	}
+	if k.Validate == nil {
+		return nil
+	}
+	// The hook is asked about the value as the FILE will spell it (trimmed, canonical), not the raw
+	// keystrokes: it is the same text the next launch will read back, so a value this accepts is one
+	// that run accepts too.
+	return k.Validate(want)
 }
 
 // writableKey resolves a registry path to the row that describes it, and refuses a key no surface

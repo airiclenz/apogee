@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -47,18 +49,35 @@ import (
 // describing. The one exception is `mode`, which has a live seam (Engine.SetMode) — the same one
 // Shift+Tab drives — so its edit takes effect now and the row simply shows the new value.
 //
-// The string/int edit buffer, per-key validation and reset-to-default are item 8's; ⏎ on those rows
-// is still a no-op here.
+// A string or an int is edited in a BUFFER on its own row (the /sessions rename idiom): ⏎ opens it,
+// the row's value cell becomes what is being typed with a caret after it, ⏎ commits and esc
+// abandons. What a commit is checked against is the BINARY's business, exactly as the file format is
+// — [Options.WriteSetting] refuses a value the key cannot hold (a port outside its range, an
+// endpoint with no host) and the refusal lands on the row with the buffer still open, so the human
+// corrects what they typed rather than typing it again.
+//
+// And backspace UNSETS: it arms a reset on a row that has something to reset, the hint line asks for
+// a confirming ⏎, and what that ⏎ sends is [Options.ResetSetting] — the key's line REMOVED from the
+// file rather than today's spelling of its default written into it (ADR 0035). The row then reports
+// the default it went back to, on exactly the terms a write reports its value: a marker, or — for
+// `mode` — the live apply and no marker at all.
 
-// settingsKind is what the open pane is DOING: reading its key list, or asking which value one enum
-// key should take. It is the picker's own two-step idiom (pickerKind, /schedule's cycle-then-mode
-// pair): one pane, one selection per step, and the step is a field rather than a second overlay — so
-// there is no state in which two settings surfaces are open and no second give-way rule to write.
+// settingsKind is what the open pane is DOING: reading its key list, asking which value one enum key
+// should take, holding the buffer a string or an int is being typed into, or waiting for a reset to
+// be confirmed. It is the picker's own two-step idiom (pickerKind, /schedule's cycle-then-mode pair):
+// one pane, one selection per step, and the step is a field rather than a second overlay — so there
+// is no state in which two settings surfaces are open and no second give-way rule to write.
+//
+// One field for all four is also what makes them mutually exclusive by construction: a pane cannot be
+// buffering a value and awaiting a reset confirmation at once, so no keypress has two meanings and no
+// state pair has to be reasoned about.
 type settingsKind int
 
 const (
-	settingsKeyList  settingsKind = iota // the key list — the pane's own screen
-	settingsEnumList                     // the selected enum key's closed vocabulary, one value per row
+	settingsKeyList     settingsKind = iota // the key list — the pane's own screen
+	settingsEnumList                        // the selected enum key's closed vocabulary, one value per row
+	settingsValueBuffer                     // the selected string/int key's edit buffer, on its own row
+	settingsResetArmed                      // backspace armed the selected row's reset; ⏎ confirms it
 )
 
 // settingsPane is the overlay's inline state on the Model. Its zero value is "closed", so it lives
@@ -71,22 +90,31 @@ const (
 // edits and failure are the pane's memory of its OWN writes, and they are display-only: they say what
 // this pane persisted and what a refusal said, never what the config now holds (the provider answers
 // that, from the resolution this run made). sub is the value sub-list's highlight, meaningful only
-// while kind is [settingsEnumList].
+// while kind is [settingsEnumList]; buf is the string/int edit buffer, meaningful only while kind is
+// [settingsValueBuffer], and it is a plain string so the whole pane stays a value the Model can copy.
 type settingsPane struct {
 	open     bool
 	kind     settingsKind
 	selected int
 	sub      int
+	buf      string
 	edits    []settingEdit
 	failure  settingFailure
 }
 
-// settingEdit is one key this pane PERSISTED this session, and the value it wrote — the fact behind a
-// row's "(next launch)" marker. It is not a cache of the config: the file is authoritative and the
-// pane never reads it back, so this is only ever used to say "you changed this, here to what".
+// settingEdit is one key this pane PERSISTED this session and the value the file now yields for it —
+// the fact behind a row's "(next launch)" marker. It is not a cache of the config: the file is
+// authoritative and the pane never reads it back, so this is only ever used to say "you changed this,
+// here to what".
+//
+// reset marks the one edit that did not WRITE a value: a reset removed the key's line, so the value
+// recorded is the DEFAULT the key went back to (empty when it defaults to unset) rather than anything
+// the human typed. The row's marker needs the difference — a reset of a masked key has no secret to
+// keep quiet about, and an empty value it returned to is spelled "unset" rather than as a blank.
 type settingEdit struct {
 	path  string
 	value string
+	reset bool
 }
 
 // settingFailure is the last write this pane was REFUSED, and by what — a read-only config home, a
@@ -102,11 +130,32 @@ type settingFailure struct {
 // step, because the keys mean different things in each: in the key list ⏎ opens the selected row's
 // edit idiom and esc leaves the pane, while in a value sub-list ⏎ COMMITS the highlighted value and
 // esc backs out of the question without writing anything.
+// The buffer's legend names the two keys that end it and nothing else — what a caret on a row already
+// says is that the row is being typed into — and the reset's is the one line the pane ASKS anything:
+// backspace armed something destructive, so the hint is where the confirmation is spelled out, which
+// is the /sessions delete-confirm posture with ⏎ in place of y.
 const (
-	settingsTitle    = "Settings"
-	settingsHint     = "↑/↓ select · ⏎ edit · esc close"
-	settingsEnumHint = "↑/↓ select · ⏎ set · esc back"
+	settingsTitle      = "Settings"
+	settingsHint       = "↑/↓ select · ⏎ edit · esc close"
+	settingsEnumHint   = "↑/↓ select · ⏎ set · esc back"
+	settingsBufferHint = "⏎ save · esc cancel"
+	settingsResetHint  = "⏎ confirm reset · esc cancel"
 )
+
+// settingsCaret is the cell drawn after the edit buffer's text — the /sessions rename idiom's own
+// glyph, and the whole of the caret this mini-editor has: the buffer appends and pops at its end, so
+// there is no position to move and nothing to draw one at.
+const settingsCaret = "▏"
+
+// settingsUnsetValue is how a marker spells a value that is not there — the state a reset returns a
+// key with no built-in default to. "" would render as a marker that trailed off ("→  (next launch)"),
+// which is the one thing the row must not do after a deliberate act.
+const settingsUnsetValue = "unset"
+
+// settingsSavedNote is a masked key's whole marker: the act, with no value behind an arrow. It is the
+// note and not a label, because there is nothing for the arrow to point AT — the pane persisted a
+// secret it does not hold and will not describe.
+const settingsSavedNote = "saved (next launch)"
 
 // The value cells of a bool row, spelled as the config file spells them — the two strings ⏎ toggles
 // between and hands [Options.WriteSetting], which is the whole of what "the value as the file would
@@ -179,19 +228,20 @@ func (m Model) settingRows() []SettingRow {
 }
 
 // settingsKey routes a keypress while the pane is open (idle only, the verb's own policy): ↑/↓ move
-// the highlight, wrapping at both ends (the pickerKey idiom), ⏎ opens the selected row's edit idiom
-// and esc closes. Every other key is SWALLOWED, because the pane is modal: a keystroke that fell
-// through to the input box would edit a draft the human cannot see behind a full-height pane.
+// the highlight, wrapping at both ends (the pickerKey idiom), ⏎ opens the selected row's edit idiom,
+// backspace arms its reset and esc closes. Every other key is SWALLOWED, because the pane is modal: a
+// keystroke that fell through to the input box would edit a draft the human cannot see behind a
+// full-height pane.
 //
 // The row count is re-derived and the selection re-clamped on every key rather than once at open,
 // the picker's posture: the provider answers from the binary's live resolution, so the list can
 // legitimately change under an open pane (a persisted edit is exactly that), and a selection left
 // pointing past the end of a shorter list would be an index panic one keypress later.
 //
-// A value sub-list claims the keys FIRST and its target row is re-derived with them, so the second
-// step of the edit is always asked about a row that is still there: a sub-list whose key went away
-// under it falls back to the key list rather than committing a value to whatever now sits at that
-// index.
+// A second step — a value sub-list, an edit buffer, an armed reset — claims the keys FIRST and its
+// target row is re-derived with them, so the step is always about a row that is still there: a step
+// whose key went away under it falls back to the key list rather than committing a value to whatever
+// now sits at that index.
 func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	rows := m.settingRows()
 	n := len(rows)
@@ -206,6 +256,18 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.settings.kind, m.settings.sub = settingsKeyList, 0
 		m.layout()
 		return m, nil
+	}
+	if m.settings.kind == settingsValueBuffer {
+		if row, ok := m.settingsBufferTarget(rows); ok {
+			return m.settingsBufferKey(msg, row)
+		}
+		return m.settingsAbandonStep() // the buffered key went away — same fallback, same reason
+	}
+	if m.settings.kind == settingsResetArmed {
+		if row, ok := m.settingsResetTarget(rows); ok {
+			return m.settingsResetKey(msg, row)
+		}
+		return m.settingsAbandonStep()
 	}
 	switch msg.String() {
 	case "esc":
@@ -224,8 +286,20 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m.settingsEnter(rows)
+	case "backspace":
+		return m.settingsArmReset(rows)
 	}
 	return m, nil // any other key is swallowed by the modal
+}
+
+// settingsAbandonStep drops a second step whose row went away and swallows the keypress that found
+// it gone — the enum sub-list's fallback, shared by the buffer and the armed reset. Nothing is
+// written and nothing is kept: a buffer whose key is no longer there has nothing to save, and a
+// confirmation for a row that left cannot be confirmed.
+func (m Model) settingsAbandonStep() (tea.Model, tea.Cmd) {
+	m.settings.kind, m.settings.sub, m.settings.buf = settingsKeyList, 0, ""
+	m.layout()
+	return m, nil
 }
 
 // settingsEnter opens the selected row's edit idiom — the one place the pane decides what ⏎ MEANS,
@@ -233,7 +307,7 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 //
 //   - a bool is toggled and persisted on the spot, because a two-value key has no question to ask;
 //   - an enum asks which value, in a sub-list of its own (the /schedule two-step);
-//   - a string or an int opens a buffer, which is item 8's; and
+//   - a string or an int opens a buffer on the row, seeded with what the key holds; and
 //   - a row the registry does not let this surface write does nothing at all — its own cell already
 //     says where it IS edited ([SettingRow.EditPointer]), so a refusal note here would only repeat it.
 //
@@ -263,7 +337,10 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 	case SettingString, SettingInt:
-		return m, nil // the edit buffer is item 8 of the settings-screen plan
+		m.settings.kind = settingsValueBuffer
+		m.settings.buf = m.settingsBufferSeed(row)
+		m.layout()
+		return m, nil
 	case SettingStructured:
 		return m, nil // never Editable; the registry terminates descent here
 	}
@@ -298,6 +375,135 @@ func (m Model) settingsEnumKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, 
 	return m, nil // swallowed, like every key the pane does not act on
 }
 
+// settingsBufferSeed is what a freshly opened edit buffer starts from: the value the pane believes the
+// file holds, so a human correcting a port edits the port rather than retyping it — and NOTHING for a
+// masked key, because the row carries a mask and not the secret ([SettingRow]). An api-key is
+// therefore typed whole, which is the only honest offer a surface that never held the old one can
+// make.
+func (m Model) settingsBufferSeed(row SettingRow) string {
+	if row.Masked {
+		return ""
+	}
+	return m.settingsPersistedValue(row)
+}
+
+// settingsBufferKey routes a keypress in the string/int edit buffer — the /sessions rename idiom
+// (sessions.go): printable text appends, backspace pops the last RUNE (never the last byte, which
+// would leave half a grapheme in the buffer and half a value in the file), ⏎ commits and esc
+// abandons. Everything else is swallowed, as everywhere else in this modal pane.
+//
+// The buffer is the one state in which backspace does not arm a reset: inside an edit it means what
+// it means in every other text field on the screen. That is exactly why the two idioms can share the
+// key — the pane's kind says which of them is being typed at.
+func (m Model) settingsBufferKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		// An abandoned edit takes its refusal with it: the ✗ on this row is the reason THIS buffer
+		// was not accepted, and leaving it up after the human walked away from the edit would report
+		// a failure against a row nobody is editing any more.
+		m.settings.kind, m.settings.buf = settingsKeyList, ""
+		m.settings.failure = settingFailure{}
+		m.layout()
+		return m, nil
+	case "enter":
+		return m.settingsCommitBuffer(row)
+	case "backspace":
+		if r := []rune(m.settings.buf); len(r) > 0 {
+			m.settings.buf = string(r[:len(r)-1])
+		}
+		return m, nil
+	}
+	if msg.Text != "" { // a printable keypress carries its rune(s) in Text
+		m.settings.buf += msg.Text
+	}
+	return m, nil
+}
+
+// settingsCommitBuffer persists what was typed, and stays in the buffer when the binary will not have
+// it. That is the whole reason a commit reports its outcome: a refused value is still on the screen,
+// with the reason beside it (settingsNote), so the human fixes a port they mistyped instead of typing
+// it again from nothing.
+//
+// The value is checked by the BINARY, not here (ADR 0011's thin renderer): what a key may hold is the
+// registry's business and it is the write seam that asks — this pane knows only that a refusal means
+// the file is unchanged. An EMPTY buffer commits nothing at all and simply closes, the /sessions
+// empty-rename posture: ⏎ on a buffer the human has just cleared is far more likely to be an
+// abandoned edit than a request to persist emptiness, and the deliberate way to take a value away is
+// the reset backspace arms.
+func (m Model) settingsCommitBuffer(row SettingRow) (tea.Model, tea.Cmd) {
+	value := stripEscapes(strings.TrimSpace(m.settings.buf))
+	if value == "" {
+		m.settings.kind, m.settings.buf = settingsKeyList, ""
+		m.layout()
+		return m, nil
+	}
+	next, landed := m.settingsPersist(row, value)
+	m = next
+	if landed {
+		m.settings.kind, m.settings.buf = settingsKeyList, ""
+	}
+	m.layout()
+	return m, nil
+}
+
+// settingsArmReset arms the selected row's reset-to-default — backspace on a row that HAS something to
+// reset. Arming is deliberately a state and not the act: removing a line from a file the human
+// maintains by hand is not something a stray keypress does, so the hint line asks
+// (settingsResetHint) and ⏎ answers.
+//
+// A row with nothing to reset arms nothing and says nothing: a key already at its default has no line
+// to remove (settingsResettable), and a note about a no-op would be noise on a row the human is
+// simply passing through.
+func (m Model) settingsArmReset(rows []SettingRow) (tea.Model, tea.Cmd) {
+	row, ok := m.settingsSelectedRow(rows)
+	if !ok || !m.settingsResettable(row) {
+		return m, nil
+	}
+	m.settings.kind = settingsResetArmed
+	m.layout()
+	return m, nil
+}
+
+// settingsResetKey answers the armed reset: ⏎ confirms it and esc cancels. Any other key leaves it
+// armed, the sessionConfirmKey posture — a confirmation is not something a mistyped key should be able
+// to dismiss quietly, and the hint line is still on the screen saying which two keys mean anything.
+func (m Model) settingsResetKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.settings.kind = settingsKeyList
+		m.layout()
+		return m, nil
+	case "enter":
+		return m.settingsReset(row)
+	}
+	return m, nil
+}
+
+// settingsReset returns one key to its default through [Options.ResetSetting] — the key's line REMOVED
+// from the file rather than the default written into it (ADR 0035), so the value goes back to being
+// described by the binary and documented by its commented example.
+//
+// The outcomes are settingsWrite's, for the same reasons: no seam wired, or refused, changes nothing
+// but the row's own line; a reset that lands is recorded as the edit it is — the key now yields its
+// DEFAULT — and `mode`, the one key with a live seam, applies that default now. The armed state ends
+// either way: the question was answered.
+func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
+	m.settings.kind = settingsKeyList
+	if m.opts.ResetSetting == nil {
+		m.settings.failure = settingFailure{path: row.Path, msg: noSettingsWriterNote}
+		m.layout()
+		return m, nil
+	}
+	if err := m.opts.ResetSetting(row.Path); err != nil {
+		m.settings.failure = settingFailure{path: row.Path, msg: err.Error()}
+		m.layout()
+		return m, nil
+	}
+	m = m.settingsApplied(row, settingEdit{path: row.Path, value: row.Default, reset: true})
+	m.layout()
+	return m, nil
+}
+
 // settingsWrite persists one key through [Options.WriteSetting] and records what became of it. It is
 // synchronous, the SaveHostAcknowledgement posture: one small file, spliced and renamed, on a keypress
 // the human is waiting on — a Cmd would only let the pane repaint a row whose value had not landed yet.
@@ -311,24 +517,43 @@ func (m Model) settingsEnumKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, 
 //     also takes effect now, through the same Engine.SetMode + opts.Mode pair Shift+Tab drives, so
 //     the footer's mode and the Agent's agree with the file the same instant.
 func (m Model) settingsWrite(row SettingRow, value string) (tea.Model, tea.Cmd) {
+	m, _ = m.settingsPersist(row, value)
+	m.layout()
+	return m, nil
+}
+
+// settingsPersist is settingsWrite's body and its outcome: the model after the attempt, and whether the
+// write LANDED. The bool exists for the edit buffer, which is the one caller whose next move depends on
+// it — a refused value keeps its buffer open so it can be corrected (settingsCommitBuffer), where a
+// refused toggle has nothing to keep. It does not lay out: the caller does, once, after it has finished
+// deciding what the pane is now doing.
+func (m Model) settingsPersist(row SettingRow, value string) (Model, bool) {
 	if m.opts.WriteSetting == nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: noSettingsWriterNote}
-		m.layout()
-		return m, nil
+		return m, false
 	}
 	if err := m.opts.WriteSetting(row.Path, value); err != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: err.Error()}
-		m.layout()
-		return m, nil
+		return m, false
 	}
-	m.settings = m.settings.recordEdit(row.Path, value)
-	if row.Path == settingsModeKey {
-		mode := domain.Mode(value)
+	return m.settingsApplied(row, settingEdit{path: row.Path, value: value}), true
+}
+
+// settingsApplied records an edit that LANDED and applies it live where a seam exists — the one place
+// both halves of "the file now says this" happen, so a write and a reset cannot drift apart on either
+// (a reset of `mode` must switch the running session's mode exactly as a write of it does).
+//
+// The live apply is guarded on a non-empty value as well as on the key: a reset records the key's
+// DEFAULT, and a key whose default is unset would otherwise hand the Engine an empty mode — which
+// `mode` never is, and which the guard keeps from becoming a possibility a future live key inherits.
+func (m Model) settingsApplied(row SettingRow, edit settingEdit) Model {
+	m.settings = m.settings.recordEdit(edit)
+	if row.Path == settingsModeKey && edit.value != "" {
+		mode := domain.Mode(edit.value)
 		m.eng.SetMode(mode)
 		m.opts.Mode = mode // the footer renders the mode from opts.Mode (footerContent), as Shift+Tab does
 	}
-	m.layout()
-	return m, nil
+	return m
 }
 
 // settingsModeKey is the registry path of the one key an edit APPLIES as well as persists. It is
@@ -338,36 +563,37 @@ func (m Model) settingsWrite(row SettingRow, value string) (tea.Model, tea.Cmd) 
 // (ADR 0035: the pane never triggers rebinds; /model and /server own those).
 const settingsModeKey = "mode"
 
-// recordEdit returns the pane with path's persisted value recorded, replacing any earlier edit of the
-// same key — the last write is what the file says. The slice is built FRESH rather than appended to,
-// the value-copied Model's rule (ADR 0011, doc.go): an append could write into an array a Model copy
-// still in flight is sharing, and the copies are not ours to reason about.
+// recordEdit returns the pane with edit recorded, replacing any earlier edit of the same key — the
+// last one is what the file says, whether it wrote a value or removed the line. The slice is built
+// FRESH rather than appended to, the value-copied Model's rule (ADR 0011, doc.go): an append could
+// write into an array a Model copy still in flight is sharing, and the copies are not ours to reason
+// about.
 //
 // A landed write also clears the failure slot, which is one attempt's outcome and not one row's
 // condition: the human just saw a write succeed, and a refusal left over from a previous keypress
 // would go on contradicting it.
-func (p settingsPane) recordEdit(path, value string) settingsPane {
+func (p settingsPane) recordEdit(edit settingEdit) settingsPane {
 	next := make([]settingEdit, 0, len(p.edits)+1)
 	for _, e := range p.edits {
-		if e.path != path {
+		if e.path != edit.path {
 			next = append(next, e)
 		}
 	}
-	p.edits = append(next, settingEdit{path: path, value: value})
+	p.edits = append(next, edit)
 	p.failure = settingFailure{}
 	return p
 }
 
-// editOf is the value this pane persisted for path, and whether it persisted one at all. A linear
-// scan over at most one edit per config key is the right shape here: the list is short, it is read
-// once per row per frame, and a map on the pane would be a reference the Model's copies would share.
-func (p settingsPane) editOf(path string) (string, bool) {
+// editOf is what this pane did to path and whether it did anything at all. A linear scan over at most
+// one edit per config key is the right shape here: the list is short, it is read once per row per
+// frame, and a map on the pane would be a reference the Model's copies would share.
+func (p settingsPane) editOf(path string) (settingEdit, bool) {
 	for _, e := range p.edits {
 		if e.path == path {
-			return e.value, true
+			return e, true
 		}
 	}
-	return "", false
+	return settingEdit{}, false
 }
 
 // toggledSetting is the value ⏎ writes for a bool row: the other one. A row whose value is neither
@@ -397,8 +623,8 @@ func indexOfSetting(values []string, value string) int {
 // two ⏎ presses on a bool return it to where it was and a sub-list re-opened after an edit opens on
 // the value that edit set — rather than both starting again from a resolution that is now behind the file.
 func (m Model) settingsPersistedValue(row SettingRow) string {
-	if value, ok := m.settings.editOf(row.Path); ok {
-		return value
+	if edit, ok := m.settings.editOf(row.Path); ok {
+		return edit.value
 	}
 	return row.Value
 }
@@ -421,6 +647,71 @@ func (m Model) settingsEnumTarget(rows []SettingRow) (SettingRow, bool) {
 		return SettingRow{}, false
 	}
 	return row, true
+}
+
+// settingsSelectedRow is the highlighted row, and whether there is one — the read every second step
+// starts from. It exists so the buffer and the reset ask the same question of the same clamp the enum
+// sub-list does, rather than each indexing the slice on its own arithmetic.
+func (m Model) settingsSelectedRow(rows []SettingRow) (SettingRow, bool) {
+	sel := m.settingsSelection(len(rows))
+	if sel < 0 {
+		return SettingRow{}, false
+	}
+	return rows[sel], true
+}
+
+// settingsBufferTarget is the row an open edit buffer is typing into, and whether there still IS one —
+// the settingsEnumTarget contract for the other second step, and the predicate that keeps a ⏎ from
+// committing a buffer into whatever key moved into that index.
+func (m Model) settingsBufferTarget(rows []SettingRow) (SettingRow, bool) {
+	if m.settings.kind != settingsValueBuffer {
+		return SettingRow{}, false
+	}
+	row, ok := m.settingsSelectedRow(rows)
+	if !ok || !settingsBufferable(row) {
+		return SettingRow{}, false
+	}
+	return row, true
+}
+
+// settingsResetTarget is the row an armed reset is about, and whether it is still there and still worth
+// resetting. Re-asked on the confirming keypress rather than trusted from the arming one, so a ⏎ can
+// never remove a line from a key the human did not arm.
+func (m Model) settingsResetTarget(rows []SettingRow) (SettingRow, bool) {
+	if m.settings.kind != settingsResetArmed {
+		return SettingRow{}, false
+	}
+	row, ok := m.settingsSelectedRow(rows)
+	if !ok || !m.settingsResettable(row) {
+		return SettingRow{}, false
+	}
+	return row, true
+}
+
+// settingsBufferable reports whether a row is edited in the caret buffer: the two kinds with no closed
+// vocabulary and more than two values, and only where the registry lets this surface write at all.
+func settingsBufferable(row SettingRow) bool {
+	return row.Editable && (row.Kind == SettingString || row.Kind == SettingInt)
+}
+
+// settingsResettable reports whether a row has anything for a reset to DO. Two ways it can: this pane
+// wrote the key (so the file carries a line the pane put there), or the value the run resolved differs
+// from the built-in default — the renderer's honest read of "the file, an environment variable or a
+// flag is setting this", since a key nothing sets resolves to its default by definition.
+//
+// A row already showing its default therefore arms nothing. That is not a shortcut: reset means "remove
+// the line", and for such a row there is either no line to remove or removing it changes nothing the
+// human can see — so the keypress is better as a no-op than as a confirmation prompt for a no-op. An
+// overridden row is still resettable: the FILE may well set it, and the row's own note says the
+// override outranks what the file says.
+func (m Model) settingsResettable(row SettingRow) bool {
+	if !row.Editable {
+		return false
+	}
+	if _, edited := m.settings.editOf(row.Path); edited {
+		return true
+	}
+	return row.Value != row.Default
 }
 
 // clampSelection keeps selected inside a row list that moved under the open pane. An empty list pins
@@ -484,9 +775,47 @@ func (m Model) settingsDisplayRows(rows []SettingRow, selected int) settingsDisp
 		if i == selected {
 			display = len(out)
 		}
-		out = append(out, m.settingRowCells(row))
+		cells := m.settingRowCells(row)
+		// An open edit buffer replaces the SELECTED row's value cell, in place: the key stays where it
+		// was in the list and in its column, so the human types into the row they chose rather than
+		// into a prompt that has covered it (the /sessions rename idiom, one column narrower — a
+		// setting's row is a key and a value, and it is the value being typed).
+		if i == selected && m.settings.kind == settingsValueBuffer && settingsBufferable(row) {
+			cells = m.settingBufferCells(row)
+		}
+		out = append(out, cells)
 	}
 	return settingsDisplay{rows: out, selected: display}
+}
+
+// settingBufferCells is the row being typed into: the same four columns, with the buffer and its caret
+// where the value goes. The value the key HOLDS is deliberately not shown beside it — the buffer opened
+// seeded with it (settingsBufferSeed), so what is on the row is what will be written, and a second
+// copy of the old value would only make the human wonder which one the ⏎ takes.
+//
+// The buffer is escape-stripped here like every other cell: it is keystrokes, and a paste is
+// keystrokes too — a bracketed paste carrying an OSC 8 opener would otherwise reach the popup module,
+// which strips nothing (doc.go).
+func (m Model) settingBufferCells(row SettingRow) popupRow {
+	return popupRow{
+		stripEscapes(row.Path),
+		stripEscapes(m.settings.buf) + settingsCaret,
+		stripEscapes(settingsSourceMarker(row.Source)),
+		stripEscapes(m.settingsNote(row)),
+	}
+}
+
+// settingsPaneHint is the legend at the pane's foot: one per step, because the keys mean different
+// things in each — and the armed reset's is the one that ASKS, which is what makes backspace safe to
+// give a destructive act (settingsResetHint). The enum sub-list has its own renderer and its own hint.
+func (m Model) settingsPaneHint() string {
+	switch m.settings.kind {
+	case settingsValueBuffer:
+		return settingsBufferHint
+	case settingsResetArmed:
+		return settingsResetHint
+	}
+	return settingsHint
 }
 
 // settingRowCells is one key's row in the pane's fixed column schema — ["key", "value", "(env)",
@@ -521,8 +850,8 @@ func (m Model) settingRowCells(row SettingRow) popupRow {
 // it is the row's marker, because the session is still running the old value and the column would
 // otherwise claim a change that has not happened yet.
 func (m Model) settingsValueCell(row SettingRow) string {
-	if value, ok := m.settings.editOf(row.Path); ok && !row.Restart {
-		return value
+	if edit, ok := m.settings.editOf(row.Path); ok && !row.Restart {
+		return edit.value
 	}
 	return row.Value
 }
@@ -547,21 +876,39 @@ func (m Model) settingsNote(row SettingRow) string {
 	if m.settings.failure.path == row.Path && m.settings.failure.msg != "" {
 		return "✗ " + m.settings.failure.msg
 	}
-	value, edited := m.settings.editOf(row.Path)
-	if row.Masked {
-		value = row.Value
-	}
+	edit, edited := m.settings.editOf(row.Path)
 	switch {
 	case edited && !row.Restart:
 		return "" // applied live: the value cell says it
 	case edited && row.Source != SettingFromFile:
 		return "saved — overridden by " + settingsSourceLabel(row) + " this run"
+	case edited && row.Masked && !edit.reset:
+		// A written secret is reported as the ACT and never as the value: this package holds no
+		// api-key and no mask of one it could put behind an arrow ([SettingRow]), and "saved" is the
+		// whole of what the row has to say. A RESET of it falls through — a removed line left nothing
+		// to keep quiet about, so it says "unset" like every other emptied key.
+		return settingsSavedNote
 	case edited:
-		return "→ " + value + " (next launch)"
+		return "→ " + settingsPendingLabel(row, edit) + " (next launch)"
 	case row.EditPointer != "":
 		return "· " + row.EditPointer
 	}
 	return ""
+}
+
+// settingsPendingLabel is what a marker calls the value the next launch will read: what this pane
+// wrote, or — after a reset — the default the key went back to, which for a key that defaults to
+// nothing is the word for nothing rather than a blank the arrow would trail off into.
+func settingsPendingLabel(row SettingRow, edit settingEdit) string {
+	switch {
+	case edit.reset && row.Default == "":
+		return settingsUnsetValue
+	case edit.reset:
+		return row.Default
+	case edit.value == "":
+		return settingsUnsetValue
+	}
+	return edit.value
 }
 
 // settingsSourceLabel names the source that beat the file for a row — "APOGEE_MODE", "--mode" — for
@@ -628,7 +975,7 @@ func (m Model) renderSettings() string {
 		maxBodyRows: maxBody,
 		rows:        display.rows,
 		selected:    display.selected,
-		hint:        settingsHint,
+		hint:        m.settingsPaneHint(),
 		maxRows:     maxRows,
 	}, m.width)
 }

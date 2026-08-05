@@ -440,9 +440,11 @@
 // settings.go the /settings pane — the frame's one FULL-HEIGHT pane, listing every config key the
 // binary resolved this run over one display seam ([Options.SettingsRows]), claiming the whole
 // transcript budget while it is open, and persisting ONE key per deliberate edit through
-// [Options.WriteSetting] — the renderer owning the idiom (⏎ toggles a bool, opens an enum's value
-// sub-list) while the binary owns the file, with `mode` the one edit that also applies live through
-// the Engine.SetMode seam Shift+Tab drives (ADR 0035); and
+// [Options.WriteSetting] / [Options.ResetSetting] — the renderer owning the idiom (⏎ toggles a bool,
+// opens an enum's value sub-list or a string's caret buffer; backspace arms a reset a ⏎ confirms)
+// while the binary owns the file AND what a key may hold: a value it refuses comes back as an error
+// the row carries, with the buffer still open to correct. `mode` is the one edit that also applies
+// live, through the Engine.SetMode seam Shift+Tab drives (ADR 0035); and
 // popup.go the one bordered pane every overlay — those three, the autocomplete dropdown, the ask
 // and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go
 // this narration.

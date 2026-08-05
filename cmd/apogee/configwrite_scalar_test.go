@@ -404,6 +404,39 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 			path:    "endpoints", value: "http://box:1111",
 			wantMsg: "not a setting apogee knows",
 		},
+		// The rows' validate hooks, on the write path: a value the kind accepts but the KEY does not
+		// (registry.go). Every one of them is refused before the file is opened, so the assertion
+		// below — the file is byte-for-byte what it was — is what "validate before writing" means.
+		{
+			name:    "an endpoint with no scheme is not a URL apogee can dial",
+			content: "mode: auto\n",
+			path:    "endpoint", value: "box:1111",
+			wantMsg: "give a scheme and a host",
+		},
+		{
+			name:    "a search endpoint no URL parse accepts",
+			content: "mode: auto\n",
+			path:    "web-search-endpoint", value: "%zz",
+			wantMsg: "not a URL",
+		},
+		{
+			name:    "a negative context window is a window nothing fits in",
+			content: "mode: auto\n",
+			path:    "context-window", value: "-1",
+			wantMsg: "0 or more",
+		},
+		{
+			name:    "a port outside the range the document server could bind",
+			content: "mode: auto\n",
+			path:    "present.port", value: "99999",
+			wantMsg: "0-65535",
+		},
+		{
+			name:    "a launcher config written as a URL belongs under mcp-servers",
+			content: "mode: auto\n",
+			path:    "llama-launcher", value: "http://box:7331",
+			wantMsg: "looks like a URL",
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()

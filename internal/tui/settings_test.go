@@ -7,10 +7,25 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
+
+// keyBackspace is the rune-pop of an edit buffer and the arming key of a reset — the one keypress the
+// settings pane gives two meanings, told apart by what the pane is doing (settingsKind).
+func keyBackspace() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyBackspace} }
+
+// typeSetting sends text into an open edit buffer one printable keypress at a time, the way a human
+// fills it.
+func typeSetting(t *testing.T, m Model, text string) Model {
+	t.Helper()
+	for _, r := range text {
+		m = step(t, m, keyRune(r))
+	}
+	return m
+}
 
 // ----------------------------------------------------------------------------
 // /settings — the full-height configuration pane (settings.go)
@@ -156,19 +171,19 @@ func TestSettingsPaneNavigationWrapsAndSwallowsEveryOtherKey(t *testing.T) {
 		t.Errorf("↓ selected %d, want 1", m.settings.selected)
 	}
 
-	// A printable key neither edits the draft nor moves the selection, and ⏎ on a STRING row is a
-	// no-op: its edit buffer is item 8 of the settings-screen plan (the bool and enum idioms below
-	// are item 7's).
+	// A printable key in the key list neither edits the draft nor moves the selection, and ⏎ on a
+	// STRING row opens its edit buffer on the spot — driving no Cmd either way: every one of the
+	// pane's own acts is synchronous.
 	m = step(t, m, keyRune('x'))
 	m, cmd := stepCmd(t, m, keyEnter())
 	if v := m.input.Value(); v != "" {
 		t.Errorf("a key reached the input box behind the pane: %q", v)
 	}
 	if cmd != nil {
-		t.Error("⏎ in the read-only pane returned a Cmd; it must do nothing at all")
+		t.Error("a keypress in the pane returned a Cmd; it drives nothing off the loop")
 	}
-	if !m.settings.open || m.settings.selected != 1 {
-		t.Errorf("pane = %+v, want it open and still on row 1", m.settings)
+	if !m.settings.open || m.settings.selected != 1 || m.settings.kind != settingsValueBuffer {
+		t.Errorf("pane = %+v, want it open on row 1 with the row's edit buffer", m.settings)
 	}
 }
 
@@ -617,31 +632,30 @@ func TestSettingsPaneWithoutAWriterSaysSoOnTheRow(t *testing.T) {
 	}
 }
 
-// ⏎ never writes a row the registry does not let this surface write, and never a kind whose idiom is
-// not here yet: a structured block, the confinement keys /confine keeps single-homed (ADR 0012), and
-// the string and int rows item 8 buffers. The pointer cell already says where each one IS edited.
+// ⏎ never writes a row the registry does not let this surface write, and opens no step on one either: a
+// structured block and the confinement keys /confine keeps single-homed (ADR 0012). The pointer cell
+// already says where each one IS edited. Backspace is refused on the same rows for the same reason —
+// nothing here may remove their lines.
 func TestSettingsPaneEnterNeverWritesARowItMayNotEdit(t *testing.T) {
 	rows := []SettingRow{
 		{Path: "servers", Section: "Upstream", Kind: SettingStructured, Value: "3 servers",
 			EditPointer: "edit in config.yaml", Desc: "The named server list."},
 		{Path: "unconfined-hosts", Section: "Confinement", Kind: SettingStructured, Value: "2 hosts",
 			EditPointer: "use /confine", Desc: "Machines acknowledged as disposable."},
-		{Path: "endpoint", Section: "Upstream", Kind: SettingString, Value: "http://h:1111",
-			Editable: true, Restart: true, Desc: "The OpenAI-compatible base URL."},
-		{Path: "context-window", Section: "Upstream", Kind: SettingInt, Value: "0",
-			Editable: true, Restart: true, Desc: "Pin the model context window."},
 	}
 	log := &settingsWriteLog{}
 	m, eng := settingsEditModel(t, rows, log)
 
 	for i := range rows {
-		m.settings.selected = i
-		m = step(t, m, keyEnter())
-		if len(log.writes) != 0 || len(log.resets) != 0 {
-			t.Fatalf("⏎ on %s persisted %+v / %+v", rows[i].Path, log.writes, log.resets)
-		}
-		if m.settings.kind != settingsKeyList {
-			t.Fatalf("⏎ on %s opened a sub-list", rows[i].Path)
+		for _, key := range []tea.KeyPressMsg{keyEnter(), keyBackspace()} {
+			m.settings.selected = i
+			m = step(t, m, key)
+			if len(log.writes) != 0 || len(log.resets) != 0 {
+				t.Fatalf("%v on %s persisted %+v / %+v", key, rows[i].Path, log.writes, log.resets)
+			}
+			if m.settings.kind != settingsKeyList {
+				t.Fatalf("%v on %s opened a step on a row it may not edit", key, rows[i].Path)
+			}
 		}
 	}
 	if got := eng.modesSet(); len(got) != 0 {
@@ -677,5 +691,391 @@ func TestSettingsEnumSubListFallsBackWhenItsKeyGoesAway(t *testing.T) {
 	}
 	if pane := strip(m.renderSettings()); !strings.Contains(pane, settingsHint) {
 		t.Errorf("the pane is not showing its key list:\n%s", pane)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Editing: the string/int buffer, validation and reset-to-default (ADR 0035)
+// ----------------------------------------------------------------------------
+
+// settingsStringRow is one editable string row — `endpoint:` as the registry describes it.
+func settingsStringRow() SettingRow {
+	return SettingRow{
+		Path: "endpoint", Section: "Upstream", Kind: SettingString, Value: "http://box:1111",
+		Editable: true, Restart: true, Desc: "The OpenAI-compatible LLM server URL.",
+	}
+}
+
+// settingsIntRow is one editable int row — `present.port:`, whose default is its "pick one for me".
+func settingsIntRow() SettingRow {
+	return SettingRow{
+		Path: "present.port", Section: "Present", Kind: SettingInt, Value: "0", Default: "0",
+		Editable: true, Restart: true, Desc: "The document server's port; 0 picks a free one.",
+	}
+}
+
+// ⏎ on a string or an int row opens a buffer ON the row, seeded with the value the key holds — so a
+// human correcting a port edits it rather than retyping it — and ⏎ commits what is in the buffer
+// through the write seam. The caret and the buffer are painted in the value's own column, and the
+// legend switches to the two keys that end the edit.
+func TestSettingsPaneBufferEditsAStringAndPersistsIt(t *testing.T) {
+	rows := []SettingRow{settingsStringRow()}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter())
+
+	if m.settings.kind != settingsValueBuffer {
+		t.Fatalf("pane = %+v, want the edit buffer open", m.settings)
+	}
+	if m.settings.buf != "http://box:1111" {
+		t.Errorf("buffer = %q, want it seeded with the value the key holds", m.settings.buf)
+	}
+	pane := strip(m.renderSettings())
+	for _, want := range []string{"endpoint", "http://box:1111" + settingsCaret, settingsBufferHint} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("the buffered row does not show %q:\n%s", want, pane)
+		}
+	}
+
+	// Backspace pops runes off the buffer inside an edit; it does not arm a reset there.
+	for range len("1111") {
+		m = step(t, m, keyBackspace())
+	}
+	m = typeSetting(t, m, "2222")
+	if m.settings.kind != settingsValueBuffer {
+		t.Fatalf("pane = %+v, want the buffer still open (backspace edits inside it)", m.settings)
+	}
+
+	m = step(t, m, keyEnter())
+
+	if want := []settingEdit{{path: "endpoint", value: "http://box:2222"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if m.settings.kind != settingsKeyList || m.settings.buf != "" {
+		t.Errorf("pane = %+v after the commit, want the buffer closed and empty", m.settings)
+	}
+	if got, want := m.settingsNote(rows[0]), "→ http://box:2222 (next launch)"; got != want {
+		t.Errorf("marker = %q, want %q", got, want)
+	}
+	// A re-opened buffer starts from what was WRITTEN, not from the resolution the pane opened over.
+	if reopened := step(t, m, keyEnter()); reopened.settings.buf != "http://box:2222" {
+		t.Errorf("re-opened buffer = %q, want the value this pane persisted", reopened.settings.buf)
+	}
+}
+
+// esc abandons the edit: the buffer closes, nothing is written, and the value the run resolved is back
+// in its column. An empty buffer commits nothing either — ⏎ on a cleared field is an abandoned edit far
+// more often than a request to persist emptiness, and taking a value away is what the reset below is.
+func TestSettingsPaneBufferCancelAndEmptyCommitWriteNothing(t *testing.T) {
+	rows := []SettingRow{settingsIntRow()}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	cancelled := step(t, typeSetting(t, step(t, m, keyEnter()), "8080"), keyEsc())
+
+	if cancelled.settings.kind != settingsKeyList || cancelled.settings.buf != "" {
+		t.Errorf("pane = %+v after esc, want the buffer closed and empty", cancelled.settings)
+	}
+	if !cancelled.settings.open {
+		t.Error("esc out of the buffer closed the whole pane; it backs out of the EDIT")
+	}
+	if len(log.writes) != 0 {
+		t.Fatalf("an abandoned edit persisted %+v", log.writes)
+	}
+	if got := cancelled.settingsValueCell(rows[0]); got != "0" {
+		t.Errorf("value cell = %q, want the row untouched", got)
+	}
+
+	emptied := step(t, m, keyEnter())
+	for range len("0") {
+		emptied = step(t, emptied, keyBackspace())
+	}
+	emptied = step(t, emptied, keyEnter())
+
+	if len(log.writes) != 0 {
+		t.Fatalf("an empty buffer persisted %+v, want nothing", log.writes)
+	}
+	if emptied.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v, want the buffer closed", emptied.settings)
+	}
+}
+
+// A value the binary refuses keeps its buffer OPEN with the reason on the row: what a key may hold is
+// the registry's business and the write seam is what asks (ADR 0011's thin renderer), so the pane's
+// half of a validation failure is to leave the human's own text in front of them to correct. A value
+// that lands afterwards closes the buffer and clears the refusal.
+func TestSettingsPaneBufferKeepsARefusedValueForCorrection(t *testing.T) {
+	rows := []SettingRow{settingsIntRow()}
+	log := &settingsWriteLog{err: errors.New("apogee: invalid present.port \"99999\": want a TCP port in 0-65535")}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = typeSetting(t, step(t, m, keyEnter()), "99999")
+	m = step(t, m, keyEnter())
+
+	if m.settings.kind != settingsValueBuffer {
+		t.Fatalf("pane = %+v, want the buffer still open on a refused value", m.settings)
+	}
+	if m.settings.buf != "099999" {
+		t.Errorf("buffer = %q, want the typed value kept for correction", m.settings.buf)
+	}
+	if len(m.settings.edits) != 0 {
+		t.Errorf("edits = %+v, want none: a refused write changed no file", m.settings.edits)
+	}
+	if got := m.settingsNote(rows[0]); !strings.Contains(got, "0-65535") {
+		t.Errorf("marker = %q, want the refusal's reason", got)
+	}
+	// On the row itself the reason is truncated to the column, so what is asserted there is its FRONT:
+	// a refusal is worded key-first for exactly this reason (cmd/apogee/registry.go).
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, "invalid present.port") ||
+		!strings.Contains(pane, settingsCaret) {
+		t.Errorf("the pane shows neither the refusal nor the still-open buffer:\n%s", pane)
+	}
+
+	log.err = nil
+	m = step(t, m, keyBackspace()) // "09999"
+	m = step(t, m, keyEnter())
+
+	if want := []settingEdit{{path: "present.port", value: "09999"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if m.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v, want the buffer closed once the value landed", m.settings)
+	}
+	if got := m.settingsNote(rows[0]); strings.Contains(got, "0-65535") {
+		t.Errorf("marker = %q, want the refusal gone", got)
+	}
+}
+
+// An abandoned edit takes its refusal with it: the ✗ described THAT buffer, and a row nobody is editing
+// must not go on reporting a failure the human walked away from.
+func TestSettingsPaneBufferCancelClearsTheRefusal(t *testing.T) {
+	rows := []SettingRow{settingsIntRow()}
+	log := &settingsWriteLog{err: errors.New("not a port")}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter())
+	m = step(t, m, keyEnter()) // commit the seeded value; refused
+	if got := m.settingsNote(rows[0]); !strings.Contains(got, "not a port") {
+		t.Fatalf("marker = %q, want the refusal — test premise broken", got)
+	}
+
+	m = step(t, m, keyEsc())
+
+	if got := m.settingsNote(rows[0]); got != "" {
+		t.Errorf("marker = %q after esc, want nothing left of the abandoned edit", got)
+	}
+}
+
+// The masked key is the one row the buffer does not seed: the pane holds a mask and not the secret
+// ([SettingRow]), so an api-key is typed whole. What is typed IS visible while typing — a human cannot
+// check a token they cannot see — and the marker afterwards says only that it was saved.
+func TestSettingsPaneMaskedRowBuffersVisiblyAndSaysOnlySaved(t *testing.T) {
+	rows := []SettingRow{{
+		Path: "api-key", Section: "Upstream", Kind: SettingString, Value: "••••",
+		Editable: true, Masked: true, Restart: true, Desc: "Bearer token sent on every request.",
+	}}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter())
+	if m.settings.buf != "" {
+		t.Fatalf("buffer = %q, want it empty: the pane never held the old secret", m.settings.buf)
+	}
+	m = typeSetting(t, m, "sk-live-42")
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, "sk-live-42"+settingsCaret) {
+		t.Errorf("the buffer does not show what is being typed:\n%s", pane)
+	}
+
+	m = step(t, m, keyEnter())
+
+	if want := []settingEdit{{path: "api-key", value: "sk-live-42"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if got, want := m.settingsNote(rows[0]), settingsSavedNote; got != want {
+		t.Errorf("marker = %q, want %q — the row never repeats a secret", got, want)
+	}
+	if pane := strip(m.renderSettings()); strings.Contains(pane, "sk-live-42") {
+		t.Errorf("the committed secret is still on the screen:\n%s", pane)
+	}
+}
+
+// Reset is two keypresses on purpose: backspace ARMS it and the hint line asks, ⏎ confirms, esc cancels.
+// What lands is ResetSetting — the key's line removed — and the row then reports the default it went back
+// to, on the same terms a write reports its value.
+func TestSettingsPaneResetArmsConfirmsAndCancels(t *testing.T) {
+	rows := []SettingRow{{
+		Path: "auto-title", Section: "Session", Kind: SettingBool, Value: "false", Default: "true",
+		Editable: true, Restart: true, Desc: "Name a new session from its first prompt.",
+	}}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	armed := step(t, m, keyBackspace())
+
+	if armed.settings.kind != settingsResetArmed {
+		t.Fatalf("pane = %+v, want the reset armed", armed.settings)
+	}
+	if pane := strip(armed.renderSettings()); !strings.Contains(pane, settingsResetHint) {
+		t.Errorf("the hint line does not ask for the confirmation:\n%s", pane)
+	}
+	if len(log.resets) != 0 {
+		t.Fatalf("arming reset %+v; arming is not the act", log.resets)
+	}
+
+	// esc cancels the question and leaves the key alone.
+	cancelled := step(t, armed, keyEsc())
+	if cancelled.settings.kind != settingsKeyList || !cancelled.settings.open {
+		t.Errorf("pane = %+v after esc, want the key list back", cancelled.settings)
+	}
+	if len(log.resets) != 0 {
+		t.Fatalf("a cancelled reset called %+v", log.resets)
+	}
+
+	confirmed := step(t, armed, keyEnter())
+
+	if want := []string{"auto-title"}; !reflect.DeepEqual(log.resets, want) {
+		t.Fatalf("resets = %+v, want %+v", log.resets, want)
+	}
+	if len(log.writes) != 0 {
+		t.Errorf("the reset WROTE %+v; a reset removes the line, it does not write the default", log.writes)
+	}
+	if confirmed.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v, want the key list back after the confirmation", confirmed.settings)
+	}
+	if got, want := confirmed.settingsNote(rows[0]), "→ true (next launch)"; got != want {
+		t.Errorf("marker = %q, want %q — the default the key went back to", got, want)
+	}
+}
+
+// A reset of a key that defaults to NOTHING says so in words: a marker that trailed off into a blank is
+// the one thing a row must not do after a deliberate act. The masked key is that case too — a removed
+// line left no secret to keep quiet about, so it reads like every other emptied key.
+func TestSettingsPaneResetOfAnUnsetDefaultSaysUnset(t *testing.T) {
+	for _, row := range []SettingRow{
+		settingsStringRow(),
+		{Path: "api-key", Section: "Upstream", Kind: SettingString, Value: "••••",
+			Editable: true, Masked: true, Restart: true, Desc: "Bearer token."},
+	} {
+		t.Run(row.Path, func(t *testing.T) {
+			log := &settingsWriteLog{}
+			m, _ := settingsEditModel(t, []SettingRow{row}, log)
+
+			m = step(t, step(t, m, keyBackspace()), keyEnter())
+
+			if want := []string{row.Path}; !reflect.DeepEqual(log.resets, want) {
+				t.Fatalf("resets = %+v, want %+v", log.resets, want)
+			}
+			if got, want := m.settingsNote(row), "→ unset (next launch)"; got != want {
+				t.Errorf("marker = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// A row already showing its default has no line to remove, so backspace arms nothing at all: a
+// confirmation prompt for a no-op is worse than a keypress that does nothing. Nor is a reset offered on
+// a row this surface may not write.
+func TestSettingsPaneResetIsANoOpOnADefaultValuedRow(t *testing.T) {
+	rows := []SettingRow{
+		settingsIntRow(), // value "0" == default "0"
+		{Path: "servers", Section: "Upstream", Kind: SettingStructured, Value: "3 servers",
+			EditPointer: "edit in config.yaml", Desc: "The named server list."},
+	}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	for i := range rows {
+		m.settings.selected = i
+		m = step(t, m, keyBackspace())
+		if m.settings.kind != settingsKeyList {
+			t.Fatalf("backspace on %s armed a reset with nothing to reset", rows[i].Path)
+		}
+		m = step(t, m, keyEnter()) // and the ⏎ that would have confirmed it resets nothing
+		if len(log.resets) != 0 {
+			t.Fatalf("reset %+v on %s, want none", log.resets, rows[i].Path)
+		}
+	}
+
+	// It becomes resettable the moment this pane writes it — the file then carries a line to remove.
+	m.settings.selected = 0
+	m = step(t, typeSetting(t, step(t, m, keyEnter()), "8080"), keyEnter())
+	m = step(t, step(t, m, keyBackspace()), keyEnter())
+
+	if want := []string{"present.port"}; !reflect.DeepEqual(log.resets, want) {
+		t.Errorf("resets = %+v, want %+v", log.resets, want)
+	}
+}
+
+// `mode` is the one key a RESET applies as well as persists, through the same seam a written mode goes
+// through: the session drops back to the ladder's default now, and the row shows it with no caveat.
+func TestSettingsPaneResetOfModeAppliesTheDefaultLive(t *testing.T) {
+	rows := []SettingRow{{
+		Path: "mode", Section: "Autonomy", Kind: SettingEnum, Value: "auto", Default: "ask-before",
+		EnumValues: []string{"plan", "ask-before", "allow-edits", "auto"}, Editable: true,
+		Desc: "Autonomy mode: how tool calls are gated.",
+	}}
+	log := &settingsWriteLog{}
+	m, eng := settingsEditModel(t, rows, log)
+
+	m = step(t, step(t, m, keyBackspace()), keyEnter())
+
+	if want := []string{"mode"}; !reflect.DeepEqual(log.resets, want) {
+		t.Fatalf("resets = %+v, want %+v", log.resets, want)
+	}
+	if got := eng.modesSet(); len(got) != 1 || got[0] != domain.ModeAskBefore {
+		t.Errorf("engine SetMode = %v, want [ask-before] — a reset of mode applies live too", got)
+	}
+	if m.opts.Mode != domain.ModeAskBefore {
+		t.Errorf("opts.Mode = %q, want ask-before (the footer renders the mode from it)", m.opts.Mode)
+	}
+	if got := m.settingsNote(rows[0]); got != "" {
+		t.Errorf("marker = %q, want none: a live-applied reset has nothing to wait for", got)
+	}
+	if got := m.settingsValueCell(rows[0]); got != "ask-before" {
+		t.Errorf("value cell = %q, want the default the session is now running", got)
+	}
+}
+
+// The two new steps are views of the SELECTED row and the rows are re-derived under them, so a key that
+// went away takes its buffer (or its armed reset) with it rather than letting a ⏎ land on whatever now
+// sits at that index — the enum sub-list's contract, on the same predicate.
+func TestSettingsSecondStepsFallBackWhenTheirKeyGoesAway(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open tea.KeyPressMsg
+		kind settingsKind
+	}{
+		{"the edit buffer", keyEnter(), settingsValueBuffer},
+		{"an armed reset", keyBackspace(), settingsResetArmed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := []SettingRow{settingsBoolRow(), settingsStringRow()}
+			log := &settingsWriteLog{}
+			opts := testOpts
+			opts.SettingsRows = func() []SettingRow { return rows }
+			opts.WriteSetting = log.write
+			opts.ResetSetting = log.reset
+			m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+
+			m = step(t, m, keyDown()) // the string row
+			m = step(t, m, tc.open)
+			if m.settings.kind != tc.kind {
+				t.Fatalf("pane = %+v, want %v open", m.settings, tc.kind)
+			}
+
+			rows = []SettingRow{settingsBoolRow()} // the provider drops the row under the step
+			m = step(t, m, keyEnter())
+
+			if m.settings.kind != settingsKeyList || m.settings.buf != "" {
+				t.Errorf("pane = %+v, want the key list back and no buffer", m.settings)
+			}
+			if len(log.writes) != 0 || len(log.resets) != 0 {
+				t.Errorf("the orphaned step persisted %+v / %+v, want nothing", log.writes, log.resets)
+			}
+			if pane := strip(m.renderSettings()); !strings.Contains(pane, settingsHint) {
+				t.Errorf("the pane is not showing its key list:\n%s", pane)
+			}
+		})
 	}
 }

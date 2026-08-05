@@ -337,7 +337,34 @@ path; write-error path leaves state unchanged.
 
 **Commit:** `feat(tui): settings pane edits bools and enums, persisting per edit`
 
-## 8. Editing v1b: string/int buffer, validation, reset-to-default
+## 8. Editing v1b: string/int buffer, validation, reset-to-default — ✅ DONE (2026-08-05)
+
+**NOTES (2026-08-05):** seven deviations. (1) The validate hooks are on the registry rows as the item says, but
+the PANE never calls one — it cannot (ADR 0011: the registry is the binary's). `saveConfigSetting` runs
+`configKey.Validate` before it opens the file, and the pane's half of "invalid input renders an inline error and
+stays in the buffer" is the existing refusal path: a `WriteSetting` error keeps `settingsValueBuffer` open with the
+reason in the row's note cell. (2) Validation sits in `saveConfigSetting` rather than inside the splice so its
+message is NOT prefixed with `update config "<path>":` — the note cell truncates at the column, and the pane would
+have shown the file path where the reason belongs (the validators are worded key-first for the same reason; the
+splice's own kind check is left where it is). (3) A commit of an EMPTY buffer writes nothing and just closes (the
+`/sessions` empty-rename precedent): `api-key`'s buffer seeds empty by design, so a committing-empty rule would
+make ⏎⏎ wipe the key, and the deliberate way to take a value away is the reset. (4) A masked row's marker is now
+`saved (next launch)` instead of item 7's `→ •••• (next launch)` — item 7's own doc says "'saved' is the whole of
+what the row has to say about an api-key", and the mask fallback read `row.Value`, which is `""` for a key that was
+unset at resolution time, so a first api-key write would have rendered a marker that trailed off. (5) A reset is
+recorded as the edit it is: `settingEdit` gained `reset`, `recordEdit`/`editOf` carry the record rather than the
+value alone, `settingsWrite` split into `settingsPersist` (which reports whether the write LANDED — the buffer is
+the one caller whose next move depends on it) and `settingsApplied`, which now homes the `mode` live apply for both
+a write and a reset. That is also item 7's carried-over follow-up answered: the reset of `mode` goes through the
+same seam, and `TestModeIsTheOnlyKeyAppliedWithoutARestart` (beyond the item's test list) pins the
+`settingsModeKey` ↔ `RestartRequired:false` equivalence the pane's show/apply split rests on. (6) "Active (file-set
+or just-edited)" is read as `edited-by-this-pane || Value != Default`: the renderer cannot know what the file sets,
+and a row already showing its default has no line worth removing — which is exactly the item's "reset on a
+default-valued row is a no-op", implemented as backspace arming nothing. (7) Two existing tests changed shape with
+the code they cover: `TestSettingsPaneEnterNeverWritesARowItMayNotEdit` lost its string/int rows (⏎ now opens their
+buffer — the new buffer tests own them) and gained backspace coverage of the same refusal, and
+`TestSettingsPaneNavigationWrapsAndSwallowsEveryOtherKey`'s "⏎ on a string row is a no-op" became "⏎ opens the
+row's buffer". Registry-side accept/refuse tables and a hook-coverage guard are also beyond the item's list.
 
 **What:** Depends on item 7. ⏎ on an editable string/int row opens a caret edit buffer
 (the `/sessions` rename idiom: hand-rolled mini-editor, esc cancel, ⏎ commit,
