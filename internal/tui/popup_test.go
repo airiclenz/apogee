@@ -1088,8 +1088,10 @@ func TestRenderPopupTitleFromBody(t *testing.T) {
 		}
 	})
 
-	// One body row, spent entirely on the marker: the case the ask prompt reaches between twelve and
-	// fifteen terminal rows, where the pane used to be a count and a hint.
+	// One body row, spent entirely on the marker: the case the ask prompt reaches wherever its grant
+	// past the pane's chrome is down to its offering's anchor row plus one line — a mechanism, not a
+	// height band, since it moves with how tall that row lands. There the pane used to be a count and
+	// a hint.
 	t.Run("the body's one row went to the marker", func(t *testing.T) {
 		t.Parallel()
 		spec := base()

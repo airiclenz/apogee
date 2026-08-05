@@ -96,13 +96,18 @@ import (
 // cannot give this many rows is not drawn at all.
 const popupChrome = 4
 
-// popupTitleBorderChrome is that same irreducible height for a pane that carries its name IN the top
-// border (popupSpec.titleInBorder): the title rides a row the box was drawing anyway, so the pane's
-// floor is its two borders and its hint row — one row less than popupChrome. It is the chrome such a
-// pane hands [Model.popupBudget], which is what spends the freed row on the pane's own content
-// instead of leaving it unclaimed. The frame's per-pane floor stays popupChrome ([Model.frameRowPlan]):
-// the allocation cannot know a pane's title placement, and a floor one row generous seats a pane the
-// budget then fills, where a floor one row short would seat one it cannot draw.
+// popupTitleBorderChrome is that same irreducible height for a pane that draws no title ROW
+// (popupSpec.titleInBorder): whatever name such a pane has rides a line the box was drawing anyway,
+// so its floor is its two borders and its hint row — one row less than popupChrome. Its only
+// production caller draws no title at ALL: the ask prompt's name went into the question itself
+// (layout.md), so an empty title leaves the top border plain, and the border carries the question's
+// own lead only on the windows that seat no line of it (popupSpec.titleFromBody). Either way the
+// name costs no content row, which is the whole of what this constant states. It is the chrome such
+// a pane hands [Model.popupBudget], which is what spends the freed row on the pane's own content
+// instead of leaving it unclaimed. The frame's per-pane floor stays popupChrome
+// ([Model.frameRowPlan]): the allocation cannot know a pane's title placement, and a floor one row
+// generous seats a pane the budget then fills, where a floor one row short would seat one it cannot
+// draw.
 const popupTitleBorderChrome = popupChrome - 1
 
 // popupBorderChrome is that height for a pane that draws NEITHER a title row nor a hint row: its
@@ -122,10 +127,11 @@ const popupBorderChrome = popupTitleBorderChrome - 1
 //
 // body states a different pane: one whose prose is the thing being decided about, where a row list
 // long enough to eat the whole grant leaves the question itself as a count (the ask prompt at eighty
-// by twenty-four — four answers and the blanks between them cost nine lines of ten, and the human is
-// asked to pick between them without the question on the screen). It is the lines the body keeps
-// FIRST, and the caller states its own prose's real wrapped height in it (popupBodyLineCount) rather
-// than a taste, so a one-line question claims one line and the rows keep the rest.
+// by twenty-four — four answers, the blanks between them and the pad around the block cost nine
+// lines of ten, and the human is asked to pick between them without the question on the screen). It
+// is the lines the body keeps FIRST, and the caller states its own prose's real wrapped height in
+// it (popupBodyLineCount) rather than a taste, so a one-line question claims one line and the rows
+// keep the rest.
 //
 // rows is what that claim may never take: the lines the row block needs to seat the one row the
 // window is anchored on, which is what keeps a floor on the prose from emptying a decision surface at

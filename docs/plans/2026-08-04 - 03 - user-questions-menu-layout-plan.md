@@ -347,8 +347,10 @@ always kept), so the approval prompt, the browser, the picker and the dropdown a
 menu needs no floor because its demand is four fixed options rather than the model's prose. The claim is a CEILING
 on a demand, not a reservation — `min(askQuestionFloor, popupBodyLineCount(...))`, so a one-line question leaves
 the offering every line it had — and it yields to `askAnchorRowLines`, the painted height of the row
-`popupRowWindow` anchors on, so wherever the pre-floor budget could seat an answer this one still does and the
-12–15-row border fallback is untouched. Two painter additions the fix implies: `popupBodyWrapped` (the wrap
+`popupRowWindow` anchors on, so wherever the pre-floor budget could seat an answer this one still does — WHICH
+heights seat an answer is what the floor leaves untouched. The border fallback's own reach did move with it: at
+80 columns with four one-line answers it fired up to a 24-row terminal before the floor and stops at 16 after
+it, and it moves again with how tall the anchor row lands. Two painter additions the fix implies: `popupBodyWrapped` (the wrap
 `popupBodyLines` already did, factored out so the caller can cost the same block) and `popupBodyLineCount`. Docs:
 `layout.md` gained the rung ("Inside a pane's own grant the rows come first — except where the prose IS what is
 being decided") and a closing clause on the F3 paragraph; the CHANGELOG `[Unreleased]` ask bullet gained the
@@ -370,6 +372,23 @@ to the marker. (c) `askPrompt`'s own doc still read "rows get priority … the b
 mention of the floor F4 had just given the question — it now names `askQuestionFloor`/`popupFloor.body` and the
 anchor-row bound it yields to. (d) one comment line this run added in `popupBudget`'s doc was 118 columns against
 the file's ~100 norm; that paragraph and the three rewritten ones are rewrapped at ≤100.
+
+NOTES (2026-08-05): follow-up (run-level, owner-approved; not a plan item) and the LAST wording pass of this run —
+comments and prose only, `git diff -U0` on the .go files is comment lines alone. Three leftovers the previous
+follow-ups left behind, each re-derived from the code as it stands. (a) `popupTitleBorderChrome`'s doc still
+opened with "a pane that carries its name IN the top border"; its only production caller draws no title at all
+(`askPrompt` sets `titleInBorder` with an EMPTY title), so the constant is now stated as the pane that draws no
+title ROW, with the ask pane's name having gone into the question (layout.md:206-207) and its border carrying the
+question's lead only via `titleFromBody`. (b) `popup_test.go`'s `titleFromBody` marker case called itself "between
+twelve and fifteen terminal rows"; measured, the ask pane reaches it at 12–16 rows at 80 columns with one-line
+answers and moves with the anchor's height, so the comment states the mechanism (the grant past the pane's chrome
+down to the anchor row plus one line) instead of a band. (c) this item's F4 NOTES clause above, likewise. Three
+more untrue claims found by the sweep this follow-up owes and fixed with them: `askPrompt`'s budget paragraph said
+the pane "shrinks to its borders and hint" on the shortest window, but the body's claim clamps at one line, so a
+seated ask pane ALWAYS keeps a content row (it holds the question's own marker while the answers' count rides the
+border); and the nine-line figure in `popupBudget`'s and `popupFloor`'s docs was decomposed as four answers plus
+the blanks between them (which is seven — the pad around the block is the other two), with `askQuestionFloor`'s
+"four wrapped answers" costing nine only when each is one line.
 
 **What:** Restyle the ask prompt per the mockup (lines 25-37). In
 `internal/tui/model.go` `askPrompt` (~line 4023):

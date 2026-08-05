@@ -4029,15 +4029,16 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // floor is the ONE thing that comes off ahead of the rows, and it is the caller's for the same reason
 // chrome is (popupFloor). Rows-first is right where the rows are the pane and the prose above them is
 // a caption — every pane but one passes the zero floor and is budgeted exactly as it always was — and
-// wrong where the prose is the thing being decided about: the ask prompt's four wrapped answers and
-// the blanks between them ask for nine lines of the ten an eighty-by-twenty-four window grants it, so
-// rows-first left the question itself as a count on a terminal with room to spare. A body claim
-// (popupBodyLineCount, capped by the pane's own taste) is taken off the top instead, bounded by what
-// leaves the rows their anchor row, so the shrink ladder below is unchanged at the heights where it
-// bites and the surplus above them goes to the question rather than to the breathing room around the
-// answers. It is a claim on the grant and never a promise past it — it is spent out of avail like
-// everything else, so both caps still floor at ZERO on a window that cannot pay for either, which is
-// the paragraph further down and the whole reason a floor here is safe.
+// wrong where the prose is the thing being decided about: the ask prompt's four answers, the blanks
+// between them and the pad around the block ask for nine lines of the ten an eighty-by-twenty-four
+// window grants it, so rows-first left the question itself as a count on a terminal with room to
+// spare. A body claim (popupBodyLineCount, capped by the pane's own taste) is taken off the top
+// instead, bounded by what leaves the rows their anchor row, so the shrink ladder below is
+// unchanged at the heights where it bites and the surplus above them goes to the question rather
+// than to the breathing room around the answers. It is a claim on the grant and never a promise
+// past it — it is spent out of avail like everything else, so both caps still floor at ZERO on a
+// window that cannot pay for either, which is the paragraph further down and the whole reason a
+// floor here is safe.
 //
 // chrome is what that frame costs the pane, and it is the CALLER's because only the caller knows the
 // spec it is about to compose. All three constants are in use: popupChrome where the title takes a
@@ -4249,11 +4250,12 @@ const askRowGap = 1
 
 // askQuestionFloor is how many lines of the QUESTION this pane keeps before its answers claim the
 // rest of the window (popupFloor.body). Rows-first is the budget's standing rule and the right one
-// almost everywhere, but this pane's offering scales with what the model wrote: four wrapped answers,
-// the blanks between them and the ones around the block cost nine lines, and an eighty-by-twenty-four
-// terminal — a window nobody would call short — grants the pane ten. The question was left with the
-// one line every seated pane keeps, spent on "… (+2 more lines)", so the human was asked to choose
-// between four answers with nothing on the screen saying what the choice was about.
+// almost everywhere, but this pane's offering scales with what the model wrote: four answers of one
+// line, the blanks between them and the ones around the block cost nine, and an
+// eighty-by-twenty-four terminal — a window nobody would call short — grants the pane ten. The
+// question was left with the one line every seated pane keeps, spent on "… (+2 more lines)", so the
+// human was asked to choose between four answers with nothing on the screen saying what the choice
+// was about.
 //
 // THREE because that is the shape of the surface rather than a round number: the mockup's own question
 // takes two lines at eighty columns, and a third covers the questions that run longer without
@@ -4289,11 +4291,12 @@ const askQuestionFloor = 3
 // pushes the input box off-screen: the question keeps its first askQuestionFloor lines ahead of
 // everything (popupFloor.body, and never more than leaves the answers the row their window is
 // anchored on), past that claim the rows get priority (they are what the human acts on), and the
-// body takes what is left and overflows into the explicit "… (+N more lines)" marker. On a window
-// that can spare neither the pane shrinks to its borders and hint — with the marker riding the top
-// BORDER now that no title row is drawn, counting BOTH the question lines and the choices it could
-// not seat (D2, popupTitleLine), so a hint still offering ↑↓ is never the only trace of an offering
-// the pane dropped.
+// body takes what is left and overflows into the explicit "… (+N more lines)" marker. That claim is
+// never less than the one line every seated pane keeps, so the shortest window is not a pane of
+// pure chrome: the one content row states the question's own count, and the answers — granted no
+// window at all there — have theirs counted onto the top BORDER now that no title row is drawn
+// (D2, popupTitleLine), so a hint still offering ↑↓ is never the only trace of an offering the pane
+// dropped.
 //
 // Where the shrinking goes one step further and leaves the question no line of its own — a body
 // budget of one row, traded whole for the marker, which is the bottom of the ladder now that the
