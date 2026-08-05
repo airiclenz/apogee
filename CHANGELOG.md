@@ -79,6 +79,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`apogee probe` and `apogee probe model` print their report to stdout.** Both reports travelled
+  on stderr, so `apogee probe > host.txt` wrote an empty file and put the whole report in the
+  terminal — the command's product now goes to stdout, where a redirect or a pipe can take it, while
+  the preamble, the record warnings and every other notice stay on stderr exactly as before.
+
 - **`/new` and `/clear` are no longer recorded as recallable prompts.** Walking back with `↑` could
   land on the session reset you typed earlier, one `⏎` away from wiping the conversation again —
   recall exists to re-send a line, and that is the one line where re-sending is never what you

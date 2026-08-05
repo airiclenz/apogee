@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"runtime"
 
@@ -103,7 +104,13 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 				ConfineToWorkspace: opts.confineToWorkspace,
 				Residue:            residue,
 			})
-			cmd.Println(host.Report())
+			// The report is this command's PRODUCT, so it goes to real stdout: Cobra's whole
+			// Print/Printf/Println family resolves to OutOrStderr, which would put the entire
+			// report on STDERR in every real invocation and leave `apogee probe >host.txt`
+			// empty (the fallback differs only when a caller has wired an out writer, which is
+			// tests and nothing else). Notices and warnings above keep travelling by PrintErrln,
+			// which does target the err stream — the same split runHeadless makes.
+			fmt.Fprintln(cmd.OutOrStdout(), host.Report())
 			return nil
 		},
 	}

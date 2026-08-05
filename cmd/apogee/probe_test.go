@@ -89,6 +89,44 @@ func TestProbeHostChildMatchesTheParent(t *testing.T) {
 	}
 }
 
+// The stream split as a SHELL sees it: `apogee probe > host.txt` must leave the report in the
+// file, not in the terminal. Both the parent and its `host` child come out of probeHostCommand,
+// so one invocation pins both.
+//
+// This is the guard on the mistake `apogee headless` made first: Cobra's cmd.Println writes to
+// OutOrStderr, so printing the product with it sends the whole report to stderr everywhere
+// except in a test that has called SetOut. Asserting on Cobra's buffers cannot catch that —
+// hence the process's own stdout and stderr here, with no out writer wired.
+func TestProbeHostReportLandsOnTheProcessStdout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			_, _ = io.WriteString(w, `{"data":[{"id":"probe-model","context_length":4096}]}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	configHome, workspace := t.TempDir(), t.TempDir()
+	var runErr error
+	stdout, stderr := captureProcessStreams(t, func() {
+		cmd := newProbeCommand()
+		// Deliberately no SetOut: the fallback under test is the one every real run takes.
+		cmd.SetArgs([]string{"--config", configHome, "--workspace", workspace, "--endpoint", srv.URL})
+		runErr = cmd.ExecuteContext(context.Background())
+	})
+	if runErr != nil {
+		t.Fatalf("probe: %v (stderr: %q)", runErr, stderr)
+	}
+
+	if !strings.Contains(stdout, "apogee probe — host report") {
+		t.Errorf("process stdout = %q; want the host report", stdout)
+	}
+	if strings.Contains(stderr, "apogee probe — host report") {
+		t.Errorf("the report reached process stderr; a redirect of stdout would lose it: %q", stderr)
+	}
+}
+
 // An interrupted Windows run leaves mandatory labels on the disk and a journal describing how
 // to undo them, and ADR 0020 §2 makes the host report the surface that says so off-session. The
 // report must therefore READ that state and leave it exactly where it found it: constructing

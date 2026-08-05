@@ -129,7 +129,12 @@ func probeModelCommand() *cobra.Command {
 			result.Save = recordProbeFingerprint(result, roots, opts, !noSave,
 				func(msg string) { cmd.PrintErrln(msg) })
 
-			cmd.Println(result.Report())
+			// The report is this command's PRODUCT, so it goes to real stdout, exactly as the
+			// host half's does: Cobra's Print family resolves to OutOrStderr and would put the
+			// battery's whole report on STDERR in every real invocation. The preamble, the
+			// save warnings and the record notices above stay on stderr by PrintErrln, so
+			// `apogee probe model >report.txt` keeps the report and still shows the rest.
+			fmt.Fprintln(cmd.OutOrStdout(), result.Report())
 			return nil
 		},
 	}

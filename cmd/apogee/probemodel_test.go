@@ -173,6 +173,42 @@ func TestProbeModelRunsTheBatteryAndRecords(t *testing.T) {
 	}
 }
 
+// The stream split as a SHELL sees it: `apogee probe model > battery.txt` must leave the report
+// in the file and the spend/write preamble in the terminal, where a warning belongs.
+//
+// The same guard the host half carries, for the same reason: Cobra's cmd.Println resolves to
+// OutOrStderr, so printing the product with it puts the whole report on stderr in every real
+// invocation and only a test that has called SetOut sees otherwise. No out writer is wired
+// here, so this exercises the fallback every real run takes.
+func TestProbeModelReportLandsOnTheProcessStdout(t *testing.T) {
+	srv := modelUpstream(t)
+	configHome := t.TempDir()
+
+	var runErr error
+	stdout, stderr := captureProcessStreams(t, func() {
+		cmd := newProbeCommand()
+		// Deliberately no SetOut: the fallback under test is the one every real run takes.
+		cmd.SetArgs([]string{"model", "--config", configHome, "--endpoint", srv.URL})
+		runErr = cmd.ExecuteContext(context.Background())
+	})
+	if runErr != nil {
+		t.Fatalf("probe model: %v (stderr: %q)", runErr, stderr)
+	}
+
+	if !strings.Contains(stdout, "apogee probe — model battery") {
+		t.Errorf("process stdout = %q; want the battery report", stdout)
+	}
+	if strings.Contains(stderr, "apogee probe — model battery") {
+		t.Errorf("the report reached process stderr; a redirect of stdout would lose it: %q", stderr)
+	}
+	if !strings.Contains(stderr, "apogee probe model: calling the model live") {
+		t.Errorf("the preamble is not on process stderr: %q", stderr)
+	}
+	if strings.Contains(stdout, "calling the model live") {
+		t.Errorf("the preamble reached process stdout, where it would contaminate the report: %q", stdout)
+	}
+}
+
 // Once the record exists, the identity ladder resolves the same model at MEDIUM confidence
 // offline — which is the whole reason the probe persists. Print-only would leave
 // ConfidenceMedium a tier nothing can produce.
