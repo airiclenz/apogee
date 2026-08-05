@@ -109,11 +109,14 @@ point is a **minor** bump, not a breaking change.
     **transitive**, so one number says how much work happened in there however deeply it nested.
     Expanding reveals the inner blocks *in their own states* — a nested run stays collapsed inside
     an expanded parent, because this is one rule applied at every depth and not a special case.
-  - **A live block's star blinks.** While a block still holds a call whose result has not landed —
-    or a run whose report has not — its header glyph alternates `✦` with a bare cell on the
-    spinner's own tick, so work in progress is visible without the transcript carrying a timer of
-    its own. It settles to `✦` when the result lands, and the tick repaints the transcript only
-    while something is actually open.
+  - **A live block's star blinks, half a second on and half a second bare.** While a block still
+    holds a call whose result has not landed — or a run whose report has not — its header glyph
+    shows `✦` for half a second, then leaves its cell bare for half a second: a space that holds the
+    star's column, so the label beside it never shifts. The phase rides the spinner's own tick, so
+    work in progress is visible without the transcript carrying a timer of its own, and the
+    transcript is repainted only on the tick that actually flips the phase — two repaints a second
+    while something is open, and none at all while nothing is. It settles to `✦` when the result
+    lands.
   - **The header says which state it is in — and that it can be clicked at all.** A header whose
     block has something to reveal now trails its label with `▸` while the block is collapsed and
     `▾` while it is expanded, painted in the faint detail tone so it reads as chrome beside the
@@ -714,14 +717,6 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
-- **The live star blinks half a second on, half a second bare.** A block still holding an open call
-  used to alternate `✦` and `✧` on every spinner frame, which at ten to twenty frames a second read
-  as a flicker rather than a heartbeat. Now the star shows for half a second and its cell is bare
-  for half a second — a space that holds the column, so the label beside it never shifts. The phase
-  is still carried on the spinner's own tick and the transcript still keeps no timer of its own; the
-  transcript is repainted only on the tick that actually flips the phase, so a running turn costs
-  two repaints a second instead of twenty. Specced in `layout.md` ("The live star").
-
 - **The two prompts that ask you something are menus now.** An approval used to be a paragraph with a
   legend under it (`a allow · s always · d deny`), and an ask prompt a question under an
   `the assistant is asking:` heading. Both are menu boxes: the tool the decision turns on rides the
@@ -1176,7 +1171,7 @@ point is a **minor** bump, not a breaking change.
     cannot shift; that is what the toggle reads now, identically for a header, a `… +N more lines`
     marker and a collapsed prompt's `see more (+N lines)…` block.
   - **A press on a block that is still working survives the block repainting under it.** A live
-    block's header star alternates ✦/✧ with the spinner, and a repaint of any line the press sat on
+    block's header star blinks with the spinner, and a repaint of any line the press sat on
     discarded the press outright — so the running calls you most want to open were the ones whose
     headers could not be clicked at all. A press with no drag behind it paints no highlight, so
     there is no stale text it could be covering; it now rides out repaints. A real drag selection

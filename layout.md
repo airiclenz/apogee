@@ -27,12 +27,12 @@
   ┝ TODO.md   1 - 408
   ┕ ISSUES.md 1 - 8
 
-✦ Run
+✦ Run ▸
   ┕ go test ./...
     ok      github.com/airiclenz/apogee/internal/tui   0.412s
     … +2 more lines
 
-✦ View Diff
+✦ View Diff ▾
   ┕ main.go +2 -2
       a context line
     - a code line that has been removed
@@ -357,9 +357,11 @@ brackets' job and dies with them.
 **What groups.** Consecutive tool calls at the same nesting depth carrying the same label fold
 into one block. Any entry between them — narration, a note, an approval, an error — breaks the
 run. Two different tools that share a label (a single and a multi find-and-replace are both
-"Edit File") do group: the user groups by what they read, not by tool id. Grouping still asks the
-next question of each call, though, and an edit carrying its changed lines answers it the way any
-body-carrying call does — see *What stays standalone* below.
+"Edit File" — the one label the registry gives to more than one tool) do group: the user groups by
+what they read, not by tool id. Grouping still asks the next question of each call, though, and an
+edit carrying its changed lines answers it the way any body-carrying call does — so that pair in
+fact groups only where neither call's arguments say anything about a change. See *What stays
+standalone* below.
 
 **The outcome, in two halves.** What a finished call has to say is split in two, and everything
 below follows from that split — never from counting lines. The **summary** is the single line that
@@ -431,7 +433,8 @@ renders as its own block. It renders in the *same shape* it would have had insid
 a block of one is byte-identical in shape to a block of many, which is the whole point of the
 header carrying no target.
 
-**The block's shape.** One header line carrying the label alone, then one branch line per call —
+**The block's shape.** One header line carrying no target — the label, and its state indicator
+where the block has something to toggle — then one branch line per call —
 `┝`, and `┕` for the last. Two shapes, and they are the whole grammar:
 
 - **A call with a target** — the branch is the target, and where the call has a summary, one space
@@ -513,7 +516,9 @@ where a click there toggles something, so a body-less group and a block that hid
 none, and a sub-agent run's head wears one however short its own report is. The
 `… +N more lines` marker is apogee's line too and is painted as one — light gray-blue `#8db4e6`, no
 background and no bold weight, the quieter sibling of the prompt block's `see more` — so a body line
-that happens to open with `…` can never be mistaken for the affordance beneath it.
+that happens to open with `…` can never be mistaken for the affordance beneath it. The sketch at the
+top of this file shows both states side by side: a collapsed `Run ▸` over its remainder marker, and
+a `View Diff ▾` deliberately drawn open so the shape of a full body appears too.
 
 **A huge prompt collapses to three rows.** A send whose body soft-wraps to *more than three* rows —
 a submitted `❯` prompt and a delivered `⧖` interjection alike, they are one shape — paints three:

@@ -4,9 +4,6 @@ X: Executed
 
 - [ ] I'd like a full screen menu for all available settings when running the slash command /settings. This needs grilling.
 
-- [ ] not all tool calls follow the collapsable display pattern. Generally, I want to not see more than 3 to 4 lines of a tool call and the tool call content needs to be properly formatted (orientation, font weight, color highlights), aligned and readable. All tools must follow the same general formatting rules and be collapsable. This means for example that file-write-tools needs to be able to display the changed lines, and so on...
-The tool header needs to indicate if a tool in the session chat is expanded or collapse (e.g. `Run Python ▾` for expanded and `Run Python ▸` for collapsed - feel free to find better symbols). This will probably need grilling.
-
 - [ ] Collapsable tool calls print too much of the tool's content if the first line is very long. apogee just wraps the line and prints however many lines it needs. I'd like to limit the apogee tool printout - when collapsed - to 3 lines. Important information like the amount of tool calls for a sub agent need to stay visible (maybe print them in a separated extra line?)
 
 - [ ] `/new` should not be recorded as a recallable prompt

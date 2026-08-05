@@ -98,10 +98,12 @@ func quotedSummary(line detailLine) branchSummary {
 }
 
 // toolBody is a tool call's retained body — the detail lines that lay out beneath its branch line
-// — bound to the one fact the collapsed paint's cap depends on: whether those lines are a DIFF (a
-// body carrying at least one red/green line). Every body collapses to the same house budget
-// whatever its kind (collapsedBodyCap, render.go), so the kind no longer sizes the collapsed
-// paint; it is the body's own description of what it holds, settled where the lines are.
+// — bound to one fact about those lines: whether they are a DIFF (a body carrying at least one
+// red/green line). The kind sizes nothing. Every body collapses to the same house budget whatever
+// it holds (collapsedBodyCap, render.go), and since that one budget replaced the per-kind caps no
+// painter asks the question at all. What the kind still buys is the SEAM rather than the flag: a
+// body and its own description travel as one value, derived together and never apart, so neither
+// can go stale against the other. That is why it is settled here rather than dropped.
 //
 // The lines and their kind travel as ONE value, and newToolBody is the only thing that puts lines
 // in, so the pair cannot be written stale: there is no way to hand a painter a diff body that says
@@ -131,7 +133,9 @@ func (b toolBody) all() []detailLine { return b.lines }
 // from which halves of the outcome are filled, never from how many lines there are (render.go).
 func (b toolBody) len() int { return len(b.lines) }
 
-// isDiff reports the kind newToolBody settled: true when the body carries a red/green line.
+// isDiff reports the kind newToolBody settled: true when the body carries a red/green line. No
+// painter calls it — one budget caps every kind alike — so its callers today are the tests that
+// pin the seam and the codec's decode, which has to settle a kind the wire never carried.
 func (b toolBody) isDiff() bool { return b.diff }
 
 // with returns the body extended by more lines — a result folding into a view that already has one
@@ -530,8 +534,8 @@ func (tv *toolView) sanitize() {
 // bodyIsDiff reports whether a body's lines carry a red/green diff line — the exact test for a diff
 // body, since diffBody is the diff kinds' only producer and never emits an untagged body ("No
 // changes detected" carries no diff at all and never reaches it). It runs once per body, in
-// newToolBody; the painter reads the answer off the body (toolBody.isDiff) rather than asking
-// again.
+// newToolBody, so the answer is settled with the lines rather than re-derived over a retained body
+// on every repaint.
 func bodyIsDiff(details []detailLine) bool {
 	for _, d := range details {
 		if d.Kind == detailDiffAdded || d.Kind == detailDiffRemoved {

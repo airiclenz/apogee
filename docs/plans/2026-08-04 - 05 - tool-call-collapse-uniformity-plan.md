@@ -366,7 +366,31 @@ no promotion); empty/missing content argument → no body. Golden updated.
 
 ---
 
-## 7. Closeout: the spec reads as one document and the issue closes (depends on 1–6)
+## 7. Closeout: the spec reads as one document and the issue closes (depends on 1–6) — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): the five follow-ups routed here resolved as follows. (a) CHANGELOG's Fixed entry
+on the click-during-repaint bug said the star "alternates ✦/✧" in the present tense — reworded to
+"blinks with the spinner", which is the fact that entry actually needs. (b)+(c) layout.md's opening
+sketch is normative (§"The rules behind the tool-call sketch" explains it by name), so `✦ Run` gained
+`▸` and `✦ View Diff` gained `▾`: the diff stays drawn open deliberately, since a collapsed sketch
+would never show a full body's shape, and the indicator is what makes the two states legible side by
+side — §"Collapsed and expanded blocks" now says so in one sentence. The sketch's `✦ Sub Agent` block
+is left ALONE and wears no indicator: its "Sub Agent 1: Agent Name (= brief one line summary)" lines
+are not stale spec but the still-parked TODO.md entry "Naming Sub-Agents", so it depicts an
+unimplemented wish rather than today's run block — out of this item's scope. (d) **The body kind
+stays.** `toolBody.diff`/`isDiff()` has no painter left, but deleting it would take `bodyIsDiff`, the
+codec's decode settling and the `newToolBody` constructor guard with it — a design call about the
+seam, not a closeout edit. The judgement is recorded where a reader meets the code: the `toolBody`,
+`isDiff` and `bodyIsDiff` comments now say the kind sizes nothing and survives for the seam, and the
+two test comments that justified the invariant by a per-kind cap were reworded. (e) The
+find-and-replace grouping example STAYS: "Edit File" is the only label the registry gives to more
+than one tool, so there is no other pair to teach with; the paragraph now says so and adds that the
+pair groups only where neither call's arguments say anything about a change. Two further edits beyond
+the follow-up list, both squarely "no orphaned sentence": layout.md's "The block's shape" still opened
+"One header line carrying the label alone", which item 2's indicator contradicted; and the two
+`[Unreleased]` blink entries were merged — the Changed entry framed `✦`/`✧` as prior behaviour that
+never shipped in any release, so its substance (the half-second timing, the bare cell holding the
+column, the flip-only repaint) folded into the Added sub-bullet and the Changed entry was deleted.
 
 **What.** Read `layout.md`'s two amended sections end-to-end and reconcile any contradiction the
 per-item amendments left (one voice, no orphaned sentence still describing the old star, the old

@@ -696,11 +696,12 @@ func TestWriteBodySurvivesItsByteCountSummary(t *testing.T) {
 	}
 }
 
-// TestBodyKindIsSettledWhereTheLinesAre pins the mechanism the collapsed paint's cap reads: the
-// body's kind is decided ONCE, where the lines are put into a body (newToolBody), and carried by
-// that body — not re-derived from the lines on every repaint, over a body the entry retains whole.
-// Both flavours and both edges are covered: an empty body and a single line never truncate whatever
-// their kind, so they are exactly the shapes where a wrong answer would hide until the body grew.
+// TestBodyKindIsSettledWhereTheLinesAre pins the constructor seam, which is what the kind is for
+// now that one budget caps every body alike and no painter reads it: the kind is decided ONCE,
+// where the lines are put into a body (newToolBody), and carried by that body — not re-derived from
+// the lines on every repaint, over a body the entry retains whole. Both flavours and both edges are
+// covered, an empty body and a single line included, because a body that answers wrongly while it
+// is small would keep answering wrongly once it grew.
 func TestBodyKindIsSettledWhereTheLinesAre(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -740,7 +741,8 @@ func TestBodyKindIsSettledWhereTheLinesAre(t *testing.T) {
 
 // TestBodyKindFollowsTheProducer proves the seam is reached on the paths that actually make
 // bodies: view_diff's tagged body settles as a diff, free-form output settles as plain. Together
-// with TestBodyKindIsSettledWhereTheLinesAre this is the whole contract collapsedDetails relies on.
+// with TestBodyKindIsSettledWhereTheLinesAre it pins the whole contract — the kind describes the
+// lines it was derived with, on every path that makes a body.
 func TestBodyKindFollowsTheProducer(t *testing.T) {
 	diff := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, workspaceRoot{})
 	diff.enrichWithResult(domain.ToolResult{
