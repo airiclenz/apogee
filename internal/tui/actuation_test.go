@@ -557,6 +557,35 @@ func TestProfileLoadMovedTakesTheSwitchFold(t *testing.T) {
 	}
 }
 
+// A followed profile is not a startup CHOICE: its server is an address the launcher picked, named by
+// no `servers:` entry, so the fold records nothing and claims nothing (ADR 0036 decision 2). The
+// recording seam is wired for this test precisely so an unwanted call would be caught.
+func TestProfileLoadMoveRecordsNoStartupChoice(t *testing.T) {
+	t.Parallel()
+
+	fake := newLauncher()
+	fake.follows(ServerSwitchResult{Endpoint: "http://localhost:8081", HostAlias: "beta"}, nil)
+	rec := &fakeRecorder{saved: true} // would report a write if it were ever called
+	opts := testOpts
+	opts.LaunchProfiles = fake.list
+	opts.LoadProfile = fake.load
+	opts.UnloadServer = fake.act
+	opts.StopServer = fake.act
+	opts.RecordServerChoice = rec.record
+	m, _ := seededPicker(t, opts)
+	m, cmd := startLoad(t, m, "beta")
+
+	m, _ = driveActuation(t, m, cmd)
+
+	if len(rec.names) != 0 {
+		t.Errorf("recorded %v, want nothing — a profile's server is no entry a session could start on", rec.names)
+	}
+	want := "switching server: test-host → beta (http://localhost:8081)"
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+		t.Errorf("notes = %v, want %q with no saved clause", got, want)
+	}
+}
+
 // The move a load resolves is committed by the FOLD, never by the seam that resolved it. The seam
 // blocks for minutes on a Cmd goroutine while the move re-points the engine, and the Update loop is
 // the only boundary that orders such a mutation against the heartbeat's own rebinds — so a load that

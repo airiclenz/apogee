@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -301,6 +302,72 @@ func TestRunRootSwitchServerRepointsTheSession(t *testing.T) {
 	if metas[0].Model != "" {
 		t.Errorf("Meta.Model = %q; want empty — a Save in the unbound gap must not claim the old server's model",
 			metas[0].Model)
+	}
+}
+
+// The recording seam, end to end through runRoot (ADR 0036 decision 2): a name the `servers:` list
+// holds is spliced into config.yaml as the entry the NEXT session starts on; a name it does not hold —
+// the synthesized ephemeral startup row is the one the picker offers — is skipped silently, without
+// so much as creating the file; and a write that cannot land is reported rather than swallowed.
+func TestRunRootRecordServerChoiceWritesOnlyConfiguredNames(t *testing.T) {
+	t.Parallel()
+
+	first := upstreamServer(t, "model-a", 4096)
+	second := upstreamServer(t, "model-b", 8192)
+	configHome := t.TempDir()
+
+	rec := &recordingLauncher{}
+	opts := options{
+		endpoint:         first.URL,
+		model:            "model-a",
+		mode:             "ask-before",
+		hostAlias:        "workstation",
+		workspace:        t.TempDir(),
+		configDir:        configHome,
+		autoCompact:      true,
+		servers:          []serverEntry{{Name: "second", Endpoint: second.URL}},
+		startupEphemeral: true, // an override run, so "workstation" is the synthesized row's label
+	}
+
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+	if rec.opts.RecordServerChoice == nil {
+		t.Fatal("the composition root left the recording seam unwired")
+	}
+	configPath := filepath.Join(configHome, "config.yaml")
+
+	// The ephemeral startup row: switchable, and deliberately not writable-back — it names no entry.
+	if saved, err := rec.opts.RecordServerChoice("workstation"); saved || err != nil {
+		t.Errorf("recording the synthesized row = (%v, %v); want (false, nil) — a silent skip", saved, err)
+	}
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Errorf("a skipped recording touched %s (stat err %v); want the file left absent", configPath, err)
+	}
+
+	// A configured entry: the choice is written, through the same splice writer every other key uses.
+	if saved, err := rec.opts.RecordServerChoice("second"); !saved || err != nil {
+		t.Fatalf("recording a configured entry = (%v, %v); want (true, nil)", saved, err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read the config the recording wrote: %v", err)
+	}
+	if !strings.Contains(string(data), "server: second") {
+		t.Errorf("config.yaml does not carry `server: second`:\n%s", data)
+	}
+
+	// A write that cannot land: the seam reports it, so the renderer can warn rather than claim a
+	// recording that never happened. A directory where the file belongs is the failure, arranged
+	// where no real run could reach it.
+	if err := os.Remove(configPath); err != nil {
+		t.Fatalf("clear the config: %v", err)
+	}
+	if err := os.Mkdir(configPath, 0o755); err != nil {
+		t.Fatalf("stage the unwritable config: %v", err)
+	}
+	if saved, err := rec.opts.RecordServerChoice("second"); saved || err == nil {
+		t.Errorf("recording onto an unwritable config = (%v, %v); want (false, an error)", saved, err)
 	}
 }
 

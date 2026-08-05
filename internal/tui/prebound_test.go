@@ -37,15 +37,18 @@ func (f *fakeBind) bind(name string) (ServerSwitchResult, error) {
 	return ServerSwitchResult{}, errors.New("unknown server " + name)
 }
 
-// fakeRecorder stands in for the `server:` splice writer behind [Options.RecordServerChoice].
+// fakeRecorder stands in for the `server:` splice writer behind [Options.RecordServerChoice]. saved
+// is what it reports having done: true is the binary's answer for a name the `servers:` list holds,
+// and the zero value is its silent skip for one it does not.
 type fakeRecorder struct {
 	names []string
+	saved bool
 	err   error
 }
 
-func (f *fakeRecorder) record(name string) error {
+func (f *fakeRecorder) record(name string) (bool, error) {
 	f.names = append(f.names, name)
-	return f.err
+	return f.saved, f.err
 }
 
 // preboundOpts is the Options the binary hands a session it could not resolve a server for: the
@@ -130,7 +133,7 @@ func TestPreboundSessionIssuesNoBeat(t *testing.T) {
 // recorded as the one the next session starts on, the display adopts what came back, and the state
 // is over.
 func TestPreboundChoiceBindsRecordsAndEndsTheState(t *testing.T) {
-	bind, rec := &fakeBind{}, &fakeRecorder{}
+	bind, rec := &fakeBind{}, &fakeRecorder{saved: true}
 	m, _ := preboundModel(t, PreboundFirstBoot, "", bind, rec)
 
 	m = step(t, m, keyDown()) // highlight the second entry, so the accept cannot pass by luck
@@ -157,7 +160,9 @@ func TestPreboundChoiceBindsRecordsAndEndsTheState(t *testing.T) {
 	if box := m.transcript.entries[0]; box.kind != entryStartup || box.startup.Host != "remote" {
 		t.Errorf("start-up box = %+v, want it restated on the server just bound", box.startup)
 	}
-	if want := "server bound: remote (http://remote:8080)"; countNotes(m, want) != 1 {
+	// One line for one act: the server bound, and — because that choice was written — the key that
+	// now remembers it, stated at the end of the same note.
+	if want := "server bound: remote (http://remote:8080)" + savedChoiceClause; countNotes(m, want) != 1 {
 		t.Errorf("notes = %v, want exactly one %q", noteTexts(m), want)
 	}
 	// A bind is a COLD start, not a switch: nothing was ever observed, so the first beat that lands

@@ -342,7 +342,11 @@
 // current row marked by endpoint rather than by id and the accept calling SwitchServer instead of
 // applyRebind; both verbs also take their choice as an argument ("/model <id>", "/server <name>"),
 // both are idle-only by the commandSpecs table, and /server's whole degrade ladder is one line —
-// an unwired seam and an empty list are the same situation for the human.
+// an unwired seam and an empty list are the same situation for the human. A committed switch is also
+// a CHOICE (ADR 0036): the name goes to [Options.RecordServerChoice], which writes it as the entry
+// the next session starts on when the binary recognises it as a configured one and skips it silently
+// otherwise — the renderer offers every name and believes the answer, stating the recording at the
+// end of the move's own note and a failed write as a footnote under it (prebound.go).
 //
 // A session may also start with NO server, and that is the one state in which the renderer opens a
 // pane nobody asked for (prebound.go, ADR 0036). The binary could not resolve which `servers:` entry

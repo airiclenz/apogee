@@ -462,6 +462,10 @@ type Options struct {
 	// a configured entry (and is therefore worth writing) is the binary's question, because only the
 	// binary can tell a configured row from the synthesized one an override startup earns.
 	//
+	// It answers whether it WROTE, which is what lets the renderer state the recording beside the
+	// move ("· server: saved") without claiming one for the moves the binary skips: a name in no
+	// `servers:` entry is skipped silently, and false with no error is exactly that outcome.
+	//
 	// It is best-effort persistence of something that ALREADY happened: the session moved before this
 	// is called and stays moved whatever it answers, so an error is a note and never an undo. Like
 	// WriteSetting it is synchronous — one small file, spliced and renamed — and called on the Update
@@ -469,7 +473,7 @@ type Options struct {
 	//
 	// nil ⇒ nothing is recorded and every switch is session-scoped, which is exactly the behaviour
 	// this key was introduced to replace; every hand-built Options keeps it.
-	RecordServerChoice func(name string) error
+	RecordServerChoice func(name string) (recorded bool, err error)
 
 	// LaunchProfiles lists the Launch profiles the launcher's config defines — what `/model` offers on
 	// a host with a launcher, re-read FRESH every time the picker opens (ADR 0029 D4), so a profile

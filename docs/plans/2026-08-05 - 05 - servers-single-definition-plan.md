@@ -347,7 +347,25 @@ both status-line facts; command-table and `TestModelNoBuilderByValue` stay green
 
 **Commit:** `feat(tui): first boot asks — the pre-bound state opens the server picker, or /settings when none configured`
 
-## 8. A switch records the startup choice
+## 8. A switch records the startup choice — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): "the fold/announce line notes the recording" forced item 7's seam to ANSWER rather
+than merely accept: `tui.Options.RecordServerChoice` is now `func(name string) (recorded bool, err error)`.
+The renderer states "· server: saved" only for a write that happened, and it cannot tell a configured row
+from `upstreamChoices`'s synthesized one (item 7's ratified division of labour) — so the binary reports
+what it decided. `false, nil` IS the silent skip.
+
+NOTES (2026-08-05): consequences of stating the recording on the move's own line. `recordServerChoice` is
+now a free function returning a `choiceRecord{saved, warning}` (prebound.go) that both folds take —
+`foldServerBind`/`foldServerSwitch` and their note builders gained the parameter — so the record runs
+BEFORE the fold (its clause is part of the announce) while a failed write lands as a footnote UNDER the
+move it belongs to rather than above it. The launcher's completion fold (`actuation.go`) passes the zero
+`choiceRecord`: a profile's server reaches the seam not at all, which is its silent skip.
+
+NOTES (2026-08-05): the failed-write warning stays a TRANSCRIPT note ("could not record the server
+choice: …"), the shape item 7 shipped, not a status-line item as this item's text says: the status line's
+pre-bound slot carries standing session facts (layout.md), and a one-off write failure is news about an
+act, which is what notes are for.
 
 **What:** Depends on item 7 (and the settings plan's splice writer). Wire a
 `recordServerChoice(name)` seam (composition root, beside the `switchServer` closure

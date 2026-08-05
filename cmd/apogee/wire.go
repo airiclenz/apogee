@@ -407,6 +407,29 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		return mover.move(entry.Endpoint, entry.Name, entry.Model, entry.APIKey)
 	}
 
+	// The recording closure: the composition root's half of ADR 0036 decision 2 — the `server:` key
+	// this session's last deliberate choice becomes, so the NEXT session starts where this one ended
+	// without asking. It is spliced into the same config.yaml every other write goes through (the
+	// ADR 0035 writer, extended by 0036 to this key), which is why it lives beside the two closures
+	// above rather than in the renderer: the file, the path, and the registry that says the key may
+	// be written are all the binary's.
+	//
+	// The CONFIGURED check is the whole of the decision, and it is a name lookup in the file's own
+	// list rather than in the switchable choices: the one row those two lists differ by is the
+	// synthesized ephemeral startup (upstreamChoices), which names no entry and must never be
+	// written back as one. A move onto it — like a launcher profile's server, which never reaches
+	// this seam at all — is skipped SILENTLY: false with no error, which the renderer states by
+	// saying nothing about a recording.
+	recordServerChoice := func(name string) (bool, error) {
+		if !configuredServer(opts.servers, name) {
+			return false, nil
+		}
+		if err := saveConfigSetting(filepath.Join(roots.config, "config.yaml"), "server", name); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
 	// The bind closure: the same resolution, ending in a CONSTRUCTION rather than a move. It is the
 	// only way out of the pre-bound state, and it answers with what a switch answers so the display
 	// adopts a first binding exactly as it adopts a move — the endpoint now on the wire, the entry's
@@ -526,6 +549,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// leaves every flow below exactly as it was.
 		Prebound:   opts.prebound,
 		BindServer: bindServer,
+		// The persistence half of both verbs (ADR 0036 decision 2): every deliberate move onto a
+		// configured entry — the first-boot choice included — records that entry as the one the next
+		// session starts on, so the question is asked once. Moves onto anything the file does not
+		// list are skipped silently, which is what keeps an override or a profile load from becoming
+		// config nobody wrote.
+		RecordServerChoice: recordServerChoice,
 		// The `/model`-over-profiles, `/unload-model`, `/stop-server` half (ADR 0029): browse the
 		// launcher's profiles, activate one — following it onto another server when it lives
 		// there — and free or stop the server this session is on. All four are nil when the

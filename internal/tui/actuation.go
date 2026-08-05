@@ -348,7 +348,10 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 			// the notices above are on screen with the move rather than one frame behind it. It also
 			// replaces the whole heartbeat state, which discards any rebind stashed under the latch —
 			// an observation of the server being LEFT is not news about the one being joined.
-			return m.foldServerSwitch(from, switched)
+			// Nothing is RECORDED here: a profile's server is an address the launcher chose, not an
+			// entry of `servers:`, so there is no name a next session could start on (ADR 0036
+			// decision 2). The zero record is that silence — no clause on the note, no warning.
+			return m.foldServerSwitch(from, switched, choiceRecord{})
 		}
 		// The profile is loaded but the session could not follow it there, so it stays exactly where
 		// it was and the failure is told like every other one below.

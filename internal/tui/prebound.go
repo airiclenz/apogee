@@ -156,11 +156,13 @@ func (m Model) bindToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 	if err != nil {
 		return m.pickerNote("could not bind server: " + stripEscapes(err.Error()))
 	}
+	// The recording runs BEFORE the fold and the fold states it, so the human reads one line about one
+	// act rather than a line and a footnote about the same one (ADR 0036 decision 2).
+	record := recordServerChoice(m.opts.RecordServerChoice, choice.Name)
 	// The state is over the moment the engine exists, and it is cleared BEFORE the fold: the beat the
 	// fold arms is issued only for a bound session (beatCmd).
 	m.opts.Prebound = PreboundStart{}
-	bound, beat := m.foldServerBind(result)
-	bound = bound.recordServerChoice(choice.Name)
+	bound, beat := m.foldServerBind(result, record)
 	bound.layout()
 	return bound, beat
 }
@@ -176,12 +178,13 @@ func (m Model) bindToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 // describes — the first beat lands quietly and the restated box is what says the model — it merely
 // begins a few seconds later than usual. The Cmd is that first beat, armed now rather than one
 // Interval from now.
-func (m Model) foldServerBind(result ServerSwitchResult) (Model, tea.Cmd) {
+func (m Model) foldServerBind(result ServerSwitchResult, record choiceRecord) (Model, tea.Cmd) {
 	m.opts.Endpoint = result.Endpoint
 	m.opts.HostAlias = result.HostAlias
 	m.opts.ContextWindow = result.ContextWindow
 	m.transcript.refreshStartup(newStartupView(m.opts))
-	m.transcript.addNote(serverBindNote(m.opts))
+	m.transcript.addNote(serverBindNote(m.opts, record.saved))
+	record.warn(&m.transcript)
 	// Arming is a statement of its own: it takes a pointer, and in `return m, m.armBeat()` the order
 	// of the bump and the copy of m is unspecified (ADR 0011, [Model.armBeat]).
 	beat := m.armBeat()
@@ -191,28 +194,68 @@ func (m Model) foldServerBind(result ServerSwitchResult) (Model, tea.Cmd) {
 // serverBindNote words a committed first bind, in serverSwitchNote's shape one step shorter: there
 // is no server being left, so the line states only the one now on the wire — its alias with the
 // endpoint spelled out beside it, once when the two are the same string.
-func serverBindNote(to Options) string {
+func serverBindNote(to Options, saved bool) string {
 	note := "server bound: " + hostDisplay(to)
 	if hostDisplay(to) != to.Endpoint {
 		note += " (" + to.Endpoint + ")"
 	}
-	return note
+	return note + savedClause(saved)
+}
+
+// ----------------------------------------------------------------------------
+// Recording the choice — the `server:` key (ADR 0036 decision 2)
+// ----------------------------------------------------------------------------
+
+// savedChoiceClause is what a bind or switch note adds when the move was also RECORDED: the
+// `server:` key now names the entry this session is on, so the NEXT one starts here without being
+// asked. It names the key rather than describing it, because the key is what the human will find in
+// config.yaml — and it is stated on the move's own line so a remembered choice reads as part of the
+// move rather than as a second event.
+const savedChoiceClause = " · server: saved"
+
+// savedClause renders that clause for a move that was recorded, and "" for one that was not — a move
+// onto an unlisted endpoint (the ephemeral override row, a launcher profile's server), an unwired
+// seam, or a write that failed and said so in a warning of its own.
+func savedClause(saved bool) string {
+	if saved {
+		return savedChoiceClause
+	}
+	return ""
+}
+
+// choiceRecord is what a committed move learned from the recording seam: whether the `server:` key
+// now names the entry the session is on, and the warning a failed write earns ("" when there is
+// nothing to say). Both travel into the fold together so the announce can state the recording on its
+// own line and a warning can follow the move it is a footnote to, rather than precede it.
+type choiceRecord struct {
+	saved   bool
+	warning string
+}
+
+// warn appends the failed-write warning to the transcript, and nothing at all when there is none. It
+// takes the transcript by pointer because a Model is copied by value on every Update (ADR 0011) —
+// the caller's own copy is the one that must carry the note.
+func (r choiceRecord) warn(t *transcript) {
+	if r.warning != "" {
+		t.addNote(r.warning)
+	}
 }
 
 // recordServerChoice persists the name this session is now on as the one the NEXT session starts on
 // (ADR 0036 decision 2), through the seam the binary backs. It is called with every name the human
 // chose; whether that name is a configured entry worth writing is the binary's question, not the
-// renderer's.
+// renderer's, and the answer comes back as the saved flag rather than being guessed at here.
 //
 // A failed write is a warning and nothing more: the session already moved, and the recording is
 // best-effort persistence of something that is already true. An unwired seam records nothing and
 // says nothing — that is the pre-ADR-0036 behaviour, and every hand-built Options has it.
-func (m Model) recordServerChoice(name string) Model {
-	if m.opts.RecordServerChoice == nil || name == "" {
-		return m
+func recordServerChoice(record func(name string) (bool, error), name string) choiceRecord {
+	if record == nil || name == "" {
+		return choiceRecord{}
 	}
-	if err := m.opts.RecordServerChoice(name); err != nil {
-		m.transcript.addNote("could not record the server choice: " + stripEscapes(err.Error()))
+	saved, err := record(name)
+	if err != nil {
+		return choiceRecord{warning: "could not record the server choice: " + stripEscapes(err.Error())}
 	}
-	return m
+	return choiceRecord{saved: saved}
 }

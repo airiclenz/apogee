@@ -328,7 +328,10 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 	}
-	return m.foldServerSwitch(from, result)
+	// The move is now true, so it is also the choice this human should not have to make again: the
+	// name goes to the recording seam, which writes it when it belongs to a configured entry and
+	// skips it silently when it does not (ADR 0036 decision 2, [Options.RecordServerChoice]).
+	return m.foldServerSwitch(from, result, recordServerChoice(m.opts.RecordServerChoice, choice.Name))
 }
 
 // ----------------------------------------------------------------------------

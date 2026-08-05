@@ -560,6 +560,78 @@ func TestServerSwitchHappyPath(t *testing.T) {
 	}
 }
 
+// seededServersRecording is seededServers with the recording seam wired too — the state a human is in
+// when a `/server` switch is also a choice the next session can start on.
+func seededServersRecording(t *testing.T, sw *fakeSwitch, rec *fakeRecorder) (Model, *fakeRebind) {
+	t.Helper()
+	opts := testOpts
+	opts.Servers = twoServers
+	opts.SwitchServer = sw.switchTo
+	opts.RecordServerChoice = rec.record
+	return seededPicker(t, opts)
+}
+
+// A switch onto a configured entry is also a CHOICE (ADR 0036 decision 2): the name the session moved
+// to goes to the recording seam, and the move's own note says the key now remembers it.
+func TestServerSwitchRecordsTheChoice(t *testing.T) {
+	sw, rec := &fakeSwitch{}, &fakeRecorder{saved: true}
+	m, _ := seededServersRecording(t, sw, rec)
+
+	m, _ = typeCommand(t, m, "/server remote")
+
+	if want := []string{"remote"}; !reflect.DeepEqual(rec.names, want) {
+		t.Fatalf("recorded names = %v, want %v — the switch is what the next session starts on", rec.names, want)
+	}
+	want := "switching server: test-host → remote (http://remote:8080)" + savedChoiceClause
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+		t.Errorf("notes = %v, want %q", got, want)
+	}
+}
+
+// The renderer cannot tell a configured row from the synthesized one an override startup earns, so it
+// offers every name it was given and believes the answer: a write the binary skipped claims nothing.
+func TestServerSwitchOntoAnUnlistedRowClaimsNoRecording(t *testing.T) {
+	sw, rec := &fakeSwitch{}, &fakeRecorder{} // the binary's silent skip: no write, no error
+	m, _ := seededServersRecording(t, sw, rec)
+
+	m, _ = typeCommand(t, m, "/server remote")
+
+	if want := []string{"remote"}; !reflect.DeepEqual(rec.names, want) {
+		t.Fatalf("recorded names = %v, want %v — the binary decides, the renderer asks", rec.names, want)
+	}
+	want := "switching server: test-host → remote (http://remote:8080)"
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+		t.Errorf("notes = %v, want %q — an unwritten choice must not be announced as saved", got, want)
+	}
+	if m.opts.Endpoint != "http://remote:8080" {
+		t.Errorf("opts.Endpoint = %q, want the switch itself unaffected by the skipped recording", m.opts.Endpoint)
+	}
+}
+
+// The recording is best-effort persistence of something already true: a failed write is a footnote
+// UNDER the move it belongs to, and the session stays on the server it just moved to.
+func TestServerSwitchRecordFailureWarnsAndTheSwitchStands(t *testing.T) {
+	sw, rec := &fakeSwitch{}, &fakeRecorder{err: errors.New("permission denied")}
+	m, _ := seededServersRecording(t, sw, rec)
+
+	m, _ = typeCommand(t, m, "/server remote")
+
+	if m.opts.Endpoint != "http://remote:8080" || m.opts.HostAlias != "remote" {
+		t.Errorf("opts = {%q %q}, want the switch to stand despite the failed recording",
+			m.opts.Endpoint, m.opts.HostAlias)
+	}
+	got := noteTexts(m)
+	if len(got) < 2 {
+		t.Fatalf("notes = %v, want the move and its warning", got)
+	}
+	if want := "switching server: test-host → remote (http://remote:8080)"; got[len(got)-2] != want {
+		t.Errorf("notes = %v, want %q stated first, with no saved clause", got, want)
+	}
+	if want := "could not record the server choice: permission denied"; got[len(got)-1] != want {
+		t.Errorf("notes = %v, want %q as the last line", got, want)
+	}
+}
+
 // Everything still in flight on the old chain lands inert: the switch retired that generation, so a
 // beat or a tick from the server the session just left changes nothing and schedules nothing.
 func TestServerSwitchRetiresTheOldChain(t *testing.T) {

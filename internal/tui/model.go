@@ -2583,7 +2583,7 @@ func windowWord(n int) string {
 // survives, exactly as it survives a model rebind. The returned Cmd is that first beat, fired NOW
 // rather than one Interval from now: the human just acted and should not watch "connecting…" for
 // ten seconds.
-func (m Model) foldServerSwitch(from string, result ServerSwitchResult) (tea.Model, tea.Cmd) {
+func (m Model) foldServerSwitch(from string, result ServerSwitchResult, record choiceRecord) (tea.Model, tea.Cmd) {
 	m.opts.Endpoint = result.Endpoint
 	m.opts.HostAlias = result.HostAlias
 	m.opts.ContextWindow = result.ContextWindow
@@ -2593,7 +2593,8 @@ func (m Model) foldServerSwitch(from string, result ServerSwitchResult) (tea.Mod
 	// the server this session is now on rather than the one it launched against (applyRebind's own
 	// reason, one level up).
 	m.transcript.refreshStartup(newStartupView(m.opts))
-	m.transcript.addNote(serverSwitchNote(from, m.opts))
+	m.transcript.addNote(serverSwitchNote(from, m.opts, record.saved))
+	record.warn(&m.transcript)
 	m.layout()
 	// The fresh generation IS the retirement of the old chain, so the first beat is armed rather than
 	// merely issued — in a statement of its own, per [Model.armBeat].
@@ -2604,13 +2605,14 @@ func (m Model) foldServerSwitch(from string, result ServerSwitchResult) (tea.Mod
 // serverSwitchNote words a committed switch: the server left, by the label the footer called it, and
 // the one now on the wire — its alias with the endpoint spelled out beside it, because the alias is
 // the human's own word for a URL and the switch is exactly the moment to show which URL it stands
-// for. An aliasless server would name the endpoint twice, so it says it once.
-func serverSwitchNote(from string, to Options) string {
+// for. An aliasless server would name the endpoint twice, so it says it once. A switch that was also
+// recorded says so at the end of the same line (savedClause, prebound.go).
+func serverSwitchNote(from string, to Options, saved bool) string {
 	note := "switching server: " + from + " → " + hostDisplay(to)
 	if hostDisplay(to) != to.Endpoint {
 		note += " (" + to.Endpoint + ")"
 	}
-	return note
+	return note + savedClause(saved)
 }
 
 // foldBeatFailure folds a beat that could not read the server. Four rules, in order:

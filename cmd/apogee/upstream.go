@@ -276,6 +276,20 @@ func findServer(entries []serverEntry, name string) (serverEntry, error) {
 	return serverEntry{}, fmt.Errorf("unknown server %q — configured: %s", name, serverNameList(entries))
 }
 
+// configuredServer reports whether name labels an entry of the `servers:` list — the question the
+// recording seam asks before writing a `server:` line (ADR 0036 decision 2), and deliberately a
+// different question from findServer's: that one resolves against the SWITCHABLE rows, which include
+// the synthesized ephemeral startup, while only a row the file actually holds is a choice a next
+// session could start on.
+func configuredServer(entries []serverEntry, name string) bool {
+	for _, e := range entries {
+		if e.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // serverNameList renders the switchable names for findServer's error (an empty list renders
 // "(none)", matching knownMechanismList's shape for the same job).
 func serverNameList(entries []serverEntry) string {
