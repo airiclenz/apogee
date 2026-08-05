@@ -3,7 +3,9 @@ package tui
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -1095,7 +1097,10 @@ func orderedArgs(raw json.RawMessage) ([]argumentPair, bool) {
 	if _, err := dec.Token(); err != nil { // the closing brace
 		return nil, false
 	}
-	if dec.More() { // a second document behind the first
+	// The stream must END there. Asking for one more token is what says so for EVERY tail — a second
+	// document behind the first, loose text, and the stray `}`/`]` that dec.More() reads as "no more
+	// input" rather than as the garbage it is.
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, false
 	}
 	return pairs, true

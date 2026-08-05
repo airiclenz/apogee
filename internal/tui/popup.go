@@ -61,8 +61,9 @@ import (
 //   - The optional body block (spec.body) sits between the title and the rows and carries prose the
 //     rows cannot: it is the ONE part the module word-wraps rather than truncates, because a
 //     question or an approval reason/args body must break across lines instead of losing its tail
-//     to an ellipsis. Embedded newlines are honoured as layout (the pretty-printed args'
-//     indentation and blank separators survive), each segment is word-wrapped to the inner budget,
+//     to an ellipsis. Embedded newlines are honoured as layout (the labelled arguments' one-per-line
+//     shape — a `name:` line with its value's own lines indented beneath it — and the blank
+//     separators survive), each segment is word-wrapped to the inner budget,
 //     and the flattened block is capped at spec.maxBodyRows — negative = uncapped, ZERO = no body
 //     rows at all, the same sense maxRows carries. Past a positive cap the last row becomes an
 //     explicit faint "… (+N more lines)" marker counting the hidden lines, so the body never

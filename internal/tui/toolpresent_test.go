@@ -867,7 +867,9 @@ func TestArgumentDetailsLabelsEachArgument(t *testing.T) {
 }
 
 // Arguments with no names to label are shown as they arrived (prettyJSONDetails), because a half
-// labelled body would be a claim about the call that the bytes do not support. Absent or null
+// labelled body would be a claim about the call that the bytes do not support. That holds for a
+// blob whose tail is garbage too — a stray `}`/`]` behind the object makes the payload malformed,
+// so it falls back rather than being labelled as if the tail were not there. Absent or null
 // arguments add no lines at all.
 func TestArgumentDetailsFallsBackWhereThereIsNothingToLabel(t *testing.T) {
 	cases := []struct {
@@ -878,6 +880,9 @@ func TestArgumentDetailsFallsBackWhereThereIsNothingToLabel(t *testing.T) {
 		{"a malformed blob", `{"command":`, []string{`{"command":`}},
 		{"not an object", `["a","b"]`, []string{"[", `  "a",`, `  "b"`, "]"}},
 		{"a second document behind the first", `{"a":1} {"b":2}`, []string{`{"a":1} {"b":2}`}},
+		{"a stray brace behind the object", `{"a":1}}`, []string{`{"a":1}}`}},
+		{"a stray bracket behind the object", `{"a":1}]`, []string{`{"a":1}]`}},
+		{"loose text behind the object", `{"a":1} trailing`, []string{`{"a":1} trailing`}},
 		{"absent arguments", ``, nil},
 		{"null arguments", `null`, nil},
 	}
