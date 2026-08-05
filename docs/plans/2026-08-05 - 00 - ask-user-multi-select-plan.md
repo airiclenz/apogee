@@ -194,10 +194,20 @@ single-select question's render is byte-identical to the pre-plan golden.
 
 **Commit:** `feat(tui): checkbox marker column on multi-select ask prompts`
 
-## 4. Docs reconcile
+## 4. Docs reconcile — ✅ DONE (2026-08-05)
 
 Depends on items 1–3. This item owns every cross-cutting doc amendment — no other item
 touches these files.
+
+NOTES (2026-08-05): two records against the item's literal text.
+1. The note appended to `docs/design/user-questions-layout.md` is a short blockquote rather than
+literally "one line": besides naming this plan and its date as the amending authority, it states the
+ratified `␣`/`⏎` calls and the pinned `[x]`/`[ ]` glyphs, and it records that the gap the sketch draws as
+one space is the pop-up module's own two-space column gutter — item 3's NOTES 2 decided the gutter
+stands, and a mockup pinned without that note would read as a spec the code deliberately does not meet.
+2. In `layout.md` the three lines after the inserted transcript sentence were re-wrapped to the file's
+~100-column prose wrap. Same paragraph, same words, no content change — the insertion had left a
+48-column stub line mid-paragraph.
 
 **What:**
 - `CONTEXT.md` (Ask-user entry, ~line 307): two or three sentences — the optional

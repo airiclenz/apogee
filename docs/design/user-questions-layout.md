@@ -38,3 +38,25 @@ Please refer to the menu system UI-laypout in llama-launcher for reference.
 │   change is the riskier part — get it stable first.                    │
 │                                                                        │
 ╰────────────────────────────────────────────────────────────────────────╯
+
+
+# Multi-select question:
+
+> Pinned 2026-08-05 by `docs/plans/2026-08-05 - 00 - ask-user-multi-select-plan.md`, whose ratified
+> design calls amend this file for questions the model marks `multi_select`: `␣` toggles the
+> highlighted row, `⏎` sends every checked row (the highlighted one alone when none is checked), and
+> the marker glyphs are `[x]` / `[ ]`. The pointer and dim rows are the menu style already drawn
+> above; the gap between the marker and the label is the pop-up module's own two-space column
+> gutter, where the sketch below draws one.
+
+╭──────────────────────────────────────────────╮
+│ Which findings should I fix?                 │
+│                                              │
+│ ❯ [x] Fix the nil-check in submitAnswer      │
+│                                              │
+│ · [ ] Add the missing layout() call          │
+│                                              │
+│ · [x] Guard the empty-choices path           │
+│                                              │
+│  ↑↓ select · ␣ toggle · ⏎ send · …           │
+╰──────────────────────────────────────────────╯

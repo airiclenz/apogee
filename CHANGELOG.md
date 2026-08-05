@@ -8,6 +8,29 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- **A question can now take more than one of its answers.** The model asks with
+  `multi_select: true` on `ask_user` when several of the choices could apply at once — "which of
+  these findings should I fix?" — and every offered answer gets a `[x]`/`[ ]` box in front of it.
+  `↑↓` still move the highlight, `␣` ticks and un-ticks the row you are on, and `⏎` sends every row
+  you ticked, one answer per line and in the order they were offered. Nothing was added to the
+  bottom of the list to press: the key that answers every other prompt answers this one too.
+  - **`⏎` with nothing ticked still sends the highlighted answer**, so a question you want to answer
+    with one option takes exactly the keypresses it always did.
+  - **Typing still writes your own answer.** The offering hides the moment the box is non-empty and
+    `⏎` sends only what you typed; delete back to empty and the offering comes back with your ticks
+    exactly as you left them.
+  - **Single-answer questions are untouched** — on the wire, on the screen, and at the keyboard. The
+    flag is optional and off by default, `␣` on such a question still just types a space into a
+    custom answer, and the reply to a single choice is byte-identical to the one Apogee always sent.
+  - **The boxes are a column, not padding.** They line up down the pane through the same pop-up
+    column machinery the approval prompt's shortcut letters use, and an answer too long for the
+    width wraps under its own text rather than under the box beside it.
+
+  Defined in `CONTEXT.md` ("Ask-user") and specced in `layout.md`, with the pinned mockup in
+  `docs/design/user-questions-layout.md`.
+
 ### Removed
 
 - **`/skill` — the two-step picker verb is gone.** Naming a skill is what invoking it already is:

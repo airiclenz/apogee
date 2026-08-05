@@ -440,12 +440,14 @@ whole output is a single line puts that line on the branch beside the target
 (`┕ cat paths.txt  /home/me/proj/docs/plan.md`), and promotion changes where the text sits, never
 whose text it is — one row lower the identical line would have been a body. The answer to an
 `Ask User` question rides the branch on the same footing: it is the human's own words, not a report
-the block wrote, so it prints exactly as they typed it. An in-workspace path sitting inside file
-content is content, not a mention: shortened, it would show the human approving a write a spelling
-the file will not actually contain. Nothing decides this by looking at a line, because a content
-line can look exactly like a path; a line is respelled only where the presenter that put it there
-says it is the block's own words — a path it names, or a summary it wrote itself (`1 - 154`,
-`replaced text in docs/plan.md`, `(no output)`).
+the block wrote, so it prints exactly as they typed it. A multi-select answer needs no rule of its
+own here — several ticked labels arrive as one multi-line answer, so its first line is promoted onto
+the branch and the rest rides the expandable detail beneath it, exactly as any other multi-line body
+does. An in-workspace path sitting inside file content is content, not a mention: shortened, it
+would show the human approving a write a spelling the file will not actually contain. Nothing
+decides this by looking at a line, because a content line can look exactly like a path; a line is
+respelled only where the presenter that put it there says it is the block's own words — a path it
+names, or a summary it wrote itself (`1 - 154`, `replaced text in docs/plan.md`, `(no output)`).
 
 **What stays standalone.** A call is groupable when it has a target, an empty body, and a plain
 (non-diff) summary — which includes an `error: …` line, and an in-flight call whose result has not
@@ -1068,11 +1070,32 @@ pipeline — the two-cell selection marker in front, the highlight bar across it
 inner width with a trailing `…`. That truncation is **whole-row**, never column by column, so a
 narrow terminal loses the rightmost tiers rather than scrambling the alignment of the ones still on
 screen. A row with a single cell has no columns to align and renders exactly as it did before
-columns existed: `@`'s file suggestions, an armed rename buffer in the `/sessions` browser, and the
-ask prompt's answers. The **approval prompt's rows are two-cell** — the option and its `[a]`-style
-shortcut — so the letters stack into a right-hand column the module derives rather than the prompt
-hand-pads, and a pane too narrow for both loses the shortcut cell off the right by the same
-whole-row truncation every other grammar takes. The key it drew still answers the prompt.
+columns existed: `@`'s file suggestions, an armed rename buffer in the `/sessions` browser, and a
+single-select ask prompt's answers. The **approval prompt's rows are two-cell** — the option and its
+`[a]`-style shortcut — so the letters stack into a right-hand column the module derives rather than
+the prompt hand-pads, and a pane too narrow for both loses the shortcut cell off the right by the
+same whole-row truncation every other grammar takes. The key it drew still answers the prompt. A
+**multi-select ask prompt's rows are two-cell the other way round** — a `[x]`/`[ ]` box first, the
+answer after it across the module's own two-space gutter — so the boxes stack into a left-hand
+column nothing hand-pads, and an answer too long for the pane **wraps under its own label** rather
+than under the box beside it: the continuation lines hang at the label's column, so one option still
+reads as one block of prose instead of sliding back under a marker that says nothing about it. A
+single-cell row measures a hanging indent of zero and wraps exactly where it always did.
+
+**`␣` ticks a multi-select answer, and `⏎` is still the one send.** A question the model marked
+`multi_select` draws that box in front of every answer, and while the box below is empty `␣` ticks
+and un-ticks the highlighted row. `↑/↓` still only move the highlight, and no `Send` row is added at
+the end of the offering: the key that takes every other decision surface takes this one too. `⏎`
+sends **every ticked answer**, one per line, in the order they were offered — and with **nothing**
+ticked it sends the highlighted answer alone, so the single-select gesture arrives as the degenerate
+case rather than as a second rule to learn. On a single-select question there is nothing to toggle,
+so `␣` falls through to the box and types a space, opening the free-text answer it always did.
+Typing hides the offering there as it does under any question and `⏎` then sends only what was
+typed; deleting back to empty brings the offering back with the ticks exactly as they were, because
+a draft the human abandoned should not quietly discard the answers they had already chosen. The hint
+under the rows names the extra key and nothing else changes about it:
+`↑↓ select · ␣ toggle · ⏎ send · type for a custom answer · esc cancel`, truncated from its right
+with the pane's `…` on a width that cannot seat it, like every other hint.
 
 **`/model`'s launcher accept is the one that does not finish on the spot.** Picking a Launch
 profile takes the actuation latch and hands the pane's decision to a blocking launcher verb: the
