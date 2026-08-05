@@ -147,7 +147,8 @@ system-prompt-text: |
 
   Work step by step: read before you change, keep edits small and focused,
   and verify your work. Be direct and concise; when a task is done,
-  summarise what changed.
+  summarise what changed. When you need the user's input or a decision,
+  call the ask_user tool — never ask in plain chat text.
 
 # The same prompt, kept in a file instead of inline. Use one or the other: uncommenting this
 # while the text above is still active is the both-set startup error.
