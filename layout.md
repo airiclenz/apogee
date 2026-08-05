@@ -421,7 +421,8 @@ header carrying no target.
 - **A call with no target** — the one shape with no target line: the header stands alone and the
   lines are themselves the `┝`/`┕` branches, the summary closing the list since it has no branch
   line to ride (an unregistered tool's pretty-printed arguments, then the `error: …` it earned; a
-  stray `result`).
+  stray `result`). Collapsed, that branch list is what the cap falls on — the block has no body to
+  cap instead — and the remainder marker hangs beneath it at the branch marker's own width.
 
 Within a block, every target is padded with spaces to the widest target so the summary column lines
 up; a block of one pads to itself, which is no padding. Anything too long soft-wraps under its
@@ -452,10 +453,13 @@ free-form output's first line plus its `… +N more lines` remainder, the diff b
 remainder — apply at paint, not at build. Expanded shows everything, uncapped; the remainder
 markers exist only in the collapsed paint. A group is the degenerate case: its calls carry no
 bodies (that is what made them groupable), so both states paint identically and the rule never
-mentions groups. A call with **no target** is the other shape the two states pass over: its lines
-are the block's own `┝`/`┕` branches rather than a body — an unregistered tool's verbatim
-arguments, a stray `result` — and what the model actually asked for is never hidden from the human
-approving it, so those lines are uncapped in both states.
+mentions groups. A call with **no target** collapses like every other block, and only *what* is
+capped differs: its lines are the block's own `┝`/`┕` branches rather than a body — an unregistered
+tool's verbatim arguments, a registered call that arrived without its target, a stray `result` — so
+the cap falls on that branch list, with the remainder marker beneath it. Hiding them costs nothing,
+because the **approval popup** is the surface a human approves an action on and it shows the
+verbatim arguments at decision time; the transcript block is the *record*, and a record may
+collapse.
 
 **Collapsed is the default, always** — including a call still in flight and a sub-agent run still
 working. Only a click changes a block's state, so nothing ever expands or collapses by itself: a
@@ -466,9 +470,9 @@ collapsed, and `/clear` forgets it with everything else.
 **What a click means.** A motionless click — press and release in the same cell — on a block's
 **header line** toggles that block; on a `… +N more lines` marker it expands the block the body
 belongs to. A header toggles only where its block has something to reveal — a capped body, or a
-sub-agent run's elided span — so a block that hides nothing in either state (a body-less group, a
-targetless call whose lines are its branches) has no state worth flipping and its header is not a
-target. Everywhere else in the transcript a click keeps its selection meaning, and any drag is a
+sub-agent run's elided span — so a block that hides nothing in either state (a body-less group, or
+any block whose lines already fit the collapsed budget) has no state worth flipping and its header
+is not a target. Everywhere else in the transcript a click keeps its selection meaning, and any drag is a
 drag-select wherever it starts, header lines included: motion is what arbitrates, exactly as it
 already separates click-to-position from drag in the prompt. Keyboard toggling is deliberately
 absent, on the same precedent that keeps transcript selection mouse-only; a block-cursor mode is

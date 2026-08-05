@@ -187,7 +187,25 @@ the two constants.
 
 ---
 
-## 3. Targetless calls join the collapse system
+## 3. Targetless calls join the collapse system — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): paint-cache key UNCHANGED — `spanFlags` already packs every covered entry's
+`expanded` bit whatever its kind, so `entryToolResult` joining `hasBlockState` added no paint input.
+Five deviations, all in service of the item's own text. (a) **Item 4's seam moved**: rather than
+duplicate the cap and the `… +N more lines` wording in the targetless path, `collapsedDetails` was
+split into `collapsedCall` (the shape switch, now the single oracle both `renderToolBranch` and
+`blockHidesWhenCollapsed` ask), `collapsedLimit` (the caps — the one place `1` and `diffDetailCap`
+live) and `collapseAtCap` (the split + the marker's wording). **Item 4 must name its constant inside
+`collapsedLimit`; the literal `limit := 1` no longer exists, so item 4's `grep -n "limit := 1"`
+acceptance is already vacuously true.** (b) `renderOrphanResult` now returns a `blockPaint` and takes
+`expanded` — a stray result cannot be a toggle target while its click surface is dropped by
+`plainPaint`. (c) The golden gained an `mcp_search` call (item 3's Acceptance requires a collapsed
+unregistered-tool block *in the golden*), which pushed the sub-agent read's call id `c6`→`c7`.
+(d) `TestTranscriptDepthRendersFramedBlock` expands the stray result before asserting the rail: its
+subject is the rail reaching a body's continuation lines, and that second line is now behind the cap.
+(e) CHANGELOG — beyond the new sub-bullet, the existing `[Unreleased]` "The state is the view's alone"
+sub-bullet still said an unregistered tool's arguments "are never capped"; corrected in place, on
+item 1's precedent, so the unreleased notes do not ship a contradiction.
 
 **Decision (ratified 2026-08-04).** `layout.md` today deliberately leaves a targetless call's
 lines uncapped in both states ("what the model actually asked for is never hidden from the human

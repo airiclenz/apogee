@@ -1420,13 +1420,28 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 			want: nil,
 		},
 		{
-			// The targetless shape hides nothing however long its body is — an unregistered tool's
-			// verbatim arguments ARE its branches — so nothing about it is clickable.
-			name:  "a targetless block hides nothing and marks nothing",
+			// The targetless shape is capped like every other: an unregistered tool's verbatim
+			// arguments ARE its branches, and a blob that overflows the cap makes the header a
+			// target with a marker beneath it, exactly as a body would.
+			name:  "a targetless block over the cap marks its header and its marker",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 					ID: "c1", Tool: "weird_tool", Arguments: []byte(`{"a":1,"b":2,"c":3}`)}})
+			},
+			want: []blockMark{
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ weird_tool ▸"},
+				{line: 2, kind: targetMarker, entry: 0, text: "    … +4 more lines"},
+			},
+		},
+		{
+			// The cap is what decides, not the shape: a targetless call whose whole branch list
+			// fits hides nothing and keeps a click's selection meaning.
+			name:  "a targetless block inside the cap marks nothing",
+			width: 80,
+			build: func(t *testing.T, tr *transcript) {
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "weird_tool", Arguments: []byte(`"go"`)}})
 			},
 			want: nil,
 		},
@@ -2082,31 +2097,50 @@ func TestRenderInFlightStandalone(t *testing.T) {
 
 // The one shape with no target line: an unregistered tool has nothing to lead a branch with, so
 // the header stands alone and its verbatim pretty-printed arguments are themselves the ┝/┕
-// branches — nothing about what the model asked for is hidden.
+// branches. Collapsed, that branch list is capped like any other block's body and the remainder
+// marker counts what is behind it; expanded, every line the model sent is back — the approval
+// popup is where a human approves an action, the transcript block is the record (layout.md,
+// "Collapsed and expanded blocks").
 func TestRenderNoTargetStandalone(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "mcp_thing", Arguments: []byte(`{"a":1}`)}})
 
 	want := strings.Join([]string{
-		"✦ mcp_thing",
+		"✦ mcp_thing ▸",
+		"  ┕ {",
+		"    … +2 more lines",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("collapsed targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false; want the targetless block to expand")
+	}
+	want = strings.Join([]string{
+		"✦ mcp_thing ▾",
 		"  ┝ {",
 		`  ┝   "a": 1`,
 		"  ┕ }",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
-		t.Errorf("targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		t.Errorf("expanded targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 
 // A targetless call has no branch line for its summary to ride, so the outcome closes the branch
-// list instead of vanishing: an unregistered tool's arguments, then the "error: …" it earned.
+// list instead of vanishing: an unregistered tool's arguments, then the "error: …" it earned. The
+// summary is part of that list, so the collapsed cap counts it like any other branch line.
 func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "mcp_thing", Arguments: []byte(`{"a":1}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "no such server", IsError: true}})
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false; want the targetless block to expand")
+	}
 
 	want := strings.Join([]string{
-		"✦ mcp_thing",
+		"✦ mcp_thing ▾",
 		"  ┝ {",
 		`  ┝   "a": 1`,
 		"  ┝ }",
@@ -2114,6 +2148,84 @@ func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("targetless error block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// TestTargetlessBlocksCollapseToTheBudget pins the reversal of layout.md's old never-hide rule
+// across all three targetless shapes: the unregistered/MCP argument dump, a registered call whose
+// target argument never arrived, and a stray result. Each collapses to the house budget with a
+// remainder marker and a ▸ header — three rows, whatever it is hiding, which is the whole of the
+// ask — and each expands to every line it retained. The 60-line blob is the case the old rule made
+// 61 permanent rows.
+func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
+	blob := func(lines int) []byte {
+		items := make([]string, lines)
+		for i := range items {
+			items[i] = strconv.Quote("arg" + strconv.Itoa(i))
+		}
+		return []byte("[" + strings.Join(items, ",") + "]")
+	}
+	cases := []struct {
+		name          string
+		build         func(tr *transcript)
+		wantCollapsed []string
+		wantExpanded  int // physical lines, header included
+	}{
+		{
+			name: "an unregistered tool's 60-line argument blob",
+			build: func(tr *transcript) {
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "mcp_search", Arguments: blob(58)}})
+			},
+			wantCollapsed: []string{"✦ mcp_search ▸", "  ┕ [", "    … +59 more lines"},
+			wantExpanded:  61,
+		},
+		{
+			name: "a registered call whose target argument is missing",
+			build: func(tr *transcript) {
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "terminal", Arguments: []byte(`{"cmd":"go test"}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+					CallID: "c1", Content: "one\ntwo\nthree\nfour"}})
+			},
+			wantCollapsed: []string{"✦ Run ▸", "  ┕ one", "    … +3 more lines"},
+			wantExpanded:  5,
+		},
+		{
+			name: "a stray result that matched no call",
+			build: func(tr *transcript) {
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+					CallID: "gone", Content: "one\ntwo\nthree"}})
+			},
+			wantCollapsed: []string{"✦ result ▸", "  ┕ one", "    … +2 more lines"},
+			wantExpanded:  4,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(tr)
+
+			want := strings.Join(tc.wantCollapsed, "\n")
+			if got := renderPlain(tr, 80); got != want {
+				t.Errorf("collapsed block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+			if !tr.toggleExpanded(0) {
+				t.Fatal("toggleExpanded(0) = false; want the targetless block to own a block state")
+			}
+			got := strings.Split(renderPlain(tr, 80), "\n")
+			if len(got) != tc.wantExpanded {
+				t.Errorf("expanded block is %d lines, want %d:\n%s", len(got), tc.wantExpanded, strings.Join(got, "\n"))
+			}
+			if !strings.HasSuffix(got[0], " "+glyphExpanded) {
+				t.Errorf("expanded header = %q, want it to wear %q", got[0], glyphExpanded)
+			}
+			for _, ln := range got {
+				if strings.Contains(ln, "more line") {
+					t.Errorf("an expanded block kept a remainder marker: %q", ln)
+				}
+			}
+		})
 	}
 }
 
@@ -2216,6 +2328,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 // TestTranscriptLayoutGolden pins the whole rendered scrollback of one realistic mixed session —
 // a user prompt, narration the model padded with a trailing "\n\n", a batch of reads, a Run whose
 // output hangs beneath its command, a diff whose "+2 -2" rides its branch over a coloured body, an
+// unregistered tool whose verbatim arguments are its own branches, an
 // approval note, and a sub-agent read — as an exact line sequence, blank lines included. It is the
 // backstop across the layout changes rather than a test of any one of them: the blank-line hygiene
 // shows as the single separator row between every block — empty at the top level, the │ rail
@@ -2223,8 +2336,9 @@ func TestRenderGroupBreakers(t *testing.T) {
 // header text, the grouping as the one aligned Read File block, and the uniform shape as the fact
 // that every header here — grouped, standalone, railed — is a label and nothing else, with the
 // target always leading a branch and the outcome split into the summary beside it and the body
-// beneath. The ▸ on the Run's header and its absence everywhere else is the affordance rule in the
-// same picture: exactly the one block here that hides something says so. A regression in any of
+// beneath. The ▸ on the Run's and the unregistered call's headers and its absence everywhere else
+// is the affordance rule in the same picture: exactly the blocks here that hide something say so,
+// the targetless one among them now that it collapses like every other. A regression in any of
 // them changes this golden, and the golden doubles as the living example of what layout.md
 // sketches.
 func TestTranscriptLayoutGolden(t *testing.T) {
@@ -2246,8 +2360,10 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		Content: "  func main() {\n-     fmt.Println(\"old\")\n-     return\n+     fmt.Println(\"new\")\n+     os.Exit(0)\n  }",
 		Summary: domain.DiffStat{Added: 2, Removed: 2},
 	}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c6", Tool: "mcp_search",
+		Arguments: []byte(`{"query":"collapse","limit":20}`)}})
 	tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
-	readCall(tr, "c6", "main.go", 1, 154, 1)
+	readCall(tr, "c7", "main.go", 1, 154, 1)
 
 	want := strings.Join([]string{
 		"❯ read the docs, then run the tests",
@@ -2272,6 +2388,10 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"    +     fmt.Println(\"new\")",
 		"    +     os.Exit(0)",
 		"      }",
+		"",
+		"✦ mcp_search ▸",
+		"  ┕ {",
+		"    … +3 more lines",
 		"",
 		"· approval allow: terminal",
 		"",

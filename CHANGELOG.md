@@ -122,13 +122,20 @@ point is a **minor** bump, not a breaking change.
     click it. The `… +N more lines` marker gained a tone of its own to match — light gray-blue, the
     quieter sibling of the prompt block's `see more` — so a body line that happens to start with
     `…` is never mistaken for the affordance beneath it.
+  - **No block is exempt any more, targetless calls included.** An unregistered or MCP tool prints
+    its arguments verbatim as the block's own branches, and a 60-line argument blob used to stand
+    60 rows tall forever — the one shape that never collapsed. It now caps at the same budget as
+    every other block, with the same `… +N more lines` marker and the same one-click toggle, and so
+    do a registered call that arrived without its target and a stray `result` that matched no call.
+    Nothing is lost: the approval popup is where you approve an action and it still shows the
+    verbatim arguments at decision time — the transcript block is the record, and a record may
+    collapse.
   - **The state is the view's alone.** It is never encoded with the transcript: a resumed session
     paints everything collapsed and `/clear` forgets it with everything else. A block that hides
-    nothing has nothing to toggle — a group of body-less calls, or a call with no target whose
-    lines are the block's own branches, since an unregistered tool's verbatim arguments are never
-    capped — and a click there keeps its ordinary selection meaning. Toggling is mouse-only for
-    now, on the same precedent that keeps transcript selection mouse-only; a keyboard block-cursor
-    is its own future feature.
+    nothing has nothing to toggle — a group of body-less calls, or any block whose lines already
+    fit the collapsed budget — and a click there keeps its ordinary selection meaning. Toggling is
+    mouse-only for now, on the same precedent that keeps transcript selection mouse-only; a
+    keyboard block-cursor is its own future feature.
 
   Specced in `layout.md` ("Collapsed and expanded blocks").
 

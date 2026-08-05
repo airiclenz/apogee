@@ -562,9 +562,11 @@ func (t *transcript) hasOpenToolCall() bool {
 }
 
 // hasBlockState reports whether an entry kind owns a collapsed/expanded block state — the gate
-// setExpanded and toggleExpanded both answer through. Four kinds do: a tool call and a scheduled
-// Firing (entrySchedule), whose retained bodies are capped when the block is collapsed — the Firing
-// is painted by the same block painter, so it collapses and expands by the tool block's rule — and
+// setExpanded and toggleExpanded both answer through. Five kinds do: a tool call, a stray result
+// (entryToolResult) and a scheduled
+// Firing (entrySchedule), whose retained bodies are capped when the block is collapsed — the stray
+// result and the Firing are painted by the same block painter, so they collapse and expand by the
+// tool block's rule — and
 // the human's own two voices — the prompt
 // (entryUser) and the interjection (entryInterjected), which read as one block and collapse by one
 // rule — whose bodies collapse to a fixed row count when they run long (layout.md, "Collapsed and
@@ -576,7 +578,7 @@ func (t *transcript) hasOpenToolCall() bool {
 // against the current width, and any answer kept here would be stale by the next resize.
 func hasBlockState(kind entryKind) bool {
 	switch kind {
-	case entryToolCall, entrySchedule, entryUser, entryInterjected:
+	case entryToolCall, entryToolResult, entrySchedule, entryUser, entryInterjected:
 		return true
 	default:
 		return false

@@ -810,6 +810,11 @@ func TestTranscriptDepthRendersFramedBlock(t *testing.T) {
 		EventBase: domain.EventBase{Depth: 1},
 		Result:    domain.ToolResult{Content: "line1\nline2"},
 	})
+	// The stray result collapses like every other block now, so its second line is behind the cap;
+	// open it, because what this test is about is the rail reaching a body's continuation lines.
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false; want the stray result to expand")
+	}
 	got := plainRender(tr)
 	if !strings.HasPrefix(got, "│ ⤷ sub-agent") {
 		t.Errorf("depth-1 run not opened by a ⤷ sub-agent label:\n%q", got)
