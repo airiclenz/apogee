@@ -760,8 +760,8 @@ func TestModelApprovalCancelClearsPrompt(t *testing.T) {
 
 // The approval prompt paints as a MENU (docs/design/user-questions-layout.md): the raw tool name in
 // the TOP BORDER, the four decisions as menu rows with the pointer on Allow and their shortcut
-// letters aligned in a second column, the pretty-printed args still in the body — and no legend row
-// at all, the letters now being written beside the options they take.
+// letters aligned in a second column, the labelled args still in the body — and no legend row at
+// all, the letters now being written beside the options they take.
 func TestModelApprovalPromptPopupChrome(t *testing.T) {
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{
 		Tool:      "write_file",
@@ -785,7 +785,7 @@ func TestModelApprovalPromptPopupChrome(t *testing.T) {
 		"· Deny",
 		"· Cancel",
 		"Reason: write", // the labelled reason on the body's lead line
-		"notes.txt",     // pretty-printed args in the body
+		"notes.txt",     // the labelled args in the body
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("approval popup missing %q:\n%s", want, got)
@@ -961,8 +961,8 @@ func TestModelApprovalEscapeStrips(t *testing.T) {
 	}
 }
 
-// The pretty-printed args keep their two-space JSON indentation on the rendered body lines
-// (embedded-newline layout is preserved end to end, not collapsed by the wrap).
+// A labelled argument's value keeps the two-space indent that hangs it under its own label on the
+// rendered body lines (embedded-newline layout is preserved end to end, not collapsed by the wrap).
 func TestModelApprovalArgsKeepIndentation(t *testing.T) {
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	reply := make(chan domain.ApprovalDecision, 1)
@@ -970,17 +970,17 @@ func TestModelApprovalArgsKeepIndentation(t *testing.T) {
 		Request: domain.ApprovalRequest{Tool: "write_file", Arguments: json.RawMessage(`{"path":"notes.txt"}`)},
 		Reply:   reply,
 	})
-	// prettyJSON indents the "path" line by two spaces; had the indent been collapsed, only the
-	// popup's one-space padding would precede the quote. The two-space run proves it survived.
-	if got := plain(m.View()); !strings.Contains(got, `  "path"`) {
-		t.Errorf("args lost their two-space JSON indentation:\n%s", got)
+	// The value hangs two spaces under "path:"; had the indent been collapsed, only the popup's
+	// one-space padding would precede it. The two-space run proves it survived.
+	if got := plain(m.View()); !strings.Contains(got, "  notes.txt") {
+		t.Errorf("the argument's value lost its two-space hanging indent:\n%s", got)
 	}
 }
 
-// The shell tool's body reads as the command line it is about to run, under a "Command:" label with
-// the line indented beneath it (docs/design/user-questions-layout.md) — not as the JSON envelope
-// that carries it. The argument braces and the quoted key are gone: this is a rendering of the same
-// one fact, not an extra view beside it.
+// The shell tool's body reads as the command line it is about to run, under its own argument name
+// with the line indented beneath it (docs/design/user-questions-layout.md) — not as the JSON
+// envelope that carries it. The argument braces and the quoted key are gone: this is a rendering of
+// the same one fact, not an extra view beside it.
 func TestModelApprovalTerminalShowsCommandBlock(t *testing.T) {
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	reply := make(chan domain.ApprovalDecision, 1)
@@ -996,7 +996,7 @@ func TestModelApprovalTerminalShowsCommandBlock(t *testing.T) {
 	got := ansiPattern.ReplaceAllString(m.approvalPrompt(m.pending.Request), "")
 	for _, want := range []string{
 		"Reason: subprocess execution",
-		"Command:",
+		"command:",
 		"  cd /ws/a && git status", // its own line, indented under the label
 	} {
 		if !strings.Contains(got, want) {
@@ -1005,6 +1005,73 @@ func TestModelApprovalTerminalShowsCommandBlock(t *testing.T) {
 	}
 	if strings.Contains(got, `"command"`) {
 		t.Errorf("the JSON envelope is still drawn beside the command block:\n%s", got)
+	}
+}
+
+// Every argument is a `name:` label with the value's own lines under it — a single-line value, a
+// multi-line one reading as the lines it will actually run rather than as one `\n`-escaped string,
+// and every key of a multi-argument call, in the order the model wrote them. What is NOT on the
+// screen is the envelope: no braces around the set, no quoted key names, nothing for the human to
+// read past on the one surface whose job is that the arguments are read.
+//
+// The order case is the security-relevant one: a workdir naming where a command runs is exactly the
+// fact a body that showed the command alone would hide.
+func TestModelApprovalArgsReadAsLabelledLines(t *testing.T) {
+	cases := []struct {
+		name string
+		args string
+		want []string // in the order they must appear
+	}{
+		{
+			"a single-line value",
+			`{"path":"notes.txt"}`,
+			[]string{"path:", "  notes.txt"},
+		},
+		{
+			"a multi-line value reads as its own lines",
+			`{"command":"cd /ws/a\ngit status\ngit diff"}`,
+			[]string{"command:", "  cd /ws/a", "  git status", "  git diff"},
+		},
+		{
+			"several arguments, each labelled, in wire order",
+			`{"command":"git status","workdir":"/ws/b","timeout":30}`,
+			[]string{"command:", "  git status", "workdir:", "  /ws/b", "timeout:", "  30"},
+		},
+		{
+			"a non-string value keeps the literal the model sent",
+			`{"command":42}`,
+			[]string{"command:", "  42"},
+		},
+		{
+			"a whitespace-only value is still labelled and shown",
+			`{"command":"   "}`,
+			[]string{"command:"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+			reply := make(chan domain.ApprovalDecision, 1)
+			m = step(t, m, approvalReqMsg{
+				Request: domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(tc.args)},
+				Reply:   reply,
+			})
+			got := ansiPattern.ReplaceAllString(m.approvalPrompt(m.pending.Request), "")
+
+			at := 0
+			for _, want := range tc.want {
+				i := strings.Index(got[at:], want)
+				if i < 0 {
+					t.Fatalf("body missing %q at or after the line before it:\n%s", want, got)
+				}
+				at += i + len(want)
+			}
+			for _, envelope := range []string{"{", "}", `"command"`, `"path"`, `"workdir"`, `\n`} {
+				if strings.Contains(got, envelope) {
+					t.Errorf("the JSON envelope survives in the painted body (%q):\n%s", envelope, got)
+				}
+			}
+		})
 	}
 }
 
@@ -1028,8 +1095,8 @@ func TestModelApprovalMenuSpacing(t *testing.T) {
 	got := strings.Join(rows, "\n")
 	blank := func(i int) bool { return strings.TrimSpace(strings.Trim(rows[i], "│")) == "" }
 
-	if reason, command := paneRowIndex(t, rows, "Reason:"), paneRowIndex(t, rows, "Command:"); command != reason+1 {
-		t.Errorf("Command: sits %d lines under Reason:, want the two labels adjacent:\n%s", command-reason, got)
+	if reason, command := paneRowIndex(t, rows, "Reason:"), paneRowIndex(t, rows, "command:"); command != reason+1 {
+		t.Errorf("command: sits %d lines under Reason:, want the two labels adjacent:\n%s", command-reason, got)
 	}
 	allow, cancel := paneRowIndex(t, rows, "❯ Allow"), paneRowIndex(t, rows, "· Cancel")
 	if !blank(allow - 1) {
@@ -1043,11 +1110,11 @@ func TestModelApprovalMenuSpacing(t *testing.T) {
 	}
 }
 
-// Everything the command block cannot state in full falls back to the raw arguments JSON, because
-// that is what keeps the human deciding against what the tool will actually receive: another tool
-// (whose arguments are not a command line), a terminal call whose arguments do not parse or carry no
-// command, and one carrying a FURTHER argument the block has no line for — a workdir naming where
-// the command runs is exactly the fact a command-only body would hide.
+// Arguments with no names to label fall back to the raw JSON, because that is what keeps the human
+// deciding against what the tool will actually receive: a blob that does not parse, one that is not
+// an object at all, and one carrying a second document behind the first. Showing them as they
+// arrived is the honest rendering — half a labelled body would be a claim about the call that the
+// bytes do not support.
 func TestModelApprovalArgsFallBackToJSON(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1055,29 +1122,19 @@ func TestModelApprovalArgsFallBackToJSON(t *testing.T) {
 		want string
 	}{
 		{
-			"another tool keeps its arguments JSON",
-			domain.ApprovalRequest{Tool: "write_file", Arguments: json.RawMessage(`{"command":"rm -rf /"}`)},
-			`"command": "rm -rf /"`,
-		},
-		{
 			"unparseable terminal arguments",
 			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":`)},
 			`{"command":`,
 		},
 		{
-			"a non-string command",
-			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":42}`)},
-			`"command": 42`,
+			"arguments that are not an object",
+			domain.ApprovalRequest{Tool: "write_file", Arguments: json.RawMessage(`["rm -rf /"]`)},
+			`"rm -rf /"`,
 		},
 		{
-			"an empty command",
-			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":"   "}`)},
-			`"command": "   "`,
-		},
-		{
-			"a workdir the command block would hide",
-			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":"git status","workdir":"/ws/b"}`)},
-			`"workdir": "/ws/b"`,
+			"a second document behind the first",
+			domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(`{"command":"ls"} {"command":"rm -rf /"}`)},
+			`{"command":"ls"} {"command":"rm -rf /"}`,
 		},
 	}
 	for _, tc := range cases {
@@ -1087,11 +1144,10 @@ func TestModelApprovalArgsFallBackToJSON(t *testing.T) {
 			m = step(t, m, approvalReqMsg{Request: tc.req, Reply: reply})
 
 			got := ansiPattern.ReplaceAllString(m.approvalPrompt(m.pending.Request), "")
+			// The want strings each carry a brace or a quote a labelled rendering would have
+			// stripped, so finding them IS the proof the fallback was taken.
 			if !strings.Contains(got, tc.want) {
 				t.Errorf("body missing the raw argument %q:\n%s", tc.want, got)
-			}
-			if strings.Contains(got, "Command:") {
-				t.Errorf("body took the command block on arguments it cannot state in full:\n%s", got)
 			}
 		})
 	}

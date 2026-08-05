@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -1004,6 +1005,116 @@ func prettyJSONDetails(raw json.RawMessage) []detailLine {
 		details = append(details, detailLine{Text: ln})
 	}
 	return details
+}
+
+// argumentValueIndent is the hanging indent an argument's value sits under, so a labelled argument
+// reads as a label with its value beneath it rather than as one run-on line
+// (docs/design/user-questions-layout.md, the approval box).
+const argumentValueIndent = "  "
+
+// argumentDetails renders a tool call's arguments as LABELLED lines: one `name:` line per argument,
+// the value's own real lines indented beneath it. It is the shape a human reads a decision off —
+// no surrounding braces, no quoted key names, and a multi-line command showing the lines it will
+// actually run rather than one `"…\n…"` string — and it is DISPLAY-ONLY: what the tool receives is
+// the caller's json.RawMessage, untouched by anything here.
+//
+// The order is the MODEL's own, taken off the wire in the order it wrote the keys, so the display is
+// deterministic for a given call without imposing an order the call did not have (a decode into
+// map[string]any loses it, which is why orderedArgs streams the tokens instead).
+//
+// Two things still render as JSON, and both are the honest rendering rather than a leftover. A blob
+// that is not an object at all — a bare array, a malformed fragment — has no names to label, so it
+// falls back to prettyJSONDetails and the unregistered-tool body's verbatim-rather-than-dropped
+// rule. And a single value with no flat shape (a nested object, an array of objects) is indented
+// JSON under its own label, since nothing else states its structure without lying about it. What
+// never comes back is an envelope around the argument SET: the labels ARE the object.
+//
+// The transcript's own targetless block keeps prettyJSONDetails (presentToolCall) — that block is
+// the record of a call, this is the surface a human decides on, and only the second one was asked to
+// change.
+func argumentDetails(raw json.RawMessage) []detailLine {
+	pairs, ok := orderedArgs(raw)
+	if !ok {
+		return prettyJSONDetails(raw)
+	}
+	var details []detailLine
+	for _, p := range pairs {
+		details = append(details, detailLine{Text: p.name + ":"})
+		for _, ln := range argumentValueLines(p.value) {
+			details = append(details, detailLine{Text: argumentValueIndent + ln})
+		}
+	}
+	return details
+}
+
+// argumentPair is one argument as the model wrote it: its name, and its value still encoded, so the
+// value's own rendering (argumentValueLines) decides what shape it takes on the screen.
+type argumentPair struct {
+	name  string
+	value json.RawMessage
+}
+
+// orderedArgs decodes a tool call's arguments into name/value pairs in WIRE order, reporting false
+// when there is nothing to label — absent or null arguments, a top-level value that is not an
+// object, a blob that does not parse, or one carrying anything after its closing brace. Every false
+// leaves the caller to show the arguments as they arrived: half a labelled rendering of a malformed
+// blob would be a claim about the call that the bytes do not support.
+func orderedArgs(raw json.RawMessage) ([]argumentPair, bool) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return nil, false
+	}
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	open, err := dec.Token()
+	if err != nil {
+		return nil, false
+	}
+	if delim, isDelim := open.(json.Delim); !isDelim || delim != '{' {
+		return nil, false
+	}
+	var pairs []argumentPair
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return nil, false
+		}
+		name, isString := key.(string)
+		if !isString {
+			return nil, false
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, false
+		}
+		pairs = append(pairs, argumentPair{name: name, value: value})
+	}
+	if _, err := dec.Token(); err != nil { // the closing brace
+		return nil, false
+	}
+	if dec.More() { // a second document behind the first
+		return nil, false
+	}
+	return pairs, true
+}
+
+// argumentValueLines renders one argument's value as the lines that sit under its label: a string as
+// its OWN lines, so the newline a JSON blob spells `\n` is a line break here; any other scalar as
+// the literal the model sent (a `null` says null rather than going quiet, which is why only a
+// decoded STRING takes the first exit); and a value with no flat shape as indented JSON. It
+// truncates nothing and wraps nothing — how many of these lines a surface can seat is that
+// surface's own business.
+func argumentValueLines(value json.RawMessage) []string {
+	var decoded any
+	if err := json.Unmarshal(value, &decoded); err == nil {
+		if s, isString := decoded.(string); isString {
+			return splitLines(s)
+		}
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, value, "", "  "); err != nil {
+		return splitLines(strings.TrimSpace(string(value)))
+	}
+	return splitLines(buf.String())
 }
 
 // firstLine returns the first line of s (without its newline), or s when it has none.

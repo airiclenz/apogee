@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"image/color"
 	"os"
@@ -4106,9 +4105,10 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int, floor popupFlo
 // chrome is its two borders and nothing else (popupBorderChrome) and the menu costs the frame no
 // more than the legend did.
 //
-// The mockup's vertical spacing is the same argument in blank lines: Reason: and Command: run
-// ADJACENT — they are two labelled facts about one call, and a blank line between them reads as two
-// blocks — while ONE blank line sets the menu off from them (popupSpec.rowPadAbove), because that is
+// The mockup's vertical spacing is the same argument in blank lines: the Reason: line and the
+// labelled arguments under it run ADJACENT — they are labelled facts about one call, and a blank
+// line between them reads as two blocks — while ONE blank line sets the menu off from them
+// (popupSpec.rowPadAbove), because that is
 // the break that matters, between what the human is deciding about and what the decisions are. It is
 // the ONLY blank the pane spends: the menu's four options are adjacent to each other and the last of
 // them ends the box, so nothing separates Cancel from the bottom border (rowPadBelow stays off, and
@@ -4187,55 +4187,34 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	return renderPopup(m.th, spec, m.width)
 }
 
-// approvalTerminalTool is the canonical name of the shell tool whose approval body reads as a
-// command line rather than as JSON (internal/tools terminalSpec). It is a string rather than a
-// typed constant for this package's standing reason: the view does not import internal/tools
-// (doc.go), so a tool name crosses that seam as the wire value the model itself sends — the same
-// way toolPresenters keys on "terminal".
-const approvalTerminalTool = "terminal"
-
-// approvalCommandIndent is the hanging indent the command line sits under, so the body reads as a
-// label with its value beneath rather than as one run-on line (docs/design/user-questions-layout.md).
-const approvalCommandIndent = "  "
-
-// approvalArgsBlock renders req's arguments for the approval body, escape-stripped: a "Command:"
-// label with the shell command line indented beneath it for the terminal tool, and the
-// pretty-printed arguments JSON — today's rendering — for every other tool.
+// approvalArgsBlock renders req's arguments for the approval body, escape-stripped: one `name:`
+// label line per argument with the value's own lines indented beneath it (argumentDetails), so a
+// shell call reads
 //
-// The JSON is the DEFAULT and the fallback, because on this surface the human decides against what
-// the tool will actually receive; the command block is the one case where a friendlier shape shows
-// strictly the same fact, the shell line being the whole of terminal's blast radius. So the block is
-// taken only when the arguments are exactly a non-empty command and nothing else: a malformed
-// object, a missing or non-string command, or any FURTHER argument (a workdir, a timeout) falls back
-// to the JSON rather than deciding on the human's behalf that the extra one does not matter.
+//	command:
+//	  cd /ws/a && git status
+//
+// rather than as the JSON object carrying that string. The human is deciding about the ARGUMENTS,
+// and a brace, a quoted key and a `\n` escape are the envelope they travelled in — three things to
+// read past on a surface whose whole job is that the fact is read.
+//
+// Nothing is dropped to get there: every argument the request carries gets a label, so an extra one
+// the reader would want to see — a workdir naming where a command runs — is on the screen rather
+// than summarised away, and arguments that cannot be labelled at all still show as they arrived
+// (argumentDetails). This is DISPLAY-ONLY in the strict sense: req.Arguments is what the tool
+// receives whatever this returns, and the decision the human sends is unaffected by the shape it
+// was read in.
+//
+// One tool-presentation vocabulary paints both surfaces: the block is built from the same
+// [detailLine] values a transcript block is, in toolpresent.go, rather than from a second formatter
+// living here.
 func approvalArgsBlock(req domain.ApprovalRequest) string {
-	if cmd, ok := approvalCommandLine(req); ok {
-		lines := strings.Split(stripEscapes(cmd), "\n")
-		for i, ln := range lines {
-			lines[i] = approvalCommandIndent + ln
-		}
-		return "Command:\n" + strings.Join(lines, "\n")
+	details := argumentDetails(req.Arguments)
+	lines := make([]string, len(details))
+	for i, d := range details {
+		lines[i] = d.Text
 	}
-	return stripEscapes(prettyJSON(req.Arguments))
-}
-
-// approvalCommandLine reports the shell command line req would run, and whether the approval body
-// may render it as a command block at all (see approvalArgsBlock for what disqualifies a request).
-// It is DISPLAY-ONLY: domain.ApprovalRequest is unchanged and the decision the human sends is
-// unaffected by which rendering the body took.
-func approvalCommandLine(req domain.ApprovalRequest) (string, bool) {
-	if req.Tool != approvalTerminalTool {
-		return "", false
-	}
-	var args map[string]any
-	if err := json.Unmarshal(req.Arguments, &args); err != nil || len(args) != 1 {
-		return "", false
-	}
-	cmd, ok := args["command"].(string)
-	if !ok || strings.TrimSpace(cmd) == "" {
-		return "", false
-	}
-	return cmd, true
+	return stripEscapes(strings.Join(lines, "\n"))
 }
 
 // maxAskChoiceRows caps how many ask_user choice rows the popup shows at once (the

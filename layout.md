@@ -212,6 +212,30 @@ rows of fixed chrome below the session area, that puts the shortest terminal a p
 at all at **twelve rows** — and at twelve the session area is already gone, so the frame is exactly
 the pane and the chrome together.
 
+**What the approval prompt's body says is the call, in the call's own words.** The tool's raw name
+rides the top border, a non-empty reason leads the body as `Reason: …`, and the arguments follow it
+as LABELLED lines: one `name:` line per argument, the value's own lines hanging two spaces under it,
+the arguments in the order the model wrote them. So a shell call reads
+
+```
+│ Reason: subprocess execution (confinement unavailable on this host)          │
+│ command:                                                                     │
+│   cd /workspace/repos/apogee && git status                                   │
+```
+
+— the reason and the arguments adjacent, two labelled facts about one call, and a command that spans
+several lines showing the lines it will actually run. The JSON object the arguments travelled in is
+NOT drawn: no braces around the set, no quoted key names, no `\n` between one line of a command and
+the next. That envelope is three things to read past on the one surface whose whole job is that the
+fact is read, and it says nothing the labels do not. Nothing is dropped to buy that: EVERY argument
+gets a label, so a workdir naming where a command runs is on the screen rather than summarised away,
+and arguments with no names to label — a blob that does not parse, a value that is not an object at
+all — are shown exactly as they arrived, since half a labelled body would be a claim about the call
+the bytes do not support. A single value with no flat shape (a nested object, an array) is indented
+JSON under its own label, which is the one place a brace still reaches this pane. All of it is
+display: the arguments the tool receives are the ones the model sent, whatever shape they were read
+in.
+
 **Inside a pane's own grant the rows come first — except where the prose IS what is being decided.**
 A picker, a browser or a dropdown *is* its rows, and the caption over them takes what they leave; the
 approval prompt reads the same way and can afford to, because its offering is four fixed options and
@@ -485,9 +509,11 @@ mentions groups. A call with **no target** collapses like every other block, and
 capped differs: its lines are the block's own `┝`/`┕` branches rather than a body — an unregistered
 tool's verbatim arguments, a registered call that arrived without its target, a stray `result` — so
 the cap falls on that branch list, with the remainder marker beneath it. Hiding them costs nothing,
-because the **approval popup** is the surface a human approves an action on and it shows the
-verbatim arguments at decision time; the transcript block is the *record*, and a record may
-collapse.
+because the **approval popup** is the surface a human approves an action on and it shows every
+argument at decision time, each one under its own `name:` label (above); the transcript block is the
+*record*, and a record may collapse. The two surfaces render the same arguments differently on
+purpose: the record shows a targetless call's arguments as the pretty-printed JSON they arrived in,
+where the decision surface labels them.
 
 **Collapsed is the default, always** — including a call still in flight and a sub-agent run still
 working. Only a click changes a block's state, so nothing ever expands or collapses by itself: a

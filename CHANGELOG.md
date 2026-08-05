@@ -729,11 +729,14 @@ point is a **minor** bump, not a breaking change.
     so the legend row is gone and the pane spends that row on what you are deciding about instead.
     On the shortest terminal a pane is drawn in at all, that is the difference between seeing a
     decision row and seeing none.
-  - **A terminal approval shows the command rather than JSON.** `Reason:` and `Command:` label the
-    body and the shell line sits indented under the second. Every other tool still shows its raw
-    arguments as JSON — and so does a terminal call carrying anything besides the command, a working
-    directory or a timeout included, because what you decide against must be what the tool will
-    actually receive.
+  - **An approval shows the arguments, not the JSON they arrived in.** Every tool's arguments are
+    labelled lines — `command:` with the shell line indented under it, `path:` with the file under
+    that — in the order the model wrote them, so a command spanning several lines reads as the lines
+    it will actually run instead of one `"…\n…"` string. No braces around the set, no quoted key
+    names, nothing to read past. Nothing is summarised away to get there: every argument is on the
+    screen, a working directory or a timeout beside the command included, because what you decide
+    against must be what the tool will actually receive — and arguments that cannot be labelled at
+    all (a blob that does not parse) are still shown exactly as they arrived.
   - **An ask prompt's answers may be prose.** A long option wraps with a hanging indent instead of
     being cut off, a blank line separates one answer from the next, and the tool no longer asks the
     model for short single-line choices. An answer is seated whole or not at all, so a short window

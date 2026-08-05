@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"encoding/json"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -805,4 +807,99 @@ func TestClipDetail(t *testing.T) {
 	if short := clipDetail("short"); short != "short" {
 		t.Errorf("a short line must pass through unchanged: %q", short)
 	}
+}
+
+// argumentDetails is the labelled rendering the approval prompt reads a decision off: one `name:`
+// line per argument in the order the model wrote them, the value's own real lines indented beneath
+// it — a multi-line string becoming the lines it will actually run rather than one escaped blob —
+// and no envelope around the set. A value with no flat shape is the one place JSON survives, under
+// its own label, because nothing else states its structure without lying about it.
+func TestArgumentDetailsLabelsEachArgument(t *testing.T) {
+	cases := []struct {
+		name string
+		args string
+		want []string
+	}{
+		{
+			"a single-line value",
+			`{"path":"notes.txt"}`,
+			[]string{"path:", "  notes.txt"},
+		},
+		{
+			"a multi-line value keeps its own lines",
+			`{"command":"cd /ws/a\ngit status\ngit diff"}`,
+			[]string{"command:", "  cd /ws/a", "  git status", "  git diff"},
+		},
+		{
+			"several arguments in wire order",
+			`{"command":"git status","workdir":"/ws/b","timeout":30}`,
+			[]string{"command:", "  git status", "workdir:", "  /ws/b", "timeout:", "  30"},
+		},
+		{
+			"wire order is the model's, not the alphabet's",
+			`{"workdir":"/ws/b","command":"git status"}`,
+			[]string{"workdir:", "  /ws/b", "command:", "  git status"},
+		},
+		{
+			"a non-string scalar keeps the literal the model sent",
+			`{"count":42,"force":true,"note":null}`,
+			[]string{"count:", "  42", "force:", "  true", "note:", "  null"},
+		},
+		{
+			"a value with no flat shape is indented JSON under its own label",
+			`{"opts":{"deep":1}}`,
+			[]string{"opts:", "  {", `    "deep": 1`, "  }"},
+		},
+		{
+			"an empty object has nothing to label",
+			`{}`,
+			nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := detailLineTexts(argumentDetails(json.RawMessage(tc.args)))
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("argumentDetails(%s) =\n%#v\nwant\n%#v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// Arguments with no names to label are shown as they arrived (prettyJSONDetails), because a half
+// labelled body would be a claim about the call that the bytes do not support. Absent or null
+// arguments add no lines at all.
+func TestArgumentDetailsFallsBackWhereThereIsNothingToLabel(t *testing.T) {
+	cases := []struct {
+		name string
+		args string
+		want []string
+	}{
+		{"a malformed blob", `{"command":`, []string{`{"command":`}},
+		{"not an object", `["a","b"]`, []string{"[", `  "a",`, `  "b"`, "]"}},
+		{"a second document behind the first", `{"a":1} {"b":2}`, []string{`{"a":1} {"b":2}`}},
+		{"absent arguments", ``, nil},
+		{"null arguments", `null`, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := detailLineTexts(argumentDetails(json.RawMessage(tc.args)))
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("argumentDetails(%s) =\n%#v\nwant\n%#v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// detailTexts reads the plain text off a body's lines, so a rendering is compared as the lines a
+// reader sees rather than as the struct carrying them.
+func detailLineTexts(lines []detailLine) []string {
+	if lines == nil {
+		return nil
+	}
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		out[i] = ln.Text
+	}
+	return out
 }
