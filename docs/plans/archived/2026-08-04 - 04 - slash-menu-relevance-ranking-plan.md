@@ -63,6 +63,12 @@ entry was added under `[Unreleased]` per repo convention (no version identifier 
 - Do not touch `computeAutocomplete`'s selection logic: `selected` stays zero-valued,
   so the best-ranked row becomes the default highlight for free.
 
+> **Note (2026-08-05):** the `/skill` verb was removed by
+> "2026-08-04 - 06 - remove-skill-command-plan"; this passage's `/skill <arg>` picker clause
+> is inert. `skillSuggestions` now feeds only the merged `/` slash menu, so that menu — and
+> the inline `/<skill-id>` token an accepted row splices in — is what inherits the ranking.
+> (Elsewhere in this item, `autocomplete/skill` names test files, not the removed verb.)
+
 **Tests** (in `internal/tui`, alongside the existing autocomplete/skill tests):
 
 - Table-driven unit test for `slashMatchRank`: exact beats prefix beats substring;

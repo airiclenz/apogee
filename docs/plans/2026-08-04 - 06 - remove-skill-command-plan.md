@@ -387,3 +387,22 @@ the status line do not otherwise carry.
 NOTES (2026-08-05): the whole-file sweep for further now-false picker claims found none. The
 only other `picker` in the file (`:195`) denotes the surviving `picker.go` single-select overlay
 (`/model` + `/server` over `hb.models`) and was left untouched, as instructed.
+
+## FOLLOW-UP FU2 (post-item-4) — Note the inert `/skill` clause in the slash-menu ranking plan
+
+Run-level follow-up work item, not a numbered plan item: the slash-menu relevance-ranking
+plan still claimed the removed `/skill <arg>` picker inherits the new ranking. The passage
+was annotated, not rewritten.
+
+NOTES (2026-08-05): the item named the target as `docs/plans/2026-08-04 - 04 - slash-menu-relevance-ranking-plan.md`,
+but that plan completed and was archived on 2026-08-05; the file lives at
+`docs/plans/archived/2026-08-04 - 04 - slash-menu-relevance-ranking-plan.md` and was annotated there.
+Its `- **Status:** completed (2026-08-05) — all items ✅, archived` line, its items and its
+acceptance commands were left untouched, as instructed.
+
+NOTES (2026-08-05): the "around line 53" locator was stale — the `/skill <arg>` clause sits at
+`:59–60`, the tail of item 1's `skillSuggestions` bullet, and was matched on wording. One dated
+note was appended at the end of that item's **What** block. The whole-file sweep found no other
+`/skill`-verb claim: the acceptance grep's second hit (`autocomplete/skill tests`, now `:71`) is a
+test-file phrase, not a verb, and the note — which sits immediately above it — says so explicitly
+rather than leaving a bare grep hit uncovered.
