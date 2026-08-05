@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -62,6 +63,14 @@ type options struct {
 	// for the startup server: a configured startup is already IN the list, an ephemeral one is
 	// nowhere. Resolved-not-flag-bound; applyConfig sets it.
 	startupEphemeral bool
+
+	// prebound says this session starts with NO upstream bound, and why — the zero value being the
+	// ordinary start, on the server selection determined. It is the one resolution outcome that
+	// does not come out of applyConfig's write-back but out of its refusal: the root command
+	// recognises startupUndetermined and turns it into this value (ADR 0036 decisions 3 and 5),
+	// while every other Driver returns the refusal and stops. runRoot reads it to decide whether to
+	// construct the engine before the TUI starts or to hand the TUI the bind seam instead.
+	prebound tui.PreboundStart
 
 	// llamaLauncher is the resolved `llama-launcher:` key (ADR 0029), exactly as the user wrote it:
 	// empty ⇒ auto-detect the launcher's own config, `off` ⇒ the local-server verbs stay off, any
@@ -241,7 +250,15 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 			// A soft notice from resolution (a malformed unconfined-hosts entry) prints here,
 			// on stderr before the alt-screen, like the seeding line above.
 			if err := applyConfig(&opts, changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
-				return err
+				// The one refusal this Driver answers instead of printing: resolution could not say
+				// which server to start on. The TUI can ASK — it has a picker, and a human in front
+				// of it — so it starts pre-bound and gets its engine from the answer (ADR 0036
+				// decisions 3 and 5). Every other error, and every other Driver, stops here.
+				var undetermined *startupUndetermined
+				if !errors.As(err, &undetermined) {
+					return err
+				}
+				opts.prebound = undetermined.start
 			}
 			// Nothing asks the server anything here. Startup used to stall for up to five seconds
 			// on a discovery probe — and hard-fail when no model was configured and the server was

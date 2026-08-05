@@ -817,8 +817,10 @@ func TestApplyConfigStartupServerOverrideSelects(t *testing.T) {
 }
 
 // The three ways selection has no answer. Each is a hard error naming the config file and showing
-// what to write — the permanent behaviour for the non-interactive drivers, and the behaviour for
-// the TUI too until ADR 0036's pre-bound state (which asks instead) is wired.
+// what to write — the permanent behaviour for the non-interactive drivers — and each carries the
+// REASON that lets the TUI answer it by asking instead (ADR 0036 decisions 3 and 5). The resolved
+// opts must survive the refusal intact, because the pre-bound TUI asks with exactly that: the
+// servers list it offers, and every other key the session runs on.
 func TestApplyConfigStartupServerRefusals(t *testing.T) {
 	t.Parallel()
 	const list = "servers:\n  - name: laptop\n    endpoint: http://127.0.0.1:1111\n"
@@ -826,21 +828,25 @@ func TestApplyConfigStartupServerRefusals(t *testing.T) {
 		name       string
 		configYAML string
 		wantParts  []string
+		wantStart  tui.PreboundStart
 	}{
 		{
 			name:       "an empty list has nothing to start on",
 			configYAML: "mode: plan\n",
 			wantParts:  []string{"no servers are configured", "config.yaml", "servers:", "server: my-box"},
+			wantStart:  tui.PreboundStart{Reason: tui.PreboundNoServers},
 		},
 		{
 			name:       "a list with no choice recorded",
 			configYAML: list,
 			wantParts:  []string{"no startup server is chosen", "laptop", "--server"},
+			wantStart:  tui.PreboundStart{Reason: tui.PreboundFirstBoot},
 		},
 		{
 			name:       "a choice no entry carries",
 			configYAML: list + "server: the-old-name\n",
 			wantParts:  []string{`names "the-old-name"`, "configured: laptop", "--server"},
+			wantStart:  tui.PreboundStart{Reason: tui.PreboundStaleChoice, Name: "the-old-name"},
 		},
 	}
 	for _, tt := range tests {
@@ -850,7 +856,7 @@ func TestApplyConfigStartupServerRefusals(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
 				t.Fatalf("write config: %v", err)
 			}
-			opts := options{configDir: home}
+			opts := options{configDir: home, mode: "ask-before"}
 			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
 				os.ReadFile, noNotify)
 			if err == nil {
@@ -860,6 +866,30 @@ func TestApplyConfigStartupServerRefusals(t *testing.T) {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("the refusal does not mention %q: %v", want, err)
 				}
+			}
+			var undetermined *startupUndetermined
+			if !errors.As(err, &undetermined) {
+				t.Fatalf("the refusal is not a startupUndetermined (%T); the TUI cannot tell it from "+
+					"a config error it must print", err)
+			}
+			if undetermined.start != tt.wantStart {
+				t.Errorf("reason = %+v; want %+v", undetermined.start, tt.wantStart)
+			}
+			// Resolution finished despite the refusal: the list to pick from is there, and so is
+			// every other key. Nothing is bound, so the upstream fields are empty and the startup
+			// is not the ephemeral one either.
+			if len(opts.servers) != strings.Count(tt.configYAML, "  - name:") {
+				t.Errorf("opts.servers = %+v; want the file's list, resolved despite the refusal", opts.servers)
+			}
+			if opts.mode != "plan" && tt.configYAML == "mode: plan\n" {
+				t.Errorf("opts.mode = %q; want the file's — the write-back must complete", opts.mode)
+			}
+			if opts.endpoint != "" || opts.apiKey != "" || opts.model != "" || opts.hostAlias != "" {
+				t.Errorf("an undetermined startup left upstream fields set: endpoint=%q key-set=%t model=%q alias=%q",
+					opts.endpoint, opts.apiKey != "", opts.model, opts.hostAlias)
+			}
+			if opts.startupEphemeral {
+				t.Error("startupEphemeral = true; nothing was selected, so there is no row to synthesize")
 			}
 		})
 	}

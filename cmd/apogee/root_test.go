@@ -5,6 +5,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -187,6 +189,48 @@ func TestRootStartsWithNoModelAndNoServer(t *testing.T) {
 	}
 	if rec.opts.Rebind == nil {
 		t.Error("tui.Options.Rebind is nil; the rebind closure was not wired")
+	}
+}
+
+// The refusal the TUI answers instead of printing (ADR 0036 decision 3): a config that lists a
+// server but records no choice cannot say where to start, and every other Driver stops there. The
+// root command carries on — pre-bound, with no engine and the reason for the renderer to act on —
+// because it is the one Driver that can ask. The proof is end to end, through the command tree,
+// because the conversion from refusal to reason lives in RunE and nowhere else.
+func TestRootStartsPreboundWhenNothingIsChosen(t *testing.T) {
+	// The host's own environment must not choose a server the test is asserting nobody chose.
+	t.Setenv(envServer, "")
+	t.Setenv(envEndpoint, "")
+
+	home := t.TempDir()
+	const listWithoutAChoice = "servers:\n  - name: laptop\n    endpoint: http://127.0.0.1:1111\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(listWithoutAChoice), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	rec := &recordingLauncher{}
+	cmd := newRootCommand(rec.launch)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--workspace", t.TempDir(), "--config", home})
+
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("Execute with no startup server chosen: %v\n%s", err, out.String())
+	}
+	if !rec.called {
+		t.Fatal("the launcher was not invoked; the TUI still refuses a config it could ask about")
+	}
+	want := tui.PreboundStart{Reason: tui.PreboundFirstBoot}
+	if rec.opts.Prebound != want {
+		t.Errorf("tui.Options.Prebound = %+v; want %+v", rec.opts.Prebound, want)
+	}
+	// The list it will ask WITH survived the refusal, and so did the seam that ends it.
+	if len(rec.opts.Servers) != 1 || rec.opts.Servers[0].Name != "laptop" {
+		t.Errorf("tui.Options.Servers = %+v; want the configured list", rec.opts.Servers)
+	}
+	if rec.opts.BindServer == nil {
+		t.Error("tui.Options.BindServer is nil; the pre-bound session cannot bind the server it picks")
 	}
 }
 

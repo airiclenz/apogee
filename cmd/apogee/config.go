@@ -1477,6 +1477,13 @@ func overrideSources(changed func(string) bool, getenv func(string) string) map[
 // Host acknowledgement, if any, that applies on this host (ADR 0012, amendment 2026-07-21).
 // notify receives resolution's soft notices — a malformed acknowledgement is reported and
 // skipped, never fatal — on stderr, like the other pre-TUI startup lines.
+//
+// One error is deliberately returned LAST, after every value has been written back:
+// [startupUndetermined], the refusal that says the config could not name a startup server. Every
+// Driver still receives it, so a driver that cannot ask a human refuses exactly as it did before
+// (item 3's hard errors); but the TUI answers it by starting pre-bound (ADR 0036 decisions 3 and
+// 5), and it can only do that if the rest of the resolution — the servers list to pick from, the
+// mode, the roots — is standing in opts by the time it reads the refusal.
 func applyConfig(opts *options, changed func(string) bool, getenv func(string) string, readFile func(string) ([]byte, error), notify func(string)) error {
 	opts.configDir = resolveConfigDir(opts.configDir, changed, getenv)
 	if !changed("workspace") {
@@ -1552,11 +1559,13 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	// overrides together, and a name that matches nothing is a fact about that triple, not about
 	// any one key. The overrides are read from the SAME opts the flag layer was built from, before
 	// the write-back below overwrites the flag-bound endpoint/model fields with the answer.
+	//
+	// A selection that cannot be made is NOT returned here: the refusal is held and returned at the
+	// very end, so a Driver that answers it by asking the human (the TUI's pre-bound start) still
+	// receives a fully-resolved opts to ask WITH. The startup entry is the zero one in that case,
+	// which writes the empty endpoint/model/key a session with no upstream honestly has.
 	raw := resolveStartupOverrides(*opts, changed, getenv)
-	startup, err := resolveStartupEntry(raw, s.startupServer, s.servers, configFilePath(opts.configDir))
-	if err != nil {
-		return err
-	}
+	startup, startupErr := resolveStartupEntry(raw, s.startupServer, s.servers, configFilePath(opts.configDir))
 	opts.endpoint = startup.Endpoint
 	opts.model = startup.Model
 	opts.apiKey = startup.APIKey
@@ -1564,7 +1573,9 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	// Whether that entry came out of the list or out of the invocation. A configured entry always
 	// has a name (validateServers refuses one without) and the ephemeral override entry never does,
 	// so namelessness IS the distinction — the same invariant the alias fallback below leans on.
-	opts.startupEphemeral = startup.Name == ""
+	// An undetermined startup is neither: nothing was selected, so there is nothing to synthesize a
+	// switch row for either.
+	opts.startupEphemeral = startupErr == nil && startup.Name == ""
 	opts.mode = s.mode
 	opts.bypass = s.bypass
 	opts.servers = s.servers
@@ -1598,7 +1609,10 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
 	}
-	return nil
+	// Held from the selection step above: everything is resolved, so the caller that can ask a
+	// human has what it needs to ask, and the caller that cannot refuses with the same message it
+	// has always printed.
+	return startupErr
 }
 
 // startupOverrides carries the raw invocation overrides ADR 0036 detached from the config schema:
@@ -1721,29 +1735,58 @@ func resolveStartupEntry(o startupOverrides, name string, servers []serverEntry,
 // None of them is reached when a raw endpoint override already answered the question
 // (resolveStartupEntry, which calls this only for the no-override case).
 //
-// ADR 0036 gives the TUI a better answer for the last two — it asks, through the `/server` picker,
-// and records the choice — which is not wired yet. The hard error stays the permanent answer for
-// the non-interactive drivers (headless, probe, bench): they have no one to ask.
+// ADR 0036 gives the TUI a better answer for all three — it asks, through the `/server` picker, or
+// points at `/settings` when nothing is configured — so each refusal is typed with the REASON it
+// carries (startupUndetermined) and the TUI reads that instead of printing it. The message itself
+// stays the permanent answer for the non-interactive drivers (headless, probe, bench): they have no
+// one to ask.
 func selectStartupServer(name string, servers []serverEntry, configPath string) (serverEntry, error) {
 	chosen := strings.TrimSpace(name)
 	switch {
 	case len(servers) == 0:
-		return serverEntry{}, fmt.Errorf("apogee: no servers are configured — apogee needs a server to "+
-			"talk to.\n\nAdd one to %s and start apogee again:\n\n%s", configPath, exampleServersBlock)
+		return serverEntry{}, &startupUndetermined{
+			start: tui.PreboundStart{Reason: tui.PreboundNoServers},
+			msg: fmt.Sprintf("apogee: no servers are configured — apogee needs a server to "+
+				"talk to.\n\nAdd one to %s and start apogee again:\n\n%s", configPath, exampleServersBlock),
+		}
 	case chosen == "":
-		return serverEntry{}, fmt.Errorf("apogee: no startup server is chosen — %s configures %s but "+
-			"records no server:.\n\nName the one to start on (or pass --server <name>):\n\nserver: %s\n",
-			configPath, serverNameList(servers), servers[0].Name)
+		return serverEntry{}, &startupUndetermined{
+			start: tui.PreboundStart{Reason: tui.PreboundFirstBoot},
+			msg: fmt.Sprintf("apogee: no startup server is chosen — %s configures %s but "+
+				"records no server:.\n\nName the one to start on (or pass --server <name>):\n\nserver: %s\n",
+				configPath, serverNameList(servers), servers[0].Name),
+		}
 	}
 	for _, s := range servers {
 		if s.Name == chosen {
 			return s, nil
 		}
 	}
-	return serverEntry{}, fmt.Errorf("apogee: server: names %q, which no servers: entry in %s carries "+
-		"(configured: %s).\n\nFix the name (or pass --server <name>).", chosen, configPath,
-		serverNameList(servers))
+	return serverEntry{}, &startupUndetermined{
+		start: tui.PreboundStart{Reason: tui.PreboundStaleChoice, Name: chosen},
+		msg: fmt.Sprintf("apogee: server: names %q, which no servers: entry in %s carries "+
+			"(configured: %s).\n\nFix the name (or pass --server <name>).", chosen, configPath,
+			serverNameList(servers)),
+	}
 }
+
+// startupUndetermined is selection's refusal: the config, the flags and the environment together
+// could not say which server this session starts on. It is an ERROR first — every Driver receives
+// it, and one that has nobody to ask prints it and stops, which is the permanent behaviour for
+// headless, probe and bench — and a reason second: the TUI recognises the type, takes the reason
+// out of it, and starts pre-bound instead (ADR 0036 decisions 3 and 5), because asking through the
+// picker fixes in one keystroke what a refusal would send to file surgery.
+//
+// The message is carried rather than formatted here so each of the three cases keeps the wording
+// that names ITS remedy, and so the type has exactly one job: pairing that message with the reason.
+type startupUndetermined struct {
+	start tui.PreboundStart
+	msg   string
+}
+
+// Error is the message the non-interactive drivers print — unchanged from the plain errors this
+// type replaced, because the refusal a human reads is the same refusal it always was.
+func (e *startupUndetermined) Error() string { return e.msg }
 
 // exampleServersBlock is the smallest config that starts a session, shown by the refusals above.
 // It is spelled here rather than in each message so the shape a user is told to write is one

@@ -778,6 +778,232 @@ func TestBuildAgentNew(t *testing.T) {
 	t.Cleanup(func() { _ = agent.Close() })
 }
 
+// ----------------------------------------------------------------------------
+// Late-bound construction (ADR 0036 decision 3)
+// ----------------------------------------------------------------------------
+
+// The ordinary start is unchanged: a determined startup server is bound BEFORE the TUI is handed
+// anything, so the engine the renderer receives is a working one and the heartbeat seam already
+// observes that server. Prebound is the zero value, which is what says so.
+func TestRunRootBindsADeterminedStartupBeforeLaunch(t *testing.T) {
+	t.Parallel()
+	srv := upstreamServer(t, "model-a", 4096)
+	rec := &recordingLauncher{}
+	opts := options{
+		endpoint:  srv.URL,
+		model:     "model-a",
+		mode:      "ask-before",
+		hostAlias: "workstation",
+		workspace: t.TempDir(),
+		configDir: t.TempDir(),
+	}
+
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+	if rec.opts.Prebound != (tui.PreboundStart{}) {
+		t.Errorf("tui.Options.Prebound = %+v; want the zero value — this session started bound", rec.opts.Prebound)
+	}
+	// A bound engine answers a conversation read; an unbound one refuses it.
+	if _, err := rec.engine.Snapshot(); err != nil {
+		t.Errorf("Snapshot on the launched engine: %v; want a constructed Agent behind the seam", err)
+	}
+	if beat := rec.opts.Heartbeat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-a" {
+		t.Errorf("beat = %+v; want the startup server's Monitor, installed before launch", beat)
+	}
+}
+
+// The pre-bound start: with no server determined, the TUI is launched with no engine at all. Every
+// seam is still wired — that is the point, the renderer must be able to ask and then bind — and the
+// reason travels through to the renderer so it can say which of the three situations this is.
+func TestRunRootStartsPreboundWithoutAnEngine(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		prebound tui.PreboundStart
+		servers  []serverEntry
+	}{
+		{
+			name:     "first boot, with servers to choose from",
+			prebound: tui.PreboundStart{Reason: tui.PreboundFirstBoot},
+			servers:  []serverEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}},
+		},
+		{
+			name:     "a recorded choice no entry carries any more",
+			prebound: tui.PreboundStart{Reason: tui.PreboundStaleChoice, Name: "the-old-name"},
+			servers:  []serverEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}},
+		},
+		{
+			name:     "nothing configured at all",
+			prebound: tui.PreboundStart{Reason: tui.PreboundNoServers},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rec := &recordingLauncher{}
+			opts := options{
+				mode:      "ask-before",
+				workspace: t.TempDir(),
+				configDir: t.TempDir(),
+				servers:   tt.servers,
+				prebound:  tt.prebound,
+			}
+
+			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+				t.Fatalf("runRoot: %v", err)
+			}
+			if !rec.called {
+				t.Fatal("the launcher was not invoked; a pre-bound start must still open the UI")
+			}
+			if rec.opts.Prebound != tt.prebound {
+				t.Errorf("tui.Options.Prebound = %+v; want %+v", rec.opts.Prebound, tt.prebound)
+			}
+			// Nothing was constructed: the conversation seams refuse, and they refuse by naming
+			// the way out rather than panicking on a nil Agent.
+			if _, err := rec.engine.Snapshot(); !errors.Is(err, errNoServerBound) {
+				t.Errorf("Snapshot err = %v; want errNoServerBound — an engine was constructed with no server", err)
+			}
+			if err := rec.engine.Submit(apogee.UserInput{Text: "hello"}); !errors.Is(err, errNoServerBound) {
+				t.Errorf("Submit err = %v; want errNoServerBound", err)
+			}
+			if rec.engine.InExchange() {
+				t.Error("InExchange = true with nothing bound")
+			}
+			beat := rec.opts.Heartbeat(context.Background())
+			if beat.Reachable || beat.Failure != "" || beat.ActiveModel != "" || len(beat.AvailableModels) != 0 {
+				t.Errorf("beat = %+v; want the zero Beat — there is no server to observe yet", beat)
+			}
+			// And the way out is wired: the picker's rows are the configured list (no synthesized
+			// row, because no ephemeral startup exists) and BindServer is what ends the state.
+			if len(rec.opts.Servers) != len(tt.servers) {
+				t.Errorf("tui.Options.Servers = %+v; want the configured list %+v", rec.opts.Servers, tt.servers)
+			}
+			if rec.opts.BindServer == nil {
+				t.Error("tui.Options.BindServer is nil; the pre-bound session has no way to bind one")
+			}
+		})
+	}
+}
+
+// BindServer is the seam that ends the pre-bound state, and it does it exactly once: the first call
+// constructs the Agent AND installs the Monitor (both seams flip together), a second is refused
+// before anything is built, and an unknown name never reaches construction at all.
+func TestBindServerConstructsOnceAndFlipsBothSeams(t *testing.T) {
+	t.Parallel()
+	first := upstreamServer(t, "model-a", 4096)
+	second := upstreamServer(t, "model-b", 8192)
+	rec := &recordingLauncher{}
+	opts := options{
+		mode:          "ask-before",
+		workspace:     t.TempDir(),
+		configDir:     t.TempDir(),
+		contextWindow: 16384, // the global pin, which a first binding adopts like a switch does
+		servers: []serverEntry{
+			{Name: "laptop", Endpoint: first.URL, Model: "model-a", APIKey: "laptop-key"},
+			{Name: "workstation", Endpoint: second.URL, Model: "model-b"},
+		},
+		prebound: tui.PreboundStart{Reason: tui.PreboundFirstBoot},
+	}
+
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+
+	// A name no entry carries is resolved before anything is constructed, so the session stays
+	// exactly as unbound as it was.
+	if _, err := rec.opts.BindServer("nope"); err == nil {
+		t.Error("BindServer accepted a name no entry carries")
+	}
+	if _, err := rec.engine.Snapshot(); !errors.Is(err, errNoServerBound) {
+		t.Errorf("Snapshot err = %v after a failed bind; want errNoServerBound", err)
+	}
+
+	result, err := rec.opts.BindServer("laptop")
+	if err != nil {
+		t.Fatalf("BindServer: %v", err)
+	}
+	if result.Endpoint != first.URL || result.HostAlias != "laptop" {
+		t.Errorf("result = %+v; want the entry's endpoint and its name as the alias", result)
+	}
+	if result.ContextWindow != 16384 {
+		t.Errorf("result.ContextWindow = %d; want the global 16384 pin", result.ContextWindow)
+	}
+	// Both seams flipped: the engine exists, and the heartbeat observes the server it was built
+	// against.
+	if _, err := rec.engine.Snapshot(); err != nil {
+		t.Errorf("Snapshot after the bind: %v; want a constructed Agent", err)
+	}
+	if beat := rec.opts.Heartbeat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-a" {
+		t.Errorf("beat after the bind = %+v; want model-a from the bound server's Monitor", beat)
+	}
+
+	// Exactly once: a second bind is refused, and nothing moved — the session is still on the
+	// server it bound, which is what `/server` (SwitchServer) exists to change.
+	if _, err := rec.opts.BindServer("workstation"); !errors.Is(err, errAlreadyBound) {
+		t.Errorf("second BindServer err = %v; want errAlreadyBound", err)
+	}
+	if beat := rec.opts.Heartbeat(context.Background()); beat.ActiveModel != "model-a" {
+		t.Errorf("beat after the refused second bind = %+v; want the first server still observed", beat)
+	}
+	// And the switch that IS the right verb still works over the same list.
+	if _, err := rec.opts.SwitchServer("workstation"); err != nil {
+		t.Fatalf("SwitchServer after a bind: %v", err)
+	}
+	if beat := rec.opts.Heartbeat(context.Background()); beat.ActiveModel != "model-b" {
+		t.Errorf("beat after the switch = %+v; want model-b", beat)
+	}
+}
+
+// The two settings a human can move while the picker is open must not be lost when the engine is
+// finally constructed: the footer showed them, so the engine has to be born with them.
+func TestLateEngineAppliesPreBindSettingsOnBind(t *testing.T) {
+	t.Parallel()
+	engine := newLateEngine(modeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+
+	// Unbound, the reads answer what a bind would install.
+	if !engine.ConfineToWorkspace() {
+		t.Error("ConfineToWorkspace = false before a bind; want the resolved value")
+	}
+	engine.SetMode(modePlan)
+	engine.SetConfineToWorkspace(false)
+	if engine.ConfineToWorkspace() {
+		t.Error("ConfineToWorkspace = true after SetConfineToWorkspace(false) while unbound")
+	}
+
+	cfg := validCfg(t)
+	cfg.Mode = modeAskBefore
+	cfg.ConfineToWorkspace = true
+	var bound *apogee.Agent
+	if err := engine.Bind(func() (*apogee.Agent, error) {
+		agent, err := apogee.New(cfg)
+		bound = agent
+		return agent, err
+	}); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if engine.ConfineToWorkspace() {
+		t.Error("the bound Agent kept the launch blast radius; the pre-bind change was dropped")
+	}
+	if bound.Mode() != modePlan {
+		t.Errorf("the bound Agent's mode = %q; want the %q the human cycled to before the bind",
+			bound.Mode(), modePlan)
+	}
+	// Exactly one Agent per session: a second Bind is refused before the constructor runs, so the
+	// one this holder closes at shutdown is the only one that was ever built.
+	built := false
+	if err := engine.Bind(func() (*apogee.Agent, error) {
+		built = true
+		return apogee.New(cfg)
+	}); !errors.Is(err, errAlreadyBound) {
+		t.Errorf("second Bind err = %v; want errAlreadyBound", err)
+	}
+	if built {
+		t.Error("the refused second Bind still constructed an Agent")
+	}
+}
+
 func TestBuildAgentResumeRoundTrip(t *testing.T) {
 	t.Parallel()
 	// Snapshot a fresh Agent and resume off the record's Session (buildAgent no longer reads
@@ -1356,7 +1582,8 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 	t.Helper()
 	agent := &fakeSwitcher{}
 	host := &fakeStamper{}
-	holder := newUpstreamHolder(endpoint, "", "", heartbeat.NewMonitor(endpoint, "", ""))
+	holder := newUpstreamHolder()
+	holder.Bind(endpoint, "", "", heartbeat.NewMonitor(endpoint, "", ""))
 	wiring := launcherWiring{
 		sessionMover: sessionMover{agent: agent, holder: holder, host: host, pinnedWindow: 16384},
 		ops:          ops,

@@ -43,7 +43,8 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 	first := upstreamServer(t, "model-a", 4096)
 	second := upstreamServer(t, "model-b", 8192)
 
-	holder := newUpstreamHolder(first.URL, "key-a", "model-a", heartbeat.NewMonitor(first.URL, "", ""))
+	holder := newUpstreamHolder()
+	holder.Bind(first.URL, "key-a", "model-a", heartbeat.NewMonitor(first.URL, "", ""))
 
 	if beat := holder.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-a" {
 		t.Fatalf("first beat = %+v; want a reachable model-a from the seeded Monitor", beat)

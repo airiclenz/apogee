@@ -263,7 +263,26 @@ passes.
 
 **Commit:** `refactor(upstream): server choices come from the list; only an ephemeral startup is synthesized`
 
-## 6. Late-bound engine construction
+## 6. Late-bound engine construction — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): the bind step lives in `wire.go` as the item says, but "the TUI path only" could not
+be expressed there alone — `applyConfig` refuses before `runRoot` is ever reached. Three files outside
+`wire.go` carry the consequence: `config.go` (selection's three refusals become one typed
+`startupUndetermined` carrying the reason, and `applyConfig` returns it LAST so the write-back completes
+and a Driver that can ask still gets a fully-resolved `opts`), `root.go` (the only caller that
+`errors.As`-tolerates it, turning it into a new `options.prebound`), and `upstream.go` (the holder now
+starts empty via `newUpstreamHolder()` + a `Bind` method, and `Beat` answers the zero Beat while nothing
+is bound). `newUpstreamHolder`'s four seeding arguments moved to `Bind`, so its two test call sites gained
+a line; `Swap` is now that same write with the model cleared.
+
+NOTES (2026-08-05): beyond "nil-safe", `lateEngine` REMEMBERS the two settings a human can move while
+pre-bound — `SetMode` and `SetConfineToWorkspace` — and applies them to the Agent it constructs. Dropping
+them would leave the footer showing a mode the engine never received.
+
+NOTES (2026-08-05): the bind step is exactly the three things the item names (`buildAgent` + holder +
+Monitor). It deliberately does NOT re-resolve the per-model system prompt or validated set for a late
+entry's `model:` hint: that is the rebind path's job (`rebindSpecFor`), which the first beat of the
+Monitor it installs runs seconds later — the same path a cold start with no model already relies on.
 
 **What:** Depends on item 5. In `cmd/apogee/wire.go`, extract engine construction
 (`buildAgent` + `upstreamHolder` + Monitor wiring) into a bind step invoked with a

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -725,6 +726,55 @@ func TestHeadlessWithNoServerNeverStartsARun(t *testing.T) {
 	}
 	if strings.Contains(errOut.String(), "turns:") {
 		t.Errorf("a run that never started printed a summary: %q", errOut.String())
+	}
+}
+
+// The pre-bound start is the TUI's alone. Every way a startup server can be undetermined — nothing
+// configured, nothing chosen, a choice that names an entry the list no longer carries — is still a
+// refusal here, because the reason the TUI may ask instead (there is a human in front of it) is
+// exactly the reason a headless run may not.
+func TestHeadlessRefusesEveryUndeterminedStartup(t *testing.T) {
+	t.Setenv(envServer, "")
+	t.Setenv(envMode, "")
+	t.Setenv(envEndpoint, "")
+
+	const list = "servers:\n  - name: laptop\n    endpoint: http://127.0.0.1:1111\n"
+	tests := []struct {
+		name       string
+		configYAML string
+		want       string
+	}{
+		{name: "nothing configured", configYAML: "mode: plan\n", want: "no servers are configured"},
+		{name: "nothing chosen", configYAML: list, want: "no startup server is chosen"},
+		{name: "a stale choice", configYAML: list + "server: the-old-name\n", want: `names "the-old-name"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			cmd := newHeadlessCommand()
+			var out, errOut bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&errOut)
+			cmd.SetIn(strings.NewReader(""))
+			cmd.SetArgs([]string{"--config", home, "--workspace", t.TempDir(), "--no-save", "hi"})
+
+			err := cmd.ExecuteContext(context.Background())
+			if err == nil {
+				t.Fatal("an undetermined startup was accepted by a driver with nobody to ask")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("the refusal does not say what is missing (%q): %v", tt.want, err)
+			}
+			if code := exitCodeFor(err); code != exitNotStarted {
+				t.Errorf("exit code = %d; want %d (err: %v)", code, exitNotStarted, err)
+			}
+			if out.String() != "" {
+				t.Errorf("a run that never started wrote to stdout: %q", out.String())
+			}
+		})
 	}
 }
 

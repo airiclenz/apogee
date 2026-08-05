@@ -60,18 +60,44 @@ type upstreamBinding struct {
 	APIKey   string
 }
 
-// newUpstreamHolder seeds the holder with the Monitor for the server this session STARTS on, plus
-// the launch-time binding that Monitor observes: the endpoint, the resolved key, and the configured
-// `model:` pin (empty on a cold start, where the first beat binds one).
-func newUpstreamHolder(endpoint, apiKey, model string, monitor *heartbeat.Monitor) *upstreamHolder {
-	return &upstreamHolder{endpoint: endpoint, apiKey: apiKey, model: model, monitor: monitor}
+// newUpstreamHolder builds the holder EMPTY: no Monitor, no binding, nothing to observe. The
+// composition root's bind step fills it (Bind below) the moment a server is determined — before the
+// TUI starts on the ordinary path, or on the first pick when the session started pre-bound (ADR
+// 0036 decision 3) — which is why the holder has to exist before the engine does: every per-server
+// seam is a closure over THIS pointer, and closing over one that a bind could replace would leave
+// half the wiring watching a holder nobody fills.
+func newUpstreamHolder() *upstreamHolder {
+	return &upstreamHolder{}
+}
+
+// Bind installs the Monitor for the server the session is now on, together with the binding it
+// observes: the endpoint, the resolved key, and that server's discovery hint (empty when the entry
+// pins no model, where the first beat binds one). It is how a Monitor first ARRIVES — Swap below is
+// the same write for a session that already had one — so it is the single writer of the four
+// fields, and they move together under one lock.
+func (h *upstreamHolder) Bind(endpoint, apiKey, model string, monitor *heartbeat.Monitor) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.endpoint = endpoint
+	h.apiKey = apiKey
+	h.model = model
+	h.monitor = monitor
 }
 
 // Beat observes whichever Upstream is current when the beat starts. It is the value wired into
 // [tui.Options.Heartbeat], so the TUI's unchanged one-beat-per-Interval cadence follows the session
 // across a server switch without knowing one happened.
+//
+// With nothing bound yet there is nothing to observe, and the zero Beat is what that says: no
+// server was reached because none was asked. The seam stays wired across the pre-bound state rather
+// than appearing with the first binding, so the cadence the TUI started is the cadence that
+// observes the server the human picks.
 func (h *upstreamHolder) Beat(ctx context.Context) heartbeat.Beat {
-	return h.current().Beat(ctx)
+	monitor := h.current()
+	if monitor == nil {
+		return heartbeat.Beat{}
+	}
+	return monitor.Beat(ctx)
 }
 
 // SetModel moves the current Monitor's discovery hint AND records the model as bound — the
@@ -81,12 +107,18 @@ func (h *upstreamHolder) Beat(ctx context.Context) heartbeat.Beat {
 // is precisely the moment the two become the same fact. A hint stated against a Monitor that has
 // since been retired is harmless: it dies with that Monitor, and the new server's own hint came in
 // with it.
+//
+// With nothing bound there is no Monitor to state the hint against; the binding is still recorded,
+// so a bind that follows carries it. (The rebind closure cannot reach here unbound — the engine
+// refuses first — so this is a backstop, not a path.)
 func (h *upstreamHolder) SetModel(model string) {
 	h.mu.Lock()
 	h.model = model
 	monitor := h.monitor
 	h.mu.Unlock()
-	monitor.SetModel(model)
+	if monitor != nil {
+		monitor.SetModel(model)
+	}
 }
 
 // Swap makes monitor — observing endpoint with apiKey — the one subsequent beats observe. It is
@@ -99,12 +131,7 @@ func (h *upstreamHolder) SetModel(model string) {
 // unbinds the model, and until the new server's first beat rebinds one, claiming the old server's
 // model would be a claim about a server this session no longer talks to.
 func (h *upstreamHolder) Swap(endpoint, apiKey string, monitor *heartbeat.Monitor) {
-	h.mu.Lock()
-	h.endpoint = endpoint
-	h.apiKey = apiKey
-	h.model = ""
-	h.monitor = monitor
-	h.mu.Unlock()
+	h.Bind(endpoint, apiKey, "", monitor)
 }
 
 // Endpoint reports the Upstream the session is on right now — the launch endpoint until a move

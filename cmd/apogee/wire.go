@@ -299,11 +299,13 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		return err
 	}
 
-	agent, err := buildAgent(cfg, resumed)
-	if err != nil {
-		return friendlyConstructErr(err)
-	}
-	defer agent.Close()
+	// The engine seam the renderer drives. It is a HOLDER rather than the Agent itself, because
+	// construction is no longer something startup always gets to do: with no startup server
+	// determined the TUI opens pre-bound and the engine arrives with the human's first pick (ADR
+	// 0036 decision 3). Everything below this line wires against the holder and never learns which
+	// of the two happened — the seams are identical, and the engine is behind them either way.
+	engine := newLateEngine(mode, opts.confineToWorkspace)
+	defer engine.Close()
 
 	// The store-backed session host: it persists the active session (per-Turn, at idle, and on
 	// quit) and backs the /sessions browser. It owns id minting and the metadata policy — the
@@ -324,9 +326,20 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// It is held rather than passed directly, because a Monitor is per-SERVER (endpoint and key
 	// alike) and a `/server` switch replaces the whole thing. The holder is what keeps that a
 	// composition-root move: Options.Heartbeat below is wired to holder.Beat, one signature for the
-	// life of the session, and the renderer never learns which Monitor answered.
-	holder := newUpstreamHolder(opts.endpoint, opts.apiKey, opts.model,
-		heartbeat.NewMonitor(opts.endpoint, opts.model, opts.apiKey))
+	// life of the session, and the renderer never learns which Monitor answered. It starts empty
+	// for the same reason the engine holder above does — the bind step is what fills both.
+	holder := newUpstreamHolder()
+
+	// The bind step: the one place a serverEntry becomes a running session (the Agent, the Monitor,
+	// and the binding the out-of-band calls read). A determined startup binds HERE, before the TUI
+	// starts, which is what keeps the ordinary path exactly what it was; an undetermined one leaves
+	// both holders empty and binds through the seam handed to the renderer below.
+	binder := serverBinder{cfg: cfg, resumed: resumed, engine: engine, holder: holder}
+	if opts.prebound.Reason == "" {
+		if err := binder.bind(startupEntry(opts)); err != nil {
+			return err
+		}
+	}
 
 	// The servers this session can be moved to: the `servers:` entries, plus a synthesized row for
 	// the startup endpoint only when that endpoint came from a raw override and is therefore in no
@@ -353,7 +366,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
-		if err := agent.Rebind(spec); err != nil {
+		if err := engine.Rebind(spec); err != nil {
 			return tui.RebindResult{}, err
 		}
 		// Session metadata follows the wire: a session that switched models mid-conversation is
@@ -376,7 +389,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// The one fold that re-points a session at another Upstream, shared by `/server`'s switch and
 	// a profile load's follow-the-profile: engine switch, Monitor swap, stored model cleared, in order
 	// (see sessionMover.move, which carries the reasoning).
-	mover := sessionMover{agent: agent, holder: holder, host: host, pinnedWindow: pinnedWindow}
+	mover := sessionMover{agent: engine, holder: holder, host: host, pinnedWindow: pinnedWindow}
 
 	// The server-switch closure: the composition root's half of `/server`. The TUI decides WHEN
 	// (at idle, on an explicit act by the human), this decides everything the move touches —
@@ -392,6 +405,27 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 			return tui.ServerSwitchResult{}, err
 		}
 		return mover.move(entry.Endpoint, entry.Name, entry.Model, entry.APIKey)
+	}
+
+	// The bind closure: the same resolution, ending in a CONSTRUCTION rather than a move. It is the
+	// only way out of the pre-bound state, and it answers with what a switch answers so the display
+	// adopts a first binding exactly as it adopts a move — the endpoint now on the wire, the entry's
+	// name as the alias, and the global window pin, which was never per-server. The binder refuses a
+	// second construction, so an already-bound session is told to use `/server` instead of quietly
+	// growing a second engine.
+	bindServer := func(name string) (tui.ServerSwitchResult, error) {
+		entry, err := findServer(choices, name)
+		if err != nil {
+			return tui.ServerSwitchResult{}, err
+		}
+		if err := binder.bind(entry); err != nil {
+			return tui.ServerSwitchResult{}, err
+		}
+		return tui.ServerSwitchResult{
+			Endpoint:      entry.Endpoint,
+			HostAlias:     entry.Name,
+			ContextWindow: pinnedWindow,
+		}, nil
 	}
 
 	// The llama-launcher seams (ADR 0029 D1): four closures over the bridge in launcher.go, which is
@@ -457,7 +491,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// answers an unknown name with the default anyway — a caret is drawn either way.
 	cursorShape, _ := tui.ParseCursorShape(opts.cursorShape)
 
-	err = launch(ctx, agent, bridge, tui.Options{
+	err = launch(ctx, engine, bridge, tui.Options{
 		// Both upstream facts are now honestly launch-time-only: Model is the configured pin ("" on
 		// a cold start, where the footer says "connecting…" until the first beat binds one), and
 		// ContextWindow is the `context-window:` pin (0 when unpinned). Neither is a discovery
@@ -485,6 +519,13 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// session started on, which is exactly "nothing to switch to" without a special case.
 		Servers:      serverChoices(choices),
 		SwitchServer: switchServer,
+		// The pre-bound half of the same list (ADR 0036 decisions 3 and 5): why this session has no
+		// upstream yet — first boot, a `server:` naming an entry that is gone, or nothing configured
+		// at all — and the seam that ends it. Both are always wired; on the ordinary start Prebound
+		// is the zero value, which says the engine was constructed before the program began and
+		// leaves every flow below exactly as it was.
+		Prebound:   opts.prebound,
+		BindServer: bindServer,
 		// The `/model`-over-profiles, `/unload-model`, `/stop-server` half (ADR 0029): browse the
 		// launcher's profiles, activate one — following it onto another server when it lives
 		// there — and free or stop the server this session is on. All four are nil when the
@@ -573,10 +614,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		ScheduleAutoBlocked: scheduleAutoBlocked(
 			probe.BackendName(confiner), confiner.Capabilities(), opts.confineToWorkspace),
 		ReportActivity: gate.report,
-		// agent.InExchange() reads the resumed Agent's open-Exchange state (false on a fresh start,
+		// engine.InExchange() reads the resumed Agent's open-Exchange state (false on a fresh start,
 		// or a cleanly-closed resume; true only when the stored snapshot died mid-task), so newModel
-		// appends the interrupted note and /continue picks the work back up.
-		Resumed: resumedSession(resumed, agent.InExchange()),
+		// appends the interrupted note and /continue picks the work back up. A pre-bound start has
+		// no Agent to ask, and answers false: nothing is open until something is bound.
+		Resumed: resumedSession(resumed, engine.InExchange()),
 	})
 	// Once the alternate screen is torn down, point the user at how to pick this session back up.
 	// ActiveID is non-empty exactly when there is a resumable session — a resumed one, or a fresh
@@ -1127,6 +1169,301 @@ func buildAgent(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, erro
 		return apogee.New(cfg)
 	}
 	return apogee.Resume(cfg, resumed.Session)
+}
+
+// startupEntry re-assembles the server selection resolved (ADR 0036) from the flattened fields it
+// left on options: the endpoint, the key, the discovery hint, and the alias — which for a
+// configured entry IS its `servers:` name and for the ephemeral override entry is the endpoint's
+// host. It exists so the bind step below has ONE input shape, the serverEntry, whether it is
+// binding the startup server or the one a human picked out of the list.
+func startupEntry(opts options) serverEntry {
+	return serverEntry{
+		Name:     opts.hostAlias,
+		Endpoint: opts.endpoint,
+		APIKey:   opts.apiKey,
+		Model:    opts.model,
+	}
+}
+
+// serverBinder is the one step that turns a serverEntry into a running session: the Agent
+// constructed against that server, the Monitor that observes it, and the binding the out-of-band
+// calls (naming, Firings) read. It is a step rather than inline wiring because it now runs at two
+// different times — before the TUI starts when a startup server was determined, and on the human's
+// first pick when it was not (ADR 0036 decision 3) — and both must produce the same session.
+//
+// What it does NOT do is re-resolve the per-model bindings for the entry's `model:` hint. Those
+// belong to the rebind path (rebindSpecFor), which the first beat of the Monitor installed here
+// runs within seconds, for a late bind exactly as it does for the cold start a launch-time bind
+// with no model already is.
+type serverBinder struct {
+	// cfg is everything about the session the server does not decide. The three fields it does —
+	// endpoint, key, model hint — are overwritten from the entry, so nothing that reached this
+	// struct can contradict the server being bound.
+	cfg     apogee.Config
+	resumed *session.Record
+	engine  *lateEngine
+	holder  *upstreamHolder
+}
+
+// bind constructs the engine for entry and points both holders at it. The engine is constructed
+// FIRST and the Monitor installed only once that succeeded, so a refused construction (Auto on a
+// host without confinement, a future-version snapshot) leaves the session exactly as unbound as it
+// was rather than half-wired to a server it cannot talk to.
+//
+// A second bind is refused before anything is constructed (lateEngine.Bind), because the holder can
+// only release one Agent at shutdown: a session that already has an engine moves with
+// sessionMover.move, which switches the one it has.
+func (b serverBinder) bind(entry serverEntry) error {
+	cfg := b.cfg
+	cfg.Endpoint = entry.Endpoint
+	cfg.Model = entry.Model
+	cfg.APIKey = entry.APIKey
+
+	if err := b.engine.Bind(func() (*apogee.Agent, error) {
+		agent, err := buildAgent(cfg, b.resumed)
+		if err != nil {
+			return nil, friendlyConstructErr(err)
+		}
+		return agent, nil
+	}); err != nil {
+		return err
+	}
+	b.holder.Bind(entry.Endpoint, entry.APIKey, entry.Model,
+		heartbeat.NewMonitor(entry.Endpoint, entry.Model, entry.APIKey))
+	return nil
+}
+
+// ----------------------------------------------------------------------------
+// The late-bound engine (ADR 0036 decision 3: construction waits for a server)
+// ----------------------------------------------------------------------------
+
+// lateEngine is the [tui.Engine] the composition root hands the renderer, and the holder of the
+// Agent behind it. It exists because the engine cannot always be built at launch: ADR 0024 keeps
+// construction impossible without an endpoint, and ADR 0036 lets a session start before anyone has
+// said which endpoint that is — so the seam must exist before the thing behind it does.
+//
+// Unbound, every call that needs a conversation is refused with errNoServerBound and every read
+// answers what "nothing is bound" honestly is: no open Exchange, no context files, no snapshot.
+// Nothing panics and nothing silently pretends to have worked, because the renderer reaches this
+// type through the same interface either way.
+//
+// The two settings a human can move before a server exists — the autonomy mode and Auto's blast
+// radius — are held here and applied to the Agent the moment it is constructed. Without that, a
+// mode cycled while the picker was open would show in the footer and be nowhere in the engine.
+//
+// The mutex guards the pointer and those two values. Beat-style long calls (Step, Compact) read the
+// pointer under the lock and then run OUTSIDE it, like upstreamHolder does with its Monitor, so a
+// Step that takes a minute never holds the Update loop's next call behind it.
+type lateEngine struct {
+	mu      sync.Mutex
+	agent   *apogee.Agent
+	mode    apogee.Mode
+	confine bool
+}
+
+// The composition root's engine holder satisfies both seams it is handed across: the renderer's
+// narrow Engine, and the switcher half of the shared move (sessionMover).
+var (
+	_ tui.Engine       = (*lateEngine)(nil)
+	_ upstreamSwitcher = (*lateEngine)(nil)
+)
+
+// errNoServerBound is what every conversation-touching call answers while the session has no
+// upstream. It names the way out, because the one surface it can reach is a note the human reads.
+var errNoServerBound = errors.New("apogee: no server is bound yet — choose one with /server")
+
+// errAlreadyBound refuses a SECOND construction on a holder that already has an Agent. It names
+// `/server` because that verb does what the caller meant: move the session it already has.
+var errAlreadyBound = errors.New("apogee: this session already has a server — use /server to switch")
+
+// newLateEngine builds the unbound holder, seeded with the autonomy mode and blast radius this run
+// resolved — the same two values the Config carries, so a bind that happens immediately restates
+// them and a bind that happens after the human moved one applies what they moved.
+func newLateEngine(mode apogee.Mode, confineToWorkspace bool) *lateEngine {
+	return &lateEngine{mode: mode, confine: confineToWorkspace}
+}
+
+// Bind constructs the Agent through construct and installs it as this session's engine. The
+// construction happens UNDER the lock, which is what makes "exactly one Agent" a property of the
+// type rather than of its callers: a second Bind is refused before construct is ever called, so no
+// engine is ever built that nothing holds. It costs nothing to hold the lock across it — apogee.New
+// reaches no network (startup makes no probe, ADR 0024) — and a failed construction leaves the
+// holder unbound, free to try another server.
+func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.agent != nil {
+		return errAlreadyBound
+	}
+	agent, err := construct()
+	if err != nil {
+		return err
+	}
+	// What the human may have moved while there was nothing to move it on.
+	agent.SetMode(e.mode)
+	agent.SetConfineToWorkspace(e.confine)
+	e.agent = agent
+	return nil
+}
+
+// bound reports whether an Agent is installed — the pointer read every method below opens with.
+func (e *lateEngine) bound() *apogee.Agent {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.agent
+}
+
+// Submit enqueues user input, or refuses when there is no engine to enqueue it in.
+func (e *lateEngine) Submit(in apogee.UserInput) error {
+	agent := e.bound()
+	if agent == nil {
+		return errNoServerBound
+	}
+	return agent.Submit(in)
+}
+
+// Step advances the loop one Turn. It runs outside the lock: a Turn is a network call.
+func (e *lateEngine) Step(ctx context.Context) (apogee.StepResult, error) {
+	agent := e.bound()
+	if agent == nil {
+		return apogee.StepResult{}, errNoServerBound
+	}
+	return agent.Step(ctx)
+}
+
+// Snapshot captures the conversation, or refuses: an unbound session has no conversation to save.
+func (e *lateEngine) Snapshot() (apogee.Session, error) {
+	agent := e.bound()
+	if agent == nil {
+		return apogee.Session{}, errNoServerBound
+	}
+	return agent.Snapshot()
+}
+
+// Interject commits a message into the open Exchange; unbound there is none.
+func (e *lateEngine) Interject(in apogee.UserInput) error {
+	agent := e.bound()
+	if agent == nil {
+		return errNoServerBound
+	}
+	return agent.Interject(in)
+}
+
+// ClearContext drops the model's history; unbound there is no history to drop.
+func (e *lateEngine) ClearContext() error {
+	agent := e.bound()
+	if agent == nil {
+		return errNoServerBound
+	}
+	return agent.ClearContext()
+}
+
+// AbortExchange discards a cancelled Exchange. Unbound it is a no-op rather than a refusal: it
+// answers nothing, it is called on a path that is already unwinding, and there is nothing to abort.
+func (e *lateEngine) AbortExchange() {
+	if agent := e.bound(); agent != nil {
+		agent.AbortExchange()
+	}
+}
+
+// RestoreSession swaps a stored snapshot into the live Agent — which a pre-bound session does not
+// have, so the /sessions restore is refused until a server is chosen.
+func (e *lateEngine) RestoreSession(sess apogee.Session) error {
+	agent := e.bound()
+	if agent == nil {
+		return errNoServerBound
+	}
+	return agent.RestoreSession(sess)
+}
+
+// InExchange reports whether an Exchange is open — false with nothing bound, which is exactly true.
+func (e *lateEngine) InExchange() bool {
+	agent := e.bound()
+	return agent != nil && agent.InExchange()
+}
+
+// ContextFilesReport reports what the workspace context files contributed. Unbound the report is
+// empty, which the renderer already reads as "nothing to note" (it notes a report with no files
+// exactly as it notes none at all).
+func (e *lateEngine) ContextFilesReport() apogee.ContextFilesReport {
+	agent := e.bound()
+	if agent == nil {
+		return apogee.ContextFilesReport{}
+	}
+	return agent.ContextFilesReport()
+}
+
+// Compact folds the conversation through the upstream; unbound there is neither.
+func (e *lateEngine) Compact(ctx context.Context) (bool, error) {
+	agent := e.bound()
+	if agent == nil {
+		return false, errNoServerBound
+	}
+	return agent.Compact(ctx)
+}
+
+// SetMode changes the autonomy mode. Unbound it is REMEMBERED rather than dropped, so the mode the
+// footer shows is the mode the engine is constructed into.
+func (e *lateEngine) SetMode(mode apogee.Mode) {
+	e.mu.Lock()
+	e.mode = mode
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetMode(mode)
+	}
+}
+
+// SetConfineToWorkspace changes Auto's blast radius, remembered while unbound for SetMode's reason.
+func (e *lateEngine) SetConfineToWorkspace(confine bool) {
+	e.mu.Lock()
+	e.confine = confine
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetConfineToWorkspace(confine)
+	}
+}
+
+// ConfineToWorkspace reports the blast radius the next tool call will read: the Agent's own once
+// there is one, and until then the value a bind would install.
+func (e *lateEngine) ConfineToWorkspace() bool {
+	e.mu.Lock()
+	agent, confine := e.agent, e.confine
+	e.mu.Unlock()
+	if agent != nil {
+		return agent.ConfineToWorkspace()
+	}
+	return confine
+}
+
+// Close releases the Agent, or nothing at all when a session ends without ever binding one.
+func (e *lateEngine) Close() error {
+	agent := e.bound()
+	if agent == nil {
+		return nil
+	}
+	return agent.Close()
+}
+
+// Rebind swaps in the per-model bindings a heartbeat observation implies (the composition root's
+// rebind closure). A beat cannot land before a Monitor exists, so unbound this is a backstop.
+func (e *lateEngine) Rebind(spec apogee.RebindSpec) error {
+	agent := e.bound()
+	if agent == nil {
+		return errNoServerBound
+	}
+	return agent.Rebind(spec)
+}
+
+// SwitchUpstream re-points the session at another server (sessionMover.move). Unbound there is
+// nothing to re-point: the first server arrives through Bind above, not through a move.
+func (e *lateEngine) SwitchUpstream(spec apogee.UpstreamSpec) error {
+	agent := e.bound()
+	if agent == nil {
+		return errNoServerBound
+	}
+	return agent.SwitchUpstream(spec)
 }
 
 // errAutoUnavailable is the friendly framing of ErrAutoUnavailable: Auto needs

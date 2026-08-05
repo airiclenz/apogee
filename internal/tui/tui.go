@@ -430,6 +430,32 @@ type Options struct {
 	// session where it was. nil ⇒ switching is unwired, and `/server` degrades to a note.
 	SwitchServer func(name string) (ServerSwitchResult, error)
 
+	// Prebound says this session started with NO upstream bound, and why (ADR 0036 decisions 3 and
+	// 5). The zero value is the ordinary start — the binary determined a startup server and the
+	// engine was constructed before the program began — and everything below it is unchanged.
+	//
+	// A non-zero Reason means there is no engine yet: the binary could not tell which server to
+	// start on, and the TUI is the one Driver that can ASK rather than refuse (the non-interactive
+	// drivers keep their hard error, because they have nobody to ask). Engine calls are answered
+	// with a "no server is bound" error until BindServer below lands one, so the renderer's job is
+	// to reach that seam before anything needs the engine.
+	Prebound PreboundStart
+
+	// BindServer constructs the session's engine on the named `servers:` entry — the pre-bound
+	// half of SwitchServer, and the only seam that can end the pre-bound state. It answers with the
+	// same [ServerSwitchResult] a switch does, so the display adopts a first binding exactly as it
+	// adopts a move.
+	//
+	// It binds ONCE: a session that already has an engine is answered with an error naming
+	// SwitchServer's own verb, because a second construction would leave the first engine running
+	// with nothing holding it. Like SwitchServer it is called synchronously on the Update loop and
+	// opens no connection of its own — the first beat of the Monitor it installs is what discovers
+	// the server.
+	//
+	// nil ⇒ unwired, and a pre-bound session has no way out of the pre-bound state; the binary
+	// always wires it beside SwitchServer.
+	BindServer func(name string) (ServerSwitchResult, error)
+
 	// LaunchProfiles lists the Launch profiles the launcher's config defines — what `/model` offers on
 	// a host with a launcher, re-read FRESH every time the picker opens (ADR 0029 D4), so a profile
 	// added in the launcher's own TUI a moment ago is offered here without restarting apogee. The
@@ -570,6 +596,38 @@ type ServerSwitchResult struct {
 	Endpoint      string // the new Upstream's base URL, adopted by the footer and the start-up box
 	HostAlias     string // the chosen server's name, now the footer's host label
 	ContextWindow int    // the `context-window:` pin that survives the switch; 0 ⇒ unpinned/unknown
+}
+
+// PreboundReason names why a session started with NO upstream bound — the three answers ADR 0036
+// gives when the config alone cannot say which server to start on. It is a fact the binary resolved
+// (it read the file, the flags and the environment); the renderer only renders it and, on the first
+// two, asks the human through the picker it already has.
+//
+// The empty value is the ordinary start: a server WAS determined and the engine was constructed
+// before the program began.
+type PreboundReason string
+
+const (
+	// PreboundFirstBoot: servers are configured, none is chosen yet (no `server:` recorded). The
+	// picker asks, and the choice is what records one.
+	PreboundFirstBoot PreboundReason = "first-boot"
+	// PreboundStaleChoice: the recorded `server:` names an entry the list no longer carries — a
+	// renamed or deleted server, or a typo. It is state, not intent: the picker fixes in one
+	// keystroke what a refusal would send to file surgery.
+	PreboundStaleChoice PreboundReason = "stale-choice"
+	// PreboundNoServers: nothing is configured at all, so there is nothing to pick from and the
+	// guidance is to add a server to config.yaml.
+	PreboundNoServers PreboundReason = "no-servers"
+)
+
+// PreboundStart says whether this session started with an upstream bound, and if not, why. The zero
+// value — an empty Reason — is the ordinary bound start, so a hand-built Options describes today's
+// behaviour without naming this field at all.
+type PreboundStart struct {
+	Reason PreboundReason
+	// Name is the `server:` value that named no entry, carried for PreboundStaleChoice so the
+	// notice can say which one went missing. Empty for every other reason.
+	Name string
 }
 
 // LaunchProfileChoice is one Launch profile `/model` offers (CONTEXT.md: a Launch profile
