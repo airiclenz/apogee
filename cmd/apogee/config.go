@@ -1383,6 +1383,41 @@ func flagLayer(opts options, changed func(string) bool) layer {
 	return l
 }
 
+// configSource names which precedence source supplied a key's value. The zero value is the
+// ordinary case — the config file, or the built-in default below it — and the other two are the
+// sources that can BEAT the file (flag > env > file > default).
+type configSource string
+
+const (
+	sourceFile configSource = ""     // the config file, or the default below it: nothing overrode the key
+	sourceEnv  configSource = "env"  // an APOGEE_* variable set the key
+	sourceFlag configSource = "flag" // an explicitly-set command-line flag set the key
+)
+
+// overrideSources reports which higher-precedence source beat the config file for each key this
+// run, keyed by registry path. Resolution COLLAPSES the layers into one value, so afterwards the
+// winner is no longer recoverable from the resolved settings — and a surface that shows a key's
+// value has to be able to say "this is not what your file says": a `/settings` row rendered
+// without the marker would present an environment variable's value as the file's, and offer to
+// persist an edit that the override would keep swallowing for the rest of the run.
+//
+// The predicates are deliberately the SAME two the layers themselves are built from (flagLayer's
+// changed, envLayer's non-empty getenv), read off the same registry rows, so the marker cannot
+// claim a source that did not actually win. Keys absent from the map resolved from the file or the
+// default, which is the majority and needs no entry.
+func overrideSources(changed func(string) bool, getenv func(string) string) map[string]configSource {
+	sources := make(map[string]configSource, len(multiSourceKeys))
+	for _, k := range multiSourceKeys {
+		switch {
+		case k.fromFlag != nil && k.row.FlagName != "" && changed(k.row.FlagName):
+			sources[k.row.Path] = sourceFlag
+		case k.fromEnv != nil && k.row.EnvVar != "" && getenv(k.row.EnvVar) != "":
+			sources[k.row.Path] = sourceEnv
+		}
+	}
+	return sources
+}
+
 // ----------------------------------------------------------------------------
 // The orchestrator
 // ----------------------------------------------------------------------------
@@ -1493,6 +1528,11 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.contextFiles = s.contextFiles.resolved()
 	opts.ui = s.ui
 	opts.cursorShape = s.cursorShape
+	// Which source won, for the keys where more than one could have: the resolved values above no
+	// longer carry that fact, and the /settings pane has to mark a row the environment or a flag is
+	// overriding (see overrideSources). Recorded from the same predicates the layers were built
+	// from, a few lines up.
+	opts.overrides = overrideSources(changed, getenv)
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
 	}

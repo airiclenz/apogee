@@ -523,7 +523,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// the on-disk format is the binary's business, like the session Save seam below.
 		SaveHostAcknowledgement: hostAcknowledgementSaver(
 			filepath.Join(roots.config, "config.yaml"), platform.HostID()),
-		Skills: skillProvider,
+		// The `/settings` pane's rows: every key the registry describes, with the value THIS run
+		// resolved and the marker for a key an environment variable or a flag overrode
+		// (settingsRows.go). A provider rather than a slice because the pane derives its rows on
+		// every paint — the picker's convention — and it closes over the resolved opts because the
+		// pane reports what the SESSION is running: a key persisted mid-session takes effect on the
+		// next launch, which is exactly what the row's "(next launch)" marker says.
+		SettingsRows: func() []tui.SettingRow { return settingsRows(opts) },
+		Skills:       skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
 		// on the shared Provider — the same one Config.Skills resolves against — so a skill added
 		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals

@@ -151,6 +151,14 @@ type options struct {
 	// like ui above, and already validated by applyConfig; runRoot parses it into the renderer's
 	// own tea.CursorShape for tui.Options.
 	cursorShape string
+
+	// overrides records which HIGHER-precedence source beat the config file for a key this run,
+	// keyed by registry path (`mode` → sourceFlag when --mode was given, `model` → sourceEnv when
+	// APOGEE_MODEL was set). It is the one resolution fact the resolved values above cannot carry:
+	// precedence collapses the layers into a single value, and the /settings pane has to mark a row
+	// whose value this run is not taking from the file. applyConfig fills it (overrideSources);
+	// absent from the map ⇒ the file or the built-in default, which is the majority of keys.
+	overrides map[string]configSource
 }
 
 // launcher starts the interactive UI over the constructed engine. It carries the Bridge

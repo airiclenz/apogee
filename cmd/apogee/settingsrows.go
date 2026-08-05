@@ -1,0 +1,290 @@
+package main
+
+// The wire side of the /settings surface: it projects the declarative key registry (registry.go)
+// plus the values THIS run resolved (options) onto the renderer's plain-data rows (tui.SettingRow).
+//
+// It sits here, in the composition root, for the reason every other display seam does: the schema,
+// the precedence that decided which source won, the config file's own spelling of a value and the
+// masking of a secret are all the binary's knowledge, and the renderer that draws the pane holds
+// none of it (ADR 0011's thin renderer). What crosses the seam is a list of rows a pane can paint
+// and select in, and nothing else.
+//
+// Two tables do the work, and both are covered by tests that pin them to the registry so a key
+// added there cannot quietly render as a blank row: settingSections names the runs of keys the
+// pane groups under a header, and settingValues formats each key's effective value.
+
+import (
+	"strconv"
+	"strings"
+
+	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/tui"
+)
+
+// maskedSettingValue is what a masked row shows INSTEAD of its value (api-key). The secret is
+// replaced here, at the seam, so the renderer is never handed it at all: a value the pane does not
+// hold cannot reach a paint cache, a transcript, or a crash dump, and it has no use for it — the
+// editor buffers what the human types rather than revealing what was stored.
+const maskedSettingValue = "••••"
+
+// noneSettingValue is what a structured row with nothing in it shows. Blank would read as "this
+// row failed to render"; "none" is the answer to the question the row asks.
+const noneSettingValue = "none"
+
+// The two pointers a non-editable row carries — where the key IS edited. confine-to-workspace and
+// unconfined-hosts are the pair that do not go to the file's editor: their acknowledgement
+// interlock (a distinct affirmative act, never a default-yes) stays single-homed in /confine
+// (ADR 0012), so the pane sends the human there rather than growing a second way to loosen a
+// blast radius.
+const (
+	pointerConfigFile = "edit in config.yaml"
+	pointerConfine    = "use /confine"
+)
+
+// settingSection is one header the pane groups rows under: a NAME and the registry path that opens
+// it. Sections are runs over the registry's own order rather than a per-key label, because that
+// order is the config template's order and the template's `# ===` dividers are per-key — a header
+// per divider would be one header per row. Every row from Opens up to the next section's Opens
+// belongs to this section, so a key inserted into the registry inherits the section it was
+// inserted into and no second table has to be edited for it.
+type settingSection struct {
+	Name  string
+	Opens string
+}
+
+// settingSections is that table, in registry order (pinned by
+// TestSettingSectionsOpenInRegistryOrder). context-files sits under the system prompt because that
+// is what it IS — the workspace files are folded into the standing system content — and bypass
+// opens Mechanisms because it is the Mechanisms off-switch, the floor the whole surface is measured
+// against.
+var settingSections = []settingSection{
+	{Name: "Upstream", Opens: "endpoint"},
+	{Name: "Autonomy", Opens: "mode"},
+	{Name: "System prompt", Opens: "system-prompt-text"},
+	{Name: "Confinement", Opens: "confine-to-workspace"},
+	{Name: "Tools & skills", Opens: "web-search-endpoint"},
+	{Name: "Session", Opens: "auto-compact"},
+	{Name: "Presentation", Opens: "present.auto-open"},
+	{Name: "Interface", Opens: "ui.spinner"},
+	{Name: "Mechanisms", Opens: "bypass"},
+	{Name: "Model profile", Opens: "model-profile"},
+}
+
+// settingValues formats each key's EFFECTIVE value — what this run actually resolved, spelled the
+// way the config file spells it, so the row and the file read the same. A structured block is
+// summarized instead ("3 servers"): the pane cannot edit one, so a YAML fragment would be noise.
+//
+// It is keyed by registry path and covers every row (TestSettingValuesCoverEveryRegistryKey). A
+// path with no formatter renders as an empty value rather than panicking — a table gap must not
+// cost the user the whole surface mid-session — and that test is what keeps the gap from shipping.
+var settingValues = map[string]func(options) string{
+	"endpoint":           func(o options) string { return o.endpoint },
+	"api-key":            func(o options) string { return o.apiKey }, // masked by settingsRows, per the row's Masked flag
+	"host-alias":         func(o options) string { return o.hostAlias },
+	"model":              func(o options) string { return o.model },
+	"servers":            func(o options) string { return countSummary(len(o.servers), "server") },
+	"llama-launcher":     func(o options) string { return o.llamaLauncher },
+	"mode":               func(o options) string { return o.mode },
+	"system-prompt-text": func(o options) string { return countSummary(lineCount(o.systemPrompt.global.text), "line") },
+	"system-prompt-file": func(o options) string { return o.systemPrompt.global.file },
+	"system-prompt-models": func(o options) string {
+		return countSummary(len(o.systemPrompt.models), "model")
+	},
+	// The `context-files:` block resolves to the NAME LIST in force (nil when the feature is off,
+	// however it got there — `enable: false`, or an empty `names:`), which is why enable is reported
+	// from the list rather than from a flag: the effective outcome is what the row is asked about.
+	"context-files.enable": func(o options) string { return boolValue(len(o.contextFiles) > 0) },
+	"context-files.names":  func(o options) string { return listValue(o.contextFiles) },
+	"confine-to-workspace": func(o options) string { return boolValue(o.confineToWorkspace) },
+	"unconfined-hosts":     func(o options) string { return countSummary(len(o.unconfinedHosts), "host") },
+	"web-search-endpoint":  func(o options) string { return o.webSearchEndpoint },
+	"mcp-servers":          func(o options) string { return countSummary(len(o.mcpServers), "server") },
+	"use-project-skills":   func(o options) string { return boolValue(o.useProjectSkills) },
+	"auto-compact":         func(o options) string { return boolValue(o.autoCompact) },
+	"auto-title":           func(o options) string { return boolValue(o.autoTitle) },
+	"context-window":       func(o options) string { return strconv.Itoa(o.contextWindow) },
+	"present.auto-open":    func(o options) string { return boolValue(o.present.autoOpen) },
+	"present.command":      func(o options) string { return o.present.command },
+	"present.port":         func(o options) string { return strconv.Itoa(o.present.port) },
+	"present.host":         func(o options) string { return o.present.host },
+	"ui.spinner":           func(o options) string { return string(o.ui.spinner) },
+	"ui.spinner-color":     func(o options) string { return boolValue(o.ui.spinnerColor) },
+	"ui.show-scrollbar":    func(o options) string { return boolValue(o.ui.showScrollbar) },
+	"cursor-shape":         func(o options) string { return o.cursorShape },
+	"bypass":               func(o options) string { return boolValue(o.bypass) },
+	"mechanisms":           func(o options) string { return countSummary(enabledCount(o.mechanisms), "mechanism") },
+	"validated-sets":       func(o options) string { return validatedSetsSummary(o) },
+	"model-profile":        func(o options) string { return profileSummary(o.profile) },
+}
+
+// settingsRows builds the /settings pane's rows: one per registry key, in registry order (which is
+// the config template's order), each carrying its section, its effective value, and the metadata
+// the pane needs in order to render and later edit it.
+//
+// Three things are applied HERE rather than in the per-key formatters, so no formatter can forget
+// one: a masked key's value is replaced by the mask, a structured key with nothing in it reads
+// "none", and a key whose effective value came out empty while the registry declares a default
+// shows that default — an unset `cursor-shape:` is a block caret, and saying so is the honest
+// answer to "what is this set to".
+func settingsRows(opts options) []tui.SettingRow {
+	rows := make([]tui.SettingRow, 0, len(keyRegistry))
+	section := ""
+	next := 0
+	for _, k := range keyRegistry {
+		if next < len(settingSections) && settingSections[next].Opens == k.Path {
+			section = settingSections[next].Name
+			next++
+		}
+		value := ""
+		if format, ok := settingValues[k.Path]; ok {
+			value = format(opts)
+		}
+		switch {
+		case k.Masked && value != "":
+			value = maskedSettingValue
+		case value == "" && k.Kind == kindStructured:
+			value = noneSettingValue
+		case value == "" && k.Default != "":
+			value = k.Default
+		}
+		source, sourceName := settingSource(k, opts.overrides)
+		rows = append(rows, tui.SettingRow{
+			Path:        k.Path,
+			Section:     section,
+			Kind:        settingKind(k.Kind),
+			Value:       value,
+			Default:     k.Default,
+			Source:      source,
+			SourceName:  sourceName,
+			EnumValues:  k.EnumValues,
+			Editable:    k.Editable,
+			Masked:      k.Masked,
+			Restart:     k.RestartRequired,
+			EditPointer: editPointer(k),
+			Desc:        k.Desc,
+		})
+	}
+	return rows
+}
+
+// settingKind projects a registry kind onto the renderer's vocabulary. The two vocabularies are
+// spelled the same on purpose — they describe the same five shapes — but the mapping is explicit so
+// that a kind added to the registry has to be given an edit idiom deliberately rather than reaching
+// the pane as an unhandled string. An unmapped kind falls back to structured, the read-only end:
+// the surface that cannot say what a value is must not offer to write it.
+func settingKind(kind configKind) tui.SettingKind {
+	switch kind {
+	case kindBool:
+		return tui.SettingBool
+	case kindInt:
+		return tui.SettingInt
+	case kindString:
+		return tui.SettingString
+	case kindEnum:
+		return tui.SettingEnum
+	default:
+		return tui.SettingStructured
+	}
+}
+
+// settingSource reports the override marker for a row: which higher-precedence source beat the
+// file for this key this run, and what that source is CALLED, so the pane's note can name it
+// ("APOGEE_MODE", "--mode") instead of saying "something".
+func settingSource(k configKey, overrides map[string]configSource) (tui.SettingSource, string) {
+	switch overrides[k.Path] {
+	case sourceEnv:
+		return tui.SettingFromEnv, k.EnvVar
+	case sourceFlag:
+		return tui.SettingFromFlag, "--" + k.FlagName
+	default:
+		return tui.SettingFromFile, ""
+	}
+}
+
+// editPointer says where a key this pane will not write is edited instead — empty for an editable
+// key. The confinement pair is the one case that does not point at the file: their acknowledgement
+// interlock stays single-homed in /confine (ADR 0012), and GlobalOnly is exactly the property that
+// marks them, so the pointer follows the registry rather than a second list of paths.
+func editPointer(k configKey) string {
+	switch {
+	case k.Editable:
+		return ""
+	case k.GlobalOnly:
+		return pointerConfine
+	default:
+		return pointerConfigFile
+	}
+}
+
+// boolValue spells a bool the way the config file spells it.
+func boolValue(v bool) string { return strconv.FormatBool(v) }
+
+// listValue spells a resolved name list the way the template's inline form spells it
+// ("[AGENTS.md]"), so the row and the registry's default for the key read alike. An empty list is
+// "[]" rather than "none": the key holds a list, and an empty one is a value the user can have set.
+func listValue(names []string) string { return "[" + strings.Join(names, ", ") + "]" }
+
+// countSummary summarizes a structured block by how much is in it ("3 servers"). Zero returns
+// EMPTY rather than "0 servers", so settingsRows' one central rule turns it into "none" — the
+// same word every other empty structured row shows. The plural is the naive one because every
+// noun this file counts ("server", "model", "host", "line", "mechanism", "alias") takes a bare s.
+func countSummary(n int, noun string) string {
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return "1 " + noun
+	default:
+		return strconv.Itoa(n) + " " + noun + "s"
+	}
+}
+
+// lineCount counts the lines of a multi-line value — how a system prompt is summarized, since its
+// text is far too long to show on a row and its length is what the human recognizes it by.
+func lineCount(text string) int {
+	if text == "" {
+		return 0
+	}
+	return len(strings.Split(strings.TrimSuffix(text, "\n"), "\n"))
+}
+
+// enabledCount counts the Mechanisms actually switched ON. A `mechanisms:` block may carry explicit
+// `false` entries — that is how a user records a decision to leave one off — and those are not
+// enabled Mechanisms, so counting map keys would overstate what the session is running.
+func enabledCount(mechanisms map[string]bool) int {
+	n := 0
+	for _, on := range mechanisms {
+		if on {
+			n++
+		}
+	}
+	return n
+}
+
+// validatedSetsSummary summarizes the `validated-sets:` block: its off-switch first, because that
+// is the fact that decides whether the rest of the block does anything, then how many explicit
+// carry-over aliases are configured.
+func validatedSetsSummary(o options) string {
+	if !o.validatedSetsEnable {
+		return "off"
+	}
+	if n := len(o.validatedSetsAlias); n > 0 {
+		return "on, " + countSummary(n, "alias")
+	}
+	return "on"
+}
+
+// profileSummary summarizes the `model-profile:` block by the two facts it configures: how the
+// model emits tool calls, and whether it has an inline thinking channel to strip. An unset format
+// is native tool calls (the domain treats "" that way), so the row names native rather than
+// leaving the more interesting half of the block looking unconfigured.
+func profileSummary(profile apogee.ModelProfile) string {
+	format := string(profile.ToolCallFormat)
+	if format == "" {
+		format = string(apogee.FormatNative)
+	}
+	if style := string(profile.Thinking.Style); style != "" {
+		return format + ", thinking " + style
+	}
+	return format
+}

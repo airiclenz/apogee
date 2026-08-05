@@ -279,6 +279,18 @@ type Options struct {
 	// the binary's job (it owns the path and the file format), exactly like Save below.
 	SaveHostAcknowledgement func() (path string, err error)
 
+	// SettingsRows lists every config key the `/settings` pane shows, in the order the config
+	// template presents them, as the binary resolved them THIS run (see [SettingRow]). It is a
+	// provider rather than a slice for the reason the picker's rows are derived at render time
+	// (picker.go): the pane calls it each time it paints, so a row re-read after an edit reflects
+	// what the edit made of it and a selection is clamped against rows that are current.
+	//
+	// The binary owns everything behind it — the key registry, the schema, the precedence that
+	// decided which source won, the masking of a secret — exactly as SaveHostAcknowledgement owns
+	// the file format. nil ⇒ unwired: `/settings` has nothing to show and says so, the nil-seam
+	// degrade every other provider here takes.
+	SettingsRows func() []SettingRow
+
 	// Skills is the discovered skill catalog the merged "/" menu lists and an inline "/token"
 	// resolves against; nil ⇒ no skills are wired (the menu offers no skills and no token
 	// resolves). The binary backs it with a live skills.Provider and the agent loop resolves the SAME
@@ -630,6 +642,76 @@ type ConfinementInfo struct {
 	Backend string                 // the backend's human label ("landlock", "seatbelt", "deny"); "" ⇒ unknown
 	Caps    domain.ConfinementCaps // what it can enforce on THIS host — FSWrite false is the degraded case
 	HostID  string                 // platform.HostID(), the id --save records; "" ⇒ unknown
+}
+
+// SettingKind is what a settings row HOLDS, which is what decides how the pane renders the value
+// and which edit idiom ⏎ opens on it. The binary PROJECTS its own registry kind onto this
+// vocabulary rather than the renderer importing one, the [ServerChoice] posture: internal/tui
+// knows how to toggle a bool, pick an enum value and buffer a string or an int, and knows that a
+// structured value is one it must not try to edit at all. An unknown kind is therefore not a
+// worry the pane carries — a value it cannot edit reads as structured, which is the safe end.
+type SettingKind string
+
+const (
+	SettingBool       SettingKind = "bool"
+	SettingInt        SettingKind = "int"
+	SettingString     SettingKind = "string"
+	SettingEnum       SettingKind = "enum"
+	SettingStructured SettingKind = "structured" // a list, a map, a block, or a multi-line text value
+)
+
+// SettingSource is which precedence source supplied the value a row shows. The zero value is the
+// ordinary case — the config file, or the built-in default below it — and the other two are the
+// higher-precedence sources that BEAT the file for that key this run (flag > env > file > default).
+//
+// The pane needs it for one reason: a row the environment is overriding must say so, because a
+// value the file does not contain would otherwise look like the file's, and an edit persisted into
+// the file would appear to do nothing for as long as the override stands.
+type SettingSource string
+
+const (
+	SettingFromFile SettingSource = ""     // the config file or the built-in default; nothing overrode it
+	SettingFromEnv  SettingSource = "env"  // an APOGEE_* environment variable won
+	SettingFromFlag SettingSource = "flag" // an explicitly-set command-line flag won
+)
+
+// SettingRow is one row of the `/settings` pane: a config key as the binary resolved it this run.
+// It is plain data — the [ServerChoice] posture — projected from the binary's declarative key
+// registry, so the renderer never reads the config schema, the file, or an environment variable,
+// and cannot disagree with the surface that writes them.
+//
+// Value is the EFFECTIVE value, formatted as the config file would spell it ("true", "32768",
+// "ask-before"), with a structured block summarized instead ("3 servers") — never a YAML fragment,
+// because nothing in the pane can edit one. Default is the built-in default in that same spelling,
+// so the two are comparable on sight; an empty Default means the key defaults to unset.
+//
+// A Masked row's Value is ALREADY the mask (`••••`) — the secret is not carried at all. That is
+// deliberate: a value the renderer never holds cannot reach a transcript, a paint cache, or a
+// crash dump, and the pane has no use for it (item 8's editor buffers what the human types, it
+// never reveals what was stored).
+//
+// EditPointer is where a row this pane will not write IS edited — "edit in config.yaml" for a
+// structured block, "use /confine" for the confinement keys, whose acknowledgement interlock
+// stays single-homed in `/confine` (ADR 0012). It is non-empty exactly when Editable is false.
+type SettingRow struct {
+	Path    string      // the key's yaml path with `.` between levels ("ui.spinner") — its display key and its identity
+	Section string      // the section header this row sits under, matching the config template's own grouping
+	Kind    SettingKind // what the key holds, and with it the edit idiom ⏎ opens
+	Value   string      // the effective value as the file would spell it; a mask when Masked, a summary when structured
+	Default string      // the built-in default in the same spelling; "" ⇒ the key defaults to unset
+
+	// Source and SourceName are the override marker: which higher-precedence source beat the file
+	// for this key this run, and what it is CALLED ("APOGEE_MODE", "--mode") so the note can name
+	// it. SourceName is empty exactly when Source is [SettingFromFile].
+	Source     SettingSource
+	SourceName string
+
+	EnumValues  []string // the closed vocabulary, non-empty exactly for [SettingEnum]
+	Editable    bool     // this pane may write the key
+	Masked      bool     // Value is a mask, not the value (api-key)
+	Restart     bool     // a change takes effect on the next launch — the "(next launch)" marker
+	EditPointer string   // where a non-Editable key is edited instead; "" exactly when Editable
+	Desc        string   // the one-line description shown for the selected row
 }
 
 // ----------------------------------------------------------------------------

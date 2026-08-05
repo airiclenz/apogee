@@ -2077,3 +2077,93 @@ func TestLoadFileConfigReadErrorPropagates(t *testing.T) {
 		t.Fatalf("read error = %v; want it propagated (not treated as absent)", err)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Which source won (the /settings override marker's input)
+// ----------------------------------------------------------------------------
+
+// overrideSources must agree with the LAYERS themselves about which source beat the config file:
+// the marker it feeds tells the user their file's value is not the one in force, so a marker naming
+// a source that did not win would be a lie in both directions. The cases mirror flagLayer's and
+// envLayer's own predicates, including the two shapes that are easy to get wrong — an empty
+// variable is not a setting, and api-key has no flag to be beaten by.
+func TestOverrideSourcesNameTheWinningSource(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		changed map[string]bool
+		env     map[string]string
+		want    map[string]configSource
+	}{
+		{
+			name: "nothing set leaves every key on the file",
+			want: map[string]configSource{},
+		},
+		{
+			name: "an environment variable beats the file",
+			env:  map[string]string{envModel: "qwen2.5-coder"},
+			want: map[string]configSource{"model": sourceEnv},
+		},
+		{
+			name:    "an explicitly-set flag beats its own variable",
+			changed: map[string]bool{"mode": true},
+			env:     map[string]string{envMode: "auto"},
+			want:    map[string]configSource{"mode": sourceFlag},
+		},
+		{
+			name: "an empty variable is not a setting",
+			env:  map[string]string{envEndpoint: ""},
+			want: map[string]configSource{},
+		},
+		{
+			// There is no --api-key to win with, so the variable stands even when a same-named flag
+			// claims to have been set: the secret rides the file/env order alone.
+			name:    "api-key has no flag to be beaten by",
+			changed: map[string]bool{"api-key": true},
+			env:     map[string]string{envAPIKey: "sk-token"},
+			want:    map[string]configSource{"api-key": sourceEnv},
+		},
+		{
+			name:    "several keys are marked independently",
+			changed: map[string]bool{"bypass": true},
+			env:     map[string]string{envEndpoint: "http://box:1111"},
+			want:    map[string]configSource{"bypass": sourceFlag, "endpoint": sourceEnv},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := overrideSources(
+				func(name string) bool { return tc.changed[name] },
+				func(name string) string { return tc.env[name] },
+			)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("overrideSources() = %v; want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// applyConfig records the winning sources on the resolved options, because that is the only place
+// the layers still exist: the /settings pane is handed the resolved options long after they have
+// been collapsed into single values.
+func TestApplyConfigRecordsOverrideSources(t *testing.T) {
+	t.Parallel()
+	getenv := func(name string) string {
+		if name == envModel {
+			return "qwen2.5-coder"
+		}
+		return ""
+	}
+	opts := options{configDir: t.TempDir(), mode: "auto"}
+	changed := func(name string) bool { return name == "mode" }
+	if err := applyConfig(&opts, changed, getenv, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+	want := map[string]configSource{"model": sourceEnv, "mode": sourceFlag}
+	if !reflect.DeepEqual(opts.overrides, want) {
+		t.Errorf("opts.overrides = %v; want %v", opts.overrides, want)
+	}
+}

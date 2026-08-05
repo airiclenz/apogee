@@ -206,7 +206,19 @@ style, multi-doc, example-match ambiguity) refuse without writing.
 
 **Commit:** `feat(config): comment-preserving scalar splice writer with insert-below-example and delete`
 
-## 5. Settings rows seam: registry → tui.Options
+## 5. Settings rows seam: registry → tui.Options — ✅ DONE (2026-08-05)
+
+**NOTES (2026-08-05):** three deviations. (1) The `(env)`/`(flag)` markers needed a fact the resolved
+`options` did not carry — precedence collapses the layers, so afterwards nothing says which source won.
+`config.go` gained `configSource` + `overrideSources` (the same predicates `flagLayer`/`envLayer` are
+built from, read off the same registry rows), `applyConfig` records the result on the new
+`options.overrides`, and the builder reads it; guarded by `TestOverrideSourcesNameTheWinningSource` and
+`TestApplyConfigRecordsOverrideSources`. (2) The builder itself lives in a new `cmd/apogee/settingsrows.go`;
+`wire.go` carries only the one-line `SettingsRows:` wiring beside `SaveHostAcknowledgement`, as the item
+says. (3) Section names are AUTHORED here rather than lifted from the template: the template's `# ===`
+dividers are per-key, so a header per divider would be one header per row. `settingSections` is an
+ordered table of section RUNS over registry order (ten sections), pinned to that order by
+`TestSettingSectionsOpenInRegistryOrder` so a key added to the registry inherits its section.
 
 **What:** Depends on item 2. A new plain-data row type in `internal/tui`
 (suggest `SettingRow`: key path, display section, kind, current value string, default
