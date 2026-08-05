@@ -7,6 +7,16 @@
 #
 #   command-line flag  >  APOGEE_* environment variable  >  this file  >  built-in default
 #
+# Three keys have all four layers — server: (--server, APOGEE_SERVER), mode: (--mode,
+# APOGEE_MODE) and bypass: (--bypass, APOGEE_BYPASS). Every other key here is config-file only,
+# and says so where it is documented.
+#
+# Two raw overrides are NOT config keys at all, which is why no key below spells them: --endpoint
+# / APOGEE_ENDPOINT starts THIS run on an UNLISTED server — it wins over any server: name and is
+# never written back here — while APOGEE_API_KEY and --model / APOGEE_MODEL carry that unlisted
+# server's bearer token and model hint, or overlay those two fields of the listed entry the run
+# starts on.
+#
 # Every line below is commented out with ONE exception — system-prompt-text:, the default
 # system prompt — so out of the box this file changes nothing else; it is a documented
 # starting point. Uncomment a line and edit it to make it your default; delete or comment
@@ -16,60 +26,40 @@
 # change back into this file — one key at a time, comments and layout kept as you left them.
 
 # =============================================================================
-# The local OpenAI-compatible LLM server URL.
-#   flag: --endpoint   env: APOGEE_ENDPOINT
-# endpoint: http://192.168.64.1:1111
-
-# =============================================================================
-# The bearer token that endpoint wants, if it wants one — llama.cpp started with --api-key,
-# LM Studio, a remote vLLM, any keyed OpenAI-compatible proxy. It is sent as
-# `Authorization: Bearer <key>` on EVERY request to the server above: your conversation, the
-# ten-second heartbeat, and both halves of `apogee probe`. Leave it unset — the local-server
-# default — and no Authorization header is sent at all.
-#   env: APOGEE_API_KEY   (no flag, deliberately: a secret typed on the command line lands in
-#                          your shell history and in `ps` output on every OS)
-# The environment variable WINS over this file, so a key here is your per-machine default and
-# APOGEE_API_KEY is the override. CAVEAT: this file is plain text — on a shared machine prefer
-# the environment variable, or restrict this file's permissions yourself. apogee reports
-# whether a key was resolved (`apogee probe`, the upstream block); the value is never printed,
-# and the provider client redacts it from server-echoed errors.
-# api-key: sk-my-server-token
-
-# =============================================================================
-# A short, friendly name for the upstream host, shown in the status footer. Leave it unset
-# and apogee shows the endpoint's host instead. Config-file only (no flag or env).
-# host-alias: my-box
-
-# The model name to request from that server. It is a HINT, not a claim: apogee follows the
-# model the server actually serves. Leave it unset and the first heartbeat binds whatever is
-# loaded — a single-model server (e.g. llama.cpp's llama-server) needs only the endpoint above
-# — and set it on a multi-model server to say which of them you mean. Either way, when the
-# server's loaded model changes under a running session, apogee rebinds to it within ten
-# seconds and says so in the transcript.
-#   flag: --model      env: APOGEE_MODEL
-# model: qwen2.5-coder
-
-# =============================================================================
-# The OTHER servers you run models on. endpoint: above is where a session STARTS; each entry
-# here is a server the running session can be moved to with /server, without restarting apogee
-# and without losing the conversation. Config-file only (no flag or env). Default: empty — no
-# alternatives are offered, and nothing else changes.
+# The servers you run models on — the SINGLE definition of what apogee can talk to. Each entry
+# is one OpenAI-compatible server; the server: key below names the one a session STARTS on, and
+# /server moves a running session to any other one without restarting apogee and without losing
+# the conversation. Config-file only (no flag or env): an invocation picks an entry by name
+# (--server) or points at an unlisted URL (--endpoint), and neither defines a server here.
+#
+# The default is empty — and a session needs a server, so with nothing listed apogee opens
+# /settings and points you back at this file. Add one entry and you are running.
 #
 #   name       what the entry is called: the label /server lists it under, the argument
-#              `/server <name>` takes, and the host name the status footer shows once the
-#              session is on it (host-alias: above, once per server). Required, and no two
-#              entries may share one.
-#   endpoint   that server's OpenAI-compatible URL, like the endpoint: above. Required.
-#   api-key    the bearer token that server wants, if it wants one. Optional, and config-file
-#              only: APOGEE_API_KEY is a single value and it belongs to the STARTUP server, so
-#              a keyed server here carries its own key. Leave it out for a keyless local one.
-#   model      that server's model hint — exactly the model: above, per server: which of the
-#              models it serves you mean. Optional: leave it out and the first heartbeat there
-#              binds whatever is loaded.
-#
-# The server this session started on is always offered too, whether or not you list it here, so
-# you can always switch back. A switch lasts for the SESSION only: nothing is written back to
-# this file, and the next launch starts at endpoint: above again.
+#              `/server <name>` takes, the value server: below points at, and the host name the
+#              status footer shows while the session is on it. Required, and no two entries may
+#              share one.
+#   endpoint   that server's OpenAI-compatible URL. Required.
+#   api-key    the bearer token that server wants, if it wants one — llama.cpp started with
+#              --api-key, LM Studio, a remote vLLM, any keyed OpenAI-compatible proxy. It is
+#              sent as `Authorization: Bearer <key>` on EVERY request to that server: your
+#              conversation, the ten-second heartbeat, and both halves of `apogee probe`.
+#              Optional — leave it out for a keyless local server and no Authorization header is
+#              sent at all. APOGEE_API_KEY overrides it for the server this session starts on
+#              (no flag, deliberately: a secret typed on the command line lands in your shell
+#              history and in `ps` output on every OS), so a key here is your per-machine
+#              default and the variable is the override. CAVEAT: this file is plain text — on a
+#              shared machine prefer the environment variable, or restrict this file's
+#              permissions yourself. apogee reports whether a key was resolved (`apogee probe`,
+#              the upstream block); the value is never printed, and the provider client redacts
+#              it from server-echoed errors.
+#   model      that server's model hint. It is a HINT, not a claim: apogee follows the model the
+#              server actually serves. Optional — leave it out and the first heartbeat binds
+#              whatever is loaded, which is all a single-model server (e.g. llama.cpp's
+#              llama-server) needs — and set it on a multi-model server to say which of them
+#              you mean. Either way, when the server's loaded model changes under a running
+#              session, apogee rebinds to it within ten seconds and says so in the transcript.
+#              --model / APOGEE_MODEL overrides it for the server this session starts on.
 #
 # servers:
 #   - name: workstation
@@ -78,6 +68,19 @@
 #   - name: rented-box
 #     endpoint: https://llm.example.com
 #     api-key: sk-rented-token
+
+# =============================================================================
+# Which servers: entry a session starts on — the name of one of the entries above. apogee keeps
+# this current for you: every /server switch to a listed entry writes the key back into this
+# file, so the next launch starts where you left off. A move to a server the list does NOT name
+# — an --endpoint URL, a llama-launcher profile — records nothing.
+#
+# Leave it unset and the first run ASKS: apogee starts with no server bound, opens the /server
+# picker over the list above, and records what you choose. A name no entry above carries is
+# handled the same way — apogee says which name went missing and opens the picker — rather than
+# refusing to start.
+#   flag: --server     env: APOGEE_SERVER
+# server: my-box
 
 # =============================================================================
 # Start, switch and stop the LOCAL servers yourself, with llama-launcher. The servers: list above

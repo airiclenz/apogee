@@ -113,22 +113,57 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 	}
 }
 
-// The template documents the upstream api key where a reader meets the endpoint: the key's own
-// spelling, its environment variable, and the two facts a secret in a plain-text file needs
-// (the env var wins; restrict the file otherwise). It stays a COMMENTED example — the
-// behaviour-neutrality above already pins that the seeded file resolves no key.
+// The template documents the upstream api key where a reader meets the server it belongs to —
+// inside a `servers:` entry, its only home since ADR 0036 retired the top-level key: the field's
+// own spelling, the environment variable that overrides it for the startup server, and the two
+// facts a secret in a plain-text file needs (the env var wins; restrict the file otherwise). It
+// stays a COMMENTED example — the behaviour-neutrality above already pins that the seeded file
+// resolves no key.
 func TestEmbeddedDefaultConfigDocumentsTheAPIKey(t *testing.T) {
 	t.Parallel()
 	template := string(defaultConfigYAML)
 	for _, want := range []string{
-		"# api-key:",     // the config key itself, as a commented example
-		"APOGEE_API_KEY", // the environment variable that overrides it
-		"no flag",        // why the third precedence layer is deliberately absent
-		"plain text",     // the shared-machine caveat
+		"api-key: sk-rented-token", // the field itself, as a commented example inside an entry
+		"APOGEE_API_KEY",           // the environment variable that overrides it
+		"no flag",                  // why the third precedence layer is deliberately absent
+		"plain text",               // the shared-machine caveat
 	} {
 		if !strings.Contains(template, want) {
-			t.Errorf("embedded template does not mention %q; the api-key block is missing or reworded", want)
+			t.Errorf("embedded template does not mention %q; the api-key documentation is missing or reworded", want)
 		}
+	}
+}
+
+// The template teaches the schema ADR 0036 settled, and only that one: the `servers:` list and the
+// `server:` startup choice are each documented once, as a commented example the splice writer can
+// place a real setting under, and none of the four retired top-level keys is offered any more. A
+// template still showing `endpoint:` at the top level would teach a config that no longer resolves,
+// and a second example of either surviving key would leave the writer with no one place to write.
+func TestEmbeddedDefaultConfigTeachesTheServersSchema(t *testing.T) {
+	t.Parallel()
+	lines := splitConfigLines(defaultConfigYAML)
+	retired := map[string]bool{"endpoint": true, "api-key": true, "host-alias": true, "model": true}
+	for i, line := range lines {
+		indent, name, ok := commentedKey(line)
+		if ok && indent == 0 && retired[name] {
+			t.Errorf("line %d still offers the retired top-level %s: — %q", i+1, name, line)
+		}
+	}
+	// Each surviving key is documented exactly once (commentedExampleLine refuses a second one),
+	// and the line it reports is where a first write of that key lands.
+	at, err := commentedExampleLine(lines, "server")
+	if err != nil || at == 0 {
+		t.Fatalf("the template documents no single `# server:` example (line %d, err %v); a recorded "+
+			"choice would be appended at the end of the file instead", at, err)
+	}
+	end, err := commentedExampleBlockEnd(lines, "servers")
+	if err != nil || end == 0 {
+		t.Fatalf("the template documents no `# servers:` example block (end %d, err %v); the migration "+
+			"fold would append the list at the end of the file instead", end, err)
+	}
+	if end >= at {
+		t.Errorf("the `# servers:` example runs to line %d, past the `# server:` example on line %d; the "+
+			"two examples have run together and a write to one would land inside the other", end, at)
 	}
 }
 

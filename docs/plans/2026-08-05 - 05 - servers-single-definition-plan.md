@@ -431,7 +431,7 @@ without writing; new-schema config untouched; the announce line renders.
 
 **Commit:** `feat(config): legacy top-level keys auto-migrate once into the servers list, with backup`
 
-## 10. The seeded template teaches the new schema
+## 10. The seeded template teaches the new schema — ✅ DONE (2026-08-05)
 
 **What:** Depends on item 3. Rewrite `cmd/apogee/defaults/config.yaml`: the four
 quadruple blocks (:16-47 at baseline) are replaced by a reworked `servers:` section —

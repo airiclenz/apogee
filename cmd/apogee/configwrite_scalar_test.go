@@ -158,6 +158,7 @@ func TestSpliceScalarSettingInsertsBelowTheTemplateExample(t *testing.T) {
 		value string
 		want  []string
 	}{
+		{path: "server", value: "my-box", want: []string{"server: my-box"}},
 		{path: "mode", value: "auto", want: []string{"mode: auto"}},
 		{path: "llama-launcher", value: "off", want: []string{"llama-launcher: \"off\""}},
 		{path: "context-window", value: "32768", want: []string{"context-window: 32768"}},
