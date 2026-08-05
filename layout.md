@@ -888,17 +888,23 @@ readout is separate too, and reads the same count from the same queue.
 **One dropdown for `/`.** Typing a `/` token opens ONE suggestion pane above the box — the same
 bordered, titled pane the `/sessions` browser and the approval prompt use, in the slot that
 shrinks the transcript to make room. It is titled `commands and skills` and it lists both:
-commands first, prefix-matched, each with its one-line summary; then skills, matched on id and
+commands, prefix-matched, each with its one-line summary; and skills, matched on id and
 display name, each row led by the `✦` skill glyph so the two kinds never read alike. `@` opens the
 same pane over workspace files. At most eight rows show — and fewer than eight when the window
 cannot spare eight, because the dropdown answers to the same row budget every pane does (the
 section above): a short terminal scrolls a smaller window around the selected row, and one with no
 rows to give counts the whole menu onto the title row rather than opening an empty pane under a
 hint still offering `↑/↓ select`. The hint line under the rows reads
-`↑/↓ select · ⏎/tab accept · esc dismiss`. The command rows read **alphabetically**, so the menu
-can be scanned without knowing the table behind it, and every verb the parser knows is in it —
-`/stop-server` and `/unload-model` included. Those two act on the session's own server and say so
-in their names, and a verb the human cannot discover is a verb they will not find.
+`↑/↓ select · ⏎/tab accept · esc dismiss`. The rows rank by **match quality** — an exact name
+first, then the names the typed partial starts, then the ones that merely contain it — and rows of
+equal quality keep the scan order behind the menu: the commands, alphabetically, and then the
+skills in catalog order. A bare `/` therefore still reads alphabetically, because with nothing
+typed every name ranks alike and nothing reorders, so the menu can be scanned without knowing the
+tables behind it; a typed `imple`, though, puts `/implement-plan` above `/feature-implementation`,
+because the row the human is reaching for should not sit under one that merely spells the same
+letters somewhere inside. Every verb the parser knows is in it — `/stop-server` and `/unload-model`
+included. Those two act on the session's own server and say so in their names, and a verb the human
+cannot discover is a verb they will not find.
 
 **Its rows are columns, not sentences.** A dropdown row is not one concatenated string. The name
 and its one-line summary render as **vertically aligned columns**, each padded to the widest cell

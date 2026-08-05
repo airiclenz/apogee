@@ -84,7 +84,12 @@ entry was added under `[Unreleased]` per repo convention (no version identifier 
 
 **Commit:** `fix(tui): rank slash-menu suggestions by match quality, prefix first`
 
-## 2. Amend the layout spec's dropdown-ordering prose
+## 2. Amend the layout spec's dropdown-ordering prose — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): the item's "around lines 804–817" hint was stale — the "One dropdown for `/`"
+paragraph now sits at `layout.md:888–907`. The named section and paragraph were authoritative and
+both of their ordering claims (the "commands first … then skills" clause and the "read
+**alphabetically**" sentence) were rewritten there; no other prose moved.
 
 Depends on item 1.
 
