@@ -4004,9 +4004,9 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // and nothing is set off from anything: a spec that wraps its rows, gaps them or pads the block
 // states its demand through popupRowBlockLines instead (approvalPrompt, askPrompt). Both are 0 for a
 // pane with no rows on offer. maxRows caps the scrolled row window and maxBody the wrapped body
-// block, both ≥ 0 and both in renderPopup's zero-means-none sense. seated is false when the frame's allocation left
-// this pane no rows at all — a window too short to seat it beside its siblings — and the overlay
-// renders nothing rather than a pane drawn past the terminal's last row.
+// block, both ≥ 0 and both in renderPopup's zero-means-none sense. seated is false when the frame's
+// allocation left this pane no rows at all — a window too short to seat it beside its siblings —
+// and the overlay renders nothing rather than a pane drawn past the terminal's last row.
 //
 // For the MODAL prompt that outcome is reachable only below twelve rows, where no pane is drawn at
 // all: the prompt is last in the give-way order and the input box's draft rows now give way to it
@@ -4042,12 +4042,15 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // chrome is what that frame costs the pane, and it is the CALLER's because only the caller knows the
 // spec it is about to compose. All three constants are in use: popupChrome where the title takes a
 // content row of its own and a hint row spells the keys below the list (the /sessions browser, the
-// picker, the autocomplete dropdown); popupTitleBorderChrome where the title rides the top border
-// (popupSpec.titleInBorder) and the hint alone keeps a row (askPrompt); and popupBorderChrome where
-// neither does — the approval menu writes its shortcut letters beside the options they take, so its
-// two borders are its whole frame (approvalPrompt). Each spends the row it saved on the pane's own
-// content rather than leaving it unclaimed. chrome is also what "seated" is measured against, so a
-// pane is refused only on a grant its own chrome cannot fit in.
+// picker, the autocomplete dropdown); popupTitleBorderChrome where no title row is drawn and the
+// hint alone keeps one — its only caller is the ask prompt, which draws no title at ALL, its name
+// having gone into the question itself (layout.md), so what titleInBorder buys there is a top
+// border left plain by an empty title, carrying the question only at the heights that seat no line
+// of it (popupSpec.titleFromBody); and popupBorderChrome where neither row is drawn — the approval
+// prompt's tool name does ride its top border and its shortcut letters are written beside the
+// options they take, so its two borders are its whole frame (approvalPrompt). Each spends the row
+// it saved on the pane's own content rather than leaving it unclaimed. chrome is also what "seated"
+// is measured against, so a pane is refused only on a grant its own chrome cannot fit in.
 //
 // BOTH caps floor at ZERO rather than at a comfortable minimum, and that is the point of them: a
 // row floor of 6 on a window with 4 rows to give promised a pane the frame could not hold, and the
@@ -4283,16 +4286,20 @@ const askQuestionFloor = 3
 // its last one against the border.
 //
 // The screen budget is derived from the live layout so a long question or a long choice set never
-// pushes the input box off-screen: rows get priority (they are what the human acts on), the body
-// takes what is left and overflows into the explicit "… (+N more lines)" marker, and on a window
+// pushes the input box off-screen: the question keeps its first askQuestionFloor lines ahead of
+// everything (popupFloor.body, and never more than leaves the answers the row their window is
+// anchored on), past that claim the rows get priority (they are what the human acts on), and the
+// body takes what is left and overflows into the explicit "… (+N more lines)" marker. On a window
 // that can spare neither the pane shrinks to its borders and hint — with the marker riding the top
 // BORDER now that no title row is drawn, counting BOTH the question lines and the choices it could
 // not seat (D2, popupTitleLine), so a hint still offering ↑↓ is never the only trace of an offering
 // the pane dropped.
 //
 // Where the shrinking goes one step further and leaves the question no line of its own — a body
-// budget of one row, spent entirely on the marker, which is the 12-to-15-row window with a question
-// longer than the pane is wide — the question falls back into the top border instead
+// budget of one row, traded whole for the marker, which is the bottom of the ladder now that the
+// question has a floor: the windows whose grant past this pane's chrome is the offering's anchor
+// row and a single line, so the floor is clamped back to that line and a question longer than the
+// pane is wide has nothing to put on it — the question falls back into the top border instead
 // (popupSpec.titleFromBody). Dropping the title was the right call because the question says what a
 // heading would; a pane showing NEITHER says nothing, and a decision surface whose whole identity has
 // become a count is the case the approval prompt does not have — its tool name is on the border at

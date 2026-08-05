@@ -355,6 +355,22 @@ being decided") and a closing clause on the F3 paragraph; the CHANGELOG `[Unrele
 matching sub-bullet. The mockup in `docs/design/user-questions-layout.md` is unchanged — this moves the rendering
 TOWARDS it.
 
+NOTES (2026-08-05): follow-up (run-level, owner-approved; not a plan item) — comments only, no behaviour change
+(`git diff` on `internal/tui/model.go` is comment lines alone). Four wording defects the verifiers of this run's
+own earlier fixes reported, each re-derived from the code as it now stands. (a) `popupBudget`'s chrome paragraph
+sold `popupTitleBorderChrome` as "the title rides the top border … (askPrompt)": the ask pane sets `titleInBorder`
+with an EMPTY title, so nothing rides its border at the heights the mockup draws — the constant is now described
+as the pane that draws no title ROW, with the ask pane's name having gone into the question itself (layout.md:206)
+and its border carrying the question only via `titleFromBody`. (b) `askPrompt`'s fallback paragraph called that
+case "the 12-to-15-row window"; the range was never the mechanism and the F4 floor moved it (at 80 columns with
+four one-line answers the fallback pre-floor reached to 24 rows and now stops at 16, and a taller anchor row moves
+it again), so the passage states the mechanism instead: the fallback is where the grant past this pane's chrome is
+down to the offering's anchor row plus one line, which clamps the question's floor back to that line and hands it
+to the marker. (c) `askPrompt`'s own doc still read "rows get priority … the body takes what is left" with no
+mention of the floor F4 had just given the question — it now names `askQuestionFloor`/`popupFloor.body` and the
+anchor-row bound it yields to. (d) one comment line this run added in `popupBudget`'s doc was 118 columns against
+the file's ~100 norm; that paragraph and the three rewritten ones are rewrapped at ≤100.
+
 **What:** Restyle the ask prompt per the mockup (lines 25-37). In
 `internal/tui/model.go` `askPrompt` (~line 4023):
 
