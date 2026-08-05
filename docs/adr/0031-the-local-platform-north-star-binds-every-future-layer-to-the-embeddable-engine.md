@@ -76,6 +76,11 @@ unattended eval harness.
 [ADR 0033](0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md)
 answers the fresh-vs-resumed question for the **scheduled-trigger** case only (fresh per
 firing); the workflow-node case stays open.
+[ADR 0034](0034-the-daemon-is-an-in-repo-subcommand-over-a-declarative-trigger-action-file.md)
+answers daemon packaging (an in-repo `apogee daemon` subcommand) and records the
+cross-process contention settlement (the slot broker splits into llama-launcher's Gateway and
+a deferred apogee-side resolver); durable-across-restart approvals stay open — the daemon
+launches with ADR 0033's deny-and-record posture.
 
 ## Considered options
 
