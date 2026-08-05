@@ -9,8 +9,8 @@
   be recorded as a recallable prompt (`ISSUES.md:9`). Independent of the `/skill`
   removal; folded here on the owner's instruction rather than opening a fourth
   active plan.
-- **Date:** 2026-08-04 · **Status:** TODO (no item executed) · Amended 2026-08-05
-  (item 4 folded in)
+- **Date:** 2026-08-04 · **Status:** completed (2026-08-05) — items 1–4 all ✅,
+  plus run-level follow-ups FU1–FU3; archived · Amended 2026-08-05 (item 4 folded in)
 - **Ratified design calls:**
   - Recall exclusion scope: only the session-reset pair `/new` + `/clear` stops
     being recorded, via a spec-driven `commandSpec` flag (`noRecall`); every other
