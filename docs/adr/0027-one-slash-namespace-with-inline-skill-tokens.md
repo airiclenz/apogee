@@ -5,6 +5,17 @@ Amends: ADR 0025 (decision 10)
 
 # One `/` namespace: skills are inline tokens, commands execute at accept
 
+> **Amendment 2026-08-05 — the alternate `/skill` entry point is removed.** Decision 3 below kept
+> the two-step `/skill <partial>` picker (and with it the `menuOnly` spec flag) as an alternate
+> entry point, chiefly as the route to a skill whose id a command verb shadows. The owner ruled it
+> redundant (`ISSUES.md`: *"`/skill` is not needed anymore - remove it"*) and it was deleted with
+> plan `docs/plans/2026-08-04 - 06 - remove-skill-command-plan.md`. **The core decision is
+> unchanged** — one `/` namespace, skills as inline tokens in the message text, commands executing
+> at accept. What changes is that the merged menu and the directly typed `/<skill-id>` token are now
+> the only ways in, and the shadowed-skill route named in decision 3 and in the rejected
+> alternatives is the `/id` token typed mid-message, which `submitParse` still resolves. The body
+> below is left as it was written, describing the design at the time it was taken.
+
 ## Context
 
 The prompt box had grown two slash worlds that did not know about each other, and the owner hit

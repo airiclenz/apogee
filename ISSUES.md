@@ -8,8 +8,6 @@ X: Executed
 
 - [ ] `/new` should not be recorded as a recallable prompt
 
-- [ ] `/skill` is not needed anymore - remove it.
-
 - [ ] Currently I cannot see how much of it's context a sub agent has used.
 
 - [ ] keyboard path for collapse/expand: a block-cursor mode (↑/↓ move a highlighted block, enter toggles, esc leaves). Deliberately deferred from the collapse wave — layout.md "Collapsed and expanded blocks" keeps toggling mouse-only for now, on the same precedent that keeps transcript selection mouse-only.
@@ -18,5 +16,3 @@ X: Executed
 SUSPECTED, UNPROBED: the same rune-vs-cell mismatch should also sit at `clipRunes`' other caller, `clipDetail` / `detailClipRunes` = 160 (internal/tui/toolpresent.go:764), where a detail line of double-width text would clip at 160 runes and paint up to 320 cells. The transcript soft-wraps rather than dropping a neighbour, so a reader would expect extra wrapped rows rather than a lost element — but nobody has run that probe, so this half is inference from the shared helper, not a confirmed defect.
 
 - [ ] Two comments left by 35f4245 disagree about the same probed number. `toolPhrase` (internal/tui/activity.go:157) says a target clipped to 32 runes "painted up to 139 cells"; that same commit's test comments (internal/tui/paint_test.go:897 and :913) say 91, which is the figure the probe actually measured and the one the rune-vs-cell entry above cites. The 139 is the stale one. Documentation accuracy only — the code is right either way — but a reader trusting the 139 would mis-size any future budget work on that path.
-
-- [ ] `/skill` wears the `— idle only` tag in the "/" menu while the model works, but picking it there works anyway — the tag is wrong. `commandSuggestions` (internal/tui/autocomplete.go) tags every row whose `commandSpec.whileRunning` is false, and `/skill` is declared `menuOnly: true` with no such flag (internal/tui/command.go); `acceptAutocomplete` then completes any `takesArgs`/`menuOnly` verb to `/skill ` and chains straight into the skill picker, never reaching the idle-only refusal (`refuseIdleOnlyCommand`). So the tag contradicts both the actual behaviour and README's own command table, which lists `/skill` as usable while the model works. Predates the popup-alignment work — the tag arrived with 72de7dd. The fix is a semantics call: either give `/skill` `whileRunning: true`, or stop tagging `menuOnly` verbs at all (which would also cover any future verb in that position).

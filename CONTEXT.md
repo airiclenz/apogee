@@ -651,8 +651,8 @@ the catalog confirms is a reference: any other `/word` inside a message is prose
 untouched), and a **command verb shadows** a skill of the same id. Like an `@file`, a skill is
 **turn-local**: the loop resolves the extracted IDs (`UserInput.SkillIDs`) through `Config.Skills`
 and prepends each body to *that one* user message, so a skill never persists as a system-prompt
-edit. The TUI parses and offers (one merged `/` menu, plus the `/skill <name>` picker that writes
-the token for you, and `/skills` to browse the catalog); the agent resolves. See
+edit. The TUI parses and offers (one merged `/` menu, and `/skills` to browse the catalog); the
+agent resolves. See
 [ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md) and
 [ADR 0032](docs/adr/0032-the-user-skill-library-outranks-the-workspace.md).
 _Avoid_: "plugin", "tool" (a skill is prompt text, not executable; it adds no capability — it

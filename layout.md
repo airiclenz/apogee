@@ -1006,8 +1006,7 @@ everything on either side is untouched.
 rest of what was typed stays in the box with the caret where it belongs. The verbs that need what
 follows them are the exception and complete instead: the four that take arguments — `/confine`,
 `/model`, `/server` and `/schedule` (and arguments are only ever read from a whole-line
-invocation) — plus `/skill`, which chains into the picker over the catalog. Accepting a skill row writes that
-skill's own `/id ` token into the text.
+invocation). Accepting a skill row writes that skill's own `/id ` token into the text.
 
 **One overlay for "which one?".** `/model` and `/server` with nothing after them open a
 picker: the same bordered pane as the `/sessions` browser, one row per choice, one highlight, `↑/↓

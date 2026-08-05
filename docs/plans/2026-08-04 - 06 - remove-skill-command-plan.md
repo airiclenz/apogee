@@ -231,9 +231,22 @@ to the surviving consumers (the merged `/` menu, `/skills`, inline `/<id>` token
 
 **Commit:** `docs(tui): repoint code comments from the removed /skill picker to its surviving consumers`
 
-## 3. Living documentation, changelog, ADR amendment, and issue closure
+## 3. Living documentation, changelog, ADR amendment, and issue closure — ✅ DONE (2026-08-05)
 
 Depends on item 1.
+
+NOTES (2026-08-05): the ADR 0027 amendment note is dated **2026-08-05**, not the item's literal
+"removed 2026-08-04" — items 1 and 2 landed today, and a permanent record should carry the date the
+removal actually happened. The acceptance grep for `2026-08-04` is still satisfied honestly: the note
+cites this plan by its filename (`docs/plans/2026-08-04 - 06 - …`). The note also states where the
+shadowed-skill route went (the inline `/id` token, per item 1's NOTES), since decision 3 and the
+rejected-alternatives section both leaned on the picker for it; the ADR body is untouched.
+
+NOTES (2026-08-05): `cmd/apogee/defaults/config.yaml` says "prepend its instructions to **that**
+message" rather than the item's "your next message" — skills are turn-local (CONTEXT.md), so
+"next" was the chip-era phrasing and is wrong for an inline token. `ISSUES.md` entries were at
+`:11` and `:22` in the working tree, not the pinned `:12`/`:23` (locator drift; quoted phrases
+matched).
 
 **What:** every cross-cutting doc amendment for this removal, owned here:
 

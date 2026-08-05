@@ -228,7 +228,6 @@ blue for a file your workspace has — so a typo is visible before you send.
 |---|---|---|
 | `/<skill-id>` | Invoke a skill — type its id anywhere in your message | ✅ rides the queued message |
 | `@<path>` | Hand a workspace file to the model | ✅ rides the queued message |
-| `/skill` | Pick a skill by name — writes its `/token` for you | ✅ |
 | `/skills` | List the discovered skills — id, name and summary | ✅ |
 | `/version` | Show the apogee version | ✅ |
 | `/confine` | Report or change Auto's blast radius — see [below](#auto-modes-blast-radius) | ✅ report only |

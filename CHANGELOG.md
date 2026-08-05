@@ -8,6 +8,20 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Removed
+
+- **`/skill` — the two-step picker verb is gone.** Naming a skill is what invoking it already is:
+  type its `/<skill-id>` anywhere in your message, or pick it from the merged `/` menu, which lists
+  every skill beside the commands and splices the same token. The separate "pick a skill by name"
+  verb was a second route to the one destination since ADR 0027 made skills inline tokens, and a
+  bare `/skill` now earns the same `unknown command or skill` refusal as any other unknown verb. A
+  skill whose id collides with a command verb is still reachable — the merged menu hides it, but the
+  `/id` token typed mid-message resolves as it always did.
+  - **The `menuOnly` command flag left with it**, and took a display bug with it: `/skill` was the
+    only verb that carried the flag, so it was also the only row that wore a `— idle only` tag in
+    the `/` menu while the model worked even though picking it there worked fine. No surviving verb
+    is menu-only, so the tag now says what it means everywhere it appears.
+
 ## [0.11.0] — 2026-08-05
 
 ### Added
