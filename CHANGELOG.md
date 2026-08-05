@@ -703,6 +703,12 @@ point is a **minor** bump, not a breaking change.
     the question moves up onto the box's top border instead, rather than leaving you a live `⏎` and
     nothing on the screen saying what it would answer. Give the box its rows back and the border is
     plain again.
+  - **And an ordinary one never shows a count where the question belongs.** Four prose answers with a
+    blank line between each pair cost nine rows, which is nearly everything an 80×24 window has to
+    give a pane — so the question was being squeezed out on a terminal with room to spare. It now
+    keeps up to three lines before the answers claim the rest: a short question still costs the
+    options nothing, and a window too short for both still puts an answer on the screen ahead of the
+    question's third line.
 
   Mocked up in `docs/design/user-questions-layout.md`; specced in `layout.md` (What "height" means,
   The Column contract).

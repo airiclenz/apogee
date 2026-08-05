@@ -114,6 +114,30 @@ const popupTitleBorderChrome = popupChrome - 1
 // does not paint leaves the row unclaimed at exactly the window where it has fewest to spare.
 const popupBorderChrome = popupTitleBorderChrome - 1
 
+// popupFloor is what a pane's two content blocks each keep before the other claims the rest of the
+// window ([Model.popupBudget]). The ZERO VALUE is the standing rule and every pane but one passes
+// it: the ROWS take what they ask for and the body keeps the one line the budget has always left it,
+// because on a picker, a browser or a dropdown the rows ARE the pane and the prose above them is a
+// caption.
+//
+// body states a different pane: one whose prose is the thing being decided about, where a row list
+// long enough to eat the whole grant leaves the question itself as a count (the ask prompt at eighty
+// by twenty-four — four answers and the blanks between them cost nine lines of ten, and the human is
+// asked to pick between them without the question on the screen). It is the lines the body keeps
+// FIRST, and the caller states its own prose's real wrapped height in it (popupBodyLineCount) rather
+// than a taste, so a one-line question claims one line and the rows keep the rest.
+//
+// rows is what that claim may never take: the lines the row block needs to seat the one row the
+// window is anchored on, which is what keeps a floor on the prose from emptying a decision surface at
+// the heights where it has least to give (popupRowWindow seats a row whole or not at all, so a
+// two-line answer needs both its lines or it is not on the screen). Stated by the caller for the same
+// reason chrome is — only the pane knows how tall its own rows land. A body claim with no row claim
+// beside it still leaves the rows one line.
+type popupFloor struct {
+	body int // lines the prose keeps before the rows claim the remainder
+	rows int // lines the rows keep whatever the prose claims
+}
+
 // popupRow is one row of a popup as its columns: the escape-stripped cells the module lays out
 // into vertically aligned columns. Every row of one spec follows that popup kind's fixed column
 // schema — an absent optional tier is an empty cell, which still pads, so the columns after it
@@ -649,10 +673,7 @@ func popupBodyLines(th theme, body string, maxBodyRows, inner int, blackFill lip
 		return nil, 0
 	}
 
-	var wrapped []string
-	for _, seg := range strings.Split(body, "\n") {
-		wrapped = append(wrapped, wrapText(th, seg, inner)...)
-	}
+	wrapped := popupBodyWrapped(th, body, inner)
 
 	if maxBodyRows == 0 {
 		// A window with nothing left to spend on prose (popupBudget), not an invitation to show all
@@ -677,6 +698,31 @@ func popupBodyLines(th theme, body string, maxBodyRows, inner int, blackFill lip
 		out = append(out, blackFill.Render(th.statusFaint.Render(truncateToWidth(th, marker, inner))))
 	}
 	return out, hidden
+}
+
+// popupBodyWrapped breaks a body block into the lines it wants at the given inner width, before any
+// budget is applied to it: each embedded newline is layout the caller composed, so the block is split
+// on "\n" and each segment word-wrapped independently. It is the one wrap both halves of the body's
+// accounting go through — the painter's (popupBodyLines) and the CALLER's (popupBodyLineCount) — for
+// the reason popupWrappedRowHeights exists on the row side: a pane that has to state its prose's cost
+// before the block is composed must state the cost the painter will actually pay.
+func popupBodyWrapped(th theme, body string, inner int) []string {
+	if body == "" {
+		return nil
+	}
+	var wrapped []string
+	for _, seg := range strings.Split(body, "\n") {
+		wrapped = append(wrapped, wrapText(th, seg, inner)...)
+	}
+	return wrapped
+}
+
+// popupBodyLineCount is what body will cost in painted LINES on a pane drawn at the given TOTAL
+// width, uncapped — the figure a caller needs to claim room for prose it will actually use
+// (popupFloor.body). Claiming a fixed taste instead would reserve three lines for a one-line
+// question and hand the rows a budget two lines short of the block they would otherwise have seated.
+func popupBodyLineCount(th theme, body string, width int) int {
+	return len(popupBodyWrapped(th, body, popupInnerWidth(th, width)))
 }
 
 // popupElisionMarker is the ONE phrase a pane uses to say prose it holds is not on the screen,

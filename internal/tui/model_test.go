@@ -1178,7 +1178,7 @@ func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
 				// sets the menu off by included, because a test budgeting for a shape the pane does not
 				// compose would look for the marker at a window the pane never puts it on.
 				menuLines := popupRowBlockLines(popupFlatRowHeights(len(approvalMenu)), 0, popupRowPadLines(true, false))
-				if maxBody, _, _ := m.popupBudget(panePrompt, menuLines, menuLines, popupBorderChrome); maxBody == 1 {
+				if maxBody, _, _ := m.popupBudget(panePrompt, menuLines, menuLines, popupBorderChrome, popupFloor{}); maxBody == 1 {
 					if first := strings.Trim(rows[1], "│ "); !elisionMarkerPattern.MatchString(first) {
 						t.Errorf("body row = %q, want the marker counting the prose the pane dropped:\n%s", first, flat)
 					}
@@ -1491,6 +1491,151 @@ func TestModelAskNamesItselfWhereTheQuestionHasNoRow(t *testing.T) {
 			t.Errorf("first content line = %q, want the question itself:\n%s", first, got)
 		}
 	})
+}
+
+// askAnswerLines is how many of a rendered ask pane's lines are the head of an answer — the rows
+// carrying a marker in the pane's own marker column, which is what "an answer is on the screen"
+// means. The hint spends the same middle dot between its keys, so the marker is matched at the START
+// of the content and never anywhere in it.
+func askAnswerLines(rows []string) int {
+	seated := 0
+	for _, row := range rows {
+		text := strings.TrimSpace(strings.Trim(row, "│"))
+		if strings.HasPrefix(text, glyphUser+" ") || strings.HasPrefix(text, glyphMenuUnselected+" ") {
+			seated++
+		}
+	}
+	return seated
+}
+
+// TestModelAskQuestionKeepsItsFloorOnARoomyWindow is the rule that the pane's own budget broke: the
+// answers had priority over the question at EVERY height, and an ask_user offering costs lines that
+// scale with what the model wrote — four wrapped answers, the blanks between them and the pad around
+// the block ask for nine of the ten lines an eighty-by-twenty-four terminal grants the pane. So on a
+// window nobody would call short the box read "… (+2 more lines)" where the question belongs, and the
+// human was asked to choose between four answers with nothing on the screen saying what about. The
+// question now claims up to askQuestionFloor lines first (popupFloor).
+//
+// The claim is a CEILING and not a reservation, which the second subtest is for: a question that
+// wants one line takes one and the offering keeps every line it had, pad included — a floor that
+// booked three lines whatever the prose measured would cost the mockup's own spacing on the very
+// windows that can afford it.
+func TestModelAskQuestionKeepsItsFloorOnARoomyWindow(t *testing.T) {
+	const lead = "how should I continue"
+	req := domain.AskRequest{
+		Question: lead + ` with the implementation of the feature "The best. Feature in the world"? ` +
+			"Pick one of the options below and I will get going on it, or type an answer of your own.",
+		Choices: []string{"just do it all in one shot and commit once", "no", "ask me again later", "stop and let me drive"},
+	}
+
+	for _, height := range []int{24, 26, 28} {
+		t.Run(fmt.Sprintf("80×%d", height), func(t *testing.T) {
+			m := modelWithOverlayRoomAt(t, 80, height, Options{Workspace: "/ws/a"})
+			pane := m.askPrompt(req)
+			rows := strings.Split(ansiPattern.ReplaceAllString(pane, ""), "\n")
+			got := strings.Join(rows, "\n")
+
+			if h := lipgloss.Height(pane); h > m.viewport.Height() {
+				t.Fatalf("pane is %d rows on a %d-row viewport: the input box goes off the frame\n%s",
+					h, m.viewport.Height(), got)
+			}
+			// The premise: this question wants more lines than one, so a pane granting it one would be
+			// the defect rather than a question that happens to be short.
+			if want := popupBodyLineCount(m.th, req.Question, m.width); want < askQuestionFloor {
+				t.Fatalf("the question wraps onto %d line(s) at 80 columns — test premise broken", want)
+			}
+			// Its first askQuestionFloor lines are on CONTENT rows, so the border is the unbroken one
+			// the mockup draws and the marker — if the question owes one at all — is the last of them
+			// rather than the whole of what the pane says about itself.
+			question := popupBodyWrapped(m.th, req.Question, popupInnerWidth(m.th, m.width))
+			for i := range askQuestionFloor {
+				if text := strings.TrimSpace(strings.Trim(rows[1+i], "│")); text != strings.TrimSpace(question[i]) {
+					t.Errorf("content row %d = %q, want line %d of the question (%q):\n%s",
+						i+1, text, i+1, strings.TrimSpace(question[i]), got)
+				}
+			}
+			if trimmed := strings.Trim(rows[0], "╭─╮"); trimmed != "" {
+				t.Errorf("top border carries %q, want it unbroken where the question has its own rows:\n%s", trimmed, got)
+			}
+			// …and the answers are still there to be taken: the question's floor buys lines off the
+			// offering's surplus, never off the decision itself.
+			if seated := askAnswerLines(rows); seated == 0 {
+				t.Errorf("no answer is on the screen:\n%s", got)
+			}
+		})
+	}
+
+	t.Run("a one-line question claims one line", func(t *testing.T) {
+		m := modelWithOverlayRoomAt(t, 80, 24, Options{Workspace: "/ws/a"})
+		short := domain.AskRequest{Question: "which way?", Choices: req.Choices}
+		rows := strings.Split(ansiPattern.ReplaceAllString(m.askPrompt(short), ""), "\n")
+		got := strings.Join(rows, "\n")
+
+		if seated, want := askAnswerLines(rows), len(short.Choices); seated != want {
+			t.Errorf("%d of %d answers on the screen, want the floor to have cost the offering nothing:\n%s", seated, want, got)
+		}
+		if sep := strings.TrimSpace(strings.Trim(rows[2], "│")); sep != "" {
+			t.Errorf("the line under the question = %q, want the blank that sets the offering off:\n%s", sep, got)
+		}
+	})
+}
+
+// TestModelAskQuestionFloorGivesWayToTheAnswers is the other half of the floor, and the one that
+// keeps it from being a new way to empty a decision surface. A window granted rows enough to seat one
+// ANSWER must still seat it: the question's claim yields to the lines the offering needs for the row
+// its window is anchored on (popupFloor.rows, askAnchorRowLines), because an answer is seated whole
+// or not at all and a three-line answer needs all three.
+//
+// The reach it may not shorten is the one the budget had before the floor existed — rows first, one
+// line kept back for the body — which is what the arithmetic below states: an answer was on the
+// screen exactly where the pane's granted rows past its chrome covered that answer's height with the
+// body's line still set aside. Where even that could not seat one, the pane owes its identity to the
+// border instead (popupSpec.titleFromBody), and the floor does not change which case a height is in.
+func TestModelAskQuestionFloorGivesWayToTheAnswers(t *testing.T) {
+	const lead = "how should I continue"
+	// One long answer, so the offering's irreducible claim is three lines rather than one — the case
+	// where a floor taken off the top could have left the pane with no seatable answer at all.
+	req := domain.AskRequest{
+		Question: lead + " with this refactor of the resolution pipeline, now that the gate has moved?",
+		Choices: []string{
+			"implement the config redesign first, commit it, then do the TUI part in a separate " +
+				"commit, and run make check after each — the config change is the riskier part",
+			"no",
+			"ask me again later",
+		},
+	}
+
+	for height := smallestOverlayWindow; height <= 24; height++ {
+		t.Run(fmt.Sprintf("80×%d", height), func(t *testing.T) {
+			m := modelWithOverlayRoomAt(t, 80, height, Options{Workspace: "/ws/a"})
+			pane := m.askPrompt(req)
+			rows := strings.Split(ansiPattern.ReplaceAllString(pane, ""), "\n")
+			got := strings.Join(rows, "\n")
+
+			if h := lipgloss.Height(pane); h > m.viewport.Height() {
+				t.Fatalf("pane is %d rows on a %d-row viewport: the input box goes off the frame\n%s",
+					h, m.viewport.Height(), got)
+			}
+
+			answer := popupWrappedRowHeights(m.th, singleCellRows(req.Choices), m.width)[0]
+			avail := m.frameRowPlan(m.openPanes().with(panePrompt)).panes[panePrompt] - popupTitleBorderChrome
+			seated := askAnswerLines(rows)
+			switch {
+			case avail-1 >= answer:
+				if seated == 0 {
+					t.Errorf("no answer on the screen at %d rows, where %d line(s) past the pane's chrome "+
+						"could seat a %d-line one:\n%s", height, avail, answer, got)
+				}
+			case seated == 0:
+				// The window cannot pay for an answer either way, which is the case the border fallback
+				// was added for: the pane still says what it is asking and counts what it is holding back.
+				if !strings.Contains(rows[0], lead) || !elisionMarkerPattern.MatchString(rows[0]) {
+					t.Errorf("top border = %q, want the question's lead and the count for the answers "+
+						"the window seated none of:\n%s", rows[0], got)
+				}
+			}
+		})
+	}
 }
 
 // TestModelAskLongChoiceWrapsUnderItsMarker is what the schema's relaxed wording rests on: a choice
@@ -3856,7 +4001,7 @@ func TestPopupBudgetShrinksToNothing(t *testing.T) {
 	for _, c := range cases {
 		t.Run(fmt.Sprintf("%d rows", c.height), func(t *testing.T) {
 			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 80, Height: c.height})
-			body, rows, _ := m.popupBudget(paneBrowser, 8, maxSessionRows, popupChrome)
+			body, rows, _ := m.popupBudget(paneBrowser, 8, maxSessionRows, popupChrome, popupFloor{})
 			if rows != c.wantRows {
 				t.Errorf("popupBudget row window = %d, want %d (viewport %d rows)", rows, c.wantRows, m.viewport.Height())
 			}

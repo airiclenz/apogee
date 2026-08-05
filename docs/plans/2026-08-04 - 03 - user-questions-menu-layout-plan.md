@@ -335,6 +335,26 @@ Two stale doc comments this made false were corrected with it (`popupTitleLine`'
 title-less spec today", `popupBudget`'s reading of the ask pane's one body line), and layout.md's shrink ladder
 gained the case (the rendered 80×12 example) per the item-7 wording this follow-up now owns.
 
+NOTES (2026-08-05): follow-up (run-level, owner-approved; not a plan item) — this item's budget gave the choice
+ROWS priority over the question at every height, and an ask offering's cost scales with what the model wrote: four
+wrapped answers, the gaps between them and the pad around the block ask for nine lines of the ten an 80×24 window
+grants the pane, so the question was reduced to "… (+2 more lines)" (and its lead to the border, via the F3
+fallback) on a terminal nobody would call short. `popupBudget` now takes a `popupFloor` — the lines the BODY keeps
+before the rows claim the remainder, and the lines the ROWS keep whatever the body claims — and the ask pane is the
+only caller that states a non-zero one (`askQuestionFloor = 3`, the mockup's own two-line question plus one). Every
+other pane passes `popupFloor{}`, which is today's arithmetic exactly (`reserve` clamps at 1, the line the body has
+always kept), so the approval prompt, the browser, the picker and the dropdown are byte-identical; the approval
+menu needs no floor because its demand is four fixed options rather than the model's prose. The claim is a CEILING
+on a demand, not a reservation — `min(askQuestionFloor, popupBodyLineCount(...))`, so a one-line question leaves
+the offering every line it had — and it yields to `askAnchorRowLines`, the painted height of the row
+`popupRowWindow` anchors on, so wherever the pre-floor budget could seat an answer this one still does and the
+12–15-row border fallback is untouched. Two painter additions the fix implies: `popupBodyWrapped` (the wrap
+`popupBodyLines` already did, factored out so the caller can cost the same block) and `popupBodyLineCount`. Docs:
+`layout.md` gained the rung ("Inside a pane's own grant the rows come first — except where the prose IS what is
+being decided") and a closing clause on the F3 paragraph; the CHANGELOG `[Unreleased]` ask bullet gained the
+matching sub-bullet. The mockup in `docs/design/user-questions-layout.md` is unchanged — this moves the rendering
+TOWARDS it.
+
 **What:** Restyle the ask prompt per the mockup (lines 25-37). In
 `internal/tui/model.go` `askPrompt` (~line 4023):
 

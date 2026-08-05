@@ -4026,6 +4026,19 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // pane — gives the ROWS priority (they are what the human acts on) and lets the body have what is
 // left, overflowing into the explicit "… (+N more lines)" marker.
 //
+// floor is the ONE thing that comes off ahead of the rows, and it is the caller's for the same reason
+// chrome is (popupFloor). Rows-first is right where the rows are the pane and the prose above them is
+// a caption — every pane but one passes the zero floor and is budgeted exactly as it always was — and
+// wrong where the prose is the thing being decided about: the ask prompt's four wrapped answers and
+// the blanks between them ask for nine lines of the ten an eighty-by-twenty-four window grants it, so
+// rows-first left the question itself as a count on a terminal with room to spare. A body claim
+// (popupBodyLineCount, capped by the pane's own taste) is taken off the top instead, bounded by what
+// leaves the rows their anchor row, so the shrink ladder below is unchanged at the heights where it
+// bites and the surplus above them goes to the question rather than to the breathing room around the
+// answers. It is a claim on the grant and never a promise past it — it is spent out of avail like
+// everything else, so both caps still floor at ZERO on a window that cannot pay for either, which is
+// the paragraph further down and the whole reason a floor here is safe.
+//
 // chrome is what that frame costs the pane, and it is the CALLER's because only the caller knows the
 // spec it is about to compose. All three constants are in use: popupChrome where the title takes a
 // content row of its own and a hint row spells the keys below the list (the /sessions browser, the
@@ -4057,13 +4070,19 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // row, so the approval menu is in neither case: its count stays in its body and a decision stays on
 // the screen. Shrinking costs the prose, and the rows outside the window, but never the fact that
 // there are some.
-func (m Model) popupBudget(p framePane, rows, rowCap, chrome int) (maxBody, maxRows int, seated bool) {
+func (m Model) popupBudget(p framePane, rows, rowCap, chrome int, floor popupFloor) (maxBody, maxRows int, seated bool) {
 	granted := m.frameRowPlan(m.openPanes().with(p)).panes[p]
 	if granted < chrome {
 		return 0, 0, false
 	}
 	avail := granted - chrome
-	maxRows = min(rows, rowCap, max(0, avail-1))
+	// The body's claim comes off the top, between the two bounds that keep the arbitration honest at
+	// both ends of the ladder: never less than the one line the body has always kept (which is what
+	// makes the zero floor today's rule exactly), and never more than what leaves the rows the lines
+	// their anchor row costs — so prose can take a roomy window's surplus without emptying a decision
+	// surface on a short one. Past that the rows are first, as they always were.
+	reserve := clampInt(floor.body, 1, max(1, avail-max(1, floor.rows)))
+	maxRows = min(rows, rowCap, max(0, avail-reserve))
 	maxBody = max(0, avail-maxRows)
 	return maxBody, maxRows, true
 }
@@ -4139,8 +4158,13 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	// this pane is one per option — the labels are ours and they do not wrap — plus the blank line the
 	// menu is set off by (popupSpec.rowPadAbove): a pane that asked for four and painted five would
 	// overflow by exactly the room it did not book.
+	//
+	// The ZERO floor (popupFloor) is right here and not an oversight beside the ask prompt's: this
+	// menu's demand is its own four options and nothing longer, so the rows can never eat a window the
+	// body had room in — past five lines every further row of the grant is the reason's. The pane the
+	// floor exists for is the one whose offering scales with what the model wrote.
 	menuLines := popupRowBlockLines(popupFlatRowHeights(len(rows)), 0, popupRowPadLines(true, false))
-	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, menuLines, menuLines, popupBorderChrome)
+	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, menuLines, menuLines, popupBorderChrome, popupFloor{})
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
@@ -4220,6 +4244,22 @@ const maxAskChoiceRows = 8
 // separator's own cost, which the pane's line budget has to pay for as well as its rows.
 const askRowGap = 1
 
+// askQuestionFloor is how many lines of the QUESTION this pane keeps before its answers claim the
+// rest of the window (popupFloor.body). Rows-first is the budget's standing rule and the right one
+// almost everywhere, but this pane's offering scales with what the model wrote: four wrapped answers,
+// the blanks between them and the ones around the block cost nine lines, and an eighty-by-twenty-four
+// terminal — a window nobody would call short — grants the pane ten. The question was left with the
+// one line every seated pane keeps, spent on "… (+2 more lines)", so the human was asked to choose
+// between four answers with nothing on the screen saying what the choice was about.
+//
+// THREE because that is the shape of the surface rather than a round number: the mockup's own question
+// takes two lines at eighty columns, and a third covers the questions that run longer without
+// promising room a short window has not got. It is a CEILING on the claim, not a reservation — the
+// pane asks for the lesser of it and the question's real wrapped height (popupBodyLineCount), so a
+// one-line question leaves the answers every line they had — and it yields in turn to the lines the
+// answers need to seat one row, so the give-way ladder at the bottom of the range is untouched.
+const askQuestionFloor = 3
+
 // askPrompt renders the pending ask_user question as a bordered popup pane above the input box
 // (the shared popup module): the wrapped question body, then any offered choices as selectable
 // menu rows, and a one-line key hint (P3.11; D5/D6/D8). While the input box is empty and
@@ -4269,8 +4309,11 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 		hint = "↑↓ select · ⏎ send · type for a custom answer · esc cancel"
 	}
 
+	question := stripEscapes(req.Question)
+
 	// Budget against the live layout so a long question or choice set never pushes the input box
-	// off-screen (D2); the rows get priority and the body takes what is left (see popupBudget).
+	// off-screen (D2); past the question's own floor the rows get priority and the body takes what is
+	// left (see popupBudget).
 	//
 	// Both row figures are in the LINES the window will paint, not in choices: an option may now wrap
 	// onto two or three lines, every adjacent pair is a blank line apart and the block itself is set
@@ -4284,7 +4327,11 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	askPad := popupRowPadLines(true, true)
 	wanted := popupRowBlockLines(heights, askRowGap, askPad)
 	capped := popupRowBlockLines(heights[:min(len(heights), maxAskChoiceRows)], askRowGap, askPad)
-	maxBodyRows, rowLines, seated := m.popupBudget(panePrompt, wanted, capped, popupTitleBorderChrome)
+	floor := popupFloor{
+		body: min(askQuestionFloor, popupBodyLineCount(m.th, question, m.width)),
+		rows: askAnchorRowLines(selected, heights),
+	}
+	maxBodyRows, rowLines, seated := m.popupBudget(panePrompt, wanted, capped, popupTitleBorderChrome, floor)
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
@@ -4292,7 +4339,7 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	spec := popupSpec{
 		titleInBorder: true, // no title at all: an empty one leaves the top border unbroken…
 		titleFromBody: true, // …except where the window seats no line of the question to be named by
-		body:          stripEscapes(req.Question),
+		body:          question,
 		maxBodyRows:   maxBodyRows,
 		rows:          rows,
 		menuRows:      true,
@@ -4305,4 +4352,19 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 		maxRows:       rowLines,
 	}
 	return renderPopup(m.th, spec, m.width)
+}
+
+// askAnchorRowLines is what the ask prompt's offering must keep to put ONE answer on the screen: the
+// painted height of the row the window is anchored on (popupFloor.rows). A row is seated whole or not
+// at all, so a two-line answer needs both of its lines — a budget of one seats nothing and counts all
+// four onto the border, which is the state the question's floor may never buy itself.
+//
+// The anchor is popupRowWindow's own — the selection clamped into the list, which is row 0 for the
+// −1 the pane carries once free text is typed — computed here rather than assumed to be the first
+// row, so the floor and the window agree about which row has to fit. An empty offering claims nothing.
+func askAnchorRowLines(selected int, heights []int) int {
+	if len(heights) == 0 {
+		return 0
+	}
+	return heights[clampInt(selected, 0, len(heights)-1)]
 }

@@ -212,6 +212,22 @@ rows of fixed chrome below the session area, that puts the shortest terminal a p
 at all at **twelve rows** — and at twelve the session area is already gone, so the frame is exactly
 the pane and the chrome together.
 
+**Inside a pane's own grant the rows come first — except where the prose IS what is being decided.**
+A picker, a browser or a dropdown *is* its rows, and the caption over them takes what they leave; the
+approval prompt reads the same way and can afford to, because its offering is four fixed options and
+every row past them is the reason's. The **ask prompt** is the one surface where rows-first is wrong.
+Its answers are prose the model wrote, and four wrapped ones — a blank line between each pair and one
+more around the block — cost nine lines of the ten an eighty-by-twenty-four window grants the pane,
+so the question itself was left with the single line every seated pane keeps, spent on
+`… (+3 more lines)`, on a terminal nobody would call short. The question now claims up to **three
+lines** before the answers take the rest. The claim is a ceiling and not a reservation: it is the
+lesser of those three and what the question actually wraps onto, so a one-line question costs the
+offering nothing. And it yields in turn to the lines the answers need for the row their window is
+anchored on — an answer is seated whole or not at all, so a three-line one keeps all three — which is
+what keeps the floor from emptying the surface at the heights where the ladder below actually bites.
+What the claim spends is the offering's breathing room first and then its scroll window, in that
+order, and never the last answer on the screen.
+
 **What shrinking never buys is silence.** Prose a pane cannot seat is counted out in the
 `… (+N more lines)` marker, and that marker outranks the prose itself: with one body row left it
 IS the body, and with none left it moves onto the **title row**, after the pane's name. Which of
@@ -271,7 +287,9 @@ falls back INTO the border, where a title would have sat all along:
 The row it costs is none: the border is drawn at every height anyway, and the count rides out beside
 the name exactly as it does on a pane whose title was there from the start. The moment one line of
 the question is back on a content row the border goes back to being unbroken — which is the ask
-box's normal appearance, and the one its mockup draws.
+box's normal appearance, and the one its mockup draws. The question's floor above is what makes that
+the normal case rather than the lucky one: the windows that still grant a single body row are the
+short ones, not an ample terminal whose answers happened to be long.
 
 **Narrowness does not buy silence either.** A half-height pane is usually a half-width one too, and
 the title row is composed **to** the pane's width rather than composed long and clipped to it — a
