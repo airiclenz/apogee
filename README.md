@@ -2,16 +2,16 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="graphics/apogee-logo-light.svg">
     <source media="(prefers-color-scheme: light)" srcset="graphics/apogee-logo-dark.svg">
-    <img src="graphics/apogee-logo-light.svg" alt="Apogee" width="350">
+    <img src="graphics/apogee-logo-light.svg" alt="Apogee" width="200">
   </picture>
 </p>
+
+A **terminal coding agent**, built **local-first**: <br>
+capable with frontier models, engineered so even small, locally-run LLMs (~4B–35B) deliver.
 
 <p align="center">
   <img src="graphics/demo.gif" alt="Apogee finding and fixing a failing Go test against a local model, with a follow-up instruction queued mid-run and delivered at the next tool boundary">
 </p>
-
-A terminal coding agent, built **local-first**: capable with frontier models,
-engineered so even small, locally-run LLMs (~4B–35B) deliver.
 
 Apogee is a single, cross-platform tool that drops into any IDE's integrated
 terminal — or any standalone terminal — on Windows, macOS, and Linux. It runs
