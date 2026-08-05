@@ -105,7 +105,7 @@ entries — never *unprompted*; a settings-screen edit is user-initiated and nam
 
 **Commit:** `docs(adr): ratify the /settings surface — full-height pane, persist-per-edit, auto-sync rejected`
 
-## 2. Declarative key registry with schema-bijection guard
+## 2. Declarative key registry with schema-bijection guard — ✅ DONE (2026-08-05)
 
 **What:** New file in `cmd/apogee` (suggest `registry.go`): a `configKey` row type and a
 `keyRegistry` table with one row per leaf key of `fileConfig` (`cmd/apogee/config.go:685`),
