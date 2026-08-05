@@ -357,16 +357,31 @@ brackets' job and dies with them.
 **What groups.** Consecutive tool calls at the same nesting depth carrying the same label fold
 into one block. Any entry between them — narration, a note, an approval, an error — breaks the
 run. Two different tools that share a label (a single and a multi find-and-replace are both
-"Edit File") do group: the user groups by what they read, not by tool id.
+"Edit File") do group: the user groups by what they read, not by tool id. Grouping still asks the
+next question of each call, though, and an edit carrying its changed lines answers it the way any
+body-carrying call does — see *What stays standalone* below.
 
 **The outcome, in two halves.** What a finished call has to say is split in two, and everything
 below follows from that split — never from counting lines. The **summary** is the single line that
 rides the branch beside the target: a read's `1 - 154`, a diff's `+2 -2`, an `error: …`. The
-**body** is what hangs beneath it: a command's output, a diff's own lines. A call may have either,
+**body** is what hangs beneath it: a command's output, a diff's own lines, an edit's changed lines.
+A call may have either,
 both, or — while it is still in flight — neither. Anything that fits on one line is a summary,
 whatever produced it: a command whose whole output is one line rides the branch like a read does
 (`┕ git rev-parse --short HEAD  9f2c1ab`), and only output that needs the `… +N more lines`
 remainder becomes a body.
+
+**An edit shows the lines it changes, and the block derives them itself.** The three edit tools —
+a single and a multi find-and-replace, and `edit_existing_file` — hang the lines they change
+beneath their branch: per replacement the removed lines behind `- `, then the inserted lines behind
+`+ `, in the order the call listed them, coloured exactly as `View Diff`'s hunks are. Those lines
+are read off the **call's own arguments** at presentation time, never off its result: the tool
+reports nothing new, no result grows, nothing extra crosses the wire, and the model's own view of
+the call is byte for byte what it always was. The body is therefore there before the result lands;
+it is quoted text like every other body, so it is never respelled; and it collapses to the same one
+budget as every other block, a click showing the rest. A call whose arguments say nothing about a
+change — absent, malformed, or of the wrong shape — carries no body at all and renders as it always
+did.
 
 **Paths print relative to the workspace.** The paths a block **names** are spelled relative to the
 workspace root: the target leading a branch (`┕ docs/plan.md 1 - 154`, never
@@ -404,7 +419,8 @@ says it is the block's own words — a path it names, or a summary it wrote itse
 **What stays standalone.** A call is groupable when it has a target, an empty body, and a plain
 (non-diff) summary — which includes an `error: …` line, and an in-flight call whose result has not
 landed yet. A call carrying a body (the `Run` above, with its `… +N more lines` remainder; the
-`View Diff` above, with its diff beneath the `+2 -2`) or no target at all breaks the run and
+`View Diff` above, with its diff beneath the `+2 -2`; an edit, with the lines it changes beneath
+its report — which is why consecutive edits now stand alone) or no target at all breaks the run and
 renders as its own block. It renders in the *same shape* it would have had inside a group, though:
 a block of one is byte-identical in shape to a block of many, which is the whole point of the
 header carrying no target.

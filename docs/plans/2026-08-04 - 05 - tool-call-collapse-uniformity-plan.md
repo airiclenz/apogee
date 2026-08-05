@@ -288,7 +288,27 @@ finds nothing (the literal is named).
 
 ---
 
-## 5. Edit calls carry their changed lines as a diff body (depends on item 4)
+## 5. Edit calls carry their changed lines as a diff body (depends on item 4) — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): paint-cache key UNCHANGED — the body is entry content settled when the call is
+announced, exactly like every other body, so `paintcache.go` gained no field. Four deviations from
+the item's literal text, all recorded. (a) **A new `argBody` registry field rather than a grown
+`body`**: `toolPresenter.body` takes a RESULT's content and runs in `enrichWithResult`, and an
+argument-derived body has to exist before any result — overloading one field with two sources would
+have meant a `body` whose parameter means different things per entry. `argBody func(args
+map[string]any) []detailLine` runs in `presentToolCall` beside the target extractor, off the same
+parsed argument map. (b) **`edit_existing_file`'s full-replacement form** carries a pair that
+removes nothing and inserts every line (all `+`); the item's text speaks only of replacement pairs,
+which covers that tool's patch form (one pair per `@@` hunk) but not the other half of what the tool
+accepts — and leaving its commonest form bodyless would have missed the item's own goal. This is not
+item 6's work: item 6 owns `write_file`. (c) **`layout.md` and `CHANGELOG.md` amended** though item 5's
+What names neither — the plan's standing rule ("the item lands the layout.md amendment" where a
+ratified decision changes the spec) and decision 5 being one of those deltas. layout.md gained a
+short paragraph on the derivation and its wire-silence, plus the edit's mention in the two-halves,
+grouping and standalone paragraphs. (d) **The golden gained TWO edit calls** (the item's own text
+predicts "consecutive edits standing alone"), which pushed `mcp_search` c6→c8 and the sub-agent read
+c7→c9. Also: a patch's CONTEXT lines are dropped from the body — a block showing what changed has
+nothing to say about a line that is there so the applier can find the place.
 
 **What.** Implement decision 5 for the three edit presenters in `internal/tui/toolpresent.go`
 (`single_find_and_replace`, `multi_find_and_replace`, `edit_existing_file`): grow a `body`

@@ -452,6 +452,168 @@ func TestDiffBody(t *testing.T) {
 	}
 }
 
+// changedBody is an edit view's body as plain strings, checked line by line against the one
+// pairing the paint depends on: a "- " line must be red and a "+ " line green. Reading the tag off
+// the text is exact here because the tag is what the producer put there (changedLines).
+func changedBody(t *testing.T, tv toolView) []string {
+	t.Helper()
+	out := make([]string, 0, tv.Details.len())
+	for _, d := range tv.Details.all() {
+		want := detailPlain
+		switch {
+		case strings.HasPrefix(d.Text, "- "):
+			want = detailDiffRemoved
+		case strings.HasPrefix(d.Text, "+ "):
+			want = detailDiffAdded
+		}
+		if d.Kind != want {
+			t.Errorf("line %q: kind = %v, want %v — the tag and the colour must agree", d.Text, d.Kind, want)
+		}
+		out = append(out, d.Text)
+	}
+	return out
+}
+
+// TestEditCallsCarryTheirChangedLines pins the edit tools' display-only diff body: it is derived
+// from the call's OWN ARGUMENTS at presentation time — before any result exists — so the block
+// shows what the model asked to change without the tool reporting it and without a byte more
+// crossing the wire.
+//
+// The three tools' arguments say the same thing three ways and the body reads identically: a pair
+// per replacement, its removed lines then its inserted lines, pairs in the order the call listed
+// them. Multi-line strings stay line per line (a body is lines, not a blob), a trailing newline is
+// the last line's terminator rather than a blank line of its own, and a side that changes nothing
+// contributes nothing.
+//
+// The degraded rows carry the weight: arguments that are absent, malformed or of the wrong shape
+// yield NO body — the call renders exactly as it did before this existed — because a hostile or
+// merely broken model must not be able to turn a card into a panic or into a claim about a change
+// nobody asked for.
+func TestEditCallsCarryTheirChangedLines(t *testing.T) {
+	cases := []struct {
+		name string
+		call domain.ToolCall
+		want []string
+	}{
+		{
+			name: "single: one pair, one line each",
+			call: domain.ToolCall{ID: "1", Tool: "single_find_and_replace",
+				Arguments: []byte(`{"path":"main.go","oldText":"a := 1","newText":"a := 2"}`)},
+			want: []string{"- a := 1", "+ a := 2"},
+		},
+		{
+			name: "single: multi-line strings stay line per line, removed before inserted",
+			call: domain.ToolCall{ID: "2", Tool: "single_find_and_replace",
+				Arguments: []byte(`{"path":"main.go","oldText":"one\ntwo","newText":"uno\ndos\ntres"}`)},
+			want: []string{"- one", "- two", "+ uno", "+ dos", "+ tres"},
+		},
+		{
+			name: "single: a trailing newline terminates the last line, it is not a line",
+			call: domain.ToolCall{ID: "3", Tool: "single_find_and_replace",
+				Arguments: []byte(`{"path":"main.go","oldText":"one\n","newText":"uno\n"}`)},
+			want: []string{"- one", "+ uno"},
+		},
+		{
+			name: "single: a deletion inserts nothing, so it shows nothing green",
+			call: domain.ToolCall{ID: "4", Tool: "single_find_and_replace",
+				Arguments: []byte(`{"path":"main.go","oldText":"gone","newText":""}`)},
+			want: []string{"- gone"},
+		},
+		{
+			name: "single: no replacement arguments at all → no body",
+			call: domain.ToolCall{ID: "5", Tool: "single_find_and_replace",
+				Arguments: []byte(`{"path":"main.go"}`)},
+			want: nil,
+		},
+		{
+			name: "multi: every pair, in argument order",
+			call: domain.ToolCall{ID: "6", Tool: "multi_find_and_replace",
+				Arguments: []byte(`{"path":"main.go","replacements":[` +
+					`{"oldText":"first","newText":"1st"},{"oldText":"second","newText":"2nd"}]}`)},
+			want: []string{"- first", "+ 1st", "- second", "+ 2nd"},
+		},
+		{
+			name: "multi: an entry of the wrong shape is skipped, the rest still shows",
+			call: domain.ToolCall{ID: "7", Tool: "multi_find_and_replace",
+				Arguments: []byte(`{"path":"main.go","replacements":["nonsense",{"oldText":"a","newText":"b"}]}`)},
+			want: []string{"- a", "+ b"},
+		},
+		{
+			name: "multi: replacements of the wrong type → no body",
+			call: domain.ToolCall{ID: "8", Tool: "multi_find_and_replace",
+				Arguments: []byte(`{"path":"main.go","replacements":"all of them"}`)},
+			want: nil,
+		},
+		{
+			name: "edit_existing_file: a patch shows its hunks' changed lines, context dropped",
+			call: domain.ToolCall{ID: "9", Tool: "edit_existing_file",
+				Arguments: []byte(`{"path":"main.go","content":"*** Begin Patch\n*** Update File: main.go\n` +
+					`@@\n ctx\n-old one\n+new one\n@@\n-old two\n+new two\n*** End Patch"}`)},
+			want: []string{"- old one", "+ new one", "- old two", "+ new two"},
+		},
+		{
+			name: "edit_existing_file: full replacement content removes nothing and inserts the lot",
+			call: domain.ToolCall{ID: "10", Tool: "edit_existing_file",
+				Arguments: []byte(`{"path":"main.go","content":"package main\n\nfunc main() {}\n"}`)},
+			want: []string{"+ package main", "+ ", "+ func main() {}"},
+		},
+		{
+			name: "edit_existing_file: no content argument → no body",
+			call: domain.ToolCall{ID: "11", Tool: "edit_existing_file",
+				Arguments: []byte(`{"path":"main.go"}`)},
+			want: nil,
+		},
+		{
+			name: "malformed arguments degrade to no body rather than to a guess",
+			call: domain.ToolCall{ID: "12", Tool: "single_find_and_replace",
+				Arguments: []byte("{not json")},
+			want: nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tv := presentToolCall(tc.call, workspaceRoot{})
+			if got := changedBody(t, tv); strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
+				t.Errorf("body = %q, want %q", got, tc.want)
+			}
+			if tv.Details.len() > 0 && !tv.Details.isDiff() {
+				t.Error("an edit body must settle as a diff body, or it paints without its colours")
+			}
+		})
+	}
+}
+
+// An edit's body is retained WHOLE, however big the edit: the four-row shape a reader sees is the
+// collapsed paint's cap on these lines (collapsedBodyCap, render.go), never a truncation performed
+// here — which is what makes expanding the block able to show the change.
+func TestEditBodyRetainsEveryChangedLine(t *testing.T) {
+	const lines = 40 // far past the collapsed budget, so a build-time cap could not hide in the noise
+	inserted := strings.TrimSuffix(strings.Repeat("added\\n", lines), "\\n")
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "single_find_and_replace",
+		Arguments: []byte(`{"path":"main.go","oldText":"gone","newText":"` + inserted + `"}`)}, workspaceRoot{})
+
+	if got, want := tv.Details.len(), lines+1; got != want {
+		t.Errorf("body has %d lines, want the removed line plus all %d inserted", got, lines)
+	}
+}
+
+// A long changed line is clipped to the same 160-rune ceiling every other detail line answers to
+// — a minified blob pasted into a replacement must not flood a row — and the clip counts RUNES, so
+// a multi-byte edit is never cut mid-character.
+func TestEditBodyClipsALongChangedLine(t *testing.T) {
+	long := strings.Repeat("é", detailClipRunes+50)
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "single_find_and_replace",
+		Arguments: []byte(`{"path":"main.go","oldText":"x","newText":"` + long + `"}`)}, workspaceRoot{})
+
+	body := tv.Details.all()
+	if len(body) != 2 {
+		t.Fatalf("body = %+v, want the removed line and the inserted one", body)
+	}
+	if got := len([]rune(body[1].Text)); got != detailClipRunes+1 { // + the ellipsis clipRunes appends
+		t.Errorf("inserted line is %d runes, want it clipped to %d plus the ellipsis", got, detailClipRunes)
+	}
+}
+
 // TestBodyKindIsSettledWhereTheLinesAre pins the mechanism the collapsed paint's cap reads: the
 // body's kind is decided ONCE, where the lines are put into a body (newToolBody), and carried by
 // that body — not re-derived from the lines on every repaint, over a body the entry retains whole.

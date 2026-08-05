@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -44,8 +45,9 @@ import (
 // status line pairs with the target while the call is in flight — the per-tool knowledge
 // stays in this one registry instead of growing a second, parallel switch elsewhere.
 
-// detailKind tags a tool-detail line so the renderer can colour it. The diff kinds are
-// emitted by diffBody (view_diff's body renderer) and rendered red/green in render.go.
+// detailKind tags a tool-detail line so the renderer can colour it. The diff kinds are emitted by
+// diffBody (view_diff's body renderer) and by changedLines (the edit tools' body, derived from
+// their own arguments), and rendered red/green in render.go.
 type detailKind int
 
 const (
@@ -186,7 +188,8 @@ type toolView struct {
 // — a fixed result sentence is summary-only ("HTTP 200 OK") and multi-line free-form output is
 // body-only (every one of its lines). A tool whose result carries a domain.ToolSummary
 // does not come through here at all: summaryLine words the branch line and the presenter's
-// body renderer (view_diff's alone) fills the half beneath it.
+// body renderer (view_diff's alone) fills the half beneath it. An edit's body comes from neither
+// half of the result — it was derived from the call's arguments before it (argBody).
 //
 // The Summary is a branchSummary rather than a bare line because the extractor is the one thing
 // that knows whose words it just wrote — its own sentence, or the tool's output promoted onto the
@@ -216,10 +219,11 @@ func promotedOutput(text string) toolOutcome {
 
 // toolPresenter maps a tool name to its friendly label, the active verb naming what the tool
 // is doing while it runs, a header extractor that pulls the Target from the call's
-// arguments, a prose extractor that turns a summary-less result into a [toolOutcome], and —
-// for the one tool that has one — a body renderer for a result whose branch line comes from
-// its typed summary. A nil extractor is valid (the tool has no target, or no summarisable
-// result).
+// arguments, a prose extractor that turns a summary-less result into a [toolOutcome], and the two
+// body renderers — one for a RESULT whose branch line came from its typed summary (the one tool
+// that has one), one for a body derived from the call's own ARGUMENTS before any result exists
+// (the edit tools). A nil extractor is valid (the tool has no target, no summarisable result, or
+// nothing in its request worth showing).
 //
 // label and verb are two views of the same tool for two places: label titles the finished
 // header line ("Read File"), verb is the lowercase present participle the live status line
@@ -235,9 +239,19 @@ type toolPresenter struct {
 	detail func(content string) toolOutcome
 
 	// body renders the lines laid out BENEATH the branch when the summary supplied the
-	// branch line itself. Exactly one entry sets it — view_diff, the only tool with both a
-	// summary and a body — so the asymmetry is intentional, not an oversight.
+	// branch line itself. Exactly one entry sets it — view_diff, the only tool whose body is
+	// read off its RESULT — so the asymmetry is intentional, not an oversight. A body derived
+	// from what the call ASKED for is argBody's instead.
 	body func(content string) []detailLine
+
+	// argBody renders the body from the call's OWN ARGUMENTS, at the moment the call is
+	// presented: before any result exists, and never touching one. The edit tools set it,
+	// because what an edit changes is already in the request — the block can show the changed
+	// lines without the tool reporting them and without a byte more crossing the wire, which is
+	// what keeps this display-only (the engine stays wire-silent, ADR 0031: no tool result
+	// grows, no token is spent). It reads the same map the target extractor reads, so a call
+	// whose arguments are absent or malformed yields no body rather than a guess.
+	argBody func(args map[string]any) []detailLine
 }
 
 // toolRegistry is the open, name-keyed catalogue. Each later tool adds one entry here; the
@@ -255,6 +269,10 @@ type toolPresenter struct {
 // full text either way. One tool's result is nobody's words but the human's — ask_user's, which is
 // the answer they typed — so it takes quotedFirstLineDetail and the block quotes that line rather
 // than respelling it.
+//
+// The three edit tools are the one group whose body owes nothing to a result: what they change is
+// stated in the REQUEST, so each sets an argBody that reads its own arguments as -/+ lines
+// (changedLines) and the block shows the change from the moment the call is announced.
 var toolRegistry = map[string]toolPresenter{
 	"read_file": {
 		label:  "Read File",
@@ -281,22 +299,25 @@ var toolRegistry = map[string]toolPresenter{
 		detail: firstLineDetail, // floor; the count comes from domain.MatchedLines
 	},
 	"single_find_and_replace": {
-		label:  "Edit File",
-		verb:   "editing",
-		target: stringArg("path"),
-		detail: firstLineDetail, // "replaced text in <path>"
+		label:   "Edit File",
+		verb:    "editing",
+		target:  stringArg("path"),
+		detail:  firstLineDetail,       // "replaced text in <path>"
+		argBody: singleReplacementBody, // the one oldText → newText pair, as -/+ lines
 	},
 	"multi_find_and_replace": {
-		label:  "Edit File",
-		verb:   "editing",
-		target: stringArg("path"),
-		detail: firstLineDetail, // "applied N replacements to <path>"
+		label:   "Edit File",
+		verb:    "editing",
+		target:  stringArg("path"),
+		detail:  firstLineDetail,      // "applied N replacements to <path>"
+		argBody: multiReplacementBody, // one -/+ pair per replacement, in argument order
 	},
 	"edit_existing_file": {
-		label:  "Edit File",
-		verb:   "editing",
-		target: stringArg("path"),
-		detail: firstLineDetail, // "applied patch to <path> (N hunks)" / "updated <path>"
+		label:   "Edit File",
+		verb:    "editing",
+		target:  stringArg("path"),
+		detail:  firstLineDetail, // "applied patch to <path> (N hunks)" / "updated <path>"
+		argBody: fileEditBody,    // a patch's hunks, or full replacement content as + lines
 	},
 	"view_diff": {
 		label:  "View Diff",
@@ -385,7 +406,11 @@ var toolRegistry = map[string]toolPresenter{
 	},
 }
 
-// presentToolCall builds the header view of a tool call. A known tool gets its friendly
+// presentToolCall builds the header view of a tool call — and, for the tools whose arguments
+// already say what the call will change, its body too (argBody: the edit tools' -/+ lines).
+// That body is derived here, at presentation time, from arguments the model has already sent:
+// nothing is asked of the tool, nothing is added to a result, and the block shows the change
+// before the result even lands. A known tool gets its friendly
 // label, its active verb, and a target pulled from the arguments; an unknown tool falls back
 // to its raw name (styled like any other label) with the pretty-printed arguments as plain
 // detail lines, so a not-yet-registered tool still renders and a malformed argument is shown
@@ -409,8 +434,12 @@ func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
 		return tv
 	}
 	tv := toolView{Label: p.label, Verb: p.verb, name: call.Tool}
+	args := parseArgs(call.Arguments)
 	if p.target != nil {
-		tv.Target = p.target(parseArgs(call.Arguments))
+		tv.Target = p.target(args)
+	}
+	if p.argBody != nil {
+		tv.Details = newToolBody(p.argBody(args))
 	}
 	tv.finishDisplay(ws)
 	return tv
@@ -754,6 +783,168 @@ func diffBody(content string) []detailLine {
 		body = append(body, detailLine{Kind: kind, Text: clipDetail(ln)})
 	}
 	return body
+}
+
+// editPair is one changed region an edit call ASKS FOR: the lines it removes and the lines it
+// puts there instead. It is the shape all three edit tools reduce to — a single find-and-replace
+// is one pair, a multi find-and-replace is its ordered list of them, a patch is one per hunk — so
+// each tool's extractor has only to say what its own arguments mean and one renderer turns the
+// answer into a body (changedLines). Either half may be empty: a pure insertion removes nothing,
+// a deletion inserts nothing.
+type editPair struct {
+	removed  []string
+	inserted []string
+}
+
+// replacedText builds the pair a find-and-replace argument names, splitting each side into the
+// lines it changes (editLines).
+func replacedText(removed, inserted string) editPair {
+	return editPair{removed: editLines(removed), inserted: editLines(inserted)}
+}
+
+// editLines splits one side of an edit into the lines it changes. An empty side has none — there
+// is no such thing as removing the empty string — and a single trailing newline is the last line's
+// TERMINATOR rather than a line of its own, so a replacement written "a\nb\n" changes two lines and
+// not two and a blank. Nothing else is dropped: what a body retains is every line it was given, and
+// the compact shape is the painter's business (collapsedBodyCap, render.go).
+func editLines(text string) []string {
+	if text == "" {
+		return nil
+	}
+	return splitLines(strings.TrimSuffix(text, "\n"))
+}
+
+// changedLines renders edit pairs as the display-only diff body an edit block hangs beneath its
+// branch: per pair, the removed lines behind "- ", then the inserted lines behind "+ ", pairs in
+// the order the call listed them. It is DERIVED FROM THE ARGUMENTS and goes nowhere near the wire
+// — no tool result grows, no token is spent, and the model's own view of the call is untouched.
+//
+// The two tags are the ones diffBody emits, so the body settles as a diff (newToolBody) and paints
+// through the very red/green styles view_diff's hunks do; the house collapsed cap then holds an
+// edit block to the same four rows as every other block (collapsedBodyCap, render.go). It
+// truncates nothing — the entry keeps every line — and the per-line clip is the same 160-rune
+// guard against a minified blob every other detail line carries.
+//
+// Pairs with nothing on either side yield NO body at all, which is what lets a call with absent or
+// malformed arguments render exactly as it did before: a target, a summary, and nothing beneath.
+func changedLines(pairs []editPair) []detailLine {
+	n := 0
+	for _, p := range pairs {
+		n += len(p.removed) + len(p.inserted)
+	}
+	if n == 0 {
+		return nil
+	}
+	body := make([]detailLine, 0, n)
+	for _, p := range pairs {
+		body = appendTagged(body, p.removed, "- ", detailDiffRemoved)
+		body = appendTagged(body, p.inserted, "+ ", detailDiffAdded)
+	}
+	return body
+}
+
+// appendTagged appends one side of a pair, one detail line per line of text, each behind its diff
+// tag and clipped like any other detail line.
+func appendTagged(body []detailLine, lines []string, tag string, kind detailKind) []detailLine {
+	for _, ln := range lines {
+		body = append(body, detailLine{Kind: kind, Text: clipDetail(tag + ln)})
+	}
+	return body
+}
+
+// singleReplacementBody derives single_find_and_replace's changed lines from its own arguments:
+// the one oldText → newText pair the call asks for.
+func singleReplacementBody(args map[string]any) []detailLine {
+	removed, _ := args["oldText"].(string)
+	inserted, _ := args["newText"].(string)
+	return changedLines([]editPair{replacedText(removed, inserted)})
+}
+
+// multiReplacementBody derives multi_find_and_replace's changed lines: one pair per entry of the
+// replacements array, in the order the tool applies them (sequentially, internal/tools), so the
+// body reads in the order the edit happens. An entry that is not an object is skipped rather than
+// guessed at — a malformed argument shows fewer pairs, never a wrong one.
+func multiReplacementBody(args map[string]any) []detailLine {
+	list, ok := args["replacements"].([]any)
+	if !ok {
+		return nil
+	}
+	pairs := make([]editPair, 0, len(list))
+	for _, item := range list {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		removed, _ := m["oldText"].(string)
+		inserted, _ := m["newText"].(string)
+		pairs = append(pairs, replacedText(removed, inserted))
+	}
+	return changedLines(pairs)
+}
+
+// fileEditBody derives edit_existing_file's changed lines from its content argument, which the
+// tool reads in one of two ways and so does this: a "*** Begin Patch" block is a list of hunks,
+// each of them a pair (patchEditPairs), and anything else is full replacement content — one pair
+// that removes nothing and inserts the lot, which is exactly what the call does to the file.
+func fileEditBody(args map[string]any) []detailLine {
+	content, ok := args["content"].(string)
+	if !ok {
+		return nil
+	}
+	if isPatchArgument(content) {
+		return changedLines(patchEditPairs(content))
+	}
+	return changedLines([]editPair{replacedText("", content)})
+}
+
+// patchOpener matches the "*** Begin Patch" marker edit_existing_file's patch form opens with,
+// with the same tolerance for case and spacing the tool's own parser has (internal/tools,
+// file_edit.go, which is the format's authority). The view reads the format rather than importing
+// the parser: it needs the changed LINES, not the applier's hunks, and a patch it failed to
+// recognise degrades to a body of "+ " lines rather than to anything untrue.
+var patchOpener = regexp.MustCompile(`(?i)^\*{3}\s*Begin\s+Patch`)
+
+// isPatchArgument reports whether an edit_existing_file content argument is a patch rather than
+// full replacement content.
+func isPatchArgument(content string) bool {
+	return patchOpener.MatchString(strings.TrimLeft(content, " \t\r\n"))
+}
+
+// patchEditPairs reads a patch's hunks as edit pairs, one per "@@" header: within a hunk a "-"
+// line is removed and a "+" line inserted. A CONTEXT line is neither — it is there so the applier
+// can find the place — and a block showing what CHANGED has nothing to say about it. Begin/End/File
+// markers and anything before the first hunk fall out for free, since none of them opens with a
+// tag.
+func patchEditPairs(content string) []editPair {
+	var (
+		pairs   []editPair
+		current editPair
+		inHunk  bool
+	)
+	flush := func() {
+		if len(current.removed) > 0 || len(current.inserted) > 0 {
+			pairs = append(pairs, current)
+		}
+		current = editPair{}
+	}
+	for _, ln := range splitLines(content) {
+		if strings.HasPrefix(ln, "@@") {
+			flush()
+			inHunk = true
+			continue
+		}
+		if !inHunk {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(ln, "-"):
+			current.removed = append(current.removed, ln[1:])
+		case strings.HasPrefix(ln, "+"):
+			current.inserted = append(current.inserted, ln[1:])
+		}
+	}
+	flush()
+	return pairs
 }
 
 // detailClipRunes caps one detail/target line so a minified blob or a wall-of-text report

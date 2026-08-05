@@ -136,6 +136,16 @@ point is a **minor** bump, not a breaking change.
     same single line as every other block, so no collapsed block anywhere is taller than four rows
     and a wall of blocks reads as a list of what happened rather than a wall of diff. Nothing is
     lost: the `+2 -2` on the branch still counts the whole change, and one click shows every hunk.
+  - **An edit shows the lines it changes.** A find-and-replace or an `edit_existing_file` reported
+    only that it had happened — `┕ main.go replaced text in main.go` and nothing else — so the one
+    thing worth seeing, *what* changed, was the one thing the transcript never showed. Every edit
+    block now hangs the changed lines beneath its report, red for what goes and green for what
+    arrives, per replacement and in the order the call listed them. Collapsed it is the same four
+    rows as every other block, and one click shows the whole change. The lines are read off the
+    call's **own arguments**: the model already said what it wanted changed, so nothing extra is
+    sent to it or asked of it and the tokens a session spends are untouched. Consecutive edits now
+    stand alone rather than grouping into one block, on the standing rule that a call carrying a
+    body breaks a run.
   - **The state is the view's alone.** It is never encoded with the transcript: a resumed session
     paints everything collapsed and `/clear` forgets it with everything else. A block that hides
     nothing has nothing to toggle — a group of body-less calls, or any block whose lines already

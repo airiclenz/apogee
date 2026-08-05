@@ -2336,7 +2336,8 @@ func TestRenderGroupBreakers(t *testing.T) {
 
 // TestTranscriptLayoutGolden pins the whole rendered scrollback of one realistic mixed session —
 // a user prompt, narration the model padded with a trailing "\n\n", a batch of reads, a Run whose
-// output hangs beneath its command, a diff whose "+2 -2" rides its branch over a coloured body, an
+// output hangs beneath its command, a diff whose "+2 -2" rides its branch over a coloured body, two
+// edits showing the lines they change beneath their own reports, an
 // unregistered tool whose verbatim arguments are its own branches, an
 // approval note, and a sub-agent read — as an exact line sequence, blank lines included. It is the
 // backstop across the layout changes rather than a test of any one of them: the blank-line hygiene
@@ -2345,7 +2346,9 @@ func TestRenderGroupBreakers(t *testing.T) {
 // header text, the grouping as the one aligned Read File block, and the uniform shape as the fact
 // that every header here — grouped, standalone, railed — is a label and nothing else, with the
 // target always leading a branch and the outcome split into the summary beside it and the body
-// beneath. The ▸ on the Run's and the unregistered call's headers and its absence everywhere else
+// beneath. The two "Edit File" blocks are the counter-example that proves the grouping rule: they
+// are consecutive and share a label, and they still stand alone, because a call carrying a body
+// breaks the run. The ▸ on every header that hides something and its absence everywhere else
 // is the affordance rule in the same picture: exactly the blocks here that hide something say so,
 // the targetless one among them now that it collapses like every other. A regression in any of
 // them changes this golden, and the golden doubles as the living example of what layout.md
@@ -2369,10 +2372,16 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		Content: "  func main() {\n-     fmt.Println(\"old\")\n-     return\n+     fmt.Println(\"new\")\n+     os.Exit(0)\n  }",
 		Summary: domain.DiffStat{Added: 2, Removed: 2},
 	}})
-	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c6", Tool: "mcp_search",
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c6", Tool: "single_find_and_replace",
+		Arguments: []byte(`{"path":"main.go","oldText":"fmt.Println(\"old\")","newText":"fmt.Println(\"new\")"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c6", Content: "replaced text in main.go"}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c7", Tool: "multi_find_and_replace",
+		Arguments: []byte(`{"path":"main.go","replacements":[{"oldText":"return","newText":"os.Exit(0)"}]}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c7", Content: "applied 1 replacement to main.go"}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c8", Tool: "mcp_search",
 		Arguments: []byte(`{"query":"collapse","limit":20}`)}})
 	tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
-	readCall(tr, "c7", "main.go", 1, 154, 1)
+	readCall(tr, "c9", "main.go", 1, 154, 1)
 
 	want := strings.Join([]string{
 		"❯ read the docs, then run the tests",
@@ -2393,6 +2402,16 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"  ┕ main.go +2 -2",
 		"      func main() {",
 		"    … +5 more lines",
+		"",
+		"✦ Edit File ▸",
+		"  ┕ main.go replaced text in main.go",
+		"    - fmt.Println(\"old\")",
+		"    … +1 more line",
+		"",
+		"✦ Edit File ▸",
+		"  ┕ main.go applied 1 replacement to main.go",
+		"    - return",
+		"    … +1 more line",
 		"",
 		"✦ mcp_search ▸",
 		"  ┕ {",
