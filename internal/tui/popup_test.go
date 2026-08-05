@@ -1047,6 +1047,108 @@ func TestRenderPopupTitleInBorderCarriesTheElisionCount(t *testing.T) {
 	}
 }
 
+// titleFromBody is the identity a body-is-the-heading pane keeps at the heights that seat none of
+// that body, and it is scoped to exactly those heights: the flag decides what the border says only
+// when the body block came back with every one of its own lines traded for the elision marker. With
+// a line of the body on the screen the pane is already naming itself, and the flag must change
+// nothing at all — which is what keeps the untitled border the normal appearance of the surface that
+// asks for it (docs/design/user-questions-layout.md).
+func TestRenderPopupTitleFromBody(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	const (
+		width = 40
+		lead  = "which way should I take this refactor"
+		plain = "╭──────────────────────────────────────╮"
+	)
+	base := func() popupSpec {
+		return popupSpec{
+			titleInBorder: true,
+			titleFromBody: true,
+			body:          lead + " of the resolution pipeline, now that the gate has moved?",
+			maxBodyRows:   -1,
+			rows:          singleCellRows([]string{"first row", "second row"}),
+			selected:      0,
+			hint:          "esc close",
+			maxRows:       8,
+		}
+	}
+
+	t.Run("the body has a row of its own", func(t *testing.T) {
+		t.Parallel()
+		spec := base()
+		off := spec
+		off.titleFromBody = false
+		on := strip(renderPopup(th, spec, width))
+		if got := strip(renderPopup(th, off, width)); on != got {
+			t.Errorf("the flag changed a pane whose body is on the screen:\nwith:\n%s\n\nwithout:\n%s", on, got)
+		}
+		if top := popupLines(on)[0]; strip(top) != plain {
+			t.Errorf("top border = %q, want the plain %q", strip(top), plain)
+		}
+	})
+
+	// One body row, spent entirely on the marker: the case the ask prompt reaches between twelve and
+	// fifteen terminal rows, where the pane used to be a count and a hint.
+	t.Run("the body's one row went to the marker", func(t *testing.T) {
+		t.Parallel()
+		spec := base()
+		spec.maxBodyRows = 1
+		top := strip(popupLines(renderPopup(th, spec, width))[0])
+		if !strings.Contains(top, "which way should I take") {
+			t.Errorf("top border = %q, want it to lead with the body — the pane's only identity here", top)
+		}
+	})
+
+	// No body row at all is the same fact one row further down, and the count still rides out with the
+	// name: a fallback title may not push the elision marker off the row it is stated on.
+	t.Run("no body row at all", func(t *testing.T) {
+		t.Parallel()
+		spec := base()
+		spec.maxBodyRows = 0
+		top := strip(popupLines(renderPopup(th, spec, width))[0])
+		if !strings.Contains(top, "which way") {
+			t.Errorf("top border = %q, want it to lead with the body", top)
+		}
+		if !elisionMarkerPattern.MatchString(top) {
+			t.Errorf("top border = %q, want the count for the lines the pane dropped", top)
+		}
+	})
+
+	// A spec that names itself keeps its own name: the fallback stands in for an identity, it does not
+	// compete with one.
+	t.Run("an explicit title wins", func(t *testing.T) {
+		t.Parallel()
+		spec := base()
+		spec.maxBodyRows = 0
+		spec.title = "saved sessions"
+		top := strip(popupLines(renderPopup(th, spec, width))[0])
+		if !strings.Contains(top, "saved sessions") || strings.Contains(top, "which way") {
+			t.Errorf("top border = %q, want the spec's own title", top)
+		}
+	})
+
+	// And without titleInBorder the flag is inert, because there the fallback would have to claim a
+	// title ROW — the row the budget had just refused the body — and no pane may grow while shrinking.
+	t.Run("it claims no row without titleInBorder", func(t *testing.T) {
+		t.Parallel()
+		spec := base()
+		spec.maxBodyRows = 0
+		spec.titleInBorder = false
+		on := popupLines(renderPopup(th, spec, width))
+		off := spec
+		off.titleFromBody = false
+		if got := popupLines(renderPopup(th, off, width)); len(on) != len(got) {
+			t.Fatalf("the pane is %d rows with the flag and %d without it", len(on), len(got))
+		}
+		for _, ln := range on {
+			if strings.Contains(strip(ln), "which way") {
+				t.Errorf("the fallback title was drawn on a pane that has no border to put it in: %q", strip(ln))
+			}
+		}
+	})
+}
+
 // A title-in-border pane is one row shorter than the same pane with a title row — that is the whole
 // point of the placement — and the chrome constant the budget reserves says the same thing, so the
 // row the border took back is spent on the pane's content rather than left unclaimed

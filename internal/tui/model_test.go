@@ -1439,6 +1439,60 @@ func TestModelAskPromptMenuChrome(t *testing.T) {
 	}
 }
 
+// TestModelAskNamesItselfWhereTheQuestionHasNoRow is the ask pane's half of the promise the approval
+// prompt keeps with its border title: a decision surface with live keys always says what it is
+// deciding. The ask box says it with the question, and the question is BODY — so on the windows that
+// grant the body a single row and spend that row on the "… (+N more lines)" marker, the box was a
+// count and a key hint while the approval box beside it still named its tool in the border. There the
+// question falls back INTO the border (popupSpec.titleFromBody) and takes the count with it, and only
+// there: with any line of the question on a content row the border is the unbroken one the mockup
+// draws (TestModelAskPromptMenuChrome), which the last subtest pins at a window with room to spare.
+func TestModelAskNamesItselfWhereTheQuestionHasNoRow(t *testing.T) {
+	const lead = "which way should I take"
+	req := domain.AskRequest{
+		Question: lead + " this refactor of the resolution pipeline, now that the gate has moved?",
+		Choices:  []string{"yes, go ahead", "no", "ask me again later", "stop and let me drive"},
+	}
+
+	for _, width := range []int{80, narrowOverlayWindow} {
+		for _, height := range []int{smallestOverlayWindow, 13, 14, 15} {
+			t.Run(fmt.Sprintf("%d×%d", width, height), func(t *testing.T) {
+				m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
+				rows := strings.Split(ansiPattern.ReplaceAllString(m.askPrompt(req), ""), "\n")
+				got := strings.Join(rows, "\n")
+
+				// The premise of the case: no content row carries the question, so the border is the only
+				// place its identity can be. A budget that started seating it again is a changed premise
+				// and the assertion below would be pinning nothing.
+				for _, row := range rows[1:] {
+					if strings.Contains(row, lead) {
+						t.Fatalf("the question holds a content row here — test premise broken:\n%s", got)
+					}
+				}
+				if !strings.Contains(rows[0], lead) {
+					t.Errorf("top border = %q, want it to lead with the question — the pane's whole identity here:\n%s", rows[0], got)
+				}
+				if !elisionMarkerPattern.MatchString(rows[0]) {
+					t.Errorf("top border = %q, want the count for the answers the window seated none of:\n%s", rows[0], got)
+				}
+			})
+		}
+	}
+
+	// …and nothing changes at a height with room: the border is unbroken and the question is the
+	// pane's lead line, which is the appearance the mockup pins.
+	t.Run("a window with room", func(t *testing.T) {
+		rows := askPaneLines(t, 80, req)
+		got := strings.Join(rows, "\n")
+		if trimmed := strings.Trim(rows[0], "╭─╮"); trimmed != "" {
+			t.Errorf("top border carries %q, want it unbroken where the question has its own row:\n%s", trimmed, got)
+		}
+		if first := strings.TrimSpace(strings.Trim(rows[1], "│")); !strings.HasPrefix(first, lead) {
+			t.Errorf("first content line = %q, want the question itself:\n%s", first, got)
+		}
+	})
+}
+
 // TestModelAskLongChoiceWrapsUnderItsMarker is what the schema's relaxed wording rests on: a choice
 // may now be a whole sentence, so the pane BREAKS it instead of eliding it, and its continuation
 // lines hang under the option's own first column rather than under the marker. A decision taken

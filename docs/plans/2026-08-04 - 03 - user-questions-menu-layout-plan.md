@@ -318,6 +318,23 @@ title bought back lets the pane seat its first answer at 16, which is scrolling,
 ask probe is the question, with the elision marker IN THE PANE as the fallback, because a pane with no
 title has no identity line left when the window grants it no body row.
 
+NOTES (2026-08-05): follow-up (run-level, owner-approved; not a plan item) — this item's implementer reported
+that dropping the title leaves the pane with NO identity at the heights that seat no line of the question: the
+one body row goes to the "… (+N more lines)" marker, so the box was a count and a hint while the approval pane
+still named its tool in the border at the same heights (this item's own concession, `mayElide` in
+`TestDecisionSurfaceStaysOnTheFrame`, is now gone — the ask pane owes its probe on the same terms the approval
+does). The fix is a third opt-in painter field, `popupSpec.titleFromBody` (`popupHeading`, popup.go): with it
+set and no explicit title, the border title becomes the body flattened onto one line — but ONLY where the
+composed body block came back with every one of its own lines traded for the marker, which is read off the
+block (`hiddenBody > 0 && len(body) <= 1`) rather than re-derived from the budget, since the block is where the
+grant and the wrapped line count meet. It requires `titleInBorder`, and that is what makes it free: the top
+border is drawn at every height, so a name spliced into it claims no row, where a fallback title on a
+title-ROW pane would claim the row the budget had just refused the body. The ratified design call is untouched
+at every height the mockup draws — one line of the question on a content row and the border is plain again.
+Two stale doc comments this made false were corrected with it (`popupTitleLine`'s "no caller composes a
+title-less spec today", `popupBudget`'s reading of the ask pane's one body line), and layout.md's shrink ladder
+gained the case (the rendered 80×12 example) per the item-7 wording this follow-up now owns.
+
 **What:** Restyle the ask prompt per the mockup (lines 25-37). In
 `internal/tui/model.go` `askPrompt` (~line 4023):
 

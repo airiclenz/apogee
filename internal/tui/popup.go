@@ -144,6 +144,22 @@ type popupRow []string
 // says: the elision marker rides the border title exactly as it rides the title row
 // (popupTitleLine), so a pane cannot go quiet about content it hid by moving its name into the frame.
 //
+// titleFromBody is the identity a pane keeps when its body IS its heading and the window seats no
+// line of that body. The ask prompt is that pane: it draws no title, because the question says what
+// a heading over it would (docs/design/user-questions-layout.md) — but a question is BODY, and on the
+// shortest windows the single body row a pane is granted goes to the elision marker, which left the
+// box carrying a count and a key hint and nothing at all about what the live ⏎ would answer. Its
+// identity had become a number. With this set, the lead of the body falls back INTO the top border
+// there — the same place a titled pane's name already rides (titleInBorder) — and only there: at
+// every height where one line of the body is on the screen the pane composes exactly as it did, so
+// the untitled top border stays the normal appearance of a surface whose first body line is its
+// heading.
+//
+// It requires titleInBorder, and that is the whole of why it costs nothing: the top border is drawn
+// at every height, so a name spliced into it claims no row. A fallback title on a pane that draws
+// title ROWS would claim the row the budget had just refused it, which is the one thing shrinking may
+// never do.
+//
 // menuRows paints the row list as a MENU rather than as a list with a cursor in it: the selected row
 // is glyphUser plus its label lit in the accent (th.popupAccent), every other row is
 // glyphMenuUnselected plus its label faint, and NO row carries th.userBlock's full-width highlight
@@ -193,6 +209,7 @@ type popupRow []string
 type popupSpec struct {
 	title         string
 	titleInBorder bool
+	titleFromBody bool
 	body          string
 	maxBodyRows   int
 	rows          []popupRow
@@ -252,7 +269,7 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 		hidden += hiddenBody
 	}
 
-	title := popupTitleLine(th, spec.title, hidden, inner)
+	title := popupTitleLine(th, popupHeading(spec, body, hiddenBody), hidden, inner)
 
 	lines := make([]string, 0, len(body)+len(rows)+2) //nolint:mnd // +2: the optional title and hint rows
 	if title != "" && !spec.titleInBorder {
@@ -695,6 +712,32 @@ func popupElisionMarkerFitting(th theme, hidden, budget int) string {
 	return popupElisionMarkerShort(hidden)
 }
 
+// popupHeading is the name popupTitleLine composes its row — or, for a title-in-border spec, its top
+// border — around: the spec's own title, or, on a pane whose body is its heading
+// (popupSpec.titleFromBody), the lead of that body on the windows that seated no line of it.
+//
+// WHICH windows those are is read off the composed block rather than re-derived from the budget the
+// block was composed against, because the block is where the two things that decide it meet: the
+// budget the frame granted, and how many lines the prose wrapped onto at this width. A block that
+// hid lines (hiddenBody > 0) and came back one line or none is a block whose every line went to the
+// elision marker — the pane is showing a count where its identity should be — and that is exactly
+// the case the fallback is for. A block still holding one of its own lines is a pane already saying
+// what it is, and gets its plain border back unchanged.
+//
+// The lead is the body flattened onto a single line, its newlines and runs of spaces closed up: the
+// title row spends the width it has on the FRONT of the name (popupTitleLine), which is where a
+// question identifies itself, and a heading that kept the body's own line breaks would spend that
+// width on the layout of prose that is not being shown.
+func popupHeading(spec popupSpec, body []string, hiddenBody int) string {
+	if spec.title != "" || !spec.titleFromBody || !spec.titleInBorder {
+		return spec.title
+	}
+	if hiddenBody == 0 || len(body) > 1 {
+		return "" // a line of the body is on the screen: the pane is naming itself already
+	}
+	return strings.Join(strings.Fields(spec.body), " ")
+}
+
 // popupTitleLine composes the pane's title row: the spec's title, plus the elision marker for the
 // hidden lines that have no row of their own to be counted on — the body block when it got NO rows,
 // the row list when the window granted it NONE, or both together (renderPopup sums them; one fact,
@@ -705,9 +748,10 @@ func popupElisionMarkerFitting(th theme, hidden, budget int) string {
 // draws. It is deliberately not the hint: the hint is how the human acts on the pane, and on the
 // approval prompt that legend is the decision itself.
 //
-// A title-less spec with hidden content gets the marker AS its title row rather than losing it: no
-// caller composes one today (every body-bearing pane titles itself), and if one ever does, the
-// honest row is worth more than the row it costs.
+// A title-less spec with hidden content gets the marker AS its title row rather than losing it. The
+// ask prompt composes one at every height where its question is on the screen — the question is its
+// name, so its border carries the count alone — and popupHeading is what keeps that from becoming a
+// pane with NO identity on the heights that seat the question nowhere.
 //
 // NARROWNESS IS NOT AN EXCUSE EITHER. The row is composed TO the pane's inner width rather than
 // composed long and clipped to it: clipping put the count at the end of a row it did not fit, so at

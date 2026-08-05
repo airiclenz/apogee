@@ -1411,12 +1411,11 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 	longProse := strings.Repeat("a long explanation the pane cannot possibly seat in full. ", 12)
 
 	prompts := []struct {
-		name     string
-		probe    string // the identity the decision turns on; only the pane writes it
-		mayElide bool   // …and the pane may state it as a COUNT where the window seats no line of it
-		raise    func(t *testing.T, m Model, draft int) Model
+		name  string
+		probe string // the identity the decision turns on; only the pane writes it
+		raise func(t *testing.T, m Model, draft int) Model
 	}{
-		{"approval prompt", "Approve write_file?", false, func(t *testing.T, m Model, draft int) Model {
+		{"approval prompt", "Approve write_file?", func(t *testing.T, m Model, draft int) Model {
 			t.Helper()
 			m.state = stateRunning
 			m = withDraft(t, m, draft)
@@ -1428,11 +1427,11 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 		}},
 		// The ask prompt has no title any more (askPrompt): the QUESTION is its identity, so the probe
 		// is the lead of it — and unlike a title, a question is body, which the shortest windows grant
-		// no room at all. There the pane states it as the count on its top border instead
-		// (popupTitleLine), which is the same promise one step down: the human is never left with a
-		// live ⏎ and no sign of what it would answer. The count is looked for in the PANE, not on the
-		// frame, so a marker the transcript or the staged band happens to draw cannot stand in for it.
-		{"ask prompt", "a long explanation", true, func(t *testing.T, m Model, draft int) Model {
+		// no room at all. There the question falls back onto the pane's own top border
+		// (popupSpec.titleFromBody) rather than being stated as a count, so this pane owes the probe on
+		// the same terms the approval prompt does: on EVERY window it is drawn in, the human can read
+		// what the live ⏎ would answer.
+		{"ask prompt", "a long explanation", func(t *testing.T, m Model, draft int) Model {
 			t.Helper()
 			m.state = stateRunning
 			m = step(t, m, askReqMsg{Request: domain.AskRequest{
@@ -1463,9 +1462,8 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 								t.Fatalf("the frame seated no prompt pane at all while its keys are live:\n%s", plainFrame)
 							}
 							pane := ansiPattern.ReplaceAllString(m.frameOverlays().prompt, "")
-							if !strings.Contains(plainFrame, p.probe) &&
-								!(p.mayElide && elisionMarkerPattern.MatchString(pane)) {
-								t.Errorf("the frame does not carry %q — the decision's own identity:\n%s", p.probe, plainFrame)
+							if !strings.Contains(pane, p.probe) {
+								t.Errorf("the pane does not carry %q — the decision's own identity:\n%s", p.probe, plainFrame)
 							}
 							// The box gave rows back; it did not go away. It is still drawn, still holds the
 							// draft (the widget scrolls what it cannot seat), and still has its floor of one

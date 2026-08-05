@@ -698,6 +698,11 @@ point is a **minor** bump, not a breaking change.
     being cut off, a blank line separates one answer from the next, and the tool no longer asks the
     model for short single-line choices. An answer is seated whole or not at all, so a short window
     scrolls rather than offering you two thirds of a sentence to decide on.
+  - **A short terminal never leaves an ask prompt anonymous.** On a window with a single row to spare
+    for the question — a half-height split, say — that row goes to the `… (+N more lines)` count, so
+    the question moves up onto the box's top border instead, rather than leaving you a live `⏎` and
+    nothing on the screen saying what it would answer. Give the box its rows back and the border is
+    plain again.
 
   Mocked up in `docs/design/user-questions-layout.md`; specced in `layout.md` (What "height" means,
   The Column contract).

@@ -4050,8 +4050,10 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // popupChrome pane is down to BOTH zeros there: it still names itself in its title row and says how
 // to act in its hint row, and everything it dropped — prose and rows alike — is counted onto that
 // title (popupTitleLine). A popupTitleBorderChrome pane keeps one body line, so the ask prompt's
-// question holds a row (the marker's row, where the question does not fit) while an offering with no
-// window left rides the border instead. A popupBorderChrome pane keeps two, one body line and one
+// question holds a row while an offering with no window left rides the border instead — and where the
+// question is too long for that one row, the row goes to the marker and the question falls back onto
+// the border beside it (popupSpec.titleFromBody), because a pane's identity may shrink to its lead
+// but never to a count. A popupBorderChrome pane keeps two, one body line and one
 // row, so the approval menu is in neither case: its count stays in its body and a decision stays on
 // the screen. Shrinking costs the prose, and the rows outside the window, but never the fact that
 // there are some.
@@ -4247,6 +4249,16 @@ const askRowGap = 1
 // BORDER now that no title row is drawn, counting BOTH the question lines and the choices it could
 // not seat (D2, popupTitleLine), so a hint still offering ↑↓ is never the only trace of an offering
 // the pane dropped.
+//
+// Where the shrinking goes one step further and leaves the question no line of its own — a body
+// budget of one row, spent entirely on the marker, which is the 12-to-15-row window with a question
+// longer than the pane is wide — the question falls back into the top border instead
+// (popupSpec.titleFromBody). Dropping the title was the right call because the question says what a
+// heading would; a pane showing NEITHER says nothing, and a decision surface whose whole identity has
+// become a count is the case the approval prompt does not have — its tool name is on the border at
+// every height it is drawn at. The fallback costs no row (the border is drawn anyway) and applies
+// nowhere else: with one line of the question on the screen the border is plain, as the mockup draws
+// it.
 func (m Model) askPrompt(req domain.AskRequest) string {
 	choicesShown := len(req.Choices) > 0 && m.input.Value() == ""
 
@@ -4278,7 +4290,8 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	}
 
 	spec := popupSpec{
-		titleInBorder: true, // no title at all: an empty one leaves the top border unbroken
+		titleInBorder: true, // no title at all: an empty one leaves the top border unbroken…
+		titleFromBody: true, // …except where the window seats no line of the question to be named by
 		body:          stripEscapes(req.Question),
 		maxBodyRows:   maxBodyRows,
 		rows:          rows,

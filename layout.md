@@ -205,7 +205,9 @@ worth drawing. The **approval prompt** spends two: its name rides the top border
 hint row at all, its shortcut letters being written beside the options they take, so the other two
 rows are one line of body and one decision row. The **ask prompt** spends three — two borders and
 its hint — and puts the fourth into the first line of the question, its name having gone into the
-question itself. What no pane may do is claim a fifth row the frame has not got. Under the eight
+question itself; where the question is too long to be that one line, the row goes to the elision
+marker and the question's lead moves up onto the border, which costs the pane nothing. What no pane
+may do is claim a fifth row the frame has not got. Under the eight
 rows of fixed chrome below the session area, that puts the shortest terminal a pane can be drawn in
 at all at **twelve rows** — and at twelve the session area is already gone, so the frame is exactly
 the pane and the chrome together.
@@ -251,6 +253,26 @@ One marker states everything the pane has no row of its own to state on, because
 narrow to seat one count has no room for two; where the body still holds a row, its own count stays
 there and the title's speaks for the rows.
 
+**A pane's name may shrink to its lead; it may never shrink to a count.** The ask prompt is the one
+surface where that can even be asked, because its name is not a title but the first line of its
+body — so a question two lines long on a window granting one body row put the marker where the name
+should be, and the box read `… (+2 more lines)` over a hint still offering `↑↓ select`: a live `⏎`
+with nothing on the screen saying what it would answer, at the very heights where the approval box
+beside it was still naming its tool in the border. On those windows, and only those, the question
+falls back INTO the border, where a title would have sat all along:
+
+```
+╭ which way should I take this refactor of the resolution pipeline, now…  … +4 ╮
+│ … (+2 more lines)                                                            │
+│ ↑↓ select · ⏎ send · type for a custom answer · esc cancel                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+The row it costs is none: the border is drawn at every height anyway, and the count rides out beside
+the name exactly as it does on a pane whose title was there from the start. The moment one line of
+the question is back on a content row the border goes back to being unbroken — which is the ask
+box's normal appearance, and the one its mockup draws.
+
 **Narrowness does not buy silence either.** A half-height pane is usually a half-width one too, and
 the title row is composed **to** the pane's width rather than composed long and clipped to it — a
 clipped row would drop the count off its end and put the silence straight back. The width is spent
@@ -258,8 +280,10 @@ in the order the row is read for: the pane's name, then the count, then the word
 So the marker sheds its noun before it sheds its number
 (`saved sessions  (all workspaces)  … +8` from the low fifties down), and past that the **name** is
 what gives way to an ellipsis (`saved session…  … +8` at 24 columns), never the number. On a pane
-too narrow for even a clipped name, the count is the whole row — which is the ask prompt's border at
-every width, its name having gone into the question below it.
+too narrow for even a clipped name, the count is the whole row — which is the ask prompt's border
+wherever the question below it is on the screen, its name having gone into that question; where the
+question is not on the screen at all, the border carries its lead instead and spends its width in
+exactly this order, the lead clipping before the count does.
 
 ---
 
