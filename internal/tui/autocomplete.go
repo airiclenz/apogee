@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -55,10 +56,42 @@ const (
 //
 // Only the cells are display: prefix matching and accept-on-enter read value (and the parsed verb)
 // exclusively, so re-columning a menu can never change what a row DOES.
+//
+// rank is the row's MATCH QUALITY against the partial being typed (slashMatchRank): the "/" menu
+// sorts by it, so a row the partial prefixes outranks one it merely appears inside. It is a
+// property of the pair (partial, row), not of the row alone, which is why it is computed where the
+// row is built and not stored on the skill or the commandSpec behind it.
 type acItem struct {
 	value string
 	cells popupRow
 	skill bool
+	rank  int
+}
+
+// slashMatchRank scores how well name answers partial, lowest-is-best: 0 exact, 1 prefix,
+// 2 substring elsewhere, 3 no match at all. It is the whole of the "/" menu's ordering rule —
+// the rows are sorted by it STABLY, so quality decides between tiers and the registries' own scan
+// order (commandSpecs' table order, then the catalog's DisplayName order) decides inside one.
+//
+// Both sides are lowercased because the skill half of the menu filters case-insensitively
+// (skillSuggestions), and a rank that disagreed with the filter that admitted a row would sort a
+// genuine match as if it were none. 3 is defensive: every caller ranks a name its own filter has
+// already accepted, so no rendered row ever carries it.
+//
+// An empty partial — the bare "/" that opens the whole menu — prefixes every name, so the entire
+// list lands in one tier and reads exactly as it did before ranking existed.
+func slashMatchRank(partial, name string) int {
+	needle, hay := strings.ToLower(partial), strings.ToLower(name)
+	switch {
+	case hay == needle:
+		return 0
+	case strings.HasPrefix(hay, needle):
+		return 1
+	case strings.Contains(hay, needle):
+		return 2
+	default:
+		return 3
+	}
 }
 
 // autocompleteState is the overlay's data. active gates rendering and key capture (it is a
@@ -278,6 +311,11 @@ const idleOnlyTag = "— idle only"
 // (acceptAutocomplete recomputes the overlay), never sending "/skill" as a literal message — like
 // the apogee-code oracle's selectSkill.
 //
+// Each row also carries its match rank (slashMatchRank), which the merged menu sorts on. The
+// command half's own order is untouched by that sort: a verb only ever matches exactly or by
+// prefix, and the exactly-matched one is the shortest of the names sharing the prefix, so it
+// already stood first in the alphabetical table.
+//
 // busy says a worker owns the engine, which is what fills the tag cell: the verbs
 // commandSpec.whileRunning marks as reporting-only leave it empty (they run right here), every other
 // row carries the tag and earns commandsAtIdleNote if accepted. The tag is a property of the
@@ -293,7 +331,11 @@ func commandSuggestions(partial string, busy bool) []acItem {
 		if busy && !c.whileRunning {
 			tag = idleOnlyTag
 		}
-		items = append(items, acItem{value: c.name, cells: popupRow{"/" + c.name, c.summary, tag}})
+		items = append(items, acItem{
+			value: c.name,
+			cells: popupRow{"/" + c.name, c.summary, tag},
+			rank:  slashMatchRank(partial, c.name),
+		})
 	}
 	return items
 }
@@ -322,11 +364,20 @@ func skillArgToken(value string, caret int) (start, end int, partial string, ok 
 	return verbStart, argEnd, value[argStart:argEnd], true
 }
 
-// slashSuggestions builds the merged "/" menu: first the commands whose name partial prefixes, in
-// table order and labelled with their summaries (commandSuggestions), then the catalog skills
-// partial matches, each marked with glyphSkill — the transcript's own skill glyph — and shown as
-// the "/id" token accepting it writes. One namespace, two kinds of row, commands first because a
-// verb ACTS on the session while a skill is content the human is composing.
+// slashSuggestions builds the merged "/" menu: the commands whose name partial prefixes, labelled
+// with their summaries (commandSuggestions), and the catalog skills partial matches, each marked
+// with glyphSkill — the transcript's own skill glyph — and shown as the "/id" token accepting it
+// writes. One namespace, two kinds of row.
+//
+// The rows are ordered by MATCH QUALITY rather than by which half produced them: a stable sort on
+// the rank both halves already carry (slashMatchRank) puts an exact match first, then the prefix
+// matches, then the substring matches only a skill can be. Ties keep the scan order the merge laid
+// down — the commands in table order, then the skills in catalog order — so a bare "/" (one tier:
+// everything is a prefix match) still reads alphabetically with the verbs above the skills, and
+// commands still lead every tier they share with a skill, because a verb ACTS on the session while
+// a skill is content the human is composing. What changes is only that a skill matched somewhere
+// in the MIDDLE of its name no longer outranks one the partial actually starts — typing "imple"
+// now offers /implement-plan above /feature-implementation, which is what ⏎ and tab accept.
 //
 // Commands SHADOW skills: a skill whose id equals any verb in commandSpecs is dropped from the
 // merged rows, because the whole-input parse would read "/id" as that command anyway. The collision
@@ -357,8 +408,10 @@ func (m Model) slashSuggestions(partial, outside string) []acItem {
 			// The description cell arrives already stripped from skillSuggestions.
 			cells: popupRow{glyphSkill + " /" + stripEscapes(sk.value), skillMenuCell(sk.cells)},
 			skill: true,
+			rank:  sk.rank,
 		})
 	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].rank < items[j].rank })
 	return items
 }
 
@@ -382,6 +435,12 @@ func skillMenuCell(cells popupRow) string {
 // ["DisplayName", "Summary"] — which the popup module lays out as columns, so what each skill DOES
 // starts at one shared offset however long the names beside it run. The value is the skill ID (what
 // the accepted row splices in as a "/id" token). A nil catalog yields nothing (the picker is dark).
+//
+// The list is ranked by match quality (slashMatchRank) and only THEN cut to maxAutocompleteItems,
+// which is the whole reason the cap moved out of the scan loop. Capping first meant the cut was
+// made in catalog order, so a skill the partial prefixes could be dropped for weaker substring
+// matches that merely sorted earlier alphabetically — the menu discarded its best answer to keep
+// its worst ones. The sort is stable, so equally-matched skills keep the catalog's order.
 //
 // "Already invoked" is read off the BUFFER — the /tokens standing in the text right now — because
 // the text is where an invocation lives; there is no attachment state beside it to consult. Delete
@@ -416,10 +475,15 @@ func (m Model) skillSuggestions(partial, outside string) []acItem {
 		items = append(items, acItem{
 			value: sk.ID,
 			cells: popupRow{stripEscapes(sk.DisplayName), stripEscapes(sk.Summary)},
+			// The better of the two names the filter above accepted the skill on: matching an id
+			// by prefix is worth as much as matching a display name by one, and a skill must not
+			// be ranked down for the name it did NOT match through.
+			rank: min(slashMatchRank(partial, sk.ID), slashMatchRank(partial, sk.DisplayName)),
 		})
-		if len(items) >= maxAutocompleteItems {
-			break
-		}
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].rank < items[j].rank })
+	if len(items) > maxAutocompleteItems {
+		items = items[:maxAutocompleteItems]
 	}
 	return items
 }

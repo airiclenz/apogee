@@ -33,7 +33,13 @@
   the stable sort produces; any change to `commandSpecs` registry order or to
   `TestCommandSpecsReadAlphabetically`.
 
-## 1. Rank slash-menu suggestions by match-quality tier
+## 1. Rank slash-menu suggestions by match-quality tier — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): the tie-stability bullet is satisfied by the existing, untouched
+`TestSlashMenuMergesCommandsAndSkills` (`/c`, mixed tiers) rather than by a duplicate of it; the new
+`TestSlashMenuKeepsScanOrderWithinOneRankTier` covers the pure single-tier case (bare `/` keeps the
+commands' table order, then the catalog order) that no existing test pinned. A `### Fixed` CHANGELOG
+entry was added under `[Unreleased]` per repo convention (no version identifier touched).
 
 **What:** in `internal/tui/autocomplete.go`:
 

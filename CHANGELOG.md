@@ -1047,6 +1047,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The `/` menu offers the best match first.** Typing `/imple` listed `/feature-implementation`
+  above `/implement-plan`: the rows came back in catalog order, so the skill that merely *contains*
+  what you typed stood above the one that *starts* with it — and since the first row is the
+  highlighted one, tab or `⏎` accepted the wrong skill. Rows now rank by match quality — an exact
+  name first, then the names your text starts, then the ones it only appears inside — and ties keep
+  the order they always had (the commands alphabetically, then the skills), so a bare `/` menu reads
+  exactly as it did before. The ranking also happens *before* the list is cut to eight rows, which
+  settles a second defect of the same shape: in a crowded menu, a skill whose name you had begun
+  typing could be dropped to make room for weaker matches that merely sorted earlier.
+
 - **The context gauge stays on the status line when a file name holds a tab.** The status line caps
   the tool target it shows — "reading · src/main.go" — so that a long path can never push the gauge
   at the right of the row off the screen. That cap was counted in characters while the screen pays

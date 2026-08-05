@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -379,6 +380,111 @@ func TestSlashMenuShadowsCollidingSkillID(t *testing.T) {
 	ac := m.computeAutocomplete(m.caretByteOffset())
 	if ac.kind != acSkill || len(ac.items) != 1 || ac.items[0].value != "clear" {
 		t.Fatalf("the /skill picker lost the shadowed skill: %+v", ac)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The merged "/" menu: rows rank by match quality, ties keep the scan order
+// ----------------------------------------------------------------------------
+
+func TestSlashMatchRank(t *testing.T) {
+	tests := []struct {
+		name    string
+		partial string
+		item    string
+		want    int
+	}{
+		{"exact beats everything", "clear", "clear", 0},
+		{"exact is case-insensitive", "Clear", "clear", 0},
+		{"prefix", "imple", "implement-plan", 1},
+		{"prefix is case-insensitive", "IMPLE", "Implement Plan", 1},
+		{"substring ranks below prefix", "imple", "feature-implementation", 2},
+		{"substring is case-insensitive", "Imple", "Feature Implementation", 2},
+		{"no match at all", "zzz", "implement-plan", 3},
+		{"empty partial prefixes every name", "", "implement-plan", 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := slashMatchRank(tc.partial, tc.item); got != tc.want {
+				t.Errorf("slashMatchRank(%q, %q) = %d, want %d", tc.partial, tc.item, got, tc.want)
+			}
+		})
+	}
+}
+
+// The reported bug: typing "/imple" listed /feature-implementation first — it merely sorted
+// earlier in the catalog — so tab and ⏎ accepted the substring match over the skill whose name the
+// human had actually started typing. The prefix match now leads, and it leads as the HIGHLIGHTED
+// row (selected stays zero-valued), which is what accepting picks up.
+func TestSlashMenuRanksPrefixMatchAboveSubstring(t *testing.T) {
+	o := testOpts
+	o.Skills = fakeSkillCatalog{skills: []skills.Skill{ // catalog order: sorted by DisplayName
+		{ID: "feature-implementation", DisplayName: "Feature Implementation", Summary: "ship a feature"},
+		{ID: "implement-plan", DisplayName: "Implement Plan", Summary: "execute a plan"},
+	}}
+	m := newTestModelEng(t, &fakeEngine{}, o)
+
+	m.input.SetValue("/imple")
+	ac := m.computeAutocomplete(m.caretByteOffset())
+
+	var got []string
+	for _, it := range ac.items {
+		got = append(got, it.value)
+	}
+	want := []string{"implement-plan", "feature-implementation"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("merged rows = %v, want the prefix match first: %v", got, want)
+	}
+	if ac.selected != 0 {
+		t.Errorf("selected = %d, want 0 — tab/⏎ must accept the best-ranked row", ac.selected)
+	}
+}
+
+// Ranking only decides between TIERS. The bare "/" menu is one tier — an empty partial prefixes
+// every name — so the whole list keeps the order the two registries hand over: the commands in
+// table (alphabetical) order, then the skills in catalog order. TestSlashMenuMergesCommandsAndSkills
+// pins the same stability for the mixed-tier "/c" case.
+func TestSlashMenuKeepsScanOrderWithinOneRankTier(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+	m.input.SetValue("/")
+	ac := m.computeAutocomplete(m.caretByteOffset())
+
+	var got []string
+	for _, it := range ac.items {
+		got = append(got, it.value)
+	}
+	want := make([]string, 0, len(commandSpecs)+2)
+	for _, c := range commandSpecs {
+		want = append(want, c.name)
+	}
+	want = append(want, "clean-code", "review")
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("bare '/' menu = %v, want the untouched scan order %v", got, want)
+	}
+}
+
+// The cap is spent on the BEST matches, not on the alphabetically luckiest ones: with more
+// matching skills than the menu can hold, the sole prefix match — last in catalog order — still
+// leads the list. Capping inside the scan loop dropped it before the ranking could ever see it.
+func TestSkillSuggestionsCapAfterRanking(t *testing.T) {
+	catalog := make([]skills.Skill, 0, maxAutocompleteItems+2)
+	for i := 0; i < maxAutocompleteItems+1; i++ {
+		id := fmt.Sprintf("a%d-widget", i) // substring match; sorts before the prefix match
+		catalog = append(catalog, skills.Skill{ID: id, DisplayName: id})
+	}
+	catalog = append(catalog, skills.Skill{ID: "widget-master", DisplayName: "widget-master"})
+	o := testOpts
+	o.Skills = fakeSkillCatalog{skills: catalog}
+	m := newTestModelEng(t, &fakeEngine{}, o)
+
+	m.input.SetValue("/skill widget")
+	ac := m.computeAutocomplete(m.caretByteOffset())
+
+	if len(ac.items) != maxAutocompleteItems {
+		t.Fatalf("picker offered %d rows, want the menu still capped at %d", len(ac.items), maxAutocompleteItems)
+	}
+	if got := ac.items[0].value; got != "widget-master" {
+		t.Errorf("first row = %q, want the prefix match widget-master to survive the cap and lead", got)
 	}
 }
 
