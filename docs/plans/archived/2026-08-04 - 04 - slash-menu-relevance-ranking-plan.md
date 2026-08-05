@@ -6,7 +6,7 @@
   case-insensitive substring and returned in catalog (`DisplayName`) order, so the
   substring match sorts first and is what Enter/Tab accepts.
 - **Date:** 2026-08-04
-- **Status:** not started
+- **Status:** completed (2026-08-05) — all items ✅, archived
 - **Authoritative sources:**
   - `layout.md` § "The prompt box's mini-language" (the dropdown spec; amended by item 2).
   - Owner directive (2026-08-04 session): relevance order, prefix matches first.
