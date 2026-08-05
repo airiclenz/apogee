@@ -27,9 +27,9 @@ import (
 // persisted below is reported as a MARKER on the row rather than as a new value: the pane holds no
 // copy of the config that could disagree with the file.
 //
-// It is the one pane granted the WHOLE transcript row budget (frameRowPlan, layout.md): 33 keys and
-// their section headers are not a choice to scan but a screen to read, so the conversation gives way
-// entirely rather than the list scrolling inside eight rows. Nothing else about the frame moves —
+// It is the one pane granted the WHOLE transcript row budget (frameRowPlan, layout.md): the registry's
+// keys and their section headers are not a choice to scan but a screen to read, so the conversation gives
+// way entirely rather than the list scrolling inside eight rows. Nothing else about the frame moves —
 // the four-row pane floor, the twelve-row window below which no pane is drawn, the status line, the
 // input box and the footer are all where they were — and when the frame cannot seat the pane at all
 // the fact goes on the status line (settingsGiveWayNote), the licence layout.md gives every surface
@@ -989,7 +989,7 @@ func (m Model) renderSettings() string {
 // It is SHORTER than the key list it replaced — a vocabulary is a handful of rows — and the rows it
 // does not use go back to the transcript for as long as the question is open. That is the row plan
 // working as written (frameRowPlan grants the pane the budget; the pane takes what it needs): the
-// full-height rule is what /settings claims when it has 33 keys to show, not a height it holds empty.
+// full-height rule is what /settings claims when it lists every key, not a height it holds empty.
 //
 // The body names the key being set and what it is for, because the list behind it — where the human
 // read the key's name — is the thing this pane just replaced. The value the key already holds carries a

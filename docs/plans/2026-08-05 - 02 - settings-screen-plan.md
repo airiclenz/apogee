@@ -4,7 +4,7 @@
   config key with its resolved value, and edits simple keys by persisting them into
   `~/.apogee/config.yaml` through the comment-preserving splice writer. The screen is
   driven by a new declarative key registry so it can never drift from the schema.
-- **Date:** 2026-08-05 · **Status:** not started
+- **Date:** 2026-08-05 · **Status:** complete — all nine items (1–9) landed 2026-08-05.
 - **Baseline commit:** `066f7c0` — all file:line anchors below are as of this commit.
 - **Authoritative sources:** ADR 0011 (thin renderer), ADR 0012 + 2026-07-21 amendment
   (config-write fence), ADR 0015/0016 (mechanisms & validated sets), ADR 0023 §8
