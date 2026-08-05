@@ -2,9 +2,9 @@ A: Activated / Active
 P: Planned
 X: Executed
 
-- [ ] I'd like a full screen menu for all available settings when running the slash command /settings. This needs grilling.
+- [P] I'd like a full screen menu for all available settings when running the slash command /settings. This needs grilling.
 
-- [ ] Currently I cannot see how much of it's context a sub agent has used.
+- [P] Currently I cannot see how much of it's context a sub agent has used.
 
 - [ ] keyboard path for collapse/expand: a block-cursor mode (↑/↓ move a highlighted block, enter toggles, esc leaves). Deliberately deferred from the collapse wave — layout.md "Collapsed and expanded blocks" keeps toggling mouse-only for now, on the same precedent that keeps transcript selection mouse-only.
 
