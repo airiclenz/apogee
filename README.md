@@ -105,12 +105,17 @@ any of the six targets, or a clone if you would rather build it yourself.
 **Homebrew — macOS and Linux:**
 
 ```bash
-brew install airiclenz/tap/apogee
+brew tap airiclenz/tap
+brew trust --tap airiclenz/tap   # once per machine, on Homebrew 5.1+
+brew install apogee
 apogee --version
 ```
 
 The formula installs the prebuilt binary for your platform, so nothing is compiled
 and no Go toolchain is needed; `brew upgrade apogee` moves you to the next release.
+The `brew trust` line is what Homebrew 5.1+ wants before it will load a third-party
+tap without warning you — it is recorded once per machine, and
+`brew untrust --tap airiclenz/tap` revokes it.
 
 **A prebuilt archive — any of the six targets.** Every release carries Linux, macOS
 and Windows × `amd64` and `arm64` on the
