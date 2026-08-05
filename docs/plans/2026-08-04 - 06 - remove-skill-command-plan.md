@@ -5,9 +5,24 @@
   with the `menuOnly` machinery and the `acSkill` dropdown that exist solely for it,
   then sweep code comments and living documentation so nothing still describes the
   removed entry point.
-- **Date:** 2026-08-04 · **Status:** TODO (no item executed)
+- **Folded in (2026-08-05):** item 4 — `/new` (and its alias `/clear`) must no longer
+  be recorded as a recallable prompt (`ISSUES.md:9`). Independent of the `/skill`
+  removal; folded here on the owner's instruction rather than opening a fourth
+  active plan.
+- **Date:** 2026-08-04 · **Status:** TODO (no item executed) · Amended 2026-08-05
+  (item 4 folded in)
+- **Ratified design calls:**
+  - Recall exclusion scope: only the session-reset pair `/new` + `/clear` stops
+    being recorded, via a spec-driven `commandSpec` flag (`noRecall`); every other
+    sent line — ordinary prompts, Interjections, all other whole-line `/command`
+    invocations (`/version` stays test-pinned as recorded) — remains recallable.
+    Rejected: excluding all slash commands; excluding all zero-arg commands.
+    (Owner via AskUserQuestion, 2026-08-05.)
 - **Authoritative sources:**
   - `ISSUES.md:12` — the owner directive: "`/skill` is not needed anymore — remove it."
+  - `ISSUES.md:9` (working tree at fold-in time) — the owner directive: "`/new` should
+    not be recorded as a recallable prompt." Item 4's `file:line` refs are indexed
+    against `ff55ff8`; the same drift rule applies.
   - `docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md` — the decision that
     made `/skill` redundant; it explicitly kept the two-step picker as an alternate
     entry point, so it receives a dated amendment note (item 3), never a rewrite.
@@ -43,6 +58,11 @@
     inert after this removal. Saved plans are never rewritten — flagged here for the
     owner, not edited.
   - No version identifier changes (see closing note).
+  - Item 4 additions: no retroactive scrub of already-recorded `/new`//`/clear`
+    lines in `~/.apogee/prompts/*.jsonl` — compaction ages them out; the
+    `internal/recall` store stays command-agnostic (the filter is TUI-side policy);
+    the `acceptAutocomplete` path (which records no command today,
+    `autocomplete.go:671`) is untouched.
 
 ## 1. Remove the `/skill` verb, the `menuOnly` flag, and the `acSkill` picker
 
@@ -198,8 +218,68 @@ here anyway since `config.yaml` changes in this item).
 
 **Commit:** `docs: retire /skill from the living docs, amend ADR 0027, close both ISSUES entries`
 
+## 4. Never record `/new` and `/clear` as recallable prompts
+
+Independent of items 1–3 (any order; the shared files — `command.go`,
+`command_test.go`, `CHANGELOG.md`, `ISSUES.md` — are touched in disjoint regions).
+Authoritative source: `ISSUES.md:9` plus the ratified design call in the header.
+
+**What:** Today every sent line is recorded: `submit()` calls
+`recordSend(sent)` (`internal/tui/model.go:1150`) one line before `runCommand`
+dispatches the parsed command, and `recordSend` (`internal/tui/recall.go:198-208`)
+filters only an unwired host, the empty string, and consecutive duplicates — so a
+sent `/new` lands in the walk and on disk, and a later ↑ + ⏎ replays a session
+wipe. Change, per the ratified design call:
+
+- `internal/tui/command.go`: add a `noRecall bool` field to `commandSpec`
+  (`:72-78`) with a doc comment stating the meaning — a sent invocation of this
+  verb is never recorded as a recallable prompt, in memory or on disk — and set
+  `noRecall: true` on exactly two registry rows: `clear` and `new` (`:133`; the
+  rows are one `case "clear", "new":` handler, `model.go:1448`).
+- `internal/tui/model.go` `submit()` (`:1149-1152`): in the `kindCommand` branch,
+  skip the `recordSend` call (which owns both the in-memory list and the disk
+  append Cmd) when the matched spec carries `noRecall`.
+- `internal/tui/interject.go` (`:171`): guard the same way, so the flag means
+  "never recorded" independent of state. Today this site is unreachable for the
+  pair (both are idle-only and refused before the record) — the guard is
+  future-proofing, not behaviour; note this in a code comment or commit body,
+  not with a test.
+- `CONTEXT.md:273-277` (Prompt recall entry): the "What is recorded is what was
+  *sent*" sentence gains the carve-out — the session-reset pair `/new`//`/clear`
+  is deliberately never recorded, so a walk cannot hand back a line whose ⏎
+  wipes the session. Use the phrase "session-reset" (acceptance greps for it).
+- `layout.md:1064-1080` (Prompt recall paragraph): one added clause/sentence with
+  the same fact, same "session-reset" phrase.
+- `CHANGELOG.md`: entry under `[Unreleased]` → `### Fixed` (create the heading if
+  absent): `/new` and `/clear` are no longer recorded as recallable prompts.
+- `ISSUES.md`: delete the `/new` recallable-prompt entry (`:9` at fold-in time).
+
+**Tests:**
+
+- `internal/tui/recall_test.go` — extend `TestRecallRecordsEverySendPath`
+  (`:353`) or add a sibling: a sent `/new` and a sent `/clear` produce no
+  in-memory entry and no `AppendPrompt` call on the fake host; the existing
+  `/version`-is-recorded assertion (`:380-386`) stays as the recorded-command
+  control.
+- `internal/tui/command_test.go` — drift guard: iterate the spec table and assert
+  exactly {`clear`, `new`} carry `noRecall` (the same shape as the `menuOnly`
+  drift guard item 1 removes; independent of whether item 1 has run).
+
+**Acceptance:**
+
+- `make check` → green.
+- `go test ./internal/tui/ -run 'TestRecall' -v` → all pass, including the new
+  exclusion coverage.
+- `grep -c 'noRecall: true' internal/tui/command.go` → exactly 2.
+- `grep -n 'session-reset' CONTEXT.md layout.md` → ≥ 1 hit in each file.
+- `grep -n 'recallable' ISSUES.md` → no hits.
+- `awk '/## \[Unreleased\]/,/## \[0\.10\.4\]/' CHANGELOG.md | grep -c 'recallable'` → ≥ 1.
+
+**Commit:** `fix(tui): never record /new and /clear as recallable prompts`
+
 ---
 
 **Suggested version bump (not performed):** minor — `v0.11.0` — a user-visible
 command is removed, which under 0.x SemVer practice is a minor-line event; the Go
-API is untouched. Owner decides whether and when.
+API is untouched; item 4's recall fix rides the same bump. Owner decides whether
+and when.
