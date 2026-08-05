@@ -93,7 +93,7 @@ point is a **minor** bump, not a breaking change.
 
 - **Tool blocks collapse and expand — click a header, or its `… +N more lines` marker, to see
   everything a call actually returned.** The compact block is unchanged and it is still what you
-  get by default: a command's output shows its first line, a diff its first 20, each with the
+  get by default: a body shows its first line, whatever tool filled it, with the
   `… +N more lines` remainder counting the rest. What changed is that the rest is still *there* —
   the transcript retains every line of every body and the caps became a **paint-time act** — so a
   **motionless click on a block's header** opens it in full, a second click closes it again, and a
@@ -130,6 +130,12 @@ point is a **minor** bump, not a breaking change.
     Nothing is lost: the approval popup is where you approve an action and it still shows the
     verbatim arguments at decision time — the transcript block is the record, and a record may
     collapse.
+  - **One budget, and the diff spends it too.** A collapsed `View Diff` stood up to 23 rows tall —
+    twenty hunk lines under its header, branch and marker — the last body with an allowance of its
+    own, and by a wide margin the tallest thing a collapsed transcript could hold. It now keeps the
+    same single line as every other block, so no collapsed block anywhere is taller than four rows
+    and a wall of blocks reads as a list of what happened rather than a wall of diff. Nothing is
+    lost: the `+2 -2` on the branch still counts the whole change, and one click shows every hunk.
   - **The state is the view's alone.** It is never encoded with the transcript: a resumed session
     paints everything collapsed and `/clear` forgets it with everything else. A block that hides
     nothing has nothing to toggle — a group of body-less calls, or any block whose lines already

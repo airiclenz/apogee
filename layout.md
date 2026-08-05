@@ -448,10 +448,13 @@ overflow recovery (ADR 0018); neither word belongs to presentation. Collapsed *i
 shape specced above — nothing about that shape changes; expanded differs in exactly one way: the
 body renders in full. The sub-agent run is the one block whose collapsed paint goes further,
 eliding its report body along with the whole span behind it (below). Truncation is thereby a
-**render-time act on retained facts**: the entry keeps every body line, and the collapsed caps —
-free-form output's first line plus its `… +N more lines` remainder, the diff body's cap with its
-remainder — apply at paint, not at build. Expanded shows everything, uncapped; the remainder
-markers exist only in the collapsed paint. A group is the degenerate case: its calls carry no
+**render-time act on retained facts**: the entry keeps every body line, and the collapsed cap —
+**one budget, and every body kind spends it** — applies at paint, not at build. The budget is a
+single line plus the `… +N more lines` remainder counting what is behind it, which is what holds a
+collapsed block to four rows at most: header, branch, that line, the marker. A diff is no
+exception and has none — its `+2 -2` on the branch already says how big the change is, so the
+hunks are worth a click rather than twenty permanent rows. Expanded shows everything, uncapped;
+the remainder markers exist only in the collapsed paint. A group is the degenerate case: its calls carry no
 bodies (that is what made them groupable), so both states paint identically and the rule never
 mentions groups. A call with **no target** collapses like every other block, and only *what* is
 capped differs: its lines are the block's own `┝`/`┕` branches rather than a body — an unregistered

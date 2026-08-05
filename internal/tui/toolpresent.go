@@ -97,15 +97,16 @@ func quotedSummary(line detailLine) branchSummary {
 
 // toolBody is a tool call's retained body — the detail lines that lay out beneath its branch line
 // — bound to the one fact the collapsed paint's cap depends on: whether those lines are a DIFF (a
-// body carrying at least one red/green line). A diff body keeps diffDetailCap lines when the block
-// is collapsed, any other multi-line body keeps its first (collapsedDetails, render.go).
+// body carrying at least one red/green line). Every body collapses to the same house budget
+// whatever its kind (collapsedBodyCap, render.go), so the kind no longer sizes the collapsed
+// paint; it is the body's own description of what it holds, settled where the lines are.
 //
 // The lines and their kind travel as ONE value, and newToolBody is the only thing that puts lines
 // in, so the pair cannot be written stale: there is no way to hand a painter a diff body that says
 // it is plain, because saying so is not a thing a caller does — the kind is derived from the lines
-// it is derived WITH. That is deliberate, and it is what keeps the cap correct without re-deriving
-// the kind at paint: the body is retained whole (layout.md) and capped only when it is drawn, so a
-// rule read off the lines at that seam would walk a command's whole output on every repaint.
+// it is derived WITH. Settling it there rather than at paint is deliberate: the body is retained
+// whole (layout.md) and drawn over and over, so a rule read off the lines at that seam would walk
+// a command's whole output on every repaint.
 //
 // The kind is never persisted — the wire carries each line's own Kind, from which decode builds the
 // body through this same constructor (fromWireToolView).
@@ -731,8 +732,8 @@ func outputDetail(content string) toolOutcome {
 // lines green, "- " lines red, context plain (layout.md's Update File sketch). Tagging on the
 // leading "+"/"-" is exact here because internal/tools' unifiedLineDiff tags every line "  ",
 // "- " or "+ " and emits no "+++ b/…" / "--- a/…" file header, so a content line that itself
-// starts with "+" always arrives behind a tag. It returns every line: the collapsed paint's
-// diffDetailCap and its remainder marker are the painter's (collapsedDetails, render.go).
+// starts with "+" always arrives behind a tag. It returns every line: the collapsed paint's cap
+// and its remainder marker are the painter's (collapsedBodyCap, collapsedDetails, render.go).
 //
 // It counts NOTHING. The "+A -R" diffstat riding the branch above it comes from the tool's
 // domain.DiffStat, counted from the diff operations themselves — which is why the stat still

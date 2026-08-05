@@ -471,13 +471,15 @@ func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
 
 // TestTranscriptCodecSettlesTheBodyKindOnDecode proves the derived body kind survives a resume
 // even though the wire never carries it: the blob stores each line's own Kind and nothing above
-// it, so decode has to settle the view's kind again or a resumed diff would paint one line plus a
-// remainder marker instead of its diffDetailCap lines. Asserted at the cap, which is what the
-// reader would have seen go wrong.
+// it, so decode has to put the lines back through newToolBody rather than seating them in a
+// toolBody of its own, or a resumed diff would come back describing itself as plain. The collapsed
+// paint no longer varies by kind — one house budget caps every body (collapsedBodyCap) — so what
+// is asserted here is the constructor seam holding across the wire, not a cap.
 func TestTranscriptCodecSettlesTheBodyKindOnDecode(t *testing.T) {
 	t.Parallel()
-	body := make([]detailLine, 0, diffDetailCap+3)
-	for range diffDetailCap + 3 {
+	const bodyLines = 23
+	body := make([]detailLine, 0, bodyLines)
+	for range bodyLines {
 		body = append(body, detailLine{Kind: detailDiffAdded, Text: "+ added"})
 	}
 	tr := &transcript{entries: []entry{{
@@ -502,10 +504,8 @@ func TestTranscriptCodecSettlesTheBodyKindOnDecode(t *testing.T) {
 	if !got[0].tool.Details.isDiff() {
 		t.Error("decoded diff body did not settle as a diff body")
 	}
-	shown, _, truncated := collapsedDetails(got[0].tool.Details)
-	if !truncated || len(shown) != diffDetailCap {
-		t.Errorf("decoded diff body paints %d lines (truncated=%v); want the diff cap of %d",
-			len(shown), truncated, diffDetailCap)
+	if got := got[0].tool.Details.len(); got != bodyLines {
+		t.Errorf("decoded body has %d lines, want the whole %d", got, bodyLines)
 	}
 }
 

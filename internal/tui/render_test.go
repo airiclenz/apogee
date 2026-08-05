@@ -673,15 +673,20 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 // A diff call is the summary-and-body shape layout.md sketches: the diffstat rides the branch
 // beside the path and the coloured body hangs beneath it. The body keeps its red/green
 // colouring, which — together with having a body at all — is why it can never fold into a group.
+// Asserted expanded, because a diff collapses to the same one-line house budget as every other
+// body (collapsedBodyCap) and a red line alone would not show both colours.
 func TestRenderDiffDetailStandalone(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
 		Content: "- a removed line\n+ an added line",
 		Summary: domain.DiffStat{Added: 1, Removed: 1}}})
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false; want the diff block expanded")
+	}
 
 	want := strings.Join([]string{
-		"✦ View Diff",
+		"✦ View Diff ▾",
 		"  ┕ main.go +1 -1",
 		"    - a removed line",
 		"    + an added line",
@@ -702,7 +707,9 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 
 // The layout.md sketch, rendered: a two-line change shows "+2 -2" on the branch beside the path
 // with the diff body beneath it, and the diffstat line itself stays plain — only the body is
-// coloured, so the branch reads like every other tool's summary.
+// coloured, so the branch reads like every other tool's summary. The sketch is the EXPANDED
+// shape: a diff spends the same one-line house budget as every other body when it is collapsed
+// (collapsedBodyCap), so its hunks are what a click reveals.
 func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
@@ -711,9 +718,12 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 		Content: "- a code line that has been removed\n- a second removed line\n+ a new code line\n+ a second new line",
 		Summary: domain.DiffStat{Added: 2, Removed: 2},
 	}})
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false; want the diff block expanded")
+	}
 
 	want := strings.Join([]string{
-		"✦ View Diff",
+		"✦ View Diff ▾",
 		"  ┕ main.go +2 -2",
 		"    - a code line that has been removed",
 		"    - a second removed line",
@@ -731,21 +741,22 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 }
 
 // A diff whose body is capped still names the whole change on its branch: the diffstat counts
-// every line, the body stops at diffDetailCap with its remainder count.
+// every line, the body stops at the house budget with its remainder count.
 func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
+	const longDiff = 25 // well past the collapsed budget, so the stat and the paint cannot agree by luck
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 		CallID:  "c1",
-		Content: strings.TrimSuffix(strings.Repeat("+ added\n", diffDetailCap+5), "\n"),
-		Summary: domain.DiffStat{Added: diffDetailCap + 5},
+		Content: strings.TrimSuffix(strings.Repeat("+ added\n", longDiff), "\n"),
+		Summary: domain.DiffStat{Added: longDiff},
 	}})
 
 	lines := strings.Split(renderPlain(tr, 80), "\n")
-	if got, want := lines[1], "  ┕ main.go +25 -0"; got != want {
+	if got, want := lines[1], "  ┕ main.go +"+strconv.Itoa(longDiff)+" -0"; got != want {
 		t.Errorf("capped diff branch = %q, want %q (the stat spans the whole diff)", got, want)
 	}
-	if got, want := lines[len(lines)-1], "    … +5 more lines"; got != want {
+	if got, want := lines[len(lines)-1], "    … +"+strconv.Itoa(longDiff-collapsedBodyCap)+" more lines"; got != want {
 		t.Errorf("capped diff body ends %q, want %q", got, want)
 	}
 }
@@ -753,10 +764,9 @@ func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
 // TestCollapsedPaintTruncatesRetainedBodies pins the relocation itself: the entry KEEPS every
 // body line it was given and the collapsed paint is the only thing that truncates, synthesizing
 // the "… +N more lines" remainder the outcome builders used to bake in (layout.md, "Collapsed
-// and expanded blocks" — truncation is a render-time act on retained facts). Both flavours are
-// asserted, because the cap is read off the body's own line kinds: a diff body paints
-// diffDetailCap lines, any other multi-line body paints its first, and a body already inside its
-// cap paints whole with no marker at all.
+// and expanded blocks" — truncation is a render-time act on retained facts). One budget answers
+// for every body kind: a command's output and a diff alike paint collapsedBodyCap lines and count
+// the rest, and a body already inside the budget paints whole with no marker at all.
 func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 	diffLines := func(n int) string {
 		return strings.TrimSuffix(strings.Repeat("+ added\n", n), "\n")
@@ -777,25 +787,24 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 			wantPaint: []string{"    ok   a", "    … +3 more lines"},
 		},
 		{
-			name: "a diff body paints diffDetailCap lines and counts the rest",
+			name: "a diff body spends the same budget and counts the rest",
 			build: func(tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
-					Content: diffLines(diffDetailCap + 3), Summary: domain.DiffStat{Added: diffDetailCap + 3}}})
+					Content: diffLines(4), Summary: domain.DiffStat{Added: 4}}})
 			},
-			wantKept: diffDetailCap + 3,
-			wantPaint: append(strings.Split(strings.TrimSuffix(strings.Repeat("    + added\n", diffDetailCap), "\n"), "\n"),
-				"    … +3 more lines"),
+			wantKept:  4,
+			wantPaint: []string{"    + added", "    … +3 more lines"},
 		},
 		{
-			name: "a body inside its cap paints whole, with no marker",
+			name: "a body inside the budget paints whole, with no marker",
 			build: func(tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
-					Content: "- old line\n+ new line", Summary: domain.DiffStat{Added: 1, Removed: 1}}})
+					Content: "+ new line", Summary: domain.DiffStat{Added: 1}}})
 			},
-			wantKept:  2,
-			wantPaint: []string{"    - old line", "    + new line"},
+			wantKept:  1,
+			wantPaint: []string{"    + new line"},
 		},
 	}
 	for _, tc := range cases {
@@ -845,14 +854,14 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 			wantExpanded:  []string{"    ok   a", "    ok   b", "    ok   c", "    PASS"},
 		},
 		{
-			name: "a diff body expands past diffDetailCap",
+			name: "a diff body expands past the house budget",
 			build: func(tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
-					Content: diffContent(diffDetailCap + 3), Summary: domain.DiffStat{Added: diffDetailCap + 3}}})
+					Content: diffContent(collapsedBodyCap + 3), Summary: domain.DiffStat{Added: collapsedBodyCap + 3}}})
 			},
-			wantCollapsed: append(paintedDiff(diffDetailCap), "    … +3 more lines"),
-			wantExpanded:  paintedDiff(diffDetailCap + 3),
+			wantCollapsed: append(paintedDiff(collapsedBodyCap), "    … +3 more lines"),
+			wantExpanded:  paintedDiff(collapsedBodyCap + 3),
 		},
 	}
 	for _, tc := range cases {
@@ -2380,14 +2389,10 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"    ok   apogee/internal/tui     0.412s",
 		"    … +2 more lines",
 		"",
-		"✦ View Diff",
+		"✦ View Diff ▸",
 		"  ┕ main.go +2 -2",
 		"      func main() {",
-		"    -     fmt.Println(\"old\")",
-		"    -     return",
-		"    +     fmt.Println(\"new\")",
-		"    +     os.Exit(0)",
-		"      }",
+		"    … +5 more lines",
 		"",
 		"✦ mcp_search ▸",
 		"  ┕ {",

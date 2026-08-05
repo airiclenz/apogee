@@ -242,7 +242,25 @@ golden is ≤ 4 rows.
 
 ---
 
-## 4. One named collapsed budget; the diff joins it
+## 4. One named collapsed budget; the diff joins it — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): paint-cache key UNCHANGED — the cap is a compile-time constant, so no paint
+gained an input. Deviations, all recorded: (a) **`collapsedLimit` is deleted rather than made the
+constant's home** (item 3's NOTES asked for the latter). With one budget it had nothing left to
+decide, and a function that takes a body, ignores it and returns a constant is indirection that
+reads as a lie; `collapsedBodyCap` now goes straight to `collapseAtCap` from both `collapsedDetails`
+and `collapsedCall`, which is item 4's own text ("name the literal … and use it in
+`collapsedDetails`"). Verify with `grep -n "collapsedBodyCap" internal/tui/render.go` — the item's
+`limit := 1` grep was vacuous either way. (b) **`toolBody.diff`/`isDiff()` now has no production
+reader** — the diff cap was its one caller. The machinery stays untouched (deleting it is out of
+scope and item 5 names its tests as still-passing); flagged for item 7 or a later cleanup pass.
+(c) Two tests beyond the item's list had to move because a collapsed diff no longer shows two
+coloured lines: `TestRenderDiffDetailStandalone` and `TestRenderDiffMatchesLayoutSketch` now expand
+the block before asserting the body — both are about the body's colouring, which is an expanded
+fact now. (d) `TestTranscriptCodecSettlesTheBodyKindOnDecode` lost its cap-based assertion (the kind
+sizes nothing any more) and pins the constructor seam across the wire instead. (e) CHANGELOG —
+beyond the new sub-bullet, the existing `[Unreleased]` bullet still said a collapsed diff shows
+"its first 20"; corrected in place on items 1 and 3's precedent.
 
 **Decision (ratified 2026-08-04).** The collapsed diff body is capped at `diffDetailCap = 20`, so
 a collapsed `View Diff` block can stand 23 rows tall — the single largest outlier against the

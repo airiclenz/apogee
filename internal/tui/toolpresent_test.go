@@ -439,10 +439,11 @@ func TestDiffBody(t *testing.T) {
 		}
 	}
 
-	long := strings.TrimSuffix(strings.Repeat("+ added\n", diffDetailCap+5), "\n")
+	const longDiff = 25 // well past the collapsed budget: what is retained answers to no cap at all
+	long := strings.TrimSuffix(strings.Repeat("+ added\n", longDiff), "\n")
 	whole := diffBody(long)
-	if len(whole) != diffDetailCap+5 {
-		t.Fatalf("retained diff has %d lines, want every one of the %d", len(whole), diffDetailCap+5)
+	if len(whole) != longDiff {
+		t.Fatalf("retained diff has %d lines, want every one of the %d", len(whole), longDiff)
 	}
 	for i, d := range whole {
 		if d.Kind != detailDiffAdded {
@@ -633,20 +634,21 @@ func funcDeclNamed(file *ast.File, name string) *ast.FuncDecl {
 }
 
 // TestDiffStatSpansTheWholeDiff: the diffstat riding the branch describes the whole diff even
-// when the collapsed paint stops at diffDetailCap — a truncated paint cannot tell you how big
-// the change was, and the stat no longer comes from the body's lines at all but from the tool's
-// domain.DiffStat, counted over the diff operations themselves (internal/tools). The outcome
-// itself keeps every line, so what the paint hides is only hidden.
+// when the collapsed paint stops at the house budget (collapsedBodyCap) — a truncated paint
+// cannot tell you how big the change was, and the stat no longer comes from the body's lines at
+// all but from the tool's domain.DiffStat, counted over the diff operations themselves
+// (internal/tools). The outcome itself keeps every line, so what the paint hides is only hidden.
 func TestDiffStatSpansTheWholeDiff(t *testing.T) {
-	long := strings.TrimSuffix(strings.Repeat("+ added\n", diffDetailCap+5), "\n")
+	const longDiff = 25 // well past the collapsed budget, so the stat and the paint cannot agree by luck
+	long := strings.TrimSuffix(strings.Repeat("+ added\n", longDiff), "\n")
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, workspaceRoot{})
-	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: long, Summary: domain.DiffStat{Added: diffDetailCap + 5}}, workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: long, Summary: domain.DiffStat{Added: longDiff}}, workspaceRoot{})
 
-	if want := "+" + strconv.Itoa(diffDetailCap+5) + " -0"; tv.Summary.Text != want {
+	if want := "+" + strconv.Itoa(longDiff) + " -0"; tv.Summary.Text != want {
 		t.Errorf("diffstat = %q, want %q", tv.Summary.Text, want)
 	}
-	if tv.Details.len() != diffDetailCap+5 {
-		t.Errorf("body has %d lines, want the whole %d", tv.Details.len(), diffDetailCap+5)
+	if tv.Details.len() != longDiff {
+		t.Errorf("body has %d lines, want the whole %d", tv.Details.len(), longDiff)
 	}
 }
 

@@ -1080,11 +1080,17 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 	return out
 }
 
-// diffDetailCap bounds how many diff lines a COLLAPSED block paints — enough to read a focused
-// change, not enough for a rewrite to flood the transcript. It is a paint-time cap on a body
-// the entry keeps in full (layout.md, "Collapsed and expanded blocks"), which is why it lives
-// beside the painter and not beside diffBody, the producer that used to apply it.
-const diffDetailCap = 20
+// collapsedBodyCap is how many lines a COLLAPSED block paints of what it hides — the house
+// budget, and the one number behind "a collapsed block stands at most four rows tall": its
+// header, its branch, this many lines, and the remainder marker counting the rest. EVERY body
+// kind spends it, the diff included — the `+2 -2` riding the branch already says how big the
+// change is, so its hunks are worth a click rather than twenty permanent rows, and a block's
+// height in the scrollback no longer depends on which tool filled it (layout.md, "Collapsed and
+// expanded blocks").
+//
+// It is a paint-time cap on a body the entry keeps in full, which is why it lives beside the
+// painter and not beside diffBody, the producer that used to apply the diff's own.
+const collapsedBodyCap = 1
 
 // The collapsed prompt's numbers and wording (layout.md, "Collapsed and expanded blocks"). A
 // prompt whose body soft-wraps to MORE than promptCollapsedRows rows paints that many rows and
@@ -1145,16 +1151,16 @@ func splitAtCap[T any](lines []T, limit int) (shown []T, hidden int) {
 // hides something", which is what makes a header clickable (blockHidesWhenCollapsed, through
 // collapsedCall).
 //
-// The kind is READ, never re-derived here. This runs on every repaint and twice per call — the
-// toggle-target rule asks it as well as the branch — over a body the entry now retains whole, so
-// sniffing the lines at this seam would walk a command's whole output once a frame. It takes the
-// BODY, which is why reading rather than deriving is safe: the lines and the kind that caps them
-// are one value and cannot be handed in disagreeing.
+// ONE budget answers for every body: a command's output and a diff both keep collapsedBodyCap
+// lines, so nothing about the lines is examined at this seam. That is worth having — this runs on
+// every repaint and twice per call, since the toggle-target rule asks it as well as the branch
+// does, over a body the entry now retains whole; a cap read off the lines here would walk a
+// command's whole output once a frame.
 //
 // It is the BODY's collapsed paint; the targetless shape has no body and caps its branch list
 // instead, through the same cap and the same wording (collapsedCall).
 func collapsedDetails(body toolBody) (shown []detailLine, remainder detailLine, truncated bool) {
-	return collapseAtCap(body.all(), collapsedLimit(body))
+	return collapseAtCap(body.all(), collapsedBodyCap)
 }
 
 // collapsedCall is the collapsed paint of ONE call, whichever of the two shapes it takes — the
@@ -1165,25 +1171,13 @@ func collapsedDetails(body toolBody) (shown []detailLine, remainder detailLine, 
 // A call WITH a target caps its body, which is what lays out beneath the branch line. A call with
 // NO target caps its BRANCH list — body plus the summary closing it (branchDetails) — because
 // there the lines are the branches themselves and a block with no body still has rows to spend.
-// The cap is read off the body either way: a targetless call carrying a diff keeps a diff's
-// allowance, exactly as it would with a target to hang it under.
+// Which lines are cut is the only thing the shape decides; how many survive is collapsedBodyCap
+// either way, so neither shape can grow taller than the other.
 func collapsedCall(tv toolView) (shown []detailLine, remainder detailLine, truncated bool) {
 	if tv.Target == "" {
-		return collapseAtCap(branchDetails(tv), collapsedLimit(tv.Details))
+		return collapseAtCap(branchDetails(tv), collapsedBodyCap)
 	}
 	return collapsedDetails(tv.Details)
-}
-
-// collapsedLimit is how many lines a collapsed paint keeps, and the one place the caps live. Two
-// flavours, told apart by the kind the body settled when its lines were paired with it (toolBody,
-// toolpresent.go): a diff body — one carrying at least one tagged line, which every body diffBody
-// produces does — keeps diffDetailCap lines, so a focused change reads in place; any other body
-// keeps its first line alone, the gist a Run's output is worth in the chat.
-func collapsedLimit(body toolBody) int {
-	if body.isDiff() {
-		return diffDetailCap
-	}
-	return 1
 }
 
 // collapseAtCap cuts lines at a collapsed paint's cap and words what it leaves behind — the seam
