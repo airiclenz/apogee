@@ -8,34 +8,49 @@
 
 <!-- demo GIF / screenshots land here (pending the menu-layout work) -->
 
-A terminal-based coding agent built for **small, locally-run LLMs** (~4B–35B).
+A terminal coding agent, built **local-first**: capable with frontier models,
+engineered so even small, locally-run LLMs (~4B–35B) deliver.
 
 Apogee is a single, cross-platform tool that drops into any IDE's integrated
 terminal — or any standalone terminal — on Windows, macOS, and Linux. It runs
-against any OpenAI-compatible LLM server (llama.cpp, Ollama, LM Studio, vLLM), so
-your code stays on your machine, a local model needs no API key (and a keyed
-server is one `api-key:` away), and you get a full agentic tool-use loop with
-sensible guardrails.
+against any OpenAI-compatible endpoint: a local LLM server (llama.cpp, Ollama,
+LM Studio, vLLM) keeps your code on your machine and needs no API key, and a
+keyed one — a remote vLLM, an OpenAI-compatible cloud provider — is one
+`api-key:` away. Either way you get the full agentic tool-use loop, with
+autonomy fenced at the operating-system level rather than on trust.
 
 ## What this repo is
 
-Apogee brings together two things most coding agents keep separate:
+Apogee is built on three commitments:
 
-- **A complete agentic coding assistant** — the *agent loop*, with provider
-  abstraction, a ~21-tool suite (file ops, grep, git, terminal, web,
-  sub-agents, showing you a finished document), an MCP client, sessions, four
-  autonomy modes (Plan / Ask-Before / Allow-Edits / Auto), and security
-  guardrails.
-- **Self-regulating mechanisms for small models** — features that make small,
-  locally-run models measurably better at sustained agentic coding: context
-  compression, tool-call validation + auto-retry, behavioural nudges, and a
-  cross-session learning *Library*. Each is gated so it only fires when the model
-  needs it.
+- **A complete agent with a UX that gets out of your way.** The full agentic
+  loop — provider abstraction, a ~21-tool suite (file ops, grep, git, terminal,
+  web, sub-agents, showing you a finished document), an MCP client, sessions
+  that survive a crash — inside a terminal UI built with care: type your next
+  message while the model streams and queue it into the running task, recall
+  any prompt you have sent, collapse what you are done reading, click every
+  path it prints.
+- **Autonomy you can trust.** Four autonomy modes end in Auto, the unsupervised
+  one — and Auto is fenced at the operating-system level on all three platforms
+  (Linux landlock, macOS seatbelt, a restricted Windows token), not by a prompt
+  asking the model to behave. Where the OS genuinely cannot enforce the fence,
+  apogee asks before each command instead of running it unbounded.
+- **Small models stay first-class.** Gated mechanisms — context compression,
+  tool-call validation + auto-retry, behavioural nudges, a cross-session
+  learning *Library* — run *inside* the agent loop, where they have the most
+  leverage, and make small, locally-run models measurably better at sustained
+  agentic coding. Each fires only when the model needs it, and nothing is
+  carried forward on faith: every mechanism is A/B-tested against real local
+  models before it earns a place in the loop, and the same eval bench measures
+  any change to what a model sees — prompts, compaction, tool wording — so the
+  agent's behaviour is regression-tested like its code.
 
-These mechanisms run *inside* the agent loop, where they have the most leverage —
-not in a separate proxy. And nothing is carried forward on faith: every mechanism
-is measured and A/B-tested against real local models with an eval/simulation
-harness before it earns a place in the loop.
+Under the hood, apogee is an **embeddable engine**, and the TUI is its first
+front-end, not its identity. The whole loop is a Go library with no wire surface
+of its own: the eval bench already drives it in-process, and future front-ends —
+a headless runner, a scheduling daemon, other surfaces entirely — compose the
+same engine. That commitment is written down and binding — see
+[the north-star decision record](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md).
 
 Working on this repo *with* a coding agent? [`AGENTS.md`](AGENTS.md) is the
 agent-facing map — where the docs live, and the conventions that aren't derivable
@@ -82,10 +97,16 @@ next.
 
 ## Key capabilities
 
-- **Model-agnostic, local-first** — any OpenAI-compatible endpoint; zero data leaves
-  your machine with a local model.
+- **Local-first, cloud-capable** — any OpenAI-compatible endpoint: a local server
+  keeps every byte on your machine and needs no API key; a keyed one — a remote
+  vLLM, an OpenAI-compatible cloud provider — is one `api-key:` away.
 - **Agentic tool use** — multi-step loop with file edits, shell, search, git, web,
   and sub-agents.
+- **Four autonomy modes** — Plan (read-only), Ask-Before (writes need approval),
+  Allow-Edits (workspace-scoped writes auto-approved), Auto (autonomous, confined
+  at the OS level via Linux landlock / macOS seatbelt / a Windows low-integrity
+  token; where the OS cannot fence a command, Auto asks before it rather than
+  running it unbounded).
 - **Type — and select — while it works** — the prompt box stays live during a run: write
   your next message while the model streams, and press `⏎` to *queue* it. A queued message
   is delivered **into the running task** at the next tool boundary, so a remark like "also
@@ -109,11 +130,6 @@ next.
   is open: each firing runs headless in Plan or Auto mode and saves its own session,
   browsable like any other (tagged `⟳` in `/sessions`); `/schedule-stop` takes one
   off the clock.
-- **Four autonomy modes** — Plan (read-only), Ask-Before (writes need approval),
-  Allow-Edits (workspace-scoped writes auto-approved), Auto (autonomous, confined
-  at the OS level via Linux landlock / macOS seatbelt / a Windows low-integrity
-  token; where the OS cannot fence a command, Auto asks before it rather than
-  running it unbounded).
 - **Diagnosable without running an agent** — `apogee probe` reports what this host can
   do (backend, capability matrix, Auto verdict, roots, endpoint reachability) for free
   and offline; `apogee probe model` runs a capability battery against the model. See
@@ -130,7 +146,9 @@ next.
   model needs it, and enabled per model via Validated sets backed by bench evidence.
 - **Validated, not assumed** — every mechanism is A/B-tested against real local models
   via an eval/simulation bench (which imports Apogee as a Go library and drives
-  the real loop in-process) before it earns a place in the loop.
+  the real loop in-process) before it earns a place in the loop — and the same
+  bench guards every change to prompts, compaction, and tool wording against
+  regression.
 
 ## In-chat commands, skills, and file references
 
@@ -379,7 +397,7 @@ or LM Studio, activating a profile on a server that is already up), while starti
 managed `llama-server` or signalling one to stop reports a clean unsupported error. And a
 launcher on **another machine** is a different thing — reach that one as an
 `mcp-servers:` entry pointing at the launcher's MCP adapter; the two compose. See
-[ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md).
+[the launcher design record](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md).
 
 ### The system prompt
 
