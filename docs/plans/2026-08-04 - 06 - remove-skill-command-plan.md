@@ -369,3 +369,21 @@ wipe. Change, per the ratified design call:
 command is removed, which under 0.x SemVer practice is a minor-line event; the Go
 API is untouched; item 4's recall fix rides the same bump. Owner decides whether
 and when.
+
+## FOLLOW-UP FU1 (post-item-4) — Retire `/skill` from `docs/design/technical-design.md`
+
+Run-level follow-up work item, not a numbered plan item: the technical-design
+contract still documented the removed `/skill` picker. All three mentions
+(`:159`, `:245`, `:248`) were repointed to the surviving consumers.
+
+NOTES (2026-08-05): only `:248` — the prose sentence describing what the TUI attaches —
+names all three surviving consumers (inline `/<skill-id>` tokens extracted by `submitParse`,
+the merged `/` menu that offers them, `/skills` for browsing). `:159` (an API-surface table
+cell) and `:245` (a resolution-status heading) name only the inline `/<skill-id>` token form:
+both are terse locations identifying the *syntax* that fills `UserInput.SkillIDs`, not the
+entry points, so listing the menu and `/skills` there would state TUI facts the API table and
+the status line do not otherwise carry.
+
+NOTES (2026-08-05): the whole-file sweep for further now-false picker claims found none. The
+only other `picker` in the file (`:195`) denotes the surviving `picker.go` single-select overlay
+(`/model` + `/server` over `hb.models`) and was left untouched, as instructed.

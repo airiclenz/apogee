@@ -156,7 +156,7 @@ The shape is in [`apogee.go`](../../apogee.go). Summary:
 | Construct / resume | `New(Config)`, `Resume(Config, Session)`, `Agent.Close()` | 0001 |
 | Autonomy | `Mode` (Plan/Ask-Before/Allow-Edits/Auto), `Config.Bypass`, global `confine-to-workspace` | 0006, 0012 |
 | Drive the loop | `Submit(UserInput)`, `Step(ctx) → StepResult`, `Run(ctx)`, `StepStatus`; **`Interject(UserInput) error`** (2026-07-27) — commits a user message into the OPEN Exchange at the **between-Steps** boundary, the third engine-call class ([ADR 0025](../adr/0025-interjections-commit-at-the-between-steps-boundary.md), amending [ADR 0011](../adr/0011-tui-is-a-thin-renderer-over-a-worker-goroutine-engine.md)'s two): callable only by the goroutine driving `Step`, between Steps, where it owns the conversation — no mutex, the boundary IS the synchronization (the `Snapshot` precedent). Lands marked `Message.Interjected` so the derived opening skips it; refs/skills resolve at delivery; `Run` embedders who want it drive `Step` | 0007, 0025 |
-| Turn-local context | `UserInput.FileRefs` (`@file`) + `UserInput.SkillIDs` (`/skill`) → resolved and prepended to the user message; `Config.Skills SkillResolver` (`ResolvedSkill`) resolves the invoked skill IDs (disk catalog stays in `internal/skills`) | 0001, 0010 |
+| Turn-local context | `UserInput.FileRefs` (`@file`) + `UserInput.SkillIDs` (inline `/<skill-id>` tokens) → resolved and prepended to the user message; `Config.Skills SkillResolver` (`ResolvedSkill`) resolves the invoked skill IDs (disk catalog stays in `internal/skills`) | 0001, 0010 |
 | Observe | `EventSink.Emit(Event)`; sealed `Event` + 11 variants (token, reasoning, stream-reset, message, tool-call, tool-result, approval, mechanism-fired, error, usage, audit); `Depth` carries sub-agent nesting | 0001, 0005 |
 | Approve | `Approver.Approve(ctx, ApprovalRequest) → ApprovalDecision` | 0004 |
 | Ask | `Asker.Ask(ctx, AskRequest) → AskAnswer` — free-text Q&A host delegate for `ask_user` (P3.11), distinct from Approver; nil ⇒ `ask_user` not registered; struct-typed for freeze-safety | 0001 |
@@ -242,10 +242,12 @@ Spine of the TDD: each component, what's decided, what's undesigned. **D**=decid
    with ADR 0003's *constraint-declared* (hook = descriptor field, dynamic order). Plan
    already calls it "provisional." Lean toward a flat `internal/mechanisms` with hook-point
    as data. **Resolve when the catalogue→hook mapping session runs.**
-5. ⏳ **`UserInput` turn-local context resolution — `@file` + `/skill` RESOLVED, budgeting
+5. ⏳ **`UserInput` turn-local context resolution — `@file` + `/<skill-id>` RESOLVED, budgeting
    still deferred (2026-06-26; handoffs `… - 00 - chat-mini-language-core.md` and
-   `… - 01 - skills-system.md`).** The TUI parses `@file` tokens into `UserInput.FileRefs` and
-   attaches `/skill` picks into `UserInput.SkillIDs`; the loop now resolves both at Turn start —
+   `… - 01 - skills-system.md`).** The TUI's `submitParse` extracts `@file` tokens into
+   `UserInput.FileRefs` and inline `/<skill-id>` tokens into `UserInput.SkillIDs` (the merged `/`
+   menu offers both verbs and skill ids; `/skills` browses the catalog); the loop now resolves
+   both at Turn start —
    `resolveFileRefs` reads each file within the workspace fence (`security.SafeReadFile`), and
    `resolveSkillRefs` maps each ID through `Config.Skills` (the `internal/skills` catalog) —
    prepending the blocks to the user message (order: skills → file refs → text), replacing the
