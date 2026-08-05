@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-08-05
+
 ### Added
 
 - **The prompt box remembers what you have sent, and `↑` walks it back.** Press `↑` on an empty box
