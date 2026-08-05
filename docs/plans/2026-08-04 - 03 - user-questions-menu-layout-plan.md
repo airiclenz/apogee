@@ -197,6 +197,21 @@ what books the blank. Where the window leaves the body fewer rows than it wants,
 line, counted as ever in the "… (+N more lines)" marker; where the window cannot cover it at all it gives
 way whole, so every decision row this item put on the screen is still on it at every height.
 
+NOTES (2026-08-05): follow-up (run-level, owner-approved; not a plan item) — comments only, no behaviour change.
+Two doc comments this plan made false were re-derived from the code as it now stands. `approvalPrompt`'s guarantee
+paragraph still said the "… (+N more lines)" marker moves onto the TITLE row "when the window leaves the pane its
+irreducible four", citing a body budget of zero between 12 and 15 rows: with `popupBorderChrome` the pane's two
+borders are its whole frame, so out of the frame's four-row floor `popupBudget` leaves it two — and since the rows
+take at most `avail−1`, one of those two is always a body line. The marker is therefore always the body's own last
+row on this pane and never rides the border title; the corrected passage says so and cites the `maxBody == 1` branch
+of `TestModelApprovalNamesTheProseItCannotShow`, which already pins that placement. `popupBudget`'s own doc comment
+was corrected in three places it had gone stale: `rows`/`rowCap` are LINES rather than a row count (and are no longer
+"0 for the choiceless approval prompt" — that pane now has four decision rows); the chrome paragraph enumerated two
+constants where three are in use, so it now names `popupBorderChrome` and the pane that spends it; and the closing
+line's "still names itself in the title and says how to act in the hint" was true only of the `popupChrome` callers,
+so it now says which floor each of the three chromes reaches and why the approval menu is in neither of the
+title-marker cases.
+
 **What:** Rebuild the approval prompt on the new painter capabilities. In
 `internal/tui/model.go`:
 

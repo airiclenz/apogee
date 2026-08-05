@@ -3998,10 +3998,13 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 }
 
 // popupBudget derives the screen-budget caps overlay p hands renderPopup so the bordered pane never
-// pushes the input box off-screen (D2). rows is how many selectable rows are on offer and rowCap
-// the overlay's own cap on how many of them it shows at once (both 0 for the choiceless approval
-// prompt); maxRows caps the scrolled row window and maxBody the wrapped body block, both ≥ 0 and
-// both in renderPopup's zero-means-none sense. seated is false when the frame's allocation left
+// pushes the input box off-screen (D2). rows is what the pane's whole row list demands and rowCap
+// the overlay's own cap on how much of it it shows at once — both in the LINES that window paints
+// (popupSpec.maxRows' own denomination), which is the row COUNT exactly while every row is one line
+// and nothing is set off from anything: a spec that wraps its rows, gaps them or pads the block
+// states its demand through popupRowBlockLines instead (approvalPrompt, askPrompt). Both are 0 for a
+// pane with no rows on offer. maxRows caps the scrolled row window and maxBody the wrapped body
+// block, both ≥ 0 and both in renderPopup's zero-means-none sense. seated is false when the frame's allocation left
 // this pane no rows at all — a window too short to seat it beside its siblings — and the overlay
 // renders nothing rather than a pane drawn past the terminal's last row.
 //
@@ -4018,16 +4021,20 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // the siblings — which is what lets a renderer be called for a pane the Model's own flags have not
 // opened (the direct-call tests) and still be budgeted like the frame would budget it.
 //
-// Inside its grant the pane spends its chrome first (the 2 borders + the title + the hint), gives
-// the ROWS priority — they are what the human acts on — and lets the body have what is left,
-// overflowing into the explicit "… (+N more lines)" marker.
+// Inside its grant the pane spends its chrome first — whatever frame the spec it is about to compose
+// actually draws, which is the chrome parameter and not always the four rows of a titled, hinted
+// pane — gives the ROWS priority (they are what the human acts on) and lets the body have what is
+// left, overflowing into the explicit "… (+N more lines)" marker.
 //
 // chrome is what that frame costs the pane, and it is the CALLER's because only the caller knows the
-// spec it is about to compose: popupChrome for a pane whose title takes a row of its own, and
-// popupTitleBorderChrome for one whose title rides the top border (popupSpec.titleInBorder), where
-// the row the border took back is spent on the pane's own content rather than left unclaimed. It is
-// also what "seated" is measured against, so a pane is refused only on a grant its own chrome cannot
-// fit in.
+// spec it is about to compose. All three constants are in use: popupChrome where the title takes a
+// content row of its own and a hint row spells the keys below the list (the /sessions browser, the
+// picker, the autocomplete dropdown); popupTitleBorderChrome where the title rides the top border
+// (popupSpec.titleInBorder) and the hint alone keeps a row (askPrompt); and popupBorderChrome where
+// neither does — the approval menu writes its shortcut letters beside the options they take, so its
+// two borders are its whole frame (approvalPrompt). Each spends the row it saved on the pane's own
+// content rather than leaving it unclaimed. chrome is also what "seated" is measured against, so a
+// pane is refused only on a grant its own chrome cannot fit in.
 //
 // BOTH caps floor at ZERO rather than at a comfortable minimum, and that is the point of them: a
 // row floor of 6 on a window with 4 rows to give promised a pane the frame could not hold, and the
@@ -4036,10 +4043,18 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // a boxed overlay's chrome is 4, so the ask and approval prompts overflowed the shortest window a
 // pane fits in at all (12 rows — the fixed chrome below the transcript is 8) by exactly one row
 // while the browser fitted. A budget that shrinks to nothing lets the TRANSCRIPT shrink to nothing
-// instead, which is the outcome D2 asks for; a pane that can spare neither rows nor body still
-// names itself in the title and says how to act in the hint — and when the zero budget dropped
-// prose, that title row also carries the "… (+N more lines)" marker (popupTitleLine), so shrinking
-// costs the body but never the fact that there is one.
+// instead, which is the outcome D2 asks for.
+//
+// WHICH nothing a pane reaches at the four-row floor follows from the chrome it spends, because the
+// arithmetic below leaves the rows at most avail−1 lines and the body whatever that did not take. A
+// popupChrome pane is down to BOTH zeros there: it still names itself in its title row and says how
+// to act in its hint row, and everything it dropped — prose and rows alike — is counted onto that
+// title (popupTitleLine). A popupTitleBorderChrome pane keeps one body line, so the ask prompt's
+// question holds a row (the marker's row, where the question does not fit) while an offering with no
+// window left rides the border instead. A popupBorderChrome pane keeps two, one body line and one
+// row, so the approval menu is in neither case: its count stays in its body and a decision stays on
+// the screen. Shrinking costs the prose, and the rows outside the window, but never the fact that
+// there are some.
 func (m Model) popupBudget(p framePane, rows, rowCap, chrome int) (maxBody, maxRows int, seated bool) {
 	granted := m.frameRowPlan(m.openPanes().with(p)).panes[p]
 	if granted < chrome {
@@ -4083,12 +4098,19 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int) (maxBody, maxR
 // no pane can promise that on a terminal with four rows to give. It is that the human is never
 // asked to decide against text the pane hid WITHOUT SAYING SO: the module word-wraps the reason
 // rather than clipping it, and whatever it cannot seat it counts out in the "… (+N more lines)"
-// marker — the body block's last row while it has one, and the TITLE row when the window leaves the
-// pane its irreducible four (popupBudget grants no body rows between 12 and 15 rows, where a fifth
-// would push the input box off the frame). On a pane too narrow to seat the tool name beside the
-// full phrase the count is stated in fewer words rather than clipped off the row (popupTitleLine),
-// because the terminal that is short is usually the one that is narrow. So the title always carries
-// the identity the decision turns on, and says when there is more to read than it is showing.
+// marker, on the body block's own last row. On THIS pane that row is always there, and the count
+// never has to fall back onto the pane's name the way a titled pane's does (popupTitleLine). The
+// chrome above is why: the frame's per-pane floor is four rows (frameRowPlan), the two borders are
+// the whole of what this pane spends out of them, and popupBudget hands the rows at most one line
+// less than what is left — so a seated approval prompt has ONE body line and ONE decision row at
+// every window it is drawn in. At that floor the body line IS the marker, every line of the reason
+// and the arguments dropped and the pane stating how many
+// (TestModelApprovalNamesTheProseItCannotShow pins the placement, reading it off the row directly
+// under the border). On a pane too narrow to seat the full phrase the count sheds its noun rather
+// than being clipped off the end (popupElisionMarkerFitting), because the terminal that is short is
+// usually the one that is narrow. So the border always carries the identity the decision turns on,
+// the row beneath it says when there is more to read than the pane is showing, and a decision the
+// human can act on is on the screen at every height.
 //
 // "Always" is total because the PANE is: the frame seats it last of all the surfaces and the input
 // box's draft rows give way to it (draftRowsCeiling), so there is no window a pane can be drawn in
