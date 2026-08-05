@@ -84,7 +84,7 @@ a safety flow):
 
 Any authorized deviation from item text lands as a dated NOTES line under the item.
 
-## 1. ADR 0035 + CONTEXT.md term: ratify the settings surface
+## 1. ADR 0035 + CONTEXT.md term: ratify the settings surface — ✅ DONE (2026-08-05)
 
 **What:** Write `docs/adr/0035-the-settings-surface-persists-one-key-per-deliberate-edit.md`
 recording the calls above: the full-height pane class (frame floor intact), persist-per-edit

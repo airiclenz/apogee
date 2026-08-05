@@ -395,6 +395,32 @@ by an explicit user act (`/confine off --save`); an unknown id is "not this host
 _Avoid_: "trusted host" (it is not a trust store, and nothing is verified), "whitelist",
 "per-host confine-to-workspace" (the key is global; only the acknowledgement is host-scoped).
 
+**Settings surface** (`/settings`):
+The **full-height pane over the key registry** — the in-app view of `~/.apogee/config.yaml`. The
+**key registry** is one declarative table describing every config key (path, kind, default,
+env-var and flag names, global-only, restart-required, editability, masking, one-line description);
+both the pane and [Resolution](#safety-and-autonomy)'s multi-source precedence read their metadata
+from it, and a reflection **bijection guard** against `fileConfig`'s yaml tags makes a schema key
+without a registry row a test failure — the screen cannot drift from the schema. The pane claims
+the **entire transcript row budget** while the frame floor (status line, input box, footer) stays
+drawn — a new pane class, `layout.md`'s first surface allowed to take all of it — lists every key
+with its resolved value and source marker, and **persists one key per committed edit**: spliced
+into the file comment-preserving, re-parsed and verified against the original apart from the target
+path, written atomically; an inserted key lands below its commented example, and **reset deletes
+the key's active line** rather than writing today's default. v1 edits **simple keys only**
+(bool / int / string / enum) — structured blocks render read-only with an "edit in config.yaml"
+pointer, `confine-to-workspace` / `unconfined-hosts` are display-only (that loosen stays
+single-homed in **`/confine`**), and **`mode` is the only live apply** (every other edit is marked
+"(next launch)"; the pane never rebinds a model or server). Idle-only. It **reconciles** the
+standing "apogee never writes your config" claims (seeding never overwrites, Probe prints
+paste-ready YAML, `/model` does not rewrite the file): never *unprompted* — a settings-screen edit
+is a deliberate user act and names the file and entry it changed, the same fence ADR 0012 applies
+to `/confine off --save`. See
+[ADR 0035](docs/adr/0035-the-settings-surface-persists-one-key-per-deliberate-edit.md).
+_Avoid_: "settings menu" / "preferences dialog" (it is a pane inside the frame, not a modal
+takeover), "config editor" (it edits declared scalar keys through a verified splice; it is not a
+text editor for the file), "auto-sync" (no boot-time key syncing exists — rejected in ADR 0035).
+
 **Safety guardrails**:
 Apogee's production safety set: Agent modes, Approval, path-safety (TOCTOU-safe at use time via a
 Go 1.26 `os.Root` pinned at the workspace root — `security.SafeWriteFile`/`SafeReadFile`, so an
