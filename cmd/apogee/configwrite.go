@@ -346,17 +346,22 @@ func hostsAppended(before, after []unconfinedHost, entry unconfinedHost) bool {
 	return after[len(after)-1] == entry
 }
 
-// sameApartFrom reports whether two parsed configs agree on every setting but the one at the given
-// dotted registry path — the guarantee that a textual splice touched nothing else. The path is
+// sameApartFrom reports whether two parsed configs agree on every setting but the ones at the given
+// dotted registry paths — the guarantee that a textual splice touched nothing else. Each path is
 // blanked in both copies and what is left is compared whole, so a key the line arithmetic clipped,
 // reordered or re-typed shows up as a difference even though the writer never meant to touch it.
 //
+// One path is the ordinary case, an edit being one setting; the legacy migration passes two,
+// because folding the retired keys writes `servers:` and `server:` as a single change.
+//
 // A path the schema does not have reports false: the comparison it was asked for cannot be made,
 // and a verification step that cannot verify must refuse.
-func sameApartFrom(before, after fileConfig, path string) bool {
+func sameApartFrom(before, after fileConfig, paths ...string) bool {
 	b, a := before, after
-	if !zeroConfigPath(reflect.ValueOf(&b).Elem(), path) || !zeroConfigPath(reflect.ValueOf(&a).Elem(), path) {
-		return false
+	for _, path := range paths {
+		if !zeroConfigPath(reflect.ValueOf(&b).Elem(), path) || !zeroConfigPath(reflect.ValueOf(&a).Elem(), path) {
+			return false
+		}
 	}
 	return reflect.DeepEqual(b, a)
 }

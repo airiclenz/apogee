@@ -183,7 +183,7 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 	// 4. A fresh resolution over that config: unconfined here, confined anywhere else.
 	// ------------------------------------------------------------------
 
-	file, err := loadFileConfig(configPath, os.ReadFile)
+	file, err := loadFileConfig(configPath, os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("re-read the saved config: %v", err)
 	}

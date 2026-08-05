@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -920,12 +921,14 @@ type unconfinedHost struct {
 // local-server default; an empty model leaves that server's discovery hint unset, so whatever it
 // serves is bound. APIKey is FILE-ONLY on purpose: APOGEE_API_KEY is a single value and it belongs
 // to the STARTUP server (the top-level `endpoint:`), so a keyed alternative carries its own key
-// here rather than borrowing that one.
+// here rather than borrowing that one. They carry `omitempty` because this type is also RENDERED
+// into a config file — the legacy migration writes an entry through the marshaller (configmigrate.go)
+// — and an optional field the user never set must not come back as an empty line in their file.
 type serverEntry struct {
 	Name     string `yaml:"name"`
 	Endpoint string `yaml:"endpoint"`
-	APIKey   string `yaml:"api-key"`
-	Model    string `yaml:"model"`
+	APIKey   string `yaml:"api-key,omitempty"`
+	Model    string `yaml:"model,omitempty"`
 }
 
 // validateServers rejects an entry that could never be switched to, at the startup boundary where
@@ -1261,11 +1264,14 @@ func (fc fileConfig) layer() layer {
 // hard error: silently ignoring it would mask a typo'd setting. readFile is injected so
 // the loader is testable without touching the filesystem.
 //
-// A config still written in the retired schema is refused here, before the layer is built: the
+// A config still written in the retired schema is migrated here, before the layer is built: the
 // decoder ignores keys the struct no longer has, so without the sniff a working `endpoint:` would
 // simply stop being read and the session would report no server configured, with nothing pointing
-// at the four lines that ARE the configuration.
-func loadFileConfig(path string, readFile func(string) ([]byte, error)) (layer, error) {
+// at the four lines that ARE the configuration. This is the one place the loader can WRITE — the
+// one-time fold of ADR 0036 decision 9, which rewrites path itself and announces the change through
+// notify; a file already in the new schema is never touched, so the write happens at most once per
+// config and the injected readFile stays the only reader on every other launch.
+func loadFileConfig(path string, readFile func(string) ([]byte, error), notify func(string)) (layer, error) {
 	if path == "" {
 		return layer{}, nil
 	}
@@ -1276,12 +1282,16 @@ func loadFileConfig(path string, readFile func(string) ([]byte, error)) (layer, 
 		}
 		return layer{}, fmt.Errorf("apogee: read config %q: %w", path, err)
 	}
+	data, note, err := migrateLegacyConfig(path, data, time.Now())
+	if err != nil {
+		return layer{}, err
+	}
+	if note != "" {
+		notify(note)
+	}
 	var fc fileConfig
 	if err := yaml.Unmarshal(data, &fc); err != nil {
 		return layer{}, fmt.Errorf("apogee: parse config %q: %w", path, err)
-	}
-	if err := sniffLegacyKeys(data, path); err != nil {
-		return layer{}, err
 	}
 	return fc.layer(), nil
 }
@@ -1293,8 +1303,9 @@ func loadFileConfig(path string, readFile func(string) ([]byte, error)) (layer, 
 // understanding is indistinguishable from one that never said anything.
 //
 // Nothing resolves from it. Its only job is to answer "was this file written in the old schema,
-// and what did it say" — the two facts the migration needs, whether it is spelled out for the user
-// to paste (today) or performed for them by ADR 0036's one-time verified rewrite.
+// and what did it say" — the two facts the migration needs, both when it performs the one-time
+// verified rewrite for the user (configmigrate.go) and when it has to refuse and spell the
+// replacement out for them to paste.
 type legacyFileConfig struct {
 	Endpoint  string `yaml:"endpoint"`
 	APIKey    string `yaml:"api-key"`
@@ -1322,9 +1333,9 @@ func (lc legacyFileConfig) name() string {
 }
 
 // block renders the retired keys as the `servers:` entry and `server:` pointer that replace them —
-// the paste-able answer that makes the refusal below a two-minute edit rather than a research task.
-// The api key is echoed back because it is part of the configuration being moved; it came out of
-// this same file and goes back into it.
+// the paste-able answer that makes a refused migration a two-minute edit rather than a research
+// task. The api key is echoed back because it is part of the configuration being moved; it came out
+// of this same file and goes back into it.
 func (lc legacyFileConfig) block() string {
 	var b strings.Builder
 	name := lc.name()
@@ -1339,23 +1350,6 @@ func (lc legacyFileConfig) block() string {
 	}
 	b.WriteString("\nserver: " + name + "\n")
 	return b.String()
-}
-
-// sniffLegacyKeys refuses a config still written in the retired schema, with the replacement block
-// spelled out. It is a hard error rather than a silent fold because the fold rewrites the user's
-// own file: ADR 0036's one-time migration — verified against the original, backed up and announced
-// — is not wired yet, and until it is, the honest answer is to say exactly what to paste.
-func sniffLegacyKeys(data []byte, path string) error {
-	var lc legacyFileConfig
-	if err := yaml.Unmarshal(data, &lc); err != nil {
-		return fmt.Errorf("apogee: parse config %q: %w", path, err)
-	}
-	if lc.isEmpty() {
-		return nil
-	}
-	return fmt.Errorf("apogee: %s still uses the retired top-level endpoint:/api-key:/host-alias:/model: "+
-		"keys — the servers: list is now the single definition of the servers you run models on.\n\n"+
-		"Delete those keys and put this in their place:\n\n%s", path, lc.block())
 }
 
 // ----------------------------------------------------------------------------
@@ -1476,7 +1470,9 @@ func overrideSources(changed func(string) bool, getenv func(string) string) map[
 // This is where the live machine identity enters resolution: platform.HostID() selects the
 // Host acknowledgement, if any, that applies on this host (ADR 0012, amendment 2026-07-21).
 // notify receives resolution's soft notices — a malformed acknowledgement is reported and
-// skipped, never fatal — on stderr, like the other pre-TUI startup lines.
+// skipped, never fatal — on stderr, like the other pre-TUI startup lines. The one-time legacy
+// migration announces itself the same way (loadFileConfig): a file apogee rewrote on the user's
+// behalf must say so where they will see it.
 //
 // One error is deliberately returned LAST, after every value has been written back:
 // [startupUndetermined], the refusal that says the config could not name a startup server. Every
@@ -1492,7 +1488,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 		}
 	}
 
-	file, err := loadFileConfig(configFilePath(opts.configDir), readFile)
+	file, err := loadFileConfig(configFilePath(opts.configDir), readFile, notify)
 	if err != nil {
 		return err
 	}

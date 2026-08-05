@@ -1138,9 +1138,11 @@ func TestStartupOverrideSourcesBindTheDetachedNames(t *testing.T) {
 	}
 }
 
-// A config still written in the retired schema is refused with the block that replaces it, key by
-// key: the decoder ignores keys fileConfig no longer has, so without the sniff a working endpoint
-// would simply stop being read.
+// A config in the retired schema that CANNOT be folded for the user is refused with the block that
+// replaces it, key by key: the decoder ignores keys fileConfig no longer has, so without the sniff
+// a working endpoint would simply stop being read. Every case here has no endpoint: to move, so
+// there is no entry to fold into — the configs the migration DOES rewrite are in
+// configmigrate_test.go.
 func TestApplyConfigRefusesTheRetiredKeys(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1149,14 +1151,9 @@ func TestApplyConfigRefusesTheRetiredKeys(t *testing.T) {
 		wantParts  []string
 	}{
 		{
-			name:       "endpoint alone",
-			configYAML: "endpoint: http://box:1111\n",
-			wantParts:  []string{"retired top-level", "servers:", "- name: box", "endpoint: http://box:1111", "server: box"},
-		},
-		{
 			name:       "api-key alone",
 			configYAML: "api-key: sk-secret\n",
-			wantParts:  []string{"retired top-level", "api-key: sk-secret"},
+			wantParts:  []string{"retired top-level", "servers:", "api-key: sk-secret"},
 		},
 		{
 			name:       "host-alias alone names the entry",
@@ -1169,12 +1166,10 @@ func TestApplyConfigRefusesTheRetiredKeys(t *testing.T) {
 			wantParts:  []string{"retired top-level", "model: qwen"},
 		},
 		{
-			name: "the whole quadruple folds into one entry",
-			configYAML: "endpoint: http://box:1111\napi-key: sk-secret\nhost-alias: the-box\nmodel: qwen\n" +
-				"mode: plan\n",
+			name:       "the quadruple without its endpoint",
+			configYAML: "api-key: sk-secret\nhost-alias: the-box\nmodel: qwen\nmode: plan\n",
 			wantParts: []string{
-				"- name: the-box", "endpoint: http://box:1111", "api-key: sk-secret", "model: qwen",
-				"server: the-box",
+				"no endpoint:", "- name: the-box", "api-key: sk-secret", "model: qwen", "server: the-box",
 			},
 		},
 	}
@@ -2472,7 +2467,7 @@ func TestApplyConfigBadBypassEnvErrors(t *testing.T) {
 // An absent config file is not an error — a config file is optional.
 func TestLoadFileConfigAbsentIsEmpty(t *testing.T) {
 	t.Parallel()
-	l, err := loadFileConfig(filepath.Join(t.TempDir(), "config.yaml"), os.ReadFile)
+	l, err := loadFileConfig(filepath.Join(t.TempDir(), "config.yaml"), os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("absent config: unexpected error %v", err)
 	}
@@ -2486,7 +2481,7 @@ func TestLoadFileConfigReadErrorPropagates(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("permission denied")
 	readFile := func(string) ([]byte, error) { return nil, boom }
-	_, err := loadFileConfig("/some/config.yaml", readFile)
+	_, err := loadFileConfig("/some/config.yaml", readFile, noNotify)
 	if err == nil || errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("read error = %v; want it propagated (not treated as absent)", err)
 	}

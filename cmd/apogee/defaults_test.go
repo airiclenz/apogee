@@ -69,7 +69,7 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 	if err := os.WriteFile(path, defaultConfigYAML, 0o600); err != nil {
 		t.Fatalf("write embedded: %v", err)
 	}
-	l, err := loadFileConfig(path, os.ReadFile)
+	l, err := loadFileConfig(path, os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("embedded default config does not parse: %v", err)
 	}

@@ -386,7 +386,27 @@ passes.
 
 **Commit:** `feat(server): a /server switch records the startup choice in config.yaml`
 
-## 9. One-time migration — verified rewrite, backup, announce
+## 9. One-time migration — verified rewrite, backup, announce — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): the fold needs three seams the item's text does not name. `loadFileConfig` gained a
+`notify` parameter — the announce line is a startup notice and rides the channel `applyConfig` already has
+for them, rather than a second one. `sameApartFrom` became variadic: the fold is ONE edit that changes two
+keys (`servers:` and `server:`), so the whole-file verify has to forgive exactly that pair. And
+`serverEntry`'s `api-key`/`model` tags gained `omitempty`, because the migrated entry is RENDERED through
+the marshaller (single definition of the field names and the quoting) and an optional field the old config
+never set must not come back as an empty line.
+
+NOTES (2026-08-05): two refusals beyond the two the item names (verify failure, name collision). A quadruple
+with no `endpoint:` among it — `api-key:`/`model:` alone, which used to lean on `APOGEE_ENDPOINT` — folds
+into an entry that names no server, so it falls back to the paste-able error instead. So does a file that
+already sets `server:`: the pointer the fold writes would replace a startup choice the user made
+deliberately. Both leave the file and the home untouched, like every other refusal.
+
+NOTES (2026-08-05): the entry is placed below the WHOLE commented `servers:` example
+(`commentedExampleBlockEnd`, the call a nested key's absent block already makes), not below its first line:
+a `servers:` example is several lines of commented list, and ADR 0035's insert-below-example rule would
+otherwise wedge the real block into the middle of its own documentation. The `server:` pointer rides the
+ordinary scalar writer (`setScalarSetting`), which places and verifies it by that same rule.
 
 **What:** Depends on items 3 and 8 (splice machinery in `cmd/apogee/configwrite.go`).
 Upgrade item 3's legacy-sniff hard error into the ratified auto-rewrite, TUI and

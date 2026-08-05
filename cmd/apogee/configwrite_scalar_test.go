@@ -729,3 +729,43 @@ func TestConfigWriteSameApartFrom(t *testing.T) {
 		})
 	}
 }
+
+// The legacy migration changes two keys as one edit, so it verifies against two paths: both are
+// forgiven together, and a third difference is still caught — a forgiven path must not become a
+// licence to rewrite the file.
+func TestConfigWriteSameApartFromTwoPaths(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name   string
+		before string
+		after  string
+		want   bool
+	}{
+		{
+			name:   "the fold's own two keys",
+			before: "mode: auto\n",
+			after:  "mode: auto\nservers:\n  - name: box\n    endpoint: http://box:1111\nserver: box\n",
+			want:   true,
+		},
+		{
+			name:   "one path forgiven does not forgive the other keys",
+			before: "mode: auto\n",
+			after:  "mode: plan\nservers:\n  - name: box\n    endpoint: http://box:1111\nserver: box\n",
+			want:   false,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var b, a fileConfig
+			if err := yaml.Unmarshal([]byte(tt.before), &b); err != nil {
+				t.Fatalf("parse before: %v", err)
+			}
+			if err := yaml.Unmarshal([]byte(tt.after), &a); err != nil {
+				t.Fatalf("parse after: %v", err)
+			}
+			if got := sameApartFrom(b, a, "servers", "server"); got != tt.want {
+				t.Errorf(`sameApartFrom(..., "servers", "server") = %v, want %v`, got, tt.want)
+			}
+		})
+	}
+}
