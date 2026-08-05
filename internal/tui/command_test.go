@@ -36,29 +36,23 @@ func TestParseInputCommands(t *testing.T) {
 
 // TestCommandTableDrivesParserAndMenu pins the one-registry guarantee: commandSpecs is the only
 // list of "/" verbs, so a verb can never be offered by the dropdown while the parser has never
-// heard of it (or vice versa). Exactly the non-menuOnly rows parse; every row is offered.
+// heard of it (or vice versa). Every row parses, and every row is offered.
 func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 	for _, spec := range commandSpecs {
 		t.Run(spec.name, func(t *testing.T) {
 			verb, _, ok := matchCommand("/" + spec.name)
-			if ok == spec.menuOnly {
-				t.Fatalf("matchCommand(%q) recognised = %v, want %v (menuOnly = %v)",
-					"/"+spec.name, ok, !spec.menuOnly, spec.menuOnly)
+			if !ok {
+				t.Fatalf("matchCommand(%q) was not recognised; every registry row parses", "/"+spec.name)
 			}
-			if ok && verb != spec.name {
+			if verb != spec.name {
 				t.Errorf("matchCommand(%q) verb = %q, want %q", "/"+spec.name, verb, spec.name)
 			}
 		})
 	}
 
-	// The parser's verb set survived the merge intact: every real command, and /skill
-	// offered by the menu alone.
-	var parsed, menuOnly []string
+	// The parser's verb set survived the merge intact: every row of the registry is a real command.
+	var parsed []string
 	for _, spec := range commandSpecs {
-		if spec.menuOnly {
-			menuOnly = append(menuOnly, spec.name)
-			continue
-		}
 		parsed = append(parsed, spec.name)
 	}
 	wantParsed := []string{
@@ -66,9 +60,6 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		"schedule-stop", "server", "sessions", "skills", "stop-server", "unload-model", "version"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
 		t.Errorf("parser verbs = %v, want %v", parsed, wantParsed)
-	}
-	if !reflect.DeepEqual(menuOnly, []string{"skill"}) {
-		t.Errorf("menu-only verbs = %v, want [skill]", menuOnly)
 	}
 
 	// The empty partial lists EVERY row, in table order, with its cells read off the same table — no
@@ -96,10 +87,7 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 
 // TestCommandSpecsReadAlphabetically pins the dropdown's order at its source. The table IS the
 // display order — commandSuggestions renders it as it stands, no render-time sort — so a verb added
-// in the wrong place would quietly un-sort the menu; this fails loudly instead. The table comment's
-// one ordering dependency rides along for free: /skill sorts before /skills because a strict prefix
-// always precedes the name extending it, which is why alphabetical order needs no exception (the
-// completion BEHAVIOUR that rests on it is TestCommandDropdownOffersSkill's).
+// in the wrong place would quietly un-sort the menu; this fails loudly instead.
 func TestCommandSpecsReadAlphabetically(t *testing.T) {
 	names := make([]string, 0, len(commandSpecs))
 	for _, spec := range commandSpecs {
@@ -108,9 +96,6 @@ func TestCommandSpecsReadAlphabetically(t *testing.T) {
 
 	if !slices.IsSorted(names) {
 		t.Errorf("commandSpecs order = %v, want alphabetical", names)
-	}
-	if skill, skills := slices.Index(names, "skill"), slices.Index(names, "skills"); skill >= skills {
-		t.Errorf("/skill at %d, /skills at %d; the picker verb must come first (%v)", skill, skills, names)
 	}
 }
 
@@ -252,7 +237,7 @@ func TestParseInputSoleUnknownSlash(t *testing.T) {
 		{"typo'd skill id", "/code-adit", kindUnknownSlash},
 		{"typo'd command verb", "/comapct", kindUnknownSlash},
 		{"whitespace around it still counts", "  /code-adit  ", kindUnknownSlash},
-		{"the menu verb is guarded too", "/skill", kindUnknownSlash},
+		{"the retired picker verb is an unknown word like any other", "/skill", kindUnknownSlash},
 		{"a lone path names nothing either", "/usr/local/bin", kindUnknownSlash},
 		{"a real command is a command", "/clear", kindCommand},
 		{"a known skill token is a message", "/grill-me", kindMessage},
@@ -279,22 +264,14 @@ func TestParseInputSoleUnknownSlash(t *testing.T) {
 	}
 }
 
-// The note names the word that failed to resolve — a typo is fixed by seeing it — while the one
-// menuOnly verb earns its usage line instead, because it resolves fine and only wants an argument.
+// The note names the word that failed to resolve — a typo is fixed by seeing it. The retired
+// /skill picker verb has no special case left: a sole "/skill" earns the same generic refusal as
+// any other word naming nothing.
 func TestUnknownSlashNote(t *testing.T) {
-	if got := unknownSlashNote("/code-adit"); !strings.Contains(got, "/code-adit") || !strings.Contains(got, "unknown command or skill") {
-		t.Errorf("unknownSlashNote(/code-adit) = %q, want it to name the token as unknown", got)
-	}
-	if got := unknownSlashNote("/skill"); got != skillPickerUsage {
-		t.Errorf("unknownSlashNote(/skill) = %q, want the picker usage %q", got, skillPickerUsage)
-	}
-	// Drift guard: every menuOnly verb is a real entry point, so none of them may be called unknown.
-	for _, spec := range commandSpecs {
-		if !spec.menuOnly {
-			continue
-		}
-		if got := unknownSlashNote("/" + spec.name); strings.Contains(got, "unknown command or skill") {
-			t.Errorf("menu verb /%s is refused as unknown (%q); it needs its own usage line", spec.name, got)
+	for _, token := range []string{"/code-adit", "/skill"} {
+		got := unknownSlashNote(token)
+		if !strings.Contains(got, token) || !strings.Contains(got, "unknown command or skill") {
+			t.Errorf("unknownSlashNote(%s) = %q, want it to name the token as unknown", token, got)
 		}
 	}
 }

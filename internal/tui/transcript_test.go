@@ -674,7 +674,7 @@ func TestAutocompleteRowsStripEscapes(t *testing.T) {
 	}
 
 	for _, item := range m.skillSuggestions("", "") {
-		assertNoESCIn(t, "a /skill picker row", item.cells...)
+		assertNoESCIn(t, "a skill suggestion row", item.cells...)
 	}
 	for _, item := range m.slashSuggestions("rev", "") {
 		assertNoESCIn(t, "a merged \"/\" menu row", item.cells...)

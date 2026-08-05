@@ -526,29 +526,6 @@ func TestUnknownSlashWithMoreWordsStillSends(t *testing.T) {
 	}
 }
 
-// A bare "/skill" is a menu verb, not a typo, so it earns the picker's usage line instead. The
-// dropdown intercepts ⏎ while it is open (TestEnterOnSkillCommandDoesNotSubmit); this is the path
-// where it is not — the overlay dismissed at idle, or a mid-run box where it never opens.
-func TestBareSkillVerbTeachesThePicker(t *testing.T) {
-	eng := &fakeEngine{}
-	m := newTestModelEng(t, eng, skillOpts())
-	m.input.SetValue("/skill")
-	m, cmd := stepCmd(t, m, keyEnter())
-
-	if m.state != stateIdle || cmd != nil {
-		t.Fatalf("a bare /skill drove something: state = %v, cmd != nil = %v", m.state, cmd != nil)
-	}
-	if got := eng.submits(); got != 0 {
-		t.Errorf("Submit calls = %d, want 0 — /skill is never sent as a literal message", got)
-	}
-	if got := m.input.Value(); got != "/skill" {
-		t.Errorf("input = %q, want the verb kept so an argument can be typed after it", got)
-	}
-	if n := countNotes(m, skillPickerUsage); n != 1 {
-		t.Errorf("usage notes = %d, want exactly 1; notes = %q", n, noteTexts(m))
-	}
-}
-
 // ----------------------------------------------------------------------------
 // Autocomplete overlay
 // ----------------------------------------------------------------------------
@@ -1028,7 +1005,7 @@ func TestCaretToken(t *testing.T) {
 		})
 	}
 	// A caret INSIDE a run of whitespace stands in no word at all: the range comes back empty, and
-	// every region but the "/skill " picker (whose partial is legitimately empty) declines it.
+	// every region declines it.
 	if start, end := caretToken("fix  it", 4); start != end {
 		t.Errorf("caretToken on whitespace = [%d,%d), want an empty range", start, end)
 	}

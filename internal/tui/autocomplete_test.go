@@ -26,30 +26,31 @@ func newDropdownModel(t *testing.T, opts Options) Model {
 	return step(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 }
 
-// The skill dropdown is painted with the shared popup chrome: a "skills" title row, the rounded
+// A dropdown carrying a skill row is painted with the shared popup chrome: a title row, the rounded
 // box border, and the ❯ marker on the selected row — all above the bottom input chrome.
 func TestAutocompleteSkillDropdownChrome(t *testing.T) {
 	m := newDropdownModel(t, skillOpts())
-	m.input.SetValue("/skill ")
+	// "zzz" is the draft's own marker word — no menu row can carry it, so its position in the view
+	// is the input box's. No command verb has the "clean" prefix, so the sole row is the skill's.
+	m.input.SetValue("zzz /clean")
 	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 
 	view := plain(m.View())
-	if !strings.Contains(view, "skills") {
-		t.Errorf("View is missing the \"skills\" title row:\n%s", view)
+	if !strings.Contains(view, "commands and skills") {
+		t.Errorf("View is missing the \"commands and skills\" title row:\n%s", view)
 	}
 	for _, glyph := range []string{"╭", "╰"} {
 		if !strings.Contains(view, glyph) {
 			t.Errorf("View is missing the popup border glyph %q:\n%s", glyph, view)
 		}
 	}
-	if !strings.Contains(view, glyphUser+" Clean Code") {
+	if !strings.Contains(view, glyphUser+" "+glyphSkill+" /clean-code") {
 		t.Errorf("the selected row does not lead with the %q marker:\n%s", glyphUser, view)
 	}
-	// The dropdown sits above the input box: the "skills" title precedes the "/skill" typed value,
-	// which appears only on the input-box line.
-	title, input := strings.Index(view, "skills"), strings.Index(view, "/skill")
+	// The dropdown sits above the input box: the title precedes the typed draft.
+	title, input := strings.Index(view, "commands and skills"), strings.Index(view, "zzz")
 	if title < 0 || input < 0 || title > input {
-		t.Errorf("dropdown not above the input box: skills@%d /skill@%d\n%s", title, input, view)
+		t.Errorf("dropdown not above the input box: title@%d input@%d\n%s", title, input, view)
 	}
 }
 
@@ -115,7 +116,7 @@ func TestSlashMenuSummariesShareOneColumn(t *testing.T) {
 func TestAutocompleteDropdownSpansFullWidth(t *testing.T) {
 	m := newDropdownModel(t, skillOpts())
 	wantWidth := m.width // the full window width, matching the input box
-	m.input.SetValue("/skill ")
+	m.input.SetValue("/c")
 	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 	for i, ln := range popupLines(m.renderAutocomplete()) {
 		if w := lipgloss.Width(ln); w != wantWidth {

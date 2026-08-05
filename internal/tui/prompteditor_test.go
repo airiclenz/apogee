@@ -63,8 +63,8 @@ func TestPromptEditorSubmitParseExtractsSkillTokens(t *testing.T) {
 // is what drops the skills too — they live in it as /tokens, not beside it.
 func TestPromptEditorResetClearsEverything(t *testing.T) {
 	e := newPromptEditor(defaultCursorShape)
-	e.input.SetValue("half-typed /skill go")
-	e.autocomplete = autocompleteState{active: true, kind: acSkill}
+	e.input.SetValue("half-typed /go")
+	e.autocomplete = autocompleteState{active: true, kind: acCommand}
 	e.reset()
 	if v := e.input.Value(); v != "" {
 		t.Errorf("input = %q, want empty after reset", v)

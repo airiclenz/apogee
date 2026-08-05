@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -15,7 +14,7 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// /skill UX harness
+// Skill UX harness
 // ----------------------------------------------------------------------------
 
 // fakeSkillCatalog is a deterministic SkillCatalog for the TUI tests. List returns its skills
@@ -50,204 +49,6 @@ func skillOpts() Options {
 }
 
 // ----------------------------------------------------------------------------
-// skillArgToken (pure)
-// ----------------------------------------------------------------------------
-
-func TestSkillArgToken(t *testing.T) {
-	tests := []struct {
-		value     string
-		wantStart int
-		wantPart  string
-		wantOK    bool
-	}{
-		{"/skill ", 0, "", true},
-		{"/skill cl", 0, "cl", true},
-		{"fix /skill cl", 4, "cl", true},
-		{"/skill", 0, "", false},      // bare command, no arg region yet
-		{"/skill foo ", 0, "", false}, // completed arg (trailing space)
-		{"hello", 0, "", false},
-		{"@main.go", 0, "", false},
-		{"", 0, "", false},
-		{" cl", 0, "", false}, // leading space, no /skill before it
-	}
-	for _, tc := range tests {
-		t.Run(tc.value, func(t *testing.T) {
-			// The caret sits at the end of the value — the forward-typing case these rows describe.
-			start, end, part, ok := skillArgToken(tc.value, len(tc.value))
-			if ok != tc.wantOK {
-				t.Fatalf("skillArgToken(%q) ok = %v, want %v", tc.value, ok, tc.wantOK)
-			}
-			if ok && (start != tc.wantStart || part != tc.wantPart) {
-				t.Errorf("skillArgToken(%q) = (%d, %q), want (%d, %q)", tc.value, start, part, tc.wantStart, tc.wantPart)
-			}
-			// The region always reaches to the end of the partial: accepting replaces the whole run.
-			if ok && end != len(tc.value) {
-				t.Errorf("skillArgToken(%q) end = %d, want %d (the end of the partial)", tc.value, end, len(tc.value))
-			}
-		})
-	}
-}
-
-// The picker region follows the CARET, not the end of the buffer: editing the argument of a
-// "/skill" run that sits mid-draft opens the same picker, scoped to exactly that run.
-func TestSkillArgTokenAtTheCaret(t *testing.T) {
-	value := "fix /skill cl and ship it"
-	start, end, partial, ok := skillArgToken(value, len("fix /skill cl"))
-	if !ok || partial != "cl" {
-		t.Fatalf("skillArgToken(%q, caret) = (%q, %v), want (\"cl\", true)", value, partial, ok)
-	}
-	if got, want := value[start:end], "/skill cl"; got != want {
-		t.Errorf("region = %q, want %q (the whole run the splice replaces)", got, want)
-	}
-	// A caret out in the prose after the run names no picker region at all.
-	if _, _, _, ok := skillArgToken(value, len(value)); ok {
-		t.Error("a caret past the run still opened the picker")
-	}
-}
-
-// ----------------------------------------------------------------------------
-// Autocomplete: the skill dropdown + the /skill command offer
-// ----------------------------------------------------------------------------
-
-func TestComputeAutocompleteSkillDropdown(t *testing.T) {
-	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-
-	// "/skill " (empty partial) lists all skills, in display order.
-	m.input.SetValue("/skill ")
-	ac := m.computeAutocomplete(m.caretByteOffset())
-	if !ac.active || ac.kind != acSkill {
-		t.Fatalf("overlay = {active:%v kind:%v}, want active skill", ac.active, ac.kind)
-	}
-	var got []string
-	for _, it := range ac.items {
-		got = append(got, it.value)
-	}
-	if !reflect.DeepEqual(got, []string{"clean-code", "review"}) {
-		t.Errorf("skill suggestions = %v, want both skills", got)
-	}
-
-	// A partial narrows by id/displayName substring.
-	m.input.SetValue("/skill rev")
-	ac = m.computeAutocomplete(m.caretByteOffset())
-	if len(ac.items) != 1 || ac.items[0].value != "review" {
-		t.Fatalf("narrowed suggestions = %+v, want [review]", ac.items)
-	}
-}
-
-func TestCommandDropdownOffersSkill(t *testing.T) {
-	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	m.input.SetValue("/sk") // "sessions" also begins with s, so narrow to "sk" for the skill verbs
-	ac := m.computeAutocomplete(m.caretByteOffset())
-	if !ac.active || ac.kind != acCommand {
-		t.Fatalf("overlay = {active:%v kind:%v}, want active command", ac.active, ac.kind)
-	}
-	// /skill BEFORE /skills: the first row is the highlighted one, so a typed "/skill" must
-	// complete into the picker rather than into the listing that shares its prefix.
-	var got []string
-	for _, it := range ac.items {
-		got = append(got, it.value)
-	}
-	if !reflect.DeepEqual(got, []string{"skill", "skills"}) {
-		t.Fatalf("'/sk' suggestions = %v, want [skill skills] in that order", got)
-	}
-	// The full "/" menu OFFERS /skill alongside every real command. The assertion is against the
-	// offering rather than the painted pane: the popup shows a scrolled window of maxAutocompleteItems
-	// rows around the selection, so which rows are visible from row 0 is a property of the window, not
-	// of the menu — and pinning the render here would silently cap how many verbs commandSpecs may hold.
-	m.input.SetValue("/")
-	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
-	var offered []string
-	for _, it := range m.autocomplete.items {
-		offered = append(offered, it.value)
-	}
-	if !slices.Contains(offered, "skill") {
-		t.Errorf("'/' menu does not offer /skill: %v", offered)
-	}
-}
-
-func TestSkillArgWinsOverBareCommand(t *testing.T) {
-	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	// "/skill" (no space) is the command branch (offers /skill); "/skill " (space) is the picker.
-	m.input.SetValue("/skill")
-	if ac := m.computeAutocomplete(m.caretByteOffset()); ac.kind != acCommand {
-		t.Errorf("'/skill' (no space) kind = %v, want command", ac.kind)
-	}
-	m.input.SetValue("/skill ")
-	if ac := m.computeAutocomplete(m.caretByteOffset()); ac.kind != acSkill {
-		t.Errorf("'/skill ' (space) kind = %v, want skill", ac.kind)
-	}
-}
-
-// ----------------------------------------------------------------------------
-// Accept: splice the skill's inline /token; the /skill command chains into the picker
-// ----------------------------------------------------------------------------
-
-// The picker no longer pops a chip: accepting a row REPLACES the "/skill <partial>" run with the
-// skill's own inline "/id " token, which is what the submit parse reads back out.
-func TestAcceptSkillSplicesInlineToken(t *testing.T) {
-	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	m.input.SetValue("fix /skill cl")
-	m.autocomplete = m.computeAutocomplete(m.caretByteOffset()) // acSkill, [clean-code]
-	m = step(t, m, keyTab())
-
-	if got, want := m.input.Value(), "fix /clean-code "; got != want {
-		t.Errorf("after accept input = %q, want the picker run replaced by %q", got, want)
-	}
-	if m.autocomplete.active {
-		t.Error("overlay still open after the splice")
-	}
-	if got := m.promptEditor.submitParse(m.knownSkillID).skillIDs; !reflect.DeepEqual(got, []string{"clean-code"}) {
-		t.Errorf("spliced token parses to skillIDs = %v, want [clean-code]", got)
-	}
-	// No chip strip renders anywhere any more — the token in the box IS the attachment.
-	if got := plain(m.View()); strings.Contains(got, "Clean Code") {
-		t.Errorf("a chip strip is still rendered above the box:\n%s", got)
-	}
-}
-
-// The picker excludes a skill the message already invokes — read off the tokens standing in the
-// buffer, since there is no attachment state beside it.
-func TestSkillPickerExcludesTokensAlreadyInTheBuffer(t *testing.T) {
-	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	m.input.SetValue("/clean-code /skill cl")
-	if ac := m.computeAutocomplete(m.caretByteOffset()); ac.active {
-		t.Errorf("a skill already invoked in the text is still offered: %+v", ac.items)
-	}
-	// Delete the token and it is offered again — the exclusion self-heals with the text.
-	m.input.SetValue("/skill cl")
-	if ac := m.computeAutocomplete(m.caretByteOffset()); !ac.active || ac.items[0].value != "clean-code" {
-		t.Errorf("removing the token did not restore the suggestion: %+v", ac)
-	}
-}
-
-func TestSkillCommandChainsIntoPicker(t *testing.T) {
-	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	m.input.SetValue("/skill")
-	m.autocomplete = m.computeAutocomplete(m.caretByteOffset()) // command menu, highlighted "skill"
-	m = step(t, m, keyTab())                                    // accept the /skill command
-	if got := m.input.Value(); got != "/skill " {
-		t.Fatalf("accepting /skill gave %q, want %q", got, "/skill ")
-	}
-	if !m.autocomplete.active || m.autocomplete.kind != acSkill {
-		t.Errorf("accepting /skill did not chain into the skill picker: %+v", m.autocomplete)
-	}
-}
-
-func TestEnterOnSkillCommandDoesNotSubmit(t *testing.T) {
-	eng := &fakeEngine{}
-	m := newTestModelEng(t, eng, skillOpts())
-	m.input.SetValue("/skill")
-	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
-	m = step(t, m, keyEnter()) // Enter completes /skill → picker; never sends "/skill"
-	if m.state != stateIdle {
-		t.Errorf("Enter on /skill launched a worker (state=%v); it must only open the picker", m.state)
-	}
-	if !m.autocomplete.active || m.autocomplete.kind != acSkill {
-		t.Errorf("Enter on /skill did not open the picker: %+v", m.autocomplete)
-	}
-}
-
-// ----------------------------------------------------------------------------
 // The merged "/" menu: one namespace, commands first, skills marked
 // ----------------------------------------------------------------------------
 
@@ -277,8 +78,8 @@ func TestSlashMenuMergesCommandsAndSkills(t *testing.T) {
 	}
 }
 
-// Accepting a skill row writes its inline token at the point the human was typing — the same
-// "/id " the picker splices, and the same thing the submit parse reads back out.
+// Accepting a skill row writes its inline token at the point the human was typing — the "/id " the
+// submit parse reads back out.
 func TestAcceptSkillRowFromTheMergedMenu(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("please /rev")
@@ -362,8 +163,8 @@ func TestAcceptSkillRowSeatsTheCaretOnAWrappedDraft(t *testing.T) {
 }
 
 // A skill whose id collides with a command verb is omitted from the merged rows — the verb owns the
-// name in one namespace — and stays reachable through the /skill picker, whose splice writes the
-// token in a position the whole-input command rule never claims.
+// name in one namespace — and stays invocable by typing its "/id" token anywhere but at the head of
+// the line, the only position the whole-input command rule claims.
 func TestSlashMenuShadowsCollidingSkillID(t *testing.T) {
 	o := testOpts
 	o.Skills = fakeSkillCatalog{skills: []skills.Skill{{ID: "clear", DisplayName: "Clear Code"}}}
@@ -376,10 +177,12 @@ func TestSlashMenuShadowsCollidingSkillID(t *testing.T) {
 		}
 	}
 
-	m.input.SetValue("/skill clea")
-	ac := m.computeAutocomplete(m.caretByteOffset())
-	if ac.kind != acSkill || len(ac.items) != 1 || ac.items[0].value != "clear" {
-		t.Fatalf("the /skill picker lost the shadowed skill: %+v", ac)
+	// Shadowed on the menu, still reachable in the text: mid-message the token is an ordinary skill
+	// reference, so the submit parse resolves it.
+	m.input.SetValue("tidy this /clear")
+	parsed := m.promptEditor.submitParse(m.knownSkillID)
+	if parsed.kind != kindMessage || !reflect.DeepEqual(parsed.skillIDs, []string{"clear"}) {
+		t.Fatalf("the shadowed skill is unreachable in the text: %+v", parsed)
 	}
 }
 
@@ -477,11 +280,11 @@ func TestSkillSuggestionsCapAfterRanking(t *testing.T) {
 	o.Skills = fakeSkillCatalog{skills: catalog}
 	m := newTestModelEng(t, &fakeEngine{}, o)
 
-	m.input.SetValue("/skill widget")
+	m.input.SetValue("/widget") // no command verb matches, so every row is a skill
 	ac := m.computeAutocomplete(m.caretByteOffset())
 
 	if len(ac.items) != maxAutocompleteItems {
-		t.Fatalf("picker offered %d rows, want the menu still capped at %d", len(ac.items), maxAutocompleteItems)
+		t.Fatalf("menu offered %d rows, want the skill half still capped at %d", len(ac.items), maxAutocompleteItems)
 	}
 	if got := ac.items[0].value; got != "widget-master" {
 		t.Errorf("first row = %q, want the prefix match widget-master to survive the cap and lead", got)
@@ -509,6 +312,25 @@ func TestTypedSkillTokenStaysOfferedAndSubmits(t *testing.T) {
 	drainCmd(t, m, cmd)
 	if len(eng.submitted) != 1 || !reflect.DeepEqual(eng.submitted[0].SkillIDs, []string{"review"}) {
 		t.Fatalf("the send did not carry the skill: %+v", eng.submitted)
+	}
+}
+
+// The other half of that rule: a skill the draft ALREADY invokes elsewhere is dropped from the menu,
+// read off the tokens standing in the buffer since there is no attachment state beside them. Delete
+// the token and the row comes back — the exclusion self-heals with the text.
+func TestSlashMenuExcludesSkillsAlreadyInTheBuffer(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
+
+	// "clean" prefixes no command verb, so the menu's rows here are the skill half alone.
+	m.input.SetValue("/clean-code /clean")
+	if ac := m.computeAutocomplete(m.caretByteOffset()); ac.active {
+		t.Fatalf("a skill already invoked in the text is still offered: %+v", ac.items)
+	}
+
+	m.input.SetValue("/clean")
+	ac := m.computeAutocomplete(m.caretByteOffset())
+	if !ac.active || len(ac.items) != 1 || ac.items[0].value != "clean-code" {
+		t.Errorf("removing the token did not restore the suggestion: %+v", ac)
 	}
 }
 
@@ -712,11 +534,6 @@ func TestFlushUnionsSkillIDs(t *testing.T) {
 func TestNilCatalogGuards(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, testOpts) // testOpts has no Skills
 
-	// The picker offers nothing rather than panicking.
-	m.input.SetValue("/skill ")
-	if ac := m.computeAutocomplete(m.caretByteOffset()); ac.active {
-		t.Errorf("skill picker active with a nil catalog: %+v", ac.items)
-	}
 	// No token resolves without a catalog, so the message is ordinary prose — no panic.
 	m.input.SetValue("/ghost do it")
 	if got := m.promptEditor.submitParse(m.knownSkillID); len(got.skillIDs) != 0 {
@@ -729,12 +546,12 @@ func TestNilCatalogGuards(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// Live refresh: the picker reloads the catalog when it opens
+// Live refresh: the merged "/" menu reloads the catalog when it opens
 // ----------------------------------------------------------------------------
 
 // reloadableCatalog is a SkillCatalog whose List reads through a pointer, so a ReloadSkills
 // closure that mutates the same backing slice is reflected on the next List — modelling the
-// shared skills.Provider whose Reload swaps in a fresh catalog both the picker and loop read.
+// shared skills.Provider whose Reload swaps in a fresh catalog both the menu and loop read.
 type reloadableCatalog struct {
 	skills *[]skills.Skill
 }
@@ -754,7 +571,7 @@ func (f reloadableCatalog) Get(id string) (skills.Skill, bool) {
 
 // reloadOpts wires a reloadable catalog whose ReloadSkills closure appends a "fresh" skill (as if
 // it had just been added on disk) and counts reloads. The returned pointers let a test assert how
-// many reloads fired and what the picker then shows.
+// many reloads fired and what the menu then shows.
 func reloadOpts() (Options, *int) {
 	current := []skills.Skill{
 		{ID: "clean-code", DisplayName: "Clean Code", Summary: "tidy the code", Body: "BE TIDY"},
@@ -772,60 +589,41 @@ func reloadOpts() (Options, *int) {
 	return o, &reloads
 }
 
-// Typing "/skill " open (the manual path) re-scans the catalog exactly once, and the picker then
-// lists the skill the reload discovered — the live-refresh the user asked for.
-func TestSkillPickerReloadsOnOpenByTyping(t *testing.T) {
+// Opening the merged "/" menu re-scans the catalog exactly once, and the menu then lists the skill
+// the reload discovered — the live refresh a skill added since launch depends on. It is
+// edge-triggered on the REGION, so typing on inside the open menu must not walk the disk again.
+func TestSlashMenuReloadsTheCatalogOnOpen(t *testing.T) {
 	o, reloads := reloadOpts()
 	m := newTestModelEng(t, &fakeEngine{}, o)
 
-	m.input.SetValue("/skill")   // bare command, not yet a /skill region
-	m = step(t, m, keyRune(' ')) // the space opens the picker → one reload
+	m = step(t, m, keyRune('/')) // the "/" opens the merged menu → one reload
 	if *reloads != 1 {
-		t.Fatalf("opening the /skill picker triggered %d reloads, want exactly 1", *reloads)
+		t.Fatalf("opening the merged menu triggered %d reloads, want exactly 1", *reloads)
 	}
-	if m.autocomplete.kind != acSkill || !m.autocomplete.active {
-		t.Fatalf("picker not open after '/skill ': %+v", m.autocomplete)
+	if !m.autocomplete.active || m.autocomplete.kind != acCommand {
+		t.Fatalf("merged menu not open after '/': %+v", m.autocomplete)
 	}
 	var got []string
 	for _, it := range m.autocomplete.items {
 		got = append(got, it.value)
 	}
 	if !containsString(got, "fresh") {
-		t.Errorf("picker did not show the skill the reload added: %v", got)
+		t.Errorf("the menu did not show the skill the reload added: %v", got)
 	}
 
-	// Typing further inside the already-open picker must NOT re-scan disk (edge-triggered on open).
+	// Typing further inside the already-open region must NOT re-scan disk (edge-triggered on open).
 	m = step(t, m, keyRune('f'))
 	if *reloads != 1 {
-		t.Errorf("typing inside the open picker re-scanned: %d reloads, want it to stay 1", *reloads)
+		t.Errorf("typing inside the open menu re-scanned: %d reloads, want it to stay 1", *reloads)
 	}
 }
 
-// Selecting /skill from the "/" command menu chains into the picker and reloads once too.
-func TestSkillPickerReloadsViaCommandChain(t *testing.T) {
-	o, reloads := reloadOpts()
-	m := newTestModelEng(t, &fakeEngine{}, o)
-
-	m.input.SetValue("/skill")
-	m.autocomplete = m.computeAutocomplete(m.caretByteOffset()) // command menu, "skill" highlighted
-	m = step(t, m, keyTab())                                    // accept → acceptAutocomplete splices "/skill " and opens the picker
-	if *reloads != 1 {
-		t.Fatalf("the /skill command chain triggered %d reloads, want exactly 1", *reloads)
-	}
-	if m.autocomplete.kind != acSkill || !m.autocomplete.active {
-		t.Fatalf("command chain did not open the picker: %+v", m.autocomplete)
-	}
-}
-
-// Leaving and re-opening the picker reloads again (each invocation re-reads), and a nil
-// ReloadSkills is simply a no-op (no panic) — the existing catalog stays as loaded.
-func TestSkillPickerReloadNilSafe(t *testing.T) {
-	o := skillOpts() // has a catalog but no ReloadSkills
-	m := newTestModelEng(t, &fakeEngine{}, o)
-	m.input.SetValue("/skill")
-	m = step(t, m, keyRune(' ')) // must not panic with a nil ReloadSkills
-	if m.autocomplete.kind != acSkill {
-		t.Fatalf("picker did not open with a nil ReloadSkills: %+v", m.autocomplete)
+// A nil ReloadSkills is simply a no-op (no panic) — the existing catalog stays as loaded.
+func TestSlashMenuReloadNilSafe(t *testing.T) {
+	m := newTestModelEng(t, &fakeEngine{}, skillOpts()) // a catalog, but no ReloadSkills
+	m = step(t, m, keyRune('/'))                        // must not panic with a nil ReloadSkills
+	if !m.autocomplete.active || m.autocomplete.kind != acCommand {
+		t.Fatalf("the menu did not open with a nil ReloadSkills: %+v", m.autocomplete)
 	}
 }
 

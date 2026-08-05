@@ -64,7 +64,24 @@
     the `acceptAutocomplete` path (which records no command today,
     `autocomplete.go:671`) is untouched.
 
-## 1. Remove the `/skill` verb, the `menuOnly` flag, and the `acSkill` picker
+## 1. Remove the `/skill` verb, the `menuOnly` flag, and the `acSkill` picker — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): `TestSlashMenuShadowsCollidingSkillID`'s `/skill clea` path could not be
+"reworked to reach the shadow via the merged menu" — `slashSuggestions` drops a shadowed skill from
+the merged rows by construction, so the menu is not a route to it. Repointed instead to the
+surviving entry point: the shadowed id typed as an inline `/id` token mid-message, which
+`submitParse` still resolves.
+
+NOTES (2026-08-05): the wholesale deletions listed below would have dropped the last coverage of
+three SURVIVING behaviours — the merged menu's edge-triggered catalog reload, its nil-`ReloadSkills`
+safety (both only pinned by the deleted `TestSkillPickerReloads*` trio) and `skillSuggestions`'
+already-invoked exclusion (only pinned by the deleted
+`TestSkillPickerExcludesTokensAlreadyInTheBuffer`). Deleted as instructed, then replaced by three
+merged-menu tests: `TestSlashMenuReloadsTheCatalogOnOpen`, `TestSlashMenuReloadNilSafe`,
+`TestSlashMenuExcludesSkillsAlreadyInTheBuffer`.
+
+NOTES (2026-08-05): `internal/tui/doc.go:122-125` (item 2's list) was rewritten here, because item
+1's own acceptance grep for `acSkill` covers that line. Item 2 will find nothing left there.
 
 **What:** Delete the behaviour and every test that pins it, in one green commit.
 

@@ -837,7 +837,7 @@ func TestScrollWhileRunningViaPgKeysAndWheel(t *testing.T) {
 	}
 }
 
-// TestAutocompleteOpensWhileRunning: all three regions are offered in an interjection — the first
+// TestAutocompleteOpensWhileRunning: both regions are offered in an interjection — the first
 // ISSUES #12 symptom was the "/" namespace vanishing exactly when the human was composing the
 // message to send next. A @ref and a skill token are message content that rides the interjection; a
 // command row is offered too, and the ones that need a boundary carry the "— idle only" tag rather
@@ -876,10 +876,13 @@ func TestAutocompleteOpensWhileRunning(t *testing.T) {
 		t.Errorf("the rendered dropdown is missing the idle-only tag:\n%s", got)
 	}
 
-	m.input.SetValue("/skill re")
+	m.input.SetValue("check /re")
 	m = step(t, m, keyRune('v'))
-	if !m.autocomplete.active || m.autocomplete.kind != acSkill {
-		t.Fatalf("autocomplete = %+v; want the skill picker open while running", m.autocomplete)
+	if !m.autocomplete.active || m.autocomplete.kind != acCommand {
+		t.Fatalf("autocomplete = %+v; want the merged menu open mid-draft while running", m.autocomplete)
+	}
+	if len(m.autocomplete.items) != 1 || !m.autocomplete.items[0].skill {
+		t.Fatalf("rows = %+v, want the single review skill row", m.autocomplete.items)
 	}
 }
 

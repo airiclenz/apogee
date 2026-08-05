@@ -119,10 +119,8 @@
 // in the agent loop, through Config.Skills. The merged "/" menu offers the catalog beside the
 // commands (marked with glyphSkill, and accepting one writes its token), with commands SHADOWING a
 // skill of the same id — the collision is settled menu-side, so the parse layer never has to know
-// skills exist. The two-step picker survives as the alternate entry point that reaches a shadowed
-// one: the "/" menu offers /skill, accepting it chains into an acSkill dropdown over the catalog,
-// and a pick splices the skill's own "/id " token at the strip point. /skill is
-// deliberately NOT a parser command, which keeps an unknown "/skill foo" an ordinary message.
+// skills exist. A shadowed skill stays invocable by typing its "/id" token anywhere but at the head
+// of the line, which is the only position the whole-input command rule claims.
 // The one input that is neither command nor message is the SOLE-TOKEN guard (kindUnknownSlash): an
 // input that is nothing but one /word naming no verb and no skill is refused with a note and left
 // in the box ([Model.refuseUnknownSlash], at idle and mid-run alike), because a mistyped invocation

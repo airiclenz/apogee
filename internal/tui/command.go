@@ -55,7 +55,7 @@ type parsedInput struct {
 
 // commandSpec is one verb of the "/" namespace: what the parser does with it and what the
 // dropdown shows for it. name is the verb without its leading slash; summary is the one-line
-// description the dropdown displays beside it. The three flags say how the verb behaves:
+// description the dropdown displays beside it. The two flags say how the verb behaves:
 //
 //   - takesArgs — the verb reads what follows it, and parseInput hands it the tokens in
 //     parsedInput.args. /confine, whose grammar is richer than a token list, keeps its dedicated
@@ -66,19 +66,15 @@ type parsedInput struct {
 //     no engine mutation, no worker of its own, no quiescent boundary needed. Every other verb is
 //     idle-only and earns commandsAtIdleNote mid-run instead of running (parsedInput.safeWhileRunning
 //     is where the flag is read, and /confine's reporting FORM is the one nuance it adds).
-//   - menuOnly — the dropdown offers the verb but the parser must never recognise it. /skill is
-//     the one: accepting it chains into the skill picker, and keeping it unparsed is exactly
-//     what keeps an unknown "/skill foo" line an ordinary message.
 type commandSpec struct {
 	name         string
 	summary      string
 	takesArgs    bool
 	whileRunning bool
-	menuOnly     bool
 }
 
 // commandSpecs is THE registry of "/" verbs, in display order (alphabetical — see below): one table
-// feeding both the parser (matchCommand recognises every non-menuOnly name) and the dropdown
+// feeding both the parser (matchCommand recognises every name) and the dropdown
 // (commandSuggestions renders every row, summaries included), so the two can no longer
 // drift apart. The parser intercepts a line only when its first whitespace token is exactly
 // "/<verb>" for a verb in this table; any other slash-prefixed line is treated as an ordinary
@@ -119,11 +115,7 @@ type commandSpec struct {
 // things it declares. A menu the human can scan without knowing the table is worth more than any
 // hand-curated grouping, and it settles where a future verb goes without a judgement call.
 // TestCommandSpecsReadAlphabetically pins it, so a row added out of place fails loudly instead of
-// quietly un-sorting the menu. The one ordering DEPENDENCY holds by construction: /skill must precede
-// /skills, because the dropdown prefix-matches in table order and highlights its first row — so a
-// typed "/skill" completes to the picker rather than to the listing that merely shares its prefix —
-// and a strict prefix always sorts before the name extending it. Alphabetical order therefore needs
-// no exception carved out of it.
+// quietly un-sorting the menu.
 var commandSpecs = []commandSpec{
 	{name: "clear", summary: "reset the model's memory of this session"},
 	{name: "compact", summary: "summarise the conversation to reclaim context"},
@@ -136,7 +128,6 @@ var commandSpecs = []commandSpec{
 	{name: "schedule-stop", summary: "take a schedule off the clock", whileRunning: true},
 	{name: "server", summary: "switch to another configured server", takesArgs: true},
 	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
-	{name: "skill", summary: "pick a skill by name (writes its /token)", menuOnly: true},
 	{name: "skills", summary: "list the available skills", whileRunning: true},
 	{name: "stop-server", summary: "stop the server this session is on"},
 	{name: "unload-model", summary: "free the model of the server this session is on"},
@@ -185,7 +176,7 @@ func parseInput(raw string, known func(string) bool) parsedInput {
 }
 
 // soleUnknownSlash reports the lone "/word" of an input that is nothing but that word and names
-// nothing this build can act on: no parser verb, no menu verb, no catalog skill. It is the typo
+// nothing this build can act on: no parser verb, no catalog skill. It is the typo
 // guard's whole rule, and it is deliberately narrow — the ONLY input it claims is one the human
 // can have meant as an invocation and nothing else, so every real message keeps travelling
 // untouched:
@@ -197,9 +188,6 @@ func parseInput(raw string, known func(string) bool) parsedInput {
 //   - "/clear", "/grill-me" → not unknown: a verb matchCommand recognises never reaches here, and a
 //     token `known` confirms is an ordinary message that happens to invoke a skill (edge default:
 //     an input that is ONLY a skill token sends);
-//   - "/skill"              → guarded, but as a MENU verb rather than a typo: it is unparsed by
-//     construction (commandSpecs.menuOnly), so without this it would be sent as a literal message.
-//     unknownSlashNote is what tells the two apart.
 //
 // A bare "/" carries no word at all and stays a message: there is no token to name back, and the
 // human is mid-thought rather than mistaken.
@@ -216,26 +204,17 @@ func soleUnknownSlash(trimmed string, known func(string) bool) (string, bool) {
 	return trimmed, true
 }
 
-// skillPickerUsage is what a bare "/skill" earns: it is the one menuOnly verb (commandSpecs), so
-// the human typed a real entry point and merely stopped short of its argument. Teaching the two
-// working forms is a more useful answer than calling it unknown.
-const skillPickerUsage = "type /skill <name> to pick a skill — or /skills to list them"
-
 // unknownSlashNote words the refusal a kindUnknownSlash earns instead of a send. token is the line
 // as typed, leading slash included, and the note names it back so the human sees WHICH word failed
 // to resolve — a typo'd skill id differs from a mistyped verb only in the spelling, and the fix is
-// the same either way. The menu verb gets its usage line instead (skillPickerUsage), because it
-// resolves fine and only wants an argument.
+// the same either way.
 func unknownSlashNote(token string) string {
-	if strings.TrimPrefix(token, "/") == "skill" {
-		return skillPickerUsage
-	}
 	return "unknown command or skill: " + token + " — nothing sent"
 }
 
 // commandByName looks a verb up in commandSpecs by its bare name (no leading slash). It is the one
 // membership test over the table: the parser asks it what a line opens with, the dropdown's accept
-// path asks it what an accepted row DOES (a takesArgs or menuOnly verb completes, every other verb
+// path asks it what an accepted row DOES (a takesArgs verb completes, every other verb
 // runs on the spot), and the merged menu asks it which skill ids a command verb shadows.
 func commandByName(name string) (commandSpec, bool) {
 	for _, c := range commandSpecs {
@@ -265,7 +244,7 @@ func (p parsedInput) safeWhileRunning() bool {
 }
 
 // matchCommand reports the recognised command verb when trimmed's first whitespace token is
-// "/<verb>" for a non-menuOnly verb of commandSpecs, together with everything that followed it —
+// "/<verb>" for a verb of commandSpecs, together with everything that followed it —
 // the line's RAW tail, split into argument tokens by the caller. Only a takesArgs verb reads it
 // (parseInput hands it on as parsedInput.args and .rest); for every other verb it is surplus and
 // ignored (as it always was). Splitting is left to the caller because one verb wants the tail
@@ -282,7 +261,7 @@ func matchCommand(trimmed string) (string, string, bool) {
 		first, rest = trimmed[:i], trimmed[i+1:]
 	}
 	c, ok := commandByName(strings.TrimPrefix(first, "/"))
-	if !ok || c.menuOnly { // menuOnly verbs are offered by the dropdown, never parsed (see commandSpec)
+	if !ok {
 		return "", "", false
 	}
 	return c.name, rest, true
