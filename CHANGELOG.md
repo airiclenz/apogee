@@ -114,6 +114,14 @@ point is a **minor** bump, not a breaking change.
     spinner's own tick, so work in progress is visible without the transcript carrying a timer of
     its own. It settles to `✦` when the result lands, and the tick repaints the transcript only
     while something is actually open.
+  - **The header says which state it is in — and that it can be clicked at all.** A header whose
+    block has something to reveal now trails its label with `▸` while the block is collapsed and
+    `▾` while it is expanded, painted in the faint detail tone so it reads as chrome beside the
+    tool's name. A header that hides nothing wears neither, which makes clickability visible for
+    the first time: the indicator and the click target are one rule, so if you can see it you can
+    click it. The `… +N more lines` marker gained a tone of its own to match — light gray-blue, the
+    quieter sibling of the prompt block's `see more` — so a body line that happens to start with
+    `…` is never mistaken for the affordance beneath it.
   - **The state is the view's alone.** It is never encoded with the transcript: a resumed session
     paints everything collapsed and `/clear` forgets it with everything else. A block that hides
     nothing has nothing to toggle — a group of body-less calls, or a call with no target whose

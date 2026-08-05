@@ -841,7 +841,8 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 }
 
 // renderToolBlock renders one tool-call block — a single call or a whole grouped run — in the
-// one uniform shape layout.md sketches: a ✦ header carrying the **label alone**, then one ┝/┕
+// one uniform shape layout.md sketches: a ✦ header carrying the **label alone — never a target**
+// (plus the ▸/▾ state indicator, below, where the header is one), then one ┝/┕
 // branch per call whose first column is that call's target. The target never sits on the header,
 // so a block does not visually reshape the moment a second call joins it: a block of one is
 // byte-identical in shape to a block of many. The caller frames the block for depth (renderView
@@ -873,16 +874,25 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // has nothing to toggle, so a body-less group's header keeps a click's selection meaning. The mark
 // is state-independent by design: an expanded block still marks its header, which is what lets the
 // same click collapse it again.
+//
+// The header WEARS that same answer: the ▸/▾ state indicator is appended to the label under the
+// very predicate that marks the line, so the affordance and the click-target rule cannot come to
+// disagree — a header that wears an indicator is clickable and a header that does not is not, with
+// one condition behind both. Unlike the mark, the glyph is state-DEPENDENT: it is what says which
+// way the click will go (stateIndicator). It is styled apart from the label (th.toolIndicator, the
+// detail tone) so it reads as chrome beside the orange rather than as the last letter of it.
 func renderToolBlock(th theme, views []toolView, width int, state blockState) blockPaint {
 	if len(views) == 0 {
 		return blockPaint{}
 	}
 	header := targetNone
+	label := th.toolLabel.Render(views[0].Label)
 	if state.elides || blockHidesWhenCollapsed(views) {
 		header = targetHeader
+		label += " " + th.toolIndicator.Render(stateIndicator(state.expanded))
 	}
 	var out blockPaint
-	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", th.toolLabel.Render(views[0].Label), width), header)
+	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), header)
 	// The column is measured over EXPANDED targets, for the reason expandTabs gives: a tab weighs
 	// nothing here while the wrap downstream spends four cells on it, so a column set from raw
 	// targets is a column the branch lines cannot land on (renderToolBranch pads to the same
@@ -944,6 +954,17 @@ func (s blockState) star() string {
 		return " "
 	}
 	return glyphAssistant
+}
+
+// stateIndicator is the glyph a TOGGLEABLE header trails its label with: ▾ for an expanded block,
+// ▸ for a collapsed one (layout.md, "Collapsed and expanded blocks"). It answers for the state
+// alone — whether a header wears one at all is the toggle-target rule's, asked once in
+// renderToolBlock — so the two questions stay one condition and one glyph apart.
+func stateIndicator(expanded bool) string {
+	if expanded {
+		return glyphExpanded
+	}
+	return glyphCollapsed
 }
 
 // anyOpenCall reports whether any of these entries is a tool call still waiting for its result —
@@ -1037,7 +1058,11 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 	shown, remainder, truncated := collapsedDetails(tv.Details)
 	out.add(renderSubDetails(th, shown, indent, width), targetNone)
 	if truncated {
-		out.add(renderSubDetails(th, []detailLine{remainder}, indent, width), targetMarker)
+		// The marker is painted in its OWN style role rather than through the body's detailStyle:
+		// it is a paint artefact, not a line the tool wrote, and a body line that happens to open
+		// with "…" must not be able to look like one. It rides the body's indent all the same, so
+		// the affordance sits under the lines it counts.
+		out.add(hangingWrap(th, th.toolMarker, strings.Repeat(" ", indent), remainder.Text, width), targetMarker)
 	}
 	return out
 }

@@ -913,7 +913,7 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	subAgentReport(tr, "s1", "Found 4 gaps\nin the suite\nhere they are", 0)
 
 	collapsed := strings.Join([]string{
-		"✦ Sub-Agent",
+		"✦ Sub-Agent ▸",
 		"  ┕ survey the tests 2 tool calls · Found 4 gaps",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != collapsed {
@@ -927,7 +927,7 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 		t.Fatal("toggleExpanded(0) = false; want the run's head entry expanded")
 	}
 	expanded := strings.Join([]string{
-		"✦ Sub-Agent",
+		"✦ Sub-Agent ▾",
 		"  ┕ survey the tests",
 		"    Found 4 gaps",
 		"    in the suite",
@@ -938,7 +938,7 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 		"│ ✦ Read File",
 		"│   ┕ a.go 1 - 5",
 		"│",
-		"│ ✦ Run",
+		"│ ✦ Run ▸",
 		"│   ┕ go test",
 		"│     ok   a",
 		"│     … +2 more lines",
@@ -1092,12 +1092,12 @@ func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ Sub-Agent",
+		"✦ Sub-Agent ▾",
 		"  ┕ survey the repo survey complete",
 		"",
 		"│ ⤷ sub-agent",
 		"│",
-		"│ ✦ Sub-Agent",
+		"│ ✦ Sub-Agent ▸", // the nested run keeps its OWN state, and its indicator says so
 		"│   ┕ read the tests 1 tool call · tests read",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {

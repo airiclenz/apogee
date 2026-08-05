@@ -344,7 +344,8 @@ so the shell returns to the screen it had.
 
 ## The rules behind the tool-call sketch
 
-**The label.** A tool header is `✦ ` plus the tool's label, **and nothing else — never a
+**The label.** A tool header is `✦ ` plus the tool's label, plus — exactly where the header is a
+toggle target — the trailing `▸`/`▾` state indicator below, **and nothing else — never a
 target**. That holds for every block alike: a grouped run, a lone call, a call still in flight,
 and the stray-result `result` header. The target always leads the first branch line instead, so
 a block does not visually reshape the moment a second call joins it. The label carries no
@@ -473,6 +474,17 @@ already separates click-to-position from drag in the prompt. Keyboard toggling i
 absent, on the same precedent that keeps transcript selection mouse-only; a block-cursor mode is
 its own future feature. After a toggle the clicked header keeps its screen row — content grows or
 shrinks *below* it, and the line under the cursor never moves.
+
+**The header wears the state.** A toggleable header trails its label with one glyph, a single space
+off it: `▸` while the block is collapsed — a click opens it — and `▾` while it is expanded. It is
+painted in the faint detail tone rather than the label's orange, so it reads as chrome beside the
+tool's name instead of as the last letter of it. Its presence *is* the clickability hint, because
+the affordance and the click-target rule are **one predicate**: a header wears the indicator exactly
+where a click there toggles something, so a body-less group and a block that hides nothing wear
+none, and a sub-agent run's head wears one however short its own report is. The
+`… +N more lines` marker is apogee's line too and is painted as one — light gray-blue `#8db4e6`, no
+background and no bold weight, the quieter sibling of the prompt block's `see more` — so a body line
+that happens to open with `…` can never be mistaken for the affordance beneath it.
 
 **A huge prompt collapses to three rows.** A send whose body soft-wraps to *more than three* rows —
 a submitted `❯` prompt and a delivered `⧖` interjection alike, they are one shape — paints three:

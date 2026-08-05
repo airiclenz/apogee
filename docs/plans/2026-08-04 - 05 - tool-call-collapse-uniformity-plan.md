@@ -137,7 +137,17 @@ unchanged.
 
 ---
 
-## 2. The header wears the block's state: trailing ▸/▾, and the marker earns a style
+## 2. The header wears the block's state: trailing ▸/▾, and the marker earns a style — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): paint-cache key UNCHANGED, as the item predicted — both new paints derive from
+`expanded` (already in `spanFlags`) and from view content (immutable per entry), so `paintcache.go`
+gained no field. Two additions beyond the item's literal text, both to keep the shipped behaviour and
+its spec in step: `layout.md`'s new indicator paragraph also states the remainder marker's new tone
+(the item changes that paint, so a spec silent on it would ship stale), and `render.go`'s
+`renderToolBlock` doc comment took the same amendment its layout.md counterpart did — its opening
+line said the header carries "the label alone", which the indicator would otherwise have contradicted.
+The new flip test drives `toggleExpanded` rather than `setExpanded` — the same act, and the one the
+neighbouring collapse goldens already use, so a there-and-back walk needs no second helper.
 
 **What.** Implement decision 2:
 - `render.go` `renderToolBlock`: when the header is a toggle target (the existing

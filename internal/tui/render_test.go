@@ -423,14 +423,14 @@ func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ Sub-Agent",
+		"✦ Sub-Agent ▾", // a run's head is always a toggle target (its span), so it always wears the state
 		"  ┕ first",
 		"",
 		"│ ⤷ sub-agent",
 		"│",
 		"│ ✦ first child",
 		"", // the first run closes here…
-		"✦ Sub-Agent",
+		"✦ Sub-Agent ▾",
 		"  ┕ second",
 		"", // …and the second call is fenced off from it on both sides
 		"│ ⤷ sub-agent",
@@ -660,7 +660,7 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 	}})
 
 	want := strings.Join([]string{
-		"✦ Run",
+		"✦ Run ▸", // a capped body is something to reveal, and the header says so
 		"  ┕ go test ./...",
 		"    ok   apogee/internal/tui   0.412s",
 		"    … +2 more lines",
@@ -1360,6 +1360,11 @@ func blockMarks(t *testing.T, tr *transcript, width int) []blockMark {
 // block's header lines and its synthesized remainder marker, each carrying the index of the entry
 // a click there toggles, and it marks NOTHING when the collapsed paint hides nothing. Every case
 // asserts the complete set of marks, so a line that quietly became clickable fails here.
+//
+// It pins the AFFORDANCE against the same rule, because each mark carries its line's text: a marked
+// header wears the ▸/▾ state indicator and an unmarked one wears none, so the visible hint and the
+// click target cannot drift apart — a header that grew an indicator without becoming clickable, or
+// became clickable without growing one, fails here too.
 func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 	// run folds a terminal call and its multi-line output — the block with a body, and therefore
 	// the block with something to reveal.
@@ -1385,7 +1390,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 				run(tr, "c1", "go test ./...", "ok   a\nok   b\nok   c\nPASS", 0)
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run"},
+				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run ▸"},
 				{line: 5, kind: targetMarker, entry: 1, text: "    … +3 more lines"},
 			},
 		},
@@ -1401,7 +1406,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 					t.Fatal("toggleExpanded(1) = false; want the tool-call entry expanded")
 				}
 			},
-			want: []blockMark{{line: 2, kind: targetHeader, entry: 1, text: "✦ Run"}},
+			want: []blockMark{{line: 2, kind: targetHeader, entry: 1, text: "✦ Run ▾"}},
 		},
 		{
 			// A group's calls carry no bodies (that is what made them groupable), so the block
@@ -1437,7 +1442,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run"},
-				{line: 1, kind: targetHeader, entry: 0, text: "  Python"},
+				{line: 1, kind: targetHeader, entry: 0, text: "  Python ▸"},
 				{line: 5, kind: targetMarker, entry: 0, text: "    … +2"},
 				{line: 6, kind: targetMarker, entry: 0, text: "    more"},
 				{line: 7, kind: targetMarker, entry: 0, text: "    lines"},
@@ -1453,9 +1458,9 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 				run(tr, "c2", "go vet ./...", "x\ny", 0)
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run"},
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run ▸"},
 				{line: 3, kind: targetMarker, entry: 0, text: "    … +2 more lines"},
-				{line: 5, kind: targetHeader, entry: 1, text: "✦ Run"},
+				{line: 5, kind: targetHeader, entry: 1, text: "✦ Run ▸"},
 				{line: 8, kind: targetMarker, entry: 1, text: "    … +1 more line"},
 			},
 		},
@@ -1469,7 +1474,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
-			want: []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent"}},
+			want: []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent ▸"}},
 		},
 		{
 			// Expanded, the run's head keeps its mark — that is the click that closes it again —
@@ -1485,7 +1490,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 					t.Fatal("setExpanded(0, true) = false; want the run's head expanded")
 				}
 			},
-			want: []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent"}},
+			want: []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent ▾"}},
 		},
 		{
 			// A railed sub-agent block is marked exactly like a flat one — the rail prefixes lines
@@ -1496,7 +1501,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 				run(tr, "c1", "go test", "a\nb\nc", 1)
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 0, text: "│ ✦ Run"},
+				{line: 2, kind: targetHeader, entry: 0, text: "│ ✦ Run ▸"},
 				{line: 5, kind: targetMarker, entry: 0, text: "│     … +2 more lines"},
 			},
 		},
@@ -1510,6 +1515,122 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 				t.Errorf("marked lines mismatch:\n--- got ---\n%+v\n--- want ---\n%+v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestHeaderIndicatorFollowsTheBlockState pins the indicator's OTHER half: unlike the click mark,
+// which is state-independent by design, the glyph says which way the click will go — ▸ while the
+// block is collapsed, ▾ while it is expanded — and it follows the state back and forth on one
+// transcript rather than across two fixtures, because that is the claim: nothing about the entry
+// changes but the flag the painter reads. The block kinds that reach the indicator by three
+// different routes are each here: a capped body (blockHidesWhenCollapsed), a sub-agent run's elided
+// span (blockState.elides) and a Firing wearing the borrowed shape under its own glyph.
+func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
+	cases := []struct {
+		name                        string
+		build                       func() *transcript
+		wantCollapsed, wantExpanded string
+	}{
+		{
+			name: "a capped body",
+			build: func() *transcript {
+				tr := &transcript{}
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok\na\nb"}})
+				return tr
+			},
+			wantCollapsed: "✦ Run ▸", wantExpanded: "✦ Run ▾",
+		},
+		{
+			name: "a sub-agent run's elided span",
+			build: func() *transcript {
+				tr := &transcript{}
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentReport(tr, "s1", "survey complete", 0)
+				return tr
+			},
+			wantCollapsed: "✦ Sub-Agent ▸", wantExpanded: "✦ Sub-Agent ▾",
+		},
+		{
+			name:          "a Firing under its own glyph",
+			build:         func() *transcript { return firingBlock("found 3 stale entries\nremoved them") },
+			wantCollapsed: "⟳ Schedule ▸", wantExpanded: "⟳ Schedule ▾",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := tc.build()
+
+			if got := headerStar(t, tr, false); got != tc.wantCollapsed {
+				t.Errorf("collapsed header = %q, want %q", got, tc.wantCollapsed)
+			}
+			if !tr.toggleExpanded(0) {
+				t.Fatal("toggleExpanded(0) = false; want the block expanded")
+			}
+			if got := headerStar(t, tr, false); got != tc.wantExpanded {
+				t.Errorf("expanded header = %q, want %q", got, tc.wantExpanded)
+			}
+			if !tr.toggleExpanded(0) {
+				t.Fatal("toggleExpanded(0) = false on the way back; want the block collapsed again")
+			}
+			if got := headerStar(t, tr, false); got != tc.wantCollapsed {
+				t.Errorf("re-collapsed header = %q, want %q", got, tc.wantCollapsed)
+			}
+		})
+	}
+}
+
+// The indicator is painted apart from the label: the detail tone, never toolLabel's bold orange, so
+// the affordance reads as chrome beside the tool's name rather than as the last letter of it. The
+// assertion is against the theme's own roles rather than a lipgloss byte-golden, and the second
+// guard catches the opposite failure — an indicator styled into the label's run.
+func TestHeaderIndicatorIsStyledApartFromTheLabel(t *testing.T) {
+	th := newTheme()
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok\na\nb"}})
+
+	header := tr.renderLines(th, 80)[0]
+
+	if want := th.toolIndicator.Render(glyphCollapsed); !strings.Contains(header, want) {
+		t.Errorf("header %q does not carry the detail-toned indicator %q", header, want)
+	}
+	if styledIntoTheLabel := th.toolLabel.Render("Run " + glyphCollapsed); strings.Contains(header, styledIntoTheLabel) {
+		t.Errorf("header %q paints the indicator inside the label's own run", header)
+	}
+}
+
+// The synthesized "… +N more lines" marker carries its OWN style role rather than the body's: it is
+// apogee's line, not the tool's, and a body line that happens to open with "…" must not be able to
+// look like one. The two roles are asserted to differ as well as to be applied, so a marker style
+// that quietly became detailStyle's twin fails here rather than passing silently.
+func TestRemainderMarkerCarriesItsOwnStyle(t *testing.T) {
+	th := newTheme()
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nok   b\nPASS"}})
+
+	rendered := tr.renderView(th, 80, false)
+	var marker string
+	for i, target := range rendered.targets {
+		if target.kind == targetMarker {
+			marker = rendered.lines[i]
+		}
+	}
+	if marker == "" {
+		t.Fatal("the block painted no remainder marker to check")
+	}
+
+	plain := ansi.Strip(marker)
+	if want := th.toolMarker.Render(plain); marker != want {
+		t.Errorf("marker line = %q; want the marker role's paint %q", marker, want)
+	}
+	if asABodyLine := th.toolDetail.Render(plain); marker == asABodyLine {
+		t.Errorf("marker line %q is painted exactly as a body line, so the two cannot be told apart", marker)
 	}
 }
 
@@ -1709,7 +1830,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
-			settled: "✦ Sub-Agent", flipped: "  Sub-Agent",
+			settled: "✦ Sub-Agent ▸", flipped: "  Sub-Agent ▸",
 		},
 		{
 			// The mirror case, and the reason the rule asks the span as well as the head: the report
@@ -1721,7 +1842,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				openRead(tr, "c1", "a.go", 1)
 				subAgentReport(tr, "s1", "survey complete", 0)
 			},
-			settled: "✦ Sub-Agent", flipped: "  Sub-Agent",
+			settled: "✦ Sub-Agent ▸", flipped: "  Sub-Agent ▸",
 		},
 		{
 			name: "a finished run settles",
@@ -1730,7 +1851,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				subAgentReport(tr, "s1", "survey complete", 0)
 			},
-			settled: "✦ Sub-Agent", flipped: "✦ Sub-Agent",
+			settled: "✦ Sub-Agent ▸", flipped: "✦ Sub-Agent ▸",
 		},
 	}
 	for _, tc := range cases {
@@ -1787,13 +1908,13 @@ func TestFiringBlockCollapsesToTheAnswersFirstLine(t *testing.T) {
 			name:   "a multi-line answer leads the body",
 			answer: "found 3 stale entries\nremoved them",
 			wantCollapsed: []string{
-				"⟳ Schedule",
+				"⟳ Schedule ▸",
 				"  ┕ nightly tidy",
 				"    found 3 stale entries",
 				"    … +4 more lines",
 			},
 			wantExpanded: []string{
-				"⟳ Schedule",
+				"⟳ Schedule ▾",
 				"  ┕ nightly tidy",
 				"    found 3 stale entries",
 				"    removed them",
@@ -1806,13 +1927,13 @@ func TestFiringBlockCollapsesToTheAnswersFirstLine(t *testing.T) {
 			name:   "a one-line answer rides the branch beside the Schedule's name",
 			answer: "the log is clean",
 			wantCollapsed: []string{
-				"⟳ Schedule",
+				"⟳ Schedule ▸",
 				"  ┕ nightly tidy the log is clean",
 				"    prompt: check the log",
 				"    … +2 more lines",
 			},
 			wantExpanded: []string{
-				"⟳ Schedule",
+				"⟳ Schedule ▾",
 				"  ┕ nightly tidy the log is clean",
 				"    prompt: check the log",
 				"    2 turns · 4s",
@@ -1849,17 +1970,20 @@ func TestFiringBlockHeaderNeverBlinks(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		tr   *transcript
+		want string
 	}{
-		{"a Firing still running", open},
-		{"a Firing that returned", firingBlock("the log is clean")},
+		// The state indicator is orthogonal to the star and follows the ordinary toggle-target
+		// rule: the running Firing's body is the one-line prompt and hides nothing, the returned
+		// one's overflows the cap and wears the ▸ a click acts on.
+		{"a Firing still running", open, "⟳ Schedule"},
+		{"a Firing that returned", firingBlock("the log is clean"), "⟳ Schedule ▸"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			const want = "⟳ Schedule"
-			if got := headerStar(t, tc.tr, false); got != want {
-				t.Errorf("header at the settled phase = %q, want %q", got, want)
+			if got := headerStar(t, tc.tr, false); got != tc.want {
+				t.Errorf("header at the settled phase = %q, want %q", got, tc.want)
 			}
-			if got := headerStar(t, tc.tr, true); got != want {
-				t.Errorf("header at the flipped phase = %q, want %q", got, want)
+			if got := headerStar(t, tc.tr, true); got != tc.want {
+				t.Errorf("header at the flipped phase = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -2014,7 +2138,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 				"✦ Read File",
 				"  ┕ a.go 1 - 5",
 				"",
-				"✦ Run",
+				"✦ Run ▸",
 				"  ┕ go test",
 				"    ok",
 				"    … +2 more lines",
@@ -2099,8 +2223,10 @@ func TestRenderGroupBreakers(t *testing.T) {
 // header text, the grouping as the one aligned Read File block, and the uniform shape as the fact
 // that every header here — grouped, standalone, railed — is a label and nothing else, with the
 // target always leading a branch and the outcome split into the summary beside it and the body
-// beneath. A regression in any of them changes this golden, and the golden doubles as the living
-// example of what layout.md sketches.
+// beneath. The ▸ on the Run's header and its absence everywhere else is the affordance rule in the
+// same picture: exactly the one block here that hides something says so. A regression in any of
+// them changes this golden, and the golden doubles as the living example of what layout.md
+// sketches.
 func TestTranscriptLayoutGolden(t *testing.T) {
 	tr := &transcript{}
 	tr.addUser("read the docs, then run the tests", nil)
@@ -2133,7 +2259,7 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"  ┝ TODO.md   1 - 408",
 		"  ┕ ISSUES.md 1 - 8",
 		"",
-		"✦ Run",
+		"✦ Run ▸",
 		"  ┕ go test ./...",
 		"    ok   apogee/internal/tui     0.412s",
 		"    … +2 more lines",
