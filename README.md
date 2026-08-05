@@ -49,9 +49,9 @@ Apogee is built on three commitments:
 
 Under the hood, apogee is an **embeddable engine**, and the TUI is its first
 front-end, not its identity. The whole loop is a Go library with no wire surface
-of its own: the eval bench already drives it in-process, and future front-ends —
-a headless runner, a scheduling daemon, other surfaces entirely — compose the
-same engine. That commitment is written down and binding — see
+of its own: the eval bench already drives it in-process, `apogee headless` is the
+second front-end over the same core, and the ones still to come — a scheduling
+daemon, other surfaces entirely — compose that same engine. That commitment is written down and binding — see
 [the north-star decision record](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md).
 
 Working on this repo *with* a coding agent? [`AGENTS.md`](AGENTS.md) is the
@@ -185,6 +185,10 @@ until then `SHA256SUMS` is the check that is actually worth making.
   is open: each firing runs headless in Plan or Auto mode and saves its own session,
   browsable like any other (tagged `⟳` in `/sessions`); `/schedule-stop` takes one
   off the clock.
+- **One prompt, no UI** — `apogee headless "…"` (or a prompt on stdin) runs a single
+  prompt to completion unattended, prints the answer to stdout and exits `0`/`1`/`2` so a
+  script can tell a bad outcome from a bad invocation. See
+  [Running one prompt](#running-one-prompt--apogee-headless).
 - **Diagnosable without running an agent** — `apogee probe` reports what this host can
   do (backend, capability matrix, Auto verdict, roots, endpoint reachability) for free
   and offline; `apogee probe model` runs a capability battery against the model. See
@@ -635,6 +639,46 @@ rises from *low* to *medium* confidence, which is what promotes a matching Valid
 set from offered to auto-applied on later runs. `--no-save` runs the whole battery and
 records nothing; the record's path is printed either way, so deleting that file undoes
 it.
+
+## Running one prompt — `apogee headless`
+
+`apogee headless` runs a single prompt to completion with nobody watching and prints
+the answer to stdout. It is the same unattended run a `/schedule` firing performs, over
+the same shared runner — the second front-end onto the engine rather than a second
+agent.
+
+```console
+$ apogee headless "list the exported types in apogee.go, one per line"
+Agent
+Config
+...
+session: 20260805-141233-7f2a · turns: 3 · denied: 0
+```
+
+The prompt is the single **quoted** argument; with no argument the whole of stdin is
+the prompt, so `cat task.md | apogee headless` works too. Empty from both is a usage
+error. `--endpoint`, `--model`, `--workspace` and `--config` resolve exactly as a
+session's do — flag over `APOGEE_*` environment over `config.yaml` — so the run has the
+shape a session on this host would have. It is saved to `~/.apogee/sessions` and shows
+up in `/sessions` like any other; `--no-save` runs it and records nothing.
+
+`--mode` takes `plan` (the default, read-only) or `auto` — the two modes that never need
+a human. `ask-before` and `allow-edits` are refused, and so is `auto` on a host whose
+confinement backend cannot fence the filesystem: there the interactive fallback is
+approval, and an unattended run has nobody to approve (see
+[Auto mode's blast radius](#auto-modes-blast-radius)). Whatever the mode, every gated
+action is refused rather than parked — the refusals are the `denied:` count — `ask_user`
+and `present_document` are not registered, and no MCP server is contacted.
+
+Only the model's answer goes to **stdout**; resolution notices and the one-line summary
+go to **stderr**, so a pipeline reads the text and nothing else. The exit status says
+which kind of thing happened:
+
+| Exit | Means |
+|---|---|
+| `0` | the run completed |
+| `1` | the run started and failed — model or tool error, cancellation, a record that would not save |
+| `2` | the run never started — usage, configuration, a refused mode |
 
 ## Building from source
 

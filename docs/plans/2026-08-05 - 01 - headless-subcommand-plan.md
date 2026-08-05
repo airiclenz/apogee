@@ -71,9 +71,13 @@ NOTES (2026-08-05): testability needed a second seam — `var newConfiner = plat
 
 **Commit:** `feat(cli): headless auto is gated by the eligibility ladder`
 
-## 3. Docs sweep — headless is no longer deferred
+## 3. Docs sweep — headless is no longer deferred — ✅ DONE (2026-08-05)
 
 Depends on items 1 and 2.
+
+NOTES (2026-08-05): README took two edits beyond the item's usage block, both under the item's own "retire every stale tense" mandate. (a) `apogee probe` is presented in *two* places — a **Key capabilities** bullet and the `##` section it links to — so headless is now presented in both, one bullet mirroring probe's. (b) "What this repo is" claimed "future front-ends — a headless runner, a scheduling daemon — compose the same engine"; the headless runner is no longer future, so the sentence now names it as the second front-end and leaves the daemon in the future clause.
+
+NOTES (2026-08-05): the item attributes "the headless CLI's flags" to `apogee.go`; it is in `internal/run/doc.go`, where it was already literal and stayed untouched. `apogee.go`'s two mentions are the package-doc CLI list (tense adjusted: "the optional `apogee headless` CLI" → "the `apogee headless` CLI") and `Asker`'s "a headless host must supply an Asker that fails safe" — the latter names a class of embedding host, not the subcommand, and is correct as written. `internal/schedule/doc.go`'s indefinite "a headless CLI's flags" became "the headless CLI's flags", matching `internal/run/doc.go`.
 
 **What:** retire every "deferred" claim and stale tense; one owning item for all of it. Locate by phrase, not line:
 

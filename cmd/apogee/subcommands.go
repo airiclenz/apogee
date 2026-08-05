@@ -6,10 +6,11 @@ import "github.com/spf13/cobra"
 // order they should appear under `apogee --help`. main — the composition root — is the
 // only production caller; tests build their own sets and hand them to newRootCommand.
 //
-// `probe` is the first and, today, the only entry: the host report (ADR 0021's free half)
-// plus its `host` child. `apogee headless` stays deferred (CONTEXT.md). Registering a child
-// is what makes a Commands section appear under `apogee --help` — the one permitted output
-// delta of the Phase-5 subcommand work.
+// `probe` is the first entry: the host report (ADR 0021's free half) plus its `host` child.
+// `headless` is the second: one prompt run to completion with nobody watching, over the same
+// shared core the scheduler's Firings use (ADR 0033). Registering a child is what makes a
+// Commands section appear under `apogee --help` — the one permitted output delta of the
+// Phase-5 subcommand work.
 //
 // Bare `apogee` is unaffected. The root keeps its own RunE (the TUI launch) and
 // `Args: cobra.NoArgs`: Cobra matches argv[1] against the children first and only falls

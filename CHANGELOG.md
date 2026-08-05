@@ -10,6 +10,38 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`apogee headless` — one prompt, one unattended run, printed to stdout.** Give it a prompt as a
+  quoted argument or pipe one on stdin, and it runs that prompt to completion with nobody watching,
+  prints the answer, and exits with a status a script can act on: `0` the run completed, `1` the run
+  started and failed (model or tool error, cancellation, a record that would not save), `2` the run
+  never started (usage, configuration, a refused mode). That is apogee's first distinct-exit-code
+  convention, and it is opt-in — every other command still exits `0` or `1` exactly as before. The
+  command is a thin CLI over the same shared runner a `/schedule` firing uses (`internal/run`) —
+  argument parsing and exit codes, not a second agent — which makes it the second Driver over the
+  embeddable engine and the tripwire ADR 0031 named for it: a capability welded to the TUI now
+  breaks visibly here. See ADR 0033 (decision 6) and ADR 0034.
+  - **Only the answer goes to stdout.** Resolution notices and the closing
+    `session: … · turns: … · denied: …` summary go to stderr, so a pipeline reads the model's text
+    and nothing else. The answer is stripped of terminal escape sequences on the way out.
+  - **Two modes, because the other two exist to consult a human.** `--mode` takes `plan` (the
+    default, read-only) or `auto`; `ask-before` and `allow-edits` are refused before anything is
+    composed. `auto` is refused outright on a host whose confinement backend cannot fence the
+    filesystem — the cell where an interactive run quietly falls back to asking, and an unattended
+    one has nobody to ask — and prints the launch's own warning, word for word, when confinement has
+    been switched off entirely.
+  - **Settings resolve exactly as a session's do** — flag over `APOGEE_*` environment over
+    `config.yaml` — so the run has the shape a session on this host would have, Mechanisms and
+    system prompt included. It is saved to `~/.apogee/sessions` and is browsable in `/sessions`
+    beside the conversations it ran next to; `--no-save` runs it and records nothing. There is no
+    `--api-key` flag, for the reason there is none anywhere else: a secret on the command line lands
+    in shell history and in `ps` output.
+  - **Nothing waits for a human.** Every gated action is refused rather than parked — the refusals
+    are the `denied:` count, never the exit code — `ask_user` and `present_document` are not
+    registered, and no MCP server is contacted. `Ctrl-C` and `SIGTERM` end the run rather than the
+    process, so an interrupted run still prints what it reached and still saves its record.
+
+  Documented in `README.md` ("Running one prompt") and defined in `CONTEXT.md` ("Driver", "Firing").
+
 - **A question can now take more than one of its answers.** The model asks with
   `multi_select: true` on `ask_user` when several of the choices could apply at once — "which of
   these findings should I fix?" — and every offered answer gets a `[x]`/`[ ]` box in front of it.

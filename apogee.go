@@ -3,7 +3,7 @@
 // Apogee is a terminal coding agent for small local LLMs that owns the full
 // agentic loop — build request, call the Upstream, parse the response, dispatch
 // tools, apply Mechanisms — and ships as both a product (the cmd/apogee TUI/CLI)
-// and this reusable library. The TUI, the optional `apogee headless` CLI, and the
+// and this reusable library. The TUI, the `apogee headless` CLI, and the
 // external bench (apogee-sim) are all consumers of this one package over the same
 // engine. Everything not in this package (and its sibling public subpackages) is
 // internal and carries no stability promise.

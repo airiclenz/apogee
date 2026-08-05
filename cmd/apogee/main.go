@@ -5,8 +5,8 @@
 // builds a Config, constructs the Agent through the public apogee package (dogfooding
 // the shipped surface), and hands it to the internal/tui renderer. The root command
 // launches the TUI; the subcommands it also carries are assembled here, from the
-// subcommands() registration seam (empty until `apogee probe` lands — `headless` stays
-// deferred, phase-2 detail plan §6).
+// subcommands() registration seam (`apogee probe` and `apogee headless` today, phase-2
+// detail plan §6).
 package main
 
 import (

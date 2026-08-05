@@ -235,7 +235,7 @@ func TestRootMakesNoStartupProbe(t *testing.T) {
 	}
 }
 
-// fakeSubcommand is a stand-in for a real subcommand (probe, later headless): it records
+// fakeSubcommand is a stand-in for a real subcommand (probe, headless): it records
 // that it ran, so a test can tell dispatch from a root invocation.
 func fakeSubcommand(ran *bool) *cobra.Command {
 	return &cobra.Command{

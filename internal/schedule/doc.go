@@ -19,7 +19,7 @@
 //   - Gating is PER SCHEDULE: one Schedule's blocked Gate never delays another's Firing.
 //   - A Schedule runs in Plan or Auto only, refused at creation otherwise (decision 2). The
 //     Auto-eligibility ladder is the CALLER's gate, exactly as it is for run.Once: the mode
-//     is authorized where it is chosen (the TUI's popup, a headless CLI's flags), and this
+//     is authorized where it is chosen (the TUI's popup, the headless CLI's flags), and this
 //     package only checks that the mode is one a Firing may run in at all.
 //   - The cycle floor is MinCycle, enforced here rather than at the surface, because a typo
 //     hammering a single-slot local server is a policy problem and policy lives in the

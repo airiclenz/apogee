@@ -33,9 +33,9 @@ retired predecessor structure).
 **Embeddable agent** (the public API):
 The public Go package other applications import to construct and run an Apogee agent
 in-process. Apogee ships as **both** a ready-to-use terminal tool (the `cmd/apogee` TUI +
-CLI — the headline product) **and** this reusable library: the TUI, the optional `apogee
-headless` CLI (still deferred — the subcommand surface now exists and carries
-[`apogee probe`](#probing-and-model-identity), but `headless` is not built), and the bench are all consumers of one
+CLI — the headline product) **and** this reusable library: the TUI, the `apogee headless`
+CLI (one prompt run unattended over the shared core, beside
+[`apogee probe`](#probing-and-model-identity) on the subcommand surface), and the bench are all consumers of one
 public package over the same engine. The repo is the whole tool, not just the library. The public surface is guarded
 and versioned; everything else lives in `internal/`. See
 [ADR 0001](docs/adr/0001-agent-loop-is-an-embeddable-library-driven-by-an-external-bench.md).
@@ -44,7 +44,7 @@ different thing; do not resurrect the name for the new library), "the SDK".
 
 **Driver**:
 A program that embeds the **Embeddable agent** and drives the loop through its public
-API. Two exist today — the TUI and the bench — with `apogee headless` deferred and a
+API. Three exist today — the TUI, `apogee headless` and the bench — with a
 platform daemon anticipated. The engine must stay sufficient for *any* Driver: nothing
 model-visible or safety-relevant may exist only in one Driver's surface, and a wire
 surface (HTTP, webhooks) is always composed by a Driver — the engine itself is
@@ -73,7 +73,7 @@ One run of a **Schedule**'s prompt: a **fresh** agent constructed through the **
 agent**'s public API, the prompt submitted, the loop driven to the quiescent boundary, and the
 result saved as an ordinary **Session record** marked with its Schedule's identity (id and name
 on browsable `Meta`) so the `/sessions` browser can label it. A Firing *is* a **headless run** —
-the same act as the deferred `apogee headless` runner, over the shared core (`internal/run`)
+the same act as the `apogee headless` runner, over the shared core (`internal/run`)
 both use. It carries nothing over from the previous Firing (fresh context; no summary is
 injected — model-visible content would be a Mechanism to bench, not a scheduler feature), its
 Approver is a **fail-safe denier** (a gated action fails visibly and nothing waits for a human),

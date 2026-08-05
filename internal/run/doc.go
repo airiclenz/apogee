@@ -1,8 +1,8 @@
 // Package run performs one Firing: a single headless run of one prompt against a fresh
 // Agent, saved as an ordinary session record (ADR 0033).
 //
-// It is the shared core of every unattended run — the scheduler's Firings today, the
-// deferred `apogee headless` subcommand tomorrow — which is ADR 0031's first mechanical
+// It is the shared core of every unattended run — the scheduler's Firings and the
+// `apogee headless` subcommand alike — which is ADR 0031's first mechanical
 // consequence in code: a capability that works only under the TUI breaks visibly here
 // rather than silently. The package imports internal/agent, internal/domain and
 // internal/session downward only (ADR 0010); it reaches neither the root facade nor
