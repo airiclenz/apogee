@@ -15,4 +15,6 @@ import "github.com/spf13/cobra"
 // `Args: cobra.NoArgs`: Cobra matches argv[1] against the children first and only falls
 // through to the root's argument validation when nothing matches, so an unknown word still
 // fails with the same `unknown command` error it does today.
-func subcommands() []*cobra.Command { return []*cobra.Command{newProbeCommand()} }
+func subcommands() []*cobra.Command {
+	return []*cobra.Command{newProbeCommand(), newHeadlessCommand()}
+}

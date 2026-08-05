@@ -1,0 +1,582 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/run"
+)
+
+// stubRunner stands in for internal/run.Once: it records the Spec the command composed and
+// returns a canned outcome, so every assertion below is about the CLI — parsing, composition,
+// output routing, exit codes — and none of them needs a model, a server, or a real run.
+type stubRunner struct {
+	called bool
+	spec   run.Spec
+	res    run.Result
+	err    error
+}
+
+func (s *stubRunner) once(_ context.Context, spec run.Spec) (run.Result, error) {
+	s.called = true
+	s.spec = spec
+	return s.res, s.err
+}
+
+// headlessRun executes one `apogee headless` invocation against the stub and hermetic roots, and
+// returns what landed on each stream plus the error the command returned. The apogee home and the
+// workspace are temporary so no real ~/.apogee config can reach the resolution, and stdin is
+// empty unless a test replaces it.
+//
+// It swaps the package-level runner seam for the duration of the test. That is shared mutable
+// state, so nothing here runs in parallel.
+func headlessRun(t *testing.T, stub *stubRunner, args ...string) (out, errOut string, err error) {
+	t.Helper()
+	prev := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prev })
+	// The environment must not decide what the mode assertions measure.
+	t.Setenv(envMode, "")
+
+	cmd := newHeadlessCommand()
+	var outBuf, errBuf bytes.Buffer
+	cmd.SetOut(&outBuf)
+	cmd.SetErr(&errBuf)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs(append([]string{"--config", t.TempDir(), "--workspace", t.TempDir()}, args...))
+
+	err = cmd.ExecuteContext(context.Background())
+	return outBuf.String(), errBuf.String(), err
+}
+
+// The prompt is the argument, or stdin, or a usage error — never an empty request to the model.
+func TestHeadlessPromptResolution(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		args    []string
+		stdin   string
+		want    string
+		wantErr bool
+	}{
+		{name: "the positional argument is the prompt", args: []string{"list the files"}, want: "list the files"},
+		{name: "no argument reads all of stdin", stdin: "summarise the repo\nin one line\n", want: "summarise the repo\nin one line"},
+		{name: "the argument wins over stdin", args: []string{"from the argument"}, stdin: "from stdin", want: "from the argument"},
+		{name: "the prompt is trimmed", args: []string{"  spaced out \n"}, want: "spaced out"},
+		{name: "nothing in either is a usage error", stdin: "", wantErr: true},
+		{name: "whitespace in either is a usage error", args: []string{" \n\t "}, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := resolveHeadlessPrompt(tc.args, strings.NewReader(tc.stdin))
+			if tc.wantErr {
+				if !errors.Is(err, errHeadlessNoPrompt) {
+					t.Fatalf("err = %v; want errHeadlessNoPrompt", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveHeadlessPrompt: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("prompt = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// An empty prompt stops the command before anything is composed, and says so with exit 2: the run
+// never started, which is a different thing for a script to read than a run that failed.
+func TestHeadlessEmptyPromptNeverStartsARun(t *testing.T) {
+	stub := &stubRunner{}
+	_, _, err := headlessRun(t, stub)
+
+	if err == nil {
+		t.Fatal("an empty prompt was accepted")
+	}
+	if code := exitCodeFor(err); code != exitNotStarted {
+		t.Errorf("exit code = %d; want %d", code, exitNotStarted)
+	}
+	if stub.called {
+		t.Error("the runner ran for an empty prompt")
+	}
+}
+
+// Only plan and auto reach the runner. The other two rungs of the ladder exist to consult a
+// human, and the refusal happens at the flag — before a Confiner is built or a model is bound.
+func TestHeadlessRefusesModesWithNobodyToAsk(t *testing.T) {
+	for _, mode := range []string{"ask-before", "allow-edits"} {
+		t.Run(mode, func(t *testing.T) {
+			stub := &stubRunner{}
+			_, errOut, err := headlessRun(t, stub, "--mode", mode, "do a thing")
+
+			if err == nil {
+				t.Fatalf("--mode %s was accepted", mode)
+			}
+			if code := exitCodeFor(err); code != exitNotStarted {
+				t.Errorf("exit code = %d; want %d", code, exitNotStarted)
+			}
+			if stub.called {
+				t.Error("the runner ran in a mode a headless run may not use")
+			}
+			for _, want := range []string{"plan", "auto"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal does not name %q: %q", want, err.Error())
+				}
+			}
+			if errOut != "" && strings.Contains(errOut, "turns:") {
+				t.Errorf("a refused run printed a summary line: %q", errOut)
+			}
+		})
+	}
+
+	t.Run("a mode that is no mode at all", func(t *testing.T) {
+		stub := &stubRunner{}
+		_, _, err := headlessRun(t, stub, "--mode", "yolo", "do a thing")
+		if err == nil {
+			t.Fatal("--mode yolo was accepted")
+		}
+		if code := exitCodeFor(err); code != exitNotStarted {
+			t.Errorf("exit code = %d; want %d", code, exitNotStarted)
+		}
+	})
+}
+
+// The bottom layer is this command's own: an unset --mode is plan, not the interactive ladder's
+// ask-before, so a bare invocation on a host that has never spelled a mode out runs read-only
+// rather than refusing.
+func TestHeadlessModeResolution(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want apogee.Mode
+	}{
+		{name: "unset is plan", args: []string{"a prompt"}, want: apogee.ModePlan},
+		{name: "explicit plan", args: []string{"--mode", "plan", "a prompt"}, want: apogee.ModePlan},
+		{name: "explicit auto", args: []string{"--mode", "auto", "a prompt"}, want: apogee.ModeAuto},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubRunner{}
+			_, _, err := headlessRun(t, stub, tc.args...)
+			if err != nil {
+				t.Fatalf("headless: %v", err)
+			}
+			if !stub.called {
+				t.Fatal("the runner did not run")
+			}
+			if stub.spec.Config.Mode != tc.want {
+				t.Errorf("Config.Mode = %q; want %q", stub.spec.Config.Mode, tc.want)
+			}
+		})
+	}
+}
+
+// What the command hands the runner: the resolved prompt, the roots this invocation was pointed
+// at, and none of the delegates that assume a human — run.Once pins its own, and a Firing reaches
+// no MCP server (ADR 0033/0034).
+func TestHeadlessComposesTheRunnerSpec(t *testing.T) {
+	stub := &stubRunner{}
+	_, _, err := headlessRun(t, stub, "explain this repo")
+	if err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+	if !stub.called {
+		t.Fatal("the runner did not run")
+	}
+	if stub.spec.Prompt != "explain this repo" {
+		t.Errorf("Spec.Prompt = %q; want %q", stub.spec.Prompt, "explain this repo")
+	}
+	if stub.spec.ScheduleID != "" || stub.spec.ScheduleName != "" || stub.spec.Title != "" {
+		t.Errorf("a bare headless run carries a Schedule identity or a title: %+v", stub.spec)
+	}
+	cfg := stub.spec.Config
+	if cfg.Events != nil || cfg.Approver != nil || cfg.Asker != nil || cfg.Presenter != nil {
+		t.Error("the command wired a delegate run.Once pins for itself")
+	}
+	if cfg.Tools != nil {
+		t.Error("the command wired a tool registry; a headless run takes the engine's own (no MCP)")
+	}
+	if cfg.Confiner == nil {
+		t.Error("no Confiner was wired; the run would not be fenced")
+	}
+	if cfg.WorkspaceDir == "" || cfg.SessionsDir == "" || cfg.ConfigDir == "" {
+		t.Errorf("the state roots did not reach the Config: %+v", cfg)
+	}
+}
+
+// Persistence is on by default and --no-save is the opt-out, expressed the only way internal/run
+// reads it: a nil Store.
+func TestHeadlessNoSaveDropsTheStore(t *testing.T) {
+	t.Run("saved by default", func(t *testing.T) {
+		stub := &stubRunner{}
+		if _, _, err := headlessRun(t, stub, "a prompt"); err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if stub.spec.Store == nil {
+			t.Error("Spec.Store is nil; a headless run is saved unless --no-save says otherwise")
+		}
+	})
+
+	t.Run("--no-save", func(t *testing.T) {
+		stub := &stubRunner{}
+		if _, _, err := headlessRun(t, stub, "--no-save", "a prompt"); err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if stub.spec.Store != nil {
+			t.Error("Spec.Store is set under --no-save; the run would be recorded")
+		}
+	})
+}
+
+// The answer goes to stdout alone; the summary — and the escape bytes the model's raw text may
+// carry — never reach it.
+func TestHeadlessOutputRouting(t *testing.T) {
+	t.Run("the answer on stdout, the summary on stderr", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{SessionID: "s-42", FinalText: "the answer", Turns: 3, Denied: 2}}
+		out, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.TrimRight(out, "\n") != "the answer" {
+			t.Errorf("stdout = %q; want the answer alone", out)
+		}
+		for _, want := range []string{"session: s-42", "turns: 3", "denied: 2"} {
+			if !strings.Contains(errOut, want) {
+				t.Errorf("the summary does not state %q: %q", want, errOut)
+			}
+		}
+		if strings.Contains(out, "turns:") {
+			t.Errorf("the summary leaked onto stdout: %q", out)
+		}
+	})
+
+	t.Run("an unsaved run omits the session segment", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+		_, errOut, err := headlessRun(t, stub, "--no-save", "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.Contains(errOut, "session:") {
+			t.Errorf("an unsaved run claimed a record: %q", errOut)
+		}
+		if !strings.Contains(errOut, "turns: 1") {
+			t.Errorf("the summary is missing: %q", errOut)
+		}
+	})
+
+	t.Run("terminal escapes are stripped from the answer", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{FinalText: "safe \x1b]52;c;cGF5bG9hZA==\x07 text", Turns: 1}}
+		out, _, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.ContainsRune(out, 0x1b) {
+			t.Errorf("an ESC byte reached stdout: %q", out)
+		}
+		if !strings.Contains(out, "safe ") || !strings.Contains(out, " text") {
+			t.Errorf("the strip ate ordinary text: %q", out)
+		}
+	})
+}
+
+// captureProcessStreams swaps the process's REAL os.Stdout and os.Stderr for pipes while fn runs
+// and returns what each one received. Wiring Cobra's own SetOut/SetErr cannot answer the question
+// this file has to answer — which of the two streams a shell would find the answer on — because
+// setting an out writer changes where Cobra's OutOrStderr fallback lands. Only the process streams
+// tell the truth.
+//
+// Both pipes are drained concurrently so a write can never block on a full pipe buffer, and the
+// originals are restored before the reads are joined.
+func captureProcessStreams(t *testing.T, fn func()) (stdout, stderr string) {
+	t.Helper()
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stderr pipe: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	var outBuf, errBuf bytes.Buffer
+	wg.Add(2)
+	go func() { defer wg.Done(); _, _ = io.Copy(&outBuf, outR) }()
+	go func() { defer wg.Done(); _, _ = io.Copy(&errBuf, errR) }()
+
+	prevOut, prevErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = outW, errW
+	func() {
+		defer func() { os.Stdout, os.Stderr = prevOut, prevErr }()
+		fn()
+	}()
+
+	_ = outW.Close()
+	_ = errW.Close()
+	wg.Wait()
+	_ = outR.Close()
+	_ = errR.Close()
+	return outBuf.String(), errBuf.String()
+}
+
+// The stream split as a SHELL sees it, over the process's real stdout and stderr with no out
+// writer wired — the invocation `apogee headless "..." > answer.txt` actually performs.
+//
+// This is the guard on a mistake the earlier attempt made and the earlier test enshrined: Cobra's
+// cmd.Println writes to OutOrStderr, so printing the product with it sends the answer to stderr
+// everywhere except in a test that has called SetOut. Asserting on Cobra's buffers alone cannot
+// catch that — this test would fail immediately if the print regressed to the Print family.
+func TestHeadlessAnswerLandsOnTheProcessStdout(t *testing.T) {
+	stub := &stubRunner{res: run.Result{SessionID: "s-7", FinalText: "the answer", Turns: 3, Denied: 1}}
+	prev := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prev })
+	t.Setenv(envMode, "")
+
+	configDir, workspace := t.TempDir(), t.TempDir()
+	var runErr error
+	stdout, stderr := captureProcessStreams(t, func() {
+		cmd := newHeadlessCommand()
+		// Deliberately no SetOut: the fallback under test is the one every real run takes.
+		cmd.SetIn(strings.NewReader(""))
+		cmd.SetArgs([]string{"--config", configDir, "--workspace", workspace, "a prompt"})
+		runErr = cmd.ExecuteContext(context.Background())
+	})
+	if runErr != nil {
+		t.Fatalf("headless: %v (stderr: %q)", runErr, stderr)
+	}
+
+	if strings.TrimRight(stdout, "\n") != "the answer" {
+		t.Errorf("process stdout = %q; want the answer and nothing else", stdout)
+	}
+	if strings.Contains(stderr, "the answer") {
+		t.Errorf("the answer reached process stderr; a redirect of stdout would lose it: %q", stderr)
+	}
+	if !strings.Contains(stderr, "turns: 3") || !strings.Contains(stderr, "denied: 1") {
+		t.Errorf("the summary is not on process stderr: %q", stderr)
+	}
+	if strings.Contains(stdout, "turns:") {
+		t.Errorf("the summary reached process stdout: %q", stdout)
+	}
+}
+
+// The exit-code convention this command introduces, end to end through the error type: 0 for a
+// completed run, 1 for a run that started and failed, 2 for one that never started.
+func TestHeadlessExitCodes(t *testing.T) {
+	t.Run("a completed run exits 0", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "done", Turns: 2, Denied: 4}}
+		_, _, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("a completed run returned an error: %v", err)
+		}
+	})
+
+	t.Run("a failed run exits 1 and names the partial record", func(t *testing.T) {
+		stub := &stubRunner{
+			res: run.Result{SessionID: "s-2", FinalText: "half an answer", Turns: 1},
+			err: errors.New("apogee: the firing was cancelled"),
+		}
+		out, _, err := headlessRun(t, stub, "a prompt")
+		if err == nil {
+			t.Fatal("a failed run returned no error")
+		}
+		if code := exitCodeFor(err); code != exitRunFailed {
+			t.Errorf("exit code = %d; want %d", code, exitRunFailed)
+		}
+		if !strings.Contains(err.Error(), "partial run saved as s-2") {
+			t.Errorf("the failure does not name the partial record: %q", err.Error())
+		}
+		if !strings.Contains(out, "half an answer") {
+			t.Errorf("a failed run withheld what it salvaged: %q", out)
+		}
+	})
+
+	t.Run("a save failure after a good run still prints the answer", func(t *testing.T) {
+		// run.Once's own shape for this case: the Result carries the answer and no record id,
+		// and only the returned error reports that the record did not land.
+		stub := &stubRunner{
+			res: run.Result{FinalText: "the answer", Turns: 2},
+			err: errors.New("apogee: save the firing's record: disk full"),
+		}
+		out, _, err := headlessRun(t, stub, "a prompt")
+		if err == nil {
+			t.Fatal("a save failure was swallowed")
+		}
+		if code := exitCodeFor(err); code != exitRunFailed {
+			t.Errorf("exit code = %d; want %d", code, exitRunFailed)
+		}
+		if strings.TrimRight(out, "\n") != "the answer" {
+			t.Errorf("stdout = %q; the answer must survive a failed save", out)
+		}
+		if strings.Contains(err.Error(), "partial run saved") {
+			t.Errorf("a run with no record claimed one: %q", err.Error())
+		}
+	})
+
+	t.Run("an unavailable auto never started, so it exits 2", func(t *testing.T) {
+		stub := &stubRunner{err: apogee.ErrAutoUnavailable}
+		_, errOut, err := headlessRun(t, stub, "--mode", "auto", "a prompt")
+		if err == nil {
+			t.Fatal("an unavailable auto was reported as a success")
+		}
+		if code := exitCodeFor(err); code != exitNotStarted {
+			t.Errorf("exit code = %d; want %d", code, exitNotStarted)
+		}
+		if !strings.Contains(err.Error(), "filesystem-write confinement") {
+			t.Errorf("the refusal is not the friendly one: %q", err.Error())
+		}
+		if strings.Contains(errOut, "turns:") {
+			t.Errorf("a run that never started printed a summary: %q", errOut)
+		}
+	})
+
+	t.Run("a construction refusal never started, so it exits 2", func(t *testing.T) {
+		// run.Once's own shape for every pre-run exit: the ZERO Result — no Turn was ever driven —
+		// beside the error that says why. The commonest one in the field is a host whose config
+		// never named an endpoint, and it must not be reported as a run that failed.
+		stub := &stubRunner{err: errors.New("apogee: construct the firing's agent: apogee: Config.Endpoint is required")}
+		out, errOut, err := headlessRun(t, stub, "a prompt")
+		if err == nil {
+			t.Fatal("a construction refusal was reported as a success")
+		}
+		if code := exitCodeFor(err); code != exitNotStarted {
+			t.Errorf("exit code = %d; want %d", code, exitNotStarted)
+		}
+		if strings.Contains(errOut, "turns:") {
+			t.Errorf("a run that never started printed a summary: %q", errOut)
+		}
+		if out != "" {
+			t.Errorf("a run that never started wrote to stdout: %q", out)
+		}
+	})
+
+	t.Run("an error carrying no code exits 1", func(t *testing.T) {
+		if code := exitCodeFor(errors.New("something else went wrong")); code != 1 {
+			t.Errorf("exit code = %d; want 1 for an ordinary error", code)
+		}
+		if code := exitCodeFor(nil); code != 1 {
+			t.Errorf("exit code = %d; want the 1 default", code)
+		}
+	})
+}
+
+// Cobra validates flags and the argument count BEFORE it calls RunE, so the exit convention has to
+// reach those refusals from outside the command body or they leave as bare errors and exit 1 —
+// telling a script the model ran and failed when nothing was ever sent.
+func TestHeadlessUsageErrorsNeverStartARun(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "an unknown flag", args: []string{"--bogus", "a prompt"}},
+		{name: "a flag value that will not parse", args: []string{"--no-save=maybe", "a prompt"}},
+		{name: "an unquoted prompt arrives as several arguments", args: []string{"summarise", "the", "repo"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubRunner{}
+			out, errOut, err := headlessRun(t, stub, tc.args...)
+
+			if err == nil {
+				t.Fatal("the invocation was accepted")
+			}
+			if code := exitCodeFor(err); code != exitNotStarted {
+				t.Errorf("exit code = %d; want %d (err: %v)", code, exitNotStarted, err)
+			}
+			if stub.called {
+				t.Error("the runner ran for an invocation Cobra rejected")
+			}
+			if out != "" {
+				t.Errorf("a run that never started wrote to stdout: %q", out)
+			}
+			if strings.Contains(errOut, "turns:") {
+				t.Errorf("a run that never started printed a summary: %q", errOut)
+			}
+		})
+	}
+}
+
+// The same convention through the REAL runner, on the invocation a fresh host actually makes:
+// `apogee headless --config <fresh> "hi"` with no endpoint named anywhere. run.Once cannot
+// construct the Agent, so no prompt is ever sent — exit 2, no answer, and no summary claiming a
+// run that never happened. Nothing here touches the network: construction refuses before a request
+// exists, which is exactly why the run counts as never started.
+func TestHeadlessWithNoEndpointNeverStartsARun(t *testing.T) {
+	// The host's own environment must not hand the run an endpoint the test is asserting is absent.
+	t.Setenv(envEndpoint, "")
+	t.Setenv(envModel, "")
+	t.Setenv(envMode, "")
+
+	cmd := newHeadlessCommand()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"--config", t.TempDir(), "--workspace", t.TempDir(), "--no-save", "hi"})
+
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("a run with no endpoint configured was reported as a success")
+	}
+	if code := exitCodeFor(err); code != exitNotStarted {
+		t.Errorf("exit code = %d; want %d (err: %v)", code, exitNotStarted, err)
+	}
+	if out.String() != "" {
+		t.Errorf("a run that never started wrote to stdout: %q", out.String())
+	}
+	if strings.Contains(errOut.String(), "turns:") {
+		t.Errorf("a run that never started printed a summary: %q", errOut.String())
+	}
+}
+
+// The prompt reaches the runner off stdin too — the pipeline form, with no argument at all.
+func TestHeadlessReadsThePromptFromStdin(t *testing.T) {
+	stub := &stubRunner{res: run.Result{FinalText: "ok", Turns: 1}}
+	prev := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prev })
+	t.Setenv(envMode, "")
+
+	cmd := newHeadlessCommand()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetIn(strings.NewReader("what does this repo do?\n"))
+	cmd.SetArgs([]string{"--config", t.TempDir(), "--workspace", t.TempDir(), "--no-save"})
+
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("headless: %v\n%s", err, errOut.String())
+	}
+	if stub.spec.Prompt != "what does this repo do?" {
+		t.Errorf("Spec.Prompt = %q; want the piped prompt", stub.spec.Prompt)
+	}
+}
+
+// The command is reachable by name off the root, and registering it leaves the bare invocation
+// alone — the seam's standing guarantee (root_test.go).
+func TestHeadlessIsRegisteredOnTheRoot(t *testing.T) {
+	t.Parallel()
+	var found *cobra.Command
+	for _, sub := range subcommands() {
+		if sub.Name() == "headless" {
+			found = sub
+		}
+	}
+	if found == nil {
+		t.Fatal("`headless` is not registered in subcommands()")
+	}
+	if !found.SilenceUsage || !found.SilenceErrors {
+		t.Error("the command dumps usage or prints its own error; main owns both")
+	}
+}

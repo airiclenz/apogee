@@ -28,6 +28,9 @@ func main() {
 	cmd := newRootCommand(tui.Run, subcommands()...)
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		// The exit status is the failure's own when it carries one — `apogee headless`
+		// distinguishes "the run started and failed" (1) from "the run never started" (2) —
+		// and 1 for everything else, which is what every command exited with before.
+		os.Exit(exitCodeFor(err))
 	}
 }

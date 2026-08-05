@@ -1,0 +1,386 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
+	"github.com/spf13/cobra"
+
+	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/mechanisms"
+	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/skills"
+)
+
+// ----------------------------------------------------------------------------
+// Exit codes
+// ----------------------------------------------------------------------------
+
+// The process exit codes `apogee headless` distinguishes — apogee's first distinct-exit-code
+// convention, introduced here deliberately. A script driving an unattended prompt has to tell
+// "the model ran and it went wrong" from "the model never got the chance", and a single non-zero
+// code cannot: the first is an outcome to read, the second is an invocation to fix. Everything
+// else in the binary still exits 0 or 1, which is exactly what the default below preserves.
+const (
+	// exitRunFailed is a run that STARTED and did not finish: a model or tool failure, a
+	// cancellation, or a record that could not be saved. Whatever the run managed is on stdout.
+	exitRunFailed = 1
+	// exitNotStarted is a run that never began: a usage mistake, a configuration this host
+	// cannot honour, or a mode a headless run may not use. Nothing was sent and nothing saved.
+	exitNotStarted = 2
+)
+
+// exitError carries the process exit code an error asks the binary to end with. RunE returns it
+// like any other error — main's error path reads the code back off it — so a deferred teardown
+// (the Confiner's Close, above all) still runs; calling os.Exit inside a command body would skip
+// every one of them.
+type exitError struct {
+	code int
+	err  error
+}
+
+// Error reports the wrapped error's message: the code is for the process, never for the reader.
+func (e exitError) Error() string { return e.err.Error() }
+
+// Unwrap exposes the wrapped error so errors.Is/As see straight through the code.
+func (e exitError) Unwrap() error { return e.err }
+
+// notStarted marks err as a refusal that stopped the run before it began (exit 2).
+func notStarted(err error) error { return exitError{code: exitNotStarted, err: err} }
+
+// runFailed marks err as the failure of a run that had already started (exit 1).
+func runFailed(err error) error { return exitError{code: exitRunFailed, err: err} }
+
+// exitCodeFor reports the exit code an error asks for: the code carried by an exitError anywhere
+// in its chain, else 1 — the code every command exited with before headless existed, so nothing
+// that does not opt in can have its exit status moved by this mechanism.
+func exitCodeFor(err error) int {
+	var carrier exitError
+	if errors.As(err, &carrier) {
+		return carrier.code
+	}
+	return 1
+}
+
+// ----------------------------------------------------------------------------
+// The headless command
+// ----------------------------------------------------------------------------
+
+// runOnce is the seam onto the shared runner. `apogee headless` is a thin CLI over internal/run —
+// argument parsing and exit codes, not a second runner (ADR 0033, decision 6) — and this variable
+// is the single point a test replaces, so prompt resolution, composition, output routing and exit
+// codes are all provable without a live model. Production never reassigns it.
+var runOnce = run.Once
+
+// errHeadlessNoPrompt is the usage refusal when neither the argument nor stdin carries anything.
+// A headless run cannot ask what the user meant, so an empty prompt is refused rather than sent.
+var errHeadlessNoPrompt = errors.New(
+	"apogee headless: no prompt — pass it as an argument (apogee headless \"...\") or pipe it on stdin")
+
+// newHeadlessCommand builds `apogee headless` — one prompt, one unattended run, printed to
+// stdout with a meaningful exit code. It is the second Driver over the embeddable engine (ADR
+// 0031) and the tripwire that makes a TUI-welded capability visible: everything it needs comes
+// from internal/run, and anything it cannot reach from there is a capability that has grown into
+// the UI by mistake.
+//
+// The Firing posture is not this command's to choose — run.Once imposes it (ADR 0033, decision
+// 2): a fail-safe denier in place of an Approver, no ask_user and no present_document, and no
+// state carried between runs. What is left for the CLI is exactly what a CLI owns: which prompt,
+// which binding, which mode, whether to save, and what the shell learns from the exit status.
+func newHeadlessCommand() *cobra.Command {
+	var opts options
+	var noSave bool
+
+	cmd := &cobra.Command{
+		Use:   "headless [prompt]",
+		Short: "Run one prompt to completion without a UI and print the answer",
+		Long: "apogee headless runs a single prompt to completion with nobody watching and\n" +
+			"prints the answer to stdout. Give the prompt as the argument, or pipe it on\n" +
+			"stdin; an empty prompt is a usage error.\n\n" +
+			"The run is unattended, so it never asks: every gated action is refused rather\n" +
+			"than parked (the count is reported), ask_user and present_document are not\n" +
+			"registered, and no MCP server is contacted. Only two modes make sense here and\n" +
+			"only two are accepted — plan (the default, read-only) and auto (confined and\n" +
+			"unattended); ask-before and allow-edits both exist to consult a human.\n\n" +
+			"Settings resolve exactly as a session's do — flag over APOGEE_* environment over\n" +
+			"config.yaml — so a headless run has the shape a session on this host would have.\n" +
+			"The run is saved to ~/.apogee/sessions like any other session and shows up in\n" +
+			"/sessions; pass --no-save to run it and record nothing.\n\n" +
+			"The answer goes to stdout and everything else to stderr, so a pipeline reads\n" +
+			"only the model's text. Exit codes: 0 the run completed, 1 the run started and\n" +
+			"failed (model or tool error, cancellation, a record that would not save), 2 the\n" +
+			"run never started (usage, configuration, a refused mode).",
+		Args:          headlessArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runHeadless(cmd, args, &opts, noSave)
+		},
+	}
+
+	// A flag Cobra itself rejects — an unknown name, a value it cannot parse — is a usage mistake,
+	// and every usage mistake this command makes is exit 2. Cobra parses flags BEFORE it calls RunE,
+	// so the body below never sees that error and cannot mark it: this hook is the only point it
+	// passes through. Without it `apogee headless --bogus x` would exit 1 and tell a script the run
+	// had started and failed, which is the opposite of what happened.
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return notStarted(fmt.Errorf("apogee headless: %w", err))
+	})
+
+	flags := cmd.Flags()
+	flags.StringVar(&opts.endpoint, "endpoint", "", "OpenAI-compatible LLM server URL")
+	flags.StringVar(&opts.model, "model", "", "model name to request (default: the configured model)")
+	flags.StringVar(&opts.mode, "mode", string(modePlan),
+		"autonomy mode for the run: plan | auto (an unattended run has nobody to ask)")
+	flags.StringVar(&opts.workspace, "workspace", "",
+		"workspace root the file tools are scoped to (default: current directory)")
+	flags.StringVar(&opts.configDir, "config", "",
+		"apogee home directory for config/library/sessions (default: ~/.apogee)")
+	flags.BoolVar(&noSave, "no-save", false,
+		"run the prompt and print the answer, but record no session")
+
+	return cmd
+}
+
+// headlessArgs is cobra.MaximumNArgs(1) with this command's exit convention attached. The argument
+// count is validated by Cobra before RunE runs, exactly like the flags, so the refusal has to carry
+// the code out from here or it would leave as a bare error and exit 1. The hint is worth the extra
+// clause: an unquoted multi-word prompt is the way this mistake is actually made.
+func headlessArgs(cmd *cobra.Command, args []string) error {
+	if err := cobra.MaximumNArgs(1)(cmd, args); err != nil {
+		return notStarted(fmt.Errorf(
+			"apogee headless: %w — the prompt is a single argument, so quote it", err))
+	}
+	return nil
+}
+
+// runHeadless is the command's body: resolve the prompt and the bindings, compose the Config the
+// runner is handed, run it once, and route what came back — the answer to stdout, everything else
+// to stderr. It is split out of RunE so the whole path is one testable function.
+//
+// The composition mirrors scheduleWiring.fire, because a headless run and a Firing are the same
+// thing reached by different Drivers: the per-model half is resolved through rebindSpecFor (the
+// system prompt keys on the model — ADR 0023 — and so does the validated Mechanism set — ADR
+// 0016), the delegates that assume a human are left nil for run.Once to pin, and no MCP tools are
+// wired at all.
+func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) error {
+	// Before anything is resolved or constructed: with no prompt there is no run to configure.
+	prompt, err := resolveHeadlessPrompt(args, cmd.InOrStdin())
+	if err != nil {
+		return notStarted(err)
+	}
+
+	// The same resolution a session performs (flag > env > file > default), so a headless run
+	// talks to the server, and runs with the Mechanisms, a session on this host would.
+	if err := applyConfig(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
+		return notStarted(err)
+	}
+	// This command's own BOTTOM layer is plan. applyConfig's is the interactive ladder's
+	// ask-before — a mode that consults a human — so leaving it in place would make the bare
+	// `apogee headless "..."` a refusal on any host that has not spelled a mode out. An explicit
+	// --mode still wins (it is refused below, loudly, if it names a mode with nobody to ask), and
+	// so does an APOGEE_MODE or a `mode:` naming plan or auto.
+	if !cmd.Flags().Changed("mode") && opts.mode == string(modeAskBefore) {
+		opts.mode = string(modePlan)
+	}
+	mode, err := parseMode(opts.mode)
+	if err != nil {
+		return notStarted(err)
+	}
+	// The refusal happens HERE, before a Confiner is built or a model is bound: run.Once's own
+	// ErrMode is the library's backstop, and a CLI that let the composition run first would spend
+	// the work only to report a decision it could have made from the flag alone.
+	if mode != modePlan && mode != modeAuto {
+		return notStarted(fmt.Errorf(
+			"apogee headless: --mode %s consults a human and an unattended run has none "+
+				"(use --mode plan or --mode auto)", mode))
+	}
+
+	roots, err := resolveRoots(opts.configDir, opts.workspace)
+	if err != nil {
+		return notStarted(err)
+	}
+
+	// The host's real Confiner backend for this OS, and the teardown the Windows token backend
+	// needs to put the disk back (ADR 0020 §2) — the same optional-interface assertion runRoot
+	// makes, for the same reason. It is deferred, which is why every failure below travels as a
+	// returned error: an os.Exit in this function would leave the labels on the disk.
+	confiner := platform.NewConfiner()
+	if closer, ok := confiner.(interface{ Close() error }); ok {
+		defer func() {
+			if notice := platform.ConfinementTeardownNotice(closer.Close()); notice != "" {
+				cmd.PrintErrln(notice)
+			}
+		}()
+	}
+
+	// Every `mechanisms:` key is validated here — enabled AND disabled — exactly as startup
+	// validates them: the engine only ever sees the enabled IDs, so a typo'd disabled key would
+	// otherwise never be reported at all (ADR 0015 §1).
+	manualIDs, err := mechanismIDs(opts.mechanisms, mechanisms.KnownIDs())
+	if err != nil {
+		return notStarted(err)
+	}
+	// The per-model half of the Config: the system prompt selected for THIS model, the validated
+	// set matched against its fingerprint, and the enable list with the manual-suppresses-a-set
+	// rule applied. The observed window is passed as unknown — nothing beats here to observe one —
+	// so a `context-window:` pin binds the Budget and an unpinned run leaves it inactive, which
+	// for one bounded prompt is the honest degrade rather than a guess.
+	spec, notices, err := rebindSpecFor(*opts, roots, manualIDs, opts.model, 0, opts.contextWindow)
+	if err != nil {
+		return notStarted(err)
+	}
+	for _, n := range notices {
+		cmd.PrintErrln(n)
+	}
+
+	cfg := apogee.Config{
+		Endpoint:     opts.endpoint,
+		Model:        spec.Model,
+		APIKey:       opts.apiKey,
+		Mode:         mode,
+		Bypass:       opts.bypass,
+		ConfigDir:    roots.config,
+		LibraryDir:   roots.library,
+		SessionsDir:  roots.sessions,
+		WorkspaceDir: roots.workspace,
+		// Confiner and posture as the session's, so an Auto run here is fenced by the same box
+		// an Auto session would be. Whether this host may run Auto unattended at all is the
+		// eligibility gate, which belongs to the surface that offers the mode.
+		Confiner:           confiner,
+		ConfineToWorkspace: opts.confineToWorkspace,
+		WebSearchEndpoint:  opts.webSearchEndpoint,
+		Profile:            opts.profile,
+		SystemPrompt:       spec.SystemPrompt,
+		ContextFiles:       opts.contextFiles,
+		Skills: skills.NewProvider(skills.Sources{
+			Home:             roots.config,
+			Workspace:        roots.workspace,
+			UseProjectSkills: opts.useProjectSkills,
+		}),
+		EnableMechanisms: spec.EnableMechanisms,
+		Context: apogee.ContextConfig{
+			MaxContextTokens:  spec.MaxContextTokens,
+			CompactionEnabled: opts.autoCompact,
+		},
+		// Tools stays nil: a headless run reaches no external MCP server (the Firing posture,
+		// ADR 0034), so the engine builds its own registry. Events, Approver, Asker and Presenter
+		// stay nil too — run.Once pins its own, and handing it any of them is how a run acquires
+		// a human it does not have.
+	}
+
+	// The store the record lands in: the shared sessions store, so a headless run is browsable in
+	// /sessions beside the conversations it ran beside. --no-save leaves it nil, which is
+	// internal/run's own "persist nothing" and leaves Result.SessionID empty.
+	var store *session.Store
+	if !noSave {
+		store = session.NewStore(roots.sessions)
+	}
+
+	// Ctrl-C and SIGTERM end the run rather than the process: the cancellation flows out of Once
+	// as a run failure carrying whatever the run had reached, so an interrupted run still prints
+	// its partial answer and still saves its record.
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	res, runErr := runOnce(ctx, run.Spec{Config: cfg, Prompt: prompt, Store: store})
+
+	// A refusal that stopped the Firing before it began is exit 2, not exit 1 — nothing was sent
+	// and nothing was saved, so what a script must do about it is fix the invocation, not read an
+	// outcome. run.Once marks that class structurally rather than by sentinel: it returns the ZERO
+	// Result from each of its three pre-run exits (a mode a Firing may not run, an Agent that would
+	// not construct, a prompt it would not accept) and a populated one from every run it actually
+	// drove, which always carries at least one Turn. So a non-nil error with no Turn behind it is a
+	// run that never started, whatever it travelled out of: Auto on a host with no filesystem
+	// confinement, an endpoint no config ever set, a model that would not bind.
+	//
+	// It returns here, ahead of the answer and the summary: there is no answer, and a "turns: 0"
+	// line would report a run that never happened. friendlyConstructErr names the rungs still open
+	// for the Auto case and passes every other refusal through untouched.
+	if runErr != nil && res.Turns == 0 {
+		return notStarted(friendlyConstructErr(runErr))
+	}
+
+	// The product, first and alone on stdout — before the summary, before any error — so a
+	// pipeline reads the model's text and nothing else, and so a run whose RECORD failed to save
+	// still hands over the answer it produced.
+	//
+	// Written through OutOrStdout rather than cmd.Println: Cobra's whole Print/Printf/Println
+	// family resolves to OutOrStderr, so it would put the answer on STDERR in every real
+	// invocation (the fallback only differs when a caller has wired an out writer, which is
+	// tests and nothing else). The product goes to real stdout; notices and the summary below
+	// travel by PrintErrln, which does target the err stream.
+	if text := stripEscapes(res.FinalText); text != "" {
+		fmt.Fprintln(cmd.OutOrStdout(), text)
+	}
+	cmd.PrintErrln(headlessSummary(res))
+
+	if runErr != nil {
+		// A failed run still reports what it salvaged: run.Once saves whatever completed before
+		// it stopped, and naming that record is what lets a human open the interrupted run rather
+		// than guess at it (the wording scheduleWiring.fire uses for the same partial).
+		if res.SessionID != "" {
+			return runFailed(fmt.Errorf("%w (partial run saved as %s)", runErr, res.SessionID))
+		}
+		return runFailed(runErr)
+	}
+	return nil
+}
+
+// resolveHeadlessPrompt reads the run's single prompt: the positional argument when there is one,
+// else all of stdin. The result is trimmed — a heredoc's trailing newline is not part of what the
+// user asked — and an empty result is a usage error rather than an empty request to the model.
+func resolveHeadlessPrompt(args []string, stdin io.Reader) (string, error) {
+	raw := ""
+	if len(args) > 0 {
+		raw = args[0]
+	} else {
+		data, err := io.ReadAll(stdin)
+		if err != nil {
+			return "", fmt.Errorf("apogee headless: read the prompt from stdin: %w", err)
+		}
+		raw = string(data)
+	}
+	prompt := strings.TrimSpace(raw)
+	if prompt == "" {
+		return "", errHeadlessNoPrompt
+	}
+	return prompt, nil
+}
+
+// headlessSummary is the one line a headless run says about itself, on stderr beside the answer:
+// where the record landed, how many Turns it took, and how many gated actions the fail-safe
+// denier refused. The denial count is reported rather than promoted to an exit code — a plan run
+// that reached for a write did its job and said so — and the record segment is omitted when there
+// is no record, which is both --no-save and a save that failed.
+func headlessSummary(res run.Result) string {
+	stats := fmt.Sprintf("turns: %d · denied: %d", res.Turns, res.Denied)
+	if res.SessionID == "" {
+		return stats
+	}
+	return "session: " + res.SessionID + " · " + stats
+}
+
+// stripEscapes removes the ESC control byte (0x1b) from the model's answer before it is printed.
+// Result.FinalText is RAW model output by contract (internal/run: the answer crosses as plain
+// data, ADR 0010) and every ANSI sequence begins with ESC, so dropping that one byte neutralises
+// an OSC 52 clipboard write or a CSI screen game while leaving ordinary text — newlines and tabs
+// included — intact. stdout is a terminal often enough that the strip belongs at this render
+// seam, exactly as the transcript strips at its own.
+//
+// It duplicates internal/tui's identical helper rather than sharing it: that one is unexported in
+// a package the binary's CLI half must not depend on, and the duplication is three lines of pure
+// function against a one-way dependency.
+func stripEscapes(s string) string {
+	if !strings.ContainsRune(s, 0x1b) {
+		return s // the overwhelmingly common case: no ESC, no allocation
+	}
+	return strings.ReplaceAll(s, "\x1b", "")
+}
