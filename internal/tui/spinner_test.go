@@ -666,14 +666,15 @@ func openCall(m *Model, id, command string) {
 		ID: id, Tool: "terminal", Arguments: []byte(`{"command":"` + command + `"}`)}})
 }
 
-// TestSpinnerTickRepaintsOnlyWhileACallIsOpen pins both halves of the tick's second job: it
-// repaints the transcript so a live block's star can flip, and it does that ONLY while a call is
-// open. The guard is not economy alone — a repaint is where a held drag-selection is judged
-// (refreshViewport's keep-if-unchanged rule), so a tick that repainted unconditionally would put
-// that judgment between the human and every selection for the whole of a turn, ten to twenty times
-// a second, to draw a frame identical to the last one. The stash refreshViewport writes (m.lines)
-// is the observable: a sentinel left standing is a repaint that did not happen.
-func TestSpinnerTickRepaintsOnlyWhileACallIsOpen(t *testing.T) {
+// TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen pins both halves of the tick's second job: it
+// repaints the transcript so a live block's star can flip, and it does that ONLY on the tick that
+// actually flips the phase and only while a call is open. The guard is not economy alone — a repaint
+// is where a held drag-selection is judged (refreshViewport's keep-if-unchanged rule), so a tick that
+// repainted unconditionally would put that judgment between the human and every selection for the
+// whole of a turn, ten to twenty times a second, to draw a frame identical to the last one. The
+// stash refreshViewport writes (m.lines) is the observable: a sentinel left standing is a repaint
+// that did not happen.
+func TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen(t *testing.T) {
 	const sentinel = "left standing by a tick that drew nothing"
 
 	running := newTestModel(t)
@@ -682,22 +683,44 @@ func TestSpinnerTickRepaintsOnlyWhileACallIsOpen(t *testing.T) {
 	if running.state != stateRunning {
 		t.Fatalf("precondition: state = %v after a submit, want running", running.state)
 	}
+	// The tick that flips the phase is the last frame of a half-period; arm left the frame at 0, so
+	// the boundary is one short of the half. A style whose half is a single frame would make the
+	// "no flip" case unreachable, which no bundled style is (framesPerBlinkHalf is 5, 6 or 10).
+	boundary := running.spin.framesPerBlinkHalf() - 1
+	if boundary < 1 {
+		t.Fatalf("precondition: framesPerBlinkHalf() = %d leaves no non-flipping tick to test",
+			running.spin.framesPerBlinkHalf())
+	}
 
-	// Nothing open: every block paints the same at either phase, so there is nothing to redraw.
+	// Nothing open, on a tick that DOES flip: every block paints the same at either phase, so there
+	// is nothing to redraw.
 	idle := running
+	idle.spin.frame = boundary
 	idle.lines = []string{sentinel}
 	idle = step(t, idle, spinnerTickMsg{gen: idle.spin.gen})
 	if got := strings.Join(idle.lines, "\n"); got != sentinel {
-		t.Errorf("a tick with no call open repainted the transcript:\n%s", got)
+		t.Errorf("a flipping tick with no call open repainted the transcript:\n%s", got)
 	}
 
-	// One open call, and the tick is the only clock its star has.
+	// A call open, but on a tick INSIDE a half-period (frame 0 → 1): the star paints identically
+	// either side of it, so this repaint would be work for its own sake.
+	steady := running
+	openCall(&steady, "c1", "go test ./...")
+	steady.lines = []string{sentinel}
+	steady = step(t, steady, spinnerTickMsg{gen: steady.spin.gen})
+	if got := strings.Join(steady.lines, "\n"); got != sentinel {
+		t.Errorf("a non-flipping tick repainted the transcript for an identical frame:\n%s", got)
+	}
+
+	// A call open on the tick that crosses the half-period, and the tick is the only clock its star
+	// has.
 	live := running
 	openCall(&live, "c1", "go test ./...")
+	live.spin.frame = boundary
 	live.lines = []string{sentinel}
 	live = step(t, live, spinnerTickMsg{gen: live.spin.gen})
 	if got := strings.Join(live.lines, "\n"); got == sentinel {
-		t.Error("a tick with a call open did not repaint — the live star would never flip")
+		t.Error("the flipping tick with a call open did not repaint — the live star would never flip")
 	}
 }
 
@@ -724,13 +747,14 @@ func TestTickRepaintReachesADetachedViewport(t *testing.T) {
 		t.Fatalf("precondition: the settled star is not on screen:\n%s", before)
 	}
 
+	m.spin.frame = m.spin.framesPerBlinkHalf() - 1 // the next tick is the one that crosses the phase
 	m = step(t, m, spinnerTickMsg{gen: m.spin.gen})
 
 	if !m.detached {
 		t.Error("the tick's repaint re-attached a scrolled-up view")
 	}
-	if after := plain(m.View()); !strings.Contains(after, "✧ Run") {
-		t.Errorf("the flipped star never reached the detached viewport:\n%s", after)
+	if after := plain(m.View()); strings.Contains(after, "✦ Run") {
+		t.Errorf("the flipped-out star never reached the detached viewport:\n%s", after)
 	}
 }
 
@@ -751,6 +775,7 @@ func TestBlinkingStarDropsOnlyTheSelectionsSpanningIt(t *testing.T) {
 		leadIn(&m)
 		openCall(&m, "c1", "go test ./...")
 		m.refreshViewport()
+		m.spin.frame = m.spin.framesPerBlinkHalf() - 1 // the next tick is the one that flips the phase
 		return armTranscriptSelection(t, m, 0)
 	}
 

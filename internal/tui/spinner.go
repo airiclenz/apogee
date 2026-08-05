@@ -338,12 +338,29 @@ func (s spinnerAnim) interval() time.Duration { return s.spec().interval }
 // glyph is this frame's braille cell(s), pure in [spinnerAnim.frame].
 func (s spinnerAnim) glyph() string { return s.spec().glyph(s.frame) }
 
-// blink is this frame's phase of the transcript's LIVE STAR — the ✦/✧ alternation a tool block
-// still holding an open call paints its header glyph from (layout.md, "The live star";
-// [blockState.star]). It is the frame's parity and nothing else, which is the whole point: the
-// transcript carries no timer of its own, so the tick that advances this animation is the same tick
-// that flips the star, and a run that is not spinning has a star that is not blinking either.
-func (s spinnerAnim) blink() bool { return s.frame%2 == 1 }
+// starBlinkHalfPeriod is how long the transcript's LIVE STAR holds one phase: ✦ for half a second,
+// then a bare cell for half a second (layout.md, "The live star"). It is a wall-clock duration
+// rather than a frame count so the blink reads the same under every spinner style — the frame count
+// a phase spans is DERIVED from the style's own interval ([spinnerAnim.framesPerBlinkHalf]) instead
+// of being re-typed per style.
+const starBlinkHalfPeriod = 500 * time.Millisecond
+
+// framesPerBlinkHalf is how many of THIS style's frames one blink phase spans: 5 at classic's
+// 10 fps, 6 at snake's 12, 10 at glitter's 20. The floor of one keeps a hypothetical style slower
+// than the phase itself blinking — without it the division would round to zero and the star would
+// freeze on one glyph — which is the same reasoning framesPerColorLoop's derivation carries.
+func (s spinnerAnim) framesPerBlinkHalf() int {
+	return max(1, int(starBlinkHalfPeriod/s.interval()))
+}
+
+// blink is this frame's phase of the transcript's LIVE STAR — the alternation between ✦ and a bare
+// cell that a tool block still holding an open call paints its header glyph from (layout.md, "The
+// live star"; [blockState.star]). It is derived from the frame count and nothing else, which is the
+// whole point: the transcript carries no timer of its own, so the tick that advances this animation
+// is the same tick that flips the star, and a run that is not spinning has a star that is not
+// blinking either. A fresh chain starts at the ✦-showing phase — [spinnerAnim.arm] zeroes the
+// frame, and the first half-period of frames is the false phase.
+func (s spinnerAnim) blink() bool { return (s.frame/s.framesPerBlinkHalf())%2 == 1 }
 
 // framesPerColorLoop is how many of THIS style's frames one colour lap spans: 100 at classic's
 // 10 fps, 120 at snake's 12, 200 at glitter's 20. Deriving the count from the style's interval is

@@ -862,7 +862,7 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // body by definition (groupable), so both states paint identically and the head entry's state is
 // passed only so the two callers share one call shape (layout.md, "Collapsed and expanded blocks").
 // Its live half reaches one glyph and no shape at all: the header's leading star (state.star), ✦
-// once the block has settled and blinking against ✧ while it still holds an open call.
+// once the block has settled and blinking against a bare cell while it still holds an open call.
 //
 // It also marks the block's CLICK SURFACE as it emits it — every physical line of the header, and
 // any remainder marker a branch synthesized — because the lines and the marks have to be one act:
@@ -910,8 +910,8 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 // live and blink are the LIVE STAR's two halves, and they are deliberately separate: live is a fact
 // about the block (something in it is still waiting for a result — anyOpenCall), blink is a fact
 // about the frame (the spinner's phase this repaint was asked for — spinnerAnim.blink). Only their
-// conjunction paints ✧, so a settled block is immune to the phase and a live one needs no clock of
-// its own.
+// conjunction blanks the star's cell, so a settled block is immune to the phase and a live one needs
+// no clock of its own.
 //
 // glyph replaces the header's leading star outright, for a block that borrows this shape without
 // borrowing the star's meaning — today the scheduled Firing's ⟳ (renderEntryLines). Its ZERO VALUE
@@ -926,10 +926,12 @@ type blockState struct {
 }
 
 // star is the glyph the block's header leads with (layout.md, "The live star"): ✦ for a block that
-// has everything it was waiting for, and ✦/✧ alternating with the frame's blink phase while it does
-// not. The zero value is a settled block at the settled phase, which is why every caller with
-// nothing running — a stray result's block, a width probe — keeps the star the transcript has
-// always led with without saying so.
+// has everything it was waiting for, and ✦ alternating with a bare cell on the frame's blink phase
+// while it does not. The blinked-out phase is a SPACE rather than an empty string — it holds the
+// glyph's column, so the label beside it never shifts left and back twice a second. The zero value
+// is a settled block at the settled phase, which is why every caller with nothing running — a stray
+// result's block, a width probe — keeps the star the transcript has always led with without saying
+// so.
 //
 // An overridden glyph answers before the live/blink conjunction is even asked, which is what makes a
 // borrowed block's header STATIC by construction rather than by its caller remembering to leave two
@@ -939,7 +941,7 @@ func (s blockState) star() string {
 		return s.glyph
 	}
 	if s.live && s.blink {
-		return glyphAssistantHollow
+		return " "
 	}
 	return glyphAssistant
 }

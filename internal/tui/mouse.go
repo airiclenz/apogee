@@ -97,9 +97,10 @@ type transcriptSel struct {
 // rewritten, and a collapsed span paints no highlight at all — shadeCells returns on exactly that
 // test. Collapsed, it is not a selection but a CLICK IN PROGRESS: the press's record of the line
 // the human pressed on, which the release consumes to toggle a block (handleMouseRelease →
-// toggleBlockAt). Dropping it threw that answer away — a live block's header alternates ✦/✧ with
-// the spinner phase (blockState.star), rewriting its own line every 50–100 ms, so a press on a
-// running tool's header was zeroed before the button came up and the toggle never fired. A kept
+// toggleBlockAt). Dropping it threw that answer away — a live block's header alternates ✦ with a
+// bare cell on the spinner phase (blockState.star), rewriting its own line twice a second, so a
+// press on a running tool's header was zeroed before the button came up and the toggle never
+// fired. A kept
 // anchor may outlive the paint it was taken in — a collapse elsewhere can leave it past the last
 // marked line — and that costs nothing: toggleBlockAt's bounds check makes a stale line a no-op.
 //

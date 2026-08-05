@@ -59,9 +59,10 @@
 // repeats in a body row what the summary slot just said; the framing and the full report are what
 // expanding it reveals, each inner block in its own state (layout.md, "Collapsed and expanded
 // blocks"). While anything behind a block's header is still waiting for a result, that
-// header's ✦ blinks against ✧ ([blockState.star]) on the STATUS SPINNER's frame parity
-// ([spinnerAnim.blink]) — the transcript keeps no clock of its own, and the spinner tick repaints
-// the viewport only while [transcript.hasOpenToolCall] holds, so an idle chain costs no repaints.
+// header's ✦ blinks against a bare cell ([blockState.star]) on the STATUS SPINNER's half-second
+// phase ([spinnerAnim.blink]) — the transcript keeps no clock of its own, and the spinner tick
+// repaints the viewport only on the tick that flips that phase and only while
+// [transcript.hasOpenToolCall] holds, so an idle chain costs no repaints.
 //
 // The chat mini-language (post-v1 apogee-code feature-parity) adds a thin parse/route layer
 // between the input box and the engine without thickening the renderer (ADR 0011 still holds):

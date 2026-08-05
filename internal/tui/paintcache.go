@@ -207,7 +207,7 @@ func (t *transcript) blockKey(shape blockShape, head, n int, th theme, width int
 		measure: th.measure,
 		span:    n,
 		live:    live,
-		blink:   blink && live, // a settled block's paint does not depend on the phase; folding it in anyway would miss on every spinner tick
+		blink:   blink && live, // a settled block's paint does not depend on the phase; folding it in anyway would miss on every phase flip
 		flags:   spanFlags(t.entries[head : head+n]),
 	}
 }

@@ -110,10 +110,10 @@ point is a **minor** bump, not a breaking change.
     Expanding reveals the inner blocks *in their own states* — a nested run stays collapsed inside
     an expanded parent, because this is one rule applied at every depth and not a special case.
   - **A live block's star blinks.** While a block still holds a call whose result has not landed —
-    or a run whose report has not — its header glyph alternates `✦`/`✧` on the spinner's own tick,
-    so work in progress is visible without the transcript carrying a timer of its own. It settles
-    to `✦` when the result lands, and the tick repaints the transcript only while something is
-    actually open.
+    or a run whose report has not — its header glyph alternates `✦` with a bare cell on the
+    spinner's own tick, so work in progress is visible without the transcript carrying a timer of
+    its own. It settles to `✦` when the result lands, and the tick repaints the transcript only
+    while something is actually open.
   - **The state is the view's alone.** It is never encoded with the transcript: a resumed session
     paints everything collapsed and `/clear` forgets it with everything else. A block that hides
     nothing has nothing to toggle — a group of body-less calls, or a call with no target whose
@@ -676,6 +676,14 @@ point is a **minor** bump, not a breaking change.
   carries it.
 
 ### Changed
+
+- **The live star blinks half a second on, half a second bare.** A block still holding an open call
+  used to alternate `✦` and `✧` on every spinner frame, which at ten to twenty frames a second read
+  as a flicker rather than a heartbeat. Now the star shows for half a second and its cell is bare
+  for half a second — a space that holds the column, so the label beside it never shifts. The phase
+  is still carried on the spinner's own tick and the transcript still keeps no timer of its own; the
+  transcript is repainted only on the tick that actually flips the phase, so a running turn costs
+  two repaints a second instead of twenty. Specced in `layout.md` ("The live star").
 
 - **The two prompts that ask you something are menus now.** An approval used to be a paragraph with a
   legend under it (`a allow · s always · d deny`), and an ask prompt a question under an

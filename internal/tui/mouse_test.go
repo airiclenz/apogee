@@ -1140,10 +1140,11 @@ func modelWithLiveToolBlock(t *testing.T) Model {
 }
 
 // TestTranscriptClickTogglesALiveBlockAcrossTheBlink is the live-header regression test. A block
-// still holding an open call paints ✦/✧ from the spinner's phase, so the tick rewrites its header
-// every 50–100 ms — and the keep-if-unchanged rule used to zero the press anchor on exactly that
-// line, which is the answer the release needs. Collapsed spans are now exempt (spanUnchanged), so
-// the press outlives the blink and the toggle lands on a running tool like any other.
+// still holding an open call paints ✦ or a bare cell from the spinner's phase, so the tick rewrites
+// its header every half second — and the keep-if-unchanged rule used to zero the press anchor on
+// exactly that line, which is the answer the release needs. Collapsed spans are now exempt
+// (spanUnchanged), so the press outlives the blink and the toggle lands on a running tool like any
+// other.
 func TestTranscriptClickTogglesALiveBlockAcrossTheBlink(t *testing.T) {
 	m := modelWithLiveToolBlock(t)
 	header := markedLine(t, m, targetHeader)
@@ -1155,6 +1156,7 @@ func TestTranscriptClickTogglesALiveBlockAcrossTheBlink(t *testing.T) {
 
 	m = step(t, m, leftClick(2, row))
 	painted := m.lines[header]
+	m.spin.frame = m.spin.framesPerBlinkHalf() - 1  // …so the next tick is the one that crosses the phase
 	m = step(t, m, spinnerTickMsg{gen: m.spin.gen}) // the star flips: the pressed line is rewritten
 	if m.lines[header] == painted {
 		t.Fatal("setup: the tick left the header line alone, so this case tests nothing")

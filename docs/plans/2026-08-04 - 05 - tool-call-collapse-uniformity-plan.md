@@ -77,7 +77,14 @@ execution):
 
 ---
 
-## 1. The live star blinks half a second on, half a second bare
+## 1. The live star blinks half a second on, half a second bare — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): beyond the item's "one entry for the new blink", the `[Unreleased]` **Added**
+entry's existing "A live block's star blinks" sub-bullet — which still said `✦`/`✧` alternate — was
+corrected in place to the bare cell. Both statements live in the same unreleased notes, so leaving it
+would have shipped a contradiction rather than the overlap item 7 is meant to merge. No new paint
+input was added: the blink phase already rides `blockKey.blink`, so `paintcache.go`'s key is
+unchanged.
 
 **What.** Implement decision 1 in `internal/tui`:
 - `spinner.go`: add `const starBlinkHalfPeriod = 500 * time.Millisecond` and

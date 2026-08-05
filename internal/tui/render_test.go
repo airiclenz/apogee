@@ -1638,10 +1638,11 @@ func headerStar(t *testing.T, tr *transcript, blink bool) string {
 }
 
 // TestLiveBlockHeaderStarBlinks is the rule in one table: a block still holding an open call paints
-// ✦ or ✧ by the frame's blink phase, and a block with everything it was waiting for paints ✦ at
-// BOTH phases — the phase alone never moves a settled star. Each case asserts the header at both
-// phases, so a block that blinked when it should not have fails here just as loudly as one that did
-// not blink when it should.
+// ✦ or a bare cell by the frame's blink phase, and a block with everything it was waiting for paints
+// ✦ at BOTH phases — the phase alone never moves a settled star. Each case asserts the header at
+// both phases, so a block that blinked when it should not have fails here just as loudly as one that
+// did not blink when it should. The blinked-out phase keeps the star's column, so its expectation is
+// the header led by two leading spaces rather than one glyph short.
 func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 	openRead := func(tr *transcript, id, path string, depth int) {
 		tr.apply(domain.ToolCallEvent{
@@ -1661,7 +1662,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 		{
 			name:    "a call still awaiting its result blinks",
 			build:   func(_ *testing.T, tr *transcript) { openRun(tr, "c1", "go test ./...") },
-			settled: "✦ Run", flipped: "✧ Run",
+			settled: "✦ Run", flipped: "  Run",
 		},
 		{
 			name: "a landed result settles the star",
@@ -1681,7 +1682,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 					t.Fatal("setExpanded(0, true) = false; want the in-flight call expanded")
 				}
 			},
-			settled: "✦ Run", flipped: "✧ Run",
+			settled: "✦ Run", flipped: "  Run",
 		},
 		{
 			// A group has ONE header for many calls, so its star answers for all of them: a batch
@@ -1691,7 +1692,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				openRead(tr, "c2", "util.go", 0)
 			},
-			settled: "✦ Read File", flipped: "✧ Read File",
+			settled: "✦ Read File", flipped: "  Read File",
 		},
 		{
 			name: "a group whose calls have all landed settles",
@@ -1708,7 +1709,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
-			settled: "✦ Sub-Agent", flipped: "✧ Sub-Agent",
+			settled: "✦ Sub-Agent", flipped: "  Sub-Agent",
 		},
 		{
 			// The mirror case, and the reason the rule asks the span as well as the head: the report
@@ -1720,7 +1721,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				openRead(tr, "c1", "a.go", 1)
 				subAgentReport(tr, "s1", "survey complete", 0)
 			},
-			settled: "✦ Sub-Agent", flipped: "✧ Sub-Agent",
+			settled: "✦ Sub-Agent", flipped: "  Sub-Agent",
 		},
 		{
 			name: "a finished run settles",

@@ -526,11 +526,12 @@ collapsed unless it was itself clicked open: the cascade is this one rule applie
 not a special case.
 
 **The live star.** While a block still contains an open call — a call whose result has not
-landed, or a run whose report has not — its header glyph blinks: `✦` and `✧` alternate on the
-spinner's own tick, so the transcript carries no timer of its own. A selection spanning that
-header drops when the glyph flips, which is the keep-if-unchanged rule doing its ordinary job on
-a line that changed. When the result lands the glyph settles to `✦` and the block repaints once,
-final.
+landed, or a run whose report has not — its header glyph blinks: `✦` shows for half a second, then
+its cell is bare for half a second. The bare phase is a space that holds the star's column, so the
+label beside it never shifts. The phase is carried on the spinner's own tick, so the transcript
+carries no timer of its own. A selection spanning that header drops when the glyph flips, which is
+the keep-if-unchanged rule doing its ordinary job on a line that changed. When the result lands the
+glyph settles to `✦` and the block repaints once, final.
 
 **The firing block.** A scheduled Firing wears this same shape and is deliberately not a tool call
 of this session's: its header leads with `⟳ Schedule` — the glyph `/sessions` tags a Firing's record

@@ -58,21 +58,20 @@ var (
 // sub-agent (Depth > 0) block is framed by a vertical rail (│ per nesting level) and opened
 // by a ⤷ sub-agent label (P3.14).
 const (
-	glyphAssistant       = "✦"
-	glyphAssistantHollow = "✧" // the other half of the live star: a tool block still holding an open call alternates ✦/✧ on the spinner's tick (layout.md, "The live star")
-	glyphBranch          = "┝"
-	glyphBranchLast      = "┕"
-	glyphUser            = "❯"
-	glyphMenuUnselected  = "·" // U+00B7 MIDDLE DOT — an unselected row of a menu-style popup (popupSpec.menuRows): glyphUser's counterpart, deliberately NOT glyphBullet's "•", because a menu row is an option waiting to be pointed at rather than an item of a list
-	glyphSubRail         = "│"
-	glyphSubLabel        = "⤷"
-	glyphBullet          = "•" // a markdown bullet-list item (- / * / +)
-	glyphSkill           = "✦" // marks a skill: the "/" menu's skill rows (the sent block marks its own by colouring the token, not by badging it)
-	glyphPresented       = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
-	glyphInterject       = "⧖" // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
-	glyphTableRule       = "─" // one cell of a markdown table's horizontal rule — under the header row and between adjacent body rows alike (mdtable.go)
-	glyphTableColumn     = "│" // U+2502 LIGHT VERTICAL — the rule between two markdown table columns (mdtable.go); one cell wide in either width method, which is what lets tableDividerWidth be a constant (TestTableDividerHoldsOneColumn). Its shape is glyphSubRail's and glyphScrollTrack's but deliberately NOT shared with either: a column boundary, a sub-agent rail and a scroll-bar track are three elements that move independently.
-	glyphTableCross      = "┼" // U+253C LIGHT VERTICAL AND HORIZONTAL — where a horizontal rule crosses a column divider (mdtable.go); one cell wide in either method, like the divider it crosses
+	glyphAssistant      = "✦" // the assistant and tool-header star. A tool block still holding an open call BLINKS it — half a second showing, half a second a bare cell that holds the column (layout.md, "The live star"; blockState.star)
+	glyphBranch         = "┝"
+	glyphBranchLast     = "┕"
+	glyphUser           = "❯"
+	glyphMenuUnselected = "·" // U+00B7 MIDDLE DOT — an unselected row of a menu-style popup (popupSpec.menuRows): glyphUser's counterpart, deliberately NOT glyphBullet's "•", because a menu row is an option waiting to be pointed at rather than an item of a list
+	glyphSubRail        = "│"
+	glyphSubLabel       = "⤷"
+	glyphBullet         = "•" // a markdown bullet-list item (- / * / +)
+	glyphSkill          = "✦" // marks a skill: the "/" menu's skill rows (the sent block marks its own by colouring the token, not by badging it)
+	glyphPresented      = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
+	glyphInterject      = "⧖" // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
+	glyphTableRule      = "─" // one cell of a markdown table's horizontal rule — under the header row and between adjacent body rows alike (mdtable.go)
+	glyphTableColumn    = "│" // U+2502 LIGHT VERTICAL — the rule between two markdown table columns (mdtable.go); one cell wide in either width method, which is what lets tableDividerWidth be a constant (TestTableDividerHoldsOneColumn). Its shape is glyphSubRail's and glyphScrollTrack's but deliberately NOT shared with either: a column boundary, a sub-agent rail and a scroll-bar track are three elements that move independently.
+	glyphTableCross     = "┼" // U+253C LIGHT VERTICAL AND HORIZONTAL — where a horizontal rule crosses a column divider (mdtable.go); one cell wide in either method, like the divider it crosses
 )
 
 // The transcript scroll bar's two glyphs (renderScrollbar). They are one axis drawn in two

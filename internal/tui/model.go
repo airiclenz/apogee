@@ -715,17 +715,18 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		if m.state != stateRunning || msg.gen != m.spin.gen {
 			return m, nil
 		}
+		wasBlink := m.spin.blink()
 		m.spin.frame++
-		if m.transcript.hasOpenToolCall() {
+		if m.spin.blink() != wasBlink && m.transcript.hasOpenToolCall() {
 			// The frame the status line spins on is also the LIVE STAR's clock: a block still holding
-			// an open call paints its header glyph from this frame's parity (layout.md, "The live
+			// an open call paints its header glyph from this frame's blink phase (layout.md, "The live
 			// star"; blockState.star), so the flip needs a repaint the tick did not use to do. It is
-			// asked for ONLY while something is open — with nothing live every block paints the same
-			// at either phase, and re-rendering the whole scrollback ten to twenty times a second for
-			// an identical result would be work for its own sake, and would put the keep-if-unchanged
-			// rule (refreshViewport) between the human and every drag-selection they hold through a
-			// turn. A selection spanning a header that DOES flip is dropped, which is that same rule
-			// doing its ordinary job on a line that changed.
+			// asked for only on the tick that actually FLIPS the phase, and only while something is
+			// open — every other tick paints byte-identically, and re-rendering the whole scrollback
+			// ten to twenty times a second for an identical result would be work for its own sake, and
+			// would put the keep-if-unchanged rule (refreshViewport) between the human and every
+			// drag-selection they hold through a turn. A selection spanning a header that DOES flip is
+			// dropped, which is that same rule doing its ordinary job on a line that changed.
 			m.refreshViewport()
 		}
 		return m, m.spin.tick()
