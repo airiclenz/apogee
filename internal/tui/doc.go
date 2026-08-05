@@ -414,7 +414,7 @@
 // lipgloss styles; width.go the display-width authority the theme carries — one measure for the
 // whole TUI, and it is whichever one the painter itself is using; inputaccent.go the
 // resolve-gated inline accents the prompt box paints its
-// /skill and @file tokens with; transcript.go the append-only scrollback model and transcriptcodec.go its
+// "/id" and @file tokens with; transcript.go the append-only scrollback model and transcriptcodec.go its
 // versioned wire form inside a saved session record; sessions.go the /sessions history browser;
 // schedule.go the /schedule surface — the status note, the cycle/mode/stop pickers and the notices
 // the scheduler's own Events become, with every when-and-how decision left to internal/schedule,

@@ -7,7 +7,7 @@ import (
 
 // TestProviderReloadPicksUpNewSkill is the core of the live-refresh contract: a Provider serves
 // the catalog as it stood at construction, and Reload re-scans the same dirs so a skill added
-// after launch becomes visible through BOTH consumer seams — List (the /skill picker) and
+// after launch becomes visible through BOTH consumer seams — List (the merged "/" menu) and
 // ResolveSkills (the agent loop) — without rebuilding the Provider.
 func TestProviderReloadPicksUpNewSkill(t *testing.T) {
 	home := t.TempDir()

@@ -160,9 +160,46 @@ assertion that a sole `/skill` is refused with the generic unknown note.
 
 **Commit:** `feat(tui): remove the /skill picker — direct /<id> invocation and the merged menu replace it`
 
-## 2. Sweep the code comments that still name the `/skill` picker
+## 2. Sweep the code comments that still name the `/skill` picker — ✅ DONE (2026-08-05)
 
 Depends on item 1.
+
+NOTES (2026-08-05): the acceptance grep cannot reach zero and was not made to. Six hits are
+irreducible: `internal/tui/command_test.go:212,214,240,268,271` are item 1's own required deliverable
+(the assertions pinning that a sole `/skill` now earns the generic unknown-slash refusal — lines 214,
+240 and 271 are executable test data, 212 and 268 the comments documenting exactly those cases), and
+`internal/agent/loop.go:830` is the `</skill>` closing tag inside the skill-injection format string —
+executable code, and a false positive of the pattern rather than a mention of the verb. Refined grep
+that IS clean, for the verifier:
+`grep -rnE '/skill([^s-]|$)' --include='*.go' . | grep -v docs/ | grep -vE 'command_test\.go|</skill>'`
+→ no hits.
+
+NOTES (2026-08-05): swept beyond the enumerated bullets, under the item's own general rule ("every
+in-code comment that presents the `/skill` picker as a live consumer"). The bullet list was derived
+from the string `/skill`, so it named none of the comments that call the removed feature "the
+picker" by the bare word. The full bare-word set, all repointed to the surviving consumers (the
+merged `/` menu, `/skills`, inline `/id` tokens): `internal/tui/autocomplete.go:353` ("not the
+picker's" — a contrast that no longer denotes anything), `:376` ("a skill picker row's cells") and
+`:392-396` (`skillSuggestions`' doc comment — "the picker's two cells", "the picker is dark", plus
+the column claim in the same sentence, which was the picker's layout and is now the merged menu's
+flattened cell); `internal/tui/skills.go:38` ("the same live refresh the picker edge-triggers when
+it opens" — false since item 1: the merged menu is what edge-triggers it), `:59` ("the order the
+picker shows"), `:174` ("identical from the picker"); `internal/skills/parse.go:26`, `:57`, `:58`,
+`:187`, `:245` ("nonsense in the picker", "the picker label", "the picker hint", "a stray character
+in the picker", "contentless entry in the picker"); `internal/skills/skill.go:30`, `:41` ("the
+picker just does not offer it", "never appears in the picker"); and in tests
+`internal/skills/parse_test.go:173` ("the picker's summary"), `internal/skills/load_test.go:219`
+("the snapshot the picker and the loop share"), `internal/tui/skill_test.go:673` ("reads like the
+picker"), `:680` ("the picker edge-triggers on open"), `:753` ("identical from the picker").
+Comment-only in every case — the test files' assertions are untouched. Bare-word "picker" comments
+that denote the SURVIVING shared single-select overlay (`picker.go` — `/model`, `/server`,
+`/schedule`, the launcher rows) or the `/sessions` browser were left alone, as was
+`command_test.go:268` ("the retired picker verb"), which is item 1's own deliverable and presents
+the feature as removed. Also reworded the slash-list phrase `command/file/skill` → `command, file
+and skill` (`popup.go:16,89`, `autocomplete.go:665`, `autocomplete_test.go:18`): those are pattern
+false positives, not picker mentions, but clearing them is what lets the acceptance grep stand as a
+permanent guard. `internal/tui/doc.go:122-124` needed nothing — item 1 already rewrote it, as its
+NOTES predicted.
 
 **What:** One-line comment rewordings only — no behaviour, no test changes. Every
 in-code comment that presents the `/skill` picker as a live consumer is repointed

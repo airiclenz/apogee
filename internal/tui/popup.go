@@ -13,7 +13,7 @@ import (
 //
 // renderPopup is the single place overlay-pane chrome is painted: a titled, bordered pane holding
 // an optional wrapping body block, a scrolled row list with the selected row highlighted, and a
-// key-hint footer. The /sessions history browser (sessions.go), the command/file/skill autocomplete
+// key-hint footer. The /sessions history browser (sessions.go), the command, file and skill autocomplete
 // dropdown (autocomplete.go), and the ask and approval prompts (model.go) all compose their pane
 // through it, so every overlay shares one look and one right edge. The dependency points inward
 // only — callers compose a popupSpec and hand it here; renderPopup reaches back into neither
@@ -86,7 +86,7 @@ import (
 //     count (popupElisionMarkerFitting) and its own name before the number, so the count survives
 //     every width a pane can be drawn at — a short window is usually a narrow one too.
 //
-// Every overlay pane — the /sessions browser, the command/file/skill dropdowns, and the ask and
+// Every overlay pane — the /sessions browser, the command, file and skill dropdowns, and the ask and
 // approval prompts — now paints through this module; no boxed overlay renders its own chrome
 // (plan D3).
 

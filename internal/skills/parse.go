@@ -10,8 +10,8 @@ import (
 )
 
 // maxSummaryLen caps a skill summary, mirroring the apogee-code oracle (summary.slice(0,200)):
-// the summary is a one-line picker hint, not a second body, so a runaway description never
-// crowds the /skill dropdown.
+// the summary is a one-line menu hint, not a second body, so a runaway description never
+// crowds the merged "/" menu.
 const maxSummaryLen = 200
 
 // frontmatterRe splits a SKILL.md into its YAML frontmatter (group 1) and body (group 2): an
@@ -23,7 +23,7 @@ const maxSummaryLen = 200
 // That allowance matters more than it looks: a file whose fence is preceded by one stray blank
 // line does not merely lose its frontmatter, it falls through to parseFallback and loads a
 // GARBAGE skill — displayName and summary both read "---", the fence itself. Tolerating the blank
-// line is what keeps an invisible whitespace slip from putting nonsense in the picker. Only
+// line is what keeps an invisible whitespace slip from putting nonsense in the menu. Only
 // whitespace is skipped, so a plain-Markdown skill (no fence at the top) still takes the fallback
 // path it is meant to.
 var frontmatterRe = regexp.MustCompile(`(?s)\A\x{feff}?[ \t\r\n]*-{3}[ \t]*\r?\n(.*?)\r?\n-{3}[ \t]*\r?\n?(.*)\z`)
@@ -54,8 +54,8 @@ var recognisedKeys = map[string]bool{
 }
 
 // frontmatter is the recognised YAML frontmatter keys, including the apogee-code/agent-skills
-// aliases: id|name for the identifier, displayName for the picker label, summary|description
-// for the picker hint. An unknown key is ignored (yaml.v3 does not error on extras).
+// aliases: id|name for the identifier, displayName for the menu label, summary|description
+// for the menu hint. An unknown key is ignored (yaml.v3 does not error on extras).
 type frontmatter struct {
 	ID          string `yaml:"id"`
 	Name        string `yaml:"name"`
@@ -184,7 +184,7 @@ func stripBlockScalar(v string) string {
 // takes the line verbatim.
 //
 // A LONE opening quote is stripped too — that unclosed quote is the very fault that sent the
-// block down this path, and leaving it would put a stray character in the picker. The strip is
+// block down this path, and leaving it would put a stray character in the menu. The strip is
 // gated on the quote being the only one in the value, so a value that merely begins with a quoted
 // phrase (`"hello" world`) keeps every character it has.
 func unquoteValue(s string) string {
@@ -242,7 +242,7 @@ func parseFallback(content, dirName string) (Skill, error) {
 // validate rejects a skill missing any load-bearing field — without an id it cannot be
 // attached, without a displayName/summary it cannot be shown, without a body there is nothing
 // to inject — so the loader skips it rather than surfacing a half-blank, contentless entry in
-// the picker. The body check is what turns an empty/whitespace SKILL.md into a skip: the
+// the menu. The body check is what turns an empty/whitespace SKILL.md into a skip: the
 // fallback would otherwise name it after its folder and load a skill with nothing to say.
 func validate(s Skill) (Skill, error) {
 	if s.ID == "" || s.DisplayName == "" || s.Summary == "" || s.Body == "" {

@@ -236,7 +236,7 @@ const (
 )
 
 // ----------------------------------------------------------------------------
-// Skills (internal/domain) — the host-supplied resolver for attached /skill IDs
+// Skills (internal/domain) — the host-supplied resolver for attached skill IDs
 // ----------------------------------------------------------------------------
 
 // SkillResolver maps a user's attached skill IDs (UserInput.SkillIDs) to their injectable

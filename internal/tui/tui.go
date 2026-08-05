@@ -15,7 +15,7 @@ import (
 )
 
 // SkillCatalog is the read-only view of the discovered skills the TUI needs: the full sorted
-// list for the /skill picker (List), a by-id lookup that resolves an inline "/token" (Get), and the
+// list for the merged "/" menu (List), a by-id lookup that resolves an inline "/token" (Get), and the
 // files discovery could not load (Skipped) so /skills can say why a skill is missing instead of
 // silently omitting it. It is satisfied by *skills.Catalog; the TUI depends only on this
 // interface so it stays unit-testable with a fake, and — being an interface — it is a reference
@@ -279,18 +279,18 @@ type Options struct {
 	// the binary's job (it owns the path and the file format), exactly like Save below.
 	SaveHostAcknowledgement func() (path string, err error)
 
-	// Skills is the discovered skill catalog the /skill picker lists and an inline "/token"
-	// resolves against; nil ⇒ no skills are wired (the picker offers nothing and no token
+	// Skills is the discovered skill catalog the merged "/" menu lists and an inline "/token"
+	// resolves against; nil ⇒ no skills are wired (the menu offers no skills and no token
 	// resolves). The binary backs it with a live skills.Provider and the agent loop resolves the SAME
-	// provider through Config.Skills, so the body the model sees matches what the picker showed —
+	// provider through Config.Skills, so the body the model sees matches what the menu showed —
 	// including skills ReloadSkills swapped in mid-session.
 	Skills SkillCatalog
 
 	// ReloadSkills re-scans the skill source dirs and swaps in a fresh catalog, so a skill added
-	// or edited after launch is picked up the next time the /skill picker opens. nil disables the
+	// or edited after launch is picked up the next time the merged "/" menu opens. nil disables the
 	// refresh (the catalog stays as loaded at launch). The binary wires it to the shared
-	// skills.Provider both this picker (Skills) and the agent loop (Config.Skills) read, so a
-	// refreshed skill both shows in the picker AND resolves when attached. The picker edge-
+	// skills.Provider both this menu (Skills) and the agent loop (Config.Skills) read, so a
+	// refreshed skill both shows in the menu AND resolves when attached. The menu edge-
 	// triggers it on open, not per keystroke; every caller guards for nil.
 	ReloadSkills func()
 

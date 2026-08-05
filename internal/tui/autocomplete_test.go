@@ -15,7 +15,7 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The command/file/skill dropdown adopts the shared popup chrome (selector-popup plan §3)
+// The command, file and skill dropdown adopts the shared popup chrome (selector-popup plan §3)
 // ----------------------------------------------------------------------------
 
 // newDropdownModel builds a ready, idle model at the 100×30 harness window (so the dropdown pane

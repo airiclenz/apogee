@@ -11,10 +11,10 @@ import (
 // Reload it from the same Sources on demand — so a skill added or edited after launch is picked
 // up without restarting apogee.
 //
-// The point of the seam is that ONE *Provider feeds both skill consumers: the TUI's /skill
-// picker (List/Get) and the agent loop's resolver (ResolveSkills, the domain.SkillResolver). A
-// Reload the picker triggers is therefore the same fresh catalog the loop later resolves against,
-// so a mid-session skill both SHOWS in the picker AND resolves when attached (rather than showing
+// The point of the seam is that ONE *Provider feeds both skill consumers: the TUI's merged "/"
+// menu (List/Get) and the agent loop's resolver (ResolveSkills, the domain.SkillResolver). A
+// Reload the menu triggers is therefore the same fresh catalog the loop later resolves against,
+// so a mid-session skill both SHOWS in the menu AND resolves when attached (rather than showing
 // but failing at submit with "attached skill … is not known").
 //
 // Reload swaps a whole immutable *Catalog under an atomic pointer, never mutating one in place.
@@ -51,7 +51,7 @@ func (p *Provider) Reload() error {
 // Reload only ever stores the non-nil result of Load.
 func (p *Provider) current() *Catalog { return p.cur.Load() }
 
-// List returns the current snapshot's skills, sorted for the /skill picker (see Catalog.List).
+// List returns the current snapshot's skills, sorted for the merged "/" menu (see Catalog.List).
 func (p *Provider) List() []Skill { return p.current().List() }
 
 // Get looks up a skill by exact ID in the current snapshot (see Catalog.Get).

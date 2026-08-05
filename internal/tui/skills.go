@@ -12,12 +12,12 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// /skills — listing the catalog (command.go owns the verb, autocomplete.go the picker)
+// /skills — listing the catalog (command.go owns the verb, autocomplete.go the merged "/" menu)
 // ----------------------------------------------------------------------------
 //
-// The browsing half of the skill UX: /skill <partial> picks one, /skills shows what there is
+// The browsing half of the skill UX: the merged "/" menu picks one, /skills shows what there is
 // to pick from — the answer to "what can I invoke?", which until now could only be discovered
-// by opening the picker and scrolling it. It is a read-only report: no engine call, no worker,
+// by opening the menu and scrolling it. It is a read-only report: no engine call, no worker,
 // nothing staged. The report builder below is pure, so the wording stays table-testable
 // without a Model (the confine.go posture).
 
@@ -35,7 +35,7 @@ func (m Model) knownSkillID(id string) bool {
 }
 
 // runSkills routes /skills: re-scan the skill source dirs, then record the catalog as one
-// transcript note. The re-scan is the same live refresh the picker edge-triggers when it opens
+// transcript note. The re-scan is the same live refresh the merged "/" menu edge-triggers on open
 // — ReloadSkills swaps the shared skills.Provider that both this listing and the agent loop
 // read — so a skill added since launch is listed, and because the provider is shared, listed
 // means resolvable. It never launches a worker, so it always returns a nil Cmd.
@@ -56,7 +56,7 @@ func (m Model) runSkills() (tea.Model, tea.Cmd) {
 
 // skillCatalogNote renders the /skills report from one scan's halves: the skills that loaded, the
 // SKILL.md files that could not be loaded, and the ones that loaded but lost an id collision. list
-// arrives in the catalog's own order (sorted by display name), which is the order the picker shows;
+// arrives in the catalog's own order (sorted by display name), the order the merged "/" menu takes;
 // skipped arrives in discovery order and is partitioned here on its cause.
 //
 // A skip is reported even when NOTHING loaded: "no skills found" would be a lie when discovery
@@ -171,7 +171,7 @@ func partitionSkips(skipped []skills.SkipError) (failed, shadowed []skills.SkipE
 // named by the ID it WOULD have had, with the reason and the file to go and fix. Discovery skips
 // a bad skill softly so one malformed file cannot sink the catalog; printing the skip here is
 // what keeps soft from meaning silent — otherwise a broken skill and an absent one look
-// identical from the picker, with nowhere to look for the difference.
+// identical from the merged "/" menu, with nowhere to look for the difference.
 func failedSkillLines(failed []skills.SkipError) []string {
 	if len(failed) == 0 {
 		return nil

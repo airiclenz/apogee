@@ -33,8 +33,8 @@ const (
 // report — for every other verb) and err is set when a
 // recognised verb was given arguments it does not understand. An arguments error stays a
 // kindCommand: the router reports the usage line rather than sending the line to the agent or
-// silently doing nothing. For kindMessage, text is the line (trimmed, with @tokens and /skill
-// tokens left in place so the model sees what was referenced), fileRefs holds the extracted
+// silently doing nothing. For kindMessage, text is the line (trimmed, with @tokens and "/id"
+// skill tokens left in place so the model sees what was referenced), fileRefs holds the extracted
 // workspace-relative paths, skillIDs the extracted skill references, and skillSpans the byte
 // ranges those references occupy IN text — one per occurrence, which is what a sent block paints
 // its inline accent from ([skillSpan]). For kindUnknownSlash,

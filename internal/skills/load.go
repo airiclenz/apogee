@@ -23,7 +23,7 @@ const maxSkillFileBytes = 1 << 20 // 1 MiB
 
 // maxSkills caps how many skills discovery loads across all source dirs, so a repo that plants
 // thousands of skill folders cannot make the in-memory catalog unbounded. Well past any real
-// library; the /skill picker only ever surfaces a handful at once.
+// library; the merged "/" menu only ever surfaces a handful at once.
 const maxSkills = 1024
 
 // Sources are the injected roots Load discovers skills under (ADR 0001 — no implicit ~/.apogee).

@@ -309,7 +309,7 @@ func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
 // joinedInterjections composes the ONE unmarked user message a flush sends: the staged rows'
 // texts oldest first — the order the human wrote them — with tail's text last when a ⏎ on a
 // non-empty box is what triggered the flush, separated by blank lines. Their @file references and
-// their /skill references are unioned in the same order and de-duplicated, so a path — or a skill —
+// their skill references are unioned in the same order and de-duplicated, so a path — or a skill —
 // named in two rows is resolved once.
 //
 // One message rather than several is the point: exactly one unmarked user message opens an

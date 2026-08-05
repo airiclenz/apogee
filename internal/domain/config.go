@@ -324,7 +324,7 @@ func modeRank(m Mode) int {
 //
 // FileRefs (@file tokens parsed from the chat input) are resolved at Step time — the loop
 // reads each within the workspace fence and prepends its content to the user message.
-// SkillIDs are the skills the user attached in chat (the /skill command); the loop resolves
+// SkillIDs are the skills the user attached in chat (inline "/id" tokens); the loop resolves
 // each through Config.Skills and prepends its body to the user message for that one turn. The
 // refs round-trip through a snapshot, so a resumed session re-resolves them.
 type UserInput struct {

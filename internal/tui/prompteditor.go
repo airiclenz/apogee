@@ -35,13 +35,13 @@ type promptEditor struct {
 	input textarea.Model
 
 	// autocomplete is the chat mini-language suggestion overlay shown while typing: one merged menu
-	// of commands and skills on a "/" token, workspace files on "@", and the two-step picker's
-	// catalog on "/skill <partial>". Every region follows the TOKEN AT THE CARET and opens wherever
-	// the box is editable, interjections included. The zero value is hidden.
+	// of commands and skills on a "/" token, and workspace files on "@". Every region follows the
+	// TOKEN AT THE CARET and opens wherever the box is editable, interjections included. The zero
+	// value is hidden.
 	autocomplete autocompleteState
 
-	// skillRegion tracks whether the input currently sits in a "/skill <partial>" region, so
-	// recomputeAutocomplete can edge-trigger a catalog reload only when the picker OPENS (the
+	// skillRegion tracks whether the input currently sits in a "/<partial>" menu region, so
+	// recomputeAutocomplete can edge-trigger a catalog reload only when the menu OPENS (the
 	// false→true transition) rather than on every keystroke inside it. It follows the region
 	// itself, not autocomplete.active, so a region that momentarily shows no matches still
 	// counts as open and does not re-reload on the next matching keystroke.
@@ -145,7 +145,7 @@ func newPromptEditor(shape tea.CursorShape) promptEditor {
 }
 
 // submitParse parses the editor's current input through the chat mini-language (command.go): the
-// verb or the message text, its @file references, and its inline /skill references. It reads the
+// verb or the message text, its @file references, and its inline "/id" skill references. It reads the
 // editor without mutating it: the caller resets the editor only once it has decided the parse is a
 // message to send (a recognised /command routes without a reset). This is the editor's "turn what
 // I hold into send-ingredients" seam — unit-testable without a Model or a fake engine.

@@ -216,7 +216,7 @@ func TestLoadRecordsSkippedSkillOnCatalog(t *testing.T) {
 }
 
 // Skipped returns a copy, so the catalog stays read-only after Load — a caller mutating the
-// returned slice must not corrupt the snapshot the picker and the loop share.
+// returned slice must not corrupt the snapshot the menu and the loop share.
 func TestSkippedIsACopy(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, filepath.Join(home, "skills"), "bad", "")

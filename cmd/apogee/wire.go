@@ -82,12 +82,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// Discover the user's skills from the layered source dirs: the global library
 	// (~/.apogee/skills), the project's .apogee/skills, and — when use-project-skills is on —
 	// the project's bare skills/. The Provider holds the current catalog and can Reload it from
-	// these same dirs on demand: the /skill picker refreshes it each time it opens, so a skill
+	// these same dirs on demand: the merged "/" menu refreshes it each time it opens, so a skill
 	// added or edited after launch is picked up without restarting. The initial load error is
 	// soft (a missing dir is skipped, a malformed skill is skipped), so the catalog is always
 	// usable. The SAME *skills.Provider feeds both the loop (Config.Skills resolves attached IDs
-	// into the turn) and the TUI's /skill picker (Options.Skills lists/labels them), so a
-	// refreshed skill both shows in the picker AND resolves when attached.
+	// into the turn) and the TUI's merged "/" menu (Options.Skills lists/labels them), so a
+	// refreshed skill both shows in the menu AND resolves when attached.
 	skillProvider := skills.NewProvider(skills.Sources{
 		Home:             roots.config,
 		Workspace:        roots.workspace,
@@ -517,7 +517,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		SaveHostAcknowledgement: hostAcknowledgementSaver(
 			filepath.Join(roots.config, "config.yaml"), platform.HostID()),
 		Skills: skillProvider,
-		// Re-scan the skill source dirs when the /skill picker opens, swapping in a fresh catalog
+		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
 		// on the shared Provider — the same one Config.Skills resolves against — so a skill added
 		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals
 		// unusable), so it is dropped.

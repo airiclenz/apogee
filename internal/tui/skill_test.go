@@ -670,14 +670,14 @@ func TestSkillsCommandListsCatalog(t *testing.T) {
 			t.Errorf("note is missing the row %q:\n%s", want, note)
 		}
 	}
-	// Catalog order is display order: the listing reads like the picker.
+	// Catalog order is display order: the listing reads like the merged "/" menu.
 	if strings.Index(note, "/clean-code") > strings.Index(note, "/review") {
 		t.Errorf("rows are not in catalog order:\n%s", note)
 	}
 }
 
 // The catalog is re-scanned BEFORE it is listed, so a skill added since launch shows up — the
-// same live refresh the picker edge-triggers on open. The reload stub appends "fresh", so the
+// same live refresh the merged "/" menu edge-triggers on open. The reload stub appends "fresh", so
 // row can only be there if the reload ran first.
 func TestSkillsCommandReloadsBeforeListing(t *testing.T) {
 	o, reloads := reloadOpts()
@@ -750,7 +750,7 @@ func TestSkillCatalogNote(t *testing.T) {
 
 // A skill discovery refused must be NAMED in the report, with its reason and its file — the
 // whole point of carrying skips: a malformed skill and an absent one are otherwise identical
-// from the picker. Pinned in both shapes: alongside loaded skills, and as the only finding.
+// from the merged "/" menu. Pinned in both shapes: alongside loaded skills, and as the only finding.
 func TestSkillCatalogNoteReportsSkipped(t *testing.T) {
 	bad := skills.SkipError{
 		Path: filepath.Join("/home", ".apogee", "skills", "implement-plan", "SKILL.md"),

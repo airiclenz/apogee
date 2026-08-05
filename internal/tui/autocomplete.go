@@ -350,7 +350,7 @@ func commandSuggestions(partial string, busy bool) []acItem {
 // that rides an interjection to the running Exchange, so it is as invocable mid-run as at idle. Only
 // the command half answers to the while-running policy (commandSuggestions takes m.busy()).
 //
-// A skill row follows the merged menu's schema, not the picker's: ["✦ /id", what the skill is]. The
+// A skill row follows the merged menu's schema: ["✦ /id", what the skill is]. The
 // two kinds of row therefore share one second column, so a skill's description starts exactly where
 // the command summaries above it do rather than wherever its own token happened to end.
 func (m Model) slashSuggestions(partial, outside string) []acItem {
@@ -373,11 +373,12 @@ func (m Model) slashSuggestions(partial, outside string) []acItem {
 	return items
 }
 
-// skillMenuCell flattens a skill picker row's cells — display name, summary — into the ONE cell the
+// skillMenuCell flattens a skill row's cells — display name, summary — into the ONE cell the
 // merged "/" menu gives a skill, joined by the module's own gutter so the flattened text reads with
-// the same rhythm the columns elsewhere do. The picker aligns those two tiers against each other;
-// the merged menu instead aligns the whole description against the command summaries, and a row
-// cannot be in two column schemas at once. Empty tiers drop out rather than leaving a hanging gutter.
+// the same rhythm the columns elsewhere do. Aligning those two tiers against each other would need
+// a column schema of their own; the merged menu instead aligns the whole description against the
+// command summaries, and a row cannot be in two column schemas at once. Empty tiers drop out rather
+// than leaving a hanging gutter.
 func skillMenuCell(cells popupRow) string {
 	parts := make([]string, 0, len(cells))
 	for _, cell := range cells {
@@ -389,10 +390,11 @@ func skillMenuCell(cells popupRow) string {
 }
 
 // skillSuggestions lists skills matching partial (a case-insensitive substring of id or
-// displayName), excluding those the message already invokes, as the picker's two cells —
-// ["DisplayName", "Summary"] — which the popup module lays out as columns, so what each skill DOES
-// starts at one shared offset however long the names beside it run. The value is the skill ID (what
-// the accepted row splices in as a "/id" token). A nil catalog yields nothing (the picker is dark).
+// displayName), excluding those the message already invokes, as two cells —
+// ["DisplayName", "Summary"] — which the merged "/" menu flattens into the single description cell
+// a skill row gets (skillMenuCell), so what each skill DOES aligns against the command summaries
+// above it. The value is the skill ID (what the accepted row splices in as a "/id" token). A nil
+// catalog yields nothing (the menu shows no skill rows).
 //
 // The list is ranked by match quality (slashMatchRank) and only THEN cut to maxAutocompleteItems,
 // which is the whole reason the cap moved out of the scan loop. Capping first meant the cut was
@@ -662,7 +664,7 @@ func (m Model) insertSkillToken(id string) Model {
 // spliceCompletion writes token, plus the separator that ends it, over the completion region and
 // re-derives the overlay, leaving the caret just after what it wrote. It RECOMPUTES rather than
 // blindly closing, so the overlay tracks the draft the splice left behind — which for a completed
-// command/file/skill token means closing, because the separator ends the token.
+// command, file or skill token means closing, because the separator ends the token.
 //
 // The separator is written only when the draft does not already carry one: completing a token in the
 // middle of a sentence must not double the space before the next word. The caret then lands after

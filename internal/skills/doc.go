@@ -6,10 +6,10 @@
 // so a skill written for one is interoperable with the others and has room for bundled
 // resources (refs/, scripts) hung off the same folder later (the Dir field is the seam).
 //
-// The package is the discovery half of the post-v1 apogee-code feature-parity /skill command:
+// The package is the discovery half of the post-v1 apogee-code feature-parity skills feature:
 // it loads skills, and a *Catalog resolves attached IDs both for the agent loop (which prepends
 // the resolved bodies to the turn — through the domain.SkillResolver seam it satisfies, so the
-// loop never imports this package) and for the TUI's /skill picker.
+// loop never imports this package) and for the TUI's merged "/" menu.
 //
 // It is grounded in:
 //

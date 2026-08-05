@@ -10,7 +10,7 @@ import (
 
 // Catalog is the outcome of one discovery scan: the skills that loaded, keyed by ID, AND the
 // SKILL.md files that did not (Skipped). It is built by Load and read by two consumers over
-// different seams: the TUI's /skill picker (List/Get/Skipped) and the agent loop (ResolveSkills,
+// different seams: the TUI's merged "/" menu (List/Get/Skipped) and the agent loop (ResolveSkills,
 // the domain.SkillResolver it satisfies). The same *Catalog is injected into both — it is
 // read-only after Load, so sharing it across the UI and the loop goroutine is safe (no method
 // mutates byID, pathByID or skipped).
@@ -76,7 +76,7 @@ func (c *Catalog) skipError() error {
 }
 
 // List returns every skill sorted by DisplayName (then ID, so the order is total and stable
-// across equal display names) — the order the /skill dropdown shows.
+// across equal display names) — the order the merged "/" menu shows.
 func (c *Catalog) List() []Skill {
 	out := make([]Skill, 0, len(c.byID))
 	for _, s := range c.byID {

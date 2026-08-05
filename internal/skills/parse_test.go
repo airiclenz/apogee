@@ -170,7 +170,7 @@ func TestParseSkillValidYAMLKeepsYAMLSemantics(t *testing.T) {
 }
 
 // An indented key belongs to whatever encloses it, so the lenient scan must not hoist it into the
-// skill's own fields — otherwise a nested "description:" would hijack the picker's summary.
+// skill's own fields — otherwise a nested "description:" would hijack the merged menu's summary.
 func TestParseSkillLenientIgnoresNestedKeys(t *testing.T) {
 	sk, err := parseSkill("---\nname: plan\ndescription: The real one: here\nmetadata:\n  description: internal note\n---\nbody", "dir")
 	if err != nil {

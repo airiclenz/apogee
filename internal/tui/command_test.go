@@ -333,7 +333,7 @@ func TestExtractFileRefs(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// Inline /skill tokens — the second half of the mini-language
+// Inline "/id" skill tokens — the second half of the mini-language
 // ----------------------------------------------------------------------------
 
 // knownSkills builds the catalog predicate parseInput/extractSkillRefs resolve against, from a

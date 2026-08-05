@@ -507,7 +507,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		if m.state == stateIdle || m.state == stateRunning {
-			m = m.recomputeAutocomplete() // re-derive the overlay from the pasted-into input (reloads on /skill open)
+			m = m.recomputeAutocomplete() // re-derive the overlay from the pasted-into input (reloads on "/" menu open)
 		}
 		m.layout() // re-flow: the box auto-grows as the pasted text wraps to more rows
 		return m, cmd
@@ -1000,7 +1000,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		if m.state == stateIdle || m.state == stateRunning {
-			m = m.recomputeAutocomplete() // re-derive the overlay from the edited input (reloads on /skill open)
+			m = m.recomputeAutocomplete() // re-derive the overlay from the edited input (reloads on "/" menu open)
 		}
 		m.layout() // re-flow: the input box auto-grows as the message wraps to more rows
 		return m, cmd
@@ -3309,7 +3309,7 @@ func (m Model) joinFrame(blocks []string) string {
 // (topRule), not part of this box, so the status line reads as sitting directly above the box.
 //
 // Two overlays compose onto the widget's own block, and the ORDER is the contract: accentTokens
-// paints the resolving /skill and @file tokens first (inputaccent.go), then highlightInput paints
+// paints the resolving "/id" and @file tokens first (inputaccent.go), then highlightInput paints
 // the drag-selection over whatever it covers. shadeCells strips the span it re-renders, so the last
 // pass wins on any overlap — and a selection must read as selected even across an accented token.
 //

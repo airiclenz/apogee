@@ -7,7 +7,7 @@ import (
 
 // Skill is one discovered, user-authored skill: a folder (Dir) containing a SKILL.md whose
 // frontmatter and body define it. ID is the stable key the chat input attaches and the loop
-// resolves; DisplayName and Summary drive the /skill picker; Body is the instruction text the
+// resolves; DisplayName and Summary drive the merged "/" menu; Body is the instruction text the
 // loop prepends to the turn when the skill is attached.
 //
 // Dir is the absolute path to the skill's folder, carried so a later bundled-resource feature
@@ -27,7 +27,7 @@ type Skill struct {
 //
 // Discovery is deliberately soft (one bad skill never sinks the catalog), but soft must not
 // mean silent: with only the loaded half surfaced, a malformed skill is indistinguishable from
-// an absent one — the picker just does not offer it and the human has nowhere to look. So the
+// an absent one — the menu just does not offer it and the human has nowhere to look. So the
 // reason travels WITH the catalog that omitted it (Catalog.Skipped), and the /skills report
 // names it.
 type SkipError struct {
@@ -38,7 +38,7 @@ type SkipError struct {
 }
 
 // Name is the folder the skipped SKILL.md sat in — the ID the skill WOULD have had, and so the
-// name the human is hunting for when it never appears in the picker. It mirrors the dirName
+// name the human is hunting for when it never appears in the menu. It mirrors the dirName
 // the loader derives an ID from (load.go), so the report names the skill the way the user does.
 func (e SkipError) Name() string { return filepath.Base(filepath.Dir(e.Path)) }
 
