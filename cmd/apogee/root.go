@@ -49,6 +49,12 @@ type options struct {
 	// refused an entry that could never be switched to.
 	servers []serverEntry
 
+	// startupServer is the resolved `server:` key — the NAME of the servers entry this session
+	// starts on, which /server records after a switch. It is the one key of this pair with sources
+	// above the file (--server > APOGEE_SERVER > `server:`), so the flag below binds it directly
+	// and applyConfig then overwrites it with the resolved value. Empty ⇒ no entry is named.
+	startupServer string
+
 	// llamaLauncher is the resolved `llama-launcher:` key (ADR 0029), exactly as the user wrote it:
 	// empty ⇒ auto-detect the launcher's own config, `off` ⇒ the local-server verbs stay off, any
 	// other value ⇒ the launcher config file to read. Loaded from the config file only, like the
@@ -236,6 +242,8 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.StringVar(&opts.endpoint, "endpoint", "", "OpenAI-compatible LLM server URL")
+	flags.StringVar(&opts.startupServer, "server", "",
+		"name of the servers: entry to start on (default: the last one /server switched to)")
 	flags.StringVar(&opts.model, "model", "", "model name to request (default: ask the server for its active model)")
 	flags.StringVar(&opts.mode, "mode", string(modeAskBefore),
 		"autonomy ladder: plan | ask-before | allow-edits | auto "+

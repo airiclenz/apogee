@@ -57,6 +57,15 @@ type settings struct {
 	// stands on its own either way, so this key only ADDS the servers it can move to.
 	servers []serverEntry
 
+	// startupServer is the resolved `server:` key: the NAME of the `servers:` entry this session
+	// starts on — the last one chosen, which /server records automatically. It resolves
+	// flag > env > file (`--server`, `APOGEE_SERVER`, `server:`), so one invocation can start on
+	// another configured machine without editing the file. Empty ⇒ no choice is recorded (or none
+	// is asked for). It is deliberately NOT validated against the list here: which names exist is
+	// a fact about the resolved `servers:` list, so a name that matches nothing is answered at
+	// selection, where the list is in hand.
+	startupServer string
+
 	// llamaLauncher is the resolved `llama-launcher:` key (ADR 0029): whether — and through which
 	// of that tool's config files — this session may start, switch and stop LOCAL servers itself.
 	// File-only on the `servers:` reasoning: naming a tool installed on this machine is a config
@@ -428,6 +437,13 @@ type layer struct {
 	hostAlias *string
 	bypass    *bool
 
+	// startupServer is the `server:` key: the NAME of the `servers:` entry a session starts on.
+	// Unlike the list it names — file-only, because naming a machine is a config act — this one
+	// key is settable from all three layers (`--server` beats `APOGEE_SERVER` beats the file),
+	// because which of those machines THIS run starts on is an invocation fact. A nil pointer
+	// means the source names none, so resolution falls through to the empty default.
+	startupServer *string
+
 	// apiKey is set by the FILE and ENV layers only; the flag layer never carries it, because
 	// there is deliberately no --api-key (a secret must not reach shell history or a process
 	// list). It still rides the generic resolution loop, so the loop's own order — file, then
@@ -606,6 +622,24 @@ var multiSourceKeys = []multiSourceKey{
 		overlay: func(s *settings, l layer) {
 			if l.model != nil {
 				s.model = *l.model
+			}
+		},
+	},
+	{
+		// The one key of the `servers:` neighbourhood with sources above the file: the list is
+		// config, the choice of entry is an invocation.
+		row: mustKey("server"),
+		fromEnv: func(l *layer, text string) error {
+			l.startupServer = &text
+			return nil
+		},
+		fromFlag: func(l *layer, opts options) {
+			v := opts.startupServer
+			l.startupServer = &v
+		},
+		overlay: func(s *settings, l layer) {
+			if l.startupServer != nil {
+				s.startupServer = *l.startupServer
 			}
 		},
 	},
@@ -817,6 +851,13 @@ type fileConfig struct {
 	// machines, not this invocation. Absent/empty ⇒ none is configured, which changes nothing
 	// about the session's own upstream (see serverEntry for what an entry carries).
 	Servers []serverEntry `yaml:"servers"`
+	// Server names which entry of the list above a session STARTS on — the last one chosen, which
+	// /server records here automatically after a switch. Unlike the list, it has both an env var
+	// (`APOGEE_SERVER`) and a flag (`--server`): the list describes machines, and this says which
+	// of them this run is on, which is an invocation fact. Absent/empty ⇒ no choice is recorded.
+	// A name no entry carries is not refused here — which names exist is what the list says, so
+	// selection answers it.
+	Server string `yaml:"server"`
 	// LlamaLauncher says whether this session may start, switch and stop the LOCAL servers it
 	// talks to — through llama-launcher — and which of that tool's config files to read (ADR
 	// 0029). File-only (no flag/env), like Servers above. Absent/empty ⇒ auto-detect: the
@@ -1239,6 +1280,9 @@ func (fc fileConfig) layer() layer {
 	if len(fc.Servers) > 0 {
 		l.servers = fc.Servers
 	}
+	if fc.Server != "" {
+		l.startupServer = &fc.Server
+	}
 	if fc.LlamaLauncher != "" {
 		l.llamaLauncher = &fc.LlamaLauncher
 	}
@@ -1330,6 +1374,7 @@ func loadFileConfig(path string, readFile func(string) ([]byte, error)) (layer, 
 // Environment variable names, prefixed APOGEE_ to namespace the process environment.
 const (
 	envEndpoint  = "APOGEE_ENDPOINT"
+	envServer    = "APOGEE_SERVER"
 	envModel     = "APOGEE_MODEL"
 	envMode      = "APOGEE_MODE"
 	envBypass    = "APOGEE_BYPASS"
@@ -1510,6 +1555,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.hostAlias = s.hostAlias
 	opts.apiKey = s.apiKey
 	opts.servers = s.servers
+	opts.startupServer = s.startupServer
 	opts.llamaLauncher = s.llamaLauncher
 	opts.confineToWorkspace = s.confineToWorkspace
 	opts.unconfinedHosts = s.unconfinedHosts

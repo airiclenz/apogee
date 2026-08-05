@@ -326,8 +326,11 @@ func TestRegistryValidateHooksSitOnEditableKeys(t *testing.T) {
 	t.Parallel()
 	// The editable keys whose kind IS their whole contract: a plain name, a free-text template, an
 	// address this process cannot verify. Listed here so adding a key cannot quietly join them.
+	// `server` joins them for a reason of its own: its valid values are the names of THIS config's
+	// `servers:` entries, which no per-value hook holding no list can know — so the name is checked
+	// at selection, where the list is in hand, and any string is a writable value here.
 	unchecked := map[string]bool{
-		"api-key": true, "host-alias": true, "model": true,
+		"api-key": true, "host-alias": true, "model": true, "server": true,
 		"present.command": true, "present.host": true,
 	}
 	for _, k := range keyRegistry {

@@ -125,7 +125,7 @@ is the host alias (the standalone `host-alias:` key is gone).
 
 **Commit:** `docs(adr): ratify the servers-list schema — single definition, last-switch startup, one-time migration`
 
-## 2. The `server:` startup-choice key (additive)
+## 2. The `server:` startup-choice key (additive) — ✅ DONE (2026-08-05)
 
 **What:** Depends on item 1. `fileConfig` gains `Server string
 \`yaml:"server"\`` (beside `Servers`, `cmd/apogee/config.go:819`). New registry row in

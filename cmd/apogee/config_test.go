@@ -309,7 +309,7 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 	}
 }
 
-// The six keys that resolve from more than one source, driven end to end through their registry
+// The seven keys that resolve from more than one source, driven end to end through their registry
 // rows: a real fileConfig, a real getenv, a real explicitly-set flag, and the precedence the
 // three produce. The WIRE-FACING names — the variable a user exports, the flag they type — are
 // spelled out here as literals rather than read from the row, which is what makes this a test of
@@ -356,6 +356,13 @@ func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
 			setFile:  func(fc *fileConfig, v string) { fc.Model = v },
 			setFlag:  func(o *options, v string) { o.model = v },
 			resolved: func(s settings) string { return s.model },
+		},
+		{
+			path: "server", envVar: "APOGEE_SERVER", flagName: "server",
+			file: "the-file-box", env: "the-env-box", flag: "the-flag-box",
+			setFile:  func(fc *fileConfig, v string) { fc.Server = v },
+			setFlag:  func(o *options, v string) { o.startupServer = v },
+			resolved: func(s settings) string { return s.startupServer },
 		},
 		{
 			path: "mode", envVar: "APOGEE_MODE", flagName: "mode",

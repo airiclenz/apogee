@@ -131,6 +131,17 @@ var keyRegistry = []configKey{
 		Desc:            "The other servers a running session can be moved to with /server.",
 	},
 	{
+		// A plain string rather than an enum, even though its values ARE a closed set: EnumValues is
+		// static and TestRegistryEnumValuesMatchParseSites recovers each vocabulary from its parse
+		// site, while the names this key takes are whatever THIS config's `servers:` list spells. A
+		// name that matches no entry is therefore refused where the list is known — at selection —
+		// rather than by a vocabulary this table cannot hold.
+		Path: "server", Kind: kindString,
+		EnvVar: envServer, FlagName: "server",
+		RestartRequired: true, Editable: true,
+		Desc: "Which servers: entry a session starts on; /server records the last one chosen.",
+	},
+	{
 		Path: "llama-launcher", Kind: kindString,
 		RestartRequired: true, Editable: true,
 		Validate: validateLlamaLauncher, // the startup check itself, unwrapped: ADR 0029's three shapes

@@ -83,6 +83,7 @@ var settingValues = map[string]func(options) string{
 	"host-alias":         func(o options) string { return o.hostAlias },
 	"model":              func(o options) string { return o.model },
 	"servers":            func(o options) string { return countSummary(len(o.servers), "server") },
+	"server":             func(o options) string { return o.startupServer },
 	"llama-launcher":     func(o options) string { return o.llamaLauncher },
 	"mode":               func(o options) string { return o.mode },
 	"system-prompt-text": func(o options) string { return countSummary(lineCount(o.systemPrompt.global.text), "line") },

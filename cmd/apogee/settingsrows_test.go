@@ -22,6 +22,7 @@ func fabricatedSettings() options {
 		hostAlias:     "workstation",
 		model:         "gpt-oss-20b",
 		servers:       []serverEntry{{Name: "workstation"}, {Name: "rented-box"}, {Name: "laptop"}},
+		startupServer: "rented-box",
 		llamaLauncher: "off",
 		mode:          "auto",
 		systemPrompt: systemPromptSettings{
@@ -182,6 +183,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"host-alias":           "workstation",
 		"model":                "gpt-oss-20b",
 		"servers":              "3 servers",
+		"server":               "rented-box",
 		"llama-launcher":       "off",
 		"mode":                 "auto",
 		"system-prompt-text":   "2 lines",
