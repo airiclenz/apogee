@@ -614,6 +614,88 @@ func TestEditBodyClipsALongChangedLine(t *testing.T) {
 	}
 }
 
+// TestWriteCallCarriesTheWrittenLines pins write_file's display-only body, the other half of the
+// same rule the edit tools follow: what a write puts in a file is stated in its ARGUMENTS, so the
+// block hangs those lines beneath its branch from the moment the call is announced — every one of
+// them green, because a write inserts the lot and removes nothing.
+//
+// The degraded rows carry the same weight they do for an edit: content that is absent, empty or of
+// the wrong type yields NO body rather than a panic or a claim about a write nobody asked for. An
+// empty write is the interesting one — it genuinely writes nothing, so a body of one blank line
+// would be a line the call never asked for.
+func TestWriteCallCarriesTheWrittenLines(t *testing.T) {
+	cases := []struct {
+		name string
+		args string
+		want []string
+	}{
+		{
+			name: "every line of the content, all of it green",
+			args: `{"path":"notes.txt","content":"alpha\nbeta\ngamma"}`,
+			want: []string{"+ alpha", "+ beta", "+ gamma"},
+		},
+		{
+			name: "a trailing newline terminates the last line, it is not a line",
+			args: `{"path":"notes.txt","content":"alpha\nbeta\n"}`,
+			want: []string{"+ alpha", "+ beta"},
+		},
+		{
+			name: "single-line content still carries a one-line body",
+			args: `{"path":"notes.txt","content":"hello"}`,
+			want: []string{"+ hello"},
+		},
+		{
+			name: "empty content writes nothing, so it shows nothing",
+			args: `{"path":"notes.txt","content":""}`,
+			want: nil,
+		},
+		{
+			name: "no content argument → no body",
+			args: `{"path":"notes.txt"}`,
+			want: nil,
+		},
+		{
+			name: "content of the wrong type → no body",
+			args: `{"path":"notes.txt","content":42}`,
+			want: nil,
+		},
+		{
+			name: "malformed arguments degrade to no body rather than to a guess",
+			args: "{not json",
+			want: nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file", Arguments: []byte(tc.args)}, workspaceRoot{})
+			if got := changedBody(t, tv); strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
+				t.Errorf("body = %q, want %q", got, tc.want)
+			}
+			if tv.Details.len() > 0 && !tv.Details.isDiff() {
+				t.Error("a write body must settle as a diff body, or it paints without its colours")
+			}
+		})
+	}
+}
+
+// A write's two halves say different things and neither is derived from the other: the result's
+// "+N bytes" rides the branch beside the target and the argument-derived lines hang beneath it —
+// including when there is only one of them. Nothing is promoted onto the branch, because the slot
+// is already taken by the count the tool reported.
+func TestWriteBodySurvivesItsByteCountSummary(t *testing.T) {
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file",
+		Arguments: []byte(`{"path":"notes.txt","content":"hello"}`)}, workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "wrote 5 bytes to notes.txt",
+		Summary: domain.WroteBytes{Bytes: 5}}, workspaceRoot{})
+
+	if got := tv.Summary.Text; got != "+5 bytes" {
+		t.Errorf("summary = %q, want the reported byte count on the branch", got)
+	}
+	if got := changedBody(t, tv); len(got) != 1 || got[0] != "+ hello" {
+		t.Errorf("body = %q, want the one written line beneath the branch", got)
+	}
+}
+
 // TestBodyKindIsSettledWhereTheLinesAre pins the mechanism the collapsed paint's cap reads: the
 // body's kind is decided ONCE, where the lines are put into a body (newToolBody), and carried by
 // that body — not re-derived from the lines on every repaint, over a body the entry retains whole.

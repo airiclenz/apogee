@@ -146,6 +146,12 @@ point is a **minor** bump, not a breaking change.
     sent to it or asked of it and the tokens a session spends are untouched. Consecutive edits now
     stand alone rather than grouping into one block, on the standing rule that a call carrying a
     body breaks a run.
+  - **A write shows what it writes.** `write_file` reported a byte count and nothing else, so a
+    file the model created was a number in the transcript. The block now hangs the content beneath
+    its branch, every line of it green, with the `+25 bytes` still riding above — the count says how
+    much, the lines say what. It is read off the call's **own arguments** exactly as an edit's is,
+    collapses to the same four rows, and an empty write still shows nothing, because it wrote
+    nothing.
   - **The state is the view's alone.** It is never encoded with the transcript: a resumed session
     paints everything collapsed and `/clear` forgets it with everything else. A block that hides
     nothing has nothing to toggle — a group of body-less calls, or any block whose lines already

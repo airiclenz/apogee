@@ -335,7 +335,21 @@ diff bodies and stop grouping).
 
 ---
 
-## 6. A write call carries the written lines (depends on item 4)
+## 6. A write call carries the written lines (depends on item 4) — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): paint-cache key UNCHANGED — the body is entry content settled when the call is
+announced, exactly as an edit's is, so `paintcache.go` gained no field. Three deviations from the
+item's literal text. (a) **`layout.md` and `CHANGELOG.md` amended** though item 6's What names
+neither, on item 5's precedent and the plan's standing rule that the item lands the spec delta of a
+ratified decision (decision 5 covers the write): layout.md's derivation, two-halves and standalone
+paragraphs now name the write beside the edit. (b) **The golden gained a `write_file` call** (the
+item asks for it), which pushed `mcp_search` c8→c9 and the sub-agent read c9→c10. (c) The
+"collapses to the cap with marker and expands whole" test landed as a case in the existing
+`TestExpandedBlockPaintsItsWholeBody` table rather than as a presenter test — it is a fact about the
+paint, and that table is where the collapsed↔expanded round trip already lives; the presenter test
+(`TestWriteCallCarriesTheWrittenLines`) pins the derived lines themselves. Also: `writtenLines`
+reuses the full-replacement pair the edit body already builds (`replacedText("", content)` →
+`changedLines`), so a write and an `edit_existing_file` that say the same thing read identically.
 
 **What.** The `write_file` presenter derives a body from its `content` argument: every line
 prefixed `+`, through the same diff body kind as item 5, collapsed to item 4's cap. The

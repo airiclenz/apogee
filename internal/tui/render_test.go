@@ -863,6 +863,17 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 			wantCollapsed: append(paintedDiff(collapsedBodyCap), "    … +3 more lines"),
 			wantExpanded:  paintedDiff(collapsedBodyCap + 3),
 		},
+		{
+			// The written lines are the body from the moment the call is announced, so this one
+			// spends and expands past the budget with no result involved at all.
+			name: "a write's own lines collapse to the budget and expand whole",
+			build: func(tr *transcript) {
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "write_file",
+					Arguments: []byte(`{"path":"notes.txt","content":"alpha\nbeta\ngamma\ndelta"}`)}})
+			},
+			wantCollapsed: []string{"    + alpha", "    … +3 more lines"},
+			wantExpanded:  []string{"    + alpha", "    + beta", "    + gamma", "    + delta"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2337,7 +2348,8 @@ func TestRenderGroupBreakers(t *testing.T) {
 // TestTranscriptLayoutGolden pins the whole rendered scrollback of one realistic mixed session —
 // a user prompt, narration the model padded with a trailing "\n\n", a batch of reads, a Run whose
 // output hangs beneath its command, a diff whose "+2 -2" rides its branch over a coloured body, two
-// edits showing the lines they change beneath their own reports, an
+// edits showing the lines they change beneath their own reports, a write showing the lines it
+// writes beneath its own byte count, an
 // unregistered tool whose verbatim arguments are its own branches, an
 // approval note, and a sub-agent read — as an exact line sequence, blank lines included. It is the
 // backstop across the layout changes rather than a test of any one of them: the blank-line hygiene
@@ -2378,10 +2390,14 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c7", Tool: "multi_find_and_replace",
 		Arguments: []byte(`{"path":"main.go","replacements":[{"oldText":"return","newText":"os.Exit(0)"}]}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c7", Content: "applied 1 replacement to main.go"}})
-	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c8", Tool: "mcp_search",
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c8", Tool: "write_file",
+		Arguments: []byte(`{"path":"notes.md","content":"# Notes\n\nrewrote main.go\n"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c8",
+		Content: "wrote 25 bytes to notes.md", Summary: domain.WroteBytes{Bytes: 25}}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c9", Tool: "mcp_search",
 		Arguments: []byte(`{"query":"collapse","limit":20}`)}})
 	tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
-	readCall(tr, "c9", "main.go", 1, 154, 1)
+	readCall(tr, "c10", "main.go", 1, 154, 1)
 
 	want := strings.Join([]string{
 		"❯ read the docs, then run the tests",
@@ -2412,6 +2428,11 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"  ┕ main.go applied 1 replacement to main.go",
 		"    - return",
 		"    … +1 more line",
+		"",
+		"✦ Write File ▸",
+		"  ┕ notes.md +25 bytes",
+		"    + # Notes",
+		"    … +2 more lines",
 		"",
 		"✦ mcp_search ▸",
 		"  ┕ {",

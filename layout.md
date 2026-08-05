@@ -364,24 +364,29 @@ body-carrying call does — see *What stays standalone* below.
 **The outcome, in two halves.** What a finished call has to say is split in two, and everything
 below follows from that split — never from counting lines. The **summary** is the single line that
 rides the branch beside the target: a read's `1 - 154`, a diff's `+2 -2`, an `error: …`. The
-**body** is what hangs beneath it: a command's output, a diff's own lines, an edit's changed lines.
+**body** is what hangs beneath it: a command's output, a diff's own lines, an edit's changed lines,
+a write's written ones.
 A call may have either,
 both, or — while it is still in flight — neither. Anything that fits on one line is a summary,
 whatever produced it: a command whose whole output is one line rides the branch like a read does
 (`┕ git rev-parse --short HEAD  9f2c1ab`), and only output that needs the `… +N more lines`
 remainder becomes a body.
 
-**An edit shows the lines it changes, and the block derives them itself.** The three edit tools —
-a single and a multi find-and-replace, and `edit_existing_file` — hang the lines they change
-beneath their branch: per replacement the removed lines behind `- `, then the inserted lines behind
-`+ `, in the order the call listed them, coloured exactly as `View Diff`'s hunks are. Those lines
+**An edit shows the lines it changes, a write the lines it writes, and the block derives them
+itself.** The three edit tools — a single and a multi find-and-replace, and `edit_existing_file` —
+hang the lines they change beneath their branch: per replacement the removed lines behind `- `,
+then the inserted lines behind `+ `, in the order the call listed them, coloured exactly as
+`View Diff`'s hunks are. `write_file` is the same shape with one half of it: the content it writes,
+every line behind `+ `, because a write puts all of them in the file and takes nothing out. Its
+`+N bytes` goes on riding the branch above — the summary says how much was written and the body
+says what. Those lines
 are read off the **call's own arguments** at presentation time, never off its result: the tool
 reports nothing new, no result grows, nothing extra crosses the wire, and the model's own view of
 the call is byte for byte what it always was. The body is therefore there before the result lands;
 it is quoted text like every other body, so it is never respelled; and it collapses to the same one
 budget as every other block, a click showing the rest. A call whose arguments say nothing about a
-change — absent, malformed, or of the wrong shape — carries no body at all and renders as it always
-did.
+change — absent, malformed, or of the wrong shape, and an empty write, which puts no line anywhere
+— carries no body at all and renders as it always did.
 
 **Paths print relative to the workspace.** The paths a block **names** are spelled relative to the
 workspace root: the target leading a branch (`┕ docs/plan.md 1 - 154`, never
@@ -420,7 +425,8 @@ says it is the block's own words — a path it names, or a summary it wrote itse
 (non-diff) summary — which includes an `error: …` line, and an in-flight call whose result has not
 landed yet. A call carrying a body (the `Run` above, with its `… +N more lines` remainder; the
 `View Diff` above, with its diff beneath the `+2 -2`; an edit, with the lines it changes beneath
-its report — which is why consecutive edits now stand alone) or no target at all breaks the run and
+its report — which is why consecutive edits now stand alone; a write, with the lines it writes
+beneath its `+N bytes`) or no target at all breaks the run and
 renders as its own block. It renders in the *same shape* it would have had inside a group, though:
 a block of one is byte-identical in shape to a block of many, which is the whole point of the
 header carrying no target.

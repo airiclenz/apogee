@@ -46,8 +46,8 @@ import (
 // stays in this one registry instead of growing a second, parallel switch elsewhere.
 
 // detailKind tags a tool-detail line so the renderer can colour it. The diff kinds are emitted by
-// diffBody (view_diff's body renderer) and by changedLines (the edit tools' body, derived from
-// their own arguments), and rendered red/green in render.go.
+// diffBody (view_diff's body renderer) and by changedLines (the edit tools' and write_file's body,
+// derived from their own arguments), and rendered red/green in render.go.
 type detailKind int
 
 const (
@@ -188,8 +188,9 @@ type toolView struct {
 // — a fixed result sentence is summary-only ("HTTP 200 OK") and multi-line free-form output is
 // body-only (every one of its lines). A tool whose result carries a domain.ToolSummary
 // does not come through here at all: summaryLine words the branch line and the presenter's
-// body renderer (view_diff's alone) fills the half beneath it. An edit's body comes from neither
-// half of the result — it was derived from the call's arguments before it (argBody).
+// body renderer (view_diff's alone) fills the half beneath it. An edit's body — and a write's —
+// comes from neither half of the result: it was derived from the call's arguments before it
+// (argBody).
 //
 // The Summary is a branchSummary rather than a bare line because the extractor is the one thing
 // that knows whose words it just wrote — its own sentence, or the tool's output promoted onto the
@@ -245,12 +246,12 @@ type toolPresenter struct {
 	body func(content string) []detailLine
 
 	// argBody renders the body from the call's OWN ARGUMENTS, at the moment the call is
-	// presented: before any result exists, and never touching one. The edit tools set it,
-	// because what an edit changes is already in the request — the block can show the changed
-	// lines without the tool reporting them and without a byte more crossing the wire, which is
-	// what keeps this display-only (the engine stays wire-silent, ADR 0031: no tool result
-	// grows, no token is spent). It reads the same map the target extractor reads, so a call
-	// whose arguments are absent or malformed yields no body rather than a guess.
+	// presented: before any result exists, and never touching one. The edit tools and write_file
+	// set it, because what such a call puts in a file is already in the request — the block can
+	// show those lines without the tool reporting them and without a byte more crossing the wire,
+	// which is what keeps this display-only (the engine stays wire-silent, ADR 0031: no tool
+	// result grows, no token is spent). It reads the same map the target extractor reads, so a
+	// call whose arguments are absent or malformed yields no body rather than a guess.
 	argBody func(args map[string]any) []detailLine
 }
 
@@ -270,9 +271,9 @@ type toolPresenter struct {
 // the answer they typed — so it takes quotedFirstLineDetail and the block quotes that line rather
 // than respelling it.
 //
-// The three edit tools are the one group whose body owes nothing to a result: what they change is
-// stated in the REQUEST, so each sets an argBody that reads its own arguments as -/+ lines
-// (changedLines) and the block shows the change from the moment the call is announced.
+// The three edit tools and write_file are the group whose body owes nothing to a result: what they
+// put in a file is stated in the REQUEST, so each sets an argBody that reads its own arguments as
+// -/+ lines (changedLines) and the block shows the change from the moment the call is announced.
 var toolRegistry = map[string]toolPresenter{
 	"read_file": {
 		label:  "Read File",
@@ -281,10 +282,11 @@ var toolRegistry = map[string]toolPresenter{
 		detail: firstLineDetail, // floor; the span comes from domain.ReadSpan
 	},
 	"write_file": {
-		label:  "Write File",
-		verb:   "writing",
-		target: stringArg("path"),
-		detail: firstLineDetail, // floor; the count comes from domain.WroteBytes
+		label:   "Write File",
+		verb:    "writing",
+		target:  stringArg("path"),
+		detail:  firstLineDetail, // floor; the count comes from domain.WroteBytes
+		argBody: writtenLines,    // the content the call writes, as + lines
 	},
 	"list_dir": {
 		label:  "List Dir",
@@ -407,7 +409,8 @@ var toolRegistry = map[string]toolPresenter{
 }
 
 // presentToolCall builds the header view of a tool call — and, for the tools whose arguments
-// already say what the call will change, its body too (argBody: the edit tools' -/+ lines).
+// already say what the call will change, its body too (argBody: the edit tools' -/+ lines, a
+// write's + lines).
 // That body is derived here, at presentation time, from arguments the model has already sent:
 // nothing is asked of the tool, nothing is added to a result, and the block shows the change
 // before the result even lands. A known tool gets its friendly
@@ -945,6 +948,23 @@ func patchEditPairs(content string) []editPair {
 	}
 	flush()
 	return pairs
+}
+
+// writtenLines derives write_file's body from the content the call asks to be written: every line
+// of it behind "+ ", since a write puts all of them in the file and takes nothing out — the same
+// pair shape and the same renderer an edit's full-replacement form uses (changedLines), so a write
+// and an edit that say the same thing read the same way.
+//
+// The "+N bytes" the result reports keeps riding the branch beside the target: the summary says how
+// much was written and the body says what, and neither is derived from the other. Content that is
+// absent, empty or of the wrong type yields no body — an empty file is a write with nothing to
+// show, not a body of one blank line.
+func writtenLines(args map[string]any) []detailLine {
+	content, ok := args["content"].(string)
+	if !ok {
+		return nil
+	}
+	return changedLines([]editPair{replacedText("", content)})
 }
 
 // detailClipRunes caps one detail/target line so a minified blob or a wall-of-text report
