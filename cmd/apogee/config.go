@@ -36,25 +36,14 @@ import (
 // settings is the resolved configuration after precedence is applied: the values the
 // composition root feeds into the apogee.Config and the TUI Options.
 type settings struct {
-	endpoint  string
-	model     string
-	mode      string
-	hostAlias string
-	bypass    bool
+	mode   string
+	bypass bool
 
-	// apiKey is the upstream bearer token: the value sent as `Authorization: Bearer <key>` on
-	// every request to the LLM server (a keyed llama.cpp, LM Studio, a remote vLLM, any keyed
-	// OpenAI-compatible proxy). It resolves env > file — `APOGEE_API_KEY` beats `api-key:` in
-	// config.yaml — and has NO flag on purpose: a secret passed on the command line lands in
-	// shell history and in `ps` output on every OS. Empty (the keyless local-server default)
-	// ⇒ no Authorization header at all.
-	apiKey string
-
-	// servers is the resolved `servers:` list: the named upstream endpoints a running session can
-	// be switched to, in file order. File-only (no flag, no env — like mcpServers): naming another
-	// machine's endpoint and its key is a config act, not an invocation one. Absent/empty ⇒ no
-	// alternatives are configured, which is the default; the endpoint this session started on
-	// stands on its own either way, so this key only ADDS the servers it can move to.
+	// servers is the resolved `servers:` list: the SINGLE definition of the upstream servers this
+	// config knows (ADR 0036), in file order — the one a session starts on and every one it can be
+	// switched to. File-only (no flag, no env — like mcpServers): naming a machine's endpoint and
+	// its key is a config act, not an invocation one. Absent/empty ⇒ no server is configured at
+	// all, which selection answers rather than resolution.
 	servers []serverEntry
 
 	// startupServer is the resolved `server:` key: the NAME of the `servers:` entry this session
@@ -431,11 +420,8 @@ func (u uiSettings) validate() error {
 // pointer (including a pointer to the zero value) is an explicit setting that wins over
 // everything below it.
 type layer struct {
-	endpoint  *string
-	model     *string
-	mode      *string
-	hostAlias *string
-	bypass    *bool
+	mode   *string
+	bypass *bool
 
 	// startupServer is the `server:` key: the NAME of the `servers:` entry a session starts on.
 	// Unlike the list it names — file-only, because naming a machine is a config act — this one
@@ -443,13 +429,6 @@ type layer struct {
 	// because which of those machines THIS run starts on is an invocation fact. A nil pointer
 	// means the source names none, so resolution falls through to the empty default.
 	startupServer *string
-
-	// apiKey is set by the FILE and ENV layers only; the flag layer never carries it, because
-	// there is deliberately no --api-key (a secret must not reach shell history or a process
-	// list). It still rides the generic resolution loop, so the loop's own order — file, then
-	// env — is what makes `APOGEE_API_KEY` beat `api-key:`. A nil pointer means the source
-	// configures no key, so resolution falls through to the empty default: no auth header.
-	apiKey *string
 
 	// servers is set only by the FILE layer (the `servers:` list is config'd, default-empty, with
 	// no flag/env — like mcpServers). A nil slice means the source names no server, so resolution
@@ -543,7 +522,7 @@ type layer struct {
 }
 
 // multiSourceKey binds one registry row to the plumbing that carries its key through resolution.
-// Six of the schema's keys are settable from more than one source, and they are the only ones
+// Three of the schema's keys are settable from more than one source, and they are the only ones
 // whose environment-variable and flag NAMES are ever in play — so those names are read from the
 // row (EnvVar, FlagName) rather than restated as a literal at each of the three sites that used
 // to spell them: the env layer, the flag layer, and resolveSettings' precedence loop. Source
@@ -551,13 +530,16 @@ type layer struct {
 // registry row instead of a three-site edit that can half-land — with the row the /settings
 // surface shows as the key's source guaranteed to be the row resolution actually read.
 //
+// What this table does NOT carry is the raw startup overrides (`--endpoint`, `APOGEE_ENDPOINT`,
+// `APOGEE_API_KEY`, `--model`, `APOGEE_MODEL`): since ADR 0036 those name no config key at all —
+// they build or overlay a startup server entry — so they are resolved on their own, off the
+// registry, rather than pretending to be file keys that no longer exist.
+//
 // The accessors are what lets the typed layer/settings structs stand unchanged (rewriting that
 // whole copy chain into table-driven resolution is a separate effort): fromEnv projects a
 // variable's text onto a layer, fromFlag projects the already-parsed flag value, and overlay
 // copies a layer's value onto the resolved settings when that layer sets it. A nil fromEnv or
-// fromFlag means the key has no source of that kind — api-key deliberately has no flag (a secret
-// typed on a command line lands in shell history and in `ps` output) and host-alias has neither,
-// so it rides the loop on the file layer alone.
+// fromFlag means the key has no source of that kind.
 type multiSourceKey struct {
 	row      configKey
 	fromEnv  func(l *layer, text string) error
@@ -569,62 +551,6 @@ type multiSourceKey struct {
 // affect the outcome — each key overlays its own field, and precedence is the order the LAYERS
 // are applied in — it only keeps the table readable beside the registry it is built over.
 var multiSourceKeys = []multiSourceKey{
-	{
-		row: mustKey("endpoint"),
-		fromEnv: func(l *layer, text string) error {
-			l.endpoint = &text
-			return nil
-		},
-		fromFlag: func(l *layer, opts options) {
-			v := opts.endpoint
-			l.endpoint = &v
-		},
-		overlay: func(s *settings, l layer) {
-			if l.endpoint != nil {
-				s.endpoint = *l.endpoint
-			}
-		},
-	},
-	{
-		row: mustKey("api-key"),
-		fromEnv: func(l *layer, text string) error {
-			l.apiKey = &text
-			return nil
-		},
-		// No fromFlag: there is no --api-key to project, so the loop's own file-then-env order is
-		// what resolves the token.
-		overlay: func(s *settings, l layer) {
-			if l.apiKey != nil {
-				s.apiKey = *l.apiKey
-			}
-		},
-	},
-	{
-		// Neither an env var nor a flag names the host alias: it is a per-config display fact. It
-		// still rides the loop, so the day it gains a source only its row changes.
-		row: mustKey("host-alias"),
-		overlay: func(s *settings, l layer) {
-			if l.hostAlias != nil {
-				s.hostAlias = *l.hostAlias
-			}
-		},
-	},
-	{
-		row: mustKey("model"),
-		fromEnv: func(l *layer, text string) error {
-			l.model = &text
-			return nil
-		},
-		fromFlag: func(l *layer, opts options) {
-			v := opts.model
-			l.model = &v
-		},
-		overlay: func(s *settings, l layer) {
-			if l.model != nil {
-				s.model = *l.model
-			}
-		},
-	},
 	{
 		// The one key of the `servers:` neighbourhood with sources above the file: the list is
 		// config, the choice of entry is an invocation.
@@ -687,11 +613,11 @@ var multiSourceKeys = []multiSourceKey{
 // resolveSettings overlays the layers in increasing priority — the default base, then
 // the file, then the environment, then the flags — so a flag beats an environment
 // variable beats the file beats the default. Only ask-before (the default mode) is a
-// non-zero base; endpoint/model default empty and bypass defaults false.
+// non-zero base; `server:` defaults empty and bypass defaults false.
 //
-// api-key is the mirror-image case: it rides the same loop, but no flag layer ever sets it
-// (there is no --api-key — a secret on the command line lands in shell history and in `ps`
-// output), so the loop's order alone resolves it env > file.
+// What resolution deliberately does NOT produce is an endpoint: which server a session runs on is
+// selected from the resolved `servers:` list afterwards (selectStartupServer), because the answer
+// needs the list and the chosen name in one hand (ADR 0036).
 //
 // confine-to-workspace is the exception: it defaults true and is resolved from the FILE
 // layer ONLY (never env or flag), because it is global-config-only (ADR 0012) — a hostile
@@ -830,26 +756,23 @@ func resolveConfineToWorkspace(explicit *bool, hosts []unconfinedHost, hostID st
 // ----------------------------------------------------------------------------
 
 // fileConfig is the on-disk config schema. It mirrors the settable flags so a user can
-// fix their endpoint/model/autonomy once instead of passing them every invocation.
+// fix their servers/autonomy once instead of passing them every invocation.
 // Bypass is a pointer so an explicit `bypass: false` is distinguishable from an absent
 // key (the former wins over a lower layer; the latter falls through).
+//
+// The upstream a session talks to is described by exactly two keys, Servers and Server (ADR
+// 0036): the list is the single definition of what servers exist, and the pointer says which of
+// them this session starts on. The retired top-level `endpoint:`/`api-key:`/`host-alias:`/`model:`
+// quadruple said the same things a second time for one privileged server; a config that still
+// carries any of them is caught by the legacy sniff (legacyFileConfig) rather than silently
+// dropped by the decoder, which ignores keys the schema no longer has.
 type fileConfig struct {
-	Endpoint  string `yaml:"endpoint"`
-	Model     string `yaml:"model"`
-	Mode      string `yaml:"mode"`
-	HostAlias string `yaml:"host-alias"`
-	Bypass    *bool  `yaml:"bypass"`
-	// APIKey is the bearer token sent as `Authorization` on every upstream request — what a
-	// keyed server wants (llama.cpp's `--api-key`, LM Studio, a remote vLLM, any keyed
-	// OpenAI-compatible proxy). `APOGEE_API_KEY` overrides it; there is no flag on purpose (a
-	// secret on the command line lands in shell history and in `ps` output). Absent/empty ⇒ no
-	// Authorization header, which is the keyless local-server default. This file is plain
-	// text: on a shared machine prefer the environment variable, or restrict its permissions.
-	APIKey string `yaml:"api-key"`
-	// Servers names the upstream endpoints besides the one above — the alternatives a running
-	// session can be moved to. File-only (no flag/env), like mcp-servers: the list describes
-	// machines, not this invocation. Absent/empty ⇒ none is configured, which changes nothing
-	// about the session's own upstream (see serverEntry for what an entry carries).
+	Mode   string `yaml:"mode"`
+	Bypass *bool  `yaml:"bypass"`
+	// Servers is the single definition of the upstream servers this config knows: the one a
+	// session starts on and every one it can be moved to with /server. File-only (no flag/env),
+	// like mcp-servers: the list describes machines, not this invocation. Absent/empty ⇒ no server
+	// is configured at all (see serverEntry for what an entry carries).
 	Servers []serverEntry `yaml:"servers"`
 	// Server names which entry of the list above a session STARTS on — the last one chosen, which
 	// /server records here automatically after a switch. Unlike the list, it has both an env var
@@ -1253,23 +1176,11 @@ func (p modelProfileConfig) toModelProfile() apogee.ModelProfile {
 // field becomes an explicit setting, an absent one stays nil to fall through.
 func (fc fileConfig) layer() layer {
 	var l layer
-	if fc.Endpoint != "" {
-		l.endpoint = &fc.Endpoint
-	}
-	if fc.Model != "" {
-		l.model = &fc.Model
-	}
 	if fc.Mode != "" {
 		l.mode = &fc.Mode
 	}
-	if fc.HostAlias != "" {
-		l.hostAlias = &fc.HostAlias
-	}
 	if fc.Bypass != nil {
 		l.bypass = fc.Bypass
-	}
-	if fc.APIKey != "" {
-		l.apiKey = &fc.APIKey
 	}
 	if fc.ConfineToWorkspace != nil {
 		l.confineToWorkspace = fc.ConfineToWorkspace
@@ -1349,6 +1260,11 @@ func (fc fileConfig) layer() layer {
 // file is absent (the common case — a config file is optional). A malformed file is a
 // hard error: silently ignoring it would mask a typo'd setting. readFile is injected so
 // the loader is testable without touching the filesystem.
+//
+// A config still written in the retired schema is refused here, before the layer is built: the
+// decoder ignores keys the struct no longer has, so without the sniff a working `endpoint:` would
+// simply stop being read and the session would report no server configured, with nothing pointing
+// at the four lines that ARE the configuration.
 func loadFileConfig(path string, readFile func(string) ([]byte, error)) (layer, error) {
 	if path == "" {
 		return layer{}, nil
@@ -1364,7 +1280,82 @@ func loadFileConfig(path string, readFile func(string) ([]byte, error)) (layer, 
 	if err := yaml.Unmarshal(data, &fc); err != nil {
 		return layer{}, fmt.Errorf("apogee: parse config %q: %w", path, err)
 	}
+	if err := sniffLegacyKeys(data, path); err != nil {
+		return layer{}, err
+	}
 	return fc.layer(), nil
+}
+
+// legacyFileConfig is the retired half of the schema — and ONLY that half: the top-level
+// `endpoint:`/`api-key:`/`host-alias:`/`model:` quadruple ADR 0036 folded into the `servers:` list.
+// It exists so the four keys can still be READ off a config that has them, which fileConfig can no
+// longer do; a plain unmarshal ignores unknown keys, so a config apogee has quietly stopped
+// understanding is indistinguishable from one that never said anything.
+//
+// Nothing resolves from it. Its only job is to answer "was this file written in the old schema,
+// and what did it say" — the two facts the migration needs, whether it is spelled out for the user
+// to paste (today) or performed for them by ADR 0036's one-time verified rewrite.
+type legacyFileConfig struct {
+	Endpoint  string `yaml:"endpoint"`
+	APIKey    string `yaml:"api-key"`
+	HostAlias string `yaml:"host-alias"`
+	Model     string `yaml:"model"`
+}
+
+// isEmpty reports whether the file carried none of the retired keys — the new-schema case, which
+// is every config from here on.
+func (lc legacyFileConfig) isEmpty() bool {
+	return lc.Endpoint == "" && lc.APIKey == "" && lc.HostAlias == "" && lc.Model == ""
+}
+
+// name is what the entry these keys fold into is called: the old `host-alias:` if the config gave
+// one — it did exactly this job for the startup endpoint — and otherwise the endpoint's own host,
+// which is the alias the footer would have fallen back to anyway (hostFromEndpoint).
+func (lc legacyFileConfig) name() string {
+	if alias := strings.TrimSpace(lc.HostAlias); alias != "" {
+		return alias
+	}
+	if host := hostFromEndpoint(lc.Endpoint); host != "" {
+		return host
+	}
+	return "my-box"
+}
+
+// block renders the retired keys as the `servers:` entry and `server:` pointer that replace them —
+// the paste-able answer that makes the refusal below a two-minute edit rather than a research task.
+// The api key is echoed back because it is part of the configuration being moved; it came out of
+// this same file and goes back into it.
+func (lc legacyFileConfig) block() string {
+	var b strings.Builder
+	name := lc.name()
+	b.WriteString("servers:\n")
+	b.WriteString("  - name: " + name + "\n")
+	b.WriteString("    endpoint: " + lc.Endpoint + "\n")
+	if lc.APIKey != "" {
+		b.WriteString("    api-key: " + lc.APIKey + "\n")
+	}
+	if lc.Model != "" {
+		b.WriteString("    model: " + lc.Model + "\n")
+	}
+	b.WriteString("\nserver: " + name + "\n")
+	return b.String()
+}
+
+// sniffLegacyKeys refuses a config still written in the retired schema, with the replacement block
+// spelled out. It is a hard error rather than a silent fold because the fold rewrites the user's
+// own file: ADR 0036's one-time migration — verified against the original, backed up and announced
+// — is not wired yet, and until it is, the honest answer is to say exactly what to paste.
+func sniffLegacyKeys(data []byte, path string) error {
+	var lc legacyFileConfig
+	if err := yaml.Unmarshal(data, &lc); err != nil {
+		return fmt.Errorf("apogee: parse config %q: %w", path, err)
+	}
+	if lc.isEmpty() {
+		return nil
+	}
+	return fmt.Errorf("apogee: %s still uses the retired top-level endpoint:/api-key:/host-alias:/model: "+
+		"keys — the servers: list is now the single definition of the servers you run models on.\n\n"+
+		"Delete those keys and put this in their place:\n\n%s", path, lc.block())
 }
 
 // ----------------------------------------------------------------------------
@@ -1372,6 +1363,13 @@ func loadFileConfig(path string, readFile func(string) ([]byte, error)) (layer, 
 // ----------------------------------------------------------------------------
 
 // Environment variable names, prefixed APOGEE_ to namespace the process environment.
+//
+// They fall in three groups. envServer/envMode/envBypass are read through the registry rows their
+// keys carry (multiSourceKeys). envConfig/envWorkspace are read by applyConfig directly, because
+// they name the roots resolution itself runs in and so cannot be config keys. envEndpoint/
+// envModel/envAPIKey are the raw startup overrides ADR 0036 DETACHED from the schema: they no
+// longer describe config keys — they build or overlay the startup server entry — so they are
+// named here and resolved by the startup-override resolver rather than by a layer.
 const (
 	envEndpoint  = "APOGEE_ENDPOINT"
 	envServer    = "APOGEE_SERVER"
@@ -1386,11 +1384,12 @@ const (
 // envLayer reads the APOGEE_* variables into a precedence layer; an unset variable stays nil to
 // fall through. Which variable carries which key is the registry's to say (multiSourceKeys), so
 // this reads names out of the rows rather than repeating them: a key whose row names no variable
-// — host-alias — has no environment source at all, and one whose row names one (api-key
-// included, the recommended way to supply a token: it beats `api-key:` and never touches the
-// config file) is read here and nowhere else. A set-but-unparseable APOGEE_BYPASS is a hard error
-// rather than a silently-ignored boolean, reported with the name the row carries. getenv is
-// injected so the layer is testable without mutating the process environment.
+// has no environment source at all. The variables that name no config key — APOGEE_ENDPOINT,
+// APOGEE_API_KEY, APOGEE_MODEL — are not read here at all: since ADR 0036 they override the
+// startup SERVER rather than a file key, so they are resolved outside this loop. A
+// set-but-unparseable APOGEE_BYPASS is a hard error rather than a silently-ignored boolean,
+// reported with the name the row carries. getenv is injected so the layer is testable without
+// mutating the process environment.
 func envLayer(getenv func(string) string) (layer, error) {
 	var l layer
 	for _, k := range multiSourceKeys {
@@ -1412,8 +1411,8 @@ func envLayer(getenv func(string) string) (layer, error) {
 // flag was explicitly set (changed reports cobra's per-flag Changed). An unset flag carries its
 // zero default, which must not shadow a lower layer — so it is omitted. The flag NAMES come from
 // the registry rows, like the variable names above: a key whose row names no flag cannot be
-// carried by one, which is how api-key stays off the command line even though options has a
-// field for the resolved token.
+// carried by one. `--endpoint` and `--model` are absent for the same reason APOGEE_ENDPOINT is
+// (ADR 0036): they name no config key, so they are not resolved through the layers.
 func flagLayer(opts options, changed func(string) bool) layer {
 	var l layer
 	for _, k := range multiSourceKeys {
@@ -1548,12 +1547,19 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	if err := validateLlamaLauncher(s.llamaLauncher); err != nil {
 		return err
 	}
-	opts.endpoint = s.endpoint
-	opts.model = s.model
+	// Which of the configured servers this session starts on. It is the last step of resolution
+	// rather than part of it (ADR 0036): the answer needs the resolved list and the resolved name
+	// together, and a name that matches nothing is a fact about the pair, not about either key.
+	startup, err := selectStartupServer(s.startupServer, s.servers, configFilePath(opts.configDir))
+	if err != nil {
+		return err
+	}
+	opts.endpoint = startup.Endpoint
+	opts.model = startup.Model
+	opts.apiKey = startup.APIKey
+	opts.hostAlias = startup.Name
 	opts.mode = s.mode
 	opts.bypass = s.bypass
-	opts.hostAlias = s.hostAlias
-	opts.apiKey = s.apiKey
 	opts.servers = s.servers
 	opts.startupServer = s.startupServer
 	opts.llamaLauncher = s.llamaLauncher
@@ -1579,14 +1585,61 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	// overriding (see overrideSources). Recorded from the same predicates the layers were built
 	// from, a few lines up.
 	opts.overrides = overrideSources(changed, getenv)
+	// A configured entry always has a name (validateServers refuses one without), so this fallback
+	// is for the entry that has none: the unnamed startup entry a raw `--endpoint`/`APOGEE_ENDPOINT`
+	// override builds, which has no label but still has to be called something in the footer.
 	if opts.hostAlias == "" {
 		opts.hostAlias = hostFromEndpoint(opts.endpoint)
 	}
 	return nil
 }
 
+// selectStartupServer resolves the server a session starts on: the `servers:` entry named by the
+// post-precedence `server:` value (`--server` > `APOGEE_SERVER` > `server:`). The entry IS the
+// answer — its endpoint, key and model hint are what the session is built from, and its name is
+// the alias the footer calls it — which is what makes the list the single definition (ADR 0036).
+//
+// The three ways there is no answer are all refused here, with the config path and a block to
+// paste, because a session with no upstream can do nothing at all:
+//
+//   - the list is empty: nothing is configured yet;
+//   - no name is chosen (first boot, or a config that never recorded one);
+//   - the chosen name matches no entry — a renamed or deleted server, or a typo.
+//
+// ADR 0036 gives the TUI a better answer for the last two — it asks, through the `/server` picker,
+// and records the choice — which is not wired yet. The hard error stays the permanent answer for
+// the non-interactive drivers (headless, probe, bench): they have no one to ask.
+func selectStartupServer(name string, servers []serverEntry, configPath string) (serverEntry, error) {
+	chosen := strings.TrimSpace(name)
+	switch {
+	case len(servers) == 0:
+		return serverEntry{}, fmt.Errorf("apogee: no servers are configured — apogee needs a server to "+
+			"talk to.\n\nAdd one to %s and start apogee again:\n\n%s", configPath, exampleServersBlock)
+	case chosen == "":
+		return serverEntry{}, fmt.Errorf("apogee: no startup server is chosen — %s configures %s but "+
+			"records no server:.\n\nName the one to start on (or pass --server <name>):\n\nserver: %s\n",
+			configPath, serverNameList(servers), servers[0].Name)
+	}
+	for _, s := range servers {
+		if s.Name == chosen {
+			return s, nil
+		}
+	}
+	return serverEntry{}, fmt.Errorf("apogee: server: names %q, which no servers: entry in %s carries "+
+		"(configured: %s).\n\nFix the name (or pass --server <name>).", chosen, configPath,
+		serverNameList(servers))
+}
+
+// exampleServersBlock is the smallest config that starts a session, shown by the refusals above.
+// It is spelled here rather than in each message so the shape a user is told to write is one
+// string, and the same one the seeded template teaches.
+const exampleServersBlock = "servers:\n" +
+	"  - name: my-box\n" +
+	"    endpoint: http://127.0.0.1:1111\n" +
+	"\nserver: my-box\n"
+
 // hostFromEndpoint extracts the bare host (without scheme or port) from an endpoint URL —
-// the footer's fallback when no host-alias is configured. A URL that does not parse, or
+// the fallback alias for a startup entry that carries no name. A URL that does not parse, or
 // carries no host, falls back to the raw endpoint so the footer still shows something
 // identifiable. An empty endpoint stays empty.
 func hostFromEndpoint(endpoint string) string {

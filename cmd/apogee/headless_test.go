@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -55,7 +54,7 @@ var fenceableHost = fakeConfiner{caps: apogee.ConfinementCaps{FSWrite: true}}
 // empty unless a test replaces it.
 func headlessRun(t *testing.T, stub *stubRunner, args ...string) (out, errOut string, err error) {
 	t.Helper()
-	return headlessRunOn(t, stub, fenceableHost, t.TempDir(), args...)
+	return headlessRunOn(t, stub, fenceableHost, testConfigHome(t, ""), args...)
 }
 
 // headlessRunOn is headlessRun with the two facts the Auto gate reads under the caller's control:
@@ -89,11 +88,7 @@ func headlessRunOn(t *testing.T, stub *stubRunner, confiner apogee.Confiner, con
 // explicit "I am the sandbox", which is the only way that posture is ever reached.
 func unconfinedHome(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("confine-to-workspace: false\n"), 0o600); err != nil {
-		t.Fatalf("write config.yaml: %v", err)
-	}
-	return dir
+	return testConfigHome(t, "confine-to-workspace: false\n")
 }
 
 // The prompt is the argument, or stdin, or a usage error — never an empty request to the model.
@@ -260,7 +255,7 @@ func TestHeadlessAutoEligibilityGate(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			home := t.TempDir()
+			home := testConfigHome(t, "")
 			if tc.unconfined {
 				home = unconfinedHome(t)
 			}
@@ -351,7 +346,7 @@ func TestHeadlessAutoDegradedCellIsARefusalNotANotice(t *testing.T) {
 
 		t.Run(probe.CapabilityLine(probe.BackendName(confiner), caps), func(t *testing.T) {
 			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
-			_, errOut, err := headlessRunOn(t, stub, confiner, t.TempDir(), "--mode", "auto", "a prompt")
+			_, errOut, err := headlessRunOn(t, stub, confiner, testConfigHome(t, ""), "--mode", "auto", "a prompt")
 
 			if degraded == "" {
 				if err != nil {
@@ -534,7 +529,7 @@ func TestHeadlessAnswerLandsOnTheProcessStdout(t *testing.T) {
 	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(envMode, "")
 
-	configDir, workspace := t.TempDir(), t.TempDir()
+	configDir, workspace := testConfigHome(t, ""), t.TempDir()
 	var runErr error
 	stdout, stderr := captureProcessStreams(t, func() {
 		cmd := newHeadlessCommand()
@@ -698,14 +693,14 @@ func TestHeadlessUsageErrorsNeverStartARun(t *testing.T) {
 }
 
 // The same convention through the REAL runner, on the invocation a fresh host actually makes:
-// `apogee headless --config <fresh> "hi"` with no endpoint named anywhere. run.Once cannot
-// construct the Agent, so no prompt is ever sent — exit 2, no answer, and no summary claiming a
-// run that never happened. Nothing here touches the network: construction refuses before a request
-// exists, which is exactly why the run counts as never started.
-func TestHeadlessWithNoEndpointNeverStartsARun(t *testing.T) {
-	// The host's own environment must not hand the run an endpoint the test is asserting is absent.
-	t.Setenv(envEndpoint, "")
-	t.Setenv(envModel, "")
+// `apogee headless --config <fresh> "hi"` with no server named anywhere. Selection has nothing to
+// start on, so no prompt is ever sent — exit 2, no answer, and no summary claiming a run that never
+// happened. Nothing here touches the network: the refusal lands before a request exists, which is
+// exactly why the run counts as never started. A headless run gets the hard error rather than a
+// picker for the reason ADR 0036 gives: there is nobody to ask.
+func TestHeadlessWithNoServerNeverStartsARun(t *testing.T) {
+	// The host's own environment must not hand the run a server the test is asserting is absent.
+	t.Setenv(envServer, "")
 	t.Setenv(envMode, "")
 
 	cmd := newHeadlessCommand()
@@ -717,7 +712,10 @@ func TestHeadlessWithNoEndpointNeverStartsARun(t *testing.T) {
 
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {
-		t.Fatal("a run with no endpoint configured was reported as a success")
+		t.Fatal("a run with no server configured was reported as a success")
+	}
+	if !strings.Contains(err.Error(), "no servers are configured") {
+		t.Errorf("the refusal does not say what is missing: %v", err)
 	}
 	if code := exitCodeFor(err); code != exitNotStarted {
 		t.Errorf("exit code = %d; want %d (err: %v)", code, exitNotStarted, err)
@@ -743,7 +741,7 @@ func TestHeadlessReadsThePromptFromStdin(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
 	cmd.SetIn(strings.NewReader("what does this repo do?\n"))
-	cmd.SetArgs([]string{"--config", t.TempDir(), "--workspace", t.TempDir(), "--no-save"})
+	cmd.SetArgs([]string{"--config", testConfigHome(t, ""), "--workspace", t.TempDir(), "--no-save"})
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("headless: %v\n%s", err, errOut.String())

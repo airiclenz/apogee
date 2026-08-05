@@ -138,9 +138,9 @@ func runProbeModel(t *testing.T, configHome string, args ...string) string {
 func TestProbeModelRunsTheBatteryAndRecords(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
-	configHome := t.TempDir()
+	configHome := upstreamHome(t, srv.URL)
 
-	report := runProbeModel(t, configHome, "--endpoint", srv.URL)
+	report := runProbeModel(t, configHome)
 
 	for _, want := range []string{
 		"apogee probe model: calling the model live",
@@ -182,13 +182,13 @@ func TestProbeModelRunsTheBatteryAndRecords(t *testing.T) {
 // here, so this exercises the fallback every real run takes.
 func TestProbeModelReportLandsOnTheProcessStdout(t *testing.T) {
 	srv := modelUpstream(t)
-	configHome := t.TempDir()
+	configHome := upstreamHome(t, srv.URL)
 
 	var runErr error
 	stdout, stderr := captureProcessStreams(t, func() {
 		cmd := newProbeCommand()
 		// Deliberately no SetOut: the fallback under test is the one every real run takes.
-		cmd.SetArgs([]string{"model", "--config", configHome, "--endpoint", srv.URL})
+		cmd.SetArgs([]string{"model", "--config", configHome})
 		runErr = cmd.ExecuteContext(context.Background())
 	})
 	if runErr != nil {
@@ -215,9 +215,9 @@ func TestProbeModelReportLandsOnTheProcessStdout(t *testing.T) {
 func TestProbeModelRecordReachesTheResolver(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
-	configHome := t.TempDir()
+	configHome := upstreamHome(t, srv.URL)
 
-	_ = runProbeModel(t, configHome, "--endpoint", srv.URL)
+	_ = runProbeModel(t, configHome)
 
 	roots, err := resolveRoots(configHome, t.TempDir())
 	if err != nil {
@@ -242,9 +242,9 @@ func TestProbeModelRecordReachesTheResolver(t *testing.T) {
 func TestProbeModelNoSaveWritesNothing(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
-	configHome := t.TempDir()
+	configHome := upstreamHome(t, srv.URL)
 
-	report := runProbeModel(t, configHome, "--endpoint", srv.URL, "--no-save")
+	report := runProbeModel(t, configHome, "--no-save")
 
 	if !strings.Contains(report, "NO — --no-save was given") {
 		t.Errorf("the report must say the record was not written:\n%s", report)
@@ -252,10 +252,7 @@ func TestProbeModelNoSaveWritesNothing(t *testing.T) {
 	if !strings.Contains(report, "probe:1:tools+json+chain") {
 		t.Errorf("--no-save still runs the full battery and prints the identity:\n%s", report)
 	}
-	entries, err := os.ReadDir(configHome)
-	if err != nil || len(entries) != 0 {
-		t.Errorf("--no-save wrote into the apogee home (entries=%v, err=%v)", entries, err)
-	}
+	assertHomeHoldsOnlyConfig(t, configHome, "--no-save")
 }
 
 // --no-save with a record an earlier run already stored: the effect line must not deny the
@@ -265,7 +262,7 @@ func TestProbeModelNoSaveWritesNothing(t *testing.T) {
 func TestProbeModelNoSaveNamesTheSurvivingRecord(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
-	configHome := t.TempDir()
+	configHome := upstreamHome(t, srv.URL)
 	dir := library.ProbeDir(configHome)
 	// Seeded in a zone that is NOT local's, so the date the effect line prints proves the display
 	// converts to the reader's own clock on any machine's TZ (the stored stamp is unaffected —
@@ -282,7 +279,7 @@ func TestProbeModelNoSaveNamesTheSurvivingRecord(t *testing.T) {
 		t.Fatalf("seed previous record: %v", err)
 	}
 
-	report := runProbeModel(t, configHome, "--endpoint", srv.URL, "--no-save")
+	report := runProbeModel(t, configHome, "--no-save")
 
 	if !strings.Contains(report,
 		"none new — the record from "+local.Format(time.RFC3339)+" continues to apply; this run recorded nothing") {
@@ -306,7 +303,7 @@ func TestProbeModelNoSaveNamesTheSurvivingRecord(t *testing.T) {
 func TestProbeModelWarnsAboutAnOldFormatRecord(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
-	configHome := t.TempDir()
+	configHome := upstreamHome(t, srv.URL)
 	dir := library.ProbeDir(configHome)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir probe dir: %v", err)
@@ -321,7 +318,7 @@ func TestProbeModelWarnsAboutAnOldFormatRecord(t *testing.T) {
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
-	cmd.SetArgs([]string{"model", "--config", configHome, "--endpoint", srv.URL})
+	cmd.SetArgs([]string{"model", "--config", configHome})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("probe model: %v\n%s%s", err, out.String(), errOut.String())
 	}
@@ -381,7 +378,7 @@ func TestProbeModelRejectsTheWorkspaceFlag(t *testing.T) {
 func TestProbeModelReportsAChangedModelBehindTheLabel(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
-	configHome := t.TempDir()
+	configHome := upstreamHome(t, srv.URL)
 	dir := library.ProbeDir(configHome)
 	// As in the surviving-record test: a stored zone that is not local's, so "changed since <date>"
 	// is proved to reach the reader in the reader's own clock whatever the machine's TZ.
@@ -397,7 +394,7 @@ func TestProbeModelReportsAChangedModelBehindTheLabel(t *testing.T) {
 		t.Fatalf("seed previous record: %v", err)
 	}
 
-	report := runProbeModel(t, configHome, "--endpoint", srv.URL)
+	report := runProbeModel(t, configHome)
 	if !strings.Contains(report, "the model behind this label changed since "+local.Format(time.RFC3339)) {
 		t.Errorf("report does not flag the changed model in local time:\n%s", report)
 	}
@@ -414,7 +411,7 @@ func TestProbeModelReportsAChangedModelBehindTheLabel(t *testing.T) {
 func TestProbeModelPromotesAnOfferedValidatedSet(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
-	configHome := t.TempDir()
+	configHome := upstreamHome(t, srv.URL, gemmaKey)
 	roots, err := resolveRoots(configHome, t.TempDir())
 	if err != nil {
 		t.Fatalf("resolve roots: %v", err)
@@ -433,7 +430,7 @@ func TestProbeModelPromotesAnOfferedValidatedSet(t *testing.T) {
 		t.Fatalf("before the probe the surface must OFFER the set; notices=%v", offerNotices)
 	}
 
-	report := runProbeModel(t, configHome, "--endpoint", srv.URL, "--model", gemmaKey)
+	report := runProbeModel(t, configHome)
 	if !strings.Contains(report, "Validated set "+gemmaKey+" now AUTO-APPLIES") {
 		t.Errorf("the report must name the promotion it just performed:\n%s", report)
 	}
@@ -458,7 +455,8 @@ func TestProbeModelKeepsAnAliasedSetApplying(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
 	configHome := t.TempDir()
-	writeProbeConfig(t, configHome, "validated-sets:\n  alias:\n    "+gemmaKey+": "+gemmaKey+"\n")
+	writeProbeConfig(t, configHome, serverEntry{Name: "probe-target", Endpoint: srv.URL, Model: gemmaKey},
+		"validated-sets:\n  alias:\n    "+gemmaKey+": "+gemmaKey+"\n")
 
 	roots, err := resolveRoots(configHome, t.TempDir())
 	if err != nil {
@@ -473,7 +471,7 @@ func TestProbeModelKeepsAnAliasedSetApplying(t *testing.T) {
 		t.Fatalf("the alias must already apply the set: set=%v err=%v", before, err)
 	}
 
-	report := runProbeModel(t, configHome, "--endpoint", srv.URL, "--model", gemmaKey)
+	report := runProbeModel(t, configHome)
 	if !strings.Contains(report, "was already applying through your validated-sets alias") {
 		t.Errorf("the report claimed a promotion that did not happen:\n%s", report)
 	}
@@ -495,8 +493,8 @@ func TestProbeModelKeepsAnAliasedSetApplying(t *testing.T) {
 func TestProbeModelDoesNotClaimAnEntryStartupWillSkip(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
-	configHome := t.TempDir()
 	const key = "ghost-set-model"
+	configHome := upstreamHome(t, srv.URL, key)
 
 	roots, err := resolveRoots(configHome, t.TempDir())
 	if err != nil {
@@ -505,7 +503,7 @@ func TestProbeModelDoesNotClaimAnEntryStartupWillSkip(t *testing.T) {
 	writeUserValidatedEntry(t, roots.validated, key,
 		`{"version":1,"key":"`+key+`","set":["ghost_mechanism"],"evidence":{"campaign":"c"}}`)
 
-	report := runProbeModel(t, configHome, "--endpoint", srv.URL, "--model", key)
+	report := runProbeModel(t, configHome)
 
 	if strings.Contains(report, "AUTO-APPLIES") {
 		t.Errorf("the report claims an auto-apply startup will refuse:\n%s", report)
@@ -583,9 +581,9 @@ func TestResolveValidatedSetAppliesOnAStoredProbeRecord(t *testing.T) {
 func TestProbeModelSuppressesTheClaimWhenNoModelIsPinned(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstreamAdvertising(t, gemmaKey)
-	configHome := t.TempDir()
+	configHome := upstreamHome(t, srv.URL)
 
-	report := runProbeModel(t, configHome, "--endpoint", srv.URL)
+	report := runProbeModel(t, configHome)
 
 	if strings.Contains(report, "AUTO-APPLIES") {
 		t.Errorf("the report claims a promotion an unpinned startup cannot resolve:\n%s", report)
@@ -611,13 +609,13 @@ func TestProbeModelSuppressesTheClaimWhenNoModelIsPinned(t *testing.T) {
 func TestProbeModelSuppressesTheClaimForAWeightsFileModel(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
-	configHome := t.TempDir()
 	weights := filepath.Join(t.TempDir(), "local-model.gguf")
 	if err := os.WriteFile(weights, []byte("fake weight bytes"), 0o600); err != nil {
 		t.Fatalf("write weight file: %v", err)
 	}
+	configHome := upstreamHome(t, srv.URL, weights)
 
-	report := runProbeModel(t, configHome, "--endpoint", srv.URL, "--model", weights)
+	report := runProbeModel(t, configHome)
 
 	if strings.Contains(report, "AUTO-APPL") {
 		t.Errorf("the report claims an effect the weights tier out-ranks:\n%s", report)
@@ -695,13 +693,22 @@ func writeUserValidatedEntry(t *testing.T, validatedDir, name, body string) {
 }
 
 // writeProbeConfig seeds a config.yaml in a hermetic apogee home so the command under test
-// resolves the same options a real session would.
-func writeProbeConfig(t *testing.T, configHome, body string) {
+// resolves the same options a real session would: the caller's own keys, plus the one configured
+// server the probe talks to (ADR 0036 — a config that names no server has nothing to probe).
+func writeProbeConfig(t *testing.T, configHome string, upstream serverEntry, body string) {
 	t.Helper()
 	if err := os.MkdirAll(configHome, 0o700); err != nil {
 		t.Fatalf("mkdir config home: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte(body), 0o600); err != nil {
+	entry := "servers:\n  - name: " + upstream.Name + "\n    endpoint: " + upstream.Endpoint + "\n"
+	if upstream.APIKey != "" {
+		entry += "    api-key: " + upstream.APIKey + "\n"
+	}
+	if upstream.Model != "" {
+		entry += "    model: " + upstream.Model + "\n"
+	}
+	entry += "server: " + upstream.Name + "\n"
+	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte(body+entry), 0o600); err != nil {
 		t.Fatalf("write config.yaml: %v", err)
 	}
 }
@@ -726,11 +733,11 @@ func TestProbeModelSendsTheConfiguredAPIKey(t *testing.T) {
 	auth := &authLog{}
 	srv := modelUpstreamRecording(t, "battery-model", auth)
 	configHome := t.TempDir()
-	writeProbeConfig(t, configHome, "api-key: probe-token\n")
+	writeProbeConfig(t, configHome, serverEntry{Name: "probe-target", Endpoint: srv.URL, APIKey: "probe-token"}, "")
 
 	// No --model, so the label discovery client runs too — the request that would 401 first
 	// on a keyed server.
-	_ = runProbeModel(t, configHome, "--endpoint", srv.URL)
+	_ = runProbeModel(t, configHome)
 
 	entries := auth.all()
 	var sawDiscovery, sawBattery bool
@@ -760,7 +767,7 @@ func TestProbeModelWithoutAnAPIKeySendsNoAuthHeader(t *testing.T) {
 	auth := &authLog{}
 	srv := modelUpstreamRecording(t, "battery-model", auth)
 
-	_ = runProbeModel(t, t.TempDir(), "--endpoint", srv.URL)
+	_ = runProbeModel(t, upstreamHome(t, srv.URL))
 
 	for _, e := range auth.all() {
 		if e.header != "" {
@@ -769,9 +776,10 @@ func TestProbeModelWithoutAnAPIKeySendsNoAuthHeader(t *testing.T) {
 	}
 }
 
-// The model half never runs off an absent endpoint: with nothing to call there is no battery,
-// and the refusal points at the free host report that needs none.
-func TestProbeModelRefusesWithoutAnEndpoint(t *testing.T) {
+// The model half never runs off a config that names no server: with nothing to call there is no
+// battery, and the refusal says what to write (ADR 0036 — a non-interactive driver has nobody to
+// ask, so it gets the hard error rather than a picker).
+func TestProbeModelRefusesWithoutAServer(t *testing.T) {
 	t.Parallel()
 	cmd := newProbeCommand()
 	var out bytes.Buffer
@@ -781,10 +789,10 @@ func TestProbeModelRefusesWithoutAnEndpoint(t *testing.T) {
 
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {
-		t.Fatalf("probe model with no endpoint should fail:\n%s", out.String())
+		t.Fatalf("probe model with no server should fail:\n%s", out.String())
 	}
-	if !strings.Contains(err.Error(), "no endpoint configured") {
-		t.Errorf("error = %v; want the endpoint refusal", err)
+	if !strings.Contains(err.Error(), "no servers are configured") {
+		t.Errorf("error = %v; want the selection refusal", err)
 	}
 }
 
@@ -826,9 +834,9 @@ func TestProbeModelRefusesBeforeSpendingTokens(t *testing.T) {
 			t.Parallel()
 			var chatCalls int
 			srv := discoveryUpstream(t, tc.status, tc.body, &chatCalls)
-			configHome := t.TempDir()
+			configHome := upstreamHome(t, srv.URL)
 
-			err := probeModelRefusal(t, configHome, "--endpoint", srv.URL)
+			err := probeModelRefusal(t, configHome)
 
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("error = %v; want the refusal to name %q", err, tc.wantErr)
@@ -836,9 +844,7 @@ func TestProbeModelRefusesBeforeSpendingTokens(t *testing.T) {
 			if chatCalls != 0 {
 				t.Errorf("the refusal spent %d battery call(s); the gate must land before the first one", chatCalls)
 			}
-			if entries, readErr := os.ReadDir(configHome); readErr != nil || len(entries) != 0 {
-				t.Errorf("a refused probe wrote into the apogee home (entries=%v, err=%v)", entries, readErr)
-			}
+			assertHomeHoldsOnlyConfig(t, configHome, "a refused probe")
 		})
 	}
 }
@@ -901,15 +907,13 @@ func TestBareProbeNeverRunsTheBattery(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	configHome := t.TempDir()
-	_ = runProbe(t, newProbeCommand(), configHome, t.TempDir(), "--endpoint", srv.URL)
+	configHome := upstreamHome(t, srv.URL)
+	_ = runProbe(t, newProbeCommand(), configHome, t.TempDir())
 
 	if chatCalls != 0 {
 		t.Errorf("bare `apogee probe` made %d chat call(s); the host half must call no model", chatCalls)
 	}
-	if entries, err := os.ReadDir(configHome); err != nil || len(entries) != 0 {
-		t.Errorf("bare `apogee probe` wrote into the apogee home (entries=%v, err=%v)", entries, err)
-	}
+	assertHomeHoldsOnlyConfig(t, configHome, "bare `apogee probe`")
 }
 
 // The record lands in its own subdirectory of the apogee home, beside library/ and sessions/,

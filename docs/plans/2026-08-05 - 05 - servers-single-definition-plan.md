@@ -148,7 +148,24 @@ the new entry.
 
 **Commit:** `feat(config): server: startup-choice key with APOGEE_SERVER/--server sources`
 
-## 3. Retire the quadruple — selection comes from the list
+## 3. Retire the quadruple — selection comes from the list — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): the Acceptance grep
+`grep -cE 'yaml:"(endpoint|api-key|host-alias|model)"' cmd/apogee/config.go` cannot count
+only `serverEntry`'s three tags: this item's own `legacyFileConfig` sniff struct holds the
+four retired tags by design, and `mcpServerConfig.Endpoint` carried one before this plan. It
+now returns 8 = 3 (`serverEntry`) + 4 (`legacyFileConfig`) + 1 (`mcpServerConfig`), and no
+top-level `fileConfig` field carries any of them.
+
+NOTES (2026-08-05): `validateEndpointURL` was deleted with the `endpoint` registry row that
+was its only caller (it was the write-path guard for that row; startup never called it). If
+item 4 wants the ephemeral override endpoint validated, it reintroduces the check.
+
+NOTES (2026-08-05): no registry row is `Masked` any more (the schema's one secret is a
+`servers:` entry's nested `api-key`). The masking seam — `configKey.Masked`,
+`maskedSettingValue`, the `settingsRows` branch, `tui.SettingRow.Masked` — is kept, with its
+invariant test inverted to "no row may be masked"; removing it would cascade into
+`internal/tui`, which this item does not own.
 
 **What:** Depends on item 2. Delete the `Endpoint`, `Model`, `HostAlias`, `APIKey`
 fields from `fileConfig` (`config.go:803-814`) and their four registry rows

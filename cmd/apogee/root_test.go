@@ -141,10 +141,9 @@ func TestRootCommandExecuteCleanQuit(t *testing.T) {
 	rec := &recordingLauncher{}
 	cmd := newRootCommand(rec.launch)
 	cmd.SetArgs([]string{
-		"--endpoint", "http://127.0.0.1:1111",
-		"--model", "fake",
 		"--workspace", t.TempDir(),
-		"--config", t.TempDir(), // hermetic: no real ~/.apogee/config.yaml in the loop
+		// hermetic: a home of this test's own, so no real ~/.apogee/config.yaml is in the loop
+		"--config", upstreamHome(t, "http://127.0.0.1:1111", "fake"),
 	})
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
@@ -169,9 +168,9 @@ func TestRootStartsWithNoModelAndNoServer(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs([]string{
-		"--endpoint", "http://127.0.0.1:1", // nothing listens here — and nothing asks
 		"--workspace", t.TempDir(),
-		"--config", t.TempDir(), // hermetic: no real ~/.apogee/config.yaml, so no model: key
+		// nothing listens at that endpoint — and nothing asks; the entry names no model either
+		"--config", upstreamHome(t, "http://127.0.0.1:1"),
 	})
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
@@ -219,9 +218,8 @@ func TestRootMakesNoStartupProbe(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs([]string{
-		"--endpoint", srv.URL,
 		"--workspace", t.TempDir(),
-		"--config", t.TempDir(),
+		"--config", upstreamHome(t, srv.URL),
 	})
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
@@ -284,10 +282,9 @@ func TestRootCommandBareInvocationSurvivesSubcommands(t *testing.T) {
 		var ran bool
 		cmd := newRootCommand(rec.launch, fakeSubcommand(&ran))
 		cmd.SetArgs([]string{
-			"--endpoint", "http://127.0.0.1:1111",
-			"--model", "fake",
 			"--workspace", t.TempDir(),
-			"--config", t.TempDir(), // hermetic: no real ~/.apogee/config.yaml in the loop
+			// hermetic: a home of this test's own, so no real ~/.apogee/config.yaml is in the loop
+			"--config", upstreamHome(t, "http://127.0.0.1:1111", "fake"),
 		})
 
 		if err := cmd.ExecuteContext(context.Background()); err != nil {

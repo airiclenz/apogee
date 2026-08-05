@@ -219,8 +219,11 @@ func TestRegistryRowInvariants(t *testing.T) {
 		if k.Editable && k.Kind == kindStructured {
 			t.Errorf("registry row %q is editable but structured — v1 has no editor for a block", k.Path)
 		}
-		if k.Masked && k.Path != "api-key" {
-			t.Errorf("registry row %q is masked; api-key is the only secret the schema carries", k.Path)
+		// No row is masked since ADR 0036 retired the top-level `api-key:`: the schema's one secret
+		// is a `servers:` entry's own key, nested inside a structured block the pane summarizes as a
+		// count. A masked row appearing again means a secret has been given a surface of its own.
+		if k.Masked {
+			t.Errorf("registry row %q is masked; no top-level key carries a secret any more", k.Path)
 		}
 		switch k.Kind {
 		case kindEnum:
@@ -240,9 +243,6 @@ func TestRegistryRowInvariants(t *testing.T) {
 			t.Errorf("registry row %q has a flag but no env var; every flag-settable key has both", k.Path)
 		}
 	}
-	if !seen["api-key"] {
-		t.Error("the registry lost its api-key row, so the masking invariant above asserts nothing")
-	}
 }
 
 // TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse pins each row's validate hook (configKey.Validate
@@ -257,8 +257,6 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 		value   string
 		wantMsg string
 	}{
-		{"endpoint", "box:1111", "give a scheme and a host"},
-		{"endpoint", "http://[::1", "invalid endpoint"},
 		{"web-search-endpoint", "%zz", "not a URL"},
 		{"context-window", "-1", "0 or more"},
 		{"present.port", "70000", "0-65535"},
@@ -292,7 +290,6 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct{ path, value string }{
-		{"endpoint", "http://127.0.0.1:1111"},
 		{"web-search-endpoint", ""},
 		{"web-search-endpoint", "off"},
 		{"web-search-endpoint", "search.example.com/s"}, // scheme-less: the tool heals it to https://
@@ -330,8 +327,7 @@ func TestRegistryValidateHooksSitOnEditableKeys(t *testing.T) {
 	// `servers:` entries, which no per-value hook holding no list can know — so the name is checked
 	// at selection, where the list is in hand, and any string is a writable value here.
 	unchecked := map[string]bool{
-		"api-key": true, "host-alias": true, "model": true, "server": true,
-		"present.command": true, "present.host": true,
+		"server": true, "present.command": true, "present.host": true,
 	}
 	for _, k := range keyRegistry {
 		switch {

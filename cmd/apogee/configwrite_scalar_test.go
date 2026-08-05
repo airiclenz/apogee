@@ -86,8 +86,8 @@ func TestSpliceScalarSettingGoldenOps(t *testing.T) {
 	for _, tt := range []scalarOpCase{
 		{
 			name: "an active line is rewritten in place",
-			path: "endpoint", value: "http://other:2222",
-			golden: "settings-edited.set-endpoint.golden",
+			path: "server", value: "other",
+			golden: "settings-edited.set-server.golden",
 		},
 		{
 			name: "a key with a commented example lands directly below it",
@@ -158,9 +158,8 @@ func TestSpliceScalarSettingInsertsBelowTheTemplateExample(t *testing.T) {
 		value string
 		want  []string
 	}{
-		{path: "endpoint", value: "http://box:1111", want: []string{"endpoint: http://box:1111"}},
 		{path: "mode", value: "auto", want: []string{"mode: auto"}},
-		{path: "api-key", value: "sk-token", want: []string{"api-key: sk-token"}},
+		{path: "llama-launcher", value: "off", want: []string{"llama-launcher: \"off\""}},
 		{path: "context-window", value: "32768", want: []string{"context-window: 32768"}},
 		{path: "ui.spinner", value: "glitter", want: []string{"ui:", "  spinner: glitter"}},
 		{path: "present.port", value: "8080", want: []string{"present:", "  port: 8080"}},
@@ -316,19 +315,19 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 		},
 		{
 			name:    "a flow-style top level has no line to edit either",
-			content: "{endpoint: http://box:1111}\n",
-			path:    "endpoint", value: "http://other:2222",
+			content: "{server: box}\n",
+			path:    "server", value: "other",
 			wantMsg: "flow style",
 		},
 		{
 			name:    "a second document apogee would never read",
-			content: "endpoint: http://box:1111\n---\nendpoint: http://other:2222\n",
-			path:    "endpoint", value: "http://third:3333",
+			content: "server: box\n---\nserver: other\n",
+			path:    "server", value: "third",
 			wantMsg: "more than one YAML document",
 		},
 		{
 			name:    "a top level that is not a mapping of settings",
-			content: "- endpoint\n- mode\n",
+			content: "- server\n- mode\n",
 			path:    "mode", value: "auto",
 			wantMsg: "not a mapping of settings",
 		},
@@ -340,26 +339,26 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 		},
 		{
 			name:    "one key commented out in two places names no one place",
-			content: "# endpoint: http://one:1111\n# endpoint: http://two:2222\nmode: auto\n",
-			path:    "endpoint", value: "http://box:1111",
+			content: "# server: one\n# server: two\nmode: auto\n",
+			path:    "server", value: "box",
 			wantMsg: "in two places",
 		},
 		{
 			name:    "a value written as a multi-line block cannot be rewritten as one line",
-			content: "endpoint: |\n  http://box:1111\n",
-			path:    "endpoint", value: "http://other:2222",
+			content: "server: |\n  box\n",
+			path:    "server", value: "other",
 			wantMsg: "multi-line block",
 		},
 		{
 			name:    "a value that does not sit on its key's line",
-			content: "endpoint:\n  http://box:1111\n",
-			path:    "endpoint", value: "http://other:2222",
+			content: "server:\n  box\n",
+			path:    "server", value: "other",
 			wantMsg: "same line",
 		},
 		{
 			name:    "a scalar key holding a list",
-			content: "endpoint:\n  - http://box:1111\n",
-			path:    "endpoint", value: "http://other:2222",
+			content: "server:\n  - box\n",
+			path:    "server", value: "other",
 			wantMsg: "not a single value",
 		},
 		{
@@ -401,18 +400,12 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 		{
 			name:    "a key that is not in the schema at all",
 			content: "mode: auto\n",
-			path:    "endpoints", value: "http://box:1111",
+			path:    "servers-list", value: "box",
 			wantMsg: "not a setting apogee knows",
 		},
 		// The rows' validate hooks, on the write path: a value the kind accepts but the KEY does not
 		// (registry.go). Every one of them is refused before the file is opened, so the assertion
 		// below — the file is byte-for-byte what it was — is what "validate before writing" means.
-		{
-			name:    "an endpoint with no scheme is not a URL apogee can dial",
-			content: "mode: auto\n",
-			path:    "endpoint", value: "box:1111",
-			wantMsg: "give a scheme and a host",
-		},
 		{
 			name:    "a search endpoint no URL parse accepts",
 			content: "mode: auto\n",
@@ -502,7 +495,7 @@ func TestConfigWriteSettingWritesNothingWhenTheFileAlreadyAgrees(t *testing.T) {
 	}{
 		{name: "a set to the value already there", path: "mode", value: "auto"},
 		{name: "a set of a bool already there", path: "auto-compact", value: "true"},
-		{name: "a reset of a key the file does not set", path: "endpoint", reset: true},
+		{name: "a reset of a key the file does not set", path: "server", reset: true},
 		{name: "a reset of a nested key whose block is absent", path: "ui.spinner", reset: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -597,27 +590,27 @@ func TestSpliceScalarSettingKeepsTheLinesOwnNotes(t *testing.T) {
 	}{
 		{
 			name:    "a trailing note survives a rewrite",
-			content: "endpoint: http://box:1111   # my box\n",
-			path:    "endpoint", value: "http://other:2222",
-			want: "endpoint: http://other:2222   # my box\n",
+			content: "server: box   # my box\n",
+			path:    "server", value: "other",
+			want: "server: other   # my box\n",
 		},
 		{
 			name:    "so does the note on a key with no value yet",
-			content: "endpoint:  # not set yet\nmode: auto\n",
-			path:    "endpoint", value: "http://box:1111",
-			want: "endpoint: http://box:1111  # not set yet\nmode: auto\n",
+			content: "server:  # not set yet\nmode: auto\n",
+			path:    "server", value: "box",
+			want: "server: box  # not set yet\nmode: auto\n",
 		},
 		{
 			name:    "hand-made alignment survives a rewrite",
-			content: "endpoint:    http://box:1111\n",
-			path:    "endpoint", value: "http://other:2222",
-			want: "endpoint:    http://other:2222\n",
+			content: "server:    box\n",
+			path:    "server", value: "other",
+			want: "server:    other\n",
 		},
 		{
 			name:    "an indented commented example is not an anchor",
-			content: "servers:\n  - name: box\n    # endpoint: http://box:1111\nmode: auto\n",
-			path:    "endpoint", value: "http://other:2222",
-			want: "servers:\n  - name: box\n    # endpoint: http://box:1111\nmode: auto\n\nendpoint: http://other:2222\n",
+			content: "servers:\n  - name: box\n    # model: qwen\nmode: auto\n",
+			path:    "server", value: "other",
+			want: "servers:\n  - name: box\n    # model: qwen\nmode: auto\n\nserver: other\n",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -645,9 +638,9 @@ func TestSpliceScalarSettingQuotesValuesThatNeedIt(t *testing.T) {
 	}{
 		{path: "web-search-endpoint", value: "off", want: `web-search-endpoint: "off"`},
 		{path: "present.host", value: "", want: `  host: ""`},
-		{path: "host-alias", value: "123", want: `host-alias: "123"`},
+		{path: "server", value: "123", want: `server: "123"`},
 		{path: "present.command", value: "zed {path}", want: "  command: zed {path}"},
-		{path: "endpoint", value: "  http://box:1111  ", want: "endpoint: http://box:1111"},
+		{path: "llama-launcher", value: "  /opt/launcher.yaml  ", want: "llama-launcher: /opt/launcher.yaml"},
 		{path: "context-window", value: "32768", want: "context-window: 32768"},
 		{path: "auto-compact", value: "false", want: "auto-compact: false"},
 	} {
@@ -681,8 +674,8 @@ func TestConfigWriteSameApartFrom(t *testing.T) {
 	}{
 		{
 			name:   "the target key alone",
-			before: "mode: auto\nendpoint: http://box:1111\n",
-			after:  "mode: plan\nendpoint: http://box:1111\n",
+			before: "mode: auto\nserver: box\n",
+			after:  "mode: plan\nserver: box\n",
 			path:   "mode", want: true,
 		},
 		{
@@ -705,8 +698,8 @@ func TestConfigWriteSameApartFrom(t *testing.T) {
 		},
 		{
 			name:   "a neighbour elsewhere in the file",
-			before: "mode: auto\nendpoint: http://box:1111\n",
-			after:  "mode: plan\nendpoint: http://other:2222\n",
+			before: "mode: auto\nserver: box\n",
+			after:  "mode: plan\nserver: other\n",
 			path:   "mode", want: false,
 		},
 		{

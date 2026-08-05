@@ -49,8 +49,8 @@ func TestProbeCommandReportsTheHost(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	configHome := t.TempDir()
-	report := runProbe(t, newProbeCommand(), configHome, t.TempDir(), "--endpoint", srv.URL)
+	configHome := upstreamHome(t, srv.URL)
+	report := runProbe(t, newProbeCommand(), configHome, t.TempDir())
 
 	for _, want := range []string{
 		"apogee probe — host report",
@@ -66,16 +66,16 @@ func TestProbeCommandReportsTheHost(t *testing.T) {
 
 	// The host half is read-only: unlike the root's RunE it seeds no starter config, so a
 	// diagnosis run leaves the apogee home exactly as it found it.
-	if entries, err := os.ReadDir(configHome); err != nil || len(entries) != 0 {
-		t.Errorf("probe wrote into the apogee home (entries=%v, err=%v); the host half writes nothing", entries, err)
-	}
+	assertHomeHoldsOnlyConfig(t, configHome, "the host report")
 }
 
 // `apogee probe host` is the named child form of the bare parent's report — the scriptable
 // spelling ADR 0021 §1 promises — so the two must print the same thing.
 func TestProbeHostChildMatchesTheParent(t *testing.T) {
 	t.Parallel()
-	configHome := t.TempDir()
+	// A configured but dead endpoint: the report reaches the same "could not be dialled" state
+	// by both spellings, without either one depending on a live server.
+	configHome := upstreamHome(t, "http://127.0.0.1:1")
 
 	workspace := t.TempDir()
 	parent := runProbe(t, newProbeCommand(), configHome, workspace)
@@ -84,8 +84,8 @@ func TestProbeHostChildMatchesTheParent(t *testing.T) {
 	if parent != child {
 		t.Errorf("`probe` and `probe host` printed different reports:\n--- probe ---\n%s\n--- probe host ---\n%s", parent, child)
 	}
-	if !strings.Contains(parent, "no endpoint is configured") {
-		t.Errorf("with no endpoint set anywhere, the report should say so:\n%s", parent)
+	if !strings.Contains(parent, "http://127.0.0.1:1") {
+		t.Errorf("the report does not name the configured endpoint:\n%s", parent)
 	}
 }
 
@@ -107,12 +107,12 @@ func TestProbeHostReportLandsOnTheProcessStdout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	configHome, workspace := t.TempDir(), t.TempDir()
+	configHome, workspace := upstreamHome(t, srv.URL), t.TempDir()
 	var runErr error
 	stdout, stderr := captureProcessStreams(t, func() {
 		cmd := newProbeCommand()
 		// Deliberately no SetOut: the fallback under test is the one every real run takes.
-		cmd.SetArgs([]string{"--config", configHome, "--workspace", workspace, "--endpoint", srv.URL})
+		cmd.SetArgs([]string{"--config", configHome, "--workspace", workspace})
 		runErr = cmd.ExecuteContext(context.Background())
 	})
 	if runErr != nil {
@@ -167,7 +167,7 @@ func TestProbeReportsConfinementResidueWithoutHealingIt(t *testing.T) {
 	// place: the second invocation seeing the same residue is itself proof the first did not
 	// consume it.
 	for _, args := range [][]string{nil, {"host"}} {
-		report := runProbe(t, newProbeCommand(), t.TempDir(), t.TempDir(), args...)
+		report := runProbe(t, newProbeCommand(), upstreamHome(t, "http://127.0.0.1:1"), t.TempDir(), args...)
 		if !strings.Contains(report, "labels:") || !strings.Contains(report, labelled) {
 			t.Errorf("`apogee probe %s` does not report the outstanding label journal:\n%s", strings.Join(args, " "), report)
 		}
@@ -188,7 +188,8 @@ func TestProbeReportsConfinementResidueWithoutHealingIt(t *testing.T) {
 func TestProbeCommandReadsTheConfigFile(t *testing.T) {
 	t.Parallel()
 	configHome := t.TempDir()
-	config := "endpoint: http://127.0.0.1:1\nconfine-to-workspace: false\n"
+	config := "confine-to-workspace: false\n" +
+		"servers:\n  - name: probe-target\n    endpoint: http://127.0.0.1:1\nserver: probe-target\n"
 	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte(config), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

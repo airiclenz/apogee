@@ -59,8 +59,9 @@ const (
 // (today: mode, through the same seam Shift+Tab drives). Editable is whether the settings
 // surface may write the key at all — false for every structured kind, and false for the
 // confinement keys, whose acknowledgement interlock stays single-homed in /confine. Masked
-// says the value must not be rendered in full (api-key only). Desc is the one-line
-// description a surface shows, condensed from the template's own comments.
+// says the value must not be rendered in full — no row carries it today (the schema's one
+// secret is a `servers:` entry's api-key, nested inside a structured block). Desc is the
+// one-line description a surface shows, condensed from the template's own comments.
 //
 // Validate is the key's own admission test, run on a value a SURFACE offers before it is
 // written (saveConfigSetting) — the check the kind alone cannot make: a URL that has no host,
@@ -102,33 +103,9 @@ var (
 // model-profile is the one key the template does not document, so it sits last.
 var keyRegistry = []configKey{
 	{
-		Path: "endpoint", Kind: kindString,
-		EnvVar: envEndpoint, FlagName: "endpoint",
-		RestartRequired: true, Editable: true,
-		Validate: validateEndpointURL,
-		Desc:     "The OpenAI-compatible LLM server URL a session starts on.",
-	},
-	{
-		Path: "api-key", Kind: kindString,
-		EnvVar:          envAPIKey, // no flag, deliberately: a secret must not reach shell history or `ps`
-		RestartRequired: true, Editable: true, Masked: true,
-		Desc: "Bearer token sent as Authorization on every upstream request; unset sends no header.",
-	},
-	{
-		Path: "host-alias", Kind: kindString,
-		RestartRequired: true, Editable: true,
-		Desc: "A short, friendly name for the upstream host, shown in the status footer.",
-	},
-	{
-		Path: "model", Kind: kindString,
-		EnvVar: envModel, FlagName: "model",
-		RestartRequired: true, Editable: true,
-		Desc: "The model to request — a hint: apogee follows the model the server actually serves.",
-	},
-	{
 		Path: "servers", Kind: kindStructured,
 		RestartRequired: true,
-		Desc:            "The other servers a running session can be moved to with /server.",
+		Desc:            "The servers you run models on — name, endpoint, and what each one needs.",
 	},
 	{
 		// A plain string rather than an enum, even though its values ARE a closed set: EnumValues is
@@ -305,24 +282,8 @@ var keyRegistry = []configKey{
 // no file path in front — the settings pane shows them inline, where a prefix would push the reason
 // out of the cell.
 
-// validateEndpointURL refuses an `endpoint:` that is not a base URL apogee could dial. The upstream
-// client is handed this value as it stands — nothing heals a missing scheme for it, the way the
-// web_search tool heals its own endpoint — so a host typed without one would fail on the first
-// request, with a message about a transport rather than about the key that is wrong.
-func validateEndpointURL(value string) error {
-	u, err := url.Parse(value)
-	switch {
-	case err != nil:
-		return fmt.Errorf("apogee: invalid endpoint %q: %s", value, err)
-	case u.Scheme == "" || u.Host == "":
-		return fmt.Errorf("apogee: invalid endpoint %q: give a scheme and a host, "+
-			"like http://127.0.0.1:1111", value)
-	}
-	return nil
-}
-
 // validateSearchEndpoint refuses a `web-search-endpoint:` the web_search tool could make nothing of.
-// It is deliberately looser than validateEndpointURL, because this key has four documented shapes
+// It is deliberately loose, because this key has four documented shapes
 // (tools.NewWebSearch): empty for the built-in provider, the off/none/disabled sentinels, a
 // scheme-less host the tool itself heals to https://, and a full URL. So what is refused is text no
 // url.Parse accepts even after that heal — and the sentinels pass on their own merits (`off` heals

@@ -1,10 +1,10 @@
 # my apogee config — hand-edited, and every word of it must survive a settings write
 
 # =============================================================================
-# The local OpenAI-compatible LLM server URL.
-#   flag: --endpoint   env: APOGEE_ENDPOINT
-# endpoint: http://192.168.64.1:1111
-endpoint: http://box:1111
+# Which servers: entry a session starts on.
+#   flag: --server   env: APOGEE_SERVER
+# server: my-box
+server: box
 
 # =============================================================================
 # Autonomy mode: how tool calls are gated.

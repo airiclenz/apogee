@@ -65,7 +65,9 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 	defer srv.Close()
 
 	workspace := t.TempDir()
-	configHome := t.TempDir()
+	// A config that already names a server: since ADR 0036 startup selects one out of `servers:`,
+	// so a home with none of them never gets as far as the confinement resolution under test.
+	configHome := upstreamHome(t, srv.URL)
 	configPath := filepath.Join(configHome, "config.yaml")
 
 	// The simulated incapable host: a backend that reports no filesystem confinement, exactly

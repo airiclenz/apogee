@@ -21,10 +21,16 @@ import (
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
-// maskedSettingValue is what a masked row shows INSTEAD of its value (api-key). The secret is
-// replaced here, at the seam, so the renderer is never handed it at all: a value the pane does not
-// hold cannot reach a paint cache, a transcript, or a crash dump, and it has no use for it — the
-// editor buffers what the human types rather than revealing what was stored.
+// maskedSettingValue is what a masked row shows INSTEAD of its value. The secret is replaced here,
+// at the seam, so the renderer is never handed it at all: a value the pane does not hold cannot
+// reach a paint cache, a transcript, or a crash dump, and it has no use for it — the editor buffers
+// what the human types rather than revealing what was stored.
+//
+// No row is masked since ADR 0036 retired the top-level `api-key:`: the only secret the schema
+// still carries is a `servers:` entry's own key, which sits inside a structured block the pane
+// summarizes ("2 servers") rather than renders. The seam stays because the registry's Masked flag
+// is the schema's way of saying "never show this", and the day a surface can edit a server entry
+// is the day it is needed again — not something to rediscover with a secret already on screen.
 const maskedSettingValue = "••••"
 
 // noneSettingValue is what a structured row with nothing in it shows. Blank would read as "this
@@ -58,7 +64,7 @@ type settingSection struct {
 // opens Mechanisms because it is the Mechanisms off-switch, the floor the whole surface is measured
 // against.
 var settingSections = []settingSection{
-	{Name: "Upstream", Opens: "endpoint"},
+	{Name: "Upstream", Opens: "servers"},
 	{Name: "Autonomy", Opens: "mode"},
 	{Name: "System prompt", Opens: "system-prompt-text"},
 	{Name: "Confinement", Opens: "confine-to-workspace"},
@@ -78,10 +84,6 @@ var settingSections = []settingSection{
 // path with no formatter renders as an empty value rather than panicking — a table gap must not
 // cost the user the whole surface mid-session — and that test is what keeps the gap from shipping.
 var settingValues = map[string]func(options) string{
-	"endpoint":           func(o options) string { return o.endpoint },
-	"api-key":            func(o options) string { return o.apiKey }, // masked by settingsRows, per the row's Masked flag
-	"host-alias":         func(o options) string { return o.hostAlias },
-	"model":              func(o options) string { return o.model },
 	"servers":            func(o options) string { return countSummary(len(o.servers), "server") },
 	"server":             func(o options) string { return o.startupServer },
 	"llama-launcher":     func(o options) string { return o.llamaLauncher },

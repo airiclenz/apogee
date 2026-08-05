@@ -44,7 +44,7 @@ func fabricatedSettings() options {
 		validatedSetsEnable: true,
 		validatedSetsAlias:  map[string]string{"gpt-oss-20b": "gpt-oss"},
 		profile:             apogee.ModelProfile{},
-		overrides:           map[string]configSource{"mode": sourceFlag, "model": sourceEnv},
+		overrides:           map[string]configSource{"mode": sourceFlag, "server": sourceEnv},
 	}
 }
 
@@ -152,7 +152,7 @@ func TestSettingsRowsCarryTheirSection(t *testing.T) {
 
 	byPath := rowsByPath(t, rows)
 	for path, want := range map[string]string{
-		"endpoint":            "Upstream",
+		"servers":             "Upstream",
 		"llama-launcher":      "Upstream",
 		"mode":                "Autonomy",
 		"context-files.names": "System prompt",
@@ -178,10 +178,6 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 
 	byPath := rowsByPath(t, settingsRows(fabricatedSettings()))
 	want := map[string]string{
-		"endpoint":             "http://192.168.64.1:1111",
-		"api-key":              maskedSettingValue,
-		"host-alias":           "workstation",
-		"model":                "gpt-oss-20b",
 		"servers":              "3 servers",
 		"server":               "rented-box",
 		"llama-launcher":       "off",
@@ -223,10 +219,10 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 	}
 }
 
-// The secret never crosses the seam: the api-key row carries the mask and nothing of the token, so
-// no pane, paint cache or crash dump can hold it. An unset key is empty rather than masked — there
-// is nothing to hide, and "••••" would claim a key is configured when none is.
-func TestSettingsRowsMaskTheAPIKey(t *testing.T) {
+// The secret never crosses the seam. Since ADR 0036 the schema's only api key belongs to a
+// `servers:` entry — a structured block the pane summarizes as a count — so no row may carry the
+// token in any form, and the `servers` row in particular must render its count and nothing else.
+func TestSettingsRowsNeverCarryAnAPIKey(t *testing.T) {
 	t.Parallel()
 
 	opts := fabricatedSettings()
@@ -235,14 +231,8 @@ func TestSettingsRowsMaskTheAPIKey(t *testing.T) {
 			t.Errorf("row %q leaks the api key in its value %q", r.Path, r.Value)
 		}
 	}
-	row := rowsByPath(t, settingsRows(opts))["api-key"]
-	if !row.Masked || row.Value != maskedSettingValue {
-		t.Errorf("api-key row = {masked:%v value:%q}; want the mask %q", row.Masked, row.Value, maskedSettingValue)
-	}
-
-	opts.apiKey = ""
-	if got := rowsByPath(t, settingsRows(opts))["api-key"].Value; got != "" {
-		t.Errorf("unset api-key row value = %q; want empty (nothing is configured to hide)", got)
+	if got := rowsByPath(t, settingsRows(opts))["servers"].Value; got != "3 servers" {
+		t.Errorf("servers row value = %q; want the count — an entry's fields never reach the pane", got)
 	}
 }
 
@@ -257,11 +247,11 @@ func TestSettingsRowsMarkOverriddenKeys(t *testing.T) {
 		t.Errorf("mode row source = {%q %q}; want the flag marker {%q %q}",
 			got.Source, got.SourceName, tui.SettingFromFlag, "--mode")
 	}
-	if got := byPath["model"]; got.Source != tui.SettingFromEnv || got.SourceName != envModel {
-		t.Errorf("model row source = {%q %q}; want the env marker {%q %q}",
-			got.Source, got.SourceName, tui.SettingFromEnv, envModel)
+	if got := byPath["server"]; got.Source != tui.SettingFromEnv || got.SourceName != envServer {
+		t.Errorf("server row source = {%q %q}; want the env marker {%q %q}",
+			got.Source, got.SourceName, tui.SettingFromEnv, envServer)
 	}
-	for _, path := range []string{"endpoint", "api-key", "bypass", "auto-compact"} {
+	for _, path := range []string{"servers", "llama-launcher", "bypass", "auto-compact"} {
 		got := byPath[path]
 		if got.Source != tui.SettingFromFile || got.SourceName != "" {
 			t.Errorf("row %q source = {%q %q}; want the unmarked file source", path, got.Source, got.SourceName)

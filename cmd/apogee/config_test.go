@@ -23,6 +23,85 @@ func intptr(i int) *int       { return &i }
 // values, not the wording (resolveConfineToWorkspace's own table covers the notices).
 func noNotify(string) {}
 
+// startupServerYAML is the smallest upstream a config can describe since ADR 0036 retired the
+// top-level `endpoint:` key: one `servers:` entry and the `server:` pointer that starts on it.
+// Startup refuses a config that names no server at all, so every test whose subject is some OTHER
+// key carries this block to get past selection — the way a real config always will.
+const startupServerYAML = "servers:\n  - name: testbox\n    endpoint: http://127.0.0.1:1111\nserver: testbox\n"
+
+// The facts startupServerYAML resolves to, for the tests that assert what selection produced.
+const (
+	testServerName     = "testbox"
+	testServerEndpoint = "http://127.0.0.1:1111"
+)
+
+// writeConfigHome writes an apogee home's config.yaml: the caller's own keys, followed by a startup
+// server when they name none, so a test states only the keys it is about. A caller that DOES write
+// a `servers:` block owns the whole upstream half of the file, `server:` included.
+func writeConfigHome(t *testing.T, dir, extra string) {
+	t.Helper()
+	body := extra
+	if !namesServersBlock(extra) {
+		body += startupServerYAML
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+}
+
+// namesServersBlock reports whether the yaml opens a top-level `servers:` block — the column-1
+// check keeps `mcp-servers:` from counting as one.
+func namesServersBlock(yamlText string) bool {
+	for _, line := range strings.Split(yamlText, "\n") {
+		if strings.HasPrefix(line, "servers:") {
+			return true
+		}
+	}
+	return false
+}
+
+// testConfigHome is writeConfigHome into a fresh temp dir, returning the home.
+func testConfigHome(t *testing.T, extra string) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeConfigHome(t, dir, extra)
+	return dir
+}
+
+// assertHomeHoldsOnlyConfig fails unless the apogee home still holds nothing but the config.yaml
+// the test wrote — the read-only pledge, asserted this way now that a home has to carry a config
+// at all for a command to have a server to talk to (ADR 0036).
+func assertHomeHoldsOnlyConfig(t *testing.T, home, what string) {
+	t.Helper()
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		t.Fatalf("read the apogee home: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name() != "config.yaml" {
+			t.Errorf("%s wrote %q into the apogee home; it must write nothing", what, e.Name())
+		}
+	}
+}
+
+// upstreamHome writes an apogee home whose ONE configured server is endpoint — with the first
+// modelHint, if any, as that server's discovery hint — and returns the home. Since ADR 0036 the
+// `servers:` list is the single definition of what a command can talk to, so this is how a test
+// points a command at its own httptest upstream.
+func upstreamHome(t *testing.T, endpoint string, modelHint ...string) string {
+	t.Helper()
+	entry := "servers:\n  - name: probe-target\n    endpoint: " + endpoint + "\n"
+	if len(modelHint) > 0 && modelHint[0] != "" {
+		entry += "    model: " + modelHint[0] + "\n"
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"),
+		[]byte(entry+"server: probe-target\n"), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	return dir
+}
+
 // wantUIDefault is the resolved `ui:` block a config that configures none must produce: the
 // default spinner style with its colour loop on, and the transcript's scroll bar shown. It is
 // spelled out rather than taken from defaultUISettings, so a change to any shipped default shows up
@@ -60,21 +139,21 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 		},
 		{
 			name: "file fills every field",
-			file: layer{endpoint: strptr("http://file"), model: strptr("m-file"), mode: strptr("plan"), bypass: boolptr(true)},
-			want: settings{endpoint: "http://file", model: "m-file", mode: "plan", bypass: true, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: layer{startupServer: strptr("file-box"), mode: strptr("plan"), bypass: boolptr(true)},
+			want: settings{startupServer: "file-box", mode: "plan", bypass: true, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "env beats file, file fills the rest",
-			file: layer{endpoint: strptr("http://file"), model: strptr("m-file")},
-			env:  layer{endpoint: strptr("http://env")},
-			want: settings{endpoint: "http://env", model: "m-file", mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: layer{startupServer: strptr("file-box"), mode: strptr("plan")},
+			env:  layer{startupServer: strptr("env-box")},
+			want: settings{startupServer: "env-box", mode: "plan", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "flag beats env beats file, per field",
-			file: layer{endpoint: strptr("http://file"), model: strptr("m-file"), mode: strptr("plan")},
-			env:  layer{endpoint: strptr("http://env"), model: strptr("m-env")},
-			flag: layer{endpoint: strptr("http://flag")},
-			want: settings{endpoint: "http://flag", model: "m-env", mode: "plan", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: layer{startupServer: strptr("file-box"), mode: strptr("plan")},
+			env:  layer{startupServer: strptr("env-box"), mode: strptr("auto")},
+			flag: layer{startupServer: strptr("flag-box")},
+			want: settings{startupServer: "flag-box", mode: "auto", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "explicit false in a higher layer overrides true below it",
@@ -83,20 +162,12 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			want: settings{mode: "ask-before", bypass: false, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
-			name: "api-key comes from the file when the environment sets none",
-			file: fileConfig{APIKey: "file-secret"}.layer(),
-			want: settings{mode: "ask-before", apiKey: "file-secret", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
-		},
-		{
-			// The key is settable by the file and by the environment, and by nothing else: even
-			// with an "api-key" flag reported as explicitly set, flagLayer projects no key —
-			// there is no --api-key to bind, because a secret on the command line lands in shell
-			// history and in `ps` output. So the env value stands over the file's.
-			name: "api-key: env beats file, and the flag layer cannot carry one at all",
-			file: fileConfig{APIKey: "file-secret"}.layer(),
-			env:  layer{apiKey: strptr("env-secret")},
-			flag: flagLayer(options{apiKey: "flag-secret"}, func(name string) bool { return name == "api-key" }),
-			want: settings{mode: "ask-before", apiKey: "env-secret", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			// The servers list is file-only: it describes machines, not this invocation, so neither
+			// the environment nor a flag can name one (only `server:` — which of them to start on —
+			// rides the layers above the file).
+			name: "servers is file-only",
+			file: fileConfig{Servers: []serverEntry{{Name: "box", Endpoint: "http://box:1111"}}}.layer(),
+			want: settings{mode: "ask-before", servers: []serverEntry{{Name: "box", Endpoint: "http://box:1111"}}, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
 		},
 		{
 			name: "confine-to-workspace is file-only and defaults true",
@@ -309,7 +380,7 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 	}
 }
 
-// The seven keys that resolve from more than one source, driven end to end through their registry
+// The three keys that resolve from more than one source, driven end to end through their registry
 // rows: a real fileConfig, a real getenv, a real explicitly-set flag, and the precedence the
 // three produce. The WIRE-FACING names — the variable a user exports, the flag they type — are
 // spelled out here as literals rather than read from the row, which is what makes this a test of
@@ -317,9 +388,9 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 // carry each key, so editing a row's EnvVar or FlagName to anything else means the value this
 // test sets is never seen and the precedence assertions fail.
 //
-// The two keys with no source above the file are pinned the same way, from the other side:
-// host-alias names neither a variable nor a flag, and api-key names no flag, so the file's value
-// must stand even when every flag reports itself explicitly set.
+// The raw startup overrides (APOGEE_ENDPOINT, APOGEE_API_KEY, APOGEE_MODEL, --endpoint, --model)
+// are deliberately absent: since ADR 0036 they name no config key at all, so they do not ride
+// these layers and nothing here should claim they do.
 func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -331,32 +402,6 @@ func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
 		setFlag         func(*options, string)
 		resolved        func(settings) string
 	}{
-		{
-			path: "endpoint", envVar: "APOGEE_ENDPOINT", flagName: "endpoint",
-			file: "http://file", env: "http://env", flag: "http://flag",
-			setFile:  func(fc *fileConfig, v string) { fc.Endpoint = v },
-			setFlag:  func(o *options, v string) { o.endpoint = v },
-			resolved: func(s settings) string { return s.endpoint },
-		},
-		{
-			path: "api-key", envVar: "APOGEE_API_KEY",
-			file: "file-secret", env: "env-secret",
-			setFile:  func(fc *fileConfig, v string) { fc.APIKey = v },
-			resolved: func(s settings) string { return s.apiKey },
-		},
-		{
-			path:     "host-alias",
-			file:     "the-file-box",
-			setFile:  func(fc *fileConfig, v string) { fc.HostAlias = v },
-			resolved: func(s settings) string { return s.hostAlias },
-		},
-		{
-			path: "model", envVar: "APOGEE_MODEL", flagName: "model",
-			file: "m-file", env: "m-env", flag: "m-flag",
-			setFile:  func(fc *fileConfig, v string) { fc.Model = v },
-			setFlag:  func(o *options, v string) { o.model = v },
-			resolved: func(s settings) string { return s.model },
-		},
 		{
 			path: "server", envVar: "APOGEE_SERVER", flagName: "server",
 			file: "the-file-box", env: "the-env-box", flag: "the-flag-box",
@@ -433,14 +478,6 @@ func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
 					t.Errorf("--%s over %s: %s = %q, want %q (does the row still name --%s?)", tt.flagName,
 						tt.envVar, tt.path, tt.resolved(got), tt.flag, tt.flagName)
 				}
-				return
-			}
-			// No flag in the row means no flag can carry the key: even with every flag reported as
-			// explicitly set, nothing is projected and the file's value stands.
-			flag := flagLayer(options{}, func(string) bool { return true })
-			if got, _ := resolveSettings(file, layer{}, flag, testHostID); tt.resolved(got) != tt.file {
-				t.Errorf("every flag set: %s = %q, want the file's %q — the key has no flag", tt.path,
-					tt.resolved(got), tt.file)
 			}
 		})
 	}
@@ -616,12 +653,10 @@ func TestApplyConfigUnconfinedHosts(t *testing.T) {
 
 	t.Run("this host acknowledged", func(t *testing.T) {
 		t.Parallel()
-		home := t.TempDir()
+		home := testConfigHome(t, "")
 		configYAML := "unconfined-hosts:\n  - id: \"" + platform.HostID() + "\"\n" +
 			"    acknowledged: \"2026-07-21\"\n    note: \"disposable container\"\n"
-		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-			t.Fatalf("write config: %v", err)
-		}
+		writeConfigHome(t, home, configYAML)
 		opts := options{configDir: home}
 		if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile, noNotify); err != nil {
 			t.Fatalf("applyConfig: %v", err)
@@ -637,11 +672,9 @@ func TestApplyConfigUnconfinedHosts(t *testing.T) {
 
 	t.Run("another host acknowledged", func(t *testing.T) {
 		t.Parallel()
-		home := t.TempDir()
+		home := testConfigHome(t, "")
 		const configYAML = "unconfined-hosts:\n  - id: \"someone-elses-box-abc123\"\n"
-		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-			t.Fatalf("write config: %v", err)
-		}
+		writeConfigHome(t, home, configYAML)
 		opts := options{configDir: home}
 		if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile, noNotify); err != nil {
 			t.Fatalf("applyConfig: %v", err)
@@ -653,11 +686,9 @@ func TestApplyConfigUnconfinedHosts(t *testing.T) {
 
 	t.Run("a malformed entry notifies and does not block startup", func(t *testing.T) {
 		t.Parallel()
-		home := t.TempDir()
+		home := testConfigHome(t, "")
 		const configYAML = "unconfined-hosts:\n  - note: \"forgot the id\"\n"
-		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-			t.Fatalf("write config: %v", err)
-		}
+		writeConfigHome(t, home, configYAML)
 		var got []string
 		opts := options{configDir: home}
 		if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile, func(msg string) { got = append(got, msg) }); err != nil {
@@ -676,34 +707,29 @@ func TestApplyConfigUnconfinedHosts(t *testing.T) {
 // an explicit flag, all resolved with the real loader/parser against injected sources.
 func TestApplyConfigEndToEnd(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	const configYAML = "endpoint: http://file\nmodel: m-file\nmode: plan\nbypass: true\n"
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	home := testConfigHome(t, "servers:\n"+
+		"  - name: file-box\n    endpoint: http://file:1111\n    model: m-file\n"+
+		"  - name: flag-box\n    endpoint: http://flag:1111\n    model: m-flag\n"+
+		"server: file-box\nmode: plan\nbypass: true\n")
 
-	// env overrides model and turns bypass off; the flag overrides endpoint.
+	// env turns bypass off; the flag names another server, whose own fields come with it.
 	getenv := func(k string) string {
-		switch k {
-		case envModel:
-			return "m-env"
-		case envBypass:
+		if k == envBypass {
 			return "false"
-		default:
-			return ""
 		}
+		return ""
 	}
-	changed := func(name string) bool { return name == "endpoint" || name == "config" }
-	opts := options{configDir: home, endpoint: "http://flag"}
+	changed := func(name string) bool { return name == "server" || name == "config" }
+	opts := options{configDir: home, startupServer: "flag-box"}
 
 	if err := applyConfig(&opts, changed, getenv, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
-	if opts.endpoint != "http://flag" {
-		t.Errorf("endpoint = %q; want the flag value", opts.endpoint)
+	if opts.endpoint != "http://flag:1111" {
+		t.Errorf("endpoint = %q; want the --server entry's", opts.endpoint)
 	}
-	if opts.model != "m-env" {
-		t.Errorf("model = %q; want the env value", opts.model)
+	if opts.model != "m-flag" {
+		t.Errorf("model = %q; want the --server entry's hint", opts.model)
 	}
 	if opts.mode != "plan" {
 		t.Errorf("mode = %q; want the file value", opts.mode)
@@ -718,13 +744,13 @@ func TestApplyConfigDefaults(t *testing.T) {
 	t.Parallel()
 	noEnv := func(string) string { return "" }
 	noFlags := func(string) bool { return false }
-	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
+	opts := options{configDir: testConfigHome(t, "")} // nothing but a startup server
 
 	if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
-	if opts.endpoint != "" || opts.model != "" || opts.bypass {
-		t.Errorf("non-default endpoint/model/bypass: %+v", opts)
+	if opts.model != "" || opts.bypass {
+		t.Errorf("non-default model/bypass: %+v", opts)
 	}
 	if opts.mode != string(modeAskBefore) {
 		t.Errorf("mode = %q; want the default %q", opts.mode, modeAskBefore)
@@ -737,46 +763,215 @@ func TestApplyConfigDefaults(t *testing.T) {
 	}
 }
 
-// The api-key surface end-to-end through applyConfig: the config file sets it, APOGEE_API_KEY
-// beats the file, and a key configured nowhere resolves empty — which is what makes a keyless
-// local server behave exactly as it did before the key existed (no Authorization header). No flag
-// appears in the table because there is no --api-key flag: a secret passed on the command line
-// would land in shell history and in `ps` output.
-func TestApplyConfigAPIKey(t *testing.T) {
+// The upstream half of resolution, end to end: the `server:` name picks an entry out of `servers:`,
+// and that ONE entry is what the session is built from — endpoint, key, model hint, and the alias
+// the footer calls it (ADR 0036: the list is the single definition).
+func TestApplyConfigSelectsTheNamedServer(t *testing.T) {
 	t.Parallel()
+	home := testConfigHome(t, "servers:\n"+
+		"  - name: laptop\n    endpoint: http://127.0.0.1:1111\n"+
+		"  - name: workstation\n    endpoint: http://192.168.1.9:1111\n    api-key: sk-work\n    model: qwen\n"+
+		"server: workstation\n")
+	opts := options{configDir: home}
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+	if opts.endpoint != "http://192.168.1.9:1111" {
+		t.Errorf("endpoint = %q; want the named entry's", opts.endpoint)
+	}
+	if opts.apiKey != "sk-work" {
+		t.Errorf("apiKey = %q; want the named entry's", opts.apiKey)
+	}
+	if opts.model != "qwen" {
+		t.Errorf("model = %q; want the named entry's hint", opts.model)
+	}
+	if opts.hostAlias != "workstation" {
+		t.Errorf("hostAlias = %q; want the entry's own name — the name IS the alias", opts.hostAlias)
+	}
+	if opts.startupServer != "workstation" {
+		t.Errorf("startupServer = %q; want the resolved server: value", opts.startupServer)
+	}
+}
+
+// --server beats APOGEE_SERVER beats `server:` at selection too, not only in resolution: the value
+// that wins is the one the entry is looked up by.
+func TestApplyConfigStartupServerOverrideSelects(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "servers:\n"+
+		"  - name: laptop\n    endpoint: http://127.0.0.1:1111\n"+
+		"  - name: workstation\n    endpoint: http://192.168.1.9:1111\n"+
+		"server: laptop\n")
+	opts := options{configDir: home, startupServer: "workstation"}
+	changed := func(name string) bool { return name == "server" }
+	if err := applyConfig(&opts, changed, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+	if opts.endpoint != "http://192.168.1.9:1111" {
+		t.Errorf("endpoint = %q; want the --server entry's", opts.endpoint)
+	}
+}
+
+// The three ways selection has no answer. Each is a hard error naming the config file and showing
+// what to write — the permanent behaviour for the non-interactive drivers, and the behaviour for
+// the TUI too until ADR 0036's pre-bound state (which asks instead) is wired.
+func TestApplyConfigStartupServerRefusals(t *testing.T) {
+	t.Parallel()
+	const list = "servers:\n  - name: laptop\n    endpoint: http://127.0.0.1:1111\n"
 	tests := []struct {
-		name     string
-		fileYAML string
-		env      string
-		want     string
+		name       string
+		configYAML string
+		wantParts  []string
 	}{
-		{name: "the file alone", fileYAML: "api-key: file-secret\n", want: "file-secret"},
-		{name: "the environment alone", env: "env-secret", want: "env-secret"},
 		{
-			name:     "the environment beats the file",
-			fileYAML: "api-key: file-secret\n",
-			env:      "env-secret",
-			want:     "env-secret",
+			name:       "an empty list has nothing to start on",
+			configYAML: "mode: plan\n",
+			wantParts:  []string{"no servers are configured", "config.yaml", "servers:", "server: my-box"},
 		},
-		{name: "configured nowhere → empty (no auth header)"},
+		{
+			name:       "a list with no choice recorded",
+			configYAML: list,
+			wantParts:  []string{"no startup server is chosen", "laptop", "--server"},
+		},
+		{
+			name:       "a choice no entry carries",
+			configYAML: list + "server: the-old-name\n",
+			wantParts:  []string{`names "the-old-name"`, "configured: laptop", "--server"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			home := t.TempDir()
-			if tt.fileYAML != "" {
-				if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.fileYAML), 0o600); err != nil {
-					t.Fatalf("write config: %v", err)
-				}
-			}
-			getenv := func(k string) string {
-				if k == envAPIKey {
-					return tt.env
-				}
-				return ""
+			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
 			}
 			opts := options{configDir: home}
-			if err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+			if err == nil {
+				t.Fatal("startup was allowed with no server to talk to")
+			}
+			for _, want := range tt.wantParts {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal does not mention %q: %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+// A config still written in the retired schema is refused with the block that replaces it, key by
+// key: the decoder ignores keys fileConfig no longer has, so without the sniff a working endpoint
+// would simply stop being read.
+func TestApplyConfigRefusesTheRetiredKeys(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		configYAML string
+		wantParts  []string
+	}{
+		{
+			name:       "endpoint alone",
+			configYAML: "endpoint: http://box:1111\n",
+			wantParts:  []string{"retired top-level", "servers:", "- name: box", "endpoint: http://box:1111", "server: box"},
+		},
+		{
+			name:       "api-key alone",
+			configYAML: "api-key: sk-secret\n",
+			wantParts:  []string{"retired top-level", "api-key: sk-secret"},
+		},
+		{
+			name:       "host-alias alone names the entry",
+			configYAML: "host-alias: the-box\n",
+			wantParts:  []string{"retired top-level", "- name: the-box", "server: the-box"},
+		},
+		{
+			name:       "model alone",
+			configYAML: "model: qwen\n",
+			wantParts:  []string{"retired top-level", "model: qwen"},
+		},
+		{
+			name: "the whole quadruple folds into one entry",
+			configYAML: "endpoint: http://box:1111\napi-key: sk-secret\nhost-alias: the-box\nmodel: qwen\n" +
+				"mode: plan\n",
+			wantParts: []string{
+				"- name: the-box", "endpoint: http://box:1111", "api-key: sk-secret", "model: qwen",
+				"server: the-box",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			opts := options{configDir: home}
+			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+			if err == nil {
+				t.Fatal("a config in the retired schema was accepted")
+			}
+			for _, want := range tt.wantParts {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal does not carry %q: %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+// And the converse: a config in the new schema never trips the sniff, however much it says.
+func TestApplyConfigNewSchemaDoesNotTripTheLegacySniff(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "mode: plan\nweb-search-endpoint: \"off\"\n")
+	opts := options{configDir: home}
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, noNotify); err != nil {
+		t.Fatalf("a new-schema config was refused: %v", err)
+	}
+	if opts.endpoint != testServerEndpoint || opts.hostAlias != testServerName {
+		t.Errorf("endpoint/alias = %q/%q; want the entry's %q/%q", opts.endpoint, opts.hostAlias,
+			testServerEndpoint, testServerName)
+	}
+}
+
+// The api-key surface end-to-end through applyConfig. Since ADR 0036 the key belongs to the
+// `servers:` entry the session starts on, not to a top-level key of its own: the selected entry's
+// key is the one sent, and an entry that names none resolves empty — which is what makes a keyless
+// local server behave exactly as it did before the key existed (no Authorization header).
+func TestApplyConfigAPIKey(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		configYAML string
+		want       string
+	}{
+		{
+			name:       "the selected entry's key",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://box:1111\n    api-key: box-secret\nserver: box\n",
+			want:       "box-secret",
+		},
+		{
+			name: "only the SELECTED entry's key is sent",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://box:1111\n    api-key: box-secret\n" +
+				"  - name: other\n    endpoint: http://other:1111\nserver: other\n",
+			want: "",
+		},
+		{
+			name:       "an entry with no key → empty (no auth header)",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://box:1111\nserver: box\n",
+			want:       "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, tt.configYAML)
+			opts := options{configDir: home}
+			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify); err != nil {
 				t.Fatalf("applyConfig: %v", err)
 			}
 			if opts.apiKey != tt.want {
@@ -790,10 +985,8 @@ func TestApplyConfigAPIKey(t *testing.T) {
 // key, so an explicit `auto-compact: false` is the only way to turn the structural trigger off.
 func TestApplyConfigAutoCompactOptOut(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("auto-compact: false\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	home := testConfigHome(t, "")
+	writeConfigHome(t, home, "auto-compact: false\n")
 	opts := options{configDir: home}
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
@@ -822,11 +1015,9 @@ func TestApplyConfigAutoTitle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			home := t.TempDir()
+			home := testConfigHome(t, "")
 			if tt.fileYAML != "" {
-				if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.fileYAML), 0o600); err != nil {
-					t.Fatalf("write config: %v", err)
-				}
+				writeConfigHome(t, home, tt.fileYAML)
 			}
 			opts := options{configDir: home}
 			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
@@ -845,10 +1036,8 @@ func TestApplyConfigAutoTitle(t *testing.T) {
 // pinned separately by TestRunRootThreadsContextWindow in wire_test.go.
 func TestApplyConfigContextWindow(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("context-window: 65536\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	home := testConfigHome(t, "")
+	writeConfigHome(t, home, "context-window: 65536\n")
 	opts := options{configDir: home}
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
@@ -862,7 +1051,7 @@ func TestApplyConfigContextWindow(t *testing.T) {
 // each mapped across to mcp.ServerConfig, so the composition root can connect them.
 func TestApplyConfigMCPServers(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := testConfigHome(t, "")
 	const configYAML = `mcp-servers:
   - name: github
     transport: stdio
@@ -873,9 +1062,7 @@ func TestApplyConfigMCPServers(t *testing.T) {
     transport: streamable-http
     endpoint: https://mcp.example.com/
 `
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigHome(t, home, configYAML)
 	opts := options{configDir: home}
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
@@ -902,16 +1089,6 @@ func TestApplyConfigServers(t *testing.T) {
 		want       []serverEntry
 	}{
 		{
-			name:       "no config file at all ⇒ no servers",
-			configYAML: "",
-			want:       nil,
-		},
-		{
-			name:       "a config without the block ⇒ no servers",
-			configYAML: "model: fake\n",
-			want:       nil,
-		},
-		{
 			name: "every entry resolves in file order, with all four fields",
 			configYAML: `servers:
   - name: workstation
@@ -921,6 +1098,7 @@ func TestApplyConfigServers(t *testing.T) {
     endpoint: https://llm.example.com
     api-key: sk-rented-token
     model: qwen2.5-coder
+server: workstation
 `,
 			want: []serverEntry{
 				{Name: "workstation", Endpoint: "http://192.168.64.1:1111", Model: "gpt-oss-20b"},
@@ -929,19 +1107,14 @@ func TestApplyConfigServers(t *testing.T) {
 		},
 		{
 			name:       "api-key and model are optional (a keyless server, no hint)",
-			configYAML: "servers:\n  - name: laptop\n    endpoint: http://127.0.0.1:1111\n",
+			configYAML: "servers:\n  - name: laptop\n    endpoint: http://127.0.0.1:1111\nserver: laptop\n",
 			want:       []serverEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			home := t.TempDir()
-			if tt.configYAML != "" {
-				if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
-					t.Fatalf("write config: %v", err)
-				}
-			}
+			home := testConfigHome(t, tt.configYAML)
 			opts := options{configDir: home}
 			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 				t.Fatalf("applyConfig: %v", err)
@@ -998,10 +1171,8 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			home := t.TempDir()
-			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
-				t.Fatalf("write config: %v", err)
-			}
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.configYAML)
 			opts := options{configDir: home}
 			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 			if err == nil {
@@ -1034,7 +1205,7 @@ func TestApplyConfigLlamaLauncher(t *testing.T) {
 		},
 		{
 			name:       "a config without the key ⇒ empty (auto-detect)",
-			configYAML: "model: fake\n",
+			configYAML: "mode: plan\n",
 			want:       "",
 		},
 		{
@@ -1056,11 +1227,9 @@ func TestApplyConfigLlamaLauncher(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			home := t.TempDir()
+			home := testConfigHome(t, "")
 			if tt.configYAML != "" {
-				if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
-					t.Fatalf("write config: %v", err)
-				}
+				writeConfigHome(t, home, tt.configYAML)
 			}
 			opts := options{configDir: home}
 			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
@@ -1078,10 +1247,8 @@ func TestApplyConfigLlamaLauncher(t *testing.T) {
 // even with both spellings set in the environment. This is the `servers:` assertion, one key over.
 func TestApplyConfigLlamaLauncherIsFileOnly(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("model: fake\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	home := testConfigHome(t, "")
+	writeConfigHome(t, home, "mode: plan\n")
 	getenv := func(name string) string {
 		if strings.Contains(name, "LAUNCHER") {
 			return "/from/the/environment.yaml"
@@ -1122,10 +1289,8 @@ func TestApplyConfigLlamaLauncherInvalid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			home := t.TempDir()
-			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
-				t.Fatalf("write config: %v", err)
-			}
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.configYAML)
 			opts := options{configDir: home}
 			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 			if err == nil {
@@ -1146,15 +1311,13 @@ func TestApplyConfigLlamaLauncherInvalid(t *testing.T) {
 // end-to-end.
 func TestApplyConfigMechanisms(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := testConfigHome(t, "")
 	const configYAML = `mechanisms:
   validate: true
   syntax: true
   truncate_history: false
 `
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigHome(t, home, configYAML)
 	opts := options{configDir: home}
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
@@ -1170,7 +1333,7 @@ func TestApplyConfigMechanisms(t *testing.T) {
 // byte-identical anchor: a config without the block behaves exactly as before.
 func TestApplyConfigNoMechanismsIsNil(t *testing.T) {
 	t.Parallel()
-	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
+	opts := options{configDir: testConfigHome(t, "")} // nothing but a startup server
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
@@ -1184,16 +1347,14 @@ func TestApplyConfigNoMechanismsIsNil(t *testing.T) {
 // mechanisms, so this proves the config surface lands end-to-end.
 func TestApplyConfigValidatedSets(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := testConfigHome(t, "")
 	const configYAML = `validated-sets:
   enable: false
   alias:
     gemma-4-e4b-it-qat: gemma-4-e4b-it-qat
     my-quant: gemma-4-e4b-it-qat
 `
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigHome(t, home, configYAML)
 	opts := options{configDir: home}
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
@@ -1212,16 +1373,14 @@ func TestApplyConfigValidatedSets(t *testing.T) {
 // the blocks around it, so the composition root can build the ladder's mechanisms from them.
 func TestApplyConfigPresent(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := testConfigHome(t, "")
 	const configYAML = `present:
   auto-open: false
   command: "zed {path}"
   port: 8934
   host: 192.168.64.2
 `
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigHome(t, home, configYAML)
 	opts := options{configDir: home}
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
@@ -1238,11 +1397,9 @@ func TestApplyConfigPresent(t *testing.T) {
 // `auto-open: false` and silently disable the rung the feature exists for.
 func TestApplyConfigPresentPartialKeepsDefaults(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := testConfigHome(t, "")
 	const configYAML = "present:\n  port: 8934\n"
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigHome(t, home, configYAML)
 	opts := options{configDir: home}
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
@@ -1259,7 +1416,7 @@ func TestApplyConfigPresentPartialKeepsDefaults(t *testing.T) {
 // port, and a detected advertise host.
 func TestApplyConfigNoPresentDefaultsAutoOpen(t *testing.T) {
 	t.Parallel()
-	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
+	opts := options{configDir: testConfigHome(t, "")} // nothing but a startup server
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
@@ -1274,11 +1431,9 @@ func TestApplyConfigNoPresentDefaultsAutoOpen(t *testing.T) {
 func TestApplyConfigPresentPortRangeErrors(t *testing.T) {
 	t.Parallel()
 	for _, port := range []string{"-1", "65536", "99999"} {
-		home := t.TempDir()
+		home := testConfigHome(t, "")
 		configYAML := "present:\n  port: " + port + "\n"
-		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-			t.Fatalf("write config: %v", err)
-		}
+		writeConfigHome(t, home, configYAML)
 		opts := options{configDir: home}
 		err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 		if err == nil {
@@ -1292,11 +1447,9 @@ func TestApplyConfigPresentPortRangeErrors(t *testing.T) {
 
 	// The boundaries themselves are valid: 0 (ephemeral, the default) and 65535.
 	for _, port := range []string{"0", "65535"} {
-		home := t.TempDir()
+		home := testConfigHome(t, "")
 		configYAML := "present:\n  port: " + port + "\n"
-		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-			t.Fatalf("write config: %v", err)
-		}
+		writeConfigHome(t, home, configYAML)
 		opts := options{configDir: home}
 		if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 			t.Errorf("applyConfig with present.port %s: %v", port, err)
@@ -1341,17 +1494,15 @@ system-prompt-models:
 		},
 		{
 			name:       "no system-prompt key leaves the zero value — no prompt",
-			configYAML: "model: fake\n",
+			configYAML: "mode: plan\n",
 			want:       systemPromptSettings{},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			home := t.TempDir()
-			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
-				t.Fatalf("write config: %v", err)
-			}
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.configYAML)
 			opts := options{configDir: home}
 			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 				t.Fatalf("applyConfig: %v", err)
@@ -1432,7 +1583,7 @@ func TestResolveSystemPrompt(t *testing.T) {
 	userHome := t.TempDir()
 	t.Setenv("HOME", userHome)        // POSIX
 	t.Setenv("USERPROFILE", userHome) // Windows
-	home := t.TempDir()               // the apogee home a relative path resolves against
+	home := testConfigHome(t, "")     // the apogee home a relative path resolves against
 	absFile := filepath.Join(t.TempDir(), "absolute.md")
 
 	files := map[string]string{
@@ -1560,7 +1711,7 @@ func TestApplyConfigContextFiles(t *testing.T) {
 		},
 		{
 			name:       "a config without the block ⇒ the default name",
-			configYAML: "model: fake\n",
+			configYAML: "mode: plan\n",
 			want:       []string{"AGENTS.md"},
 		},
 		{
@@ -1597,11 +1748,9 @@ func TestApplyConfigContextFiles(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			home := t.TempDir()
+			home := testConfigHome(t, "")
 			if tt.configYAML != "" {
-				if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
-					t.Fatalf("write config: %v", err)
-				}
+				writeConfigHome(t, home, tt.configYAML)
 			}
 			opts := options{configDir: home}
 			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
@@ -1691,10 +1840,8 @@ func TestApplyConfigContextFilesInvalidNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			home := t.TempDir()
-			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
-				t.Fatalf("write config: %v", err)
-			}
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.configYAML)
 			opts := options{configDir: home}
 			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 			if err == nil {
@@ -1714,11 +1861,9 @@ func TestApplyConfigContextFilesInvalidNames(t *testing.T) {
 // layer may touch the filesystem to decide this.
 func TestApplyConfigContextFilesDoesNotRequireTheFilesToExist(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := testConfigHome(t, "")
 	const configYAML = "context-files:\n  names: [AGENTS.md, docs/nothing-here.md]\n"
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigHome(t, home, configYAML)
 	opts := options{configDir: home}
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
@@ -1735,15 +1880,13 @@ func TestApplyConfigContextFilesDoesNotRequireTheFilesToExist(t *testing.T) {
 // to parse.
 func TestApplyConfigUI(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := testConfigHome(t, "")
 	const configYAML = `ui:
   spinner: glitter
   spinner-color: false
   show-scrollbar: false
 `
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigHome(t, home, configYAML)
 	opts := options{configDir: home}
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
@@ -1793,10 +1936,8 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			home := t.TempDir()
-			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.yaml), 0o600); err != nil {
-				t.Fatalf("write config: %v", err)
-			}
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.yaml)
 			opts := options{configDir: home}
 			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 				t.Fatalf("applyConfig: %v", err)
@@ -1813,7 +1954,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 // nothing".
 func TestApplyConfigNoUIDefaults(t *testing.T) {
 	t.Parallel()
-	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
+	opts := options{configDir: testConfigHome(t, "")} // nothing but a startup server
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
@@ -1850,11 +1991,9 @@ func TestCursorShapeConfigParses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			home := t.TempDir()
+			home := testConfigHome(t, "")
 			if tt.yaml != "" {
-				if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.yaml), 0o600); err != nil {
-					t.Fatalf("write config: %v", err)
-				}
+				writeConfigHome(t, home, tt.yaml)
 			}
 			opts := options{configDir: home}
 			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
@@ -1890,10 +2029,8 @@ func TestCursorShapeConfigParses(t *testing.T) {
 // user sees carries it.
 func TestApplyConfigUIUnknownSpinnerErrors(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("ui:\n  spinner: sparkle\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	home := testConfigHome(t, "")
+	writeConfigHome(t, home, "ui:\n  spinner: sparkle\n")
 	opts := options{configDir: home}
 	err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 	if err == nil {
@@ -1907,10 +2044,8 @@ func TestApplyConfigUIUnknownSpinnerErrors(t *testing.T) {
 
 	// Every style this build knows is accepted, so the check rejects only what it should.
 	for _, style := range []tui.SpinnerStyle{tui.SpinnerSnake, tui.SpinnerGlitter, tui.SpinnerClassic} {
-		home := t.TempDir()
-		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("ui:\n  spinner: "+string(style)+"\n"), 0o600); err != nil {
-			t.Fatalf("write config: %v", err)
-		}
+		home := testConfigHome(t, "")
+		writeConfigHome(t, home, "ui:\n  spinner: "+string(style)+"\n")
 		opts := options{configDir: home}
 		if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 			t.Errorf("applyConfig with ui.spinner: %s: %v", style, err)
@@ -1922,7 +2057,7 @@ func TestApplyConfigUIUnknownSpinnerErrors(t *testing.T) {
 // applies (≥ medium confidence) or is offered (low) without any config.
 func TestApplyConfigNoValidatedSetsDefaultsOn(t *testing.T) {
 	t.Parallel()
-	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
+	opts := options{configDir: testConfigHome(t, "")} // nothing but a startup server
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
@@ -1940,7 +2075,7 @@ func TestApplyConfigNoValidatedSetsDefaultsOn(t *testing.T) {
 // no loop consumer yet; this proves the config surface lands end-to-end).
 func TestApplyConfigModelProfile(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := testConfigHome(t, "")
 	const configYAML = `model-profile:
   tool-call-format: markdown-fenced
   thinking:
@@ -1948,9 +2083,7 @@ func TestApplyConfigModelProfile(t *testing.T) {
     start: "<think>"
     end: "</think>"
 `
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(configYAML), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigHome(t, home, configYAML)
 	opts := options{configDir: home}
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
@@ -1969,7 +2102,7 @@ func TestApplyConfigModelProfile(t *testing.T) {
 // inline thinking (today's behaviour), the byte-identical anchor this item must preserve.
 func TestApplyConfigNoProfileIsZero(t *testing.T) {
 	t.Parallel()
-	opts := options{configDir: t.TempDir()} // empty dir → no config.yaml
+	opts := options{configDir: testConfigHome(t, "")} // nothing but a startup server
 	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
@@ -1982,10 +2115,8 @@ func TestApplyConfigNoProfileIsZero(t *testing.T) {
 // not set, and the config file is then read from that env-resolved home.
 func TestApplyConfigEnvDirsAndFile(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("model: m-file\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	home := testConfigHome(t, "")
+	writeConfigHome(t, home, "cursor-shape: bar\n")
 	ws := t.TempDir()
 	getenv := func(k string) string {
 		switch k {
@@ -2007,15 +2138,15 @@ func TestApplyConfigEnvDirsAndFile(t *testing.T) {
 	if opts.workspace != ws {
 		t.Errorf("workspace = %q; want the APOGEE_WORKSPACE value %q", opts.workspace, ws)
 	}
-	if opts.model != "m-file" {
-		t.Errorf("model = %q; want it read from the env-resolved config home", opts.model)
+	if opts.cursorShape != "bar" {
+		t.Errorf("cursorShape = %q; want it read from the env-resolved config home", opts.cursorShape)
 	}
 }
 
 // An explicit --config flag wins over APOGEE_CONFIG (the flag is not overlaid by env).
 func TestApplyConfigFlagDirBeatsEnvDir(t *testing.T) {
 	t.Parallel()
-	flagHome := t.TempDir()
+	flagHome := testConfigHome(t, "")
 	getenv := func(k string) string {
 		if k == envConfig {
 			return filepath.Join(t.TempDir(), "ignored")
@@ -2035,10 +2166,8 @@ func TestApplyConfigFlagDirBeatsEnvDir(t *testing.T) {
 // A malformed config file is a hard error — a typo'd setting must not be silently ignored.
 func TestApplyConfigMalformedFileErrors(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("endpoint: [not a string\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	home := testConfigHome(t, "")
+	writeConfigHome(t, home, "endpoint: [not a string\n")
 	opts := options{configDir: home}
 	err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 	if err == nil {
@@ -2092,8 +2221,8 @@ func TestLoadFileConfigReadErrorPropagates(t *testing.T) {
 // overrideSources must agree with the LAYERS themselves about which source beat the config file:
 // the marker it feeds tells the user their file's value is not the one in force, so a marker naming
 // a source that did not win would be a lie in both directions. The cases mirror flagLayer's and
-// envLayer's own predicates, including the two shapes that are easy to get wrong — an empty
-// variable is not a setting, and api-key has no flag to be beaten by.
+// envLayer's own predicates, including the shape that is easy to get wrong — an empty variable is
+// not a setting.
 func TestOverrideSourcesNameTheWinningSource(t *testing.T) {
 	t.Parallel()
 
@@ -2109,8 +2238,8 @@ func TestOverrideSourcesNameTheWinningSource(t *testing.T) {
 		},
 		{
 			name: "an environment variable beats the file",
-			env:  map[string]string{envModel: "qwen2.5-coder"},
-			want: map[string]configSource{"model": sourceEnv},
+			env:  map[string]string{envServer: "workstation"},
+			want: map[string]configSource{"server": sourceEnv},
 		},
 		{
 			name:    "an explicitly-set flag beats its own variable",
@@ -2120,22 +2249,22 @@ func TestOverrideSourcesNameTheWinningSource(t *testing.T) {
 		},
 		{
 			name: "an empty variable is not a setting",
-			env:  map[string]string{envEndpoint: ""},
+			env:  map[string]string{envServer: ""},
 			want: map[string]configSource{},
 		},
 		{
-			// There is no --api-key to win with, so the variable stands even when a same-named flag
-			// claims to have been set: the secret rides the file/env order alone.
-			name:    "api-key has no flag to be beaten by",
-			changed: map[string]bool{"api-key": true},
-			env:     map[string]string{envAPIKey: "sk-token"},
-			want:    map[string]configSource{"api-key": sourceEnv},
+			// The raw startup overrides name no config key since ADR 0036, so nothing marks a row
+			// for them: a marker for a key the pane does not show would point at nothing.
+			name:    "the raw endpoint override marks no row",
+			changed: map[string]bool{"endpoint": true},
+			env:     map[string]string{envEndpoint: "http://box:1111", envAPIKey: "sk-token"},
+			want:    map[string]configSource{},
 		},
 		{
 			name:    "several keys are marked independently",
 			changed: map[string]bool{"bypass": true},
-			env:     map[string]string{envEndpoint: "http://box:1111"},
-			want:    map[string]configSource{"bypass": sourceFlag, "endpoint": sourceEnv},
+			env:     map[string]string{envServer: "workstation"},
+			want:    map[string]configSource{"bypass": sourceFlag, "server": sourceEnv},
 		},
 	}
 
@@ -2159,17 +2288,17 @@ func TestOverrideSourcesNameTheWinningSource(t *testing.T) {
 func TestApplyConfigRecordsOverrideSources(t *testing.T) {
 	t.Parallel()
 	getenv := func(name string) string {
-		if name == envModel {
-			return "qwen2.5-coder"
+		if name == envServer {
+			return testServerName
 		}
 		return ""
 	}
-	opts := options{configDir: t.TempDir(), mode: "auto"}
+	opts := options{configDir: testConfigHome(t, ""), mode: "auto"}
 	changed := func(name string) bool { return name == "mode" }
 	if err := applyConfig(&opts, changed, getenv, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("applyConfig: %v", err)
 	}
-	want := map[string]configSource{"model": sourceEnv, "mode": sourceFlag}
+	want := map[string]configSource{"server": sourceEnv, "mode": sourceFlag}
 	if !reflect.DeepEqual(opts.overrides, want) {
 		t.Errorf("opts.overrides = %v; want %v", opts.overrides, want)
 	}
