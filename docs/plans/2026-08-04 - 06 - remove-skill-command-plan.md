@@ -56,7 +56,12 @@
   - The active plan `2026-08-04 - 04 - slash-menu-relevance-ranking-plan.md:53`
     mentions the `/skill <arg>` picker inheriting the ranking; that clause becomes
     inert after this removal. Saved plans are never rewritten — flagged here for the
-    owner, not edited.
+    owner, not edited. **Correction (2026-08-05):** superseded by FOLLOW-UP FU2
+    (below), which annotated the passage instead of only flagging it. That plan
+    completed and was archived the same day, so the clause now sits at `:59` of
+    `docs/plans/archived/2026-08-04 - 04 - slash-menu-relevance-ranking-plan.md`,
+    with a dated inert-clause note *appended* below it at `:66-70` (commit
+    `8363641`) — an addition, not a rewrite, so the never-rewrite rule above stands.
   - No version identifier changes (see closing note).
   - Item 4 additions: no retroactive scrub of already-recorded `/new`//`/clear`
     lines in `~/.apogee/prompts/*.jsonl` — compaction ages them out; the
@@ -403,6 +408,34 @@ acceptance commands were left untouched, as instructed.
 NOTES (2026-08-05): the "around line 53" locator was stale — the `/skill <arg>` clause sits at
 `:59–60`, the tail of item 1's `skillSuggestions` bullet, and was matched on wording. One dated
 note was appended at the end of that item's **What** block. The whole-file sweep found no other
-`/skill`-verb claim: the acceptance grep's second hit (`autocomplete/skill tests`, now `:71`) is a
+`/skill`-verb claim: the acceptance grep's second hit (`autocomplete/skill tests`, now `:72`) is a
 test-file phrase, not a verb, and the note — which sits immediately above it — says so explicitly
 rather than leaving a bare grep hit uncovered.
+
+## FOLLOW-UP FU3 (post-item-4) — Correct two stale locators inside this plan document
+
+Run-level follow-up work item, not a numbered plan item: two cosmetic inaccuracies
+this run's own FU1/FU2 work left inside this file were corrected before archival —
+the FU2 NOTES line's `autocomplete/skill` locator (`:71` → `:72`) and the out-of-scope
+bullet that still described the ranking plan's `/skill <arg>` clause as flagged-only.
+Documentation only; no other file touched.
+
+NOTES (2026-08-05): both locators were re-verified against
+`docs/plans/archived/2026-08-04 - 04 - slash-menu-relevance-ranking-plan.md` rather than trusted
+from the brief — `autocomplete/skill tests` is at `:72` (`:70` is FU2's own note quoting the same
+phrase), the `/skill <arg>` clause at `:59–60`, and FU2's appended note at `:66-70`, from commit
+`8363641`.
+
+NOTES (2026-08-05): the out-of-scope bullet's original decision was left in place and a dated
+**Correction** sentence appended after it, per the item's instruction not to silently rewrite it.
+That correction also absorbs the tension it would otherwise create with the "Historical records are
+never rewritten … everything under `docs/plans/archived/`" bullet directly above it, by stating
+that FU2 *appended* to the archived file rather than rewriting it — so that bullet needed no edit
+of its own.
+
+NOTES (2026-08-05): the whole-file sweep found no further claim falsified by FU1 or FU2 — FU1's
+target (`docs/design/technical-design.md`) is named nowhere in this plan outside FU1's own section,
+and every remaining `file:line` ref is an item-level locator indexed against the pinned commit
+`5b75c1b`, which the header already declares locators-only. Deliberately NOT touched: the header's
+`- **Status:** TODO (no item executed)` line (`:12`), which is falsified by items 1–4 rather than
+by FU1/FU2 and is the archival step's to set — flagged, not edited.
