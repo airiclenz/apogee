@@ -183,7 +183,10 @@ func (m Model) recallPastNewest() Model {
 // recordSend records one input the human sent: into the store off the Update loop (the fire-and-
 // forget Cmd) and into the in-memory entries, so ↑ immediately after sending recalls it without
 // waiting for a reload. Every send path calls it — a message, a whole-input /command, an
-// interjection — and the ask-answer path deliberately does not (ratified decision 3).
+// interjection — and the ask-answer path deliberately does not (ratified decision 3). The one
+// carve-out inside those paths is the session-reset pair /clear and /new: they are filtered by
+// their callers, on parsedInput.recallable, which keeps this function command-agnostic (the policy
+// is the registry's, and the store below it is command-agnostic too).
 //
 // The entries slice is REPLACED, never appended into (ADR 0011): the Model this returns is a copy
 // that will be folded back, and an in-place append would be seen through the shared backing array by

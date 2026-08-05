@@ -99,6 +99,23 @@ func TestCommandSpecsReadAlphabetically(t *testing.T) {
 	}
 }
 
+// Drift guard on the recall carve-out: exactly the session-reset pair is withheld from the walk.
+// The flag is easy to copy onto a neighbouring row and impossible to notice once there — a verb
+// that quietly stopped being recallable would look like recall losing lines — so the set is pinned
+// by name rather than by count.
+func TestOnlyTheSessionResetPairIsNotRecallable(t *testing.T) {
+	var got []string
+	for _, spec := range commandSpecs {
+		if spec.noRecall {
+			got = append(got, spec.name)
+		}
+	}
+
+	if want := []string{"clear", "new"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("noRecall verbs = %v, want exactly %v — every other sent line stays recallable", got, want)
+	}
+}
+
 // The two verbs that act on the session's server are ordinary rows: named for what they act on,
 // /stop-server and /unload-model carry no ambiguity to guard against, so the dropdown offers them on
 // the bare "/" and on every prefix of their own names — a verb the human cannot discover is a verb

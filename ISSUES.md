@@ -4,10 +4,6 @@ X: Executed
 
 - [ ] I'd like a full screen menu for all available settings when running the slash command /settings. This needs grilling.
 
-- [ ] Collapsable tool calls print too much of the tool's content if the first line is very long. apogee just wraps the line and prints however many lines it needs. I'd like to limit the apogee tool printout - when collapsed - to 3 lines. Important information like the amount of tool calls for a sub agent need to stay visible (maybe print them in a separated extra line?)
-
-- [ ] `/new` should not be recorded as a recallable prompt
-
 - [ ] Currently I cannot see how much of it's context a sub agent has used.
 
 - [ ] keyboard path for collapse/expand: a block-cursor mode (↑/↓ move a highlighted block, enter toggles, esc leaves). Deliberately deferred from the collapse wave — layout.md "Collapsed and expanded blocks" keeps toggling mouse-only for now, on the same precedent that keeps transcript selection mouse-only.

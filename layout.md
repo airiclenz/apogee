@@ -1102,7 +1102,9 @@ has taken **no other action in**: any keypress that is not one of those two arro
 non-key edit — a paste, a click in the box, a window resize, the ask borrowing the box — ends
 recall mode and the arrows are the caret's again. A typed draft never starts a walk. It is live in
 the two states where the box is the human's own, idle and running, and never under an ask, where
-↑/↓ move the choice highlight instead. **A recalled `/command` opens no dropdown**: loading an entry
+↑/↓ move the choice highlight instead. **The session-reset pair `/new`/`/clear` never enters the
+walk**: those lines are sent like any other command and recorded like none of them, so ↑ cannot
+hand back a line whose ⏎ wipes the session. **A recalled `/command` opens no dropdown**: loading an entry
 dismisses the suggestion pane rather than re-deriving it, because that pane claims ↑/↓ before recall
 ever sees them — the walk would otherwise be stolen by its own first entry. The pane comes back the
 moment the human acts, which is the same moment the arrows do. The empty box advertises the gesture

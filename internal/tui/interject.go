@@ -168,7 +168,13 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 		// Nothing else was typed (the whole-input command rule), so emptying the box is exactly
 		// stripping the verb — submit's reading at idle, and runCommand touches the editor in neither.
 		m.promptEditor.reset()
-		m, record = m.recordSend(sent)
+		if parsed.recallable() {
+			// The same carve-out submit makes, so noRecall means "never recorded" rather than
+			// "not recorded at idle". No verb reaches here carrying the flag today — /clear and
+			// /new are both idle-only, so commandRunnable refuses them above — which is exactly
+			// why the guard is written now: it costs nothing and it cannot be forgotten later.
+			m, record = m.recordSend(sent)
+		}
 		next, cmd := m.runCommand(parsed)
 		return next, tea.Batch(cmd, record)
 	}

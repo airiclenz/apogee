@@ -55,7 +55,7 @@ type parsedInput struct {
 
 // commandSpec is one verb of the "/" namespace: what the parser does with it and what the
 // dropdown shows for it. name is the verb without its leading slash; summary is the one-line
-// description the dropdown displays beside it. The two flags say how the verb behaves:
+// description the dropdown displays beside it. The three flags say how the verb behaves:
 //
 //   - takesArgs — the verb reads what follows it, and parseInput hands it the tokens in
 //     parsedInput.args. /confine, whose grammar is richer than a token list, keeps its dedicated
@@ -66,11 +66,18 @@ type parsedInput struct {
 //     no engine mutation, no worker of its own, no quiescent boundary needed. Every other verb is
 //     idle-only and earns commandsAtIdleNote mid-run instead of running (parsedInput.safeWhileRunning
 //     is where the flag is read, and /confine's reporting FORM is the one nuance it adds).
+//   - noRecall — a sent invocation of this verb is NEVER recorded as a recallable prompt, in memory
+//     or on disk. It is carried by the session-reset pair /clear and /new alone: recall exists so a
+//     line can be handed back and re-sent with one ⏎, and a walk that hands back a session wipe
+//     arms that gesture with the one action nothing undoes. Every other sent line — messages,
+//     Interjections, every other whole-line /command — stays recallable (parsedInput.recallable is
+//     where the flag is read).
 type commandSpec struct {
 	name         string
 	summary      string
 	takesArgs    bool
 	whileRunning bool
+	noRecall     bool
 }
 
 // commandSpecs is THE registry of "/" verbs, in display order (alphabetical — see below): one table
@@ -117,12 +124,12 @@ type commandSpec struct {
 // TestCommandSpecsReadAlphabetically pins it, so a row added out of place fails loudly instead of
 // quietly un-sorting the menu.
 var commandSpecs = []commandSpec{
-	{name: "clear", summary: "reset the model's memory of this session"},
+	{name: "clear", summary: "reset the model's memory of this session", noRecall: true},
 	{name: "compact", summary: "summarise the conversation to reclaim context"},
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
 	{name: "continue", summary: "ask the model to keep going"},
 	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true},
-	{name: "new", summary: "start a fresh conversation (same as /clear)"},
+	{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true},
 	{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true},
 	{name: "schedule", summary: "run a prompt on a cycle (bare = list what is live)", takesArgs: true, whileRunning: true},
 	{name: "schedule-stop", summary: "take a schedule off the clock", whileRunning: true},
@@ -241,6 +248,16 @@ func commandByName(name string) (commandSpec, bool) {
 func (p parsedInput) safeWhileRunning() bool {
 	spec, ok := commandByName(p.command)
 	return ok && spec.whileRunning && p.confine.action == confineStatus
+}
+
+// recallable reports whether this parsed command LINE is recorded as a recallable prompt. It is
+// the one place the noRecall flag is read, so every send path that records agrees on the answer:
+// an unrecognised verb never reaches a record site as a kindCommand, and reads recallable for the
+// same reason a missing spec reads not-safe-while-running — the table is the authority, and a name
+// it does not carry carries no policy either.
+func (p parsedInput) recallable() bool {
+	spec, ok := commandByName(p.command)
+	return !ok || !spec.noRecall
 }
 
 // matchCommand reports the recognised command verb when trimmed's first whitespace token is

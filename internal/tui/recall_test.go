@@ -387,6 +387,42 @@ func TestRecallRecordsEverySendPath(t *testing.T) {
 	}
 }
 
+// The session-reset pair is the carve-out: /clear and /new are sent like any other command line and
+// recorded like none of them, because a walk that hands one back arms ⏎ with the one action nothing
+// undoes. Neither half of the record moves — not the in-memory list the walk reads, not the disk
+// append — and the recallable line sent before each proves the store is otherwise live.
+func TestRecallNeverRecordsTheSessionResetPair(t *testing.T) {
+	t.Parallel()
+
+	for _, verb := range []string{"/clear", "/new"} {
+		t.Run(verb, func(t *testing.T) {
+			t.Parallel()
+
+			// /version first, as the recorded-command control: it reports on the spot and leaves the
+			// model idle, which is where the reset pair is reachable at all (both are idle-only).
+			m, host := recallModel(t)
+			m.input.SetValue("/version")
+			m, cmd := stepCmd(t, m, keyEnter())
+			drainCmd(t, m, cmd)
+			if m.state != stateIdle {
+				t.Fatalf("precondition: state = %v after /version, want idle", m.state)
+			}
+
+			m.input.SetValue(verb)
+			m, cmd = stepCmd(t, m, keyEnter())
+			drainCmd(t, m, cmd)
+
+			want := []string{"/version"}
+			if got := host.recorded(); !reflect.DeepEqual(got, want) {
+				t.Errorf("host recorded %v after %s; want %v — the reset verb is never appended", got, verb, want)
+			}
+			if got := m.recall.entries; !reflect.DeepEqual(got, want) {
+				t.Errorf("entries = %v after %s; want %v — nor does it enter the walk in memory", got, verb, want)
+			}
+		})
+	}
+}
+
 // The record is in memory the moment the send is: ↑ right after sending hands the line back without
 // the store being read a second time (and it does so while the worker runs, where recall is live too).
 func TestRecallSentPromptIsRecallableWithoutAReload(t *testing.T) {

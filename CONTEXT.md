@@ -272,7 +272,8 @@ at idle, and while the agent runs (where ⏎ stages an [Interjection](#turns-and
 **not** live under an [Ask-user](#safety-and-autonomy) prompt — there ↑/↓ move the choice
 highlight. What is recorded is what was *sent*: ordinary messages, whole-line `/command`
 invocations, and Interjections — **not** Ask answers, which answer the model's question rather than
-speak the human's own input. Storage is one JSONL file per workspace under the config home
+speak the human's own input, and **not** the session-reset pair `/new`/`/clear`, which is
+deliberately never recorded so a walk cannot hand back a line whose ⏎ wipes the session. Storage is one JSONL file per workspace under the config home
 (`~/.apogee/prompts/<digest-of-workspace-path>.jsonl`, `internal/recall`) — nothing is written into
 the project tree; consecutive duplicates collapse, and a start-up load hands back the newest 1000.
 It is **driver-side state only**

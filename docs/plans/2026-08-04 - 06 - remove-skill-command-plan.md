@@ -285,11 +285,30 @@ here anyway since `config.yaml` changes in this item).
 
 **Commit:** `docs: retire /skill from the living docs, amend ADR 0027, close both ISSUES entries`
 
-## 4. Never record `/new` and `/clear` as recallable prompts
+## 4. Never record `/new` and `/clear` as recallable prompts — ✅ DONE (2026-08-05)
 
 Independent of items 1–3 (any order; the shared files — `command.go`,
 `command_test.go`, `CHANGELOG.md`, `ISSUES.md` — are touched in disjoint regions).
 Authoritative source: `ISSUES.md:9` plus the ratified design call in the header.
+
+NOTES (2026-08-05): the flag is read through one new pure method, `parsedInput.recallable()`
+(`command.go`, beside `safeWhileRunning`), rather than each record site calling `commandByName`
+itself — same shape as the existing per-command policy, and it keeps the two guarded sites unable to
+disagree. Consequence: `internal/tui/recall.go` is touched too, though the item's file list does not
+name it — `recordSend`'s doc comment asserted "Every send path calls it", which this change makes
+false; the added clause states the carve-out and where it is applied (comment-only, the function
+stays command-agnostic as the out-of-scope note requires).
+
+NOTES (2026-08-05): the new recall coverage is a SIBLING test
+(`TestRecallNeverRecordsTheSessionResetPair`, table over both verbs) rather than an extension of
+`TestRecallRecordsEverySendPath` — the item allowed either. It sends `/version` first as the
+recorded-command control because that verb reports on the spot and leaves the model idle, which is
+where the reset pair is reachable at all. Verified sensitive: with the `submit()` guard forced open
+the test fails on both halves of the record.
+
+NOTES (2026-08-05): `make check` writes unrelated `/go.mod` hash lines into `go.sum` (same churn as
+`ec91f89`); reverted, since it belongs to no item here. A plain `go build ./...` + `go test` leaves
+it clean.
 
 **What:** Today every sent line is recorded: `submit()` calls
 `recordSend(sent)` (`internal/tui/model.go:1150`) one line before `runCommand`

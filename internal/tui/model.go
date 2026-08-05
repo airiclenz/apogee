@@ -1146,7 +1146,11 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		// box is exactly stripping the verb. runCommand does not touch the editor: its other caller,
 		// the dropdown's accept path, cuts the token out and deliberately keeps the rest of the draft.
 		m.promptEditor.reset()
-		m, record = m.recordSend(sent) // a /command line is an input the human sent (decision 3)
+		if parsed.recallable() {
+			// A /command line is an input the human sent (decision 3) — except the session-reset
+			// pair, whose noRecall flag keeps it out of the walk entirely (commandSpec).
+			m, record = m.recordSend(sent)
+		}
 		next, cmd := m.runCommand(parsed)
 		return next, tea.Batch(cmd, record)
 	}

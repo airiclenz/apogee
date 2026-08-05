@@ -22,6 +22,15 @@ point is a **minor** bump, not a breaking change.
     the `/` menu while the model worked even though picking it there worked fine. No surviving verb
     is menu-only, so the tag now says what it means everywhere it appears.
 
+### Fixed
+
+- **`/new` and `/clear` are no longer recorded as recallable prompts.** Walking back with `↑` could
+  land on the session reset you typed earlier, one `⏎` away from wiping the conversation again —
+  recall exists to re-send a line, and that is the one line where re-sending is never what you
+  meant. The session-reset pair is now sent like any other command and recorded like none of them,
+  in memory and on disk. Everything else you send stays recallable, `/version` and the other
+  whole-line commands included.
+
 ## [0.11.0] — 2026-08-05
 
 ### Added
