@@ -70,7 +70,7 @@
 
 ---
 
-## 1. Domain + tool schema: the `multi_select` opt-in
+## 1. Domain + tool schema: the `multi_select` opt-in — ✅ DONE (2026-08-05)
 
 **What:** Add the additive flag end-to-end below the TUI.
 - `internal/domain/ask.go`: new field `MultiSelect bool` on `AskRequest`, doc comment in

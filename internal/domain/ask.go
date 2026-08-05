@@ -36,11 +36,23 @@ type AskRequest struct {
 	// always type a custom answer instead, so Choices never gates the reply, and the chosen
 	// label travels back in AskAnswer.Text (D9) — no Choice index is returned.
 	Choices []string
+
+	// MultiSelect opts the question into several-of-the-above answering: the Driver lets the
+	// human check any number of Choices and returns every chosen label, each on its own line
+	// in AskAnswer.Text (D9 stands — labels, never indices). It is exactly the additive,
+	// non-breaking refinement this struct's freeze-safety anticipated: false (the zero value,
+	// and the absent-on-the-wire case) is the unchanged single-answer question, so no existing
+	// caller, Driver, or reply changes shape. Meaningless without Choices — a multi-select
+	// request with none simply leaves the human nothing to check, which is not an error.
+	MultiSelect bool
 }
 
 // AskAnswer is the human's free-text reply. A STRUCT for the same freeze-safety reason
 // (a post-v1 Choice index is an additive field).
 type AskAnswer struct {
-	// Text is the human's typed answer.
+	// Text is the human's typed answer, or the label they picked from Choices (D9). When the
+	// request was MultiSelect, it carries every chosen label — each on its own line, in the
+	// order the Choices were offered — still as labels, never indices; a single chosen label
+	// is therefore byte-identical to a single-select reply.
 	Text string
 }

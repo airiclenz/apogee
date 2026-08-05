@@ -10,20 +10,22 @@ import (
 
 var askUserSpec = toolSpec{
 	name:        "ask_user",
-	description: "Ask the human a free-text question and get their answer. Use this for a clarification or a decision only the user can make. It is not a tool-approval prompt; it is a direct question to the person. Optionally pass `choices` to offer a few answer options the human can pick from; they may still type a custom answer instead.",
+	description: "Ask the human a free-text question and get their answer. Use this for a clarification or a decision only the user can make. It is not a tool-approval prompt; it is a direct question to the person. Optionally pass `choices` to offer a few answer options the human can pick from; they may still type a custom answer instead. When several choices could apply at once, set multi_select to true so the human can pick more than one.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["question"],
   "properties": {
     "question": {"type": "string", "description": "The question to ask the human. Use this when you need a clarification or a decision only the user can make."},
-    "choices": {"type": "array", "items": {"type": "string"}, "description": "Optional: 2-5 answer options to offer when the question has a natural closed set. An option may be a full sentence — the prompt wraps it — so say what the option MEANS rather than compressing it to a word. The human can always type a custom free-text answer instead, so choices never gate the reply."}
+    "choices": {"type": "array", "items": {"type": "string"}, "description": "Optional: 2-5 answer options to offer when the question has a natural closed set. An option may be a full sentence — the prompt wraps it — so say what the option MEANS rather than compressing it to a word. The human can always type a custom free-text answer instead, so choices never gate the reply."},
+    "multi_select": {"type": "boolean", "description": "Optional: set true when several of the choices may apply at once. The human can then select any number of them, and the answer returns each chosen option on its own line. Leave it unset for a single-answer question."}
   }
 }`),
 }
 
 type askUserArgs struct {
-	Question string   `json:"question"`
-	Choices  []string `json:"choices"`
+	Question    string   `json:"question"`
+	Choices     []string `json:"choices"`
+	MultiSelect bool     `json:"multi_select"`
 }
 
 // AskUser asks the human a free-text question mid-task and returns their typed answer. It
@@ -70,7 +72,11 @@ func (t *AskUser) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 		return errorResult(call.ID, "ask_user is unavailable: no Asker delegate is configured"), nil
 	}
 
-	req := domain.AskRequest{Question: args.Question, Choices: sanitiseChoices(args.Choices)}
+	req := domain.AskRequest{
+		Question:    args.Question,
+		Choices:     sanitiseChoices(args.Choices),
+		MultiSelect: args.MultiSelect,
+	}
 	answer, err := t.asker.Ask(ctx, req)
 	if err != nil {
 		if ctx.Err() != nil {
