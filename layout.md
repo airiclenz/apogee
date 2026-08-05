@@ -40,7 +40,7 @@
     + a new code line
     + another new code line
 
-✦ Sub Agent
+✦ Sub Agent ▾
   ┕ 3 Sub Agents
     Sub Agent 1: Agent Name (= brief one line summary)
     Sub Agent 2: Agent Name (= brief one line summary)
@@ -518,7 +518,8 @@ none, and a sub-agent run's head wears one however short its own report is. The
 background and no bold weight, the quieter sibling of the prompt block's `see more` — so a body line
 that happens to open with `…` can never be mistaken for the affordance beneath it. The sketch at the
 top of this file shows both states side by side: a collapsed `Run ▸` over its remainder marker, and
-a `View Diff ▾` deliberately drawn open so the shape of a full body appears too.
+a `View Diff ▾` and a `Sub Agent ▾` deliberately drawn open so the shape of a full body appears
+too — the run among them, because collapsed it would stand alone and show nothing of what it holds.
 
 **A huge prompt collapses to three rows.** A send whose body soft-wraps to *more than three* rows —
 a submitted `❯` prompt and a delivered `⧖` interjection alike, they are one shape — paints three:

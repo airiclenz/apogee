@@ -404,6 +404,17 @@ whether or not anything is derived there. Dead-machinery removal only: no paint 
 no golden changed. Neither `layout.md` nor the `[Unreleased]` notes ever described the kind (both
 speak of display body kinds and the one budget, which are unchanged), so neither was amended.
 
+NOTES (2026-08-05, run follow-up — not a plan item): the deliberate deferral of the sketch's
+`✦ Sub Agent` block (judgement (b)/(c) above) is OVERRIDDEN by the owner's decision the same day —
+the block now wears an indicator like every other toggleable run head. The "Naming Sub-Agents"
+depiction is untouched; only the indicator was added, plus the one clause in §"Collapsed and
+expanded blocks" that names it beside the diff. The indicator is `▾`, not the `▸` the follow-up's
+title named: the block is drawn WITH its three body rows, and `▸` there would have contradicted both
+the one-line collapsed budget and "a collapsed sub-agent run stands alone" — so the block is drawn
+open on the same footing as `View Diff ▾`, which is what keeps the sketch from contradicting the
+rule it is meant to obey. Documentation only: no code, no golden, no CHANGELOG entry (the
+`[Unreleased]` indicator bullet already covers the rule).
+
 **What.** Read `layout.md`'s two amended sections end-to-end and reconcile any contradiction the
 per-item amendments left (one voice, no orphaned sentence still describing the old star, the old
 caps, or the targetless exemption); read the `[Unreleased]` CHANGELOG entries as one story and
