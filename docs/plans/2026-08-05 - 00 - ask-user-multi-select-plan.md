@@ -100,9 +100,16 @@ unchanged.
 
 **Commit:** `feat(tools): add multi_select opt-in to the ask_user question schema`
 
-## 2. TUI state and keys: checked set, space toggle, multi-answer submit
+## 2. TUI state and keys: checked set, space toggle, multi-answer submit — ✅ DONE (2026-08-05)
 
 Depends on item 1.
+
+NOTES (2026-08-05): the key case is `case "space"`, not the item's literal `case " "` —
+Bubble Tea v2's `Key.String()` explicitly falls back to `Keystroke()` when the key's text is a
+single space (ultraviolet `key.go`), so a space keypress stringifies as `"space"` and `" "` would
+never match. Verified empirically before writing the case; behaviour is otherwise exactly as the
+item specifies. The checked-label extraction lives in a small `checkedLabels` helper on `Model` so
+item 3's renderer can read the same ordering rule rather than re-deriving it.
 
 **What:** In `internal/tui/model.go`:
 - New Model field `askChecked []bool` next to `askSel` (~line 146) — a plain slice, with

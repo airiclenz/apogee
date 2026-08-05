@@ -63,6 +63,7 @@ func stepCmd(t *testing.T, m Model, msg tea.Msg) (Model, tea.Cmd) {
 // keys the model reads by their String() form.
 func keyEnter() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyEnter} }
 func keyEsc() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyEscape} }
+func keySpace() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "} }
 func keyCtrlC() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl} }
 
 // ctrlCQuit drives the two-press Ctrl+C quit gesture: the first press arms it (its disarm
@@ -1780,6 +1781,170 @@ func TestModelAskArrowsWithTextKeepSelection(t *testing.T) {
 	m = step(t, m, keyUp())
 	if m.askSel != before {
 		t.Errorf("askSel moved to %d while text was in the input; want unchanged %d", m.askSel, before)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Multi-select answers — the ␣-toggled checked set (multi_select opt-in)
+// ----------------------------------------------------------------------------
+
+// newMultiAskModel drives a fresh model to awaitingAsk on a MULTI-SELECT question offering
+// alpha/beta/gamma: the fixture every checked-set test below starts from.
+func newMultiAskModel(t *testing.T) (Model, chan domain.AskAnswer) {
+	t.Helper()
+	return newAskModel(t, domain.AskRequest{
+		Question:    "which ones?",
+		Choices:     []string{"alpha", "beta", "gamma"},
+		MultiSelect: true,
+	})
+}
+
+// ␣ ticks the highlighted row and ticks it back off, follows the ↑/↓ highlight, and — the part
+// that makes it a KEY rather than a character — never reaches the answer box.
+func TestModelAskMultiSelectSpaceToggles(t *testing.T) {
+	m, _ := newMultiAskModel(t)
+	if len(m.askChecked) != 3 {
+		t.Fatalf("askChecked = %v, want one slot per offered choice", m.askChecked)
+	}
+
+	m = step(t, m, keySpace())
+	if !m.askChecked[0] {
+		t.Errorf("space did not tick the highlighted row: %v", m.askChecked)
+	}
+	if got := m.input.Value(); got != "" {
+		t.Errorf("box = %q, want it untouched — ␣ is the toggle key here, not a character", got)
+	}
+
+	m = step(t, m, keySpace())
+	if m.askChecked[0] {
+		t.Errorf("space did not un-tick the highlighted row: %v", m.askChecked)
+	}
+
+	m = step(t, m, keyDown())
+	m = step(t, m, keySpace())
+	if m.askChecked[0] || !m.askChecked[1] {
+		t.Errorf("askChecked = %v, want the toggle to follow the highlight to row 1", m.askChecked)
+	}
+}
+
+// ⏎ sends every ticked label, one per line, in the order the choices were OFFERED — asserted by
+// ticking them out of order (gamma first, then alpha), because ticking order is exactly what a
+// naive append-as-you-go implementation would leak into the wire format.
+func TestModelAskMultiSelectSendsCheckedLabelsInChoiceOrder(t *testing.T) {
+	m, reply := newMultiAskModel(t)
+
+	m = step(t, m, keyDown())
+	m = step(t, m, keyDown())
+	m = step(t, m, keySpace()) // gamma
+	m = step(t, m, keyUp())
+	m = step(t, m, keyUp())
+	m = step(t, m, keySpace()) // alpha
+
+	m, _ = stepCmd(t, m, keyEnter())
+	if got := takeAnswer(t, reply); got != "alpha\ngamma" {
+		t.Errorf("answer = %q, want %q — newline-joined, in choice order", got, "alpha\ngamma")
+	}
+	if m.askChecked != nil {
+		t.Errorf("askChecked = %v, want it cleared with the answered question", m.askChecked)
+	}
+}
+
+// ⏎ with NOTHING ticked keeps today's single-select fast path as the degenerate case: the
+// highlighted row alone, byte-identical to the reply a single-select question would have sent.
+func TestModelAskMultiSelectWithNothingCheckedSendsTheHighlightedRow(t *testing.T) {
+	m, reply := newMultiAskModel(t)
+
+	m = step(t, m, keyDown())
+	m, _ = stepCmd(t, m, keyEnter())
+	if got := takeAnswer(t, reply); got != "beta" {
+		t.Errorf("answer = %q, want the highlighted label %q", got, "beta")
+	}
+}
+
+// Typing a custom answer REPLACES the checks rather than joining them: ⏎ sends only the typed
+// text. Deleting back to empty restores the offering with the checked set intact, so a stray
+// keystroke never costs the human the ticks they had already made.
+func TestModelAskMultiSelectFreeTextReplacesTheChecks(t *testing.T) {
+	t.Run("typed text is the whole answer", func(t *testing.T) {
+		m, reply := newMultiAskModel(t)
+		m = step(t, m, keySpace()) // alpha ticked, then abandoned for free text
+		m = typeInput(t, m, "neither")
+
+		m, _ = stepCmd(t, m, keyEnter())
+		if got := takeAnswer(t, reply); got != "neither" {
+			t.Errorf("answer = %q, want only the typed text %q", got, "neither")
+		}
+	})
+
+	t.Run("deleting back to empty keeps the ticks", func(t *testing.T) {
+		m, reply := newMultiAskModel(t)
+		m = step(t, m, keySpace()) // alpha
+		m = typeInput(t, m, "hmm")
+		for range "hmm" {
+			m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+		}
+
+		if !m.askChecked[0] {
+			t.Fatalf("askChecked = %v, want the tick to survive the abandoned free text", m.askChecked)
+		}
+		m, _ = stepCmd(t, m, keyEnter())
+		if got := takeAnswer(t, reply); got != "alpha" {
+			t.Errorf("answer = %q, want the surviving tick %q", got, "alpha")
+		}
+	})
+}
+
+// The regression pin for every question that did NOT opt in: on a single-select question ␣ is
+// still a character, so it falls through to the borrowed box and opens a free-text answer, and no
+// checked set is allocated at all.
+func TestModelAskSingleSelectSpaceStillTypes(t *testing.T) {
+	m, reply := newAskModel(t, domain.AskRequest{
+		Question: "which one?",
+		Choices:  []string{"alpha", "beta"},
+	})
+	if m.askChecked != nil {
+		t.Errorf("askChecked = %v, want none on a single-select question", m.askChecked)
+	}
+
+	m = step(t, m, keySpace())
+	if got := m.input.Value(); got != " " {
+		t.Fatalf("box = %q, want the space typed into it as it always was", got)
+	}
+
+	m = typeInput(t, m, "x")
+	m, _ = stepCmd(t, m, keyEnter())
+	if got := takeAnswer(t, reply); got != "x" {
+		t.Errorf("answer = %q, want the trimmed typed text %q", got, "x")
+	}
+}
+
+// An Exchange that dies under a multi-select question takes the checked set with it — no dead set
+// is left for the next question to inherit — and still hands the borrowed draft back (finishWorker
+// owns both, and the second must not have been traded for the first).
+func TestModelAskMultiSelectCancelClearsTheChecks(t *testing.T) {
+	const draft = "the message the question interrupted"
+
+	m := typeInput(t, newTestModel(t), draft)
+	reply := make(chan domain.AskAnswer, 1)
+	m = step(t, m, askReqMsg{Request: domain.AskRequest{
+		Question:    "which ones?",
+		Choices:     []string{"alpha", "beta"},
+		MultiSelect: true,
+	}, Reply: reply})
+	m.cancel = func() {}
+
+	m = step(t, m, keySpace())
+	if !m.askChecked[0] {
+		t.Fatalf("askChecked = %v, want the highlighted row ticked", m.askChecked)
+	}
+
+	m = step(t, m, keyEsc())
+	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+	if m.askChecked != nil {
+		t.Errorf("askChecked = %v, want it cleared with the dead question", m.askChecked)
+	}
+	if got := m.input.Value(); got != draft {
+		t.Errorf("box = %q, want the borrowed draft %q back", got, draft)
 	}
 }
 

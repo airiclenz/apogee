@@ -143,6 +143,14 @@ type Model struct {
 	pending    *approvalReqMsg    // the in-flight Approval while awaitingApproval (P2.4 acts on it)
 	pendingAsk *askReqMsg         // the in-flight ask_user question while awaitingAsk (P3.11)
 	askSel     int                // the highlighted ask_user choice index while awaitingAsk (D5); bare int, no no-copy type (ADR 0011)
+	// askChecked is the ticked set of a MULTI-SELECT ask_user question: one bool per offered
+	// choice, ␣-toggled on the highlighted row, and nil for a single-select question — which has
+	// no checked set at all, so every single-select path stays exactly what it always was. It is
+	// a bare []bool, no self-referential no-copy type, so it rides the value-copied Model
+	// (ADR 0011); the toggle writes it in place, which is safe because the slice is allocated
+	// fresh for each question (the askReqMsg fold) and no copy of the Model outlives the Update
+	// that produced it.
+	askChecked []bool
 	// approvalSel is the highlighted approvalMenu row while awaitingApproval: the row ↑/↓ move and
 	// ⏎ takes. It resets to 0 — Allow, the mockup's default — on every incoming request rather than
 	// persisting across them, because a menu that remembers where the last decision was left points
@@ -540,7 +548,13 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// the question; submitAnswer replies on msg.Reply when the human submits (P3.11).
 		m.state = stateAwaitingAsk
 		m.pendingAsk = &msg
-		m.askSel = 0            // first choice pre-selected while the input is empty (D5); no-op when there are no choices
+		m.askSel = 0 // first choice pre-selected while the input is empty (D5); no-op when there are no choices
+		// A multi-select question opens with nothing ticked and a checked set sized to its
+		// offering; a single-select one carries no checked set at all.
+		m.askChecked = nil
+		if msg.Request.MultiSelect && len(msg.Request.Choices) > 0 {
+			m.askChecked = make([]bool, len(msg.Request.Choices))
+		}
 		m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
 		// The box is BORROWED, not repossessed: whatever the human was part-way through typing is
 		// stashed and handed back when the question lets go of it (restoreAskDraft). Emptying it
@@ -953,6 +967,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.askSel++
 			}
 			return m, nil
+		case "space":
+			// ␣ ticks and un-ticks the highlighted row — but ONLY on a multi-select question,
+			// which is the only kind that has a checked set. On a single-select one there is
+			// nothing to toggle, so the key falls through to the textarea below and opens a
+			// free-text answer with a space exactly as it always did.
+			if m.pendingAsk.Request.MultiSelect {
+				if sel := min(max(m.askSel, 0), len(m.askChecked)-1); sel >= 0 {
+					m.askChecked[sel] = !m.askChecked[sel]
+				}
+				return m, nil
+			}
 		}
 	}
 
@@ -1555,18 +1580,26 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	// With choices offered and an empty input the answer is the highlighted choice — the SAME
-	// escape-stripped label the popup showed, not the raw domain string (D5/D9). Otherwise it is
-	// the trimmed typed text (an empty free-text answer stays allowed when no choices are offered).
+	// escape-stripped label the popup showed, not the raw domain string (D5/D9). A multi-select
+	// question with rows ticked answers with those instead, one label per line; with NOTHING
+	// ticked it falls back to the highlighted row, so the single-select fast path is its
+	// degenerate case rather than a second rule. Otherwise the answer is the trimmed typed text
+	// (an empty free-text answer stays allowed when no choices are offered).
 	choices := m.pendingAsk.Request.Choices
 	var answer string
 	if len(choices) > 0 && m.input.Value() == "" {
-		sel := min(max(m.askSel, 0), len(choices)-1) // defensive clamp; routing keeps it in range
-		answer = stripEscapes(choices[sel])
+		if ticked := m.checkedLabels(); len(ticked) > 0 {
+			answer = strings.Join(ticked, "\n")
+		} else {
+			sel := min(max(m.askSel, 0), len(choices)-1) // defensive clamp; routing keeps it in range
+			answer = stripEscapes(choices[sel])
+		}
 	} else {
 		answer = strings.TrimSpace(m.input.Value())
 	}
 	m.pendingAsk.Reply <- domain.AskAnswer{Text: answer}
 	m.pendingAsk = nil
+	m.askChecked = nil // the question is answered: no checked set outlives it
 	m.input.Reset()
 	m.restoreAskDraft() // the question has let go of the box: the message it interrupted comes back
 	m.state = stateRunning
@@ -1574,6 +1607,28 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 	m.layout()
 	tick := m.spin.arm()
 	return m, tick
+}
+
+// checkedLabels returns the escape-stripped labels ticked on a multi-select ask_user question, in
+// the order the choices were OFFERED rather than the order they were ticked — the schema's array
+// order is the one both sides of the wire agreed on, and it is what makes the reply reproducible.
+// Labels, never indices (D9): what travels back is the human's own words, exactly as the popup
+// painted them.
+//
+// It is empty for a single-select question and for a multi-select one with nothing ticked, which is
+// precisely what lets submitAnswer fall back to the highlighted row on an empty checked set.
+func (m Model) checkedLabels() []string {
+	if m.pendingAsk == nil || !m.pendingAsk.Request.MultiSelect {
+		return nil
+	}
+	choices := m.pendingAsk.Request.Choices
+	ticked := make([]string, 0, len(m.askChecked))
+	for i, on := range m.askChecked {
+		if on && i < len(choices) {
+			ticked = append(ticked, stripEscapes(choices[i]))
+		}
+	}
+	return ticked
 }
 
 // restoreAskDraft hands the input box back the message an ask_user question borrowed it from: the
@@ -1645,6 +1700,7 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	m.cancel = nil
 	m.pending = nil
 	m.pendingAsk = nil
+	m.askChecked = nil // and with it the ticked set: no path leaves a dead checked set standing
 	// A question that dies with its Exchange — a stop, a fault — lets go of the box exactly as an
 	// answered one does, so the message it borrowed the box from comes back here too.
 	m.restoreAskDraft()
