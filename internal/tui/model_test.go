@@ -1008,6 +1008,41 @@ func TestModelApprovalTerminalShowsCommandBlock(t *testing.T) {
 	}
 }
 
+// TestModelApprovalMenuSpacing pins the mockup's vertical spacing
+// (docs/design/user-questions-layout.md:13-22, the approval box): Reason: and Command: run ADJACENT
+// — two labelled facts about one call, and a blank line between them reads as two blocks — ONE blank
+// line sets the menu off from the body, the four decisions stay adjacent to each other, and the last
+// of them ends the box with the bottom border directly under it. That single blank is the whole of
+// the pane's spacing: the ask box closes its offering with a second one (its answers are a blank
+// line apart, so its last would otherwise be crowded), this one does not, and the difference is the
+// mockup's. It is asserted as the SHAPE of the pane rather than as a substring anywhere in it,
+// because a blank line in the wrong place is exactly what a substring check cannot see and what the
+// eye reads as a second block.
+func TestModelApprovalMenuSpacing(t *testing.T) {
+	m, _ := newApprovalModel(t, domain.ApprovalRequest{
+		Tool:      "terminal",
+		Reason:    "subprocess execution (confinement unavailable on this host)",
+		Arguments: json.RawMessage(`{"command":"cd /ws/a && git status"}`),
+	})
+	rows := strings.Split(ansiPattern.ReplaceAllString(m.approvalPrompt(m.pending.Request), ""), "\n")
+	got := strings.Join(rows, "\n")
+	blank := func(i int) bool { return strings.TrimSpace(strings.Trim(rows[i], "│")) == "" }
+
+	if reason, command := paneRowIndex(t, rows, "Reason:"), paneRowIndex(t, rows, "Command:"); command != reason+1 {
+		t.Errorf("Command: sits %d lines under Reason:, want the two labels adjacent:\n%s", command-reason, got)
+	}
+	allow, cancel := paneRowIndex(t, rows, "❯ Allow"), paneRowIndex(t, rows, "· Cancel")
+	if !blank(allow - 1) {
+		t.Errorf("the line above the menu = %q, want the blank line setting it off from the body:\n%s", rows[allow-1], got)
+	}
+	if cancel != allow+len(approvalMenu)-1 {
+		t.Errorf("the menu spans %d lines, want its %d options adjacent:\n%s", cancel-allow+1, len(approvalMenu), got)
+	}
+	if cancel != len(rows)-2 {
+		t.Errorf("%d lines sit between the last option and the bottom border, want none:\n%s", len(rows)-2-cancel, got)
+	}
+}
+
 // Everything the command block cannot state in full falls back to the raw arguments JSON, because
 // that is what keeps the human deciding against what the tool will actually receive: another tool
 // (whose arguments are not a command line), a terminal call whose arguments do not parse or carry no
@@ -1139,7 +1174,11 @@ func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
 				// stating how many. Assert the placement, not just the presence — that is what the
 				// finding was about, and the row it lands on has moved now that the title rides the
 				// border and the decisions themselves take the rows below.
-				if maxBody, _, _ := m.popupBudget(panePrompt, len(approvalMenu), len(approvalMenu), popupBorderChrome); maxBody == 1 {
+				// The demand is the pane's own (approvalPrompt): its menu in LINES, the blank line it
+				// sets the menu off by included, because a test budgeting for a shape the pane does not
+				// compose would look for the marker at a window the pane never puts it on.
+				menuLines := popupRowBlockLines(popupFlatRowHeights(len(approvalMenu)), 0, popupRowPadLines(true, false))
+				if maxBody, _, _ := m.popupBudget(panePrompt, menuLines, menuLines, popupBorderChrome); maxBody == 1 {
 					if first := strings.Trim(rows[1], "│ "); !elisionMarkerPattern.MatchString(first) {
 						t.Errorf("body row = %q, want the marker counting the prose the pane dropped:\n%s", first, flat)
 					}
@@ -1356,7 +1395,11 @@ func askPaneLines(t *testing.T, width int, req domain.AskRequest) []string {
 // TestModelAskPromptMenuChrome pins the surface the mockup asks for
 // (docs/design/user-questions-layout.md): no title of its own — the top border is unbroken and the
 // QUESTION is the pane's lead line — and the choices as a menu, ❯ on the answer ⏎ would send, · on
-// the rest, one blank line between each pair. The title row is the row this buys back: a heading
+// the rest, one blank line between each pair and one setting the block off above and below — this
+// box closes its offering, unlike the approval box's adjacent decisions. The spacing is asserted
+// line by line because it is the mockup's own, not a default: the pane draws each of those blanks
+// itself, out of a budget that books them (popupSpec.rowGap, rowPadAbove, rowPadBelow). The title
+// row is the row this buys back: a heading
 // reading "the assistant is asking:" over a question the human is already reading said nothing the
 // question did not, and on a twelve-row terminal it cost a row of the question itself.
 func TestModelAskPromptMenuChrome(t *testing.T) {
@@ -1385,13 +1428,14 @@ func TestModelAskPromptMenuChrome(t *testing.T) {
 	if sep := strings.TrimSpace(strings.Trim(rows[first+1], "│")); sep != "" {
 		t.Errorf("the line between the options = %q, want it blank:\n%s", sep, got)
 	}
-	// …and nothing but between: a blank line before the first option or after the last would be the
-	// box's own padding drawn twice.
-	if sep := strings.TrimSpace(strings.Trim(rows[first-1], "│")); sep == "" {
-		t.Errorf("a blank line sits before the first option, which the box's padding already gives:\n%s", got)
+	// …and the block is set off from the question above it and closed below the last option
+	// (popupSpec.rowPadAbove/rowPadBelow, the mockup's own spacing): with prose on both sides of the
+	// join, the marker column alone is what tells the first answer from the last line of the question.
+	if sep := strings.TrimSpace(strings.Trim(rows[first-1], "│")); sep != "" {
+		t.Errorf("the line between the question and the first option = %q, want it blank:\n%s", sep, got)
 	}
-	if sep := strings.TrimSpace(strings.Trim(rows[second+1], "│")); sep == "" {
-		t.Errorf("a blank line sits after the last option, which the box's padding already gives:\n%s", got)
+	if sep := strings.TrimSpace(strings.Trim(rows[second+1], "│")); sep != "" {
+		t.Errorf("the line after the last option = %q, want it blank:\n%s", sep, got)
 	}
 }
 

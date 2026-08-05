@@ -4065,6 +4065,15 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int) (maxBody, maxR
 // chrome is its two borders and nothing else (popupBorderChrome) and the menu costs the frame no
 // more than the legend did.
 //
+// The mockup's vertical spacing is the same argument in blank lines: Reason: and Command: run
+// ADJACENT — they are two labelled facts about one call, and a blank line between them reads as two
+// blocks — while ONE blank line sets the menu off from them (popupSpec.rowPadAbove), because that is
+// the break that matters, between what the human is deciding about and what the decisions are. It is
+// the ONLY blank the pane spends: the menu's four options are adjacent to each other and the last of
+// them ends the box, so nothing separates Cancel from the bottom border (rowPadBelow stays off, and
+// the mockup draws it that way). The blank is booked out of the pane's own row budget below, and it
+// gives way before an option does on a window too short for both.
+//
 // Every model-authored string (tool name, reason, args) is escape-stripped at this call site;
 // stripEscapes removes only the ESC byte, so the raw tool name is preserved verbatim. The menu's own
 // rows are ours, not the model's, so nothing there needs stripping. Empty/null arguments add no
@@ -4102,18 +4111,23 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	}
 
 	// The whole menu or as much of it as the window can seat; no cap of our own, because four rows is
-	// the whole offering rather than a window onto a longer list.
-	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, len(rows), len(rows), popupBorderChrome)
+	// the whole offering rather than a window onto a longer list. The demand is in LINES, which for
+	// this pane is one per option — the labels are ours and they do not wrap — plus the blank line the
+	// menu is set off by (popupSpec.rowPadAbove): a pane that asked for four and painted five would
+	// overflow by exactly the room it did not book.
+	menuLines := popupRowBlockLines(popupFlatRowHeights(len(rows)), 0, popupRowPadLines(true, false))
+	maxBodyRows, rowsShown, seated := m.popupBudget(panePrompt, menuLines, menuLines, popupBorderChrome)
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
 	spec := popupSpec{
 		title:         "Approve " + stripEscapes(req.Tool) + "?",
 		titleInBorder: true,
-		body:          strings.Join(parts, "\n\n"), // reason and args separated by one blank line; no stray blanks when one is absent
+		body:          strings.Join(parts, "\n"), // Reason: and Command: adjacent, as the mockup draws them
 		maxBodyRows:   maxBodyRows,
 		rows:          rows,
 		menuRows:      true,
+		rowPadAbove:   true, // the one blank line between the body and the menu; the mockup closes on the border
 		selected:      clampInt(m.approvalSel, 0, len(rows)-1),
 		maxRows:       rowsShown,
 	}
@@ -4197,7 +4211,12 @@ const askRowGap = 1
 // (popupTitleBorderChrome), one row less than it used to draw. The choices are a MENU like the
 // approval prompt's — ❯ on the answer the ⏎ would send, · on the rest — and they WRAP with a blank
 // line between them, because an ask_user choice is prose written for this one question and a
-// decision must not be taken against half a sentence (popupSpec.menuRows, wrapRows, rowGap).
+// decision must not be taken against half a sentence (popupSpec.menuRows, wrapRows, rowGap). One
+// more blank line sets the offering off from the question above it and another closes it below
+// (popupSpec.rowPadAbove/rowPadBelow, both, as the mockup draws this box): with wrapped prose on both
+// sides of the join, the marker column alone is what distinguishes the first answer from the last
+// line of the question, and an offering whose answers are a blank line apart would otherwise crowd
+// its last one against the border.
 //
 // The screen budget is derived from the live layout so a long question or a long choice set never
 // pushes the input box off-screen: rows get priority (they are what the human acts on), the body
@@ -4220,15 +4239,17 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	// off-screen (D2); the rows get priority and the body takes what is left (see popupBudget).
 	//
 	// Both row figures are in the LINES the window will paint, not in choices: an option may now wrap
-	// onto two or three lines and every adjacent pair is a blank line apart, so a pane asking for one
-	// row per choice would promise three answers and paint eight. maxAskChoiceRows stays a cap on the
+	// onto two or three lines, every adjacent pair is a blank line apart and the block itself is set
+	// off by one more above and below (popupSpec.rowPadAbove/rowPadBelow), so a pane asking for one row
+	// per choice would promise three answers and paint ten. maxAskChoiceRows stays a cap on the
 	// OFFERING — in this budget, what that many options and their separators cost — because a cap read
 	// as eight LINES would scroll five one-line choices, the top of the schema's own 2-5 range, on a
 	// terminal with the room for all of them.
 	rows := singleCellRows(stripEscapesAll(req.Choices))
 	heights := popupWrappedRowHeights(m.th, rows, m.width)
-	wanted := popupRowBlockLines(heights, askRowGap)
-	capped := popupRowBlockLines(heights[:min(len(heights), maxAskChoiceRows)], askRowGap)
+	askPad := popupRowPadLines(true, true)
+	wanted := popupRowBlockLines(heights, askRowGap, askPad)
+	capped := popupRowBlockLines(heights[:min(len(heights), maxAskChoiceRows)], askRowGap, askPad)
 	maxBodyRows, rowLines, seated := m.popupBudget(panePrompt, wanted, capped, popupTitleBorderChrome)
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
@@ -4242,6 +4263,8 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 		menuRows:      true,
 		wrapRows:      true,
 		rowGap:        true,
+		rowPadAbove:   true, // the blank line under the question…
+		rowPadBelow:   true, // …and the one closing the offering above the border
 		selected:      selected,
 		hint:          hint,
 		maxRows:       rowLines,

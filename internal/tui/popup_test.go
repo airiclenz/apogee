@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -296,7 +297,7 @@ func TestPopupRowWindow(t *testing.T) {
 				t.Errorf("popupRowWindow(%d,%v,gap %d,budget %d) = [%d,%d), want [%d,%d)",
 					c.selected, c.heights, c.gap, c.budget, start, end, c.wantStart, c.wantEnd)
 			}
-			if spent := popupRowBlockLines(c.heights[start:end], c.gap); spent > c.budget {
+			if spent := popupRowBlockLines(c.heights[start:end], c.gap, 0); spent > c.budget {
 				t.Errorf("window [%d,%d) paints %d lines, past the %d-line budget", start, end, spent, c.budget)
 			}
 		})
@@ -1313,6 +1314,67 @@ func TestRenderPopupRowGapSeparatesRowsOnly(t *testing.T) {
 	}
 }
 
+// rowPadAbove and rowPadBelow set the row BLOCK one blank line off what stands above it and below
+// it, EACH END ON ITS OWN — the ask box asks for both, the approval box for the opening one alone
+// (docs/design/user-questions-layout.md) — and neither puts a line between rows that did not ask for
+// a gap. The pad is also the LAST thing the row budget pays for: it is the only part of the block
+// that is not content, so a window that can seat every row unpadded keeps the rows and drops the
+// blanks — both ends together, since a block that kept one and dropped the other would move rather
+// than tighten — instead of scrolling an option off the pane to make room for whitespace.
+func TestRenderPopupRowPadSurroundsTheBlock(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	base := popupSpec{
+		rows:     singleCellRows([]string{"one", "two", "three"}),
+		menuRows: true,
+		selected: 0,
+		maxRows:  -1,
+	}
+
+	// contentBlanks is which of the pane's content lines (borders excluded) are blank.
+	contentBlanks := func(lines []string) []bool {
+		out := make([]bool, 0, len(lines)-2)
+		for _, ln := range lines[1 : len(lines)-1] {
+			out = append(out, popupContent(ln) == "")
+		}
+		return out
+	}
+
+	for name, tc := range map[string]struct {
+		above, below bool
+		maxRows      int
+		want         []bool // the blank/filled shape of the content block
+	}{
+		"both ends, uncapped":                      {true, true, -1, []bool{true, false, false, false, true}},
+		"both ends, a budget that books them":      {true, true, 5, []bool{true, false, false, false, true}},
+		"both ends, a budget one short drops them": {true, true, 4, []bool{false, false, false}},
+		"both ends never cost the block a row":     {true, true, 3, []bool{false, false, false}},
+		"a budget under the rows still scrolls":    {true, true, 2, []bool{false, false}},
+		"the opening end alone opens the block":    {true, false, -1, []bool{true, false, false, false}},
+		"the opening end alone, budget books it":   {true, false, 4, []bool{true, false, false, false}},
+		"the opening end alone, budget one short":  {true, false, 3, []bool{false, false, false}},
+		"the closing end alone closes it":          {false, true, -1, []bool{false, false, false, true}},
+		"neither is the unbroken block":            {false, false, -1, []bool{false, false, false}},
+	} {
+		name, tc := name, tc
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			spec := base
+			spec.rowPadAbove, spec.rowPadBelow, spec.maxRows = tc.above, tc.below, tc.maxRows
+			lines := popupLines(renderPopup(th, spec, 40))
+			flat := strip(strings.Join(lines, "\n"))
+			if got := contentBlanks(lines); !slices.Equal(got, tc.want) {
+				t.Errorf("content lines blank = %v, want %v:\n%s", got, tc.want, flat)
+			}
+			// …and whatever the pad did, the block still fits the budget it was handed: the blanks are
+			// counted in it, never painted past it.
+			if rowLines := len(lines) - 2; tc.maxRows >= 0 && rowLines > tc.maxRows {
+				t.Errorf("row block paints %d lines, past its %d-line budget:\n%s", rowLines, tc.maxRows, flat)
+			}
+		})
+	}
+}
+
 // The selection covers the WHOLE of a wrapped row — every line of it, in either cue — because a row
 // lit on its first line and plain on its second reads as two rows, one of them somebody else's.
 func TestRenderPopupWrappedSelectionCoversEveryLine(t *testing.T) {
@@ -1394,7 +1456,7 @@ func TestRenderPopupWrappedRowsSpendTheBudgetInLines(t *testing.T) {
 	})
 }
 
-// Both flags off is the rendering every other pane has: the representative spec is byte-identical to
+// The flags off is the rendering every other pane has: the representative spec is byte-identical to
 // its golden, and a long row still elides onto its ONE line rather than breaking.
 func TestRenderPopupWrapAndGapOffAreUnchanged(t *testing.T) {
 	t.Parallel()
@@ -1403,6 +1465,7 @@ func TestRenderPopupWrapAndGapOffAreUnchanged(t *testing.T) {
 	spec := popupTitleSpec()
 	spec.wrapRows = false
 	spec.rowGap = false
+	spec.rowPadAbove, spec.rowPadBelow = false, false
 	if off := strip(renderPopup(th, spec, 40)); off != popupTitleRowGolden {
 		t.Errorf("flags off drifted from the list rendering:\ngot:\n%s\n\nwant:\n%s", off, popupTitleRowGolden)
 	}
@@ -1410,6 +1473,7 @@ func TestRenderPopupWrapAndGapOffAreUnchanged(t *testing.T) {
 	long := popupWrapSpec()
 	long.wrapRows = false
 	long.rowGap = false
+	long.rowPadAbove, long.rowPadBelow = false, false
 	lines := popupLines(renderPopup(th, long, 48))
 	if got, want := len(lines), 2+len(long.rows); got != want {
 		t.Fatalf("flags off rendered %d lines, want %d (one line a row):\n%s",

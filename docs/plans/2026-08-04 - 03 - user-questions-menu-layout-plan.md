@@ -129,6 +129,19 @@ own break, applied at `inner - popupRowIndent` so the hanging indent is a rectan
 column. `popupRowIndent` (2) and the per-line styling split (`popupRowLine`) are additions the item's text
 implies but does not name.
 
+NOTES (2026-08-05): follow-up (run-level, owner-approved; not a plan item) — this item's rowGap policy is
+UNCHANGED ("between rows only"), but the mockup also draws a blank line between the body block and the first
+row, so the painter gained SEPARATE flags for the block's own ends: `popupSpec.rowPadAbove` and
+`rowPadBelow` (`popupRowPadLines`, and `popupRowBlockLines` now takes the pad beside the gap). Separate from
+the gap because the two say different things — the gap divides the options from EACH OTHER, the pad divides
+the offering from the pane — and the approval menu asks for the pad without the gap. Separate from EACH
+OTHER because the mockup does not spend both on both panes: the ask box closes its offering with a blank
+(lines 25-40), the approval box ends on `· Cancel [esc]` with the border directly under it (lines 13-22), so
+only the ask pane sets `rowPadBelow`. It is line-accurate the way the gap is: the callers state the padded
+cost to `popupBudget` (`popupFlatRowHeights` is the non-wrapping caller's per-row cost), and the painter
+draws the blanks only out of what the seated window LEFT OVER, dropping both ends whole where it did not, so
+a blank line can never scroll an option off a pane that had the room to show it.
+
 **What:** Extend `internal/tui/popup.go` so menu-style rows can wrap and be separated by
 blank lines, both opt-in via `popupSpec` fields (e.g. `wrapRows bool`, `rowGap bool`),
 default false. Wrapped rows: a row whose text exceeds the available width word-wraps onto
@@ -172,6 +185,17 @@ reads the border row, and its unreachable no-body-budget branch became the body'
 marker), `TestDecisionSurfaceStaysOnTheFrame`'s approval probe, and `TestModelSeamMessageTransitions`'
 lower-case "allow"/"deny" check. The hidden-row count stays all-or-nothing (item 3), so a window
 seating only some of the four options scrolls rather than counting them onto the border title.
+
+NOTES (2026-08-05): follow-up (run-level, owner-approved; not a plan item) — the body's parts now join with
+`"\n"` rather than `"\n\n"`: the mockup keeps `Reason:` and `Command:` ADJACENT (two labelled facts about one
+call) and spends that blank line between the body and the first menu row instead (`popupSpec.rowPadAbove`,
+item 3's follow-up note). That one blank is the whole of this pane's spacing — the mockup's four decisions
+are adjacent to each other and `· Cancel [esc]` sits directly on the bottom border, so `rowPadBelow` stays
+off here and only the ask pane sets it. So the pane's row demand is its menu in LINES rather than its row
+COUNT — `popupRowBlockLines(popupFlatRowHeights(len(rows)), 0, popupRowPadLines(true, false))` — which is
+what books the blank. Where the window leaves the body fewer rows than it wants, the pad now costs it that
+line, counted as ever in the "… (+N more lines)" marker; where the window cannot cover it at all it gives
+way whole, so every decision row this item put on the screen is still on it at every height.
 
 **What:** Rebuild the approval prompt on the new painter capabilities. In
 `internal/tui/model.go`:

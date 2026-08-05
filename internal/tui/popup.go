@@ -37,11 +37,16 @@ import (
 //     line to the inner budget, so no line can ever wrap the box.
 //   - A row is ONE painted line unless the spec asks for more: popupSpec.wrapRows word-wraps a row
 //     too wide for the pane onto continuation lines indented under its own first cell
-//     (popupRowIndent) instead of eliding its tail, and popupSpec.rowGap sets consecutive rows one
-//     blank line apart. Both are opt-in, and both are paid for out of the SAME row budget: the
-//     window is measured in painted LINES (popupRowWindow), a row is seated only when every line of
-//     it fits, and the separators between the seated rows are counted too — so a wrapped option is
-//     never half on the screen and a pane never outgrows the rows the frame budgeted it.
+//     (popupRowIndent) instead of eliding its tail, popupSpec.rowGap sets consecutive rows one
+//     blank line apart, and popupSpec.rowPadAbove/rowPadBelow set one blank line above the block
+//     and one below it — each end asked for on its own, because the two decision surfaces do not
+//     ask for the same shape. All of them are opt-in, and all are paid for out of the SAME row
+//     budget: the window is measured in painted LINES (popupRowWindow), a row is seated only when
+//     every line of it fits, and the separators between the seated rows are counted too — so a
+//     wrapped option is never half on the screen and a pane never outgrows the rows the frame
+//     budgeted it. The pad is the one that gives way, because it is the only one that is not
+//     content: it is drawn out of what the seated rows LEFT OVER, so a blank line never costs a
+//     decision surface an option it had the room to show.
 //   - A row is a popupRow — a slice of CELLS, not a pre-concatenated string — and the module lays
 //     the cells of every row out as vertically aligned columns (layoutPopupRows): each column is
 //     as wide as its widest cell measured in DISPLAY cells over ALL rows (not just the visible
@@ -161,11 +166,30 @@ type popupRow []string
 // against half a sentence, so a surface that asks in sentences wraps them; every other pane keeps
 // the one-line row and the elision that has always fitted it.
 //
-// rowGap sets consecutive rows one blank line apart — never before the first or after the last,
-// where the box's own padding already does that job. It is what keeps a wrapped list READABLE: once
+// rowGap sets consecutive rows one blank line apart. It is what keeps a wrapped list READABLE: once
 // a row can be three lines long, the only thing telling the eye where one option ends and the next
 // begins is the marker column, and a blank line says it without being read. A list whose every row
 // is one line needs none of that and pays no line for it.
+//
+// rowPadAbove sets the row BLOCK one blank line off what stands above it. It is what tells the eye
+// that the rows are a MENU rather than more of the prose above them: on a decision surface the body
+// asks and the rows answer, and unbroken they read as one paragraph whose last lines happen to start
+// with a glyph. It is a separate flag from rowGap because the two say different things — the gap
+// divides the options from EACH OTHER, the pad divides the offering from the pane — and the approval
+// menu asks for the second without the first, its four one-line options staying adjacent as the
+// mockup draws them.
+//
+// rowPadBelow closes the block with a blank line above the bottom border, and it is its OWN flag
+// because the mockup does not spend it on both surfaces (docs/design/user-questions-layout.md): the
+// ask box closes its offering, the approval box ends on its last decision. That is the mockup being
+// consistent rather than arbitrary — the ask box's answers are already a blank line apart, so a
+// block ending flush against the border would read as one option crowded where its siblings are not,
+// while the approval's four adjacent rows end where the last of them does. Two flags rather than one
+// derived from rowGap, because that is a coincidence of these two panes and not a rule: a caller
+// says what its surface looks like instead of inferring it.
+//
+// Either pad is drawn only out of the lines the seated rows LEFT OVER (popupRowLines), so it never
+// pushes an option out of the window: a short pane loses its breathing room rather than a decision.
 type popupSpec struct {
 	title         string
 	titleInBorder bool
@@ -175,6 +199,8 @@ type popupSpec struct {
 	menuRows      bool
 	wrapRows      bool
 	rowGap        bool
+	rowPadAbove   bool
+	rowPadBelow   bool
 	selected      int
 	hint          string
 	maxRows       int
@@ -372,6 +398,15 @@ func singleCellRows(labels []string) []popupRow {
 // between two seated rows costs a line of the same budget. Whole rows or none of them, because half
 // an option on the screen is worse than the scroll that reaches the whole of it.
 //
+// The pad around the block (popupSpec.rowPadAbove, rowPadBelow) is spent LAST, out of the lines the
+// seated window left over, and BOTH ends are dropped together where they do not cover it — a pane
+// that keeps one blank and drops the other would move the block rather than tighten it. That order
+// is the priority the pane is budgeted on (popupBudget): the rows are what the human acts on and the
+// pad is what makes them pleasant to read, so a window that can seat every option unpadded shows
+// every option — the approval menu keeps its four decisions on a short terminal and gives up its
+// breathing room, which is the trade the other way round from the one a decision surface must never
+// make.
+//
 // The hidden count is ALL-OR-NOTHING on purpose, and it is not the body's rule with the words
 // changed. A window granted at least one row scrolls around the selection (popupRowWindow): the
 // rows outside it are one keypress away, so they are off-screen rather than hidden, and a marker
@@ -390,9 +425,11 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 	if spec.rowGap {
 		gap = 1
 	}
+	padAbove, padBelow := spec.rowPadAbove, spec.rowPadBelow
 	capLines := spec.maxRows
 	if capLines < 0 {
-		capLines = popupRowBlockLines(heights, gap) // negative spends whatever the whole list needs
+		// Negative spends whatever the whole list needs.
+		capLines = popupRowBlockLines(heights, gap, popupRowPadLines(padAbove, padBelow))
 	}
 	start, end := popupRowWindow(spec.selected, heights, gap, capLines)
 	if start == end {
@@ -400,8 +437,15 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 		// human the count (an empty offering owes nothing — there is no list to hide).
 		return nil, len(blocks)
 	}
+	if popupRowBlockLines(heights[start:end], gap, popupRowPadLines(padAbove, padBelow)) > capLines {
+		// The block fits, the blank lines around it do not: the rows come first.
+		padAbove, padBelow = false, false
+	}
 
 	out := make([]string, 0, capLines)
+	if padAbove {
+		out = append(out, "")
+	}
 	for i := start; i < end; i++ {
 		if gap > 0 && i > start {
 			// A bare line, not a styled one: drawTitledBox pads every content line out on the box's own
@@ -430,6 +474,9 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 			}
 			out = append(out, popupRowLine(th, spec, blackFill, truncateToWidth(th, lead+text, inner), selected, inner))
 		}
+	}
+	if padBelow {
+		out = append(out, "")
 	}
 	return out, 0
 }
@@ -492,19 +539,52 @@ func popupRowHeights(blocks [][]string) []int {
 	return heights
 }
 
-// popupRowBlockLines is what showing the WHOLE list would cost: every row's lines plus a separator
-// between each adjacent pair (gap = 0 when the spec asks for none). It is the budget an uncapped row
-// list (maxRows < 0) is windowed against, so "show everything" and "show what fits" go through the
-// one windowing path rather than two.
-func popupRowBlockLines(heights []int, gap int) int {
-	total := 0
+// popupRowPadLines is what a spec's pad flags cost the row budget: one line per padded END of the
+// block, whichever way the rows inside it are laid out. It is a function rather than two constants
+// because both halves of the budget spend the same figure — the painter draws the pad and the CALLER
+// has to ask the frame for the lines it takes ([Model.popupBudget]) — and a pane budgeting for one
+// blank line and painting two is the overflow the line accounting exists to prevent. Callers state
+// the same two flags here that they set on their popupSpec.
+func popupRowPadLines(above, below bool) int {
+	lines := 0
+	if above {
+		lines++
+	}
+	if below {
+		lines++
+	}
+	return lines
+}
+
+// popupRowBlockLines is what showing the WHOLE list would cost: every row's lines, a separator
+// between each adjacent pair (gap = 0 when the spec asks for none), and the pad around the block
+// (popupRowPadLines, 0 when it asks for neither end). It is the budget an uncapped row
+// list (maxRows < 0) is windowed against and the figure a caller states its own demand in, so "show
+// everything", "show what fits" and "ask the frame for the room" are all the one arithmetic rather
+// than three that have to agree. An EMPTY list costs nothing at all, pad included: there is no block
+// for a blank line to sit around.
+func popupRowBlockLines(heights []int, gap, pad int) int {
+	if len(heights) == 0 {
+		return 0
+	}
+	total := pad + gap*(len(heights)-1)
 	for _, h := range heights {
 		total += h
 	}
-	if len(heights) > 1 {
-		total += gap * (len(heights) - 1)
-	}
 	return total
+}
+
+// popupFlatRowHeights is what a NON-wrapping spec's rows cost in painted lines: one apiece, whatever
+// they measure, because such a row elides its tail rather than breaking it onto a second line
+// (popupRowBlocks). It is popupWrappedRowHeights' counterpart for a caller that has to state its row
+// budget in LINES and knows its own rows never wrap — the approval menu, whose four labels are the
+// pane's own and not the model's.
+func popupFlatRowHeights(rows int) []int {
+	heights := make([]int, rows)
+	for i := range heights {
+		heights[i] = 1
+	}
+	return heights
 }
 
 // popupInnerWidth is the content budget inside a pane drawn at the given TOTAL width: the width less
