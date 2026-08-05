@@ -1113,7 +1113,18 @@ answer after it across the module's own two-space gutter — so the boxes stack 
 column nothing hand-pads, and an answer too long for the pane **wraps under its own label** rather
 than under the box beside it: the continuation lines hang at the label's column, so one option still
 reads as one block of prose instead of sliding back under a marker that says nothing about it. A
-single-cell row measures a hanging indent of zero and wraps exactly where it always did.
+single-cell row measures a hanging indent of zero and wraps exactly where it always did. The
+**`/settings` pane's key rows are four-cell** — the key, its value, an `(env)`/`(flag)` mark where a
+higher-precedence source beat the file, and a last tier carrying whatever else is true of the row:
+the `· edit in config.yaml` or `· use /confine` pointer of a key this pane will not write, else the
+`→ <value> (next launch)` marker of one it just wrote, else the reason a write was refused. That
+tier is one column rather than three because a row is only ever one of those things at a time, and
+it and the mark before it both collapse away on a configuration with nothing overridden, nothing
+read-only and nothing edited yet — the same collapse that costs the `/` menu nothing for its
+`— idle only` tag. Its **section headings are single-cell rows**, so they sit at the pane's left
+edge rather than inside the key column, and they are rows the module paints and the selection never
+lands on. The pane's second step — the values one enum key may take — is **two-cell**: the value,
+and a `(current)` mark on the one the key already holds.
 
 **`␣` ticks a multi-select answer, and `⏎` is still the one send.** A question the model marked
 `multi_select` draws that box in front of every answer, and while the box below is empty `␣` ticks

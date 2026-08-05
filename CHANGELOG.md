@@ -63,6 +63,48 @@ point is a **minor** bump, not a breaking change.
   Defined in `CONTEXT.md` ("Ask-user") and specced in `layout.md`, with the pinned mockup in
   `docs/design/user-questions-layout.md`.
 
+- **`/settings` — your whole configuration on one screen, editable where an edit is a single
+  value.** The verb opens the first **full-height** pane apogee has: one row per setting, in the
+  order the starter `config.yaml` documents them and grouped under section headings, each showing
+  the value *this run* resolved for it — with `(env)` or `(flag)` on the rows a higher-precedence
+  source beat the file at, and `••••` where the upstream `api-key:` would be. Thirty-odd keys are a
+  screen to read rather than a choice to scan, so the transcript gives way entirely while it is up;
+  `↑/↓` move the `❯`, the line under the list describes the key it is on, `esc` closes. It is
+  idle-only, and it is the first surface from which apogee writes your config at all.
+  - **An edit is persisted the moment you commit it, one key at a time.** `⏎` toggles a true/false
+    row, opens the value list on a row with a fixed set, or opens a buffer on the row for a string
+    or a number. What lands in `~/.apogee/config.yaml` is a **line splice**: your comments, your
+    layout and every other key untouched, the result re-parsed and compared against the original
+    before it replaces the file, written atomically. A key that was still one of the file's
+    commented examples has its active line inserted directly below that example, where the
+    documentation for it already is. A value the key cannot hold — a port out of range, an endpoint
+    with no host — is refused before anything is written, with the reason on the row and your text
+    still in the buffer.
+  - **A saved edit says when it takes effect** rather than pretending it already has: the row wears
+    a `→ <value> (next launch)` marker, because the session is still running the value it started
+    with. `mode:` is the one exception — it has a live path, the same one `⇧⇥` drives — so its edit
+    applies at once and the row just shows the new value. Where an environment variable or a flag
+    outranks the file, the marker says both halves of the truth: saved, and still overridden this
+    run.
+  - **`backspace` unsets a key**, arming a reset the hint line asks you to confirm with `⏎`. What
+    that removes is the key's **line**, not its value: the setting goes back to following the
+    built-in default rather than being pinned to today's spelling of it.
+  - **Structured blocks stay read-only and say where they are edited.** `servers:`,
+    `mcp-servers:`, `mechanisms:`, `validated-sets:`, the system prompt and the model profile
+    render as a summary with an `· edit in config.yaml` pointer; the confinement keys carry
+    `· use /confine`, because switching Auto's fence off asks for an acknowledgement that stays
+    with that verb. Switching model or server likewise stays with `/model` and `/server` —
+    editing `endpoint:` or `model:` here persists the value and moves nothing now.
+  - **The pane cannot drift from the schema.** It renders from a new declarative key registry in
+    the binary — one row per configuration key, with its kind, default, sources, editability and
+    one-line description — and a reflection guard pins that registry to a bijection with the config
+    struct, so a key added to the config without a registry row fails the build's tests rather than
+    quietly going missing from the screen. Settings resolution now reads each key's environment
+    variable and flag name from the same rows, so source metadata has one home.
+
+  Ratified in ADR 0035, defined in `CONTEXT.md` ("Settings surface") and specced in `layout.md`
+  ("What 'height' means", where the full-height pane class is written down).
+
 ### Removed
 
 - **`/skill` — the two-step picker verb is gone.** Naming a skill is what invoking it already is:

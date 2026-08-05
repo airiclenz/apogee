@@ -211,8 +211,8 @@ style, multi-doc, example-match ambiguity) refuse without writing.
 **NOTES (2026-08-05):** three deviations. (1) The `(env)`/`(flag)` markers needed a fact the resolved
 `options` did not carry — precedence collapses the layers, so afterwards nothing says which source won.
 `config.go` gained `configSource` + `overrideSources` (the same predicates `flagLayer`/`envLayer` are
-built from, read off the same registry rows), `applyConfig` records the result on the new
-`options.overrides`, and the builder reads it; guarded by `TestOverrideSourcesNameTheWinningSource` and
+built from, read off the same registry rows), the `options` struct in `root.go` gained the
+`overrides` field `applyConfig` records the result on, and the builder reads it; guarded by `TestOverrideSourcesNameTheWinningSource` and
 `TestApplyConfigRecordsOverrideSources`. (2) The builder itself lives in a new `cmd/apogee/settingsrows.go`;
 `wire.go` carries only the one-line `SettingsRows:` wiring beside `SaveHostAcknowledgement`, as the item
 says. (3) Section names are AUTHORED here rather than lifted from the template: the template's `# ===`
@@ -388,7 +388,21 @@ is a no-op.
 
 **Commit:** `feat(tui): settings pane edits strings and ints with validation and reset-to-default`
 
-## 9. Closing docs: README, CHANGELOG, ISSUES
+## 9. Closing docs: README, CHANGELOG, ISSUES — ✅ DONE (2026-08-05)
+
+**NOTES (2026-08-05):** four additions beyond the item's literal list, all documentation. (1) README also
+gains the `/settings` **table row** in the command table and a pointer from `## Configuration` to the new
+subsection — the table is where README enumerates every command, so the subsection alone would document a
+verb the command list does not have, and the "your edits are never overwritten" sentence the item asks to
+keep accurate is in that Configuration paragraph, which is where the qualification belongs. (2) `layout.md`'s
+**Column contract** gains the pane's row grammars (four-cell key rows, single-cell section headings,
+two-cell enum sub-list) — item 6 amended the height sections only, and the contract's "every pop-up kind has
+a fixed schema" enumeration listed every other pane's grammar but not this one. (3) Item 5's own NOTES line
+above said `config.go` gained `configSource` + `overrideSources` + "the new `options.overrides`", which reads
+as all three living in `config.go`; the `overrides` field is on the `options` struct in `root.go` (`:161`),
+and the line now says so. (4) The template's new header lines land after the "Every line below is commented
+out" paragraph rather than in the file's opening block, so the never-overwritten promise and the precedence
+ladder stay the first two things a reader meets.
 
 **What:** Depends on items 1–8. README: a `/settings` subsection in the command
 documentation (what it shows, persist-per-edit, reset, the read-only structured blocks,

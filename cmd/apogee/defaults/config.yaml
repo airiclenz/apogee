@@ -11,6 +11,9 @@
 # system prompt — so out of the box this file changes nothing else; it is a documented
 # starting point. Uncomment a line and edit it to make it your default; delete or comment
 # out the system prompt to send none.
+#
+# The /settings command shows these values in-app and edits the simple ones, writing each
+# change back into this file — one key at a time, comments and layout kept as you left them.
 
 # =============================================================================
 # The local OpenAI-compatible LLM server URL.

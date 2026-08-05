@@ -246,6 +246,7 @@ blue for a file your workspace has — so a typo is visible before you send.
 | `/server` | Move this session to another server you configured — picker, or `/server <name>` | — |
 | `/unload-model` | Free the model of the server this session is on — see [below](#local-servers--llama-launcher) | — |
 | `/stop-server` | Stop the server this session is on — see [below](#local-servers--llama-launcher) | — |
+| `/settings` | Browse every setting and edit the simple ones — see [below](#the-settings-screen--settings) | — |
 
 A lone `/word` that names neither a command nor a skill is **not** sent to the model:
 apogee says `unknown command or skill: /…` and leaves your line in the box to fix.
@@ -257,6 +258,47 @@ the model works — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back an
 prompts you have already sent in this workspace, `esc` stops a run, `⌃c` quits. Beyond
 the box, `⇧⇥` cycles the autonomy mode — Plan → Ask-Before → Allow-Edits → Auto — at
 any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript.
+
+### The settings screen — `/settings`
+
+`/settings` opens a **full-height pane** over your whole configuration: one row per setting,
+in the order the starter `config.yaml` documents them and grouped under section headings,
+each row showing the value **this run resolved** for it. Where a higher-precedence source
+beat the file, the row says which — `(env)` or `(flag)` — so a key that reads one way in the
+file and another on screen explains itself; `api-key:` shows as `••••`. The conversation
+gives way entirely while the pane is up, because thirty-odd keys are a screen to read rather
+than a choice to scan: `↑/↓` move the `❯`, the line under the list describes the key it is
+on, and `esc` closes the pane and hands the transcript back. It needs a quiet engine, so it
+is **idle only**.
+
+**Editing writes one key, when you ask.** `⏎` on a true/false row toggles it, `⏎` on a row
+with a fixed set of values opens that list, and `⏎` on a string or a number opens a buffer on
+the row itself. Each committed edit is spliced straight into `~/.apogee/config.yaml` — your
+comments, your layout and every other key untouched, the result re-parsed and compared
+against the original before it replaces the file — and a key that was still one of the
+commented examples lands directly below it. A value the key cannot hold is refused before
+anything is written, with the reason on the row and your text still in the buffer. Nothing
+else is ever written: apogee still makes no edit to that file you did not ask for.
+
+**A saved edit says when it takes effect.** The row wears a `→ <value> (next launch)` marker,
+because the session is still running the value it started with and a row that claimed
+otherwise would be lying about which run it describes. `mode:` is the exception — it has a
+live path, the same one `⇧⇥` drives — so its edit applies now and the row simply shows the
+new value. On a key an environment variable or a flag is overriding, the marker tells the
+fuller truth: the file was written and something still outranks it.
+
+**`backspace` unsets.** On a row you have set, `backspace` arms a reset, the hint line asks
+for a confirming `⏎`, and what that sends **removes the key's line** from the file rather than
+writing today's default into it — so the key goes back to following the built-in default
+instead of being pinned to a copy of it.
+
+**Some rows are read-only and say where they are edited instead.** Structured blocks —
+`servers:`, `mcp-servers:`, `mechanisms:`, `validated-sets:`, the system prompt, the model
+profile — render as a summary with an `· edit in config.yaml` pointer; the pane edits simple
+values only. The confinement keys carry `· use /confine`, because switching Auto's fence off
+asks for an acknowledgement that belongs with [that verb](#auto-modes-blast-radius). And
+switching model or server stays with `/model` and `/server`: editing `model:` or `endpoint:`
+here persists the value for next launch and moves nothing now.
 
 ## Sessions
 
@@ -310,6 +352,13 @@ env) — the system prompt, the model profile, MCP servers, web-search endpoint,
 and the small-model mechanisms — and one, the upstream `api-key:`, has a file key
 and an environment variable but deliberately **no flag** (see
 [The upstream API key](#the-upstream-api-key)).
+
+That file is also readable and editable from inside apogee:
+[`/settings`](#the-settings-screen--settings) lists every setting with the value this
+run resolved for it, and writes a committed edit back as a **single key**, comments and
+layout preserved. That is the only way apogee ever writes your config — an edit you
+asked for, one key at a time — so "your edits are never overwritten" stands: nothing is
+written on apogee's own initiative, at upgrade or at any other time.
 
 Catalogued mechanisms are opt-in by canonical ID. Every mechanism ships **off**
 until its A/B bench run proves it a win, so enabling one is a deliberate config
