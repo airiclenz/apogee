@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/run"
 )
 
@@ -32,18 +35,42 @@ func (s *stubRunner) once(_ context.Context, spec run.Spec) (run.Result, error) 
 	return s.res, s.err
 }
 
+// fakeConfiner is a Confiner whose capability matrix the test dictates — the seam that makes the
+// Auto gate assertable off the machine the suite happens to run on, where the real backend may or
+// may not be able to fence. Its type name is also what the backend label derives from
+// ("fakeConfiner" → "fake"), which is what the refusal is asserted to name.
+type fakeConfiner struct{ caps apogee.ConfinementCaps }
+
+func (f fakeConfiner) Capabilities() apogee.ConfinementCaps { return f.caps }
+
+func (fakeConfiner) Confine(context.Context, apogee.ConfinementBox, *exec.Cmd) error { return nil }
+
+// fenceableHost is the backend most of this file assumes: one that can enforce a filesystem box,
+// so the Auto gate has nothing to say and every other assertion is about what it was written for.
+var fenceableHost = fakeConfiner{caps: apogee.ConfinementCaps{FSWrite: true}}
+
 // headlessRun executes one `apogee headless` invocation against the stub and hermetic roots, and
 // returns what landed on each stream plus the error the command returned. The apogee home and the
 // workspace are temporary so no real ~/.apogee config can reach the resolution, and stdin is
 // empty unless a test replaces it.
-//
-// It swaps the package-level runner seam for the duration of the test. That is shared mutable
-// state, so nothing here runs in parallel.
 func headlessRun(t *testing.T, stub *stubRunner, args ...string) (out, errOut string, err error) {
 	t.Helper()
-	prev := runOnce
+	return headlessRunOn(t, stub, fenceableHost, t.TempDir(), args...)
+}
+
+// headlessRunOn is headlessRun with the two facts the Auto gate reads under the caller's control:
+// the host's confinement backend, and the apogee home whose config.yaml carries the confinement
+// posture (`confine-to-workspace:` is file-only by design — ADR 0012 — so an unconfined run is
+// expressed by writing that file, never by a flag).
+//
+// It swaps the package-level runner and Confiner seams for the duration of the test. That is
+// shared mutable state, so nothing here runs in parallel.
+func headlessRunOn(t *testing.T, stub *stubRunner, confiner apogee.Confiner, configDir string, args ...string) (out, errOut string, err error) {
+	t.Helper()
+	prevRunner, prevConfiner := runOnce, newConfiner
 	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prev })
+	newConfiner = func() apogee.Confiner { return confiner }
+	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
 	// The environment must not decide what the mode assertions measure.
 	t.Setenv(envMode, "")
 
@@ -52,10 +79,21 @@ func headlessRun(t *testing.T, stub *stubRunner, args ...string) (out, errOut st
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs(append([]string{"--config", t.TempDir(), "--workspace", t.TempDir()}, args...))
+	cmd.SetArgs(append([]string{"--config", configDir, "--workspace", t.TempDir()}, args...))
 
 	err = cmd.ExecuteContext(context.Background())
 	return outBuf.String(), errBuf.String(), err
+}
+
+// unconfinedHome writes an apogee home whose config switches confinement off — the user's own
+// explicit "I am the sandbox", which is the only way that posture is ever reached.
+func unconfinedHome(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("confine-to-workspace: false\n"), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	return dir
 }
 
 // The prompt is the argument, or stdin, or a usage error — never an empty request to the model.
@@ -177,6 +215,158 @@ func TestHeadlessModeResolution(t *testing.T) {
 			}
 			if stub.spec.Config.Mode != tc.want {
 				t.Errorf("Config.Mode = %q; want %q", stub.spec.Config.Mode, tc.want)
+			}
+		})
+	}
+}
+
+// The eligibility ladder for --mode auto, ruled on by the surface that offers the mode (ADR 0033,
+// decision 3). Three cells, and each one is a different answer: a host that can fence runs auto and
+// says nothing, a host that cannot refuses it outright rather than running a plan run under auto's
+// name, and a host the user has declared disposable runs it and warns.
+func TestHeadlessAutoEligibilityGate(t *testing.T) {
+	const warning = "running UNCONFINED"
+
+	tests := []struct {
+		name        string
+		caps        apogee.ConfinementCaps
+		unconfined  bool
+		wantRun     bool
+		wantWarning bool
+	}{
+		{
+			name:    "a backend that can fence runs auto, silently",
+			caps:    apogee.ConfinementCaps{FSWrite: true},
+			wantRun: true,
+		},
+		{
+			name: "a backend that cannot fence refuses auto",
+			caps: apogee.ConfinementCaps{},
+		},
+		{
+			name:        "an acknowledged disposable host runs auto unfenced, and says so",
+			caps:        apogee.ConfinementCaps{},
+			unconfined:  true,
+			wantRun:     true,
+			wantWarning: true,
+		},
+		{
+			name:        "the warning is about the posture, not the backend",
+			caps:        apogee.ConfinementCaps{FSWrite: true},
+			unconfined:  true,
+			wantRun:     true,
+			wantWarning: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			if tc.unconfined {
+				home = unconfinedHome(t)
+			}
+			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+			out, errOut, err := headlessRunOn(t, stub, fakeConfiner{caps: tc.caps}, home, "--mode", "auto", "a prompt")
+
+			if tc.wantRun {
+				if err != nil {
+					t.Fatalf("headless: %v (stderr: %q)", err, errOut)
+				}
+				if !stub.called {
+					t.Fatal("the runner did not run on a host that may run auto")
+				}
+				if stub.spec.Config.Mode != apogee.ModeAuto {
+					t.Errorf("Config.Mode = %q; want auto", stub.spec.Config.Mode)
+				}
+			} else {
+				if err == nil {
+					t.Fatal("auto was accepted on a host that cannot fence")
+				}
+				if code := exitCodeFor(err); code != exitNotStarted {
+					t.Errorf("exit code = %d; want %d (err: %v)", code, exitNotStarted, err)
+				}
+				if stub.called {
+					t.Error("the runner ran in a mode this host may not run unattended")
+				}
+				if !strings.Contains(err.Error(), "nobody to ask") || !strings.Contains(err.Error(), "fake") {
+					t.Errorf("the refusal does not state the reason or name the backend: %q", err.Error())
+				}
+				if !strings.Contains(err.Error(), "--mode plan") {
+					t.Errorf("the refusal names no way forward: %q", err.Error())
+				}
+			}
+
+			if got := strings.Contains(errOut, warning); got != tc.wantWarning {
+				t.Errorf("unconfined-auto warning present = %v; want %v (stderr = %q)", got, tc.wantWarning, errOut)
+			}
+			if strings.Contains(out, warning) {
+				t.Errorf("the warning reached stdout, where a pipeline would read it as the answer: %q", out)
+			}
+		})
+	}
+}
+
+// The refusal is the schedule surface's sentence with its noun adapted, from one source: the two
+// unattended surfaces must never tell a user two different stories about the same host.
+func TestHeadlessAutoRefusalSharesTheScheduleSentence(t *testing.T) {
+	t.Parallel()
+	unfenceable := apogee.ConfinementCaps{}
+
+	const want = "the landlock backend on this host reports no filesystem confinement, " +
+		"so auto falls back to approval — and a headless run has nobody to ask"
+	got := autoUnattendedBlocked("a headless run", "landlock", unfenceable, true)
+	if got != want {
+		t.Errorf("the refusal reads\n  %q\nwant\n  %q", got, want)
+	}
+	if firing := scheduleAutoBlocked("landlock", unfenceable, true); strings.Replace(firing, "a firing", "a headless run", 1) != got {
+		t.Errorf("the two unattended surfaces word the same verdict differently:\n  %q\n  %q", firing, got)
+	}
+
+	// The cells that are not a refusal: a backend that can fence, and a posture that asked for no
+	// confinement at all (the user's own explicit loosen, never blocked).
+	if blocked := autoUnattendedBlocked("a headless run", "landlock", apogee.ConfinementCaps{FSWrite: true}, true); blocked != "" {
+		t.Errorf("a fenceable host was refused auto: %q", blocked)
+	}
+	if blocked := autoUnattendedBlocked("a headless run", "deny", unfenceable, false); blocked != "" {
+		t.Errorf("an unconfined run was refused auto: %q", blocked)
+	}
+}
+
+// The degraded cell — auto, confinement asked for, a backend that cannot fence — is where the TUI
+// prints probe.DegradedNotice and the session runs on, because every gated command falls back to
+// approval. A headless run has no approval to fall back to, so the SAME cell is a refusal here.
+//
+// This is the routing claim, and the reason no degradation notice is printed by this command:
+// wherever DegradedNotice would speak, the run never starts, and the notice's remedies (`/confine
+// off`) are slash commands nobody is present to type. If the two predicates ever drift apart, this
+// test fails rather than leaving a headless run silently gating every write.
+func TestHeadlessAutoDegradedCellIsARefusalNotANotice(t *testing.T) {
+	for _, caps := range []apogee.ConfinementCaps{
+		{},
+		{FSWrite: true},
+		{NetworkEgress: true},
+		{FSWrite: true, NetworkEgress: true},
+	} {
+		confiner := fakeConfiner{caps: caps}
+		degraded := probe.DegradedNotice(probe.BackendName(confiner), caps, apogee.ModeAuto, true)
+
+		t.Run(probe.CapabilityLine(probe.BackendName(confiner), caps), func(t *testing.T) {
+			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+			_, errOut, err := headlessRunOn(t, stub, confiner, t.TempDir(), "--mode", "auto", "a prompt")
+
+			if degraded == "" {
+				if err != nil {
+					t.Fatalf("a host with nothing to degrade about refused the run: %v", err)
+				}
+				return
+			}
+			if err == nil || exitCodeFor(err) != exitNotStarted {
+				t.Fatalf("the degraded cell did not refuse the run: err = %v (exit %d)", err, exitCodeFor(err))
+			}
+			if stub.called {
+				t.Error("the runner ran in the cell the TUI only survives by asking a human")
+			}
+			if strings.Contains(errOut, "auto mode is gating terminal commands") || strings.Contains(errOut, "/confine off") {
+				t.Errorf("the TUI's degradation notice was printed to a run that cannot act on it: %q", errOut)
 			}
 		})
 	}

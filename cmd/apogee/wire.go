@@ -49,6 +49,15 @@ const (
 // /confine status renders it in-session, so the wording is extracted rather than copied —
 // three surfaces, one sentence (Phase-5 item 3 / ADR 0021).
 
+// unconfinedAutoWarning is what Auto says for itself when confinement is switched off
+// (`confine-to-workspace: false`) — the only blanket loosen in the system (ADR 0012), so it is
+// stated every time it is used rather than assumed remembered. It is a const because two surfaces
+// now print it — the interactive launch below and an `apogee headless --mode auto` run — and a
+// user who has read it at one of them must not meet a softer wording at the other.
+const unconfinedAutoWarning = "apogee: WARNING — auto mode is running UNCONFINED " +
+	"(confine-to-workspace: false). This is safe only inside a VM/container; " +
+	"the dangerous-action guard is a footgun-net, not a security boundary."
+
 // shouldPrewarmLabelWalk reports whether startup should eagerly run the confinement backend's
 // one-time label walk (ADR 0020 §2) rather than let the first confined command pay it mid-session.
 // It is the MIRROR of probe.DegradedNotice's gate — the same three inputs, FSWrite inverted: the
@@ -196,9 +205,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// A per-session startup warning whenever Auto runs unconfined (ADR 0012): confine=false
 	// is safe only inside a VM, and it is the only blanket loosen in the system.
 	if mode == modeAuto && !opts.confineToWorkspace {
-		fmt.Fprintln(os.Stderr, "apogee: WARNING — auto mode is running UNCONFINED "+
-			"(confine-to-workspace: false). This is safe only inside a VM/container; "+
-			"the dangerous-action guard is a footgun-net, not a security boundary.")
+		fmt.Fprintln(os.Stderr, unconfinedAutoWarning)
 	}
 
 	// The mirror branch: Auto WITH confinement asked for, on a host whose backend cannot

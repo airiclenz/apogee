@@ -47,9 +47,17 @@ NOTES (2026-08-05): exit 2 reaches two refusal classes the item's text implies b
 
 **Commit:** `feat(cli): apogee headless runs one prompt over internal/run`
 
-## 2. The Auto eligibility gate and unattended-run notices
+## 2. The Auto eligibility gate and unattended-run notices — ✅ DONE (2026-08-05)
 
 Depends on item 1.
+
+NOTES (2026-08-05): `probe.DegradedNotice` is NOT printed by headless, contrary to the third bullet. Its cell and the gate's are the same cell: the notice speaks iff `mode==auto && confineToWorkspace && !FSWrite`, and the gate refuses iff `mode==auto && confineToWorkspace && !AutoEligible()` — and `AutoEligible() == FSWrite`. With the refusal placed first (as the first bullet requires) the print could never fire, and its remedies (`/confine off`, `/confine off --save`) are slash commands a headless run has nobody to type. What the TUI degrades to, this command refuses. The equivalence is pinned rather than assumed: `TestHeadlessAutoDegradedCellIsARefusalNotANotice` walks the capability matrix and asserts that wherever `DegradedNotice` would speak the command exits 2 with no runner call and no notice text on stderr — it fails loudly if the two predicates ever drift apart.
+
+NOTES (2026-08-05): the shared sentence is `autoUnattendedBlocked(subject, backend, caps, confineToWorkspace)` in `cmd/apogee/schedule.go` (the item's "generalize the existing helper with a noun parameter" option); `scheduleAutoBlocked` is kept as the one-line wrapper passing "a firing", so the TUI's wording and its callers are byte-identical to before. Headless passes "a headless run" and frames it the way its sibling mode refusal is framed — `apogee headless: --mode auto cannot run on this host — <sentence> (use --mode plan, or run unconfined with confine-to-workspace: false …)`. The golden sentence itself is unchanged; only the prefix and the remedy clause are added, because a CLI refusal that names no way forward strands the user.
+
+NOTES (2026-08-05): the unconfined-Auto warning is now the package const `unconfinedAutoWarning` in `cmd/apogee/wire.go`, and `runRoot` prints that const instead of its inline literal (a one-line change in the file the item names as the wording's source). Mirroring by copy would have left two literals of a security warning free to drift; two surfaces now print one string.
+
+NOTES (2026-08-05): testability needed a second seam — `var newConfiner = platform.NewConfiner` in `headless.go`, beside `runOnce` and for the same reason: what a backend can enforce is a property of the machine the suite runs on (this container's landlock reports no fs-write, a developer laptop's seatbelt does), so without it the gate's rows would assert opposite things on different hosts. `headlessRun` installs a fenceable fake by default, which also makes item 1's existing `--mode auto` tests host-independent. Verified on the built binary: unfenceable host ⇒ exit 2 with the refusal naming the landlock backend; `confine-to-workspace: false` ⇒ the WARNING on stderr and the run proceeding.
 
 **What:** the caller-side Auto gate for `--mode auto`, mirroring the schedule surface ("the surface that offers Auto is the one that refuses it", ADR 0033 decision 3):
 

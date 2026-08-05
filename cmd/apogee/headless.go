@@ -14,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
@@ -79,6 +80,12 @@ func exitCodeFor(err error) int {
 // codes are all provable without a live model. Production never reassigns it.
 var runOnce = run.Once
 
+// newConfiner is the seam onto the host's confinement backend, for the same reason runOnce is one:
+// what a backend can enforce is a property of the MACHINE the test happens to run on — a kernel
+// with landlock or without it — and the Auto gate below is a decision about exactly that. A test
+// dictates the capability matrix here and asserts the verdict; production never reassigns it.
+var newConfiner = platform.NewConfiner
+
 // errHeadlessNoPrompt is the usage refusal when neither the argument nor stdin carries anything.
 // A headless run cannot ask what the user meant, so an empty prompt is refused rather than sent.
 var errHeadlessNoPrompt = errors.New(
@@ -108,7 +115,9 @@ func newHeadlessCommand() *cobra.Command {
 			"than parked (the count is reported), ask_user and present_document are not\n" +
 			"registered, and no MCP server is contacted. Only two modes make sense here and\n" +
 			"only two are accepted — plan (the default, read-only) and auto (confined and\n" +
-			"unattended); ask-before and allow-edits both exist to consult a human.\n\n" +
+			"unattended); ask-before and allow-edits both exist to consult a human. Auto is\n" +
+			"refused on a host whose confinement backend cannot fence the filesystem: there\n" +
+			"the fallback is approval, and there is nobody here to approve.\n\n" +
 			"Settings resolve exactly as a session's do — flag over APOGEE_* environment over\n" +
 			"config.yaml — so a headless run has the shape a session on this host would have.\n" +
 			"The run is saved to ~/.apogee/sessions like any other session and shows up in\n" +
@@ -212,13 +221,48 @@ func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) 
 	// needs to put the disk back (ADR 0020 §2) — the same optional-interface assertion runRoot
 	// makes, for the same reason. It is deferred, which is why every failure below travels as a
 	// returned error: an os.Exit in this function would leave the labels on the disk.
-	confiner := platform.NewConfiner()
+	confiner := newConfiner()
 	if closer, ok := confiner.(interface{ Close() error }); ok {
 		defer func() {
 			if notice := platform.ConfinementTeardownNotice(closer.Close()); notice != "" {
 				cmd.PrintErrln(notice)
 			}
 		}()
+	}
+
+	// Auto's eligibility is ruled on HERE, by the surface that offered the mode (ADR 0033,
+	// decision 3) — the same call the `/schedule` picker makes, through the same sentence, because
+	// a Firing and a headless run are the same unattended thing reached by different Drivers.
+	//
+	// It cannot be left to the engine. agent.New refuses Auto only where it can see no filesystem
+	// confinement AT ALL, whereas what breaks an unattended run is subtler: on a host that cannot
+	// fence, an interactive Auto keeps working because every terminal command falls back to the
+	// Approval path, and that is precisely the rung a headless run does not have. Its Approver
+	// denies rather than asks (ADR 0033, decision 2), so auto there is a plan run wearing auto's
+	// name that fails loudly at every write — after the model has been paid for the attempt. The
+	// refusal happens before the Config is composed for that reason: nothing is sent, and exit 2
+	// tells the script this is an invocation to fix rather than an outcome to read.
+	if mode == modeAuto {
+		if blocked := autoUnattendedBlocked(
+			"a headless run", probe.BackendName(confiner), confiner.Capabilities(), opts.confineToWorkspace); blocked != "" {
+			return notStarted(fmt.Errorf(
+				"apogee headless: --mode auto cannot run on this host — %s (use --mode plan, or "+
+					"run unconfined with `confine-to-workspace: false` in ~/.apogee/config.yaml, "+
+					"which is safe only on a disposable machine)", blocked))
+		}
+		// The other cell of the ladder: confinement switched OFF by the user's own explicit
+		// acknowledgement. That is not blocked — a headless run is never held to a stricter bar
+		// than a launch — but it is the one blanket loosen in the system, so it says so, in the
+		// launch's own words and on stderr, where it cannot contaminate the answer.
+		if !opts.confineToWorkspace {
+			cmd.PrintErrln(unconfinedAutoWarning)
+		}
+		// probe.DegradedNotice is deliberately NOT printed here, though runRoot prints it at this
+		// point: its cell — auto, confinement asked for, a backend that cannot fence — is exactly
+		// the cell refused two branches above, so the notice could never speak, and its remedies
+		// (`/confine off`) are slash commands a headless run has no way to type. What the TUI
+		// degrades to, this command refuses; the equivalence is pinned by a test rather than left
+		// to the reader (headless_test.go, the degraded-cell test).
 	}
 
 	// Every `mechanisms:` key is validated here — enabled AND disabled — exactly as startup
