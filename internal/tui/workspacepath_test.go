@@ -332,7 +332,8 @@ func TestAskUserAnswerIsQuotedAndAPathReportStillShortens(t *testing.T) {
 }
 
 // An unregistered tool's arguments are the model's request quoted verbatim — the approval surface's
-// whole point — so they are shown exactly as they were sent, workspace paths included. What is
+// whole point — so the VALUES are shown exactly as they were sent, workspace paths included, even
+// though the body labels them by name rather than printing the JSON envelope around them. What is
 // equally untouched is the tool's own id: it is a name, not a path.
 func TestUnregisteredToolCardQuotesItsArgumentsVerbatim(t *testing.T) {
 	t.Parallel()
@@ -344,10 +345,10 @@ func TestUnregisteredToolCardQuotesItsArgumentsVerbatim(t *testing.T) {
 		t.Errorf("view = %+v; want the raw-name fallback", tv)
 	}
 	got := detailsText(tv)
-	if !strings.Contains(got, `"/home/me/proj/docs/plan.md"`) {
+	if !strings.Contains(got, "path:\n  /home/me/proj/docs/plan.md") {
 		t.Errorf("arguments body = %q; want the argument quoted exactly as it was sent", got)
 	}
-	if !strings.Contains(got, `"/etc/hosts"`) {
+	if !strings.Contains(got, "other:\n  /etc/hosts") {
 		t.Errorf("arguments body = %q; want the outside path left absolute", got)
 	}
 }

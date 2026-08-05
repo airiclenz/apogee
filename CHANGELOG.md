@@ -126,13 +126,22 @@ point is a **minor** bump, not a breaking change.
     quieter sibling of the prompt block's `see more` — so a body line that happens to start with
     `…` is never mistaken for the affordance beneath it.
   - **No block is exempt any more, targetless calls included.** An unregistered or MCP tool prints
-    its arguments verbatim as the block's own branches, and a 60-line argument blob used to stand
+    its arguments as the block's own branches, and a 60-line argument blob used to stand
     60 rows tall forever — the one shape that never collapsed. It now caps at the same budget as
     every other block, with the same `… +N more lines` marker and the same one-click toggle, and so
     do a registered call that arrived without its target and a stray `result` that matched no call.
     Nothing is lost: the approval popup is where you approve an action and it still shows the
     verbatim arguments at decision time — the transcript block is the record, and a record may
     collapse.
+  - **And an unrecognised call's block labels its arguments, exactly as the approval prompt does.**
+    The block for a tool the transcript has no presenter for — an MCP tool, anything not yet
+    registered — used to paint the raw JSON it arrived in, so the same call read one way in the
+    popup you approved it in and another way in the record of it. It now uses the one rendering:
+    a `name:` line per argument in the order the model wrote them, the value's own real lines
+    beneath it, no braces around the set and no quoted key names. What each surface shows is only
+    how MANY of those lines it seats — the prompt shows them whole, the block collapses them to the
+    house budget. Arguments with no names to label are still shown exactly as they arrived, and
+    every value prints as the model sent it, absolute paths included.
   - **One budget, and the diff spends it too.** A collapsed `View Diff` stood up to 23 rows tall —
     twenty hunk lines under its header, branch and marker — the last body with an allowance of its
     own, and by a wide margin the tallest thing a collapsed transcript could hold. It now keeps the
@@ -908,7 +917,7 @@ point is a **minor** bump, not a breaking change.
     root's (`/home/me/proj-old`) stays whole.
   - **What a block quotes is never respelled.** The rule reaches the paths a block *names* and stops
     there. The body beneath the branch — a diff's hunk lines, an edit's replacement string, a
-    command's output, an unregistered tool's verbatim arguments — prints exactly as it was written,
+    command's output, an unregistered tool's argument values — prints exactly as it was written,
     absolute paths included: an in-workspace path sitting inside file content *is* content, and
     shortening it would show you a spelling the file will not actually contain. A one-line output
     promoted onto the branch is quoted in that same sense — one row lower the identical line would

@@ -39,8 +39,8 @@ import (
 // The label+extractor map is an OPEN, name-keyed registry, not a closed switch: the Phase-3
 // tool fan-out (P3.7–P3.11, ~30 tools, ADR 0002) adds one entry per tool (terminal→"Run",
 // git→"Git", find_replace→"Edit File", …) rather than editing a control-flow statement. An
-// unknown tool falls back to its raw name and pretty-printed arguments, so a tool with no
-// registry entry still renders legibly.
+// unknown tool falls back to its raw name and labelled arguments (argumentDetails), so a tool
+// with no registry entry still renders legibly.
 //
 // The same entry also carries the tool's active verb ("reading", "running"), which the live
 // status line pairs with the target while the call is in flight — the per-tool knowledge
@@ -409,13 +409,15 @@ var toolRegistry = map[string]toolPresenter{
 // nothing is asked of the tool, nothing is added to a result, and the block shows the change
 // before the result even lands. A known tool gets its friendly
 // label, its active verb, and a target pulled from the arguments; an unknown tool falls back
-// to its raw name (styled like any other label) with the pretty-printed arguments as plain
-// detail lines, so a not-yet-registered tool still renders and a malformed argument is shown
-// verbatim (the approval flow is a security surface — the model's request is never hidden).
+// to its raw name (styled like any other label) with its arguments as LABELLED detail lines
+// (argumentDetails — the same rendering the approval prompt reads a decision off, so the two
+// surfaces spell one call one way), so a not-yet-registered tool still renders and a malformed
+// argument is shown verbatim rather than dropped (the approval flow is a security surface — the
+// model's request is never hidden).
 // The verb mirrors that fallback: an unregistered tool is "running <raw name>", which stays a
 // truthful sentence fragment for a dynamic MCP tool nobody has a verb for.
 // Everything the header states traces back to the model's own JSON arguments — the target on every
-// registered tool, and the raw name behind an unknown tool's label, verb and pretty-printed body —
+// registered tool, and the raw name behind an unknown tool's label, verb and labelled body —
 // so both exits leave through finishDisplay, which escape-strips the view and spells the paths it
 // NAMES relative to the workspace root ws names.
 func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
@@ -425,7 +427,7 @@ func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
 			Label:   call.Tool,
 			Verb:    "running " + call.Tool,
 			name:    call.Tool,
-			Details: newToolBody(prettyJSONDetails(call.Arguments)),
+			Details: newToolBody(argumentDetails(call.Arguments)),
 		}
 		tv.finishDisplay(ws)
 		return tv
@@ -989,11 +991,11 @@ func parseArgs(raw json.RawMessage) map[string]any {
 	return m
 }
 
-// prettyJSONDetails renders a tool call's arguments as the plain body of the unknown-tool
-// fallback: the pretty-printed JSON (or the verbatim text when it does not parse) split into
-// one detailLine per line. It is body-only by construction — an unregistered tool has no
-// target, so the block takes the targetless shape and these lines are the branches themselves
-// (render.go). Empty/null arguments add no lines.
+// prettyJSONDetails renders a tool call's arguments as the pretty-printed JSON (or the verbatim
+// text when it does not parse) split into one detailLine per line. It is what argumentDetails
+// degrades to where there is nothing to label — a bare array, a malformed fragment — so a blob
+// with no names still reaches the screen as it arrived instead of being dropped. Empty/null
+// arguments add no lines.
 func prettyJSONDetails(raw json.RawMessage) []detailLine {
 	pretty := prettyJSON(raw)
 	if pretty == "" {
@@ -1029,9 +1031,11 @@ const argumentValueIndent = "  "
 // JSON under its own label, since nothing else states its structure without lying about it. What
 // never comes back is an envelope around the argument SET: the labels ARE the object.
 //
-// The transcript's own targetless block keeps prettyJSONDetails (presentToolCall) — that block is
-// the record of a call, this is the surface a human decides on, and only the second one was asked to
-// change.
+// Both surfaces that show a call's raw arguments read this one rendering: the approval prompt a
+// human decides on, and the transcript block that records a call the presenter does not recognise
+// (presentToolCall's unregistered-tool fallback). One call is spelled one way wherever it appears —
+// the transcript block then collapses to the house budget like any other body (render.go), which is
+// a question about how many of these lines a surface seats, not about what they say.
 func argumentDetails(raw json.RawMessage) []detailLine {
 	pairs, ok := orderedArgs(raw)
 	if !ok {

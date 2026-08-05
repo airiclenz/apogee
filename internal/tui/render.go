@@ -1015,7 +1015,7 @@ func blockHidesWhenCollapsed(views []toolView) bool {
 //     place that truncation happens (collapsedDetails), and painted whole when it is expanded.
 //   - a call with NO target — the only shape with no target line: the header stands alone and
 //     the detail lines are themselves the ┝/┕ branches, the summary last since it has no branch
-//     line to ride (an unregistered tool's pretty-printed arguments then its "error: …"
+//     line to ride (an unregistered tool's labelled arguments then its "error: …"
 //     outcome, a stray result). Collapsed, that branch LIST is what the cap falls on — the
 //     block has no body to cap instead — and the remainder marker hangs beneath it.
 //

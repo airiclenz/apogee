@@ -1451,7 +1451,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ weird_tool ▸"},
-				{line: 2, kind: targetMarker, entry: 0, text: "    … +4 more lines"},
+				{line: 2, kind: targetMarker, entry: 0, text: "    … +5 more lines"},
 			},
 		},
 		{
@@ -2116,8 +2116,9 @@ func TestRenderInFlightStandalone(t *testing.T) {
 }
 
 // The one shape with no target line: an unregistered tool has nothing to lead a branch with, so
-// the header stands alone and its verbatim pretty-printed arguments are themselves the ┝/┕
-// branches. Collapsed, that branch list is capped like any other block's body and the remainder
+// the header stands alone and its LABELLED arguments — one `name:` line with the value's own lines
+// beneath it, the same rendering the approval prompt shows — are themselves the ┝/┕ branches.
+// Collapsed, that branch list is capped like any other block's body and the remainder
 // marker counts what is behind it; expanded, every line the model sent is back — the approval
 // popup is where a human approves an action, the transcript block is the record (layout.md,
 // "Collapsed and expanded blocks").
@@ -2127,8 +2128,8 @@ func TestRenderNoTargetStandalone(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ mcp_thing ▸",
-		"  ┕ {",
-		"    … +2 more lines",
+		"  ┕ a:",
+		"    … +1 more line",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("collapsed targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -2139,9 +2140,8 @@ func TestRenderNoTargetStandalone(t *testing.T) {
 	}
 	want = strings.Join([]string{
 		"✦ mcp_thing ▾",
-		"  ┝ {",
-		`  ┝   "a": 1`,
-		"  ┕ }",
+		"  ┝ a:",
+		"  ┕   1",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("expanded targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -2161,9 +2161,8 @@ func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ mcp_thing ▾",
-		"  ┝ {",
-		`  ┝   "a": 1`,
-		"  ┝ }",
+		"  ┝ a:",
+		"  ┝   1",
 		"  ┕ error: no such server",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -2243,6 +2242,84 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 			for _, ln := range got {
 				if strings.Contains(ln, "more line") {
 					t.Errorf("an expanded block kept a remainder marker: %q", ln)
+				}
+			}
+		})
+	}
+}
+
+// A call the presenter does not recognise paints its arguments the way the approval prompt does:
+// one `name:` line per argument with the value's own real lines beneath it — no brace envelope
+// around the set, no quoted key names, and a multi-line value showing the lines it will actually
+// run rather than one `"…\n…"` blob. The labelling changes what a body SAYS and nothing about how
+// a block behaves: it still collapses to the house budget behind a remainder marker and still
+// gives every retained line back on toggle.
+func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
+	cases := []struct {
+		name          string
+		args          string
+		wantCollapsed []string
+		wantExpanded  []string
+	}{
+		{
+			name: "a multi-key argument object",
+			args: `{"query":"collapse","server":"docs","limit":20}`,
+			wantCollapsed: []string{
+				"✦ mcp_search ▸",
+				"  ┕ query:",
+				"    … +5 more lines",
+			},
+			wantExpanded: []string{
+				"✦ mcp_search ▾",
+				"  ┝ query:",
+				"  ┝   collapse",
+				"  ┝ server:",
+				"  ┝   docs",
+				"  ┝ limit:",
+				"  ┕   20",
+			},
+		},
+		{
+			name: "a multi-line value keeps its own lines",
+			args: `{"script":"cd /ws\ngit status\ngit diff"}`,
+			wantCollapsed: []string{
+				"✦ mcp_search ▸",
+				"  ┕ script:",
+				"    … +3 more lines",
+			},
+			wantExpanded: []string{
+				"✦ mcp_search ▾",
+				"  ┝ script:",
+				"  ┝   cd /ws",
+				"  ┝   git status",
+				"  ┕   git diff",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+				ID: "c1", Tool: "mcp_search", Arguments: []byte(tc.args)}})
+
+			collapsed := renderPlain(tr, 80)
+			if want := strings.Join(tc.wantCollapsed, "\n"); collapsed != want {
+				t.Errorf("collapsed block mismatch:\n--- got ---\n%s\n--- want ---\n%s", collapsed, want)
+			}
+			if !tr.toggleExpanded(0) {
+				t.Fatal("toggleExpanded(0) = false; want the unregistered call to own a block state")
+			}
+			expanded := renderPlain(tr, 80)
+			if want := strings.Join(tc.wantExpanded, "\n"); expanded != want {
+				t.Errorf("expanded block mismatch:\n--- got ---\n%s\n--- want ---\n%s", expanded, want)
+			}
+			// The JSON envelope is what the labelling replaces, so neither state may carry a
+			// brace of its own or a key still wearing its wire quotes.
+			for _, state := range []string{collapsed, expanded} {
+				for _, banned := range []string{"{", "}", `"query"`, `"server"`, `"limit"`, `"script"`} {
+					if strings.Contains(state, banned) {
+						t.Errorf("painted block still carries %q:\n%s", banned, state)
+					}
 				}
 			}
 		})
@@ -2435,7 +2512,7 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"    … +2 more lines",
 		"",
 		"✦ mcp_search ▸",
-		"  ┕ {",
+		"  ┕ query:",
 		"    … +3 more lines",
 		"",
 		"· approval allow: terminal",

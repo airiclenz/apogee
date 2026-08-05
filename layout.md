@@ -434,7 +434,7 @@ the same reason it reads the same verb: both are worded from one view.
 **A body is quoted, never respelled — and so is a promoted line.** The rule above reaches the paths
 a block *names* and stops there. The **body** beneath the branch is text the block *quotes* — a
 diff's hunk lines, an edit's replacement string, a command's output, an unregistered tool's
-verbatim arguments — and it prints exactly as the tool wrote it, absolute paths included. A
+argument values — and it prints exactly as the tool wrote it, absolute paths included. A
 **summary that was promoted rather than worded** is quoted in the very same sense: a command whose
 whole output is a single line puts that line on the branch beside the target
 (`┕ cat paths.txt  /home/me/proj/docs/plan.md`), and promotion changes where the text sits, never
@@ -469,7 +469,7 @@ where the block has something to toggle — then one branch line per call —
   are. A body of one line lays out exactly like a body of ten.
 - **A call with no target** — the one shape with no target line: the header stands alone and the
   lines are themselves the `┝`/`┕` branches, the summary closing the list since it has no branch
-  line to ride (an unregistered tool's pretty-printed arguments, then the `error: …` it earned; a
+  line to ride (an unregistered tool's labelled arguments, then the `error: …` it earned; a
   stray `result`). Collapsed, that branch list is what the cap falls on — the block has no body to
   cap instead — and the remainder marker hangs beneath it at the branch marker's own width.
 
@@ -507,13 +507,18 @@ the remainder markers exist only in the collapsed paint. A group is the degenera
 bodies (that is what made them groupable), so both states paint identically and the rule never
 mentions groups. A call with **no target** collapses like every other block, and only *what* is
 capped differs: its lines are the block's own `┝`/`┕` branches rather than a body — an unregistered
-tool's verbatim arguments, a registered call that arrived without its target, a stray `result` — so
+tool's labelled arguments, a registered call that arrived without its target, a stray `result` — so
 the cap falls on that branch list, with the remainder marker beneath it. Hiding them costs nothing,
 because the **approval popup** is the surface a human approves an action on and it shows every
 argument at decision time, each one under its own `name:` label (above); the transcript block is the
-*record*, and a record may collapse. The two surfaces render the same arguments differently on
-purpose: the record shows a targetless call's arguments as the pretty-printed JSON they arrived in,
-where the decision surface labels them.
+*record*, and a record may collapse. The two surfaces spell one call ONE way: an unrecognised call's
+block labels its arguments exactly as the approval prompt does — one `name:` line per argument in
+the order the model wrote them, the value's own real lines two spaces beneath, no braces around the
+set and no quoted key names — and the same two exceptions hold, a blob with no names to label shown
+as it arrived and a value with no flat shape indented as JSON under its own label. What differs
+between the two is how many of those lines each surface seats, not what they say: the prompt shows
+them whole because a decision is being made on them, the block collapses them to the one budget
+because a record may collapse.
 
 **Collapsed is the default, always** — including a call still in flight and a sub-agent run still
 working. Only a click changes a block's state, so nothing ever expands or collapses by itself: a

@@ -283,12 +283,12 @@ func TestPresentToolCall(t *testing.T) {
 			wantTarget: "Deploy to prod?", wantDetail: "yes, after the demo",
 		},
 		{
-			name:       "unknown tool → raw label, JSON args as detail",
+			name:       "unknown tool → raw label, labelled args as detail",
 			call:       domain.ToolCall{ID: "6", Tool: "frobnicate", Arguments: []byte(`{"x":1}`)},
 			wantLabel:  "frobnicate",
 			wantVerb:   "running frobnicate",
 			wantTarget: "",
-			wantDetail: `"x": 1`,
+			wantDetail: "x:\n  1",
 		},
 		{
 			name:       "malformed args → shown verbatim, not dropped",
