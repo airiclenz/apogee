@@ -306,8 +306,16 @@ func serverNameList(servers []ServerChoice) string {
 // Choosing the server the session is already on is answered rather than ignored, the already-bound
 // posture: an explicit act deserves a reply, and re-switching would tear down a live binding to
 // arrive back where it started.
+//
+// A PRE-BOUND session takes the same accept one step lower down (ADR 0036 decision 3): there is no
+// engine to move, so the choice CONSTRUCTS one ([Model.bindToServer], prebound.go). The branch is
+// here rather than in the two callers so both forms of the verb — the highlighted row and
+// "/server <name>" — reach it, and neither can be the one that still tries to switch.
 func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 	m.picker = picker{}
+	if m.prebound() {
+		return m.bindToServer(choice)
+	}
 	if choice.Endpoint == m.opts.Endpoint {
 		m.transcript.addNote("already on " + choice.Name + " (" + choice.Endpoint + ")")
 		m.layout()

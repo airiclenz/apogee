@@ -1181,3 +1181,84 @@ func TestPaintedSettingsGiveWayFactRidesTheStatusLine(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The pre-bound session's painted words (prebound.go)
+// ----------------------------------------------------------------------------
+
+// statusRowOf returns the painted status line — the row directly under the ▔ hairline — and fails
+// when the frame has no hairline to find it by.
+func statusRowOf(t *testing.T, rows []string) string {
+	t.Helper()
+	for i, row := range rows {
+		if strings.Contains(row, "▔") {
+			return strip(rows[i+1])
+		}
+	}
+	t.Fatalf("no ▔ hairline in the painted frame:\n%s", strings.Join(mapStrip(rows), "\n"))
+	return ""
+}
+
+// A first boot paints its notice in the transcript, under the start-up box and above the picker it
+// opened — the human reads why the pane is there in the same frame as the pane.
+func TestPaintedPreboundNoticeRidesTheTranscript(t *testing.T) {
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := preboundModel(t, PreboundFirstBoot, "", &fakeBind{}, &fakeRecorder{})
+			m = paintedAs(t, m, tc.method)
+			painted := strings.Join(mapStrip(paintFrame(t, m, tc.method)), "\n")
+
+			if !strings.Contains(painted, "no server chosen yet") {
+				t.Errorf("no painted row carries the first-boot notice:\n%s", painted)
+			}
+			if !strings.Contains(painted, "switch server") {
+				t.Errorf("the picker the notice explains is not painted:\n%s", painted)
+			}
+		})
+	}
+}
+
+// Both pre-bound facts ride the status line once the pane that asked is closed — the state and the
+// one act that changes it, on the row the give-way facts share (layout.md).
+func TestPaintedPreboundFactsRideTheStatusLine(t *testing.T) {
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Run("a server to choose", func(t *testing.T) {
+				m, _ := preboundModel(t, PreboundStaleChoice, "old-box", &fakeBind{}, &fakeRecorder{})
+				m = step(t, m, keyEsc())
+				m = paintedAs(t, m, tc.method)
+
+				if got := statusRowOf(t, paintFrame(t, m, tc.method)); !strings.Contains(got, noServerBoundFact) {
+					t.Errorf("the status line = %q, want %q", got, noServerBoundFact)
+				}
+			})
+			t.Run("nothing configured", func(t *testing.T) {
+				opts := preboundOpts(PreboundNoServers, "")
+				opts.Servers = nil
+				opts.SettingsRows = func() []SettingRow { return settingsTestRows(6) }
+				m := newTestModelEng(t, &fakeEngine{}, opts)
+				m = step(t, m, keyEsc()) // close the pane the guidance opened with
+				m = paintedAs(t, m, tc.method)
+
+				if got := statusRowOf(t, paintFrame(t, m, tc.method)); !strings.Contains(got, noServersConfiguredFact) {
+					t.Errorf("the status line = %q, want %q", got, noServersConfiguredFact)
+				}
+			})
+		})
+	}
+}
+
+// A bind ends the state, and the status line goes back to saying nothing for an idle session.
+func TestPaintedPreboundFactClearsOnceBound(t *testing.T) {
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := preboundModel(t, PreboundFirstBoot, "", &fakeBind{}, &fakeRecorder{})
+			m = step(t, m, keyEnter())
+			m = paintedAs(t, m, tc.method)
+
+			if got := statusRowOf(t, paintFrame(t, m, tc.method)); strings.Contains(got, noServerBoundFact) {
+				t.Errorf("the status line = %q, want the fact gone once a server is bound", got)
+			}
+		})
+	}
+}

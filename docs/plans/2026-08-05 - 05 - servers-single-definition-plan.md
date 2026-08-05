@@ -305,7 +305,25 @@ errors; `BindServer` constructs and flips the seams exactly once.
 
 **Commit:** `feat(wire): engine construction defers until a startup server is determined`
 
-## 7. TUI pre-bound state — first boot asks, empty list guides
+## 7. TUI pre-bound state — first boot asks, empty list guides — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): "records the choice through item 8's seam" needed the seam to EXIST on the facade,
+so this item adds `tui.Options.RecordServerChoice func(name string) error` (nil ⇒ nothing is recorded)
+and calls it from the pre-bound accept, which is also what the item's `choose→bind+record` test asserts
+against. Item 8 still owns everything on the binary's side of it: the composition-root closure, the
+`server:` splice write, the `/server`-switch call site, and the launcher/ephemeral skip rules. The
+renderer deliberately passes every chosen name and lets the binary decide which are configured entries
+worth writing — it cannot tell a configured row from `upstreamChoices`'s synthesized one.
+
+NOTES (2026-08-05): two consequences of the state beyond the item's literal text. `beatCmd` returns nil
+while pre-bound — the seam is wired but the holder has no Monitor, so a beat would paint the session
+offline against an endpoint nobody has named; the chain opens with the bind's own `armBeat`. And
+`upstreamBlockNote` gained a pre-bound branch, because the blocked-upstream ladder would otherwise
+answer `/continue` and `/compact` with "still connecting to " and an empty endpoint.
+
+NOTES (2026-08-05): reason `noServers` with no rows provider (a hand-built Options, or a Driver without
+the registry — the same degrade `/settings` itself takes) opens no pane and states the guidance as a
+note instead; a start-up that said nothing at all would read as a broken build.
 
 **What:** Depends on item 6 and on the settings plan's pane (items 6–8 there). In
 `internal/tui`: a pre-bound state entered from the startup reason. Reasons

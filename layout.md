@@ -824,6 +824,22 @@ what is trimmed around it (`⣾ read… · 5 queued` at 20 columns), because on 
 the band has been dropped that count is the only thing the whole frame says about the queue. Below
 two columns of room the phrase goes whole, separator and all, rather than reading as an ellipsis.
 
+**And the two facts an *idle* frame may still carry.** Idle otherwise says nothing for itself — the
+input box below already invites a message — but the slot is where a surface that has gone leaves its
+fact, and two of them are owed at idle. The first is the `/settings` pane's `settings — esc close`
+(above), for a window that could seat none of it. The second belongs to the **session** rather than
+to a pane: a run that started with **no server bound** — nothing recorded to start on, a `server:`
+naming an entry that is gone, or nothing configured at all (ADR 0036) — carries its state here for
+as long as that holds. With entries to choose between it reads `no server bound — /server to
+choose`, and with none it reads `no servers configured — add one to ~/.apogee/config.yaml and
+restart`: the state, and the one act that ends it. Such a run opens by ASKING — the `/server` picker
+under a notice saying why it came up unasked, or `/settings` when there is nothing to pick and the
+read-only `servers` row is the pointer — and the fact is what survives the `esc` that closes that
+pane, so a frame the human dismissed the question on never looks like an ordinary idle session. The
+pane's fact wins where both are owed, being the more urgent of the two: a modal is swallowing every
+keypress on a window showing none of it, and the session's fact is still there when it closes. The
+fact goes the moment a server is bound.
+
 ---
 
 ## The footer's upstream slot

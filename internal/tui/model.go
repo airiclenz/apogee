@@ -322,6 +322,11 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// loaded are reported here — last, so the notice closes the opening frame rather than
 	// separating the box from the scrollback it belongs to.
 	m.noteContextFiles()
+	// A session the binary could not resolve a server for opens ASKING (ADR 0036 decisions 3 and 5):
+	// the `/server` picker, or `/settings` when nothing is configured to pick. It goes last of all —
+	// after every notice above — because it is the one thing the human has to act on before the
+	// session can do anything at all (prebound.go).
+	m.openPrebound()
 	return m
 }
 
@@ -1202,6 +1207,14 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	// default: "just run the skill".
 	if parsed.text == "" && !held {
 		return m, nil
+	}
+	if m.prebound() {
+		// There is no engine to send to yet, and the human has not been asked which server to build
+		// one on since they closed the pane that asked (ADR 0036 decision 3). Ask again rather than
+		// merely refuse: the ONE act standing between this message and the model is a keystroke on
+		// the picker that comes back up, and the message stays in the box while they make it
+		// (preboundRefusal).
+		return m.preboundRefusal()
 	}
 	if m.actuation.inFlight {
 		// A launcher verb owns the server this message would go to (ADR 0029 D5). Refuse it exactly
@@ -2287,9 +2300,14 @@ func (m Model) heartbeatLive(gen int) bool {
 // newModel armed, and the tick fold issues the next one of the chain that scheduled the tick.
 // Anything else firing an immediate beat wants [Model.armBeat], which retires the running chain
 // first — one live chain per session is the invariant, and this func alone cannot keep it.
+//
+// A PRE-BOUND session issues none either, for the plainer reason that there is nothing to observe:
+// the holder behind the seam has no Monitor until the bind installs one (ADR 0036 decision 3), so a
+// beat would report an unreachable server and paint the session offline against an endpoint nobody
+// has named yet. The chain opens with the bind's own armBeat instead.
 func (m Model) beatCmd() tea.Cmd {
 	observe := m.opts.Heartbeat
-	if observe == nil {
+	if observe == nil || m.prebound() {
 		return nil
 	}
 	ctx, gen := m.parent, m.hb.gen
@@ -2648,6 +2666,14 @@ func (m Model) blockedUpstream() bool {
 // when the monitor has them, the failure's own words; the pre-bind case says the truth instead —
 // the server has not answered YET, which on a cold start is a matter of seconds.
 func (m Model) upstreamBlockNote() string {
+	if m.prebound() {
+		// The blocked-upstream ladder reads a session with no server as one whose first beat has not
+		// landed, and would name an endpoint that does not exist. There is no server AT ALL here, so
+		// the pre-bound state's own words are the honest answer (prebound.go). This is the note the
+		// two Exchange-opening verbs earn; a typed message is answered one step earlier, by the ask
+		// itself (submit → preboundRefusal).
+		return preboundNotice(m.opts.Prebound)
+	}
 	if !m.hb.offline {
 		return "cannot send — still connecting to " + m.opts.Endpoint
 	}
@@ -3777,11 +3803,18 @@ func (m Model) statusLeft() string {
 	var phrase string
 	switch m.state {
 	case stateIdle:
-		// Idle says nothing for itself — the input box below already invites a message — with ONE
-		// exception: an open /settings pane the frame could not seat leaves its fact here, the licence
-		// layout.md gives every surface that gives way entirely (settingsGiveWayPhrase). It is empty
-		// on every other idle frame, so the slot is the queue's alone as before.
+		// Idle says nothing for itself — the input box below already invites a message — with TWO
+		// exceptions. An open /settings pane the frame could not seat leaves its fact here, the licence
+		// layout.md gives every surface that gives way entirely (settingsGiveWayPhrase); and a session
+		// with no server bound carries its standing fact here for as long as that holds, which is what
+		// survives the esc that closes the pane asking about it (preboundPhrase, ADR 0036). The pane's
+		// fact wins where both are owed: a modal swallowing every key on a window showing none of it is
+		// the more urgent of the two, and the session's fact is still there when it closes. Every other
+		// idle frame leaves the slot to the queue, as before.
 		phrase = m.settingsGiveWayPhrase()
+		if phrase == "" {
+			phrase = m.preboundPhrase()
+		}
 	case stateRunning:
 		phrase = m.spin.view(m.th) + m.th.statusBar.Render(" "+m.runningPhrase(time.Now())) + m.throughputSuffix()
 	case stateAwaitingApproval:

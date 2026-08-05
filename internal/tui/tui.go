@@ -456,6 +456,21 @@ type Options struct {
 	// always wires it beside SwitchServer.
 	BindServer func(name string) (ServerSwitchResult, error)
 
+	// RecordServerChoice persists the entry this session starts on NEXT time — the `server:` key
+	// ADR 0036 decision 2 records on every move to a configured entry. The renderer calls it with the
+	// name it just bound or switched to and knows nothing else about it: whether that name belongs to
+	// a configured entry (and is therefore worth writing) is the binary's question, because only the
+	// binary can tell a configured row from the synthesized one an override startup earns.
+	//
+	// It is best-effort persistence of something that ALREADY happened: the session moved before this
+	// is called and stays moved whatever it answers, so an error is a note and never an undo. Like
+	// WriteSetting it is synchronous — one small file, spliced and renamed — and called on the Update
+	// loop.
+	//
+	// nil ⇒ nothing is recorded and every switch is session-scoped, which is exactly the behaviour
+	// this key was introduced to replace; every hand-built Options keeps it.
+	RecordServerChoice func(name string) error
+
 	// LaunchProfiles lists the Launch profiles the launcher's config defines — what `/model` offers on
 	// a host with a launcher, re-read FRESH every time the picker opens (ADR 0029 D4), so a profile
 	// added in the launcher's own TUI a moment ago is offered here without restarting apogee. The

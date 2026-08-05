@@ -344,6 +344,20 @@
 // both are idle-only by the commandSpecs table, and /server's whole degrade ladder is one line —
 // an unwired seam and an empty list are the same situation for the human.
 //
+// A session may also start with NO server, and that is the one state in which the renderer opens a
+// pane nobody asked for (prebound.go, ADR 0036). The binary could not resolve which `servers:` entry
+// this run starts on — none recorded, the recorded one gone, or nothing configured — and the TUI is
+// the one Driver that can ASK rather than refuse, so [Options.Prebound] carries the reason and the
+// same /server picker comes up under a notice saying why. Its accept goes one level lower than a
+// switch's: [Options.BindServer] CONSTRUCTS the engine that does not exist yet
+// ([Model.bindToServer]), the display adopts the result exactly as it adopts a move, and the name is
+// handed to [Options.RecordServerChoice] as the one the next session starts on. Nothing else about
+// the state is a new surface: no beat goes out while there is nothing to observe, a typed message
+// re-opens the ask instead of reaching the absent engine, the reason with nothing to pick opens
+// /settings instead, and the status line carries the standing fact that outlives the esc closing
+// either pane. One predicate ([Model.prebound]) is the whole of the state, and the single write that
+// clears it — a committed bind — ends it everywhere at once.
+//
 // That fold has ONE owner (post-v0.8 architecture deepening, review candidate 06). fold.go's
 // [Model.foldEvent] is the single door every engine Event enters the view through: the Update
 // loop's eventMsg case hands it over and does nothing else with it, and foldEvent runs the three
