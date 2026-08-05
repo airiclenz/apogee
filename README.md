@@ -141,8 +141,8 @@ Two notes on the archives, because the binaries are **not code-signed** yet. On
 macOS, a download made in a *browser* is quarantined and Gatekeeper will refuse to
 run it — `xattr -d com.apple.quarantine ./apogee` clears that, or use the `curl`
 above, which never sets it. On Windows, SmartScreen may warn about an unrecognised
-publisher for the same reason. Signing both is recorded follow-on work; until then
-`SHA256SUMS` is the check that is actually worth making.
+publisher for the same reason. Signing both is a recorded follow-on (`TODO.md`);
+until then `SHA256SUMS` is the check that is actually worth making.
 
 **From source:** a clone plus `make build` — see
 [Building from source](#building-from-source) for the prerequisites and the
