@@ -8,6 +8,9 @@
 *.test
 *.out
 
+# Release archives staged by `make dist` — published as GitHub release assets, never committed
+/dist/
+
 # Local per-tool loader shim — AGENTS.md is the canonical, checked-in agent guide
 /CLAUDE.md
 

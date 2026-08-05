@@ -726,6 +726,22 @@ point is a **minor** bump, not a breaking change.
   failed event, along with whatever outcome a failed run salvaged. The library reads none of it; it
   carries it.
 
+- **The release carries binaries now, and Homebrew installs them.** Every GitHub release ships all
+  **six** targets — Linux, macOS and Windows × `amd64` and `arm64` — as versioned archives holding
+  the binary, the README and the LICENSE, with a `SHA256SUMS` file beside them; `brew install
+  airiclenz/tap/apogee` downloads the archive for your platform instead of compiling anything, so
+  neither route needs a Go toolchain on the machine that runs apogee. Building from source is
+  unchanged and stays the shortest path to the tip of `main`. One caveat travels with the
+  convenience, and the README states it where the download is rather than in a footnote: the
+  binaries are **not code-signed** yet, so a browser download on macOS is quarantined until
+  `xattr -d com.apple.quarantine` clears it, and Windows SmartScreen warns about an unrecognised
+  publisher. Signing is follow-on work; until it lands, `SHA256SUMS` is the check worth making.
+  - **`make dist` is where the archives come from.** One target builds and packs the whole
+    publishable matrix on whichever machine cuts the release — `.tar.gz` for Linux and macOS,
+    `.zip` for Windows, the sums computed over all six — so a release is reproducible from the
+    repository rather than from whatever commands the last one happened to use. `make cross` keeps
+    its old job: the same six builds thrown away, as a compile check.
+
 ### Changed
 
 - **The two prompts that ask you something are menus now.** An approval used to be a paragraph with a

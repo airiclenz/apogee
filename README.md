@@ -65,14 +65,15 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 
 ## Status
 
-**`v0.10.x` on `main` — pre-production.** The release line was deliberately reset
+**`v0.11.x` on `main` — pre-production.** The release line was deliberately reset
 from `1.x` to `0.x` (2026-07-23): the old numbering overstated maturity, and under
 SemVer a `0.x` version makes no API-stability promise — the Go API is still allowed
-to move while the tool hardens. One consequence: install from source — a clone
-plus `make build`, or `go install github.com/airiclenz/apogee/cmd/apogee@main` —
-but **not** `go install …@latest`: proxy.golang.org retains the retired `v1.x`
-module versions immutably, so `@latest` still resolves to old `v1.7.0`. Prebuilt
-binaries are not published yet.
+to move while the tool hardens. That is a statement about the *API*, not about how
+you get the tool: every release now ships prebuilt binaries for all six targets and
+a Homebrew formula installs them — see [Install](#install). One carve-out outlives
+the reset: `go install github.com/airiclenz/apogee/cmd/apogee@main` works, but
+**not** `go install …@latest` — proxy.golang.org retains the retired `v1.x` module
+versions immutably, so `@latest` still resolves to the stale `v1.7.0`.
 
 Functionally the loop is complete: full tool suite, MCP client, sub-agents, skills,
 and OS-confined Auto mode on **all three** platforms — Linux landlock, macOS
@@ -94,6 +95,53 @@ is fully ported (21 mechanisms) and the first Validated set
 validation of that catalogue alongside TUI layout refinement. See
 [`docs/plans/`](docs/plans/) and the [`CHANGELOG`](CHANGELOG.md) for what's
 next.
+
+## Install
+
+Three ways in, and all three land the same thing: one static binary with no runtime
+to install beside it. Homebrew if you are on macOS or Linux, a prebuilt archive on
+any of the six targets, or a clone if you would rather build it yourself.
+
+**Homebrew — macOS and Linux:**
+
+```bash
+brew install airiclenz/tap/apogee
+apogee --version
+```
+
+The formula installs the prebuilt binary for your platform, so nothing is compiled
+and no Go toolchain is needed; `brew upgrade apogee` moves you to the next release.
+
+**A prebuilt archive — any of the six targets.** Every release carries Linux, macOS
+and Windows × `amd64` and `arm64` on the
+[releases page](https://github.com/airiclenz/apogee/releases/latest). Each archive
+holds the binary, the README and the LICENSE, and a `SHA256SUMS` file sits beside
+them so you can check what you downloaded.
+
+```bash
+# macOS / Linux — set these two to your release and platform
+VERSION=0.11.0
+PLATFORM=darwin_arm64   # or darwin_amd64 · linux_amd64 · linux_arm64
+
+curl -fsSLO "https://github.com/airiclenz/apogee/releases/download/v$VERSION/apogee_${VERSION}_${PLATFORM}.tar.gz"
+tar -xzf "apogee_${VERSION}_${PLATFORM}.tar.gz"
+sudo install -m 0755 "apogee_${VERSION}_${PLATFORM}/apogee" /usr/local/bin/apogee
+apogee --version
+```
+
+On Windows, download `apogee_<version>_windows_arm64.zip` (or `_amd64`), unpack it,
+and put `apogee.exe` somewhere on your `PATH`.
+
+Two notes on the archives, because the binaries are **not code-signed** yet. On
+macOS, a download made in a *browser* is quarantined and Gatekeeper will refuse to
+run it — `xattr -d com.apple.quarantine ./apogee` clears that, or use the `curl`
+above, which never sets it. On Windows, SmartScreen may warn about an unrecognised
+publisher for the same reason. Signing both is recorded follow-on work; until then
+`SHA256SUMS` is the check that is actually worth making.
+
+**From source:** a clone plus `make build` — see
+[Building from source](#building-from-source) for the prerequisites and the
+`Makefile` targets.
 
 ## Key capabilities
 
@@ -584,6 +632,9 @@ it.
 
 ## Building from source
 
+Not the only way in any more — [Install](#install) has Homebrew and prebuilt
+archives — but it stays the shortest path to the tip of `main`.
+
 **Prerequisites:** Go 1.26+ (the toolchain version pinned in `go.mod`).
 
 ```bash
@@ -602,6 +653,7 @@ A `Makefile` wraps the common Go invocations:
 | `make run ARGS="--help"` | Build-and-run, passing flags via `ARGS` |
 | `make test` | Run the test suite with the race detector |
 | `make cross` | Cross-build all six release targets (Linux/macOS/Windows × amd64/arm64) |
+| `make dist` | Build the publishable release archives into `dist/`, plus `SHA256SUMS` |
 | `make check` | The full acceptance gate — gofmt, vet, build, race tests, cross-build |
 | `make help` | List every target |
 
@@ -623,9 +675,11 @@ the retired `v1.x` module versions, so `@latest` resolves to stale `v1.7.0`.
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` does the same thing — the
 Makefile just gives the common commands one-word names. Releases are cross-compiled to
 all **six** targets — Linux, macOS and Windows × `amd64` and `arm64` — from any one of
-them: the tree is CGO-free, so `make cross` (or six `GOOS=… GOARCH=… go build ./...`
-invocations) is the whole release matrix, and every OS-specific backend is behind a
-build tag rather than a separate artifact.
+them: the tree is CGO-free, so `make dist` builds and packs the entire published
+matrix on whichever machine cuts the release (`make cross` is the same six builds
+thrown away, as a compile check), and every OS-specific backend is behind a build tag
+rather than a separate artifact. `make dist` needs `zip` on the box for the two
+Windows archives; every other tool it uses ships with Go.
 
 > **Note:** launch the TUI with `apogee --endpoint <openai-compatible-url> --model <name>`
 > to hold a real coding conversation with a local model. All four autonomy modes, the
