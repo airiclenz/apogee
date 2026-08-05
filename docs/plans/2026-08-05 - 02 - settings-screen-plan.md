@@ -131,7 +131,16 @@ enum rows have non-empty `EnumValues` matching the parse sites
 
 **Commit:** `feat(config): declarative key registry with schema-bijection guard`
 
-## 3. Resolution reads source metadata from the registry
+## 3. Resolution reads source metadata from the registry — ✅ DONE (2026-08-05)
+
+**NOTES (2026-08-05):** of the default literals at `config.go:548-550`, only `mode` was pointed at
+its registry row — the one default whose row spelling (`"ask-before"`) IS the key's typed value.
+The bool/aggregate defaults stay typed literals: their rows spell them as text (`"true"`), and
+reaching `confine-to-workspace`'s default through a parse of a table entry would leave a safety
+default one registry typo away from silently flipping to `false`. `TestRegistryModeDefaultIsTheLadderDefault`
+pins the one row resolution now reads to the ladder constant, and `TestMultiSourceKeysBindDescribedKeys`
+(added beyond the item's test list) guards the new binding table against advertising a source
+nothing reads.
 
 **What:** Depends on item 2. Rewire the multi-source precedence loop in
 `resolveSettings` (`cmd/apogee/config.go:599-618` — endpoint, model, mode, host-alias,

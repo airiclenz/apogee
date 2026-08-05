@@ -263,3 +263,17 @@ func lookupKey(path string) (configKey, bool) {
 	}
 	return configKey{}, false
 }
+
+// mustKey returns the registry row for a path and panics when the table has none. It exists for
+// the package-level tables built OVER the registry — resolution's multiSourceKeys binding — where
+// a missing row is a defect in this package's own literals rather than anything an input can
+// cause, exactly the regexp.MustCompile-on-a-literal-pattern case. Every such table is
+// initialised at process start, so the panic can only ever fire on the first run after the
+// edit that removed the row, and TestMultiSourceKeysBindDescribedKeys names it before then.
+func mustKey(path string) configKey {
+	k, ok := lookupKey(path)
+	if !ok {
+		panic("apogee: no config registry row for " + path + " (a table built over the registry names it)")
+	}
+	return k
+}

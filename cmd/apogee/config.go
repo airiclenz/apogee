@@ -526,6 +526,130 @@ type layer struct {
 	cursorShape *string
 }
 
+// multiSourceKey binds one registry row to the plumbing that carries its key through resolution.
+// Six of the schema's keys are settable from more than one source, and they are the only ones
+// whose environment-variable and flag NAMES are ever in play — so those names are read from the
+// row (EnvVar, FlagName) rather than restated as a literal at each of the three sites that used
+// to spell them: the env layer, the flag layer, and resolveSettings' precedence loop. Source
+// metadata therefore has exactly one home, and renaming APOGEE_MODE or --mode is an edit to one
+// registry row instead of a three-site edit that can half-land — with the row the /settings
+// surface shows as the key's source guaranteed to be the row resolution actually read.
+//
+// The accessors are what lets the typed layer/settings structs stand unchanged (rewriting that
+// whole copy chain into table-driven resolution is a separate effort): fromEnv projects a
+// variable's text onto a layer, fromFlag projects the already-parsed flag value, and overlay
+// copies a layer's value onto the resolved settings when that layer sets it. A nil fromEnv or
+// fromFlag means the key has no source of that kind — api-key deliberately has no flag (a secret
+// typed on a command line lands in shell history and in `ps` output) and host-alias has neither,
+// so it rides the loop on the file layer alone.
+type multiSourceKey struct {
+	row      configKey
+	fromEnv  func(l *layer, text string) error
+	fromFlag func(l *layer, opts options)
+	overlay  func(s *settings, l layer)
+}
+
+// multiSourceKeys is that table, in the order the registry lists the keys. The order does not
+// affect the outcome — each key overlays its own field, and precedence is the order the LAYERS
+// are applied in — it only keeps the table readable beside the registry it is built over.
+var multiSourceKeys = []multiSourceKey{
+	{
+		row: mustKey("endpoint"),
+		fromEnv: func(l *layer, text string) error {
+			l.endpoint = &text
+			return nil
+		},
+		fromFlag: func(l *layer, opts options) {
+			v := opts.endpoint
+			l.endpoint = &v
+		},
+		overlay: func(s *settings, l layer) {
+			if l.endpoint != nil {
+				s.endpoint = *l.endpoint
+			}
+		},
+	},
+	{
+		row: mustKey("api-key"),
+		fromEnv: func(l *layer, text string) error {
+			l.apiKey = &text
+			return nil
+		},
+		// No fromFlag: there is no --api-key to project, so the loop's own file-then-env order is
+		// what resolves the token.
+		overlay: func(s *settings, l layer) {
+			if l.apiKey != nil {
+				s.apiKey = *l.apiKey
+			}
+		},
+	},
+	{
+		// Neither an env var nor a flag names the host alias: it is a per-config display fact. It
+		// still rides the loop, so the day it gains a source only its row changes.
+		row: mustKey("host-alias"),
+		overlay: func(s *settings, l layer) {
+			if l.hostAlias != nil {
+				s.hostAlias = *l.hostAlias
+			}
+		},
+	},
+	{
+		row: mustKey("model"),
+		fromEnv: func(l *layer, text string) error {
+			l.model = &text
+			return nil
+		},
+		fromFlag: func(l *layer, opts options) {
+			v := opts.model
+			l.model = &v
+		},
+		overlay: func(s *settings, l layer) {
+			if l.model != nil {
+				s.model = *l.model
+			}
+		},
+	},
+	{
+		row: mustKey("mode"),
+		fromEnv: func(l *layer, text string) error {
+			l.mode = &text
+			return nil
+		},
+		fromFlag: func(l *layer, opts options) {
+			v := opts.mode
+			l.mode = &v
+		},
+		overlay: func(s *settings, l layer) {
+			if l.mode != nil {
+				s.mode = *l.mode
+			}
+		},
+	},
+	{
+		row: mustKey("bypass"),
+		// The one env value that is parsed rather than carried: a set-but-unparseable flag is a hard
+		// error, never a silently-ignored boolean. envLayer adds the variable's name to the message,
+		// because the name is the row's to know, not this closure's.
+		fromEnv: func(l *layer, text string) error {
+			b, err := strconv.ParseBool(text)
+			if err != nil {
+				return errors.New("want a boolean")
+			}
+			l.bypass = &b
+			return nil
+		},
+		fromFlag: func(l *layer, opts options) {
+			v := opts.bypass
+			l.bypass = &v
+		},
+		overlay: func(s *settings, l layer) {
+			if l.bypass != nil {
+				s.bypass = *l.bypass
+			}
+		},
+	},
+}
+
 // resolveSettings overlays the layers in increasing priority — the default base, then
 // the file, then the environment, then the flags — so a flag beats an environment
 // variable beats the file beats the default. Only ask-before (the default mode) is a
@@ -545,7 +669,12 @@ type layer struct {
 // entries, which are skipped rather than fatal (the ADR 0016 posture the validated-set
 // surface established: a data defect degrades, it never blocks startup).
 func resolveSettings(file, env, flag layer, hostID string) (settings, []string) {
-	s := settings{mode: string(modeAskBefore), confineToWorkspace: true, useProjectSkills: true, autoCompact: true,
+	// The default base. mode's default comes from its registry row, so the value resolution starts
+	// from and the value /settings shows as "the default" are one string. The remaining defaults
+	// stay typed literals on purpose: their rows spell them as TEXT ("true"), and reaching
+	// confine-to-workspace's default through a parse of a table entry would leave a safety default
+	// one typo away from silently flipping to false.
+	s := settings{mode: mustKey("mode").Default, confineToWorkspace: true, useProjectSkills: true, autoCompact: true,
 		autoTitle: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: defaultUISettings(),
 		contextFiles: defaultContextFilesSettings()}
 	// file-only (ADR 0012 + its 2026-07-21 amendment); env/flag never carry either, so the
@@ -596,24 +725,12 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 	if file.cursorShape != nil { // file-only, like the UI block above
 		s.cursorShape = *file.cursorShape
 	}
+	// The multi-source keys, lowest-priority layer first: each key's overlay writes its own field,
+	// so a later layer that sets the key wins and one that does not leaves the value below it
+	// standing. The keys and their sources are the registry's to describe (multiSourceKeys).
 	for _, l := range []layer{file, env, flag} {
-		if l.endpoint != nil {
-			s.endpoint = *l.endpoint
-		}
-		if l.model != nil {
-			s.model = *l.model
-		}
-		if l.mode != nil {
-			s.mode = *l.mode
-		}
-		if l.hostAlias != nil {
-			s.hostAlias = *l.hostAlias
-		}
-		if l.bypass != nil {
-			s.bypass = *l.bypass
-		}
-		if l.apiKey != nil {
-			s.apiKey = *l.apiKey
+		for _, k := range multiSourceKeys {
+			k.overlay(&s, l)
 		}
 	}
 	return s, notices
@@ -1221,56 +1338,47 @@ const (
 	envWorkspace = "APOGEE_WORKSPACE"
 )
 
-// envLayer reads the APOGEE_* variables into a precedence layer; an unset variable
-// stays nil to fall through. A set-but-unparseable APOGEE_BYPASS is a hard error rather
-// than a silently-ignored boolean. getenv is injected so the layer is testable without
-// mutating the process environment.
+// envLayer reads the APOGEE_* variables into a precedence layer; an unset variable stays nil to
+// fall through. Which variable carries which key is the registry's to say (multiSourceKeys), so
+// this reads names out of the rows rather than repeating them: a key whose row names no variable
+// — host-alias — has no environment source at all, and one whose row names one (api-key
+// included, the recommended way to supply a token: it beats `api-key:` and never touches the
+// config file) is read here and nowhere else. A set-but-unparseable APOGEE_BYPASS is a hard error
+// rather than a silently-ignored boolean, reported with the name the row carries. getenv is
+// injected so the layer is testable without mutating the process environment.
 func envLayer(getenv func(string) string) (layer, error) {
 	var l layer
-	if v := getenv(envEndpoint); v != "" {
-		l.endpoint = &v
-	}
-	if v := getenv(envModel); v != "" {
-		l.model = &v
-	}
-	if v := getenv(envMode); v != "" {
-		l.mode = &v
-	}
-	if v := getenv(envBypass); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return layer{}, fmt.Errorf("apogee: invalid %s %q: want a boolean", envBypass, v)
+	for _, k := range multiSourceKeys {
+		if k.fromEnv == nil || k.row.EnvVar == "" {
+			continue
 		}
-		l.bypass = &b
-	}
-	// The upstream bearer token: the env layer is the RECOMMENDED source (it beats `api-key:`
-	// and never touches the config file), and the only one above the file — no flag carries it.
-	if v := getenv(envAPIKey); v != "" {
-		l.apiKey = &v
+		v := getenv(k.row.EnvVar)
+		if v == "" {
+			continue
+		}
+		if err := k.fromEnv(&l, v); err != nil {
+			return layer{}, fmt.Errorf("apogee: invalid %s %q: %w", k.row.EnvVar, v, err)
+		}
 	}
 	return l, nil
 }
 
-// flagLayer projects the parsed flags onto a precedence layer, including a field only
-// when its flag was explicitly set (changed reports cobra's per-flag Changed). An unset
-// flag carries its zero default, which must not shadow a lower layer — so it is omitted.
+// flagLayer projects the parsed flags onto a precedence layer, including a field only when its
+// flag was explicitly set (changed reports cobra's per-flag Changed). An unset flag carries its
+// zero default, which must not shadow a lower layer — so it is omitted. The flag NAMES come from
+// the registry rows, like the variable names above: a key whose row names no flag cannot be
+// carried by one, which is how api-key stays off the command line even though options has a
+// field for the resolved token.
 func flagLayer(opts options, changed func(string) bool) layer {
 	var l layer
-	if changed("endpoint") {
-		v := opts.endpoint
-		l.endpoint = &v
-	}
-	if changed("model") {
-		v := opts.model
-		l.model = &v
-	}
-	if changed("mode") {
-		v := opts.mode
-		l.mode = &v
-	}
-	if changed("bypass") {
-		v := opts.bypass
-		l.bypass = &v
+	for _, k := range multiSourceKeys {
+		if k.fromFlag == nil || k.row.FlagName == "" {
+			continue
+		}
+		if !changed(k.row.FlagName) {
+			continue
+		}
+		k.fromFlag(&l, opts)
 	}
 	return l
 }

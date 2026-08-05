@@ -309,6 +309,195 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 	}
 }
 
+// The six keys that resolve from more than one source, driven end to end through their registry
+// rows: a real fileConfig, a real getenv, a real explicitly-set flag, and the precedence the
+// three produce. The WIRE-FACING names — the variable a user exports, the flag they type — are
+// spelled out here as literals rather than read from the row, which is what makes this a test of
+// the rows and not of itself: resolution now asks the registry which variable and which flag
+// carry each key, so editing a row's EnvVar or FlagName to anything else means the value this
+// test sets is never seen and the precedence assertions fail.
+//
+// The two keys with no source above the file are pinned the same way, from the other side:
+// host-alias names neither a variable nor a flag, and api-key names no flag, so the file's value
+// must stand even when every flag reports itself explicitly set.
+func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		path            string
+		envVar          string // the variable name the row must carry; "" ⇒ the key has none
+		flagName        string // the flag name the row must carry; "" ⇒ the key has none
+		file, env, flag string // what each source supplies, as that source spells it
+		setFile         func(*fileConfig, string)
+		setFlag         func(*options, string)
+		resolved        func(settings) string
+	}{
+		{
+			path: "endpoint", envVar: "APOGEE_ENDPOINT", flagName: "endpoint",
+			file: "http://file", env: "http://env", flag: "http://flag",
+			setFile:  func(fc *fileConfig, v string) { fc.Endpoint = v },
+			setFlag:  func(o *options, v string) { o.endpoint = v },
+			resolved: func(s settings) string { return s.endpoint },
+		},
+		{
+			path: "api-key", envVar: "APOGEE_API_KEY",
+			file: "file-secret", env: "env-secret",
+			setFile:  func(fc *fileConfig, v string) { fc.APIKey = v },
+			resolved: func(s settings) string { return s.apiKey },
+		},
+		{
+			path:     "host-alias",
+			file:     "the-file-box",
+			setFile:  func(fc *fileConfig, v string) { fc.HostAlias = v },
+			resolved: func(s settings) string { return s.hostAlias },
+		},
+		{
+			path: "model", envVar: "APOGEE_MODEL", flagName: "model",
+			file: "m-file", env: "m-env", flag: "m-flag",
+			setFile:  func(fc *fileConfig, v string) { fc.Model = v },
+			setFlag:  func(o *options, v string) { o.model = v },
+			resolved: func(s settings) string { return s.model },
+		},
+		{
+			path: "mode", envVar: "APOGEE_MODE", flagName: "mode",
+			file: string(modePlan), env: string(modeAllowEdits), flag: string(modeAuto),
+			setFile:  func(fc *fileConfig, v string) { fc.Mode = v },
+			setFlag:  func(o *options, v string) { o.mode = v },
+			resolved: func(s settings) string { return s.mode },
+		},
+		{
+			path: "bypass", envVar: "APOGEE_BYPASS", flagName: "bypass",
+			file: "true", env: "false", flag: "true",
+			setFile: func(fc *fileConfig, v string) { fc.Bypass = boolptr(v == "true") },
+			setFlag: func(o *options, v string) { o.bypass = v == "true" },
+			resolved: func(s settings) string {
+				if s.bypass {
+					return "true"
+				}
+				return "false"
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			t.Parallel()
+			row, ok := lookupKey(tt.path)
+			if !ok {
+				t.Fatalf("no registry row for %q — resolution reads this key's sources from it", tt.path)
+			}
+			if row.EnvVar != tt.envVar {
+				t.Errorf("row %q EnvVar = %q, want %q (the variable users export for this key)", tt.path,
+					row.EnvVar, tt.envVar)
+			}
+			if row.FlagName != tt.flagName {
+				t.Errorf("row %q FlagName = %q, want %q (the flag users type for this key)", tt.path,
+					row.FlagName, tt.flagName)
+			}
+
+			var fc fileConfig
+			tt.setFile(&fc, tt.file)
+			file := fc.layer()
+			if got, _ := resolveSettings(file, layer{}, layer{}, testHostID); tt.resolved(got) != tt.file {
+				t.Fatalf("file only: %s = %q, want %q", tt.path, tt.resolved(got), tt.file)
+			}
+
+			var env layer
+			if tt.envVar != "" {
+				var err error
+				env, err = envLayer(func(name string) string {
+					if name == tt.envVar {
+						return tt.env
+					}
+					return ""
+				})
+				if err != nil {
+					t.Fatalf("envLayer with %s=%q: %v", tt.envVar, tt.env, err)
+				}
+				if got, _ := resolveSettings(file, env, layer{}, testHostID); tt.resolved(got) != tt.env {
+					t.Errorf("%s over the file: %s = %q, want %q (does the row still name %s?)", tt.envVar,
+						tt.path, tt.resolved(got), tt.env, tt.envVar)
+				}
+			}
+
+			if tt.flagName != "" {
+				var opts options
+				tt.setFlag(&opts, tt.flag)
+				flag := flagLayer(opts, func(name string) bool { return name == tt.flagName })
+				if got, _ := resolveSettings(file, env, flag, testHostID); tt.resolved(got) != tt.flag {
+					t.Errorf("--%s over %s: %s = %q, want %q (does the row still name --%s?)", tt.flagName,
+						tt.envVar, tt.path, tt.resolved(got), tt.flag, tt.flagName)
+				}
+				return
+			}
+			// No flag in the row means no flag can carry the key: even with every flag reported as
+			// explicitly set, nothing is projected and the file's value stands.
+			flag := flagLayer(options{}, func(string) bool { return true })
+			if got, _ := resolveSettings(file, layer{}, flag, testHostID); tt.resolved(got) != tt.file {
+				t.Errorf("every flag set: %s = %q, want the file's %q — the key has no flag", tt.path,
+					tt.resolved(got), tt.file)
+			}
+		})
+	}
+}
+
+// resolveSettings takes its base mode from the registry row rather than a literal, so the row is
+// what the "all empty → defaults" expectation above now rests on. This pins that row to the
+// autonomy ladder's own default constant: a row edited to another mode — or to nothing — would
+// otherwise quietly change what a session with no config starts in.
+func TestRegistryModeDefaultIsTheLadderDefault(t *testing.T) {
+	t.Parallel()
+	row, ok := lookupKey("mode")
+	if !ok {
+		t.Fatal("no registry row for mode — resolveSettings takes the default mode from it")
+	}
+	if row.Default != string(modeAskBefore) {
+		t.Errorf("registry mode default = %q, want %q (the mode a session with no config starts in)",
+			row.Default, string(modeAskBefore))
+	}
+}
+
+// The binding table over the registry cannot half-describe a key: every row advertising a
+// variable or a flag must have the plumbing that reads it, every binding must name a described
+// key, and no binding may carry plumbing for a source its row does not name (which would be
+// dead code advertising nothing). Without this, adding `EnvVar:` to a row would silently
+// advertise a variable resolution never reads.
+func TestMultiSourceKeysBindDescribedKeys(t *testing.T) {
+	t.Parallel()
+
+	bound := map[string]multiSourceKey{}
+	for _, k := range multiSourceKeys {
+		if _, ok := lookupKey(k.row.Path); !ok {
+			t.Errorf("multiSourceKeys binds %q, which the registry does not describe", k.row.Path)
+		}
+		if k.overlay == nil {
+			t.Errorf("multiSourceKeys entry %q has no overlay, so resolution would never copy it", k.row.Path)
+		}
+		if k.fromEnv != nil && k.row.EnvVar == "" {
+			t.Errorf("multiSourceKeys entry %q reads an environment variable its row does not name", k.row.Path)
+		}
+		if k.fromFlag != nil && k.row.FlagName == "" {
+			t.Errorf("multiSourceKeys entry %q reads a flag its row does not name", k.row.Path)
+		}
+		bound[k.row.Path] = k
+	}
+	for _, row := range keyRegistry {
+		if row.EnvVar == "" && row.FlagName == "" {
+			continue // file-only, so nothing above the file has to be plumbed
+		}
+		k, ok := bound[row.Path]
+		if !ok {
+			t.Errorf("registry row %q names a source above the file but nothing binds it — the variable "+
+				"or flag would be advertised and never read", row.Path)
+			continue
+		}
+		if row.EnvVar != "" && k.fromEnv == nil {
+			t.Errorf("registry row %q names %s but the binding reads no environment value", row.Path, row.EnvVar)
+		}
+		if row.FlagName != "" && k.fromFlag == nil {
+			t.Errorf("registry row %q names --%s but the binding reads no flag value", row.Path, row.FlagName)
+		}
+	}
+}
+
 // The Host acknowledgement ladder (ADR 0012, amendment 2026-07-21), pinned in the order the
 // ADR fixes: an explicit global false wins; else a match on THIS host's id loosens here; else
 // confinement stays on. A malformed entry degrades softly with a notice, and an entry naming
