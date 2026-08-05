@@ -23,10 +23,9 @@ import (
 // domain Method. It is the fixture behind the round-trip and exclusion tests.
 //
 // The tool card's body is built through newToolBody and the card finished through sanitize rather
-// than left a bare literal, because those are the seams a real view passes: the body's kind is
-// settled where its lines are (toolBody), and a fixture that skipped them would describe a view the
-// presenter never produces — the round-trip's DeepEqual would then pass or fail on the fixture's
-// shortcut instead of on the codec.
+// than left a bare literal, because those are the seams a real view passes (toolBody), and a
+// fixture that skipped them would describe a view the presenter never produces — the round-trip's
+// DeepEqual would then pass or fail on the fixture's shortcut instead of on the codec.
 func mixedEntries() []entry {
 	toolCard := toolView{
 		Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
@@ -103,8 +102,8 @@ func firedBlockEntries() []entry {
 // TestTranscriptCodecRoundTripsAFiringBlock proves a finished firing block survives the record: it
 // is PERSISTED (a Firing is something that actually happened in this session's lifetime — the
 // ADR 0022 addendum's test — so encodeTranscript must write it, under the "schedule" kind string),
-// and it comes back with every view field, its pairing key, its done mark and its body's settled
-// kind intact.
+// and it comes back with every view field, its pairing key, its done mark and every line of its
+// body intact.
 func TestTranscriptCodecRoundTripsAFiringBlock(t *testing.T) {
 	t.Parallel()
 	tr := &transcript{entries: firedBlockEntries()}
@@ -466,46 +465,6 @@ func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
 	// The strip removes only the ESC byte, leaving the surrounding text intact.
 	if got[0].text != "hithere" {
 		t.Errorf("stripped user text = %q; want %q", got[0].text, "hithere")
-	}
-}
-
-// TestTranscriptCodecSettlesTheBodyKindOnDecode proves the derived body kind survives a resume
-// even though the wire never carries it: the blob stores each line's own Kind and nothing above
-// it, so decode has to put the lines back through newToolBody rather than seating them in a
-// toolBody of its own, or a resumed diff would come back describing itself as plain. The collapsed
-// paint no longer varies by kind — one house budget caps every body (collapsedBodyCap) — so what
-// is asserted here is the constructor seam holding across the wire, not a cap.
-func TestTranscriptCodecSettlesTheBodyKindOnDecode(t *testing.T) {
-	t.Parallel()
-	const bodyLines = 23
-	body := make([]detailLine, 0, bodyLines)
-	for range bodyLines {
-		body = append(body, detailLine{Kind: detailDiffAdded, Text: "+ added"})
-	}
-	tr := &transcript{entries: []entry{{
-		kind: entryToolCall, callID: "c1", done: true,
-		tool: toolView{
-			Label: "View Diff", Verb: "diffing", Target: "main.go", name: "view_diff",
-			Summary: namedSummary(detailLine{Text: "+23 -0"}), Details: newToolBody(body),
-		},
-	}}}
-
-	data, err := encodeTranscript(tr)
-	if err != nil {
-		t.Fatalf("encodeTranscript: %v", err)
-	}
-	got, err := decodeTranscript(data)
-	if err != nil {
-		t.Fatalf("decodeTranscript: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("decoded %d entries; want the one tool call", len(got))
-	}
-	if !got[0].tool.Details.isDiff() {
-		t.Error("decoded diff body did not settle as a diff body")
-	}
-	if got := got[0].tool.Details.len(); got != bodyLines {
-		t.Errorf("decoded body has %d lines, want the whole %d", got, bodyLines)
 	}
 }
 

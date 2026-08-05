@@ -392,6 +392,18 @@ the follow-up list, both squarely "no orphaned sentence": layout.md's "The block
 never shipped in any release, so its substance (the half-second timing, the bare cell holding the
 column, the flip-only repaint) folded into the Added sub-bullet and the Changed entry was deleted.
 
+NOTES (2026-08-05, run follow-up — not a plan item): judgement (d) above is SUPERSEDED by the owner's
+decision the same day — the body kind is DELETED, not kept. `toolBody.diff`, `isDiff()` and
+`bodyIsDiff` are gone, together with the tests that only pinned them
+(`TestBodyKindIsSettledWhereTheLinesAre`, `TestBodyKindFollowsTheProducer`,
+`TestBodyKindMatchesItsLinesEverywhere` + `assertBodyKindMatchesLines`,
+`TestToolBodyIsBuiltOnlyByItsConstructor` + `funcDeclNamed`, and the codec's
+`TestTranscriptCodecSettlesTheBodyKindOnDecode`) and the comments (d) recorded. The `newToolBody`
+constructor STAYS — the decision named its GUARD, and the seam is still where lines become a body,
+whether or not anything is derived there. Dead-machinery removal only: no paint input, no paint and
+no golden changed. Neither `layout.md` nor the `[Unreleased]` notes ever described the kind (both
+speak of display body kinds and the one budget, which are unchanged), so neither was amended.
+
 **What.** Read `layout.md`'s two amended sections end-to-end and reconcile any contradiction the
 per-item amendments left (one voice, no orphaned sentence still describing the old star, the old
 caps, or the targetless exemption); read the `[Unreleased]` CHANGELOG entries as one story and

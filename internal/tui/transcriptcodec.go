@@ -317,18 +317,17 @@ func fromWireSkillSpans(ws []wireSkillSpan) []skillSpan {
 }
 
 // fromWireToolView rebuilds a toolView from the wire and finishes it through the presenter's own
-// seams: the stored lines become a body through newToolBody, which settles the kind the wire never
-// carried (each line keeps its own Kind and nothing stands above them, so a resumed diff would come
-// back capped at one line if decode built the body any other way), and sanitize escape-strips every
-// rendered field. name is stripped here instead, because sanitize leaves it alone by design (it is
+// seams: the stored lines become a body through newToolBody — each line carrying the Kind the wire
+// kept for it, which is all a body is — and sanitize escape-strips every rendered field. name is
+// stripped here instead, because sanitize leaves it alone by design (it is
 // the registry key enrichWithResult reads, never rendered) and it still has to be restored for that
 // lookup. A body-less card stays body-less (never a non-nil empty line slice) so a not-yet-enriched
 // call round-trips exactly.
 //
 // The summary's MARK (branchSummary — whose words the line is) is deliberately not on the wire and
-// comes back unset, for the same reason the body's kind is re-derived rather than stored: what a
-// record keeps is FINISHED display text, spelled the way it was shown, and the mark governs an act
-// that happened on the way IN. This path runs sanitize alone and never finishDisplay, so no
+// comes back unset: what a record keeps is FINISHED display text, spelled the way it was shown, and
+// the mark governs an act that happened on the way IN. This path runs sanitize alone and never
+// finishDisplay, so no
 // replayed line is respelled and none needs a mark to protect it; a resumed call still awaiting its
 // result carries no summary at all, and enrichWithResult words the slot afresh with a mark of its
 // own when the result lands (TestTranscriptCodecReplaysAPromotedSummaryAsShown).

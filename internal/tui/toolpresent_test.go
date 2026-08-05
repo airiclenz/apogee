@@ -1,12 +1,6 @@
 package tui
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"maps"
-	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -576,9 +570,6 @@ func TestEditCallsCarryTheirChangedLines(t *testing.T) {
 			if got := changedBody(t, tv); strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
 				t.Errorf("body = %q, want %q", got, tc.want)
 			}
-			if tv.Details.len() > 0 && !tv.Details.isDiff() {
-				t.Error("an edit body must settle as a diff body, or it paints without its colours")
-			}
 		})
 	}
 }
@@ -671,9 +662,6 @@ func TestWriteCallCarriesTheWrittenLines(t *testing.T) {
 			if got := changedBody(t, tv); strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
 				t.Errorf("body = %q, want %q", got, tc.want)
 			}
-			if tv.Details.len() > 0 && !tv.Details.isDiff() {
-				t.Error("a write body must settle as a diff body, or it paints without its colours")
-			}
 		})
 	}
 }
@@ -694,189 +682,6 @@ func TestWriteBodySurvivesItsByteCountSummary(t *testing.T) {
 	if got := changedBody(t, tv); len(got) != 1 || got[0] != "+ hello" {
 		t.Errorf("body = %q, want the one written line beneath the branch", got)
 	}
-}
-
-// TestBodyKindIsSettledWhereTheLinesAre pins the constructor seam, which is what the kind is for
-// now that one budget caps every body alike and no painter reads it: the kind is decided ONCE,
-// where the lines are put into a body (newToolBody), and carried by that body — not re-derived from
-// the lines on every repaint, over a body the entry retains whole. Both flavours and both edges are
-// covered, an empty body and a single line included, because a body that answers wrongly while it
-// is small would keep answering wrongly once it grew.
-func TestBodyKindIsSettledWhereTheLinesAre(t *testing.T) {
-	tests := []struct {
-		name    string
-		details []detailLine
-		want    bool
-	}{
-		{name: "no body at all", details: nil, want: false},
-		{name: "a single plain line", details: []detailLine{{Text: "ok"}}, want: false},
-		{
-			name:    "a multi-line plain body",
-			details: []detailLine{{Text: "ok   a"}, {Text: "ok   b"}, {Text: "PASS"}},
-			want:    false,
-		},
-		{
-			name:    "a single diff line",
-			details: []detailLine{{Kind: detailDiffAdded, Text: "+ added"}},
-			want:    true,
-		},
-		{
-			name: "a diff line behind context — the scan cannot stop at the first line",
-			details: []detailLine{
-				{Text: "  ctx"}, {Text: "  ctx"}, {Kind: detailDiffRemoved, Text: "- gone"},
-			},
-			want: true,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			tv := toolView{Label: "Tool", Target: "main.go", Details: newToolBody(tc.details)}
-			tv.sanitize()
-			if tv.Details.isDiff() != tc.want {
-				t.Errorf("body kind = %v, want %v for %+v", tv.Details.isDiff(), tc.want, tc.details)
-			}
-		})
-	}
-}
-
-// TestBodyKindFollowsTheProducer proves the seam is reached on the paths that actually make
-// bodies: view_diff's tagged body settles as a diff, free-form output settles as plain. Together
-// with TestBodyKindIsSettledWhereTheLinesAre it pins the whole contract — the kind describes the
-// lines it was derived with, on every path that makes a body.
-func TestBodyKindFollowsTheProducer(t *testing.T) {
-	diff := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, workspaceRoot{})
-	diff.enrichWithResult(domain.ToolResult{
-		CallID: "1", Content: "  ctx\n- old line\n+ new line", Summary: domain.DiffStat{Added: 1, Removed: 1},
-	}, workspaceRoot{})
-	if !diff.Details.isDiff() {
-		t.Errorf("a view_diff body must settle as a diff body: %+v", diff.Details)
-	}
-
-	run := presentToolCall(domain.ToolCall{ID: "2", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}, workspaceRoot{})
-	run.enrichWithResult(domain.ToolResult{CallID: "2", Content: "ok   a\nok   b\nPASS"}, workspaceRoot{})
-	if run.Details.isDiff() {
-		t.Errorf("free-form output must settle as a plain body: %+v", run.Details)
-	}
-}
-
-// TestBodyKindMatchesItsLinesEverywhere is the behavioural half of the invariant collapsedDetails
-// trusts: whatever a body says about itself must be what a fresh scan of its own lines says, for
-// every view the presenter produces and for every view that comes back off the wire. It walks the
-// whole registry (plus the unregistered fallback) rather than a chosen few, so a tool added with a
-// new body path is covered the day it is registered — and each view is round-tripped through the
-// codec, the second producer of views, whose decode has to settle a kind the wire never carried.
-//
-// The staleness this guards is silent by nature: a diff body that says it is plain paints one line
-// and a "… +N more lines" marker where twenty lines of change belong, and nothing else goes wrong.
-func TestBodyKindMatchesItsLinesEverywhere(t *testing.T) {
-	t.Parallel()
-
-	// One argument blob covering every registered target extractor, so each tool gets a realistic
-	// header, and results in both flavours: a tagged diff and free-form prose.
-	const args = `{"path":"main.go","paths":["main.go"],"pattern":"TODO","command":"go test ./...",` +
-		`"query":"go slices","url":"https://example.test","task":"tidy up","question":"which one?",` +
-		`"content":"x","find":"a","replace":"b","edits":[{"find":"a","replace":"b"}]}`
-	results := []domain.ToolResult{
-		{CallID: "1", Content: "  ctx\n- old line\n+ new line", Summary: domain.DiffStat{Added: 1, Removed: 1}},
-		{CallID: "1", Content: "ok   a\nok   b\nPASS"},
-		{CallID: "1", Content: "boom", IsError: true},
-	}
-
-	names := slices.Sorted(maps.Keys(toolRegistry))
-	names = append(names, "not_a_registered_tool")
-	for _, name := range names {
-		for i, result := range results {
-			t.Run(name+"/"+strconv.Itoa(i), func(t *testing.T) {
-				tv := presentToolCall(domain.ToolCall{ID: "1", Tool: name, Arguments: []byte(args)}, workspaceRoot{})
-				assertBodyKindMatchesLines(t, tv, "before the result")
-				tv.enrichWithResult(result, workspaceRoot{})
-				assertBodyKindMatchesLines(t, tv, "after the result")
-				assertBodyKindMatchesLines(t, fromWireToolView(toWireToolView(tv)), "off the wire")
-			})
-		}
-	}
-}
-
-// assertBodyKindMatchesLines fails when a view's body disagrees with a fresh scan of the very lines
-// it holds — the stale pairing the body type exists to make unwritable.
-func assertBodyKindMatchesLines(t *testing.T, tv toolView, when string) {
-	t.Helper()
-	if want := bodyIsDiff(tv.Details.all()); tv.Details.isDiff() != want {
-		t.Errorf("%s: body says isDiff=%v, its lines say %v: %+v", when, tv.Details.isDiff(), want, tv.Details.all())
-	}
-}
-
-// toolBodyType and toolBodyConstructor are the names the literal guard watches: the retained body
-// and the only function allowed to pair its lines with their kind.
-const (
-	toolBodyType        = "toolBody"
-	toolBodyConstructor = "newToolBody"
-)
-
-// TestToolBodyIsBuiltOnlyByItsConstructor closes the last door on a stale body. The type makes the
-// natural mistake impossible — a bare []detailLine is not a body, so no caller can hand the painter
-// lines with no kind — but a composite literal could still name the fields and pair them wrongly.
-// This reads the whole package off disk and fails on any toolBody literal with elements outside
-// newToolBody; the zero literal (no lines, no diff) is consistent by construction and stays legal.
-//
-// It is parsed rather than reflected over because the defect is a line of source that does not exist
-// yet: reflection can only see the pairings a run produced, and this one would ship as a paint bug.
-func TestToolBodyIsBuiltOnlyByItsConstructor(t *testing.T) {
-	t.Parallel()
-
-	dir, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read the package directory: %v", err)
-	}
-	fset := token.NewFileSet()
-	scanned, allowed := 0, 0
-	for _, de := range dir {
-		if de.IsDir() || !strings.HasSuffix(de.Name(), ".go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, de.Name(), nil, parser.SkipObjectResolution)
-		if err != nil {
-			t.Fatalf("parse %s: %v", de.Name(), err)
-		}
-		scanned++
-		ctor := funcDeclNamed(file, toolBodyConstructor)
-		// Everything in the file, not only function bodies: a package-level var could pair a
-		// body's fields just as wrongly as a statement can.
-		ast.Inspect(file, func(n ast.Node) bool {
-			lit, ok := n.(*ast.CompositeLit)
-			if !ok || len(lit.Elts) == 0 {
-				return true
-			}
-			if id, ok := lit.Type.(*ast.Ident); !ok || id.Name != toolBodyType {
-				return true
-			}
-			if ctor != nil && lit.Pos() > ctor.Pos() && lit.End() < ctor.End() {
-				allowed++
-				return true
-			}
-			t.Errorf("%s: a %s literal with its own fields; build it with %s so its kind is derived from the lines it is paired with",
-				fset.Position(lit.Pos()), toolBodyType, toolBodyConstructor)
-			return true
-		})
-	}
-	// A guard that parsed nothing, or that no longer finds the one literal it permits, proves
-	// nothing: the type or its constructor was renamed and this test stopped watching anything.
-	if scanned == 0 {
-		t.Fatal("no Go files were parsed; the body-literal guard proved nothing")
-	}
-	if allowed == 0 {
-		t.Fatalf("%s builds no %s literal; the guard is watching for a shape that no longer exists", toolBodyConstructor, toolBodyType)
-	}
-}
-
-// funcDeclNamed returns the file's declaration of the named function, or nil when it declares none.
-func funcDeclNamed(file *ast.File, name string) *ast.FuncDecl {
-	for _, decl := range file.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == name {
-			return fn
-		}
-	}
-	return nil
 }
 
 // TestDiffStatSpansTheWholeDiff: the diffstat riding the branch describes the whole diff even
