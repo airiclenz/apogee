@@ -57,7 +57,8 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 	}
 	wantParsed := []string{
 		"clear", "compact", "confine", "continue", "model", "new", "rename", "schedule",
-		"schedule-stop", "server", "sessions", "skills", "stop-server", "unload-model", "version"}
+		"schedule-stop", "server", "sessions", "settings", "skills", "stop-server", "unload-model",
+		"version"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
 		t.Errorf("parser verbs = %v, want %v", parsed, wantParsed)
 	}
@@ -99,11 +100,11 @@ func TestCommandSpecsReadAlphabetically(t *testing.T) {
 	}
 }
 
-// Drift guard on the recall carve-out: exactly the session-reset pair is withheld from the walk.
-// The flag is easy to copy onto a neighbouring row and impossible to notice once there — a verb
-// that quietly stopped being recallable would look like recall losing lines — so the set is pinned
-// by name rather than by count.
-func TestOnlyTheSessionResetPairIsNotRecallable(t *testing.T) {
+// Drift guard on the recall carve-out: exactly the session-reset pair and the pure-UI /settings are
+// withheld from the walk. The flag is easy to copy onto a neighbouring row and impossible to notice
+// once there — a verb that quietly stopped being recallable would look like recall losing lines — so
+// the set is pinned by name rather than by count.
+func TestOnlyResetAndPureUIVerbsAreNotRecallable(t *testing.T) {
 	var got []string
 	for _, spec := range commandSpecs {
 		if spec.noRecall {
@@ -111,7 +112,7 @@ func TestOnlyTheSessionResetPairIsNotRecallable(t *testing.T) {
 		}
 	}
 
-	if want := []string{"clear", "new"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"clear", "new", "settings"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("noRecall verbs = %v, want exactly %v — every other sent line stays recallable", got, want)
 	}
 }

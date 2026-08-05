@@ -87,8 +87,8 @@ the glyph the pointer is on.
 ## What "height" means: one row budget, and the transcript pays it
 
 **Every pane above the input box takes its rows from the transcript.** The approval and ask
-prompts, the `/sessions` browser, the `/model` | `/server` picker, the `/` and `@` dropdown, and
-the staged-interjection band all sit in the frame between the session area and the bottom chrome,
+prompts, the `/sessions` browser, the `/model` | `/server` picker, the `/settings` pane, the `/` and
+`@` dropdown, and the staged-interjection band all sit in the frame between the session area and the bottom chrome,
 and the session area is what shrinks to seat them. The frame is composed from ONE derivation of
 how many rows are left over, so the rows the transcript is drawn on, the rows a mouse click may
 address in it, and the rows an overlay paints are the same three answers to one question — a click
@@ -125,8 +125,8 @@ up because they are typing.
 doing.** The **session area** goes first and goes to nothing; then the **staged band**, which is a
 reminder rather than a control, and whose count the status line is carrying anyway; then the
 **`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the
-**`/sessions` browser and the picker**; and last the **approval or ask prompt**, which the run
-itself is blocked on. The footer is not in the division at all, and the input box is in it only at
+**`/settings` pane**; then the **`/sessions` browser and the picker**; and last the **approval or ask
+prompt**, which the run itself is blocked on. The footer is not in the division at all, and the input box is in it only at
 its very end, and only for the prompt (below). Two panes can want the same rows, and on a window
 that cannot seat both, the one further down that order is not drawn.
 
@@ -211,6 +211,31 @@ may do is claim a fifth row the frame has not got. Under the eight
 rows of fixed chrome below the session area, that puts the shortest terminal a pane can be drawn in
 at all at **twelve rows** — and at twelve the session area is already gone, so the frame is exactly
 the pane and the chrome together.
+
+**One pane may claim the whole budget: the full-height class.** Every pane above spends what the
+window can *spare* — the session area keeps a three-row reserve, and only the surplus past it makes a
+pane taller than its floor. `/settings` is the first pane for which that is the wrong division. It is
+not a choice to scan beside a conversation but a **screen to read instead of one**: some thirty
+configuration keys with their values, their section headers and their sources, which a scrolling
+eight-row window turns into a keyhole. So while it is open the session area keeps **no reserve at
+all** — the transcript gives way entirely, the way it already does on a short window, and every row
+past the pane floors and the band's claim goes to the pane (ADR 0035). It takes those rows from the
+**transcript** and never from a sibling: the even split of the surplus between open panes is
+untouched, and in practice there is nothing to split with, because the verb is idle-only and the pane
+swallows every keypress — no prompt, browser, picker or dropdown can be up beside it.
+
+**Nothing else about a full-height pane is special, and that is the point.** Its irreducible height
+is the same **four rows** every pane's is, spent the same way (two borders, a title row, a key hint);
+below twelve rows it is not drawn at all, exactly as no pane is; the input box, the footer and both
+hairlines are the frame's floor here as everywhere; and a draft the human has grown takes its rows
+out of the same budget, so a long draft shrinks the pane rather than the box. Above the floor it
+spends the rows in the pane's own order: the **rows first**, its one body line — the description of
+the key under the `❯` — kept ahead of them by the same claim the ask prompt's question makes, so the
+caption is the line the pane would otherwise hand back. And when the frame can seat it nowhere, it
+does what every surface that disappears owes: it **leaves its fact on the status line**. For this pane
+the fact carries the way OUT as well — `settings — esc close` — because it is swallowing every
+keypress on a window that is showing none of it, and a frame that went quiet there would read as an
+idle session with a dead keyboard.
 
 **What the approval prompt's body says is the call, in the call's own words.** The tool's raw name
 rides the top border, a non-empty reason leads the body as `Reason: …`, and the arguments follow it

@@ -436,8 +436,11 @@
 // recall.go prompt recall — the per-workspace list of sent inputs the box walks with ↑/↓, where
 // this package owns only WHEN (one load at start-up, one fire-and-forget append per send) while
 // internal/recall owns the file and cmd/apogee owns which directory and which workspace
-// ([Options.Recall]); picker.go the modal single-select overlay behind /model and /server, and
-// popup.go the one bordered pane every overlay — those two, the autocomplete dropdown, the ask
+// ([Options.Recall]); picker.go the modal single-select overlay behind /model and /server;
+// settings.go the /settings pane — the frame's one FULL-HEIGHT pane, listing every config key the
+// binary resolved this run over one display seam ([Options.SettingsRows]) and claiming the whole
+// transcript budget while it is open (ADR 0035); and
+// popup.go the one bordered pane every overlay — those three, the autocomplete dropdown, the ask
 // and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go
 // this narration.
 //

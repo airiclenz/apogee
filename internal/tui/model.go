@@ -113,6 +113,12 @@ type Model struct {
 	// It is driven only at idle.
 	picker picker
 
+	// settings is the /settings pane's state (settings.go): whether it is open and which config key
+	// is highlighted. Its rows are derived at render time from [Options.SettingsRows], so the value
+	// itself is two plain values and its zero value is "closed" — the picker posture (ADR 0011). It
+	// is driven only at idle, and it is the frame's one full-height pane (frameRowPlan).
+	settings settingsPane
+
 	// promptEditor owns the chat input cluster — the textarea, the autocomplete overlay (+ its
 	// skillRegion edge-trigger), the workspace file cache, and the prompt drag-selection
 	// (prompteditor.go). It is embedded ANONYMOUSLY so its fields and its
@@ -855,6 +861,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.sessionBrowserKey(msg)
 	}
 
+	// The /settings pane is modal in the same way and for a stronger reason: it is the frame's one
+	// FULL-HEIGHT pane (frameRowPlan), so the input box behind it is a box the human cannot read —
+	// a keystroke falling through to it would edit an invisible draft. Idle-only, like its verb
+	// (commandSpecs), and it swallows every key it does not act on (settings.go).
+	if m.state == stateIdle && m.settings.open {
+		return m.settingsKey(msg)
+	}
+
 	// The picker is the browser's simpler sibling and claims keys the same way: while it is open the
 	// selection, the accept and esc are all its own (picker.go). It claims them in BOTH live states,
 	// because /schedule opens its cycle and mode popups mid-Exchange as well — the verb is
@@ -1389,7 +1403,8 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 // runCommand handles a recognised local /command. /continue and /compact open a worker: /continue
 // a canned "Please continue" turn, /compact a generative summary call; /clear (and its alias /new)
 // resets the session view and reprints the start-up box synchronously and stays idle
-// (startNewSession), /version records the build version as a note the same synchronous way,
+// (startNewSession), /settings opens the configuration pane the same synchronous way
+// (settings.go), /version records the build version as a note the same synchronous way,
 // /skills records the discovered skill catalog the same synchronous way (skills.go), and /confine
 // reports or swaps Auto's blast radius the same synchronous way (confine.go).
 //
@@ -1482,6 +1497,12 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// Open the history-browser overlay: list saved sessions off the Update loop and render the
 		// pane above the input (sessions.go). Synchronous and idle-safe like /clear — no worker.
 		return m.openSessionBrowser()
+
+	case "settings":
+		// Open the configuration pane over the binary's key registry (settings.go). Synchronous and
+		// idle-safe like /sessions: it reads one display seam ([Options.SettingsRows]) and drives no
+		// worker, no engine call and no file I/O of its own.
+		return m.runSettingsCommand()
 
 	case "rename":
 		// Name THIS session: take the argument as the title, or — bare — ask the model for one
@@ -2883,11 +2904,12 @@ func (m *Model) refreshViewportAnchored(line, row int) {
 // ----------------------------------------------------------------------------
 
 // frameOverlays holds the blocks View stacks between the transcript and the input box: the
-// approval or ask prompt, the /sessions browser, the /model | /server picker, the autocomplete
-// dropdown, and the staged-interjection strip. Each field is "" when its overlay is closed.
+// approval or ask prompt, the /sessions browser, the /model | /server picker, the /settings
+// configuration pane, the autocomplete dropdown, and the staged-interjection strip. Each field is
+// "" when its overlay is closed.
 //
 // They sit in two slots, and every one of them is FLUSH on the chrome its slot abuts: the first
-// three go directly above the ▔ hairline (the frame's blank gap row falls above them, not between
+// four go directly above the ▔ hairline (the frame's blank gap row falls above them, not between
 // them and the chrome), the last two directly above the input box.
 //
 // They are gathered as ONE value because two readers need them and must never disagree: View
@@ -2901,6 +2923,7 @@ type frameOverlays struct {
 	prompt   string // the approval or the ask popup (they belong to different states, so never both)
 	browser  string // the /sessions history browser
 	picker   string // the /model | /server picker
+	settings string // the /settings configuration pane (full-height — frameRowPlan)
 	dropdown string // the command / @file / skill autocomplete
 	queued   string // the staged-interjection strip (ADR 0025)
 }
@@ -2910,7 +2933,7 @@ type frameOverlays struct {
 // rather than measured.
 func (o frameOverlays) height() int {
 	rows := 0
-	for _, block := range []string{o.prompt, o.browser, o.picker, o.dropdown, o.queued} {
+	for _, block := range []string{o.prompt, o.browser, o.picker, o.settings, o.dropdown, o.queued} {
 		if block != "" {
 			rows += lipgloss.Height(block)
 		}
@@ -2939,6 +2962,7 @@ func (m Model) frameOverlays() frameOverlays {
 	}
 	o.browser = m.renderSessionBrowser()
 	o.picker = m.renderPicker()
+	o.settings = m.renderSettings()
 	o.dropdown = m.renderAutocomplete()
 	o.queued = m.renderPendingInterjections()
 	return o
@@ -2958,10 +2982,10 @@ func (m Model) transcriptRows() int {
 	return m.frameOverlays().transcriptRows(m.transcriptBudget())
 }
 
-// frameBlocks is the most blocks one frame stacks — the transcript, the five overlays, the blank
+// frameBlocks is the most blocks one frame stacks — the transcript, the six overlays, the blank
 // gap row, the ▔ hairline, the status line, the input box, the footer, and the ▁ hairline — so the
 // frame's slice is allocated once at its worst case.
-const frameBlocks = 12
+const frameBlocks = 13
 
 // View stacks the transcript, a single blank line, the ▔ top-edge hairline, the status line,
 // the bordered input box, the footer line and the ▁ bottom-edge hairline, filling the alternate
@@ -3030,6 +3054,13 @@ func (m Model) View() tea.View {
 	}
 	if ov.picker != "" {
 		rows = append(rows, ov.picker)
+	}
+	// The /settings pane shares that slot too, and on every window it is seated in it is the only
+	// thing in it: its verb is idle-only and it swallows every key, so no prompt, browser, picker or
+	// dropdown can be up beside it. What differs is its height — it was granted the transcript's
+	// whole budget (frameRowPlan), so the block above it is usually nothing at all.
+	if ov.settings != "" {
+		rows = append(rows, ov.settings)
 	}
 	// Then the ▔ top-edge hairline capping the chrome, the status line, the autocomplete overlay
 	// (when open), the input box, the footer, and the ▁ hairline closing the screen under it.
@@ -3745,6 +3776,12 @@ func (m Model) statusLeft() string {
 
 	var phrase string
 	switch m.state {
+	case stateIdle:
+		// Idle says nothing for itself — the input box below already invites a message — with ONE
+		// exception: an open /settings pane the frame could not seat leaves its fact here, the licence
+		// layout.md gives every surface that gives way entirely (settingsGiveWayPhrase). It is empty
+		// on every other idle frame, so the slot is the queue's alone as before.
+		phrase = m.settingsGiveWayPhrase()
 	case stateRunning:
 		phrase = m.spin.view(m.th) + m.th.statusBar.Render(" "+m.runningPhrase(time.Now())) + m.throughputSuffix()
 	case stateAwaitingApproval:
@@ -3958,6 +3995,7 @@ const (
 	panePrompt   framePane = iota // the approval or the ask prompt
 	paneBrowser                   // the /sessions history browser
 	panePicker                    // the /model | /server picker
+	paneSettings                  // the /settings configuration pane — the frame's one full-height pane
 	paneDropdown                  // the command / @file / skill autocomplete
 	paneKinds                     // not a pane: the count, so a plan can hold one grant per kind
 )
@@ -3987,6 +4025,9 @@ func (m Model) openPanes() framePaneSet {
 	if m.picker.open {
 		s = s.with(panePicker)
 	}
+	if m.settings.open {
+		s = s.with(paneSettings)
+	}
 	if m.autocomplete.active && len(m.autocomplete.items) > 0 {
 		s = s.with(paneDropdown)
 	}
@@ -4006,7 +4047,10 @@ type frameRowPlan struct {
 
 // frameRowPlan divides the viewport's rows between the frame's surfaces, in the order they give
 // way (layout.md): the transcript first, then the staged band, then the panes — and among the
-// panes, the dropdown before the browser or the picker, and the modal prompt last. The input box
+// panes, the dropdown before the settings pane, the browser or the picker, and the modal prompt
+// last. The one pane that claims more than an even share of the surplus is /settings, and it claims
+// it from the TRANSCRIPT rather than from a sibling: while it is open the conversation keeps no
+// reserve, which is the whole of the full-height rule (below). The input box
 // and the footer are not in the division at all; layout() has already taken their rows out — and
 // what it took for the box is itself capped when a modal prompt is up, which is the one place the
 // box gives way and the last step of the same order (draftRowsCeiling).
@@ -4041,7 +4085,18 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 	plan.band = bandShape(len(m.pendingInterjections), left)
 	left -= plan.band.height()
 
-	if growth := max(0, left-transcriptReserve); growth > 0 && seated > 0 {
+	// The transcript's soft reserve is the one thing the FULL-HEIGHT pane changes: while /settings is
+	// open the conversation keeps nothing at all, so every row past the pane floors and the band's
+	// claim goes to the panes (layout.md, "One pane may claim the whole budget"). It is a reserve and
+	// never a floor — the transcript is first in the give-way order and already goes to nothing on a
+	// short window — so dropping it here shifts rows between two surfaces that were both giving way,
+	// and leaves every pane floor, the band's shape and the frame's own chrome exactly where they are.
+	reserve := transcriptReserve
+	if open.has(paneSettings) {
+		reserve = 0
+	}
+
+	if growth := max(0, left-reserve); growth > 0 && seated > 0 {
 		share, extra := growth/seated, growth%seated
 		for p := framePane(0); p < paneKinds; p++ {
 			if plan.panes[p] == 0 {
@@ -4103,7 +4158,7 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // chrome is what that frame costs the pane, and it is the CALLER's because only the caller knows the
 // spec it is about to compose. All three constants are in use: popupChrome where the title takes a
 // content row of its own and a hint row spells the keys below the list (the /sessions browser, the
-// picker, the autocomplete dropdown); popupTitleBorderChrome where no title row is drawn and the
+// picker, the /settings pane, the autocomplete dropdown); popupTitleBorderChrome where no title row is drawn and the
 // hint alone keeps one — its only caller is the ask prompt, which draws no title at ALL, its name
 // having gone into the question itself (layout.md), so what titleInBorder buys there is a top
 // border left plain by an empty title, carrying the question only at the heights that seat no line

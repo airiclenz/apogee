@@ -240,7 +240,24 @@ section grouping.
 
 **Commit:** `feat(tui): settings-row seam from the key registry into tui.Options`
 
-## 6. /settings verb + full-height read-only pane
+## 6. /settings verb + full-height read-only pane — ✅ DONE (2026-08-05)
+
+**NOTES (2026-08-05):** three deviations. (1) The row schema is FOUR cells, not the item's two:
+`[key, value, "(env)"|"(flag)", "· edit in config.yaml"]`. The Column contract the item invokes
+forbids pre-concatenated tiers (`layout.md`: "a row is a slice of CELLS, not a pre-concatenated
+string"), and those two extra tiers are item 5's `Source` / `EditPointer` fields, which have no other
+renderer in the plan — item 7's own text ("rows with an env/flag source marker") presupposes item 6
+already draws the marker. Both columns collapse entirely on a config with no override and no
+structured block, so the schema costs nothing where it says nothing. (2) The pane draws a ONE-LINE
+body: the selected row's `Desc`, claimed through `popupFloor{body: 1}`. `popupBudget` keeps one line
+for a body on every pane whether or not it draws one (`maxRows ≤ avail−1`), so a bodyless pane hands
+that row straight back to the transcript and the item's own "the transcript gives way fully" would be
+false by exactly one row at every window size; `SettingRow.Desc` is documented by item 5 as "the
+one-line description shown for the selected row" and had no other renderer. It is truncated to the
+inner width here, so the one budgeted line always holds the description rather than an elision
+marker. (3) `TestOnlyTheSessionResetPairIsNotRecallable` is renamed
+`TestOnlyResetAndPureUIVerbsAreNotRecallable`: `/settings` is `noRecall` per ratified call, so the
+pinned set is three verbs and the old name stated something the test no longer asserts.
 
 **What:** Depends on item 5. Add the `/settings` row to `commandSpecs`
 (`internal/tui/command.go:126-142`, alphabetical between `/server` and `/skills`;

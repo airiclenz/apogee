@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
@@ -1061,4 +1062,122 @@ func lastGlyph(s string) string {
 		return ""
 	}
 	return string(runes[len(runes)-1])
+}
+
+// ----------------------------------------------------------------------------
+// /settings — the frame's one full-height pane (settings.go)
+// ----------------------------------------------------------------------------
+
+// The full-height pane paints the whole of the transcript's budget and nothing more: its top border
+// opens on the row after the frame's blank gap row, its bottom border lands on the last row before
+// the ▔ hairline, no transcript row is painted at all, and every row of it reaches the pane's right
+// border in the measure the terminal is painting in.
+//
+// The painted grid is what makes the last of those a real assertion. The pane's rows are composed to
+// the authority's width and padded out on the box's own field (drawTitledBox), so a row carrying
+// VARIATION SELECTOR-16 is exactly where a pad computed in the wrong measure shows up: one column
+// short of the border, on the one row a human would read as a rendering glitch rather than as a
+// width bug (ADR 0030 §5).
+func TestPaintedSettingsPaneFillsTheTranscriptBudget(t *testing.T) {
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m := paintedAs(t, settingsFrameModel(t, 80, 24, 40), tc.method)
+			budget := m.transcriptBudget()
+			rows := paintFrame(t, m, tc.method)
+
+			if got := strings.TrimSpace(rows[0]); got != "" {
+				t.Errorf("row 0 paints %q, want the frame's blank gap row — the transcript gave way whole", got)
+			}
+			top, bottom := 1, budget // the pane's own first and last painted rows
+			if got := lastGlyph(strings.TrimRight(rows[top], " ")); got != "╮" {
+				t.Errorf("row %d ends in %q, want the pane's top-right corner:\n%s",
+					top, got, strings.Join(mapStrip(rows), "\n"))
+			}
+			if got := lastGlyph(strings.TrimRight(rows[bottom], " ")); got != "╯" {
+				t.Errorf("row %d ends in %q, want the pane's bottom-right corner:\n%s",
+					bottom, got, strings.Join(mapStrip(rows), "\n"))
+			}
+			for i := top; i <= bottom; i++ {
+				if got := paintedWidth(rows[i], tc.method); got != m.width {
+					t.Errorf("pane row %d paints %d columns, want the window's %d: %q",
+						i, got, m.width, rows[i])
+				}
+			}
+			// The ▔ hairline is the next row down, so the pane spent every row the budget granted it.
+			if got := rows[bottom+1]; !strings.Contains(got, "▔") {
+				t.Errorf("row %d = %q, want the ▔ hairline directly under the pane", bottom+1, got)
+			}
+		})
+	}
+}
+
+// At the four-row floor the pane is its two borders, its title and its hint — and it is HONEST there:
+// every key row and its one body line are counted out on the title row (popupTitleLine), because a
+// pane showing none of its rows while its hint still offers ↑/↓ would be indistinguishable from a
+// configuration with nothing in it. The floor is the existing one: the full-height rule changed which
+// surface the surplus goes to, not what a pane costs at the bottom of the ladder.
+func TestPaintedSettingsPaneAtItsFourRowFloor(t *testing.T) {
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m := paintedAs(t, settingsFrameModel(t, 80, smallestOverlayWindow, 40), tc.method)
+			rows := paintFrame(t, m, tc.method)
+
+			if got := lipgloss.Height(m.frameOverlays().settings); got != popupChrome {
+				t.Fatalf("the pane is %d rows at the smallest window a pane is drawn in, want %d",
+					got, popupChrome)
+			}
+			if got := strings.TrimSpace(rows[0]); got != "" {
+				t.Errorf("row 0 paints %q, want the frame's blank gap row", got)
+			}
+			title := strings.Trim(strip(rows[2]), "│ ")
+			if !strings.HasPrefix(title, settingsTitle) {
+				t.Errorf("row 2 = %q, want the pane's title row", title)
+			}
+			if !elisionMarkerPattern.MatchString(title) {
+				t.Errorf("title row = %q, want the count of the rows the window seats none of", title)
+			}
+			if got := strip(rows[3]); !strings.Contains(got, "esc close") {
+				t.Errorf("row 3 = %q, want the pane's key legend", got)
+			}
+			// The frame still fits, which is what the floor exists for: the ▁ hairline is on the last row.
+			if got := rows[m.height-1]; !strings.Contains(got, "▁") {
+				t.Errorf("last painted row = %q, want the ▁ bottom-edge hairline\n%s",
+					got, strings.Join(mapStrip(rows), "\n"))
+			}
+		})
+	}
+}
+
+// One row short of the pane's floor the frame draws no pane at all — and says so on the status line
+// (layout.md, "A pane that gives way entirely leaves its fact on the status line"). For THIS pane the
+// fact has to carry the way out as well as the state: it is swallowing every keypress on a window
+// showing none of it, so a frame that painted nothing would leave the human with a dead keyboard.
+func TestPaintedSettingsGiveWayFactRidesTheStatusLine(t *testing.T) {
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			m := paintedAs(t, settingsFrameModel(t, 80, smallestOverlayWindow-1, 40), tc.method)
+			rows := paintFrame(t, m, tc.method)
+			painted := strings.Join(mapStrip(rows), "\n")
+
+			if got := m.frameOverlays().settings; got != "" {
+				t.Fatalf("the pane was seated at %d rows — test premise broken:\n%s", m.height, strip(got))
+			}
+			if strings.Contains(painted, settingsTitle) {
+				t.Errorf("an unseated pane painted its title:\n%s", painted)
+			}
+			if !strings.Contains(painted, settingsGiveWayNote) {
+				t.Errorf("no painted row carries %q:\n%s", settingsGiveWayNote, painted)
+			}
+			// It is the STATUS line that carries it — the row directly under the ▔ hairline.
+			for i, row := range rows {
+				if strings.Contains(row, "▔") {
+					if got := strip(rows[i+1]); !strings.Contains(got, settingsGiveWayNote) {
+						t.Errorf("the row under the ▔ hairline = %q, want the give-way fact", got)
+					}
+					return
+				}
+			}
+			t.Errorf("no ▔ hairline in the painted frame:\n%s", painted)
+		})
+	}
 }

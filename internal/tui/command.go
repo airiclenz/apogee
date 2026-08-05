@@ -67,9 +67,11 @@ type parsedInput struct {
 //     idle-only and earns commandsAtIdleNote mid-run instead of running (parsedInput.safeWhileRunning
 //     is where the flag is read, and /confine's reporting FORM is the one nuance it adds).
 //   - noRecall — a sent invocation of this verb is NEVER recorded as a recallable prompt, in memory
-//     or on disk. It is carried by the session-reset pair /clear and /new alone: recall exists so a
-//     line can be handed back and re-sent with one ⏎, and a walk that hands back a session wipe
-//     arms that gesture with the one action nothing undoes. Every other sent line — messages,
+//     or on disk. The session-reset pair /clear and /new carry it because recall exists so a line
+//     can be handed back and re-sent with one ⏎, and a walk that hands back a session wipe arms that
+//     gesture with the one action nothing undoes. /settings carries it for the other reason a line is
+//     not worth handing back: it opens a pane and changes nothing, so a recalled invocation would
+//     spend a walk step on a keystroke the human can retype. Every other sent line — messages,
 //     Interjections, every other whole-line /command — stays recallable (parsedInput.recallable is
 //     where the flag is read).
 type commandSpec struct {
@@ -117,6 +119,11 @@ type commandSpec struct {
 // prompt form reads the raw tail of the line rather than its tokens (parsedInput.rest), because a
 // prompt is text the human wrote, not a token list to be re-spaced.
 //
+// /settings opens the configuration pane (settings.go): every config key with the value this run
+// resolved for it, over the binary's declarative key registry (ADR 0035). Idle-only and modal like
+// /sessions, and noRecall like the reset pair — it opens a surface rather than saying anything to the
+// model, so a recalled invocation would only spend a walk step.
+//
 // Order is display order, and it is ALPHABETICAL — declared here in the literal rather than sorted
 // at render time, because this table is the registry and the order the dropdown reads is one of the
 // things it declares. A menu the human can scan without knowing the table is worth more than any
@@ -135,6 +142,7 @@ var commandSpecs = []commandSpec{
 	{name: "schedule-stop", summary: "take a schedule off the clock", whileRunning: true},
 	{name: "server", summary: "switch to another configured server", takesArgs: true},
 	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
+	{name: "settings", summary: "view the configuration this session resolved", noRecall: true},
 	{name: "skills", summary: "list the available skills", whileRunning: true},
 	{name: "stop-server", summary: "stop the server this session is on"},
 	{name: "unload-model", summary: "free the model of the server this session is on"},
