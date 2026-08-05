@@ -438,8 +438,11 @@
 // internal/recall owns the file and cmd/apogee owns which directory and which workspace
 // ([Options.Recall]); picker.go the modal single-select overlay behind /model and /server;
 // settings.go the /settings pane — the frame's one FULL-HEIGHT pane, listing every config key the
-// binary resolved this run over one display seam ([Options.SettingsRows]) and claiming the whole
-// transcript budget while it is open (ADR 0035); and
+// binary resolved this run over one display seam ([Options.SettingsRows]), claiming the whole
+// transcript budget while it is open, and persisting ONE key per deliberate edit through
+// [Options.WriteSetting] — the renderer owning the idiom (⏎ toggles a bool, opens an enum's value
+// sub-list) while the binary owns the file, with `mode` the one edit that also applies live through
+// the Engine.SetMode seam Shift+Tab drives (ADR 0035); and
 // popup.go the one bordered pane every overlay — those three, the autocomplete dropdown, the ask
 // and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go
 // this narration.

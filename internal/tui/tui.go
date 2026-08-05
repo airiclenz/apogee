@@ -291,6 +291,31 @@ type Options struct {
 	// degrade every other provider here takes.
 	SettingsRows func() []SettingRow
 
+	// WriteSetting persists one config key — the `/settings` pane's whole write half (ADR 0035:
+	// one key per deliberate edit). path is the row's registry path ("ui.spinner") and value is
+	// the value as the file would spell it ("true", "32768", "ask-before"), which is exactly what
+	// [SettingRow.Value] and [SettingRow.EnumValues] carry: the renderer hands back a string it
+	// was given rather than a YAML fragment it composed, because the binary owns the file format
+	// (the SaveHostAcknowledgement precedent) and it alone knows whether the key may be written
+	// at all — the registry's editability, the splice, the verification and the atomic write are
+	// all behind this one call.
+	//
+	// It is synchronous like SaveHostAcknowledgement: one small file, spliced and renamed, on a
+	// keypress the human is waiting on. An error is REPORTED, never swallowed — the pane shows it
+	// on the row and treats the key as unchanged — so a read-only config home surfaces as a
+	// refusal rather than as an edit that silently did not happen. nil ⇒ writing is unavailable
+	// and the pane says so, the nil-seam degrade every provider here takes.
+	WriteSetting func(path, value string) error
+
+	// ResetSetting returns one config key to its default by REMOVING the file's line for it (ADR
+	// 0035) rather than writing today's spelling of the default into the file, so the key goes
+	// back to being described by the binary and documented by its commented example. A key the
+	// file does not set is already at its default: that is a no-op, not an error.
+	//
+	// Same contract as WriteSetting in every other respect — synchronous, path-addressed,
+	// errors reported, nil ⇒ unavailable.
+	ResetSetting func(path string) error
+
 	// Skills is the discovered skill catalog the merged "/" menu lists and an inline "/token"
 	// resolves against; nil ⇒ no skills are wired (the menu offers no skills and no token
 	// resolves). The binary backs it with a live skills.Provider and the agent loop resolves the SAME

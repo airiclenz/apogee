@@ -237,6 +237,14 @@ the fact carries the way OUT as well — `settings — esc close` — because it
 keypress on a window that is showing none of it, and a frame that went quiet there would read as an
 idle session with a dead keyboard.
 
+**The value sub-list is the one state in which a full-height pane is short.** When `⏎` on an enum key
+turns the pane into the second step of its edit — the list of values that key may take (ADR 0035) —
+the pane paints that handful of rows and the ones it does not use go back to the **transcript** for as
+long as the question is open. That is the budget rule working as written rather than an exception to
+it: the grant is the whole budget, and a pane spends the rows it *has*. It is also right for what the
+state is — four answers to one question, all on the screen at once, which is the approval menu's shape
+and not a screen to read.
+
 **What the approval prompt's body says is the call, in the call's own words.** The tool's raw name
 rides the top border, a non-empty reason leads the body as `Reason: …`, and the arguments follow it
 as LABELLED lines: one `name:` line per argument, the value's own lines hanging two spaces under it,

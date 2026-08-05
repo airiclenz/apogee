@@ -1,11 +1,15 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	lipgloss "charm.land/lipgloss/v2"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -152,8 +156,9 @@ func TestSettingsPaneNavigationWrapsAndSwallowsEveryOtherKey(t *testing.T) {
 		t.Errorf("↓ selected %d, want 1", m.settings.selected)
 	}
 
-	// A printable key neither edits the draft nor moves the selection, and ⏎ is a no-op in this
-	// read-only pane (the edit idioms are items 7 and 8 of the settings-screen plan).
+	// A printable key neither edits the draft nor moves the selection, and ⏎ on a STRING row is a
+	// no-op: its edit buffer is item 8 of the settings-screen plan (the bool and enum idioms below
+	// are item 7's).
 	m = step(t, m, keyRune('x'))
 	m, cmd := stepCmd(t, m, keyEnter())
 	if v := m.input.Value(); v != "" {
@@ -171,7 +176,9 @@ func TestSettingsPaneNavigationWrapsAndSwallowsEveryOtherKey(t *testing.T) {
 func TestSettingsPaneEscCloses(t *testing.T) {
 	m := step(t, openSettingsPane(t, settingsModel(t, settingsTestRows(6))), keyEsc())
 
-	if m.settings != (settingsPane{}) {
+	// Field-wise, not ==: the pane carries the edits it has persisted this session (a slice), so the
+	// "closed is the zero value" claim is made through DeepEqual rather than by comparison.
+	if !reflect.DeepEqual(m.settings, settingsPane{}) {
 		t.Errorf("pane = %+v, want the zero value (closed)", m.settings)
 	}
 	if pane := m.renderSettings(); pane != "" {
@@ -221,7 +228,7 @@ func TestSettingsDisplayRowsInterleaveSectionHeaders(t *testing.T) {
 		{Path: "ui.spinner", Section: "Interface", Value: "snake", Editable: true},
 	}
 
-	got := settingsDisplayRows(rows, 3)
+	got := Model{}.settingsDisplayRows(rows, 3)
 
 	want := []popupRow{
 		{"Upstream"},
@@ -254,7 +261,7 @@ func TestSettingsRowCellsStripEscapes(t *testing.T) {
 		EditPointer: "edit \x1b[31min config.yaml",
 	}
 
-	for i, cell := range settingRowCells(row) {
+	for i, cell := range (Model{}).settingRowCells(row) {
 		if strings.ContainsRune(cell, 0x1b) {
 			t.Errorf("cell %d carries an ESC byte: %q", i, cell)
 		}
@@ -347,5 +354,328 @@ func TestSettingsGiveWayLeavesItsFactOnTheStatusLine(t *testing.T) {
 	m.settings = settingsPane{}
 	if got := strip(m.statusLine()); strings.Contains(got, settingsGiveWayNote) {
 		t.Errorf("status line = %q with the pane closed, want no give-way note", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Editing: bool toggle and enum sub-list, persisted per edit (ADR 0035)
+// ----------------------------------------------------------------------------
+
+// settingsWriteLog is the binary's write half, faked: what the pane asked to be persisted, in order,
+// plus the error the next write is refused with. A log is the whole of what this fake needs to be —
+// the pane never reads a value back, so there is no file for it to stand in for.
+type settingsWriteLog struct {
+	writes []settingEdit
+	resets []string
+	err    error
+}
+
+// write and reset are the two [Options] seams. A refusal records nothing, exactly as a real refused
+// splice writes nothing: the assertion "the file is unchanged" is then the log's own emptiness.
+func (l *settingsWriteLog) write(path, value string) error {
+	if l.err != nil {
+		return l.err
+	}
+	l.writes = append(l.writes, settingEdit{path: path, value: value})
+	return nil
+}
+
+func (l *settingsWriteLog) reset(path string) error {
+	if l.err != nil {
+		return l.err
+	}
+	l.resets = append(l.resets, path)
+	return nil
+}
+
+// settingsEditModel is a model with the pane OPEN over rows and both writer seams wired to log — the
+// state every edit flow below starts from. The engine comes back too, so a live apply can be asserted
+// where it actually lands (Engine.SetMode).
+func settingsEditModel(t *testing.T, rows []SettingRow, log *settingsWriteLog) (Model, *fakeEngine) {
+	t.Helper()
+	eng := &fakeEngine{}
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.WriteSetting = log.write
+	opts.ResetSetting = log.reset
+	return openSettingsPane(t, newTestModelEng(t, eng, opts)), eng
+}
+
+// settingsBoolRow is one editable, restart-required bool row — `auto-title:` as the registry describes
+// it (cmd/apogee/registry.go).
+func settingsBoolRow() SettingRow {
+	return SettingRow{
+		Path: "auto-title", Section: "Session", Kind: SettingBool, Value: "true", Default: "true",
+		Editable: true, Restart: true, Desc: "Name a new session from its first prompt.",
+	}
+}
+
+// settingsEnumRow is one editable enum row — `ui.spinner:` and its closed vocabulary.
+func settingsEnumRow() SettingRow {
+	return SettingRow{
+		Path: "ui.spinner", Section: "Interface", Kind: SettingEnum, Value: "snake", Default: "snake",
+		EnumValues: []string{"snake", "dots", "moon"}, Editable: true, Restart: true,
+		Desc: "Which animation paints the status-line spinner.",
+	}
+}
+
+// ⏎ on a bool toggles it and persists the toggle immediately — no second question, because a two-value
+// key has none to ask. The run keeps the value it resolved, so the row keeps showing it and the MARKER
+// carries what the file now says; a second ⏎ toggles back from what was WRITTEN, not from the
+// resolution the pane opened over.
+func TestSettingsPaneTogglesABoolAndPersistsIt(t *testing.T) {
+	rows := []SettingRow{settingsBoolRow()}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter())
+
+	if want := []settingEdit{{path: "auto-title", value: "false"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if got := m.settingsValueCell(rows[0]); got != "true" {
+		t.Errorf("value cell = %q, want the value THIS run is still using", got)
+	}
+	if got, want := m.settingsNote(rows[0]), "→ false (next launch)"; got != want {
+		t.Errorf("marker = %q, want %q", got, want)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, "→ false (next launch)") {
+		t.Errorf("the pane does not show the pending edit:\n%s", pane)
+	}
+
+	m = step(t, m, keyEnter())
+
+	want := []settingEdit{{path: "auto-title", value: "false"}, {path: "auto-title", value: "true"}}
+	if !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want the second ⏎ to toggle back from what was written: %+v", log.writes, want)
+	}
+	if got, want := m.settingsNote(rows[0]), "→ true (next launch)"; got != want {
+		t.Errorf("marker = %q, want %q — one edit per key, the last one", got, want)
+	}
+}
+
+// ⏎ on an enum asks WHICH value in a sub-list of its own (the /schedule two-step): the pane keeps its
+// place in the frame, the vocabulary replaces the key list, ⏎ commits the highlighted value and esc
+// backs out having written nothing. The sub-list opens on the value the key already holds, so a human
+// who presses ⏎ twice confirms what was set instead of silently changing it.
+func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
+	rows := []SettingRow{settingsEnumRow()}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	opened := step(t, m, keyEnter())
+
+	if opened.settings.kind != settingsEnumList || opened.settings.sub != 0 {
+		t.Fatalf("pane = %+v, want the sub-list open on the current value (row 0)", opened.settings)
+	}
+	pane := strip(opened.renderSettings())
+	for _, want := range []string{"ui.spinner", "snake", "dots", "moon", "(current)", settingsEnumHint} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("the value sub-list does not show %q:\n%s", want, pane)
+		}
+	}
+
+	// esc backs out of the QUESTION, not out of the pane, and writes nothing.
+	backed := step(t, opened, keyEsc())
+	if !backed.settings.open || backed.settings.kind != settingsKeyList || backed.settings.sub != 0 {
+		t.Errorf("pane = %+v after esc, want it open again on its key list", backed.settings)
+	}
+	if len(log.writes) != 0 {
+		t.Errorf("esc persisted %+v; backing out must write nothing", log.writes)
+	}
+	if list := strip(backed.renderSettings()); !strings.Contains(list, settingsHint) {
+		t.Errorf("the key list did not come back:\n%s", list)
+	}
+
+	// ⏎ straight away commits the value the key already holds — the confirmation the writer no-ops.
+	if confirmed := step(t, opened, keyEnter()); confirmed.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v after ⏎, want the sub-list closed", confirmed.settings)
+	}
+	if want := []settingEdit{{path: "ui.spinner", value: "snake"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v — the highlight opens on what is set", log.writes, want)
+	}
+
+	// And a moved highlight commits what it points at.
+	log.writes = nil
+	committed := step(t, step(t, opened, keyDown()), keyEnter())
+	if want := []settingEdit{{path: "ui.spinner", value: "dots"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if got, want := committed.settingsNote(rows[0]), "→ dots (next launch)"; got != want {
+		t.Errorf("marker = %q, want %q", got, want)
+	}
+}
+
+// `mode` is the one key an edit APPLIES as well as persists, through the same Engine.SetMode + opts.Mode
+// pair Shift+Tab drives — so the row shows the new value with no "(next launch)" caveat, because there
+// is nothing to wait for.
+func TestSettingsPaneModeEditAppliesLiveAndMarksNothing(t *testing.T) {
+	rows := []SettingRow{{
+		Path: "mode", Section: "Autonomy", Kind: SettingEnum, Value: "ask-before", Default: "ask-before",
+		EnumValues: []string{"plan", "ask-before", "allow-edits", "auto"}, Editable: true,
+		Desc: "Autonomy mode: how tool calls are gated.",
+	}}
+	log := &settingsWriteLog{}
+	m, eng := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter()) // the sub-list, highlighted on ask-before
+	m = step(t, m, keyDown())  // allow-edits
+	m = step(t, m, keyEnter()) // commit
+
+	if want := []settingEdit{{path: "mode", value: "allow-edits"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if got := eng.modesSet(); len(got) != 1 || got[0] != domain.ModeAllowEdits {
+		t.Errorf("engine SetMode = %v, want [allow-edits] — mode applies live", got)
+	}
+	if m.opts.Mode != domain.ModeAllowEdits {
+		t.Errorf("opts.Mode = %q, want allow-edits (the footer renders the mode from it)", m.opts.Mode)
+	}
+	if got := m.settingsNote(rows[0]); got != "" {
+		t.Errorf("marker = %q, want none: a live-applied edit has nothing to wait for", got)
+	}
+	if got := m.settingsValueCell(rows[0]); got != "allow-edits" {
+		t.Errorf("value cell = %q, want the value the session is now running", got)
+	}
+}
+
+// A row an environment variable or a flag is overriding says the fuller truth after a write: the file
+// was changed and something still outranks it. Without it, an edit to an overridden key would look as
+// though it had done nothing.
+func TestSettingsPaneOverriddenRowSaysTheOverrideStillOutranksIt(t *testing.T) {
+	rows := []SettingRow{{
+		Path: "bypass", Section: "Mechanisms", Kind: SettingBool, Value: "true", Default: "false",
+		Source: SettingFromEnv, SourceName: "APOGEE_BYPASS", Editable: true, Restart: true,
+		Desc: "Run with Mechanisms off.",
+	}}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter())
+
+	if want := []settingEdit{{path: "bypass", value: "false"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	want := "saved — overridden by APOGEE_BYPASS this run"
+	if got := m.settingsNote(rows[0]); got != want {
+		t.Errorf("marker = %q, want %q", got, want)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, "(env)") || !strings.Contains(pane, want) {
+		t.Errorf("the pane does not carry both the override marker and the note:\n%s", pane)
+	}
+}
+
+// A refused write changes NOTHING but the row's own line: no edit recorded, no value moved, and the
+// reason on the row — where the human can read it, which the transcript behind a full-height pane is
+// not. A write that lands afterwards clears it.
+func TestSettingsPaneWriteErrorStaysOnTheRowAndChangesNothing(t *testing.T) {
+	rows := []SettingRow{settingsBoolRow()}
+	log := &settingsWriteLog{err: errors.New("config.yaml is read-only")}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter())
+
+	if len(log.writes) != 0 || len(m.settings.edits) != 0 {
+		t.Fatalf("a refused write left writes %+v / edits %+v, want neither", log.writes, m.settings.edits)
+	}
+	if got := m.settingsValueCell(rows[0]); got != "true" {
+		t.Errorf("value cell = %q, want the row untouched", got)
+	}
+	if got := m.settingsNote(rows[0]); !strings.Contains(got, "config.yaml is read-only") {
+		t.Errorf("marker = %q, want the refusal's reason", got)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, "config.yaml is read-only") {
+		t.Errorf("the pane does not show the refusal:\n%s", pane)
+	}
+	if !m.settings.open {
+		t.Error("a refused write closed the pane")
+	}
+
+	log.err = nil
+	m = step(t, m, keyEnter())
+
+	if got, want := m.settingsNote(rows[0]), "→ false (next launch)"; got != want {
+		t.Errorf("marker = %q, want %q — a landed write replaces the refusal", got, want)
+	}
+}
+
+// The nil-seam degrade, on the row: a build (or a Driver, ADR 0031) that composed Options without the
+// write seam has an honest sentence to say and nothing to write.
+func TestSettingsPaneWithoutAWriterSaysSoOnTheRow(t *testing.T) {
+	rows := []SettingRow{settingsBoolRow()}
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+
+	m = step(t, m, keyEnter())
+
+	if len(m.settings.edits) != 0 {
+		t.Fatalf("edits = %+v, want none: nothing was written", m.settings.edits)
+	}
+	if got := m.settingsNote(rows[0]); !strings.Contains(got, noSettingsWriterNote) {
+		t.Errorf("marker = %q, want %q", got, noSettingsWriterNote)
+	}
+}
+
+// ⏎ never writes a row the registry does not let this surface write, and never a kind whose idiom is
+// not here yet: a structured block, the confinement keys /confine keeps single-homed (ADR 0012), and
+// the string and int rows item 8 buffers. The pointer cell already says where each one IS edited.
+func TestSettingsPaneEnterNeverWritesARowItMayNotEdit(t *testing.T) {
+	rows := []SettingRow{
+		{Path: "servers", Section: "Upstream", Kind: SettingStructured, Value: "3 servers",
+			EditPointer: "edit in config.yaml", Desc: "The named server list."},
+		{Path: "unconfined-hosts", Section: "Confinement", Kind: SettingStructured, Value: "2 hosts",
+			EditPointer: "use /confine", Desc: "Machines acknowledged as disposable."},
+		{Path: "endpoint", Section: "Upstream", Kind: SettingString, Value: "http://h:1111",
+			Editable: true, Restart: true, Desc: "The OpenAI-compatible base URL."},
+		{Path: "context-window", Section: "Upstream", Kind: SettingInt, Value: "0",
+			Editable: true, Restart: true, Desc: "Pin the model context window."},
+	}
+	log := &settingsWriteLog{}
+	m, eng := settingsEditModel(t, rows, log)
+
+	for i := range rows {
+		m.settings.selected = i
+		m = step(t, m, keyEnter())
+		if len(log.writes) != 0 || len(log.resets) != 0 {
+			t.Fatalf("⏎ on %s persisted %+v / %+v", rows[i].Path, log.writes, log.resets)
+		}
+		if m.settings.kind != settingsKeyList {
+			t.Fatalf("⏎ on %s opened a sub-list", rows[i].Path)
+		}
+	}
+	if got := eng.modesSet(); len(got) != 0 {
+		t.Errorf("engine SetMode = %v, want none", got)
+	}
+}
+
+// The sub-list is a view of the SELECTED row, and the rows are re-derived under it — so a key that
+// went away takes its question with it: the pane falls back to its list rather than committing a value
+// to whatever now sits at that index.
+func TestSettingsEnumSubListFallsBackWhenItsKeyGoesAway(t *testing.T) {
+	rows := []SettingRow{settingsBoolRow(), settingsEnumRow()}
+	log := &settingsWriteLog{}
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.WriteSetting = log.write
+	m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+
+	m = step(t, m, keyDown())  // the enum row
+	m = step(t, m, keyEnter()) // its value sub-list
+	if m.settings.kind != settingsEnumList {
+		t.Fatalf("pane = %+v, want the sub-list open", m.settings)
+	}
+
+	rows = []SettingRow{settingsBoolRow()} // the provider now answers with the bool row alone
+	m = step(t, m, keyEnter())
+
+	if m.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v, want the key list back", m.settings)
+	}
+	if len(log.writes) != 0 {
+		t.Errorf("the orphaned sub-list persisted %+v, want nothing", log.writes)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, settingsHint) {
+		t.Errorf("the pane is not showing its key list:\n%s", pane)
 	}
 }

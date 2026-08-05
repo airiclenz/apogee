@@ -292,7 +292,26 @@ short window (floor behavior), and for the give-way status-line fact;
 
 **Commit:** `feat(tui): /settings opens a full-height read-only settings pane`
 
-## 7. Editing v1a: bool toggle and enum sub-list, persisted per edit
+## 7. Editing v1a: bool toggle and enum sub-list, persisted per edit — ✅ DONE (2026-08-05)
+
+**NOTES (2026-08-05):** five deviations. (1) `mode` DOES record its edit in the pane's pending state, and what
+"shows no marker" buys is the VALUE cell: the rows provider closes over the resolution captured at wire time
+(`wire.go`'s `settingsRows(opts)`), so after a live apply nothing in the pane would otherwise ever show the new
+mode — the row would sit at its pre-edit value with no marker, an edit indistinguishable from one that failed.
+`settingsValueCell` shows a live-applied edit's value; only restart-required rows get the "(next launch)" marker.
+(2) The marker shares the row's LAST cell with item 6's `EditPointer` instead of adding a fifth column: a row
+either cannot be written here (pointer) or was written by this pane (marker), never both, and at 80 columns a
+fifth tier would cost every row's value about 25 cells. (3) The enum sub-list opens on the value the key HOLDS
+rather than resetting the highlight to the first row — the item's "reset the sub-selection" via the `/schedule`
+precedent — because on `mode` a reset-to-0 would make ⏎⏎ silently set the ladder's first rung; with the current
+value highlighted, ⏎⏎ re-sets what is already there, which item 4's writer no-ops. (4) The override note is
+ordered AFTER the live-apply case, so a live-applied row never claims to be "overridden … this run": the live
+apply outranks the source that beat the file at resolution time for as long as the run lasts. (5) Two existing
+tests changed shape with the code they cover: `TestSettingsPaneEscCloses` compares the closed pane through
+`reflect.DeepEqual` (the pane now holds a slice of edits, so `==` no longer compiles), and
+`settingsDisplayRows`/`settingRowCells` became Model methods (the value and note cells read the pane's own edit
+state), so their two unit tests call them on a zero Model. `layout.md` also gained one paragraph — the value
+sub-list is the one state in which the full-height pane is short — which item 6's amendment did not cover.
 
 **What:** Depends on items 4 and 6. Writer seams into the pane: `tui.Options` gains
 `WriteSetting func(path, value string) error` and `ResetSetting func(path string) error`,

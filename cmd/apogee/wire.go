@@ -530,7 +530,19 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// pane reports what the SESSION is running: a key persisted mid-session takes effect on the
 		// next launch, which is exactly what the row's "(next launch)" marker says.
 		SettingsRows: func() []tui.SettingRow { return settingsRows(opts) },
-		Skills:       skillProvider,
+		// The pane's write half: one key per deliberate edit, spliced into the same config.yaml the
+		// acknowledgement above records a host in (ADR 0035). The registry decides what may be
+		// written and the splice writer owns the file (configwrite.go) — the renderer hands over a
+		// path and the value as the file spells it, and learns only whether it landed.
+		WriteSetting: func(key, value string) error {
+			return saveConfigSetting(filepath.Join(roots.config, "config.yaml"), key, value)
+		},
+		// Reset is the same write in reverse: the key's active line is REMOVED, so the value goes
+		// back to the binary's default rather than being pinned to today's spelling of it.
+		ResetSetting: func(key string) error {
+			return resetConfigSetting(filepath.Join(roots.config, "config.yaml"), key)
+		},
+		Skills: skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
 		// on the shared Provider — the same one Config.Skills resolves against — so a skill added
 		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals
