@@ -860,6 +860,244 @@ func TestApplyConfigStartupServerRefusals(t *testing.T) {
 	}
 }
 
+// The raw invocation overrides, end to end through applyConfig (ADR 0036 decision 6). An endpoint
+// override builds an EPHEMERAL unnamed entry that wins over any recorded or flagged name and
+// carries the key and hint overrides as its own fields; without one, those two overlay the
+// selected entry's own fields and the list is still what says where the session talks.
+func TestApplyConfigStartupOverrides(t *testing.T) {
+	t.Parallel()
+	const twoServers = "servers:\n" +
+		"  - name: laptop\n    endpoint: http://127.0.0.1:1111\n    api-key: file-key\n    model: file-model\n" +
+		"  - name: workstation\n    endpoint: http://192.168.1.9:1111\n" +
+		"server: laptop\n"
+
+	tests := []struct {
+		name          string
+		configYAML    string
+		flags         options
+		changed       map[string]bool
+		env           map[string]string
+		wantEndpoint  string
+		wantAPIKey    string
+		wantModel     string
+		wantHostAlias string
+	}{
+		{
+			name:          "APOGEE_ENDPOINT alone builds the ephemeral entry",
+			configYAML:    twoServers,
+			env:           map[string]string{envEndpoint: "http://rented:8080"},
+			wantEndpoint:  "http://rented:8080",
+			wantHostAlias: "rented",
+		},
+		{
+			name:          "--endpoint beats APOGEE_ENDPOINT",
+			configYAML:    twoServers,
+			flags:         options{endpoint: "http://flag-box:1111"},
+			changed:       map[string]bool{"endpoint": true},
+			env:           map[string]string{envEndpoint: "http://env-box:1111"},
+			wantEndpoint:  "http://flag-box:1111",
+			wantHostAlias: "flag-box",
+		},
+		{
+			name:       "the ephemeral entry carries the key and hint overrides",
+			configYAML: twoServers,
+			flags:      options{model: "flag-model"},
+			changed:    map[string]bool{"model": true},
+			env: map[string]string{
+				envEndpoint: "http://rented:8080",
+				envAPIKey:   "sk-rented",
+				envModel:    "env-model",
+			},
+			wantEndpoint:  "http://rented:8080",
+			wantAPIKey:    "sk-rented",
+			wantModel:     "flag-model", // --model beats APOGEE_MODEL, per pair
+			wantHostAlias: "rented",
+		},
+		{
+			name:       "an endpoint override ignores server: and --server",
+			configYAML: twoServers,
+			flags:      options{startupServer: "workstation"},
+			changed:    map[string]bool{"server": true},
+			env:        map[string]string{envEndpoint: "http://rented:8080"},
+			// Neither the recorded `laptop` nor the flagged `workstation`: the URL is the most
+			// explicit thing the invocation said.
+			wantEndpoint:  "http://rented:8080",
+			wantHostAlias: "rented",
+		},
+		{
+			name:          "an endpoint override rescues a config that lists nothing",
+			configYAML:    "mode: plan\n",
+			env:           map[string]string{envEndpoint: "http://rented:8080", envAPIKey: "sk-rented"},
+			wantEndpoint:  "http://rented:8080",
+			wantAPIKey:    "sk-rented",
+			wantHostAlias: "rented",
+		},
+		{
+			name:          "APOGEE_API_KEY overlays the selected entry's own key",
+			configYAML:    twoServers,
+			env:           map[string]string{envAPIKey: "sk-today"},
+			wantEndpoint:  "http://127.0.0.1:1111",
+			wantAPIKey:    "sk-today",
+			wantModel:     "file-model",
+			wantHostAlias: "laptop",
+		},
+		{
+			name:          "--model overlays the selected entry's own hint",
+			configYAML:    twoServers,
+			flags:         options{model: "flag-model"},
+			changed:       map[string]bool{"model": true},
+			wantEndpoint:  "http://127.0.0.1:1111",
+			wantAPIKey:    "file-key",
+			wantModel:     "flag-model",
+			wantHostAlias: "laptop",
+		},
+		{
+			name:          "no override leaves the selected entry exactly as configured",
+			configYAML:    twoServers,
+			wantEndpoint:  "http://127.0.0.1:1111",
+			wantAPIKey:    "file-key",
+			wantModel:     "file-model",
+			wantHostAlias: "laptop",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			opts := tt.flags
+			opts.configDir = home
+			err := applyConfig(&opts, func(name string) bool { return tt.changed[name] },
+				func(name string) string { return tt.env[name] }, os.ReadFile, noNotify)
+			if err != nil {
+				t.Fatalf("applyConfig: %v", err)
+			}
+			if opts.endpoint != tt.wantEndpoint {
+				t.Errorf("endpoint = %q; want %q", opts.endpoint, tt.wantEndpoint)
+			}
+			if opts.apiKey != tt.wantAPIKey {
+				t.Errorf("apiKey = %q; want %q", opts.apiKey, tt.wantAPIKey)
+			}
+			if opts.model != tt.wantModel {
+				t.Errorf("model = %q; want %q", opts.model, tt.wantModel)
+			}
+			if opts.hostAlias != tt.wantHostAlias {
+				t.Errorf("hostAlias = %q; want %q", opts.hostAlias, tt.wantHostAlias)
+			}
+			// An override describes ONE run: it is never written back, so the file the run read
+			// must come out of it byte-identical and the home must gain nothing.
+			after, readErr := os.ReadFile(filepath.Join(home, "config.yaml"))
+			if readErr != nil {
+				t.Fatalf("re-read config: %v", readErr)
+			}
+			if string(after) != tt.configYAML {
+				t.Errorf("applyConfig rewrote config.yaml:\n%s\nwant:\n%s", after, tt.configYAML)
+			}
+			assertHomeHoldsOnlyConfig(t, home, "an override run")
+		})
+	}
+}
+
+// The ephemeral entry is unnamed on purpose — namelessness is what keeps it out of the file — so
+// the footer's alias comes from the endpoint's own host, and `server:` keeps naming what the FILE
+// records (which is what the next run without the override starts on).
+func TestApplyConfigEphemeralEntryIsUnnamed(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "")
+	opts := options{configDir: home}
+	getenv := func(name string) string {
+		if name == envEndpoint {
+			return "http://rented.example:8080/v1"
+		}
+		return ""
+	}
+	if err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("applyConfig: %v", err)
+	}
+	if opts.hostAlias != "rented.example" {
+		t.Errorf("hostAlias = %q; want the endpoint host — an ephemeral entry has no name", opts.hostAlias)
+	}
+	if opts.startupServer != testServerName {
+		t.Errorf("startupServer = %q; want the file's %q — an override does not rewrite the record",
+			opts.startupServer, testServerName)
+	}
+}
+
+// An explicitly-set flag speaks even when its value is empty: `--endpoint ""` says "nothing from
+// the command line", and letting the variable slip back in underneath would make the flag mean
+// the opposite of what was typed.
+func TestResolveStartupOverridesEmptyFlagBeatsTheVariable(t *testing.T) {
+	t.Parallel()
+	got := resolveStartupOverrides(options{},
+		func(name string) bool { return name == "endpoint" },
+		func(name string) string {
+			if name == envEndpoint {
+				return "http://env-box:1111"
+			}
+			return ""
+		})
+	if got.endpoint != "" {
+		t.Errorf("endpoint = %q; want empty — the explicitly-set flag wins", got.endpoint)
+	}
+}
+
+// The override table cannot half-describe a source, on TestMultiSourceKeysBindDescribedKeys'
+// reasoning: every entry must read the variable it names and the flag it names, the three
+// detached variables must each be bound exactly once, and no override name may collide with a
+// registry row's — since ADR 0036 these names describe no config key, and an overlap would mean
+// two resolvers fighting over one variable or flag.
+func TestStartupOverrideSourcesBindTheDetachedNames(t *testing.T) {
+	t.Parallel()
+
+	seen := map[string]bool{}
+	for _, src := range startupOverrideSources {
+		if src.envVar == "" {
+			t.Error("a startup override names no environment variable, so nothing could set it")
+		}
+		if src.into == nil {
+			t.Errorf("startup override %s has no projection, so resolution would drop it", src.envVar)
+		}
+		if (src.flagName == "") != (src.fromFlag == nil) {
+			t.Errorf("startup override %s names flag %q but reads %v — a flag that is advertised "+
+				"must be read, and one that is read must be advertised", src.envVar, src.flagName, src.fromFlag != nil)
+		}
+		seen[src.envVar] = true
+		for _, row := range keyRegistry {
+			if row.EnvVar == src.envVar {
+				t.Errorf("startup override %s is also registry row %q's variable", src.envVar, row.Path)
+			}
+			if src.flagName != "" && row.FlagName == src.flagName {
+				t.Errorf("startup override --%s is also registry row %q's flag", src.flagName, row.Path)
+			}
+		}
+	}
+	for _, name := range []string{envEndpoint, envAPIKey, envModel} {
+		if !seen[name] {
+			t.Errorf("%s is named as a startup override but nothing reads it", name)
+		}
+	}
+	if len(seen) != len(startupOverrideSources) {
+		t.Errorf("startupOverrideSources binds %d entries over %d variables; one variable is bound twice",
+			len(startupOverrideSources), len(seen))
+	}
+
+	// And the flags they name are really on the root command, so none advertises a flag cobra
+	// would reject.
+	flags := newRootCommand((&recordingLauncher{}).launch).Flags()
+	for _, src := range startupOverrideSources {
+		if src.flagName == "" {
+			continue
+		}
+		if flags.Lookup(src.flagName) == nil {
+			t.Errorf("startup override %s reads --%s, which the root command does not register",
+				src.envVar, src.flagName)
+		}
+	}
+}
+
 // A config still written in the retired schema is refused with the block that replaces it, key by
 // key: the decoder ignores keys fileConfig no longer has, so without the sniff a working endpoint
 // would simply stop being read.

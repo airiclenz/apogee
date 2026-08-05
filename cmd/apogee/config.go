@@ -1547,10 +1547,13 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	if err := validateLlamaLauncher(s.llamaLauncher); err != nil {
 		return err
 	}
-	// Which of the configured servers this session starts on. It is the last step of resolution
-	// rather than part of it (ADR 0036): the answer needs the resolved list and the resolved name
-	// together, and a name that matches nothing is a fact about the pair, not about either key.
-	startup, err := selectStartupServer(s.startupServer, s.servers, configFilePath(opts.configDir))
+	// Which server this session starts on. It is the last step of resolution rather than part of it
+	// (ADR 0036): the answer needs the resolved list, the resolved name and the raw invocation
+	// overrides together, and a name that matches nothing is a fact about that triple, not about
+	// any one key. The overrides are read from the SAME opts the flag layer was built from, before
+	// the write-back below overwrites the flag-bound endpoint/model fields with the answer.
+	raw := resolveStartupOverrides(*opts, changed, getenv)
+	startup, err := resolveStartupEntry(raw, s.startupServer, s.servers, configFilePath(opts.configDir))
 	if err != nil {
 		return err
 	}
@@ -1594,6 +1597,111 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	return nil
 }
 
+// startupOverrides carries the raw invocation overrides ADR 0036 detached from the config schema:
+// the endpoint this run is pointed at, the bearer token it sends, and the model hint it asks for.
+// They are no longer config keys with a value that could be edited or persisted — they describe
+// ONE run's upstream, which is why they are resolved on their own rather than through a layer, and
+// why nothing ever writes them back. An empty field means the run named no override of that kind.
+type startupOverrides struct {
+	endpoint string
+	apiKey   string
+	model    string
+}
+
+// startupOverride binds one raw override to the sources it is read from. It exists for the same
+// reason multiSourceKey does — so the environment-variable and flag NAMES have exactly one home,
+// and a source that is advertised is a source that is read — but it deliberately hangs off no
+// registry row: since ADR 0036 these names describe no config key, and the bijection guard pins
+// registry rows to `fileConfig` tags that no longer exist for them.
+//
+// fromFlag is nil for an override with no flag, which today is the api key: there is no
+// --api-key on purpose, because a secret on the command line lands in shell history and in `ps`
+// output. into is what projects a resolved text onto the struct above.
+type startupOverride struct {
+	envVar   string
+	flagName string
+	fromFlag func(opts options) string
+	into     func(o *startupOverrides, text string)
+}
+
+// startupOverrideSources is that table, in the order the overrides compose a server entry.
+var startupOverrideSources = []startupOverride{
+	{
+		envVar:   envEndpoint,
+		flagName: "endpoint",
+		fromFlag: func(opts options) string { return opts.endpoint },
+		into:     func(o *startupOverrides, text string) { o.endpoint = text },
+	},
+	{
+		envVar: envAPIKey,
+		into:   func(o *startupOverrides, text string) { o.apiKey = text },
+	},
+	{
+		envVar:   envModel,
+		flagName: "model",
+		fromFlag: func(opts options) string { return opts.model },
+		into:     func(o *startupOverrides, text string) { o.model = text },
+	},
+}
+
+// resolveStartupOverrides reads the raw overrides off the flags and the environment, the flag
+// beating the variable within each pair — the same precedence the config keys ride, applied to
+// values that are not config keys. An explicitly-set flag wins even when its value is empty: the
+// user spelled it out, and letting a variable slip back in underneath would make `--endpoint ""`
+// mean something other than "no endpoint from the command line". An unset flag carries its zero
+// default, which must not shadow the variable, so only cobra's Changed lets a flag speak.
+func resolveStartupOverrides(opts options, changed func(string) bool, getenv func(string) string) startupOverrides {
+	var o startupOverrides
+	for _, src := range startupOverrideSources {
+		if src.fromFlag != nil && src.flagName != "" && changed(src.flagName) {
+			src.into(&o, src.fromFlag(opts))
+			continue
+		}
+		if v := getenv(src.envVar); v != "" {
+			src.into(&o, v)
+		}
+	}
+	return o
+}
+
+// overlay applies the key and hint overrides to a CONFIGURED entry — the no-endpoint-override
+// case, where the run still starts on a listed server but sends a one-off key, or asks that
+// server for a different model than its own `model:` hint names. An override that was not given
+// leaves the entry's own value standing.
+func (o startupOverrides) overlay(entry serverEntry) serverEntry {
+	if o.apiKey != "" {
+		entry.APIKey = o.apiKey
+	}
+	if o.model != "" {
+		entry.Model = o.model
+	}
+	return entry
+}
+
+// resolveStartupEntry answers which server this session is built from, overrides first (ADR 0036
+// decision 6).
+//
+// A raw endpoint override constructs an EPHEMERAL, unnamed entry for this run alone. It wins over
+// any `server:` / `--server` name, because pointing apogee at a URL is the most explicit thing a
+// user can say about where this run talks; it carries the key and hint overrides as its own
+// fields; and it rescues a startup the list alone could not answer, so `APOGEE_ENDPOINT=… apogee`
+// works against a config that lists nothing at all. It is unnamed because there is nothing to
+// name it — the footer falls back to the endpoint's host (hostFromEndpoint) — and namelessness is
+// exactly what keeps it out of the file: nothing persists an entry that has no name to persist.
+//
+// With no endpoint override the list is the single definition, and the key and hint overrides
+// overlay the selected entry's own two optional fields.
+func resolveStartupEntry(o startupOverrides, name string, servers []serverEntry, configPath string) (serverEntry, error) {
+	if o.endpoint != "" {
+		return serverEntry{Endpoint: o.endpoint, APIKey: o.apiKey, Model: o.model}, nil
+	}
+	entry, err := selectStartupServer(name, servers, configPath)
+	if err != nil {
+		return serverEntry{}, err
+	}
+	return o.overlay(entry), nil
+}
+
 // selectStartupServer resolves the server a session starts on: the `servers:` entry named by the
 // post-precedence `server:` value (`--server` > `APOGEE_SERVER` > `server:`). The entry IS the
 // answer — its endpoint, key and model hint are what the session is built from, and its name is
@@ -1605,6 +1713,9 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 //   - the list is empty: nothing is configured yet;
 //   - no name is chosen (first boot, or a config that never recorded one);
 //   - the chosen name matches no entry — a renamed or deleted server, or a typo.
+//
+// None of them is reached when a raw endpoint override already answered the question
+// (resolveStartupEntry, which calls this only for the no-override case).
 //
 // ADR 0036 gives the TUI a better answer for the last two — it asks, through the `/server` picker,
 // and records the choice — which is not wired yet. The hard error stays the permanent answer for

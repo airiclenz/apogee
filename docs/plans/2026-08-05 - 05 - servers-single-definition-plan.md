@@ -197,7 +197,18 @@ only `serverEntry`'s nested tags; `make check` passes.
 
 **Commit:** `feat(config): the servers list is the single definition — top-level endpoint/api-key/host-alias/model retired`
 
-## 4. Override story — ephemeral entry and per-field overlays
+## 4. Override story — ephemeral entry and per-field overlays — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): beyond the item's literal text, the root command's `--endpoint`/`--model` flag
+descriptions and its `Long` help paragraph were rewritten. Item 3 left them describing the retired
+top-level keys while `--endpoint` was silently dead; this item revives the flag with new semantics,
+so the usage text it prints is user-facing behaviour this item changed. README/CHANGELOG stay with
+item 11.
+
+NOTES (2026-08-05): `APOGEE_API_KEY` has no flag partner (there is deliberately no `--api-key`), so
+the "flag beats env per pair" rule applies to the endpoint and model pairs only; the table entry for
+the key carries no flag and the binding test pins that asymmetry rather than requiring a flag per
+override.
 
 **What:** Depends on item 3. A startup-override resolver in `cmd/apogee/config.go`
 owning the detached constants (`APOGEE_ENDPOINT`, `APOGEE_API_KEY`, `APOGEE_MODEL`;

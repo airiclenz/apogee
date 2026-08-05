@@ -195,16 +195,21 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 		Long: "apogee is a terminal coding agent for small local LLMs. The root command\n" +
 			"opens an interactive session against a local OpenAI-compatible model:\n" +
 			"hold a coding conversation, watch tools run, and approve writes.\n\n" +
-			"Settings resolve by precedence: a flag overrides an APOGEE_* environment\n" +
-			"variable (APOGEE_ENDPOINT, APOGEE_MODEL, APOGEE_MODE, APOGEE_BYPASS,\n" +
-			"APOGEE_API_KEY), which overrides ~/.apogee/config.yaml, which overrides the\n" +
-			"built-in default. APOGEE_API_KEY carries the upstream bearer token for a keyed\n" +
-			"server (api-key: in the config file) and has no flag on purpose: a secret on\n" +
-			"the command line lands in shell history and in process lists. With no\n" +
-			"model set anywhere, apogee asks the server for its active model, so a single-\n" +
-			"model server (e.g. llama.cpp's llama-server) needs only --endpoint. The\n" +
-			"session is saved continuously under ~/.apogee/sessions; resume the most\n" +
-			"recent with --continue, or browse and pick one with /sessions inside apogee.",
+			"The servers: list in ~/.apogee/config.yaml defines the servers apogee can\n" +
+			"talk to, and the session starts on the one server: names. Config keys resolve\n" +
+			"by precedence: a flag overrides an APOGEE_* environment variable\n" +
+			"(APOGEE_SERVER, APOGEE_MODE, APOGEE_BYPASS), which overrides the config file,\n" +
+			"which overrides the built-in default -- so --server or APOGEE_SERVER starts\n" +
+			"this run on another listed server. --endpoint / APOGEE_ENDPOINT are not\n" +
+			"config keys: they start the run on an UNLISTED server, which is never saved.\n" +
+			"APOGEE_API_KEY and --model / APOGEE_MODEL carry the bearer token and the model\n" +
+			"hint for that unlisted server, or overlay those two fields of the listed one.\n" +
+			"APOGEE_API_KEY has no flag on purpose: a secret on the command line lands in\n" +
+			"shell history and in process lists. With no model set anywhere, apogee asks\n" +
+			"the server for its active model, so a single-model server (e.g. llama.cpp's\n" +
+			"llama-server) needs no model named at all. The session is saved continuously\n" +
+			"under ~/.apogee/sessions; resume the most recent with --continue, or browse\n" +
+			"and pick one with /sessions inside apogee.",
 		Args: cobra.NoArgs,
 		// On a runtime (RunE) error, print just the error — not the full usage dump,
 		// which is noise for a misconfiguration rather than a syntax mistake. main owns
@@ -241,10 +246,12 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.endpoint, "endpoint", "", "OpenAI-compatible LLM server URL")
+	flags.StringVar(&opts.endpoint, "endpoint", "",
+		"OpenAI-compatible LLM server URL to start on, unlisted and not saved (overrides --server)")
 	flags.StringVar(&opts.startupServer, "server", "",
 		"name of the servers: entry to start on (default: the last one /server switched to)")
-	flags.StringVar(&opts.model, "model", "", "model name to request (default: ask the server for its active model)")
+	flags.StringVar(&opts.model, "model", "",
+		"model name to request (default: the startup server's model: hint, else ask the server)")
 	flags.StringVar(&opts.mode, "mode", string(modeAskBefore),
 		"autonomy ladder: plan | ask-before | allow-edits | auto "+
 			"(auto needs filesystem confinement; tuned by confine-to-workspace in config.yaml)")
