@@ -1561,6 +1561,10 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.model = startup.Model
 	opts.apiKey = startup.APIKey
 	opts.hostAlias = startup.Name
+	// Whether that entry came out of the list or out of the invocation. A configured entry always
+	// has a name (validateServers refuses one without) and the ephemeral override entry never does,
+	// so namelessness IS the distinction — the same invariant the alias fallback below leans on.
+	opts.startupEphemeral = startup.Name == ""
 	opts.mode = s.mode
 	opts.bypass = s.bypass
 	opts.servers = s.servers

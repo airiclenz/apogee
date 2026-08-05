@@ -194,23 +194,26 @@ func (m sessionMover) move(endpoint, alias, hint, apiKey string) (tui.ServerSwit
 	}, nil
 }
 
-// upstreamChoices assembles the servers this session can be switched to: every `servers:` entry in
-// file order, preceded by a synthesized entry for the endpoint the session STARTED on whenever no
-// configured entry already names it. The synthesized row is what makes switching away reversible
-// without config surgery — a user who lists one remote server must still be able to come back to
-// the local one they launched against, and asking them to also list their own `endpoint:` twice
-// would be a config chore in service of an implementation detail.
+// upstreamChoices assembles the servers this session can be switched to: the `servers:` list
+// verbatim, in file order, because since ADR 0036 that list is the single definition of what
+// upstream servers exist. A session that started on a configured entry needs nothing added — the
+// server it is on is already one of the rows, under the one name that labels it, selects it, and
+// calls it in the footer.
 //
-// The synthesized row carries the resolved facts the startup server was built from: the host alias
-// as its name (the same one field that labels the row, selects the server, and calls it in the
-// footer — `host-alias:` already names the startup endpoint exactly that way), the resolved key,
-// and the config'd `model:` as that server's discovery hint.
+// The one server the list cannot contain is the EPHEMERAL entry a raw `--endpoint`/`APOGEE_ENDPOINT`
+// override builds for this run alone (ADR 0036 decision 6): it is unnamed, deliberately unwritten,
+// and nowhere in the file. Only then is a row synthesized, prepended, carrying the resolved facts
+// that run was built from — the endpoint's host as its label (hostFromEndpoint, the same fallback
+// the footer uses), the override key, and the override hint. That keeps ADR 0028's "the startup
+// server is always offered" invariant true, so a user who overrides their way onto a rented box can
+// still switch to a listed server and come back, without the override becoming config.
 //
-// "Already names it" is plain endpoint equality on purpose: it is the same comparison the picker
-// marks the current row by, so the two halves cannot disagree about which row the session is on.
+// Deriving the synthesized row from the ephemeral case alone is also what dissolves the edge the
+// endpoint-equality test used to leave open: a configured startup can no longer be offered twice
+// under two labels, and a synthesized label can no longer collide with a configured `name`.
 func upstreamChoices(opts options) []serverEntry {
 	entries := make([]serverEntry, 0, len(opts.servers)+1)
-	if !namesEndpoint(opts.servers, opts.endpoint) {
+	if opts.startupEphemeral {
 		entries = append(entries, serverEntry{
 			Name:     opts.hostAlias,
 			Endpoint: opts.endpoint,
@@ -219,16 +222,6 @@ func upstreamChoices(opts options) []serverEntry {
 		})
 	}
 	return append(entries, opts.servers...)
-}
-
-// namesEndpoint reports whether some configured entry already points at endpoint.
-func namesEndpoint(servers []serverEntry, endpoint string) bool {
-	for _, s := range servers {
-		if s.Endpoint == endpoint {
-			return true
-		}
-	}
-	return false
 }
 
 // serverChoices projects the assembled entries onto the renderer's view of them: the name and the

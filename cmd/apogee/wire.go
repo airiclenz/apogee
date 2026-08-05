@@ -328,8 +328,9 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	holder := newUpstreamHolder(opts.endpoint, opts.apiKey, opts.model,
 		heartbeat.NewMonitor(opts.endpoint, opts.model, opts.apiKey))
 
-	// The servers this session can be moved to: the `servers:` entries plus — unless one of them
-	// already names it — the endpoint it started on, so the way back is always offered. The
+	// The servers this session can be moved to: the `servers:` entries, plus a synthesized row for
+	// the startup endpoint only when that endpoint came from a raw override and is therefore in no
+	// entry (upstreamChoices), so the way back is always offered. The
 	// closure below resolves a name against THIS list (it needs the key and the hint); the TUI is
 	// handed the display-and-identity projection of the same list, in the same order.
 	choices := upstreamChoices(opts)

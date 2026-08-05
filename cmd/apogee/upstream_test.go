@@ -88,53 +88,70 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 	}
 }
 
-// Choice assembly is the picker's data: the configured entries in file order, plus a synthesized
-// row for the endpoint the session STARTED on — but only when no entry already names it, or the
-// list would offer the same server twice under two labels.
+// Choice assembly is the picker's data: since ADR 0036 the `servers:` list verbatim, in file order,
+// with a synthesized row prepended ONLY for the ephemeral entry a raw endpoint override builds —
+// the one server this session can be on that no `servers:` entry could name.
 func TestUpstreamChoicesAssembly(t *testing.T) {
 	t.Parallel()
 
-	startup := options{
-		endpoint:  "http://local:1111",
-		model:     "local-model",
-		apiKey:    "local-key",
-		hostAlias: "workstation",
-	}
 	remote := serverEntry{Name: "remote", Endpoint: "http://remote:8080", APIKey: "remote-key", Model: "remote-model"}
 	spare := serverEntry{Name: "spare", Endpoint: "http://spare:8080"}
-	// A configured entry pointing at the startup endpoint under its own name.
-	named := serverEntry{Name: "home", Endpoint: "http://local:1111", APIKey: "other-key", Model: "other-model"}
+	// The configured entry a startup-by-name lands on: it is already a row, so nothing is added.
+	laptop := serverEntry{Name: "laptop", Endpoint: "http://local:1111", APIKey: "local-key", Model: "local-model"}
+	// What an override run resolves to: the endpoint's host as the alias, no name in any file.
+	ephemeral := options{
+		endpoint:         "http://rented:8080",
+		model:            "rented-model",
+		apiKey:           "rented-key",
+		hostAlias:        "rented",
+		startupEphemeral: true,
+	}
+	ephemeralRow := serverEntry{
+		Name: "rented", Endpoint: "http://rented:8080", APIKey: "rented-key", Model: "rented-model",
+	}
 
 	tests := []struct {
 		name    string
+		startup options
 		servers []serverEntry
 		want    []serverEntry
 	}{
 		{
-			name: "no servers block ⇒ the startup endpoint alone",
-			want: []serverEntry{{
-				Name: "workstation", Endpoint: "http://local:1111", APIKey: "local-key", Model: "local-model",
-			}},
-		},
-		{
-			name:    "unlisted startup endpoint is prepended, entries keep file order",
-			servers: []serverEntry{remote, spare},
-			want: []serverEntry{
-				{Name: "workstation", Endpoint: "http://local:1111", APIKey: "local-key", Model: "local-model"},
-				remote,
-				spare,
+			name: "a configured startup synthesizes nothing — it is already a row",
+			startup: options{
+				endpoint:  laptop.Endpoint,
+				model:     laptop.Model,
+				apiKey:    laptop.APIKey,
+				hostAlias: laptop.Name,
 			},
+			servers: []serverEntry{remote, laptop, spare},
+			// File order, untouched: the startup entry is NOT hoisted to the front.
+			want: []serverEntry{remote, laptop, spare},
 		},
 		{
-			name:    "a configured entry already names the startup endpoint ⇒ nothing synthesized",
-			servers: []serverEntry{remote, named},
-			want:    []serverEntry{remote, named},
+			name:    "an ephemeral startup is prepended, entries keep file order",
+			startup: ephemeral,
+			servers: []serverEntry{remote, spare},
+			want:    []serverEntry{ephemeralRow, remote, spare},
+		},
+		{
+			name:    "an ephemeral startup against an empty list ⇒ exactly one row",
+			startup: ephemeral,
+			want:    []serverEntry{ephemeralRow},
+		},
+		{
+			name: "an ephemeral endpoint a configured entry happens to share is still its own row",
+			// Endpoint equality no longer decides anything: the override run is on an unnamed
+			// server, and the row that says so is what makes the switch away reversible.
+			startup: ephemeral,
+			servers: []serverEntry{{Name: "same-box", Endpoint: ephemeral.endpoint}},
+			want:    []serverEntry{ephemeralRow, {Name: "same-box", Endpoint: ephemeral.endpoint}},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			opts := startup
+			opts := tt.startup
 			opts.servers = tt.servers
 
 			got := upstreamChoices(opts)
@@ -221,6 +238,9 @@ func TestRunRootSwitchServerRepointsTheSession(t *testing.T) {
 		contextWindow: 16384, // the global pin, which a switch must not drop
 		autoCompact:   true,
 		servers:       []serverEntry{{Name: "second", Endpoint: second.URL, Model: "model-b", APIKey: "second-key"}},
+		// An override run: the session starts on an endpoint no entry names, which is the one case
+		// that still synthesizes a row — and the case that makes switching away reversible.
+		startupEphemeral: true,
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -293,14 +313,15 @@ func TestRunRootSwitchServerUnknownNameTouchesNothing(t *testing.T) {
 
 	rec := &recordingLauncher{}
 	opts := options{
-		endpoint:    first.URL,
-		model:       "model-a",
-		mode:        "ask-before",
-		hostAlias:   "workstation",
-		workspace:   t.TempDir(),
-		configDir:   t.TempDir(),
-		autoCompact: true,
-		servers:     []serverEntry{{Name: "second", Endpoint: second.URL}},
+		endpoint:         first.URL,
+		model:            "model-a",
+		mode:             "ask-before",
+		hostAlias:        "workstation",
+		workspace:        t.TempDir(),
+		configDir:        t.TempDir(),
+		autoCompact:      true,
+		servers:          []serverEntry{{Name: "second", Endpoint: second.URL}},
+		startupEphemeral: true, // an override run, so the startup row is synthesized and offered
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {

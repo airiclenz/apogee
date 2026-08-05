@@ -791,6 +791,11 @@ func TestApplyConfigSelectsTheNamedServer(t *testing.T) {
 	if opts.startupServer != "workstation" {
 		t.Errorf("startupServer = %q; want the resolved server: value", opts.startupServer)
 	}
+	// A startup that came out of the list is not ephemeral, which is what tells the switch list it
+	// already holds this server (upstreamChoices).
+	if opts.startupEphemeral {
+		t.Error("startupEphemeral = true; want false — the session started on a configured entry")
+	}
 }
 
 // --server beats APOGEE_SERVER beats `server:` at selection too, not only in resolution: the value
@@ -1023,6 +1028,11 @@ func TestApplyConfigEphemeralEntryIsUnnamed(t *testing.T) {
 	if opts.startupServer != testServerName {
 		t.Errorf("startupServer = %q; want the file's %q — an override does not rewrite the record",
 			opts.startupServer, testServerName)
+	}
+	// And it is marked ephemeral, because nothing in `servers:` names it: the switch list has to
+	// synthesize a row for it or the way back to this run's server would be lost.
+	if !opts.startupEphemeral {
+		t.Error("startupEphemeral = false; want true — the run started on an override endpoint")
 	}
 }
 

@@ -55,6 +55,14 @@ type options struct {
 	// and applyConfig then overwrites it with the resolved value. Empty ⇒ no entry is named.
 	startupServer string
 
+	// startupEphemeral records that the server this session started on is the EPHEMERAL unnamed
+	// entry a raw `--endpoint`/`APOGEE_ENDPOINT` override builds (ADR 0036 decision 6) rather than
+	// an entry out of `servers:`. It is a fact about the invocation, not about the file, and it is
+	// exactly what upstreamChoices needs to decide whether the switch list must synthesize a row
+	// for the startup server: a configured startup is already IN the list, an ephemeral one is
+	// nowhere. Resolved-not-flag-bound; applyConfig sets it.
+	startupEphemeral bool
+
 	// llamaLauncher is the resolved `llama-launcher:` key (ADR 0029), exactly as the user wrote it:
 	// empty ⇒ auto-detect the launcher's own config, `off` ⇒ the local-server verbs stay off, any
 	// other value ⇒ the launcher config file to read. Loaded from the config file only, like the

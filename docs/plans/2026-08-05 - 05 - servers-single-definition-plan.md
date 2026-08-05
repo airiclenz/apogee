@@ -230,7 +230,20 @@ nothing is splice-written in any override path.
 
 **Commit:** `feat(config): raw endpoint overrides build an ephemeral startup entry`
 
-## 5. `upstreamChoices` — synthesize only the ephemeral startup
+## 5. `upstreamChoices` — synthesize only the ephemeral startup — ✅ DONE (2026-08-05)
+
+NOTES (2026-08-05): "the startup entry is ephemeral" had to become a carried fact — after item 4's
+resolution `options` holds only the entry's flattened fields, and `startupServer` keeps naming the
+FILE's record even on an override run, so neither could answer the question. New
+`options.startupEphemeral`, set in `applyConfig` from `startup.Name == ""` (a configured entry always
+has a name — `validateServers` — and the ephemeral one never does; the same invariant the alias
+fallback already leans on). Two `applyConfig` tests gained an assertion pinning it.
+
+NOTES (2026-08-05): `namesEndpoint` was deleted — it was `upstreamChoices`'s only caller's predicate
+and became dead with the endpoint-equality rule it implemented. The two `runRoot` switch-seam test
+fixtures (`TestRunRootSwitchServerRepointsTheSession`,
+`TestRunRootSwitchServerUnknownNameTouchesNothing`) start on an endpoint no entry names, which is now
+exactly the override case, so both gained `startupEphemeral: true`; their assertions are unchanged.
 
 **What:** Depends on item 4. Rework `upstreamChoices`
 (`cmd/apogee/upstream.go:211-222`): choices are the `servers:` list verbatim; a
