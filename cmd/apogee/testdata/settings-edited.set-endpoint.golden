@@ -1,0 +1,35 @@
+# my apogee config — hand-edited, and every word of it must survive a settings write
+
+# =============================================================================
+# The local OpenAI-compatible LLM server URL.
+#   flag: --endpoint   env: APOGEE_ENDPOINT
+# endpoint: http://192.168.64.1:1111
+endpoint: http://other:2222
+
+# =============================================================================
+# Autonomy mode: how tool calls are gated.
+# mode: ask-before
+mode: auto
+
+# Name new sessions from their first prompt.
+# auto-title: false
+auto-title: false
+
+# =============================================================================
+# The model's context window in tokens. Unset = discovered from the server.
+# context-window: 32768
+
+# =============================================================================
+# ui:
+#   spinner: snake         # snake | glitter | classic
+#   spinner-color: true    # the 10s colour loop
+#   show-scrollbar: true   # false = no scroll bar
+ui:
+  spinner: snake           # my pick, and this note stays put
+
+# =============================================================================
+# present:
+#   auto-open: true      # open documents on a LOCAL desktop run
+#   port: 0              # the built-in server's port
+present:
+  auto-open: false

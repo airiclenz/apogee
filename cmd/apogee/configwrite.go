@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -146,7 +148,8 @@ func insertHostAcknowledgement(data []byte, entry unconfinedHost) ([]byte, uncon
 	if err := yaml.Unmarshal(updated, &after); err != nil {
 		return nil, unconfinedHost{}, fmt.Errorf("the edited file would not parse: %w", err)
 	}
-	if !hostsAppended(before.UnconfinedHosts, after.UnconfinedHosts, entry) || !sameApartFromHosts(before, after) {
+	if !hostsAppended(before.UnconfinedHosts, after.UnconfinedHosts, entry) ||
+		!sameApartFrom(before, after, unconfinedHostsKey) {
 		return nil, unconfinedHost{}, errors.New(
 			"the edit would have changed more than the unconfined-hosts list; add the entry by hand")
 	}
@@ -184,14 +187,14 @@ func spliceHostAcknowledgement(data []byte, entry unconfinedHost) ([]byte, error
 		if err != nil {
 			return nil, err
 		}
-		return insertAt(lines, item, maxNodeLine(value.Content[len(value.Content)-1]))
+		return insertAt(lines, item, maxNodeLine(value.Content[len(value.Content)-1]), "its unconfined-hosts: list")
 
 	default: // `unconfined-hosts:` with nothing under it — a null value, not a list yet
 		item, err := renderHostEntry(entry, listIndent)
 		if err != nil {
 			return nil, err
 		}
-		return insertAt(lines, item, keyLine)
+		return insertAt(lines, item, keyLine, "its unconfined-hosts: key")
 	}
 }
 
@@ -212,7 +215,7 @@ func configDocument(data []byte) (*yaml.Node, error) {
 	var second yaml.Node
 	switch err := decoder.Decode(&second); {
 	case err == nil:
-		return nil, errors.New("it holds more than one YAML document, and apogee reads only the first; add the entry by hand")
+		return nil, errors.New("it holds more than one YAML document, and apogee reads only the first; edit the file by hand")
 	case !errors.Is(err, io.EOF):
 		return nil, err
 	}
@@ -230,12 +233,26 @@ func unconfinedHostsNode(doc *yaml.Node) (*yaml.Node, int) {
 	if root.Kind != yaml.MappingNode {
 		return nil, 0
 	}
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		if root.Content[i].Value == unconfinedHostsKey {
-			return root.Content[i+1], root.Content[i].Line
+	key, value := mappingEntry(root, unconfinedHostsKey)
+	if key == nil {
+		return nil, 0
+	}
+	return value, key.Line
+}
+
+// mappingEntry finds one key of a block mapping and returns its key and value nodes, or two nils
+// when the mapping does not have it. The first match wins, which is also the only match a config
+// apogee can read has: a duplicate key fails the parse both writers do before they splice.
+func mappingEntry(mapping *yaml.Node, key string) (*yaml.Node, *yaml.Node) {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i], mapping.Content[i+1]
 		}
 	}
-	return nil, 0
+	return nil, nil
 }
 
 // maxNodeLine is the last line the node's subtree reaches — for a list item whose fields each sit
@@ -287,10 +304,11 @@ func appendBlock(lines, block []string) []string {
 
 // insertAt splices insert into lines after the 1-based line number at, which must name a line the
 // file actually has — a position outside it means the node tree and the text disagree, which is a
-// refusal, not something to clamp into place.
-func insertAt(lines, insert []string, at int) ([]byte, error) {
+// refusal, not something to clamp into place. subject names what pointed at that line, so the
+// refusal says which part of the file was mis-read.
+func insertAt(lines, insert []string, at int, subject string) ([]byte, error) {
 	if at < 1 || at > len(lines) {
-		return nil, fmt.Errorf("its unconfined-hosts: list ends at line %d, which is outside the file", at)
+		return nil, fmt.Errorf("%s points at line %d, which is outside the file", subject, at)
 	}
 	out := make([]string, 0, len(lines)+len(insert))
 	out = append(out, lines[:at]...)
@@ -328,11 +346,68 @@ func hostsAppended(before, after []unconfinedHost, entry unconfinedHost) bool {
 	return after[len(after)-1] == entry
 }
 
-// sameApartFromHosts reports whether two parsed configs agree on every setting but the
-// acknowledgement list — the guarantee that a textual splice touched nothing else.
-func sameApartFromHosts(before, after fileConfig) bool {
-	before.UnconfinedHosts, after.UnconfinedHosts = nil, nil
-	return reflect.DeepEqual(before, after)
+// sameApartFrom reports whether two parsed configs agree on every setting but the one at the given
+// dotted registry path — the guarantee that a textual splice touched nothing else. The path is
+// blanked in both copies and what is left is compared whole, so a key the line arithmetic clipped,
+// reordered or re-typed shows up as a difference even though the writer never meant to touch it.
+//
+// A path the schema does not have reports false: the comparison it was asked for cannot be made,
+// and a verification step that cannot verify must refuse.
+func sameApartFrom(before, after fileConfig, path string) bool {
+	b, a := before, after
+	if !zeroConfigPath(reflect.ValueOf(&b).Elem(), path) || !zeroConfigPath(reflect.ValueOf(&a).Elem(), path) {
+		return false
+	}
+	return reflect.DeepEqual(b, a)
+}
+
+// zeroConfigPath blanks the field at a dotted yaml path — `ui.spinner`, `endpoint` — in the struct
+// v addresses, and reports whether the schema has that path at all.
+//
+// A block reached through a pointer is COPIED before its leaf is blanked, so the caller's own
+// parsed config is never mutated through the shared pointer, and a block left holding nothing but
+// zero fields is set back to nil. That last step is what makes the comparison honest across an
+// insert: a `ui:` block the writer created for this one key must compare equal to the absent block
+// it replaced, while a block that still holds another setting stays non-nil and any difference in
+// it is still caught.
+func zeroConfigPath(v reflect.Value, path string) bool {
+	head, rest, nested := strings.Cut(path, ".")
+	field, ok := fieldByYAMLTag(v, head)
+	if !ok {
+		return false
+	}
+	if !nested {
+		field.Set(reflect.Zero(field.Type()))
+		return true
+	}
+	if field.Kind() != reflect.Pointer || field.Type().Elem().Kind() != reflect.Struct {
+		return false
+	}
+	if field.IsNil() { // nothing to blank, but the rest of the path must still exist in the schema
+		return zeroConfigPath(reflect.New(field.Type().Elem()).Elem(), rest)
+	}
+	block := reflect.New(field.Type().Elem())
+	block.Elem().Set(field.Elem())
+	field.Set(block)
+	if !zeroConfigPath(block.Elem(), rest) {
+		return false
+	}
+	if block.Elem().IsZero() {
+		field.Set(reflect.Zero(field.Type()))
+	}
+	return true
+}
+
+// fieldByYAMLTag finds the struct field a yaml key names — the same tags the decoder reads, so the
+// schema stays the single description of what a config file may hold.
+func fieldByYAMLTag(v reflect.Value, tag string) (reflect.Value, bool) {
+	typ := v.Type()
+	for i := range typ.NumField() {
+		if name, _, _ := strings.Cut(typ.Field(i).Tag.Get("yaml"), ","); name == tag {
+			return v.Field(i), true
+		}
+	}
+	return reflect.Value{}, false
 }
 
 // writeConfigAtomically replaces path's contents through a temp file in the same directory and a
@@ -365,4 +440,568 @@ func writeConfigAtomically(path string, data []byte) error {
 		return fmt.Errorf("apogee: replace %q: %w", path, err)
 	}
 	return nil
+}
+
+// ----------------------------------------------------------------------------
+// The scalar setting writer (the /settings screen's half)
+// ----------------------------------------------------------------------------
+//
+// The settings surface persists one key per deliberate edit (ADR 0035) into the same file the
+// acknowledgement writer above edits, under the same contract and for the same reason: the user
+// owns this file, hand-edits it and reads it back months later, so an edit made on their behalf
+// must leave every comment, key order and formatting choice exactly as found. The machinery
+// generalises almost whole — parse for positions, splice text, re-parse and compare before
+// writing anything — and what is new is the ADDRESSING: a scalar edit names its target by
+// registry path (`ui.spinner`), so the registry's row decides what may be written, in what
+// shape, and the file's own text decides which line it lands on.
+//
+// Placement follows ADR 0035's insert-below-example call. The seeded template documents every
+// key as a commented example, so a key the user has never set lands directly under the
+// paragraph explaining it, where they will find it next time they open the file — not at the
+// bottom, where it reads like a footnote to someone else's document. Append-at-end is the
+// fallback for a file whose example is gone.
+//
+// Reset is the same splice in reverse: the active line is REMOVED rather than set to a default
+// literal, so the key goes back to being described by the binary's default (and to being
+// documented by its commented example) instead of being pinned to today's spelling of it.
+
+// scalarPathDepth is how deep a scalar path may reach: a top-level key, or one key inside one
+// block (`ui.spinner`). Every registry row is within it, and a deeper path is refused rather
+// than guessed at — the two-line block this writer creates for an absent parent cannot express
+// a third level, and inventing one silently is how a config write corrupts a file.
+const scalarPathDepth = 2
+
+// saveConfigSetting writes value as the config file's setting for the registry path key, and
+// reports nothing when the file already says exactly that (a re-set is a confirmation, not a
+// rewrite). An absent config is seeded from the embedded template first, so an edit never leaves
+// a bare fragment where a documented file belongs, and the write is atomic and mode-preserving —
+// the acknowledgement writer's contract above, unchanged.
+func saveConfigSetting(path, key, value string) error {
+	k, err := writableKey(key)
+	if err != nil {
+		return err
+	}
+	data, err := readConfigForWrite(path)
+	if err != nil {
+		return err
+	}
+	updated, err := setScalarSetting(data, k, value)
+	if err != nil {
+		return fmt.Errorf("apogee: update config %q: %w", path, err)
+	}
+	if updated == nil {
+		return nil
+	}
+	return writeConfigAtomically(path, updated)
+}
+
+// resetConfigSetting removes the config file's active line for the registry path key, so the key
+// resolves from its default again. A key the file does not set is already at its default: that is
+// a no-op, not an error, and nothing is written.
+func resetConfigSetting(path, key string) error {
+	k, err := writableKey(key)
+	if err != nil {
+		return err
+	}
+	data, err := readConfigForWrite(path)
+	if err != nil {
+		return err
+	}
+	updated, err := deleteScalarSetting(data, k)
+	if err != nil {
+		return fmt.Errorf("apogee: update config %q: %w", path, err)
+	}
+	if updated == nil {
+		return nil
+	}
+	return writeConfigAtomically(path, updated)
+}
+
+// writableKey resolves a registry path to the row that describes it, and refuses a key no surface
+// may write. Editability is the registry's call, single-homed there: this writer asks rather than
+// keeping a second list of what is safe to touch.
+func writableKey(key string) (configKey, error) {
+	k, ok := lookupKey(key)
+	if !ok {
+		return configKey{}, fmt.Errorf("apogee: %q is not a setting apogee knows", key)
+	}
+	switch {
+	case k.GlobalOnly && !k.Editable:
+		return configKey{}, fmt.Errorf(
+			"apogee: %s is not written from the settings surface: it is the confinement acknowledgement, "+
+				"which /confine makes deliberately", k.Path)
+	case !k.Editable:
+		return configKey{}, fmt.Errorf("apogee: %s is not a simple value; edit it in config.yaml", k.Path)
+	case len(strings.Split(k.Path, ".")) > scalarPathDepth:
+		return configKey{}, fmt.Errorf("apogee: %s is nested too deeply to write in place; edit it in config.yaml", k.Path)
+	}
+	return k, nil
+}
+
+// readConfigForWrite seeds the config from the embedded template if it is not there yet and reads
+// it back — the state every splice below starts from.
+func readConfigForWrite(path string) ([]byte, error) {
+	if path == "" {
+		return nil, errors.New("apogee: cannot write a setting: no config file path is known")
+	}
+	if _, err := seedConfig(path, defaultConfigYAML); err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("apogee: read config %q: %w", path, err)
+	}
+	return data, nil
+}
+
+// setScalarSetting returns the config bytes with key set to value, or nil bytes when the edit would
+// not change one — a re-set of what the file already says is a confirmation, not a rewrite. The
+// splice is verified before it is returned: the result must parse, must resolve the key to the
+// value asked for, and must agree with the original on every OTHER setting — so a file shape the
+// line arithmetic mis-reads surfaces as an error rather than as a quietly mangled config.
+//
+// The splice runs before the file is parsed into fileConfig, so a config apogee could not read at
+// all is refused by the shape checks — which can say WHICH part of the file they could not
+// read — rather than by the decoder's own type error.
+func setScalarSetting(data []byte, k configKey, value string) ([]byte, error) {
+	text, want, err := renderSettingValue(k, value)
+	if err != nil {
+		return nil, err
+	}
+	updated, err := spliceScalarSet(data, k, text)
+	if err != nil {
+		return nil, err
+	}
+	if bytes.Equal(updated, data) {
+		return nil, nil
+	}
+	return verifiedSplice(data, updated, k, want, true)
+}
+
+// deleteScalarSetting returns the config bytes with key's active line removed, or nil bytes when
+// the file does not set the key at all. It is verified exactly as a set is, with the target's
+// absence standing in for its value.
+func deleteScalarSetting(data []byte, k configKey) ([]byte, error) {
+	updated, err := spliceScalarDelete(data, k)
+	if err != nil || updated == nil {
+		return nil, err
+	}
+	return verifiedSplice(data, updated, k, "", false)
+}
+
+// renderSettingValue turns a value typed at a surface into the text the file will carry and the
+// value a reader will parse back out of it, refusing anything the key's kind does not hold.
+//
+// The text comes from the YAML marshaller, which owns the quoting — so a value that would change
+// meaning as a bare scalar (`off`, `true`, `123`, the empty string) comes back quoted and one that
+// is unambiguous stays bare, which is how the template writes them too. Surrounding whitespace is
+// trimmed: a plain scalar cannot carry it, so keeping it would only make the round-trip check
+// below refuse an edit the user meant.
+func renderSettingValue(k configKey, value string) (string, string, error) {
+	v := strings.TrimSpace(value)
+	switch k.Kind {
+	case kindBool:
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return "", "", fmt.Errorf("%s is true or false, not %q", k.Path, value)
+		}
+		text, err := renderScalar(b)
+		return text, strconv.FormatBool(b), err
+	case kindInt:
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return "", "", fmt.Errorf("%s is a whole number, not %q", k.Path, value)
+		}
+		text, err := renderScalar(n)
+		return text, strconv.Itoa(n), err
+	case kindEnum:
+		if !slices.Contains(k.EnumValues, v) {
+			return "", "", fmt.Errorf("%s is one of %s, not %q", k.Path, strings.Join(k.EnumValues, ", "), value)
+		}
+		text, err := renderScalar(v)
+		return text, v, err
+	case kindString:
+		text, err := renderScalar(v)
+		return text, v, err
+	}
+	return "", "", fmt.Errorf("%s is not a simple value; edit it in config.yaml", k.Path)
+}
+
+// renderScalar renders one value as the YAML text for it, quoted by the marshaller where a bare
+// scalar would mean something else. A value that needs more than one line is refused: a scalar
+// setting occupies exactly the line this writer splices.
+func renderScalar(v any) (string, error) {
+	out, err := yaml.Marshal(v)
+	if err != nil {
+		return "", fmt.Errorf("render the value: %w", err)
+	}
+	text := strings.TrimRight(string(out), "\n")
+	if strings.Contains(text, "\n") {
+		return "", errors.New("the value does not fit on one line")
+	}
+	return text, nil
+}
+
+// scalarTarget is where a key stands in the parsed document: the nodes of its active `key: value`
+// (nil when the file does not set it) and, for a nested key, its parent block.
+type scalarTarget struct {
+	key        string     // the leaf key as the file spells it
+	parent     string     // the block the key sits in, empty for a top-level key
+	keyNode    *yaml.Node // the leaf key, nil when the key has no active line
+	valueNode  *yaml.Node // its value, nil with keyNode
+	parentKey  *yaml.Node // the block's key, nil when the block is absent
+	parentBody *yaml.Node // the block's value, nil when the block is absent
+	parentNull bool       // the block's key is there with nothing under it yet
+}
+
+// isSet reports whether the file carries an active line for the key — the difference between a
+// replace and an insert, and between a reset and a no-op.
+func (t scalarTarget) isSet() bool { return t.keyNode != nil }
+
+// childIndent is the column the block's children are indented to, so an inserted child joins the
+// block the way the ones already there are written.
+func (t scalarTarget) childIndent() int {
+	if t.parentBody != nil && !t.parentNull {
+		return t.parentBody.Column - 1
+	}
+	return listIndent
+}
+
+// scalarTargetIn locates the key in the parsed document. Shapes it refuses rather than splices:
+// a top level that is not a mapping of settings, a flow-style mapping (no line to edit — the
+// flow-style list refusal above, one level down), and a block key holding something other than
+// a block. Every one of them means the text and the node tree would disagree about where the
+// key's line is.
+func scalarTargetIn(doc *yaml.Node, k configKey) (scalarTarget, error) {
+	head, rest, nested := strings.Cut(k.Path, ".")
+	t := scalarTarget{key: head}
+	if nested {
+		t.parent, t.key = head, rest
+	}
+	root, err := rootMapping(doc)
+	if root == nil || err != nil {
+		return t, err
+	}
+	scope := root
+	if t.parent != "" {
+		key, body := mappingEntry(root, t.parent)
+		if key == nil {
+			return t, nil // the block is absent: the insert creates it
+		}
+		switch {
+		case body.Style&yaml.FlowStyle != 0:
+			return t, fmt.Errorf("its %s: block is written in flow style ({...}); edit the file by hand", t.parent)
+		case isNullNode(body):
+			t.parentKey, t.parentBody, t.parentNull = key, body, true
+			return t, nil // `ui:` with nothing under it yet: no children to find
+		case body.Kind != yaml.MappingNode:
+			return t, fmt.Errorf("its %s: is not a block of settings; edit the file by hand", t.parent)
+		}
+		t.parentKey, t.parentBody, scope = key, body, body
+	}
+	t.keyNode, t.valueNode = mappingEntry(scope, t.key)
+	return t, nil
+}
+
+// rootMapping returns the document's top-level mapping, or nil for a document that has none —
+// an empty file, or one that is nothing but comments, which is the shape of a config whose every
+// setting the user has commented out. A top level that is a list or a scalar, or a mapping
+// written in flow style, is refused: neither has the block structure a setting's line lives in.
+func rootMapping(doc *yaml.Node) (*yaml.Node, error) {
+	if doc == nil || len(doc.Content) == 0 {
+		return nil, nil
+	}
+	root := doc.Content[0]
+	switch {
+	case root.Kind != yaml.MappingNode:
+		return nil, errors.New("its top level is not a mapping of settings; edit the file by hand")
+	case root.Style&yaml.FlowStyle != 0:
+		return nil, errors.New("its top level is written in flow style ({...}); edit the file by hand")
+	}
+	return root, nil
+}
+
+// isNullNode reports whether a node is the empty value a bare `key:` parses to — a value there is
+// no text of, so it can be written over but not read from.
+func isNullNode(n *yaml.Node) bool {
+	return n != nil && n.Kind == yaml.ScalarNode && n.Tag == "!!null"
+}
+
+// spliceScalarSet rewrites the key's active line, or inserts one where the key has none.
+func spliceScalarSet(data []byte, k configKey, text string) ([]byte, error) {
+	doc, err := configDocument(data)
+	if err != nil {
+		return nil, err
+	}
+	lines := splitConfigLines(data)
+	t, err := scalarTargetIn(doc, k)
+	if err != nil {
+		return nil, err
+	}
+	if t.isSet() {
+		head, gap, tail, err := scalarLineParts(lines, t)
+		if err != nil {
+			return nil, err
+		}
+		out := slices.Clone(lines)
+		out[t.keyNode.Line-1] = head + gap + text + tail
+		return joinConfigLines(out), nil
+	}
+	block, at, err := scalarInsertion(lines, t, text)
+	if err != nil {
+		return nil, err
+	}
+	if at == 0 {
+		return joinConfigLines(appendBlock(lines, block)), nil
+	}
+	return insertAt(lines, block, at, fmt.Sprintf("the place for %s:", t.key))
+}
+
+// spliceScalarDelete removes the key's active line, and the block line above it when that line was
+// the block's last active child — a block key left with nothing under it parses as a null value
+// rather than as an absent block, which is a different config from the one the reset asked for.
+// A key the file does not set returns nil bytes: there is nothing to remove.
+func spliceScalarDelete(data []byte, k configKey) ([]byte, error) {
+	doc, err := configDocument(data)
+	if err != nil {
+		return nil, err
+	}
+	lines := splitConfigLines(data)
+	t, err := scalarTargetIn(doc, k)
+	if err != nil {
+		return nil, err
+	}
+	if !t.isSet() {
+		return nil, nil
+	}
+	if _, _, _, err := scalarLineParts(lines, t); err != nil {
+		return nil, err
+	}
+	drop := []int{t.keyNode.Line}
+	if t.parentKey != nil && len(t.parentBody.Content) == 2 {
+		drop = append(drop, t.parentKey.Line)
+	}
+	return deleteLines(lines, drop...)
+}
+
+// scalarLineParts splits the target's active line into the text through its colon, the gap before
+// the value, and any trailing comment — the pieces a replacement rebuilds the line from, keeping
+// the user's own indentation, alignment and end-of-line note. Splitting it is also the check that
+// the line IS a single plain `key: value`, which is what makes removing it safe: a value spanning
+// lines, a block scalar, or a key the text spells differently from the node tree is refused, since
+// rewriting one line of it would leave the rest behind.
+func scalarLineParts(lines []string, t scalarTarget) (head, gap, tail string, err error) {
+	line := t.keyNode.Line
+	if line < 1 || line > len(lines) {
+		return "", "", "", fmt.Errorf("its %s: sits on line %d, which is outside the file", t.key, line)
+	}
+	raw := lines[line-1]
+	indent := t.keyNode.Column - 1
+	if indent < 0 || indent > len(raw) || !strings.HasPrefix(raw[indent:], t.key+":") {
+		return "", "", "", fmt.Errorf("its %s: line reads unexpectedly at line %d; edit the file by hand", t.key, line)
+	}
+	head, gap = raw[:indent+len(t.key)+1], " "
+	if !isNullNode(t.valueNode) {
+		switch {
+		case t.valueNode.Kind != yaml.ScalarNode:
+			return "", "", "", fmt.Errorf("its %s: holds a list or a block, not a single value; edit the file by hand", t.key)
+		case t.valueNode.Line != line:
+			return "", "", "", fmt.Errorf("its %s: value does not sit on the same line as its key; edit the file by hand", t.key)
+		case t.valueNode.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0:
+			return "", "", "", fmt.Errorf("its %s: value is written as a multi-line block; edit the file by hand", t.key)
+		}
+		if start := t.valueNode.Column - 1; start > len(head) && start <= len(raw) && strings.TrimSpace(raw[len(head):start]) == "" {
+			gap = raw[len(head):start]
+		}
+	}
+	// The end-of-line note belongs to the value, except on a bare `key:` — with no value text to
+	// hang off, the parser attaches it to the key instead. Either way it is the user's note about
+	// this setting, and it stays on the line.
+	comment := t.valueNode.LineComment
+	if comment == "" {
+		comment = t.keyNode.LineComment
+	}
+	if comment != "" {
+		if at := strings.LastIndex(raw, comment); at > len(head) {
+			for at > 0 && (raw[at-1] == ' ' || raw[at-1] == '\t') {
+				at--
+			}
+			tail = raw[at:]
+		}
+	}
+	return head, gap, tail, nil
+}
+
+// scalarInsertion is the lines to insert for a key the file does not set, and the 1-based line to
+// insert them after — 0 for "append at the end", the fallback when the file documents the key
+// nowhere. The four cases, in the order they are common:
+//
+//   - a top-level key: its own line, directly below its commented example (ADR 0035);
+//   - a key whose block is absent: the block line and the key under it, below the commented
+//     example block that documents them — below the WHOLE block, so the created setting sits under
+//     its documentation rather than wedged into the middle of it;
+//   - a key whose block is there and populated: joined to that block, after its last line and at
+//     the indentation its siblings use. A commented example inside the block is NOT a candidate
+//     here: the key has to land inside the mapping that is already open, and the example is only
+//     ever above or below it;
+//   - a key whose block key is there with nothing under it: the first child of that block.
+func scalarInsertion(lines []string, t scalarTarget, text string) ([]string, int, error) {
+	setting := t.key + ": " + text
+	switch {
+	case t.parent == "":
+		at, err := commentedExampleLine(lines, t.key)
+		return []string{setting}, at, err
+	case t.parentBody == nil:
+		at, err := commentedExampleBlockEnd(lines, t.parent)
+		return []string{t.parent + ":", indentLine(listIndent, setting)}, at, err
+	case t.parentNull:
+		return []string{indentLine(t.childIndent(), setting)}, t.parentKey.Line, nil
+	default:
+		return []string{indentLine(t.childIndent(), setting)}, maxNodeLine(t.parentBody), nil
+	}
+}
+
+// indentLine pads a rendered setting to the column it belongs in.
+func indentLine(indent int, text string) string {
+	return strings.Repeat(" ", indent) + text
+}
+
+// commentedExampleLine finds the line of the key's commented example — the `# key: value` line the
+// seeded template documents every key with — and reports 0 when the file has none, so the caller
+// appends at the end instead.
+//
+// A file documenting one key in two places is refused rather than guessed at: "below the example"
+// then names two places, and putting an active setting under a paragraph that describes something
+// else is the kind of quiet damage this writer exists not to do.
+func commentedExampleLine(lines []string, key string) (int, error) {
+	at := 0
+	for i, line := range lines {
+		indent, name, ok := commentedKey(line)
+		if !ok || indent != 0 || name != key {
+			continue
+		}
+		if at != 0 {
+			return 0, fmt.Errorf(
+				"it comments %s: out in two places (lines %d and %d), so there is no one place below its "+
+					"example to put it; add the setting by hand", key, at, i+1)
+		}
+		at = i + 1
+	}
+	return at, nil
+}
+
+// commentedExampleBlockEnd finds the last line of the commented example block that documents a
+// nested key's parent — its `# parent:` line plus the run of comment lines under it — and reports 0
+// when the file documents no such block.
+func commentedExampleBlockEnd(lines []string, parent string) (int, error) {
+	end, err := commentedExampleLine(lines, parent)
+	if end == 0 || err != nil {
+		return 0, err
+	}
+	for end < len(lines) && isCommentLine(lines[end]) {
+		end++
+	}
+	return end, nil
+}
+
+// commentedKey reads a commented-out setting line: the `#`, at most one space of separation (the
+// template's own style), then the indentation the key would have if the line were active, and the
+// key itself. A prose comment is not one of these — its first colon comes after several words, and
+// a key never contains a space.
+//
+// The `#` must start the line, as every example in the template does: a comment that is itself
+// indented sits inside somebody's block, and an active setting spliced in below it would join that
+// block instead of the top level the key belongs to.
+func commentedKey(line string) (int, string, bool) {
+	if !strings.HasPrefix(line, "#") {
+		return 0, "", false
+	}
+	text := strings.TrimPrefix(line[1:], " ")
+	indent := len(text) - len(strings.TrimLeft(text, " "))
+	name, _, ok := strings.Cut(text[indent:], ":")
+	if !ok || name == "" || strings.ContainsAny(name, " \t#") {
+		return 0, "", false
+	}
+	return indent, name, true
+}
+
+// isCommentLine reports whether a line is a comment — what a commented example block is made of,
+// and what a blank line ends.
+func isCommentLine(line string) bool {
+	return strings.HasPrefix(strings.TrimLeft(line, " \t"), "#")
+}
+
+// deleteLines removes the named 1-based lines. A line number outside the file means the node tree
+// and the text disagree, which is a refusal rather than something to skip over.
+func deleteLines(lines []string, at ...int) ([]byte, error) {
+	drop := make(map[int]bool, len(at))
+	for _, n := range at {
+		if n < 1 || n > len(lines) {
+			return nil, fmt.Errorf("it names line %d, which is outside the file", n)
+		}
+		drop[n] = true
+	}
+	out := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if !drop[i+1] {
+			out = append(out, line)
+		}
+	}
+	return joinConfigLines(out), nil
+}
+
+// verifiedSplice is the gate every scalar splice passes before it reaches the disk: the result must
+// parse, must resolve the target path to exactly what the edit intended (or to nothing, for a
+// reset), and must agree with the original config on every other setting. It returns the verified
+// bytes, so a caller cannot forget to check them.
+func verifiedSplice(data, updated []byte, k configKey, want string, set bool) ([]byte, error) {
+	var before fileConfig
+	if err := yaml.Unmarshal(data, &before); err != nil {
+		return nil, err
+	}
+	var after fileConfig
+	if err := yaml.Unmarshal(updated, &after); err != nil {
+		return nil, fmt.Errorf("the edited file would not parse: %w", err)
+	}
+	got, isSet, err := scalarAtPath(updated, k.Path)
+	if err != nil {
+		return nil, fmt.Errorf("the edited file would not parse: %w", err)
+	}
+	switch {
+	case set && (!isSet || got != want):
+		return nil, fmt.Errorf("the edit did not put %s where a reader would look for it; edit the file by hand", k.Path)
+	case !set && isSet:
+		return nil, fmt.Errorf("the edit left %s set; edit the file by hand", k.Path)
+	case !sameApartFrom(before, after, k.Path):
+		return nil, fmt.Errorf("the edit would have changed more than %s; edit the file by hand", k.Path)
+	}
+	return updated, nil
+}
+
+// scalarAtPath reads the value a config file actually holds at a dotted path, the way any YAML
+// reader sees it — the round-trip half of the verification: a splice must put the value where the
+// PARSER looks for it, not merely somewhere that reads correctly in the text. A path that is
+// absent, or that runs through a value which is not a block, reports not-set.
+func scalarAtPath(data []byte, path string) (string, bool, error) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return "", false, err
+	}
+	var node any = doc
+	for _, segment := range strings.Split(path, ".") {
+		block, ok := node.(map[string]any)
+		if !ok {
+			return "", false, nil
+		}
+		if node, ok = block[segment]; !ok {
+			return "", false, nil
+		}
+	}
+	switch node.(type) {
+	case nil: // a bare `key:` — set, with nothing in it
+		return "", true, nil
+	case map[string]any, []any:
+		return "", false, nil
+	}
+	return fmt.Sprint(node), true, nil
 }

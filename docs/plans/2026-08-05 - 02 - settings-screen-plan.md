@@ -158,7 +158,19 @@ and flag-beats-env resolution driven through the registry row (fails if a row's
 
 **Commit:** `refactor(config): resolution reads source metadata from the key registry`
 
-## 4. Scalar splice writer: insert-below-example, replace, delete
+## 4. Scalar splice writer: insert-below-example, replace, delete — ✅ DONE (2026-08-05)
+
+**NOTES (2026-08-05):** two deviations. (1) The golden files pin the **user-edited** variant only
+(`cmd/apogee/testdata/settings-edited.yaml` × 8 ops); the **seeded template** cases are pinned
+structurally instead — `TestSpliceScalarSettingInsertsBelowTheTemplateExample` asserts the result
+differs from the 450-line template by exactly the inserted line(s) and that they landed under the
+key's commented example, which is a stronger claim than byte-equality with seven 450-line goldens
+no reviewer could read. (2) For a **nested** key whose block is absent, the created two-line block
+lands after the END of the parent's commented example block rather than immediately below the leaf's
+own commented line — the item's "within/below the parent's example block" latitude — so the new
+`ui:` mapping is not wedged into the middle of its own documentation. A nested key whose block IS
+already open joins that mapping (its commented example is not a candidate anchor: the child has to
+land inside the block that is open).
 
 **What:** Generalize the machinery in `cmd/apogee/configwrite.go` (today hard-coded to
 `unconfined-hosts`, `:38`, `:225`) into scalar operations keyed by registry path, for
