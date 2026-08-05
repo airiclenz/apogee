@@ -103,7 +103,17 @@ renderer keeps needing no knowledge of the `context-window:` pin (ADR 0024 decis
 members nil-degrade: no `SwitchServer` and no choices is one situation, answered with one line.
 
 **5. `servers:` is a file-only config LIST, the startup endpoint is synthesized as a row, and the
-switch is SESSION-scoped.** Each entry carries a required `name` and `endpoint` plus optional
+switch is SESSION-scoped.**
+*(Amended 2026-08-05 by [ADR 0036](0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-the-startup-choice.md):
+the list is now the **single** definition of what servers exist — the top-level
+`endpoint:`/`api-key:`/`host-alias:`/`model:` quadruple this decision sits beside is retired, so
+there is no startup endpoint left to synthesize except an ephemeral `--endpoint`/`APOGEE_ENDPOINT`
+override, and only that case still prepends a row. The **session-scoped half is superseded**: a
+switch to a configured entry now records `server: <name>` in `config.yaml`, so the next launch
+starts where the last session ended, and the "`server:` startup key" this ADR rejected below is
+ratified there. What stands unchanged: the entry shape, `name`'s three jobs, keys being per-server
+and file-only, and the invariant that the server the session started on is always offered.)*
+Each entry carries a required `name` and `endpoint` plus optional
 `api-key` and `model`. The `name` does three jobs with one field, mirroring `host-alias:`: it
 labels the picker row, it is the `/server` argument, and it becomes the footer's host alias once
 the session is on it. Keys are per-server and file-only, because `APOGEE_API_KEY` is a single value
@@ -181,6 +191,11 @@ where `rebindNote`'s silent-when-nothing-moved contract is about the observation
 - **A `--save` form for `/server`, and a `server:` startup key naming an entry** — rejected for
   now, not on principle. Session-scoped is the smaller, reversible claim and matches
   `/confine off`; both are additive later, and neither is needed to make the switch useful.
+  *(Amended 2026-08-05 by [ADR 0036](0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-the-startup-choice.md):
+  the `server:` key is ratified and a switch records into it automatically; the `--save` form stays
+  rejected — a human who picked a server has already stated the intent a flag would ask them to
+  repeat, and `/confine off`'s asymmetry is about loosening a safety fence, not about which machine
+  serves the session.)*
 - **Persist the switched endpoint in the session record** so `--resume` returns to it — rejected
   with the same reasoning: a session record describes a conversation, and which machine served it
   is not part of what is being resumed.

@@ -182,3 +182,28 @@ typing them, because a masked edit buffer is unusable.
   are condensed from it), so template comments and registry rows must be kept in step by whoever
   adds a key — the guard pins the *paths*, not the prose.
 - `ISSUES.md`'s settings-screen entry closes: the grilling it asked for is this record.
+
+## Amendment (2026-08-05) — the authorized write set gains the startup-choice recording and a one-time legacy migration
+
+[ADR 0036](0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-the-startup-choice.md)
+retires the top-level `endpoint:`/`api-key:`/`host-alias:`/`model:` quadruple in favour of the
+`servers:` list, and it adds two writers over **this record's splice machinery** (decision 2) that
+this record's write set did not cover. Both are named here so the set stays enumerable in one place:
+
+- **The `server:` startup-choice recording.** A `/server` switch to a *configured* entry
+  splice-writes `server: <name>`. It is the same fence as decision 2 — a keystroke in a surface the
+  user opened, aimed at a row they selected — and it carries the same obligation: the switch's fold
+  names what was recorded. Moves onto an unlisted endpoint write nothing, and a failed write warns
+  rather than blocking the switch.
+- **The one-time legacy migration** (ADR 0036 decision 9). This one is *not* a user act in the
+  moment, and it is the single exception in that class: a file carrying the retired keys is copied
+  to a timestamped `.bak` sibling, rewritten through this record's splice-verify-atomic path with
+  exactly the quadruple folded into an entry plus a pointer, and announced on screen — refusing to
+  write at all if the verify or a name collision leaves any doubt.
+
+The rejection of **boot-time auto-sync** above is untouched by it, and the distinction is the one
+that rejection rests on: auto-sync is apogee deciding to enrich a file that already works, on its
+own initiative, forever; the migration is the alternative to *discarding* an intent the user did
+express, on a file this version can no longer honour as written, once. `seedConfig`'s
+never-overwrite invariant and ADR 0023 §8 stand for every other case — ADR 0036 owns that exception
+explicitly, and nothing may join this set without amending one of these two records.

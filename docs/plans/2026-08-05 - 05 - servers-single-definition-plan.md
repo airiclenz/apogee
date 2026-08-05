@@ -97,7 +97,7 @@ Author-resolved, 2026-08-05 (convention/consequence of the calls above):
 
 Any authorized deviation from item text lands as a dated NOTES line under the item.
 
-## 1. ADR 0036 + amendments + CONTEXT.md
+## 1. ADR 0036 + amendments + CONTEXT.md — ✅ DONE (2026-08-05)
 
 **What:** Write
 `docs/adr/0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-the-startup-choice.md`

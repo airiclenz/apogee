@@ -152,6 +152,14 @@ endpoint honouring the OpenAI HTTP surface. Apogee reaches the Upstream directly
 its `provider/` package; there is no intervening proxy. A session is not married to one: the
 [Heartbeat](#probing-and-model-identity)'s Rebind half moves it to another configured server
 mid-session (`/server`), unbound until that server's first Beat says what it serves.
+The Upstreams apogee knows are exactly the entries of config's **`servers:` list — the single
+definition of what servers exist** (one entry = a `name`, an `endpoint`, an optional `api-key`, an
+optional `model` discovery hint). The `name` is also the **host alias** the footer shows, so no
+standalone `host-alias:` key exists. A session starts on the entry the `server:` key names — the
+last one a `/server` switch chose, recorded automatically — and asks with the picker when that key
+is unset or names an entry that is gone; a raw `--endpoint`/`APOGEE_ENDPOINT` override builds an
+unlisted, unpersisted entry for one run
+([ADR 0036](docs/adr/0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-the-startup-choice.md)).
 _Avoid_: "the model server", "the backend" (a `backend` detector package may exist, but
 it detects Upstreams — it is not the Upstream).
 
@@ -869,11 +877,19 @@ fresh provider client at the new endpoint and leaves the session with **no model
 per-server heartbeat Monitor is swapped whole behind the unchanged seam, and the new server's
 **first Beat completes the move** through that same Rebind — one code path with the cold start. A
 switch guesses nothing about the new server and destroys nothing about the session: the
-conversation, Turn counters, mode, approvals and confinement all stand. It is **session-scoped**
-(config.yaml is not rewritten; the next launch starts at `endpoint:` again), and the servers it can
-reach are the file-only `servers:` list plus the one the session started on. See
-[ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md) and
-[ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md).
+conversation, Turn counters, mode, approvals and confinement all stand. The servers it can reach
+are the `servers:` list (plus the unlisted one an `--endpoint` override started the session on),
+and a switch **onto a listed entry records the choice**: `server: <name>` is spliced into
+`config.yaml` through the [Settings surface](#safety-and-autonomy)'s writer, so the next launch
+starts where the last session ended, while a move onto an unlisted endpoint — a
+[Launch profile](#identity-and-shape) load, an override row — has no name and records nothing. With
+`server:` unset (first boot) or naming an entry that is gone, the session starts **pre-bound** —
+no engine constructed, `errMissingEndpoint` never risked — and the picker opens by itself to
+complete the startup; an empty list opens the Settings surface with its "edit `config.yaml` and
+restart" pointer instead. See
+[ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md),
+[ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md) and
+[ADR 0036](docs/adr/0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-the-startup-choice.md).
 _Avoid_: "health check" (it observes what is served, not merely that something answers), "poller"
 (says nothing about what is observed, and the chain re-arms from the landed beat, not off a clock),
 "probe" for this (the other noun, the other job), "reconnect" for a Rebind (the connection never
