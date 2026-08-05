@@ -4305,6 +4305,43 @@ const askRowGap = 1
 // answers need to seat one row, so the give-way ladder at the bottom of the range is untouched.
 const askQuestionFloor = 3
 
+// askCheckedMarker and askUncheckedMarker are the checkbox glyphs a MULTI-SELECT question draws in
+// front of every option — the mockup's own, pinned by the owner
+// (docs/design/user-questions-layout.md): ASCII boxes rather than ☑/☐, because the pane is painted
+// in whatever font the terminal is set to and a box-drawing checkbox is exactly the kind of glyph
+// that lands as a blank or a double-width tofu there. They are the same width as each other, so
+// ticking a row repaints three cells and moves nothing.
+const (
+	askCheckedMarker   = "[x]"
+	askUncheckedMarker = "[ ]"
+)
+
+// askChoiceRows composes the offering's popup rows. A single-select question hands over the plain
+// one-cell labels it always did (singleCellRows), so its pane is byte-identical to the one drawn
+// before multi-select existed. A multi-select question hands over TWO cells — the checkbox, then the
+// label — and lets the popup's own column machinery align them: the markers line up in a column of
+// their own down the pane, and a label too long for the pane wraps under the LABEL rather than under
+// the box beside it (popupRowHangingIndent), so one option still reads as one block of text.
+//
+// The checked set is read defensively rather than indexed: it is nil for a single-select question
+// and sized to the offering for a multi-select one (the askReqMsg fold), and a row it does not reach
+// is drawn unticked — the rendering states what the state says, and never panics over what it does
+// not.
+func askChoiceRows(labels []string, multi bool, checked []bool) []popupRow {
+	if !multi {
+		return singleCellRows(labels)
+	}
+	rows := make([]popupRow, len(labels))
+	for i, label := range labels {
+		marker := askUncheckedMarker
+		if i < len(checked) && checked[i] {
+			marker = askCheckedMarker
+		}
+		rows[i] = popupRow{marker, label}
+	}
+	return rows
+}
+
 // askPrompt renders the pending ask_user question as a bordered popup pane above the input box
 // (the shared popup module): the wrapped question body, then any offered choices as selectable
 // menu rows, and a one-line key hint (P3.11; D5/D6/D8). While the input box is empty and
@@ -4326,6 +4363,15 @@ const askQuestionFloor = 3
 // sides of the join, the marker column alone is what distinguishes the first answer from the last
 // line of the question, and an offering whose answers are a blank line apart would otherwise crowd
 // its last one against the border.
+//
+// A MULTI-SELECT question (domain.AskRequest.MultiSelect) draws one thing more: a checkbox in front
+// of every option, "[x]" where the row is ticked and "[ ]" where it is not (askChoiceRows), and a
+// hint that names ␣ among the live keys. The boxes are a COLUMN of the popup's own rather than three
+// characters glued onto the label — so they align down the pane whatever the labels do, and a
+// wrapped option hangs under its label instead of under its box — and the pointer, the dim rows and
+// every blank line around them are the menu style's, untouched: the two questions differ by the
+// column and the one key, which is exactly how much they differ to answer. A single-select question
+// composes the plain labels it always did and paints byte-identically.
 //
 // The screen budget is derived from the live layout so a long question or a long choice set never
 // pushes the input box off-screen: the question keeps its first askQuestionFloor lines ahead of
@@ -4357,6 +4403,12 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	if choicesShown {
 		selected = min(max(m.askSel, 0), len(req.Choices)-1) // clamp: routing keeps it in range, this is defensive
 		hint = "↑↓ select · ⏎ send · type for a custom answer · esc cancel"
+		if req.MultiSelect {
+			// The toggle is the one key this pane has that the single-select one has not, so it is
+			// named where every other live key is named; the rest of the legend is word for word the
+			// single-select hint, because the rest of the interaction is word for word the same.
+			hint = "↑↓ select · ␣ toggle · ⏎ send · type for a custom answer · esc cancel"
+		}
 	}
 
 	question := stripEscapes(req.Question)
@@ -4372,7 +4424,10 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	// OFFERING — in this budget, what that many options and their separators cost — because a cap read
 	// as eight LINES would scroll five one-line choices, the top of the schema's own 2-5 range, on a
 	// terminal with the room for all of them.
-	rows := singleCellRows(stripEscapesAll(req.Choices))
+	// The SAME rows are measured and painted — a multi-select question's marker column is part of
+	// what its options cost in lines, so the budget below is spent on the pane that is drawn rather
+	// than on a narrower one composed for the arithmetic.
+	rows := askChoiceRows(stripEscapesAll(req.Choices), req.MultiSelect, m.askChecked)
 	heights := popupWrappedRowHeights(m.th, rows, m.width)
 	askPad := popupRowPadLines(true, true)
 	wanted := popupRowBlockLines(heights, askRowGap, askPad)

@@ -145,9 +145,24 @@ path) clears `askChecked` and the borrowed-draft restore still runs.
 
 **Commit:** `feat(tui): space-toggled multi-select answers on the ask prompt`
 
-## 3. TUI rendering: checkbox marker column and the multi hint
+## 3. TUI rendering: checkbox marker column and the multi hint — ✅ DONE (2026-08-05)
 
 Depends on items 1 and 2.
+
+NOTES (2026-08-05): two records against the item's literal text.
+1. `internal/tui/popup.go` WAS touched — the item's "unless a cell capability is genuinely missing"
+clause. Nothing in the painter could hang a wrapped COLUMNED row under its last column: `popupRowBlocks`
+wrapped the already-composed line and indented every continuation by `popupRowIndent` alone, so a long
+label's tail landed under the checkbox. It now takes the cells rather than the composed lines and adds
+`popupLastColumn` / `popupRowHangingIndent` / `popupRowSplit` / `popupWrappedRowLines`; a single-cell row
+measures a hanging indent of zero and takes the identical `wrapText` path it always did (every existing
+popup test, goldens included, is untouched and green).
+2. The gap between the marker cell and the label is the column machinery's own two-space gutter
+(`popupGutter`), where the pinned mockup sketches one space. Narrowing it would mean a per-spec gutter
+override on the shared painter's column contract — a change to every columned pane — and the item's own
+instruction is to build the markers "through the existing popup column machinery", so the machinery's
+gutter stands. The pinned glyphs (`[x]`/`[ ]`), the pointer/dim menu styling and the pinned hint string
+are exactly as specified.
 
 **What:** In `internal/tui/model.go` (`askPrompt`, ~line 4313) with the shared painter
 `internal/tui/popup.go` untouched unless a cell capability is genuinely missing:

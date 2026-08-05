@@ -1442,9 +1442,17 @@ func askPaneLines(t *testing.T, width int, req domain.AskRequest) []string {
 	t.Helper()
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: width, Height: 40})
 	m = step(t, m, askReqMsg{Request: req, Reply: make(chan domain.AskAnswer, 1)})
+	return askModelPaneLines(t, m)
+}
+
+// askModelPaneLines is askPaneLines for a model already holding a question — the same stripped pane
+// lines, for a test that had to drive keys into the model first (a ␣ toggle repaints a marker, and
+// the repaint is the assertion).
+func askModelPaneLines(t *testing.T, m Model) []string {
+	t.Helper()
 	pane := m.askPrompt(m.pendingAsk.Request)
 	if pane == "" {
-		t.Fatalf("the ask pane rendered nothing at %d columns", width)
+		t.Fatalf("the ask pane rendered nothing at %d columns", m.width)
 	}
 	return strings.Split(ansiPattern.ReplaceAllString(pane, ""), "\n")
 }
@@ -1945,6 +1953,210 @@ func TestModelAskMultiSelectCancelClearsTheChecks(t *testing.T) {
 	}
 	if got := m.input.Value(); got != draft {
 		t.Errorf("box = %q, want the borrowed draft %q back", got, draft)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Multi-select rendering — the checkbox column and the toggle hint
+// ----------------------------------------------------------------------------
+
+// askChoiceLines are the pane lines carrying an option — the ones led by the menu's pointer or its
+// dim dot — with the border and the box's own padding trimmed off but the content's indentation
+// kept, because where a wrapped label hangs is exactly what these assertions are about.
+func askChoiceLines(rows []string) []string {
+	var out []string
+	for _, row := range rows {
+		content := popupContent(row)
+		if strings.HasPrefix(content, glyphUser) || strings.HasPrefix(content, glyphMenuUnselected) {
+			out = append(out, content)
+		}
+	}
+	return out
+}
+
+// A multi-select question draws a checkbox in front of every option, in a column of its own: the
+// boxes start at one offset down the pane whichever row is pointed at, and the pointer/dot marker,
+// the labels and the spacing around them are the menu style's unchanged.
+func TestModelAskMultiSelectRendersACheckboxColumn(t *testing.T) {
+	rows := askPaneLines(t, 60, domain.AskRequest{
+		Question:    "which ones?",
+		Choices:     []string{"alpha", "beta", "gamma"},
+		MultiSelect: true,
+	})
+	got := strings.Join(rows, "\n")
+
+	choices := askChoiceLines(rows)
+	want := []string{
+		glyphUser + " " + askUncheckedMarker + "  alpha",
+		glyphMenuUnselected + " " + askUncheckedMarker + "  beta",
+		glyphMenuUnselected + " " + askUncheckedMarker + "  gamma",
+	}
+	if len(choices) != len(want) {
+		t.Fatalf("pane draws %d option lines, want %d:\n%s", len(choices), len(want), got)
+	}
+	for i, line := range choices {
+		if line != want[i] {
+			t.Errorf("option line %d = %q, want %q:\n%s", i, line, want[i], got)
+		}
+	}
+
+	// In DISPLAY cells, not bytes: ❯ is three bytes and · two, so a byte offset would report the
+	// pointed-at row a column off from the rows below it and call an aligned pane broken.
+	for i, line := range choices {
+		box := lipgloss.Width(line[:strings.Index(line, askUncheckedMarker)])
+		first := lipgloss.Width(choices[0][:strings.Index(choices[0], askUncheckedMarker)])
+		if box != first {
+			t.Errorf("row %d's checkbox starts at cell %d, want %d (the column the first row opened):\n%s", i, box, first, got)
+		}
+	}
+}
+
+// ␣ repaints the marker of the row it ticked and leaves every other cell of the pane where it was:
+// the checked set is state the rendering reads, not a second layout.
+func TestModelAskMultiSelectToggleRepaintsTheMarker(t *testing.T) {
+	m, _ := newMultiAskModel(t)
+	before := askModelPaneLines(t, m)
+
+	m = step(t, m, keySpace())
+	after := askModelPaneLines(t, m)
+
+	if len(before) != len(after) {
+		t.Fatalf("the pane changed height on a toggle (%d → %d lines):\n%s", len(before), len(after), strings.Join(after, "\n"))
+	}
+	changed := 0
+	for i := range before {
+		if before[i] != after[i] {
+			changed++
+			if !strings.Contains(after[i], askCheckedMarker+"  alpha") {
+				t.Errorf("line %d changed to %q, want the ticked highlighted row", i, after[i])
+			}
+		}
+	}
+	if changed != 1 {
+		t.Errorf("a toggle repainted %d lines, want exactly the ticked row's:\nbefore:\n%s\n\nafter:\n%s",
+			changed, strings.Join(before, "\n"), strings.Join(after, "\n"))
+	}
+}
+
+// The menu's own cues survive the extra column: the pointed-at row is lit in the accent and the rest
+// stay faint dots, exactly as they are on a single-select question. The checkbox says what is TICKED
+// and the accent says what ⏎ and ␣ act on — two different facts, and the second must not be lost to
+// the first.
+func TestModelAskMultiSelectKeepsTheMenuStyling(t *testing.T) {
+	m, _ := newMultiAskModel(t)
+	if !colorActive(m.th) {
+		t.Skip("no ANSI styling in this environment")
+	}
+	pane := m.askPrompt(m.pendingAsk.Request)
+
+	for _, line := range popupLines(pane) {
+		content := popupContent(line)
+		switch {
+		case strings.HasPrefix(content, glyphUser):
+			if sgr := styleSGR(m.th.popupAccent); !strings.Contains(line, sgr) {
+				t.Errorf("the pointed-at option carries no accent SGR %q: %q", sgr, content)
+			}
+		case strings.HasPrefix(content, glyphMenuUnselected):
+			if sgr := styleSGR(m.th.statusFaint); !strings.Contains(line, sgr) {
+				t.Errorf("an unpicked option is not faint (%q): %q", sgr, content)
+			}
+		}
+	}
+	if sgr := styleSGR(m.th.userBlock); strings.Contains(pane, sgr) {
+		t.Errorf("a checkbox row carries the highlight bar %q the menu style exists to avoid", sgr)
+	}
+}
+
+// A label too long for the pane hangs its continuation lines under the LABEL, not under the box: the
+// checkbox column stays a column, and one option still reads as one block of text. This is the
+// columned half of TestModelAskLongChoiceWrapsUnderItsMarker.
+func TestModelAskMultiSelectLongChoiceWrapsUnderItsLabel(t *testing.T) {
+	const long = "implement the config redesign first, commit it, then do the TUI part in a separate commit"
+	rows := askPaneLines(t, 50, domain.AskRequest{
+		Question:    "which ones?",
+		Choices:     []string{"just do it all in one shot", long},
+		MultiSelect: true,
+	})
+	got := strings.Join(rows, "\n")
+
+	head := paneRowIndex(t, rows, glyphMenuUnselected+" "+askUncheckedMarker+"  implement")
+	indent := popupRowIndent + lipgloss.Width(askUncheckedMarker+popupGutter)
+	wrapped := []string{strings.TrimSpace(strings.TrimPrefix(popupContent(rows[head]), glyphMenuUnselected+" "+askUncheckedMarker))}
+	for _, row := range rows[head+1:] {
+		content := popupContent(row)
+		if strings.TrimSpace(content) == "" || strings.HasPrefix(strings.TrimSpace(content), "↑↓") {
+			break
+		}
+		if !strings.HasPrefix(content, strings.Repeat(" ", indent)) || strings.HasPrefix(content, strings.Repeat(" ", indent+1)) {
+			t.Errorf("continuation line %q does not hang at %d cells, under the label's own column:\n%s", content, indent, got)
+		}
+		wrapped = append(wrapped, strings.TrimSpace(content))
+	}
+	if len(wrapped) < 2 {
+		t.Fatalf("the long option did not wrap at all:\n%s", got)
+	}
+	// The whole option, and nothing elided out of the middle of it.
+	if rejoined := strings.Join(wrapped, " "); rejoined != long {
+		t.Errorf("the wrapped option reads %q, want the whole of %q:\n%s", rejoined, long, got)
+	}
+}
+
+// The hint names ␣ among the live keys on a multi-select question and is the single-select legend
+// word for word otherwise; on a pane too narrow to seat it, it elides through the same truncation
+// every other pane line takes rather than wrapping the box.
+func TestModelAskMultiSelectHintNamesTheToggle(t *testing.T) {
+	const want = "↑↓ select · ␣ toggle · ⏎ send · type for a custom answer · esc cancel"
+	req := domain.AskRequest{
+		Question:    "which ones?",
+		Choices:     []string{"alpha", "beta"},
+		MultiSelect: true,
+	}
+
+	rows := askPaneLines(t, 100, req)
+	hint := popupContent(rows[len(rows)-2]) // the row above the bottom border
+	if hint != want {
+		t.Errorf("multi-select hint = %q, want the pinned %q", hint, want)
+	}
+
+	single := askPaneLines(t, 100, domain.AskRequest{Question: req.Question, Choices: req.Choices})
+	if got := popupContent(single[len(single)-2]); got != "↑↓ select · ⏎ send · type for a custom answer · esc cancel" {
+		t.Errorf("single-select hint = %q, want it unchanged by multi-select", got)
+	}
+
+	narrow := askPaneLines(t, narrowOverlayWindow, req)
+	short := popupContent(narrow[len(narrow)-2])
+	if !strings.HasSuffix(short, "…") {
+		t.Errorf("narrow hint = %q, want it elided rather than dropped or wrapped", short)
+	}
+	for i, line := range narrow {
+		if w := lipgloss.Width(line); w != narrowOverlayWindow {
+			t.Errorf("line %d is %d cells, want the pane's %d: %q", i, w, narrowOverlayWindow, line)
+		}
+	}
+}
+
+// The regression pin for every question that did NOT opt in: a single-select offering is composed of
+// the very rows it was composed of before multi-select existed (singleCellRows), so its pane is the
+// byte-identical one — no marker column, no checkbox anywhere in it.
+func TestModelAskSingleSelectRenderIsUnchanged(t *testing.T) {
+	labels := []string{"alpha", "beta", "gamma"}
+	if got, want := askChoiceRows(labels, false, []bool{true, true, true}), singleCellRows(labels); !reflect.DeepEqual(got, want) {
+		t.Errorf("single-select rows = %v, want the plain one-cell labels %v", got, want)
+	}
+
+	rows := askPaneLines(t, 60, domain.AskRequest{Question: "which one?", Choices: labels})
+	got := strings.Join(rows, "\n")
+	if strings.Contains(got, askUncheckedMarker) || strings.Contains(got, askCheckedMarker) {
+		t.Errorf("a single-select pane drew a checkbox:\n%s", got)
+	}
+	for i, line := range askChoiceLines(rows) {
+		want := glyphMenuUnselected + " " + labels[i]
+		if i == 0 {
+			want = glyphUser + " " + labels[i]
+		}
+		if line != want {
+			t.Errorf("option line %d = %q, want %q:\n%s", i, line, want, got)
+		}
 	}
 }
 

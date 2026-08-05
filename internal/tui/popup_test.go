@@ -1385,6 +1385,66 @@ func TestRenderPopupWrappedRowsHangUnderTheirMarker(t *testing.T) {
 	}
 }
 
+// A COLUMNED row wraps under its own LAST column: the marker cells before it keep their column all
+// the way down the pane, and the prose hangs under where the prose began rather than under the
+// checkbox beside it (popupRowHangingIndent). It is the same promise the single-cell case makes one
+// column further in — an option reads as one block of text — and it is what lets the multi-select ask
+// prompt put its boxes in a column instead of gluing them onto the labels.
+func TestRenderPopupWrappedColumnedRowsHangUnderTheirLastColumn(t *testing.T) {
+	t.Parallel()
+	th := newTheme()
+	const width = 48
+	const long = "Implement the config redesign first, commit it, then do the TUI part in a separate commit."
+	spec := popupSpec{
+		rows: []popupRow{
+			{"[x]", "Just do it all in one shot."},
+			{"[ ]", long},
+		},
+		menuRows: true,
+		wrapRows: true,
+		rowGap:   true,
+		selected: 0,
+		maxRows:  -1,
+	}
+	lines := popupLines(renderPopup(th, spec, width))
+	got := strip(strings.Join(lines, "\n"))
+
+	for i, ln := range lines {
+		if w := lipgloss.Width(ln); w != width {
+			t.Errorf("line %d is %d cells, want %d: %q", i, w, width, strip(ln))
+		}
+	}
+	if strings.Contains(got, "…") {
+		t.Errorf("a wrapping columned row still elided:\n%s", got)
+	}
+
+	hang := popupRowIndent + lipgloss.Width("[ ]"+popupGutter)
+	var wrapped []string
+	for _, ln := range lines[1 : len(lines)-1] { // content rows, borders excluded
+		content := popupContent(ln)
+		switch {
+		case content == "":
+			continue // a rowGap separator
+		case strings.HasPrefix(content, glyphUser), strings.HasPrefix(content, glyphMenuUnselected):
+			// A row's FIRST line: the marker, then the checkbox at the one column.
+			if box := lipgloss.Width(content[:strings.Index(content, "[")]); box != popupRowIndent {
+				t.Errorf("checkbox column starts at cell %d, want %d: %q", box, popupRowIndent, content)
+			}
+			continue
+		}
+		if !strings.HasPrefix(content, strings.Repeat(" ", hang)) || strings.HasPrefix(content, strings.Repeat(" ", hang+1)) {
+			t.Errorf("continuation line %q does not hang at %d cells, under the label's own column:\n%s", content, hang, got)
+		}
+		wrapped = append(wrapped, strings.TrimSpace(content))
+	}
+	if len(wrapped) == 0 {
+		t.Fatalf("the long option did not wrap at all:\n%s", got)
+	}
+	if !strings.HasSuffix(long, strings.Join(wrapped, " ")) {
+		t.Errorf("the wrapped tail reads %q, want the end of %q:\n%s", strings.Join(wrapped, " "), long, got)
+	}
+}
+
 // rowGap sets consecutive rows one blank line apart and nothing else: no separator opens the list
 // and none closes it, where the box's own padding already stands. With the flag off the list is the
 // unbroken block it has always been.

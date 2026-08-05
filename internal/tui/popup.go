@@ -37,7 +37,8 @@ import (
 //     line to the inner budget, so no line can ever wrap the box.
 //   - A row is ONE painted line unless the spec asks for more: popupSpec.wrapRows word-wraps a row
 //     too wide for the pane onto continuation lines indented under its own first cell
-//     (popupRowIndent) instead of eliding its tail, popupSpec.rowGap sets consecutive rows one
+//     (popupRowIndent) — plus, where the row is columned, under its LAST column
+//     (popupRowHangingIndent) — instead of eliding its tail, popupSpec.rowGap sets consecutive rows one
 //     blank line apart, and popupSpec.rowPadAbove/rowPadBelow set one blank line above the block
 //     and one below it — each end asked for on its own, because the two decision surfaces do not
 //     ask for the same shape. All of them are opt-in, and all are paid for out of the SAME row
@@ -203,7 +204,9 @@ type popupRow []string
 // rendering, unchanged down to the two-space marker (contract 3).
 //
 // wrapRows lets a row BREAK instead of eliding: a row wider than the pane word-wraps onto
-// continuation lines hanging under its own first cell (popupRowIndent), the way the body block
+// continuation lines hanging under its own first cell (popupRowIndent) — and, on a COLUMNED row,
+// under its LAST column as well (popupRowHangingIndent), so a wrapped label lands under the label
+// rather than under the checkbox beside it — the way the body block
 // already breaks, so a long option arrives whole rather than ending in an ellipsis
 // (docs/design/user-questions-layout.md). It is the difference between a list of NAMES and a list of
 // SENTENCES. A picker offers file paths and session titles — things a human recognises from the
@@ -466,7 +469,7 @@ func singleCellRows(labels []string) []popupRow {
 // lines and a three-line answer seats nothing either, and it is counted the same way rather than
 // shown two thirds of.
 func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style) ([]string, int) {
-	blocks := popupRowBlocks(th, layoutPopupRows(th, spec.rows), spec.wrapRows, inner)
+	blocks := popupRowBlocks(th, spec.rows, spec.wrapRows, inner)
 	heights := popupRowHeights(blocks)
 
 	gap := 0
@@ -556,25 +559,124 @@ func popupRowLine(th theme, spec popupSpec, blackFill lipgloss.Style, row string
 // the HANGING INDENT a wrapped row's continuation lines carry (popupSpec.wrapRows). It is what a
 // wrapped row is wrapped TO: the text budget is the pane's inner width less this, on the first line
 // and every line after it alike, so the block of text is a rectangle under the marker rather than a
-// paragraph that steps left where the pointer stops.
+// paragraph that steps left where the pointer stops. A COLUMNED row hangs its continuations this far
+// plus its own leading columns (popupRowHangingIndent), for the same reason one column further in.
 const popupRowIndent = 2
 
-// popupRowBlocks composes each laid-out row into the plain text lines it will paint: one line per
+// popupRowBlocks composes each row into the plain text lines it will paint: one laid-out line per
 // row as it always was, or — with wrap set (popupSpec.wrapRows) — the word-wrapped lines of a row
 // too wide for the marker column and the pane's inner width together. The wrap is wrapText, the same
 // break the body block gets, so a row and a body paragraph divide their words the same way; the
-// non-wrapping path returns the row untouched and leaves the elision to the caller's truncateToWidth,
-// which is what keeps a picker's rendering byte-identical to the one it had before rows could wrap.
-func popupRowBlocks(th theme, rows []string, wrap bool, inner int) [][]string {
+// non-wrapping path returns the laid-out row untouched and leaves the elision to the caller's
+// truncateToWidth, which is what keeps a picker's rendering byte-identical to the one it had before
+// rows could wrap.
+//
+// It takes the CELLS rather than the composed lines because a columned row wraps under its own last
+// column (popupRowHangingIndent) and the composed line no longer says where that column starts: the
+// row is split back into the leading tiers and the prose after them, the prose is what breaks, and
+// the continuations are indented to where it began. A single-cell row has no leading tier, so its
+// head is empty and the whole path collapses to the wrapText call it always was.
+func popupRowBlocks(th theme, rows []popupRow, wrap bool, inner int) [][]string {
+	if !wrap {
+		lines := layoutPopupRows(th, rows)
+		blocks := make([][]string, len(lines))
+		for i, line := range lines {
+			blocks[i] = []string{line}
+		}
+		return blocks
+	}
+
+	widths := popupColumnWidths(th, rows)
+	last := popupLastColumn(widths)
+	hang := popupRowHangingIndent(th, widths, last)
+	budget := max(1, inner-popupRowIndent)
 	blocks := make([][]string, len(rows))
 	for i, row := range rows {
-		if !wrap {
-			blocks[i] = []string{row}
+		head, tail := popupRowSplit(th, row, widths, last)
+		if hang == 0 || hang >= budget {
+			// One column, or a pane so narrow the leading tiers have nothing to hang prose under:
+			// the composed line breaks whole, exactly as it did before rows could be columned.
+			blocks[i] = wrapText(th, strings.TrimRight(head+tail, " "), budget)
 			continue
 		}
-		blocks[i] = wrapText(th, row, max(1, inner-popupRowIndent))
+		blocks[i] = popupWrappedRowLines(th, head, tail, budget, hang)
 	}
 	return blocks
+}
+
+// popupLastColumn is the index of the last column any row filled — the column a wrapping spec
+// BREAKS, because the columns before it are fixed tiers (a marker, a shortcut, a size) and the last
+// is where the prose written for the human lives. It is −1 when no row filled a column at all.
+func popupLastColumn(widths []int) int {
+	for i := len(widths) - 1; i >= 0; i-- {
+		if widths[i] > 0 {
+			return i
+		}
+	}
+	return -1
+}
+
+// popupRowHangingIndent is how far past the marker column a wrapped COLUMNED row's continuation
+// lines start: the width of every column before the last, each with the gutter that follows it. It
+// is what makes a checkbox a column rather than a prefix — the tail of a wrapped label hangs under
+// the label, so the markers stay a column of their own down the pane and one option still reads as
+// one block of text. A single-cell row measures zero here and keeps the rendering it always had.
+func popupRowHangingIndent(th theme, widths []int, last int) int {
+	hang := 0
+	for i, w := range widths {
+		if i >= last || w == 0 {
+			continue // at or past the wrapped column, or a column no row filled (it collapses)
+		}
+		hang += w + th.measure.Width(popupGutter)
+	}
+	return hang
+}
+
+// popupRowSplit lays a row out like layoutPopupRow but stops short of the column that wraps: the
+// head is every column before it, padded to its measured width and gutter-joined (exactly
+// popupRowHangingIndent cells, whatever the row put in them), and the tail is the wrapping column's
+// own text. strings.TrimRight(head+tail, " ") is layoutPopupRow's line for the same row, so the
+// split changes what a row is COMPOSED of and nothing about what it paints.
+func popupRowSplit(th theme, row popupRow, widths []int, last int) (head, tail string) {
+	var b strings.Builder
+	for i := 0; i < last; i++ {
+		if widths[i] == 0 {
+			continue // a column empty in every row collapses: no width, no gutter
+		}
+		cell := ""
+		if i < len(row) {
+			cell = expandTabs(row[i])
+		}
+		b.WriteString(cell)
+		if pad := widths[i] - th.measure.Width(cell); pad > 0 {
+			b.WriteString(strings.Repeat(" ", pad))
+		}
+		b.WriteString(popupGutter)
+	}
+	if last >= 0 && last < len(row) {
+		tail = expandTabs(row[last])
+	}
+	return b.String(), tail
+}
+
+// popupWrappedRowLines breaks a columned row's prose across lines and hangs it under its own column:
+// the head leads the first line, every line after it starts hang blank cells in, and the text breaks
+// to what is left of the budget on all of them alike — so the block is a rectangle under the column
+// it belongs to rather than a paragraph that steps left where the tiers beside it end. Each composed
+// line is right-trimmed, like layoutPopupRow's, so a row that wrapped and a row that did not are
+// trimmed the same way before the painter's marker, styling and truncation run on them.
+func popupWrappedRowLines(th theme, head, tail string, budget, hang int) []string {
+	wrapped := wrapText(th, tail, budget-hang)
+	indent := strings.Repeat(" ", hang)
+	out := make([]string, len(wrapped))
+	for i, line := range wrapped {
+		lead := indent
+		if i == 0 {
+			lead = head
+		}
+		out[i] = strings.TrimRight(lead+line, " ")
+	}
+	return out
 }
 
 // popupRowHeights is how many painted lines each composed row costs — the number the window spends
@@ -655,7 +757,7 @@ func popupInnerWidth(th theme, width int) int {
 // calls renderPopup makes to reach the same numbers, in the same order, so the demand a caller
 // budgets for is the cost the painter then pays.
 func popupWrappedRowHeights(th theme, rows []popupRow, width int) []int {
-	return popupRowHeights(popupRowBlocks(th, layoutPopupRows(th, rows), true, popupInnerWidth(th, width)))
+	return popupRowHeights(popupRowBlocks(th, rows, true, popupInnerWidth(th, width)))
 }
 
 // popupBodyLines word-wraps spec.body into styled, black-filled content lines for the pane, sitting
