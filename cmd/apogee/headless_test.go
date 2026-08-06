@@ -461,6 +461,101 @@ func TestHeadlessOutputRouting(t *testing.T) {
 		}
 	})
 
+	t.Run("each sub-agent's fill is a stderr line, in order, before the summary", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			SessionID: "s-9", FinalText: "the answer", Turns: 4, Denied: 0,
+			SubAgents: []run.SubAgentUsage{
+				{Used: 12000, Limit: 32768, Task: "audit the issues"},
+				{Used: 800, Limit: 32768, Task: "summarise the findings"},
+			},
+		}}
+		out, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		first := strings.Index(errOut, "sub-agent: 12k/32k · audit the issues")
+		second := strings.Index(errOut, "sub-agent: 800/32k · summarise the findings")
+		summary := strings.Index(errOut, "turns: 4")
+		if first < 0 || second < 0 {
+			t.Fatalf("the per-run lines are missing or misspelled: %q", errOut)
+		}
+		if first > second {
+			t.Errorf("the runs are not reported in finish order: %q", errOut)
+		}
+		if second > summary {
+			t.Errorf("a per-run line printed after the summary: %q", errOut)
+		}
+		if strings.TrimRight(out, "\n") != "the answer" {
+			t.Errorf("stdout = %q; want the answer alone", out)
+		}
+	})
+
+	t.Run("a run that delegated nothing says nothing about sub-agents", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.Contains(errOut, "sub-agent:") {
+			t.Errorf("a run with no delegation printed a sub-agent line: %q", errOut)
+		}
+	})
+
+	// The self-hiding rule the TUI's cell keeps: a fill only means something beside its limit, so a
+	// run whose window the Config never named is dropped rather than spelled against nothing. Its
+	// neighbour still reports, so the drop is a skip and not an abort.
+	t.Run("a run with no window is omitted rather than spelled against nothing", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 2,
+			SubAgents: []run.SubAgentUsage{
+				{Used: 9000, Limit: 0, Task: "no window here"},
+				{Used: 4000, Limit: 32768, Task: "this one has one"},
+			},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.Contains(errOut, "no window here") {
+			t.Errorf("a limitless reading was printed: %q", errOut)
+		}
+		if !strings.Contains(errOut, "sub-agent: 4k/32k · this one has one") {
+			t.Errorf("the reportable run was dropped with it: %q", errOut)
+		}
+	})
+
+	// The task is raw model output (internal/run says so in as many words), and this is its render
+	// seam — the same seam the answer is stripped at, one stream over.
+	t.Run("a sub-agent task is escape-stripped and clipped", func(t *testing.T) {
+		long := strings.Repeat("t", 200)
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 2,
+			SubAgents: []run.SubAgentUsage{
+				{Used: 4000, Limit: 32768, Task: "safe \x1b]52;c;cGF5bG9hZA==\x07 " + long},
+			},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.ContainsRune(errOut, 0x1b) {
+			t.Errorf("an ESC byte reached stderr: %q", errOut)
+		}
+		var line string
+		for _, l := range strings.Split(errOut, "\n") {
+			if strings.HasPrefix(l, "sub-agent:") {
+				line = l
+			}
+		}
+		task := strings.TrimPrefix(line, "sub-agent: 4k/32k · ")
+		if n := len([]rune(task)); n != headlessTaskMax {
+			t.Errorf("the task printed %d runes; want it clipped to %d: %q", n, headlessTaskMax, task)
+		}
+		if !strings.HasSuffix(task, "…") {
+			t.Errorf("a clipped task does not say it was clipped: %q", task)
+		}
+	})
+
 	t.Run("terminal escapes are stripped from the answer", func(t *testing.T) {
 		stub := &stubRunner{res: run.Result{FinalText: "safe \x1b]52;c;cGF5bG9hZA==\x07 text", Turns: 1}}
 		out, _, err := headlessRun(t, stub, "a prompt")
@@ -474,6 +569,31 @@ func TestHeadlessOutputRouting(t *testing.T) {
 			t.Errorf("the strip ate ordinary text: %q", out)
 		}
 	})
+}
+
+// The gauge's own spelling, pinned value by value. This package carries a twin of internal/tui's
+// formatTokens because that one is unexported in a package the CLI half must not depend on, and a
+// twin is only worth having while it agrees: two Drivers over one engine may not spell one figure
+// two ways. Whole thousands round DOWN above a thousand, and a count below one renders empty —
+// which is why a zero-limit run is dropped upstream rather than printed as "9k/".
+func TestHeadlessTokenSpellingMatchesTheGauge(t *testing.T) {
+	for _, tc := range []struct {
+		n    int
+		want string
+	}{
+		{-1, ""},
+		{0, ""},
+		{1, "1"},
+		{999, "999"},
+		{1000, "1k"},
+		{1999, "1k"},
+		{18432, "18k"},
+		{32768, "32k"},
+	} {
+		if got := formatTokens(tc.n); got != tc.want {
+			t.Errorf("formatTokens(%d) = %q; want %q", tc.n, got, tc.want)
+		}
+	}
 }
 
 // captureProcessStreams swaps the process's REAL os.Stdout and os.Stderr for pipes while fn runs
@@ -639,7 +759,7 @@ func TestHeadlessExitCodes(t *testing.T) {
 		if code := exitCodeFor(err); code != exitNotStarted {
 			t.Errorf("exit code = %d; want %d", code, exitNotStarted)
 		}
-		if strings.Contains(errOut, "turns:") {
+		if strings.Contains(errOut, "turns:") || strings.Contains(errOut, "sub-agent:") {
 			t.Errorf("a run that never started printed a summary: %q", errOut)
 		}
 		if out != "" {

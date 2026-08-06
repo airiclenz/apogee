@@ -106,9 +106,11 @@ NOTES (2026-08-06): the bracket is CLOSED by call id, not by tool name — `Tool
 
 **Commit:** `feat(run): result carries per-sub-agent context usage`
 
-## 5. cmd/apogee: headless prints per-sub-agent lines
+## 5. cmd/apogee: headless prints per-sub-agent lines — ✅ DONE (2026-08-06)
 
 Depends on item 4.
+
+NOTES (2026-08-06): four details the item's line-shape sentence left open, all resolved from the header's own rules or from item 4's landed contract. The line is skipped when the run's *limit* is 0 as well as when its reading is (the header's self-hiding call — item 4 already drops zero readings, so the limit half is what this surface adds). The task is escape-stripped through the existing `stripEscapes` before it is printed: `run.SubAgentUsage.Task` is documented as raw model output "a surface escape-strips at its own render seam", and this is that seam. An empty task drops the ` · ` with it rather than leaving a dangling separator. The clip is `clipSubAgentTask` + a `headlessTaskMax = 80` const beside the token twin, with the ellipsis counted INSIDE the cap so a clipped label is never wider than an unclipped one.
 
 **What:** Surface `Result.SubAgents` on stderr, one line per run, before the summary line.
 

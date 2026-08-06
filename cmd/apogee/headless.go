@@ -123,9 +123,12 @@ func newHeadlessCommand() *cobra.Command {
 			"The run is saved to ~/.apogee/sessions like any other session and shows up in\n" +
 			"/sessions; pass --no-save to run it and record nothing.\n\n" +
 			"The answer goes to stdout and everything else to stderr, so a pipeline reads\n" +
-			"only the model's text. Exit codes: 0 the run completed, 1 the run started and\n" +
-			"failed (model or tool error, cancellation, a record that would not save), 2 the\n" +
-			"run never started (usage, configuration, a refused mode).",
+			"only the model's text. A run that delegated states each sub-agent's context\n" +
+			"fill on a stderr line of its own, ahead of the closing summary — each child\n" +
+			"fills a window the run's own figures say nothing about. Exit codes: 0 the run\n" +
+			"completed, 1 the run started and failed (model or tool error, cancellation, a\n" +
+			"record that would not save), 2 the run never started (usage, configuration, a\n" +
+			"refused mode).",
 		Args:          headlessArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -364,6 +367,12 @@ func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) 
 	if text := stripEscapes(res.FinalText); text != "" {
 		fmt.Fprintln(cmd.OutOrStdout(), text)
 	}
+	// Each delegated run's own context fill, one line apiece and ahead of the summary: the summary
+	// speaks for the Firing as a whole, and a sub-agent fills a window of its OWN, which no
+	// top-level figure stands in for. A run that delegated nothing prints none of these lines.
+	for _, line := range headlessSubAgentLines(res.SubAgents) {
+		cmd.PrintErrln(line)
+	}
 	cmd.PrintErrln(headlessSummary(res))
 
 	if runErr != nil {
@@ -410,6 +419,65 @@ func headlessSummary(res run.Result) string {
 		return stats
 	}
 	return "session: " + res.SessionID + " · " + stats
+}
+
+// headlessSubAgentLines renders what each delegated run did to its own context: one line per
+// finished sub-agent run, in the order the runs finished, stating how full that run's window got
+// and the task it was given. It is the headless twin of the reading the TUI paints on a collapsed
+// sub-agent block — the same fill, from the same events, on the Driver that has no block to paint.
+//
+// A run whose reading or whose window is zero is omitted rather than spelled against nothing (the
+// TUI cell's rule, and the gauge's before it): a fill only means something beside its limit. The
+// task is escape-stripped HERE, at this render seam, because internal/run hands it over as raw
+// model output exactly as it hands over the answer, and clipped, so a model that delegated a
+// screenful of instructions cannot take the terminal over with one line.
+func headlessSubAgentLines(runs []run.SubAgentUsage) []string {
+	lines := make([]string, 0, len(runs))
+	for _, r := range runs {
+		if r.Used <= 0 || r.Limit <= 0 {
+			continue
+		}
+		line := "sub-agent: " + formatTokens(r.Used) + "/" + formatTokens(r.Limit)
+		if task := clipSubAgentTask(stripEscapes(r.Task)); task != "" {
+			line += " · " + task
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// headlessTaskMax is how wide a delegated task prints on a sub-agent line, in runes: enough for a
+// real instruction to be recognisable, little enough that the reading it follows stays the line's
+// point. Runes rather than bytes, so the cap does not vary with the alphabet the task is in.
+const headlessTaskMax = 80
+
+// clipSubAgentTask cuts a task label to headlessTaskMax runes, ellipsis included in the cap, so a
+// clipped label is never wider than an unclipped one. It never splits a rune: the cut is made on
+// the decoded slice, not on the bytes.
+func clipSubAgentTask(task string) string {
+	runes := []rune(task)
+	if len(runes) <= headlessTaskMax {
+		return task
+	}
+	return string(runes[:headlessTaskMax-1]) + "…"
+}
+
+// formatTokens spells a token count the way the TUI's gauge does — bare below a thousand, whole
+// thousands with a `k` above it (18432 → "18k") — so two Drivers over one engine do not spell one
+// figure two ways. A non-positive count renders empty, which no caller here can print: a line with
+// a zero half is dropped before it is composed.
+//
+// It duplicates internal/tui's identical helper for the reason stripEscapes does: that one is
+// unexported in a package the binary's CLI half must not depend on, and the twin is six lines of
+// pure function against a one-way dependency. A test pins the spellings it must match.
+func formatTokens(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%dk", n/1000)
 }
 
 // stripEscapes removes the ESC control byte (0x1b) from the model's answer before it is printed.
