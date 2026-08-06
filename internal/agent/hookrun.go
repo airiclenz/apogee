@@ -40,8 +40,11 @@ import (
 // non-off-ramp catalogued Mechanism is skipped at dispatch, an off-ramp survives (D5). It
 // governs only catalogued Mechanisms; experimental hooks never consult it. skipMechanism
 // (selfreg.go) combines it with the self-regulation withdrawal.
+//
+// It reads the LIVE flag (bypassEnabled), not cfg's construction seed, so a mid-session SetBypass
+// from the settings surface lands at this very next hook evaluation.
 func (a *Agent) skipUnderBypass(m domain.RegisteredMechanism) bool {
-	return a.cfg.Bypass && m.Descriptor.Capability != domain.CapOffRamp
+	return a.bypassEnabled() && m.Descriptor.Capability != domain.CapOffRamp
 }
 
 // runHistoryRewriteHooks lets each history-rewrite Mechanism/hook edit conversation state

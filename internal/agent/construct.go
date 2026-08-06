@@ -94,6 +94,9 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		guards:             security.NewDefaultGuards(),
 		mode:               cfg.Mode,               // seed the live, swappable mode from the construction config
 		confineToWorkspace: cfg.ConfineToWorkspace, // likewise the live, swappable blast-radius flag (/confine)
+		bypass:             cfg.Bypass,             // and the three the settings surface swaps: Bypass …
+		compaction:         cfg.Context.CompactionEnabled,
+		contextFileNames:   cfg.ContextFiles,
 		textParser:         textParser,
 		stripper:           stripper,
 		tracker:            newSelfRegulator(),

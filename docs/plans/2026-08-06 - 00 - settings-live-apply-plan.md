@@ -57,7 +57,9 @@
 
 **Commit:** `docs(adr): 0037 — every settings edit applies to the running session`
 
-## 2. Anytime-safe engine setters: bypass, compaction, context files
+## 2. Anytime-safe engine setters: bypass, compaction, context files — ✅ DONE (2026-08-06)
+
+NOTES (2026-08-06): the three setters swap their OWN live field behind their own mutex (the literal `SetMode` shape ADR 0037 L70 names — one mutex, one field) instead of writing `a.cfg.*` in place; `cfg.Bypass` / `cfg.Context.CompactionEnabled` / `cfg.ContextFiles` stay the construction seeds, and the consumption sites read the new `bypassEnabled()` / `compactionEnabled()` / `contextFileList()` accessors. Writing cfg in place would have raced the unlocked whole-struct copy `newChildAgent` takes (`subagent.go:129`). Consequence, also new: `newChildAgent` now inherits the parent's LIVE Bypass and auto-Compaction gates at spawn, exactly as it already did for mode and confinement (the context-file NAMES are deliberately not propagated — the child copies the parent's cached content verbatim, since a sub-agent is not a session boundary).
 
 **What:** Add three mutators to `internal/agent` in the exact shape of `SetMode` (`agent.go:250`; anytime-safe class listed at `agent.go:34`), mutex-guarded like it:
 

@@ -146,8 +146,9 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 }
 
 // shouldAutoCompact reports whether the automatic Compaction trigger should fire. It fires only when
-// compaction is enabled (cfg.Context.CompactionEnabled — the `auto-compact` key, on by default; the
-// on-demand /compact ignores this gate and always folds), at an Exchange boundary (NOT inExchange —
+// compaction is enabled (the live `auto-compact` gate, seeded from cfg.Context.CompactionEnabled and
+// on by default, swappable mid-session via SetCompactionEnabled; the on-demand /compact ignores this
+// gate and always folds), at an Exchange boundary (NOT inExchange —
 // S2), and when the history has outgrown its Budget History allocation
 // (domain.Budget.HistoryExceedsAllocation) AND the trigger is not saturated (compactSat). It
 // clears the saturation latch the moment the estimate falls back under the allocation, so growth
@@ -155,7 +156,7 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 // known, so no allocation) measures against the conservative unknown-window ceiling instead of
 // standing down — historyExceedsAllocation owns that substitution and its rationale.
 func (a *Agent) shouldAutoCompact() bool {
-	if !a.cfg.Context.CompactionEnabled {
+	if !a.compactionEnabled() {
 		return false
 	}
 	// S2: auto-compaction is Exchange-boundary-only. At the top-of-step() placement inExchange is
@@ -227,7 +228,7 @@ const overflowBridge = "The conversation above was compacted because the previou
 // protected prefix and Replaces everything after it with a single summary, so no half-answered
 // tool call survives to be orphaned.
 //
-// Gates, in order: cfg.Context.CompactionEnabled — the file-only `auto-compact: false` opts out of
+// Gates, in order: the live `auto-compact` gate (compactionEnabled) — `auto-compact: false` opts out of
 // recovery too, since the emergency fold IS an automatic fold and a user managing the window
 // themselves keeps today's abandon behaviour (no upstream call is made when it is off) — then the
 // compacting re-entrancy guard, shared with autoCompact so the two triggers can never nest.
@@ -252,7 +253,7 @@ const overflowBridge = "The conversation above was compacted because the previou
 // caller's one-fold-per-Turn rule — a second overflow after a fold gives up rather than folding
 // again.
 func (a *Agent) emergencyFold(ctx context.Context, turn int) bool {
-	if !a.cfg.Context.CompactionEnabled || a.compacting {
+	if !a.compactionEnabled() || a.compacting {
 		return false
 	}
 	a.compacting = true

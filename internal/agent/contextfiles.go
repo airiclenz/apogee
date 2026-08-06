@@ -132,8 +132,11 @@ func validateContextFileNames(names []string) error {
 // session boundary and NOWHERE else — construction, a successful ClearContext (/clear, /new),
 // and a successful RestoreSession — so the content seeded into requests is fixed for the life
 // of a session while a repo whose context files changed is picked up by the next one.
+//
+// It reads the LIVE name list (contextFileList), so a mid-session SetContextFiles is picked up
+// here — at the next boundary — and nowhere earlier: the names move when the session does.
 func (a *Agent) reloadContextFiles() {
-	a.contextFiles = loadContextFiles(a.cfg.WorkspaceDir, a.cfg.ContextFiles)
+	a.contextFiles = loadContextFiles(a.cfg.WorkspaceDir, a.contextFileList())
 }
 
 // contextFileHeader introduces each file's content in the standing system message, so a model

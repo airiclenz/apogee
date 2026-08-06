@@ -112,8 +112,9 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 }
 
 // newChildAgent constructs the nested Agent for a sub-agent, threading this Agent's privileges
-// bounded (ADR 0005/0013): the parent's LIVE Mode and LIVE confine-to-workspace flag at spawn
-// (Shift+Tab and /confine can move either mid-session — the child inherits what the parent
+// bounded (ADR 0005/0013): the parent's LIVE Mode, LIVE confine-to-workspace flag, LIVE Bypass and
+// LIVE auto-Compaction gate at spawn (Shift+Tab, /confine and the settings surface can move any of
+// them mid-session — the child inherits what the parent
 // actually has NOW, never a stale construction seed) / Approver / Confiner verbatim (never
 // loosened beyond the parent's current privileges), PLUS a tighten-only
 // live view of the parent's EFFECTIVE mode (child.liveMode) so a mid-delegation tightening
@@ -131,6 +132,10 @@ func (a *Agent) newChildAgent() (*Agent, error) {
 	//                          read under the lock since this runs on the worker goroutine during dispatch
 	childCfg.ConfineToWorkspace = a.ConfineToWorkspace() // likewise the parent's LIVE blast radius at spawn
 	//                                                     (/confine may have moved it since construction)
+	childCfg.Bypass = a.bypassEnabled()                        // and the parent's LIVE Bypass + auto-Compaction gates, which the
+	childCfg.Context.CompactionEnabled = a.compactionEnabled() // settings surface may have swapped since construction
+	// The context-file NAMES are deliberately NOT re-read from the live list: the child copies the
+	// parent's context-file CONTENT verbatim below, because a sub-agent is not a session boundary.
 	childCfg.Tools = a.defaultSubAgentTools()
 	// The sub-agent shares the parent's ALREADY-BUILT registry (a.registry — the parent's
 	// Config.Mechanisms merged with whatever Config.EnableMechanisms armed), so it fires the same

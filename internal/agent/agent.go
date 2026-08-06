@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -30,8 +31,11 @@ import (
 // with no Exchange mid-flight. Between-Steps calls by the goroutine DRIVING the loop
 // (Snapshot, Interject) are additionally valid at the boundary between two Steps of an open
 // Exchange: that goroutine owns the conversation there, so the boundary itself is the
-// synchronization — no lock, and no other goroutine may make the call (ADR 0025). Only
-// SetMode and SetConfineToWorkspace are anytime-goroutine-safe, each behind its own mutex.
+// synchronization — no lock, and no other goroutine may make the call (ADR 0025). The
+// anytime-goroutine-safe class — SetMode, SetConfineToWorkspace, SetBypass,
+// SetCompactionEnabled and SetContextFiles — is the exception: each swaps ONE live field
+// behind its own mutex, so the host (the settings surface, Shift+Tab, /confine) may call it
+// while a Step runs and the change lands at that field's next consumption boundary.
 type Agent struct {
 	cfg      domain.Config
 	upstream provider.Responder        // provider seam (Decision C): fake in tests, real HTTP via New
@@ -63,6 +67,22 @@ type Agent struct {
 	// immutable construction seed.
 	confineMu          sync.RWMutex
 	confineToWorkspace bool // live confine-to-workspace flag; seeded from cfg.ConfineToWorkspace, swappable via SetConfineToWorkspace
+
+	// bypassMu, compactionMu and contextFilesMu guard the three settings the settings surface may
+	// swap mid-session (SetBypass / SetCompactionEnabled / SetContextFiles). They follow the modeMu
+	// pattern to the letter — one mutex per field, named for the single field it guards, because the
+	// three are independent facts read at three different boundaries and never as one consistent
+	// tuple. Their cfg counterparts (cfg.Bypass, cfg.Context.CompactionEnabled, cfg.ContextFiles)
+	// stay the immutable construction seeds, so the whole-struct cfg copy a sub-agent spawn takes
+	// (newChildAgent) keeps reading fields nothing ever writes.
+	bypassMu sync.RWMutex
+	bypass   bool // live Bypass flag; seeded from cfg.Bypass, swappable via SetBypass
+
+	compactionMu sync.RWMutex
+	compaction   bool // live auto-Compaction gate; seeded from cfg.Context.CompactionEnabled, swappable via SetCompactionEnabled
+
+	contextFilesMu   sync.RWMutex
+	contextFileNames []string // live workspace context-file names; seeded from cfg.ContextFiles, swappable via SetContextFiles
 
 	// liveMode, when non-nil, is a sub-agent's read-only view of its PARENT's live mode: the
 	// parent's effectiveMode accessor, captured at spawn (ADR 0013). The per-call
@@ -281,6 +301,87 @@ func (a *Agent) SetConfineToWorkspace(confine bool) {
 	a.confineMu.Lock()
 	a.confineToWorkspace = confine
 	a.confineMu.Unlock()
+}
+
+// SetBypass switches Bypass — Mechanisms off, structure on (ADR 0006) — on or off for the rest
+// of the session. It takes effect at the NEXT hook fire: the gate is consulted per catalogued
+// Mechanism per hook point (skipUnderBypass, via skipMechanism), so nothing is rebuilt and a
+// Turn already mid-flight starts honouring the new value at its next hook point. Off-ramp
+// Mechanisms and the structural machinery (Budget, Compaction, the guardrails) are unaffected
+// either way — Bypass has never governed them.
+//
+// It is safe to call from another goroutine (the settings surface) while a Step runs, like
+// SetMode. A sub-agent spawned AFTER the switch inherits the new value (newChildAgent reads the
+// live flag at spawn); one already mid-flight keeps what it was spawned with.
+func (a *Agent) SetBypass(enabled bool) {
+	a.bypassMu.Lock()
+	a.bypass = enabled
+	a.bypassMu.Unlock()
+}
+
+// bypassEnabled reports the live Bypass flag under the lock, so the worker goroutine's per-hook
+// read is race-free against a concurrent SetBypass. It is the ONE read seam for the flag: cfg.Bypass
+// is only the construction seed.
+func (a *Agent) bypassEnabled() bool {
+	a.bypassMu.RLock()
+	defer a.bypassMu.RUnlock()
+	return a.bypass
+}
+
+// SetCompactionEnabled switches the automatic, budget-driven Compaction trigger (the `auto-compact`
+// key) on or off for the rest of the session. It takes effect at the next Exchange boundary: the
+// gate is consulted per fold decision (shouldAutoCompact) and by the overflow rescue
+// (emergencyFold), so switching it off stops the next automatic fold and switching it on arms it
+// again with no rebuild. The on-demand /compact is unaffected — it has never consulted this gate.
+//
+// It is safe to call from another goroutine (the settings surface) while a Step runs, like SetMode.
+// A sub-agent spawned AFTER the switch inherits the new value at spawn.
+func (a *Agent) SetCompactionEnabled(enabled bool) {
+	a.compactionMu.Lock()
+	a.compaction = enabled
+	a.compactionMu.Unlock()
+}
+
+// compactionEnabled reports the live auto-Compaction gate under the lock, so the fold decision is
+// race-free against a concurrent SetCompactionEnabled. cfg.Context.CompactionEnabled is only the
+// construction seed.
+func (a *Agent) compactionEnabled() bool {
+	a.compactionMu.RLock()
+	defer a.compactionMu.RUnlock()
+	return a.compaction
+}
+
+// SetContextFiles replaces the workspace context-file names folded into the standing system
+// content. enable false — or an empty list, the second spelling of "off" — installs no names at
+// all, exactly as the composition root's resolution collapses the two spellings into one value.
+//
+// It deliberately does NOT re-read the workspace: the cache moves only at a session boundary
+// (construction, ClearContext, RestoreSession — reloadContextFiles), so this session keeps seeding
+// byte-identical content and the server's prefix KV cache survives it. The new names are picked up
+// by the NEXT /clear or restored session, which is the boundary the host tells the user about.
+//
+// It is safe to call from another goroutine (the settings surface) while a Step runs, like SetMode:
+// the names are copied in and the slice is never mutated in place, so the reload reads a stable
+// list. A name that escapes the workspace is refused by the read fence (readContextFile) and
+// reported as unreadable, never folded in — the construction-time name gate is the host's to apply
+// before calling this.
+func (a *Agent) SetContextFiles(enable bool, names []string) {
+	var live []string
+	if enable && len(names) > 0 {
+		live = slices.Clone(names)
+	}
+	a.contextFilesMu.Lock()
+	a.contextFileNames = live
+	a.contextFilesMu.Unlock()
+}
+
+// contextFileList reports the live context-file names under the lock. The returned slice is never
+// mutated in place — SetContextFiles installs a fresh one — so the caller may read it after the
+// lock is dropped. cfg.ContextFiles is only the construction seed.
+func (a *Agent) contextFileList() []string {
+	a.contextFilesMu.RLock()
+	defer a.contextFilesMu.RUnlock()
+	return a.contextFileNames
 }
 
 // ----------------------------------------------------------------------------
