@@ -624,12 +624,22 @@ click.
 
 **A sub-agent run collapses to its call block.** The `Sub-Agent` call block is the run's header
 block: collapsed, it stands alone and the whole railed span beneath it — every inner block, rail
-and all — is elided. Its summary line carries the run's gist in two tempi: while the run works,
-`N tool calls · ` plus the same activity phrase the status line shows for the run (`reading
-main.go`), ticking as inner calls land; once the report arrives, `N tool calls · ` plus the
+and all — is elided. Its summary line is `N tool calls · <used>/<window> · ` plus the run's gist,
+and the gist arrives in two tempi: while the run works, the same activity phrase the status line
+shows for the run (`reading main.go`), ticking as inner calls land; once the report arrives, the
 report's first line. The count is **transitive** — every call in the span counts, whatever its
 depth — so one number says how much work happened in there, at every nesting level by the same
-rule. A collapsed run is thereby the one block that reads as a single summarised line: its own
+rule. The middle cell is the other half of that summary: **how full the delegate's own context
+got** (`12k/32k`), spelled in the whole thousands the status line's gauge spells its window in so
+the two readings on screen are read in one language, and placed between the count and the gist so
+the gist — the one part with no bound on its length — is what a narrow terminal clips. It appears
+**only once a reading exists**: a run whose child has not reported usage yet keeps the count alone
+rather than trailing an empty separator, which is the gauge's own rule about a number with no scale
+beside it. It **ticks as each of the child's Turns lands** and **freezes on the final reading**, so
+a finished run goes on saying what it filled however long the scrollback holds it. And unlike the
+count it is **not transitive**: each agent fills a window of its own, so a nested run's reading
+rides that nested block and never accrues to the run above it. A collapsed run is thereby the one
+block that reads as a single summarised line: its own
 **report body is elided along with the span**, because the summary slot already says that report's
 first line and no block prints the same text twice in two adjacent rows. It grows no
 `… +N more lines` marker either — the transitive count is what says there is work behind the
@@ -881,7 +891,9 @@ with nothing under it, and read as cut off rather than as light.
 the status line's gauge states it, beside what the conversation has actually spent
 (`8k/98k 8% █░░░░░`), which is the only place the number tells the reader something that changes.
 The window is still a session fact — a change to it is still noted in the transcript — it simply
-has one home in the chrome now.
+has one home in the chrome now. It keeps exactly one: the fill a collapsed sub-agent run states on
+its summary line is a *different agent's* window said on that run's own block, which is transcript
+content and not a second gauge — the chrome gains nothing from a delegate having run.
 
 **The workdir the slot ends on.** The last segment is the local directory this session is rooted
 in, written with the home directory as `~` (`~/Repos/apogee`). The substitution happens only at a

@@ -127,7 +127,7 @@ NOTES (2026-08-06): four details the item's line-shape sentence left open, all r
 
 **Commit:** `feat(cli): headless prints per-sub-agent context lines`
 
-## 6. Docs: spec amendments, drift fix, changelog, issue closed
+## 6. Docs: spec amendments, drift fix, changelog, issue closed — ✅ DONE (2026-08-06)
 
 Depends on items 1–5. This item owns every cross-cutting doc amendment.
 

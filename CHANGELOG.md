@@ -105,6 +105,31 @@ point is a **minor** bump, not a breaking change.
   Ratified in ADR 0035, defined in `CONTEXT.md` ("Settings surface") and specced in `layout.md`
   ("What 'height' means", where the full-height pane class is written down).
 
+- **You can see how much context a sub-agent used.** A collapsed sub-agent run's summary line now
+  states the delegate's own context fill between the call count and the gist —
+  `4 tool calls · 12k/32k · found the caller in wire.go` — spelled in the same whole thousands the
+  status line's gauge uses, so the two numbers on screen read as one language. It ticks as the
+  child's turns land and freezes on the run's final reading, so a finished block goes on saying what
+  it filled. Until now a sub-agent's usage reached every sink and every consumer dropped it.
+  - **It is the delegate's fill, not a share of yours.** A sub-agent inherits the parent's context
+    window verbatim, so the reading is that agent's own window filling up; it does not move the
+    status line's gauge, and — unlike the call count beside it — it is **not transitive**: a nested
+    run's reading rides the nested block and never accrues to the run above it. The chrome still
+    carries exactly one gauge.
+  - **The figure survives a resume.** It is stored on the transcript entry when it folds, limit
+    included, so reopening a session shows each finished run's final figure rather than a blank.
+    Sessions recorded before this existed decode to no reading and simply show the line they always
+    did — the cell hides itself whenever either half is missing, the same condition the gauge hides
+    itself on.
+  - **`apogee headless` reports the same thing per run.** Before its closing summary it prints one
+    stderr line per sub-agent run, in finish order — `sub-agent: 12k/32k · review the wire seam` —
+    the task being the delegated prompt's first line, escape-stripped and clipped. Runs with no
+    reading are skipped, stdout stays answer-only, and the summary line itself is unchanged.
+
+  Closes the standing issue "I cannot see how much of its context a sub agent has used"; specced in
+  `layout.md` ("A sub-agent run collapses to its call block") and defined in `CONTEXT.md`
+  ("Sub-agent").
+
 ### Changed
 
 - **Breaking (config), with a one-time automatic migration: the `servers:` list is the single
