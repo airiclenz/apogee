@@ -22,7 +22,9 @@ point is a **minor** bump, not a breaking change.
   breaks visibly here. See ADR 0033 (decision 6) and ADR 0034.
   - **Only the answer goes to stdout.** Resolution notices and the closing
     `session: … · turns: … · denied: …` summary go to stderr, so a pipeline reads the model's text
-    and nothing else. The answer is stripped of terminal escape sequences on the way out.
+    and nothing else. The answer is stripped of terminal control characters on the way out — the
+    ESC that opens an ANSI sequence, and the bare BEL or CR that would ring the bell or rewind the
+    line without one — while its own newlines and tabs come through untouched.
   - **Two modes, because the other two exist to consult a human.** `--mode` takes `plan` (the
     default, read-only) or `auto`; `ask-before` and `allow-edits` are refused before anything is
     composed. `auto` is refused outright on a host whose confinement backend cannot fence the
@@ -123,7 +125,8 @@ point is a **minor** bump, not a breaking change.
     itself on.
   - **`apogee headless` reports the same thing per run.** Before its closing summary it prints one
     stderr line per sub-agent run, in finish order — `sub-agent: 12k/32k · review the wire seam` —
-    the task being the delegated prompt's first line, escape-stripped and clipped. Runs with no
+    the task being the delegated prompt's first line, stripped of control characters and clipped,
+    with any whitespace control folded to a space so the label stays on one line. Runs with no
     reading are skipped, stdout stays answer-only, and the summary line itself is unchanged.
 
   Closes the standing issue "I cannot see how much of its context a sub agent has used"; specced in

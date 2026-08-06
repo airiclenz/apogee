@@ -428,9 +428,11 @@ func headlessSummary(res run.Result) string {
 //
 // A run whose reading or whose window is zero is omitted rather than spelled against nothing (the
 // TUI cell's rule, and the gauge's before it): a fill only means something beside its limit. The
-// task is escape-stripped HERE, at this render seam, because internal/run hands it over as raw
-// model output exactly as it hands over the answer, and clipped, so a model that delegated a
-// screenful of instructions cannot take the terminal over with one line.
+// task is stripped of control characters HERE, at this render seam, because internal/run hands it
+// over as raw model output exactly as it hands over the answer — in the line-safe form, so a task
+// carrying a tab or a stray CR cannot rewind or re-column the reading it sits beside — and clipped,
+// so a model that delegated a screenful of instructions cannot take the terminal over with one
+// line.
 func headlessSubAgentLines(runs []run.SubAgentUsage) []string {
 	lines := make([]string, 0, len(runs))
 	for _, r := range runs {
@@ -438,7 +440,7 @@ func headlessSubAgentLines(runs []run.SubAgentUsage) []string {
 			continue
 		}
 		line := "sub-agent: " + formatTokens(r.Used) + "/" + formatTokens(r.Limit)
-		if task := clipSubAgentTask(stripEscapes(r.Task)); task != "" {
+		if task := clipSubAgentTask(stripEscapesToLine(r.Task)); task != "" {
 			line += " · " + task
 		}
 		lines = append(lines, line)
@@ -480,19 +482,48 @@ func formatTokens(n int) string {
 	return fmt.Sprintf("%dk", n/1000)
 }
 
-// stripEscapes removes the ESC control byte (0x1b) from the model's answer before it is printed.
-// Result.FinalText is RAW model output by contract (internal/run: the answer crosses as plain
-// data, ADR 0010) and every ANSI sequence begins with ESC, so dropping that one byte neutralises
-// an OSC 52 clipboard write or a CSI screen game while leaving ordinary text — newlines and tabs
-// included — intact. stdout is a terminal often enough that the strip belongs at this render
-// seam, exactly as the transcript strips at its own.
+// stripEscapes drops the C0 control characters from the model's answer before it is printed,
+// keeping the two that ordinary prose is written with: the newline and the tab. Result.FinalText is
+// RAW model output by contract (internal/run: the answer crosses as plain data, ADR 0010), and a
+// control character there is an instruction to the terminal rather than a character in the answer —
+// ESC opens an ANSI sequence, BEL rings the bell and closes an OSC 52 clipboard payload, CR rewinds
+// the line so what follows overwrites what the reader already saw. Dropping the whole class
+// neutralises all three, where dropping ESC alone left the other two to arrive intact. stdout is a
+// terminal often enough that the strip belongs at this render seam, exactly as the transcript
+// strips at its own.
 //
-// It duplicates internal/tui's identical helper rather than sharing it: that one is unexported in
-// a package the binary's CLI half must not depend on, and the duplication is three lines of pure
-// function against a one-way dependency.
+// It began as a copy of internal/tui's identically named helper and has widened past it; the
+// duplication stands for the reason it always did — that one is unexported in a package the
+// binary's CLI half must not depend on, and this is a few lines of pure function against a one-way
+// dependency.
 func stripEscapes(s string) string {
-	if !strings.ContainsRune(s, 0x1b) {
-		return s // the overwhelmingly common case: no ESC, no allocation
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r // the answer's own line and column structure, which it is printed for
+		}
+		return dropControl(r)
+	}, s)
+}
+
+// stripEscapesToLine is stripEscapes for text that must stay on ONE line — a sub-agent's task
+// label, printed beside the reading it belongs to — where the two controls the answer keeps would
+// forge a second line or a false column. They fold to a space rather than surviving; every other
+// control character goes exactly where stripEscapes sends it.
+func stripEscapesToLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return ' '
+		}
+		return dropControl(r)
+	}, s)
+}
+
+// dropControl maps a C0 control character — and DEL, its ASCII sibling — to strings.Map's "drop
+// this rune", and passes every other rune through untouched. Text carrying none of them maps to
+// itself, which strings.Map returns without allocating: the overwhelmingly common case.
+func dropControl(r rune) rune {
+	if r < 0x20 || r == 0x7f {
+		return -1
 	}
-	return strings.ReplaceAll(s, "\x1b", "")
+	return r
 }

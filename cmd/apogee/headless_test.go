@@ -556,6 +556,25 @@ func TestHeadlessOutputRouting(t *testing.T) {
 		}
 	})
 
+	// A task label shares its line with the reading it follows, so the two controls the answer keeps
+	// fold to a space here instead of surviving: a newline would forge a second line, a tab would
+	// re-column the one it is on, and a CR would rewind over the reading itself.
+	t.Run("a sub-agent task cannot break the line it is printed on", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 2,
+			SubAgents: []run.SubAgentUsage{
+				{Used: 4000, Limit: 32768, Task: "shown\rhidden\tcolumn\nline"},
+			},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if !strings.Contains(errOut, "sub-agent: 4k/32k · shownhidden column line") {
+			t.Errorf("the task did not fold onto its own single line: %q", errOut)
+		}
+	})
+
 	t.Run("terminal escapes are stripped from the answer", func(t *testing.T) {
 		stub := &stubRunner{res: run.Result{FinalText: "safe \x1b]52;c;cGF5bG9hZA==\x07 text", Turns: 1}}
 		out, _, err := headlessRun(t, stub, "a prompt")
@@ -569,6 +588,58 @@ func TestHeadlessOutputRouting(t *testing.T) {
 			t.Errorf("the strip ate ordinary text: %q", out)
 		}
 	})
+}
+
+// The sanitizer's whole job, pinned character by character. A C0 control character is an
+// instruction to the terminal rather than a character in the text — ESC opens an ANSI sequence, BEL
+// rings the bell and closes an OSC 52 clipboard payload, CR rewinds the line so what follows
+// overwrites what the reader already saw — and stripping ESC alone left the other two to arrive
+// intact. Both forms drop the class; they differ only over the two controls prose is written with,
+// which the answer keeps and a one-line label folds to a space.
+func TestHeadlessStripEscapesDropsControlCharacters(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		in       string
+		want     string // what the answer path prints
+		wantLine string // what a sub-agent's task label prints
+	}{
+		{"plain text passes through untouched", "just an answer", "just an answer", "just an answer"},
+		{"ESC opens an ANSI sequence", "safe\x1b[31mred", "safe[31mred", "safe[31mred"},
+		{"BEL rings the bell", "safe\x07text", "safetext", "safetext"},
+		{"CR rewinds the line", "shown\rhidden", "shownhidden", "shownhidden"},
+		{"CRLF leaves the newline behind", "first\r\nsecond", "first\nsecond", "first second"},
+		{
+			"an OSC 52 clipboard write is left inert",
+			"safe \x1b]52;c;cGF5bG9hZA==\x07 text",
+			"safe ]52;c;cGF5bG9hZA== text",
+			"safe ]52;c;cGF5bG9hZA== text",
+		},
+		{"NUL, backspace and the rest of C0 go too", "a\x00b\x08c\x1fd", "abcd", "abcd"},
+		{"DEL goes with them", "a\x7fb", "ab", "ab"},
+		{"newline and tab are the answer's own", "para\n\nnext\tcolumn", "para\n\nnext\tcolumn", "para  next column"},
+		{"non-ASCII text is not control text", "héllo — 世界 ✓", "héllo — 世界 ✓", "héllo — 世界 ✓"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripEscapes(tc.in)
+			if got != tc.want {
+				t.Errorf("stripEscapes(%q) = %q; want %q", tc.in, got, tc.want)
+			}
+			for _, r := range got {
+				if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f {
+					t.Errorf("stripEscapes(%q) left %#U behind: %q", tc.in, r, got)
+				}
+			}
+			line := stripEscapesToLine(tc.in)
+			if line != tc.wantLine {
+				t.Errorf("stripEscapesToLine(%q) = %q; want %q", tc.in, line, tc.wantLine)
+			}
+			for _, r := range line {
+				if r < 0x20 || r == 0x7f {
+					t.Errorf("stripEscapesToLine(%q) left %#U behind: %q", tc.in, r, line)
+				}
+			}
+		})
+	}
 }
 
 // The gauge's own spelling, pinned value by value. This package carries a twin of internal/tui's
