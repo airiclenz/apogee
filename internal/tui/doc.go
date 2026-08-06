@@ -165,11 +165,15 @@
 // the visual contract). filecache.go
 // backs the "@" overlay with a short-TTL, single-walk workspace listing filtered in memory, so a
 // typing burst reuses one os.Root walk instead of re-scanning the disk per keystroke. mouse.go
-// implements click-to-position caret and drag-to-select (with OSC52 copy) in BOTH rectangles —
+// implements click-to-position caret and drag-to-select (with OSC52 copy) in TWO rectangles —
 // apogee captures the mouse for transcript scrolling, which turns off the terminal's own click-drag
 // selection, so both are re-implemented here, the prompt's in rune offsets into the textarea Value
 // and the transcript's in content coordinates over the cached rendered lines ("copy what you see").
-// The handlers arbitrate by region, so the two never coexist. Scope is the owner's rule, not an
+// A THIRD rectangle joins them while /settings is open: the pane's row list, where a click selects a
+// key, the wheel walks the list and the row being typed into takes a caret seat and a drag of its own
+// ([Model.settingsPaint], whose geometry is the painter's own — renderPopupPlaced reports where the
+// rows landed rather than the mouse re-deriving it). The handlers arbitrate by region, so no two of
+// them coexist. Scope is the owner's rule, not an
 // accident of routing: the TRANSCRIPT selects in every state, while the PROMPT follows
 // [Model.inputEditable] — idle, ask, running — and stays inert at approval/errored, where a/d/s and
 // Enter-dismiss own the keyboard and the transcript covers copying. A transcript selection survives

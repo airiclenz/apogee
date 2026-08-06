@@ -115,12 +115,22 @@ const (
 // a plain value on a Model that is copied every Update. Its zero value is an inert widget — a
 // textarea nothing has focused, which answers "" and takes no keys — so a closed pane is still
 // exactly the zero value, and no state outside settingsValueBuffer can type into anything.
+//
+// sel is a drag-selection inside that field, and it is the pane's own rather than the Model's
+// ([Model.sel]): the prompt box is still drawn under this pane, so a span stored in the prompt's slot
+// would be highlighted down there, on a box the pane's own modality keeps the human out of. It is a
+// [promptSel] because it IS one — the same two ends of the same kind of field — but only the two RUNE
+// offsets are carried: the caret is a GLYPH inside the painted cell here (settingsCaret), so it moves
+// the text under a drag, and a visual cell recorded at the press would name a different rune a moment
+// later. The highlight derives its columns from the offsets at paint time instead
+// ([Model.highlightSettingsEdit]).
 type settingsPane struct {
 	open     bool
 	kind     settingsKind
 	selected int
 	sub      int
 	editor   lineEditor
+	sel      promptSel
 	failure  settingFailure
 }
 
@@ -196,6 +206,12 @@ const (
 // popup module, whose cells are plain escape-free text it styles whole (doc.go) — there is no seat on
 // a popup row for the real cursor the chat box gets (lineEditor.textWithCaret).
 const settingsCaret = "▏"
+
+// settingsValueColumn is which column of a row the VALUE is laid out in — the second, by the fixed
+// schema settingRowCells composes ("key", "value", "(env)", "· note"). It is stated once because the
+// MOUSE needs it: a click seating the caret in the edit field has to know which cell of the painted
+// row that field is, and counting the schema out a second time is how the two come to disagree.
+const settingsValueColumn = 1
 
 // settingsUnsetValue is how the value cell spells a value that is not there — the state a reset
 // returns a key with no built-in default to. "" would leave the marker floating after a blank cell,
@@ -297,6 +313,11 @@ func (m Model) settingRows() []SettingRow {
 // whose key went away under it falls back to the key list rather than committing a value to whatever
 // now sits at that index.
 func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Any keypress drops a drag-selection in the edit field, for handleKey's own reason one surface
+	// down (model.go): typing past a span, committing it or walking away from it all move on from what
+	// was selected, and clearing at the pane's one chokepoint keeps every branch below from having to
+	// remember to.
+	m.settings.sel = promptSel{}
 	rows := m.settingRows()
 	n := len(rows)
 	m.settings.clampSelection(n)
@@ -914,6 +935,7 @@ func (m Model) settingsSelection(n int) int {
 type settingsDisplay struct {
 	rows     []popupRow
 	kinds    []popupRowKind // parallel to rows: which are section headers, which is being edited
+	keys     []int          // parallel to rows: which SETTING row each one shows; −1 for a header or a spacer
 	selected int            // index into rows of the selected key row; −1 when nothing is highlighted
 }
 
@@ -925,7 +947,9 @@ type settingsDisplay struct {
 // Headers and spacers are rows the popup module paints and NOT rows the selection can land on. That
 // is why the selection indexes the setting rows and this method reports where the highlighted one
 // ended up: ↑/↓ walks keys, the labels scroll past with them, and no keypress can leave the ❯ on a
-// label there is nothing to do with.
+// label there is nothing to do with. The keys list says the same thing for every display row rather
+// than for the selected one alone — which is what a POINTER needs, since a click can land on any row
+// of the list and has to be told the ones that are labels (settingsPaint.rowAt, mouse.go).
 //
 // The spacer is what makes the sections read as sections (docs/layout/settings-screen-layout.md) —
 // a header flush against the last key of the section above it divides nothing — and the FIRST
@@ -937,18 +961,19 @@ func (m Model) settingsDisplayRows(rows []SettingRow, selected int) settingsDisp
 	}
 	out := make([]popupRow, 0, len(rows)+len(rows)/2) //nolint:mnd // a header and a spacer every few keys, at a guess
 	kinds := make([]popupRowKind, 0, cap(out))
-	add := func(row popupRow, kind popupRowKind) {
-		out, kinds = append(out, row), append(kinds, kind)
+	keys := make([]int, 0, cap(out))
+	add := func(row popupRow, kind popupRowKind, key int) {
+		out, kinds, keys = append(out, row), append(kinds, kind), append(keys, key)
 	}
 	display := -1
 	section := ""
 	for i, row := range rows {
 		if row.Section != "" && row.Section != section {
 			if len(out) > 0 {
-				add(popupRow{""}, popupRowPlain) // the spacer, blank in every column
+				add(popupRow{""}, popupRowPlain, -1) // the spacer, blank in every column
 			}
 			section = row.Section
-			add(popupRow{stripEscapes(row.Section)}, popupRowHeading)
+			add(popupRow{stripEscapes(row.Section)}, popupRowHeading, -1)
 		}
 		if i == selected {
 			display = len(out)
@@ -964,9 +989,19 @@ func (m Model) settingsDisplayRows(rows []SettingRow, selected int) settingsDisp
 			}
 			kind = popupRowEditing
 		}
-		add(cells, kind)
+		add(cells, kind, i)
 	}
-	return settingsDisplay{rows: out, kinds: kinds, selected: display}
+	return settingsDisplay{rows: out, kinds: kinds, keys: keys, selected: display}
+}
+
+// settingKeyAt is the SETTING row display row i shows, and whether it shows one at all: a section
+// label and the spacer above it show none. It is the one read of the keys list, so a display index
+// from anywhere — a mouse click, a test — cannot index it out of range.
+func (d settingsDisplay) settingKeyAt(i int) (int, bool) {
+	if i < 0 || i >= len(d.keys) || d.keys[i] < 0 {
+		return 0, false
+	}
+	return d.keys[i], true
 }
 
 // settingsEditing reports whether the pane is EDITING the given row — the state the row is painted
@@ -1003,10 +1038,22 @@ func (m Model) settingsEditing(row SettingRow) bool {
 func (m Model) settingBufferCells(row SettingRow) popupRow {
 	return popupRow{
 		stripEscapes(row.Path),
-		stripEscapes(m.settings.editor.textWithCaret(settingsCaret)),
+		m.settingsEditText(),
 		stripEscapes(settingsSourceMarker(row.Source)),
 		stripEscapes(m.settingsNote(row)),
 	}
+}
+
+// settingsEditText is what the edit row's value cell HOLDS: the field's text with the caret glyph
+// drawn in where the next keystroke lands (lineEditor.textWithCaret), escape-stripped like every
+// other cell handed the popup module (doc.go).
+//
+// It is a derivation of its own because the mouse reads it too: a click's column is turned into a
+// rune offset by measuring these very cells, and the highlight measures them back the other way
+// (mouse.go). One string for the painter and the pointer, so the glyph the human clicks on is the
+// glyph the caret lands at.
+func (m Model) settingsEditText() string {
+	return stripEscapes(m.settings.editor.textWithCaret(settingsCaret))
 }
 
 // settingsPaneHint is the legend at the pane's foot: one per step, because the keys mean different
@@ -1189,6 +1236,26 @@ func (m Model) renderSettings() string {
 	if row, ok := m.settingsEnumTarget(rows); ok {
 		return m.renderSettingsEnum(row)
 	}
+	spec, display, ok := m.settingsKeyListSpec(rows)
+	if !ok {
+		return "" // the frame cannot seat this pane (settingsGiveWayNote says so on the status line)
+	}
+	view, place := renderPopupPlaced(m.th, spec, m.width)
+	// The drag-selection is overlaid on the COMPOSED pane, the highlightInput idiom: the module takes
+	// plain cells and styles rows whole (doc.go), so a shaded run cannot be handed to it as a cell.
+	return m.highlightSettingsEdit(view, display, place)
+}
+
+// settingsKeyListSpec composes the key list's [popupSpec] for THIS frame — the display rows, the
+// description header and the row budget the frame granted the pane — with the display list it was
+// built from. ok is false when the frame cannot seat the pane at all.
+//
+// It is a step of its own because the painter is not the composition's only reader: the MOUSE maps a
+// click back through the very rows, the very header height and the very window that were drawn
+// (settingsPaint, mouse.go). Composing once and spending the same numbers twice is what keeps a click
+// naming the row under the pointer — a second derivation drifts the first time a description wraps to
+// a different number of lines than it assumed.
+func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDisplay, bool) {
 	display := m.settingsDisplayRows(rows, m.settingsSelection(len(rows)))
 	body := m.settingsBody(rows)
 	// The body's own claim is its real height — the fixed description region and the blank under it
@@ -1200,9 +1267,9 @@ func (m Model) renderSettings() string {
 	maxBody, maxRows, seated := m.popupBudget(paneSettings, len(display.rows), len(display.rows),
 		popupChrome, popupFloor{body: popupBodyLineCount(m.th, body, m.width)})
 	if !seated {
-		return "" // the frame cannot seat this pane (settingsGiveWayNote says so on the status line)
+		return popupSpec{}, settingsDisplay{}, false
 	}
-	return renderPopup(m.th, popupSpec{
+	return popupSpec{
 		title:       settingsTitle,
 		body:        body,
 		bodyLead:    settingsDescLabel,
@@ -1212,7 +1279,7 @@ func (m Model) renderSettings() string {
 		selected:    display.selected,
 		hint:        m.settingsPaneHint(),
 		maxRows:     maxRows,
-	}, m.width)
+	}, display, true
 }
 
 // renderSettingsEnum paints the value sub-list — the second step of an enum edit — in the SAME pane,

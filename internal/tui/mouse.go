@@ -268,6 +268,25 @@ func cellToRuneOffset(runes []rune, cells int) int {
 	return len(runes)
 }
 
+// cellToRuneOffsetIn is cellToRuneOffset in a STATED measure: the offset of the last rune whose text
+// still fits inside cells when measured the way the given authority measures (width.go).
+//
+// The two exist apart because they invert two different painters. cellToRuneOffset's oracle is the
+// textarea WIDGET, which measures its own cursor with uniseg whatever the terminal is doing, and its
+// answer is fed straight back to that widget. This one's oracle is THIS package's painter: the cells
+// it walks are cells of a line the popup module laid out and drew (a /settings row), so a click's
+// column has to be read in the authority the row was measured and cut in, or the pointer names one
+// glyph and the caret lands on its neighbour on every terminal the two measures disagree on
+// (ADR 0030 — a VARIATION SELECTOR-16 cluster is one cell to the painter's default and two to uniseg).
+func cellToRuneOffsetIn(measure widthAuthority, runes []rune, cells int) int {
+	for i := range runes {
+		if measure.Width(string(runes[:i+1])) > cells {
+			return i
+		}
+	}
+	return len(runes)
+}
+
 // caretOffset converts a (logical row, column) cursor position into a rune offset into value,
 // counting each '\n' as one rune so the result indexes []rune(value) directly. Soft-wraps are
 // not in value, so they contribute nothing — only real newlines do, which is what copied text
@@ -349,14 +368,22 @@ func selectionText(value string, a, b int) string {
 }
 
 // handleMouseClick starts a fresh, collapsed selection under a left-click. It arbitrates by
-// region: a click in the prompt's editable text area positions the caret and arms a prompt
-// selection there; otherwise a click in the transcript viewport arms a transcript selection at
-// that rendered cell; a click in neither region clears both. Starting one selection clears the
-// other, so the two never coexist. Non-left buttons are ignored.
+// region: a click on the open /settings pane's row list belongs to the pane (selecting a row, or
+// seating the caret in the row being typed into); a click in the prompt's editable text area
+// positions the caret and arms a prompt selection there; otherwise a click in the transcript viewport
+// arms a transcript selection at that rendered cell; a click in none of them clears all three. Starting
+// one selection clears the others, so no two coexist. Non-left buttons are ignored.
+//
+// The pane is asked FIRST because it is drawn over the transcript, and only for its own rows: it takes
+// no more of the frame than its list needs, so the transcript above it keeps its pointer.
 func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if msg.Button != tea.MouseLeft {
 		return m, nil
 	}
+	if next, claimed := m.handleSettingsClick(msg); claimed {
+		return next, nil
+	}
+	m.settings.sel = promptSel{} // the pane did not claim this click: its highlight goes, as the other two would
 	if m.inputEditable() {
 		if visRow, visCol, ok := m.pointInputRow(msg.X, msg.Y); ok {
 			m.transcriptSel = transcriptSel{} // the prompt claims it: drop any transcript selection
@@ -393,6 +420,9 @@ func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 	if msg.Button != tea.MouseLeft {
 		return m, nil
 	}
+	if next, claimed := m.handleSettingsMotion(msg); claimed {
+		return next, nil
+	}
 	if m.sel.active && m.inputEditable() {
 		if visRow, visCol, ok := m.pointInputRow(msg.X, msg.Y); ok {
 			off := m.caretTo(visRow, visCol)
@@ -424,6 +454,20 @@ func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 // drag-select like any other, because it never reaches this branch.
 func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
 	switch {
+	case m.settings.sel.active:
+		// The /settings edit field copies what a release took, exactly as the prompt does: the value is
+		// a string the human is typing, so the exact runes are what belongs on the clipboard. A bare
+		// click leaves the caret where it landed and copies nothing.
+		if m.settings.sel.anchorOff == m.settings.sel.headOff {
+			m.settings.sel.active = false
+			return m, nil
+		}
+		text := selectionText(m.settings.editor.value(), m.settings.sel.anchorOff, m.settings.sel.headOff)
+		if text == "" {
+			m.settings.sel.active = false
+			return m, nil
+		}
+		return m.copyFlash(text)
 	case m.sel.active:
 		if m.sel.anchorOff == m.sel.headOff {
 			m.sel.active = false
@@ -608,6 +652,293 @@ func transcriptSelectionText(measure widthAuthority, lines []string, a, b conten
 		out = append(out, strings.TrimRight(ansi.Strip(measure.Cut(line, c0, c1)), " "))
 	}
 	return strings.Join(out, "\n")
+}
+
+// ----------------------------------------------------------------------------
+// Mouse in the /settings pane (settings.go, docs/layout/settings-screen-layout.md requirement 7)
+// ----------------------------------------------------------------------------
+//
+// A third rectangle joins the prompt's and the transcript's, and it claims the pointer only where the
+// pane is actually DRAWN. /settings is the frame's one full-height pane but it takes only the rows its
+// list needs (frameRowPlan), so on a tall window the transcript is still on screen above it and a drag
+// up there copies what it always did. Inside the pane the pointer does what the keys do: a click on a
+// key row selects it, the wheel walks the list, and on the row being typed into a click seats the
+// caret and a drag selects the value's text.
+//
+// The mapping is the PAINTER's own arithmetic rather than a second copy of it. The pane composes its
+// spec once for both readers (settingsKeyListSpec) and renderPopupPlaced reports where the row block
+// landed among the pane's painted rows and which window of rows it holds (popupPlacement) — so the row
+// under the pointer is the row the frame drew there at every description length, window height and
+// scroll position. The one fact stated on this side is where the pane BEGINS on the screen, and that is
+// read off the frame's own stacking (View): the transcript's rows, the single gap row above the overlay
+// slot, and whatever else that slot is holding.
+//
+// Two states take no pointer. The value sub-list replaces the key list with a menu of a different shape
+// (renderSettingsEnum), and an armed reset is a question waiting on ⏎ or esc; a click in either names
+// nothing rather than guessing at the list it covers. And while a value is being typed the selection
+// never MOVES: the buffer belongs to the selected row (settingsBufferTarget), so a click that walked
+// the highlight would leave the field editing a key it is no longer drawn on.
+
+// settingsPaneRect is where the open /settings pane is drawn: the screen row its top border lands on
+// and how many rows the pane takes. ok is false when it is not on the frame at all — closed, or given
+// way to a window too short to seat it (settingsGiveWayNote).
+//
+// The row is derived from the frame's OWN stacking rather than counted up from the bottom the way the
+// input box is (inputContentRect): View draws the transcript first, then the single blank gap row, then
+// the transcript-side overlay slot this pane shares with the approval prompt, the browser and the
+// picker. Every one of those terms is named here — the slot's other tenants included, though none of
+// them can be open beside this pane today — because an omitted term is exactly the off-by-one that puts
+// the click on the wrong row.
+func (m Model) settingsPaneRect() (y0, h int, ok bool) {
+	if !m.settings.open {
+		// Asked before the frame is composed, because every click and every wheel notch asks: with no
+		// pane up there is nothing to place, and composing the frame's overlays to learn that would put
+		// a render on the path of a click the pane has no part in.
+		return 0, 0, false
+	}
+	ov := m.frameOverlays()
+	if ov.settings == "" {
+		return 0, 0, false
+	}
+	y0 = ov.transcriptRows(m.transcriptBudget()) + gapHeight
+	for _, above := range []string{ov.prompt, ov.browser, ov.picker} {
+		if above != "" {
+			y0 += lipgloss.Height(above)
+		}
+	}
+	return y0, lipgloss.Height(ov.settings), true
+}
+
+// settingsPaint is the open key list as it was DRAWN this frame: the display rows the pane composed,
+// the screen row its row block starts on, which display row that first line shows, and how many row
+// lines there are. It is everything a pointer needs in order to name what is under it.
+//
+// Mapping a screen row back to a display row is a subtraction because a settings row is exactly one
+// painted line — the pane asks the module for neither wrapped rows nor row gaps (settingsKeyListSpec),
+// which is the condition popupPlacement states for reading it this way.
+type settingsPaint struct {
+	display settingsDisplay
+	y0      int // screen row of the row block's first line
+	start   int // the display row that line shows
+	rows    int // how many row lines are drawn
+}
+
+// settingsPaint composes the open pane exactly as the frame does and reports where its rows landed. ok
+// is false wherever there is nothing to address: the pane closed or given way, or a second step up that
+// takes no pointer.
+//
+// It renders the pane to get the answer, which is the same price the transcript mapping already pays
+// (contentLineAt spends a frameOverlays of its own on every click): the painter is the authority on
+// where a row is, and asking it costs less than a second arithmetic that can disagree with it.
+func (m Model) settingsPaint() (settingsPaint, bool) {
+	paneTop, _, ok := m.settingsPaneRect()
+	if !ok {
+		return settingsPaint{}, false
+	}
+	rows := m.settingRows()
+	if _, sub := m.settingsEnumTarget(rows); sub {
+		return settingsPaint{}, false // the value sub-list is a menu of its own; no pointer names it
+	}
+	spec, display, seated := m.settingsKeyListSpec(rows)
+	if !seated {
+		return settingsPaint{}, false
+	}
+	_, place := renderPopupPlaced(m.th, spec, m.width)
+	return settingsPaint{
+		display: display,
+		y0:      paneTop + place.rowsAt,
+		start:   place.start,
+		rows:    place.end - place.start,
+	}, true
+}
+
+// rowAt maps a screen row to the DISPLAY row drawn on it — the pane's own list index, its section
+// labels and spacers included. ok is false above or below the drawn window, so a click on the pane's
+// title, its description header or its legend names no row.
+func (p settingsPaint) rowAt(y int) (int, bool) {
+	if p.rows < 1 || y < p.y0 || y >= p.y0+p.rows {
+		return 0, false
+	}
+	return p.start + (y - p.y0), true
+}
+
+// settingsContentX is the screen column a pane's content lines begin at: the box's left border glyph
+// and the padding cell drawn inside it, both asked of the border style the box is drawn with
+// (drawTitledBox reads the same two).
+func (m Model) settingsContentX() int {
+	return m.th.popupBorder.GetBorderLeftSize() + m.th.popupBorder.GetPaddingLeft()
+}
+
+// settingsValueX is the screen column a row's VALUE cell starts at: the pane's content origin, the
+// marker column every row leads with (popupRowIndent), and the columns laid out before the value
+// (popupCellColumn, over the widths the module measured across the whole list). Both readers of the
+// edit row spend it — the click that seats a caret and the highlight that shades a span — so the two
+// can never land on different columns of the same row.
+func (m Model) settingsValueX(display settingsDisplay) int {
+	return m.settingsContentX() + popupRowIndent +
+		popupCellColumn(m.th, popupColumnWidths(m.th, display.rows), settingsValueColumn)
+}
+
+// settingsCaretAt is the rune offset in the edit field's value that a display-cell column of its value
+// cell names. The cell is the row's PAINTED text — the caret glyph standing in it included
+// (settingsEditText) — so the column is read in the painter's own measure (cellToRuneOffsetIn) and the
+// glyph is then taken back out: it occupies a cell at the caret, and every rune after it is painted one
+// position further along than it stands in the value.
+func (m Model) settingsCaretAt(cells int) int {
+	text := []rune(m.settingsEditText())
+	off := cellToRuneOffsetIn(m.th.measure, text, cells)
+	if off > m.settings.editor.caretRune() {
+		off-- // past the caret glyph: the painted position is one ahead of the value's own
+	}
+	return off
+}
+
+// settingsEditCells is the display-cell span a range of the field's value occupies inside the value
+// cell — settingsCaretAt read the other way, for the highlight. The offsets are mapped THROUGH the
+// painted text, the caret glyph shifting everything after it one position along, and measured in the
+// painter's authority, so the shaded run covers exactly the glyphs a release would copy.
+func (m Model) settingsEditCells(a, b int) (int, int) {
+	text := []rune(m.settingsEditText())
+	if len(text) == 0 {
+		return 0, 0 // no field open: the caret glyph alone is one rune, so this is "nothing to shade"
+	}
+	caret := m.settings.editor.caretRune()
+	value := len(text) - 1 // the painted text is the value plus the caret glyph
+	cell := func(off int) int {
+		off = clampInt(off, 0, value)
+		if off > caret {
+			off++ // step over the caret glyph the painter drew before this rune
+		}
+		return m.th.measure.Width(string(text[:clampInt(off, 0, len(text))]))
+	}
+	lo, hi := a, b
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	return cell(lo), cell(hi)
+}
+
+// handleSettingsClick answers a left-click inside the open /settings pane: on the row being typed into
+// it seats the caret at the clicked glyph and arms a selection there, on any other KEY row it moves the
+// selection to that row, and on a section label, a spacer or the pane's chrome it does nothing at all.
+// ok is false when the point falls outside the pane's row block, which leaves the click to the prompt
+// and the transcript exactly as it was.
+//
+// A click the pane DOES claim drops both of the other selections: starting one selection clears the
+// others, the arbitration this file has always made, and here it also says the pointer has moved to
+// the surface the keyboard is already on. The converse is the caller's, and it is the half a live
+// selection makes silent: a click the pane does NOT claim drops the pane's own span, or the field's
+// highlight would keep answering every motion and every release taken elsewhere on the frame.
+func (m Model) handleSettingsClick(msg tea.MouseClickMsg) (Model, bool) {
+	paint, ok := m.settingsPaint()
+	if !ok {
+		return m, false
+	}
+	display, ok := paint.rowAt(msg.Y)
+	if !ok {
+		return m, false
+	}
+	m.sel, m.transcriptSel = promptSel{}, transcriptSel{}
+	switch {
+	case m.settings.kind == settingsValueBuffer:
+		if display != paint.display.selected {
+			break // another row: the buffer stays where it is, and the click is swallowed
+		}
+		off := m.settingsCaretAt(max(0, msg.X-m.settingsValueX(paint.display)))
+		m.settings.editor.caretToRune(off)
+		m.settings.sel = promptSel{active: true, anchorOff: off, headOff: off}
+	case m.settings.kind == settingsKeyList:
+		if key, isKey := paint.display.settingKeyAt(display); isKey {
+			m.settings.selected = key
+		}
+	}
+	return m, true
+}
+
+// handleSettingsMotion extends the edit field's selection as the mouse drags with the left button held:
+// the caret follows the moving end, exactly as it does in the prompt, while the click-set anchor stays
+// put. A drag never STARTS one, and motion that strays off the edited row is ignored so a stray past
+// its ends neither collapses the span nor hijacks another row.
+func (m Model) handleSettingsMotion(msg tea.MouseMotionMsg) (Model, bool) {
+	if !m.settings.sel.active || m.settings.kind != settingsValueBuffer {
+		return m, false
+	}
+	paint, ok := m.settingsPaint()
+	if !ok {
+		return m, false
+	}
+	if display, inRows := paint.rowAt(msg.Y); !inRows || display != paint.display.selected {
+		return m, true // off the field, but still the pane's drag: the span keeps what it had
+	}
+	off := m.settingsCaretAt(max(0, msg.X-m.settingsValueX(paint.display)))
+	m.settings.editor.caretToRune(off)
+	m.settings.sel.headOff = off
+	return m, true
+}
+
+// settingsWheel walks the /settings key list one row per notch while the pointer is over the pane — the
+// keyboard's ↑/↓ under the wheel, with the scroll window following it exactly as it does for them
+// (popupRowWindow re-derives around the selection on every frame). handled is false anywhere else,
+// which leaves the notch to the transcript scrolling above and behind the pane.
+//
+// It CLAMPS at the ends where the keys WRAP, and the difference is the gesture rather than an
+// inconsistency: ↑/↓ walk a list as a cycle, while a wheel is a scroll — rolling past the last key and
+// landing back on the first would move the human somewhere they did not aim. A wheel over a pane that
+// is asking something (the value sub-list, an armed reset, an open buffer) moves nothing: the step owns
+// the surface until it is answered, as it owns every key.
+func (m Model) settingsWheel(msg tea.MouseWheelMsg) (Model, bool) {
+	y0, h, ok := m.settingsPaneRect()
+	if !ok || msg.Y < y0 || msg.Y >= y0+h {
+		return m, false
+	}
+	if m.settings.kind != settingsKeyList {
+		return m, true
+	}
+	n := len(m.settingRows())
+	sel := m.settingsSelection(n)
+	if sel < 0 {
+		return m, true // no rows to walk; the pane is showing its own empty-list row
+	}
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		m.settings.selected = clampInt(sel-1, 0, n-1)
+	case tea.MouseWheelDown:
+		m.settings.selected = clampInt(sel+1, 0, n-1)
+	}
+	return m, true
+}
+
+// highlightSettingsEdit overlays the edit row's drag-selection on the composed pane — highlightInput's
+// idiom one surface along. It is done on the pane's PAINTED lines rather than in the cell the row is
+// composed from because the popup module takes plain, escape-free cells and styles its rows whole
+// (doc.go): a pre-shaded cell would hand it the very escapes its contract forbids.
+//
+// The row is found through the placement the paint reported and the columns through the layout the
+// module measured, so a span can never be shaded onto the row above or across the wrong column. With no
+// active selection, none of any width, or the edited row scrolled out of the window, the view is
+// returned unchanged.
+func (m Model) highlightSettingsEdit(view string, display settingsDisplay, place popupPlacement) string {
+	if m.settings.kind != settingsValueBuffer || !m.settings.sel.active {
+		return view
+	}
+	if m.settings.sel.anchorOff == m.settings.sel.headOff {
+		return view // a click in progress shades nothing (promptSel's own rule)
+	}
+	if display.selected < place.start || display.selected >= place.end {
+		return view
+	}
+	lines := strings.Split(view, "\n")
+	row := place.rowsAt + (display.selected - place.start)
+	if row < 0 || row >= len(lines) {
+		return view
+	}
+	x := m.settingsValueX(display)
+	c0, c1 := m.settingsEditCells(m.settings.sel.anchorOff, m.settings.sel.headOff)
+	if c1 <= c0 {
+		return view
+	}
+	lines[row] = shadeCells(m.th.measure, lines[row], x+c0, x+c1, m.th.selection)
+	return strings.Join(lines, "\n")
 }
 
 // highlightTranscript overlays the transcript drag-selection's background on the viewport's

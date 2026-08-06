@@ -220,6 +220,14 @@ func (e *lineEditor) caretToOffset(byteOff int) {
 	e.seatCaret(row, col)
 }
 
+// caretToRune drives the caret to a RUNE offset into the current value — caretToOffset for a caller
+// that counts in runes rather than in bytes, which is what a SELECTION counts in (promptSel) and what
+// a click on a painted cell resolves to (cellToRuneOffsetIn, mouse.go). The conversion lives here so
+// no caller has to pair the two functions itself and get the order right.
+func (e *lineEditor) caretToRune(off int) {
+	e.caretToOffset(byteOffsetOf(e.input.Value(), off))
+}
+
 // deleteSelection cuts a drag-selection's span out of the value and leaves the caret where that span
 // began. It is what Backspace and Del mean while the field holds a highlight: the human can SEE what
 // is selected, so the destructive keys must take exactly that rather than the one rune beside the

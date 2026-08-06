@@ -801,6 +801,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// which is state-gated (idle/ask/running feed the input; only PgUp/PgDn scroll from the
 		// keyboard everywhere). Mouse reporting is enabled in View
 		// (MouseModeCellMotion); the viewport's own Update turns the wheel into a scroll.
+		// A notch over the open /settings pane walks its key list instead (mouse.go): the pane is what
+		// is under the pointer there, and the transcript keeps every notch outside it.
+		if next, handled := m.settingsWheel(msg); handled {
+			return next, nil
+		}
 		return m.scrollViewport(msg)
 
 	case tea.MouseClickMsg:

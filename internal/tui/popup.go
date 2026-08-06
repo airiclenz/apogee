@@ -307,6 +307,30 @@ func (s popupSpec) rowKind(i int) popupRowKind {
 	return s.rowKinds[i]
 }
 
+// popupPlacement is where a rendered pane's ROW LIST landed inside it: the index among the box's
+// PAINTED rows — the top border counted as row 0 — of the row block's first line, and the
+// [start, end) window of spec.rows that block holds. It is meaningful only for a pane that was
+// actually drawn (renderPopupPlaced returning a non-empty view).
+//
+// It exists for the surface that has to map a SCREEN row back to one of its own rows — the mouse in
+// the /settings pane (mouse.go) — and it is the PAINTER's own answer rather than a second derivation
+// of it: the title row, the body block and the row window are all things the module decides, and a
+// caller re-deriving them would name the row above or below the one under the pointer the first time
+// a description wrapped differently than it guessed.
+//
+// Mapping a line back to a row is a subtraction only where every row is ONE line — a spec with
+// neither popupSpec.wrapRows nor popupSpec.rowGap, which is what /settings is. A spec whose rows can
+// cost more than a line each would need their heights as well, and the caller that needs that can
+// have them when it exists.
+type popupPlacement struct {
+	rowsAt     int // painted row index of the row block's first line
+	start, end int // the window of spec.rows that block holds
+}
+
+// popupBoxBorderRow is the one row drawTitledBox draws above a pane's content lines: its top border.
+// It is what turns an index into the composed CONTENT into an index into the pane's painted rows.
+const popupBoxBorderRow = 1
+
 // renderPopup paints the bordered selector pane described by spec at the given TOTAL width
 // (lipgloss v2 folds the border and padding into width, so every returned line is exactly width
 // cells). The inner content budget follows the border style — like renderStartupBox — rather
@@ -314,12 +338,20 @@ func (s popupSpec) rowKind(i int) popupRowKind {
 // can wrap the box. The selected row within the scrolled window carries the glyphUser marker and
 // the full-bar highlight; the others render faint.
 func renderPopup(th theme, spec popupSpec, width int) string {
+	view, _ := renderPopupPlaced(th, spec, width)
+	return view
+}
+
+// renderPopupPlaced is renderPopup with the pane's row geometry reported alongside the paint
+// (popupPlacement) — one composition, two answers, so a surface that maps a click back to a row
+// reads the very numbers the painter spent. Every other pane asks for the paint alone.
+func renderPopupPlaced(th theme, spec popupSpec, width int) (string, popupPlacement) {
 	frame := th.popupBorder.GetHorizontalFrameSize()
 	if width <= frame {
 		// No room for even one content cell inside the border + padding: lipgloss cannot render a
 		// bordered box narrower than frame+1, so a box here would overflow the View. Degrade to
 		// nothing instead — the same way footerView blanks below 3 columns (plan D3).
-		return ""
+		return "", popupPlacement{}
 	}
 	inner := popupInnerWidth(th, width)
 
@@ -342,25 +374,33 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 	// elisions on its title, the one row it still has (popupTitleLine). Composing in the other order
 	// would mean either a silent drop or a fifth row the frame has not got.
 	body, hiddenBody := popupBodyLines(th, spec.body, spec.bodyLead, spec.maxBodyRows, inner, blackFill)
-	rows, hiddenRows := popupRowLines(th, spec, inner, blackFill)
+	block := popupRowLines(th, spec, inner, blackFill)
 
 	// The two counts merge into the ONE marker the title row can seat: a hidden body block and a
 	// hidden row list are the same fact about the pane — content it holds and is not showing — and a
 	// row narrow enough to make the pane trade wording for width has no room to state it twice. The
 	// body's count only lands here when the body block had no row to put its own marker on.
-	hidden := hiddenRows
+	hidden := block.hidden
 	if len(body) == 0 {
 		hidden += hiddenBody
 	}
 
 	title := popupTitleLine(th, popupHeading(spec, body, hiddenBody), hidden, inner)
 
-	lines := make([]string, 0, len(body)+len(rows)+2) //nolint:mnd // +2: the optional title and hint rows
+	lines := make([]string, 0, len(body)+len(block.lines)+2) //nolint:mnd // +2: the optional title and hint rows
 	if title != "" && !spec.titleInBorder {
 		lines = append(lines, blackFill.Render(th.presentTitle.Render(truncateToWidth(th, title, inner))))
 	}
+	// The row block's first LINE is where the rows begin among the painted ones: the box's top border,
+	// the title row where the spec spends one on itself, the body block, and whatever blank the row
+	// block leads with (popupSpec.rowPadAbove) all stand above it.
+	place := popupPlacement{
+		rowsAt: popupBoxBorderRow + len(lines) + len(body) + block.lead,
+		start:  block.start,
+		end:    block.end,
+	}
 	lines = append(lines, body...)
-	lines = append(lines, rows...)
+	lines = append(lines, block.lines...)
 
 	if spec.hint != "" {
 		lines = append(lines, blackFill.Render(th.statusFaint.Render(truncateToWidth(th, spec.hint, inner))))
@@ -383,7 +423,7 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 	// the pane is exactly as tall as the frame budgeted for it. lipgloss.JoinVertical went with it —
 	// it left-aligned by padding every row out to the widest row IT measured, which is the same
 	// GraphemeWidth pad one level in.
-	return strings.Join(drawTitledBox(th.measure, th.popupBorder, lines, width, borderTitle, th.presentTitle), "\n")
+	return strings.Join(drawTitledBox(th.measure, th.popupBorder, lines, width, borderTitle, th.presentTitle), "\n"), place
 }
 
 // popupGutter separates two adjacent popup columns: two spaces, the minimum gap between the widest
@@ -470,6 +510,34 @@ func layoutPopupRow(th theme, row popupRow, widths []int) string {
 	return strings.TrimRight(b.String(), " ")
 }
 
+// popupCellColumn is the display column cell i of a laid-out row STARTS at, given the column widths
+// the module measured over the whole list (popupColumnWidths): layoutPopupRow's own walk read
+// forwards, gutters and collapsed columns included, so the answer is where the painter put that cell
+// rather than where a second sum thinks it should be.
+//
+// It exists for the one caller that has to go the other way — the mouse seating a caret in the
+// /settings edit row (mouse.go), which knows a screen column and needs the cell under it. A column no
+// row filled collapses (no width, no gutter), so asking for one answers with the start of the next
+// cell that is actually drawn; an index past the schema answers with the end of the row.
+func popupCellColumn(th theme, widths []int, i int) int {
+	gutter := th.measure.Width(popupGutter)
+	col, written := 0, 0
+	for c, w := range widths {
+		if w == 0 {
+			continue // a column empty in every row collapses: no width, no gutter (layoutPopupRow)
+		}
+		if written > 0 {
+			col += gutter // the gutter is written BEFORE the cell, so it belongs to this column's start
+		}
+		if c >= i {
+			return col
+		}
+		col += w
+		written++
+	}
+	return col
+}
+
 // singleCellRows lifts a plain label list into one-cell popup rows — the shape a producer with
 // nothing to align (a file suggestion, an ask_user choice) hands the module. One cell is one
 // column, so the composed line is the label itself: the contract's promise that a single-cell row
@@ -480,6 +548,19 @@ func singleCellRows(labels []string) []popupRow {
 		rows[i] = popupRow{label}
 	}
 	return rows
+}
+
+// popupRowBlock is a spec's composed row list: the painted lines, how many rows the window could not
+// seat at all (hidden), the [start, end) window of spec.rows the lines hold, and how many lines the
+// block leads with before its first ROW (lead — the blank popupSpec.rowPadAbove asks for, and nothing
+// else). The counts travel with the lines because renderPopup owes two different answers about the
+// same composition: what to paint, and where among the painted rows each row landed
+// (popupPlacement).
+type popupRowBlock struct {
+	lines      []string
+	hidden     int
+	start, end int
+	lead       int
 }
 
 // popupRowLines composes the spec's rows into the styled, black-filled content lines the pane
@@ -518,7 +599,7 @@ func singleCellRows(labels []string) []popupRow {
 // With wrapped rows that case is reachable one step earlier than a zero budget: a budget of two
 // lines and a three-line answer seats nothing either, and it is counted the same way rather than
 // shown two thirds of.
-func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style) ([]string, int) {
+func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style) popupRowBlock {
 	blocks := popupRowBlocks(th, spec.rows, spec.wrapRows, inner)
 	heights := popupRowHeights(blocks)
 
@@ -536,7 +617,7 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 	if start == end {
 		// No row on the screen: with rows on offer this is the budget's call, and the pane owes the
 		// human the count (an empty offering owes nothing — there is no list to hide).
-		return nil, len(blocks)
+		return popupRowBlock{hidden: len(blocks), start: start, end: end}
 	}
 	if popupRowBlockLines(heights[start:end], gap, popupRowPadLines(padAbove, padBelow)) > capLines {
 		// The block fits, the blank lines around it do not: the rows come first.
@@ -544,8 +625,10 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 	}
 
 	out := make([]string, 0, capLines)
+	blockLead := 0
 	if padAbove {
 		out = append(out, "")
+		blockLead = 1 // the pad stands between the block's first LINE and its first ROW (popupPlacement)
 	}
 	for i := start; i < end; i++ {
 		if gap > 0 && i > start {
@@ -579,7 +662,7 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 	if padBelow {
 		out = append(out, "")
 	}
-	return out, 0
+	return popupRowBlock{lines: out, start: start, end: end, lead: blockLead}
 }
 
 // popupRowLine styles ONE painted line of a row — the whole row when it did not wrap, and every line

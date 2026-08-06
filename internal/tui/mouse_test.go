@@ -2064,3 +2064,223 @@ func TestFrameRowBoundaryAgreesWithTheMouseMapping(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Mouse in the /settings pane (mouse.go)
+// ----------------------------------------------------------------------------
+
+// settingsFrameCell is where want is PAINTED in the composed frame: the screen row it lands on and the
+// display column its first cell occupies. A settings-mouse test aims at it rather than at coordinates
+// of its own, so what the pointer is told to hit is what the frame actually drew there — the mapping
+// under test never gets to define its own target. The column is measured in the width authority (the
+// painter's, ADR 0030) because that is what a terminal reports a click in.
+func settingsFrameCell(t *testing.T, m Model, want string) (x, y int) {
+	t.Helper()
+	frame := plain(m.View())
+	for row, line := range strings.Split(frame, "\n") {
+		if i := strings.Index(line, want); i >= 0 {
+			return m.th.measure.Width(line[:i]), row
+		}
+	}
+	t.Fatalf("no frame row paints %q:\n%s", want, frame)
+	return 0, 0
+}
+
+// A click selects the key under the pointer, at every window the pane is drawn in — including the
+// short one where the list is scrolled, which is exactly where a mapping that re-derived the pane's
+// geometry instead of reading the painter's would name the wrong row. A click on a section label, on
+// the spacer above it or on the pane's own chrome selects nothing: they are rows no keypress can put
+// the ❯ on either.
+func TestSettingsClickSelectsTheRowUnderThePointer(t *testing.T) {
+	for _, height := range []int{24, 30, 40} {
+		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
+			m := settingsFrameModel(t, 80, height, 8)
+			x, y := settingsFrameCell(t, m, "key-02")
+
+			m = step(t, m, leftClick(x, y))
+			if m.settings.selected != 2 {
+				t.Fatalf("selected = %d, want the row the pointer was on (2)", m.settings.selected)
+			}
+			// The pane claims its own rows: no prompt or transcript selection is armed under it.
+			if m.sel.active || m.transcriptSel.active {
+				t.Errorf("a click on the pane armed another surface's selection: %+v / %+v", m.sel, m.transcriptSel)
+			}
+
+			labelX, labelY := settingsFrameCell(t, m, "Interface")
+			if onLabel := step(t, m, leftClick(labelX, labelY)); onLabel.settings.selected != 2 {
+				t.Errorf("a click on the %q section label moved the selection to %d", "Interface", onLabel.settings.selected)
+			}
+			hintX, hintY := settingsFrameCell(t, m, settingsHint)
+			if onHint := step(t, m, leftClick(hintX, hintY)); onHint.settings.selected != 2 {
+				t.Errorf("a click on the pane's legend moved the selection to %d", onHint.settings.selected)
+			}
+		})
+	}
+}
+
+// A click in the open edit buffer seats the caret at the glyph under the pointer — the /sessions
+// rename idiom's field with a pointer on it (spec requirement 7) — and arms a collapsed selection
+// there, exactly as a click in the prompt does. The CJK case is the point of the conversion: a column
+// is display cells and the caret is a rune offset, so a value of two-cell glyphs is where a mapping
+// that counted runes would land one glyph out.
+func TestSettingsClickSeatsTheCaretInTheEditField(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    string // the run the pointer is put on
+		wantOff int    // the rune offset the caret must land at
+	}{
+		{"ascii", "http://box:1111", "box", 7},
+		{"double-width glyphs", "日本語abc", "本", 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			row := settingsStringRow()
+			row.Value = c.value
+			m, _ := settingsEditModel(t, []SettingRow{row}, &settingsWriteLog{})
+
+			m = step(t, m, keyEnter()) // the buffer opens seeded with the value, caret at its end
+			if m.settings.kind != settingsValueBuffer {
+				t.Fatalf("pane = %+v, want the edit buffer open", m.settings)
+			}
+			x, y := settingsFrameCell(t, m, c.want)
+
+			m = step(t, m, leftClick(x, y))
+
+			if got := m.settings.editor.caretRune(); got != c.wantOff {
+				t.Errorf("caret at rune %d, want %d (the %q the pointer was on)", got, c.wantOff, c.want)
+			}
+			if !m.settings.sel.active || m.settings.sel.anchorOff != c.wantOff || m.settings.sel.headOff != c.wantOff {
+				t.Errorf("a bare click should arm a collapsed selection at %d, got %+v", c.wantOff, m.settings.sel)
+			}
+			if m.settings.editor.value() != c.value {
+				t.Errorf("the click changed the field's value to %q", m.settings.editor.value())
+			}
+		})
+	}
+}
+
+// A drag inside the edit row selects the value's text and the release copies exactly those runes — the
+// prompt's own release, one surface along. The drag's target is found in the frame the PRESS left
+// behind, because the caret glyph stands in the painted cell and moves the text under it: what the
+// human aims at is what is on the screen at the moment they aim.
+func TestSettingsDragSelectsAndCopies(t *testing.T) {
+	m, _ := settingsEditModel(t, []SettingRow{settingsStringRow()}, &settingsWriteLog{})
+	m = step(t, m, keyEnter())
+
+	x, y := settingsFrameCell(t, m, "http://box:1111")
+	m = step(t, m, leftClick(x, y)) // anchor on the first rune
+	if m.settings.sel.anchorOff != 0 {
+		t.Fatalf("anchor at %d, want the value's first rune", m.settings.sel.anchorOff)
+	}
+	head, _ := settingsFrameCell(t, m, "://box")
+	m = step(t, m, leftDrag(head, y))
+
+	if got := m.settings.sel.headOff; got != 4 {
+		t.Fatalf("head at %d, want 4 — the drag ran over %q", got, "http")
+	}
+	if got := selectionText(m.settings.editor.value(), m.settings.sel.anchorOff, m.settings.sel.headOff); got != "http" {
+		t.Fatalf("selected text = %q, want %q", got, "http")
+	}
+	if colorActive(m.th) {
+		line := popupLineWith(t, m.renderSettings(), "http")
+		if !strings.Contains(line, styleSGR(m.th.selection)) {
+			t.Errorf("the dragged span is not shaded on the row: %q", line)
+		}
+	}
+
+	m, cmd := stepCmd(t, m, leftRelease(head, y))
+	if cmd == nil {
+		t.Fatal("release of a non-empty selection should return a copy Cmd, got nil")
+	}
+	if !strings.Contains(m.flash, "copied 4 chars") {
+		t.Fatalf("flash = %q, want it to mention 'copied 4 chars'", m.flash)
+	}
+
+	// A keypress moves on from the span, the prompt's rule at this pane's own chokepoint.
+	if typed := step(t, m, keyRune('x')); typed.settings.sel.active {
+		t.Errorf("a keypress left the drag-selection armed: %+v", typed.settings.sel)
+	}
+}
+
+// The wheel walks the key list under the pointer, one key per notch, and CLAMPS at both ends where the
+// arrows wrap — a scroll gesture must not land the human on the far end of the list. A notch outside
+// the pane is the transcript's, which is what keeps the conversation above a short pane scrollable.
+func TestSettingsWheelWalksTheKeyList(t *testing.T) {
+	m := settingsFrameModel(t, 80, 30, 8)
+	_, y := settingsFrameCell(t, m, "key-00")
+	wheel := func(m Model, button tea.MouseButton, y int) Model {
+		return step(t, m, tea.MouseWheelMsg{X: 10, Y: y, Button: button})
+	}
+
+	m = wheel(m, tea.MouseWheelDown, y)
+	if m.settings.selected != 1 {
+		t.Fatalf("selected = %d after one notch down, want 1", m.settings.selected)
+	}
+	m = wheel(wheel(m, tea.MouseWheelUp, y), tea.MouseWheelUp, y)
+	if m.settings.selected != 0 {
+		t.Fatalf("selected = %d after rolling past the top, want it clamped at 0", m.settings.selected)
+	}
+	for range 12 {
+		m = wheel(m, tea.MouseWheelDown, y)
+	}
+	if m.settings.selected != 7 {
+		t.Fatalf("selected = %d after rolling past the end, want it clamped at the last key (7)", m.settings.selected)
+	}
+
+	// Above the pane the transcript still owns the wheel.
+	paneTop, _, ok := m.settingsPaneRect()
+	if !ok {
+		t.Fatal("the pane is not on the frame")
+	}
+	if paneTop > 0 {
+		if off := wheel(m, tea.MouseWheelUp, paneTop-1); off.settings.selected != 7 {
+			t.Errorf("a notch above the pane moved the selection to %d", off.settings.selected)
+		}
+	}
+}
+
+// The transcript above a short pane keeps its drag while the pane's edit field holds a highlight of its
+// own — the pane claims only its OWN rows, in BOTH directions. The direction this guards is the one a
+// live selection makes silent: a settings span left armed answers every motion and every release from
+// then on, so a click the pane did not claim has to drop it, exactly as the transcript's and the
+// prompt's are dropped when another surface takes a click. Without that, a drag over the conversation
+// moves nothing and its release copies the field's stale runes.
+func TestTranscriptDragOutlivesASettingsHighlight(t *testing.T) {
+	m := settingsFrameModel(t, 80, 30, 8)
+	m = step(t, m, keyEnter()) // the buffer opens on key-00, seeded with its value
+
+	// A real, non-empty highlight in the field — the state that used to swallow everything after it.
+	fieldX, fieldY := settingsFrameCell(t, m, "value-00")
+	m = step(t, m, leftClick(fieldX, fieldY))
+	m = step(t, m, leftDrag(fieldX+4, fieldY))
+	if !m.settings.sel.active || m.settings.sel.anchorOff == m.settings.sel.headOff {
+		t.Fatalf("the field holds no drag-selection to guard against: %+v", m.settings.sel)
+	}
+
+	row := m.transcriptRows() - 1 // the last conversation row, immediately above the pane
+	if _, _, ok := m.pointTranscriptRow(0, row); !ok {
+		t.Fatalf("row %d is not a transcript row on this frame", row)
+	}
+
+	m = step(t, m, leftClick(2, row))
+	if m.settings.sel.active {
+		t.Fatalf("a click the pane did not claim left its highlight armed: %+v", m.settings.sel)
+	}
+	m = step(t, m, leftDrag(20, row))
+	if !m.transcriptSel.active || m.transcriptSel.head.col != 20 {
+		t.Fatalf("transcript selection = %+v, want its head at the dragged cell (col 20)", m.transcriptSel)
+	}
+
+	want := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
+	if len([]rune(want)) <= 4 {
+		t.Fatalf("the transcript span is %q, too short to tell from the field's stale one", want)
+	}
+	m, cmd := stepCmd(t, m, leftRelease(20, row))
+	if cmd == nil {
+		t.Fatal("release of a non-empty transcript selection should return a copy Cmd, got nil")
+	}
+	if flash := fmt.Sprintf("copied %d chars", len([]rune(want))); !strings.Contains(m.flash, flash) {
+		t.Fatalf("flash = %q, want %q — the transcript's own span, not the field's", m.flash, flash)
+	}
+}
