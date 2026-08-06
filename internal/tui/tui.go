@@ -430,8 +430,8 @@ type Options struct {
 	// session where it was. nil ⇒ switching is unwired, and `/server` degrades to a note.
 	SwitchServer func(name string) (ServerSwitchResult, error)
 
-	// Prebound says this session started with NO upstream bound, and why (ADR 0036 decisions 3 and
-	// 5). The zero value is the ordinary start — the binary determined a startup server and the
+	// Prebound says this session started with NO upstream bound, and why (ADR 0036 decisions 3, 4
+	// and 7). The zero value is the ordinary start — the binary determined a startup server and the
 	// engine was constructed before the program began — and everything below it is unchanged.
 	//
 	// A non-zero Reason means there is no engine yet: the binary could not tell which server to

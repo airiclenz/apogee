@@ -21,13 +21,18 @@ import (
 // failure is itself a finding the report can state.
 const batteryRequestTimeout = 60 * time.Second
 
-// errProbeModelNeedsEndpoint is the refusal when no endpoint is configured by any layer. The
-// model half cannot degrade to a partial answer the way the host half can: with nothing to
-// call there is no battery, and inventing a "model unreachable" fingerprint would be exactly
-// the identity-from-absent-evidence this command must never mint.
+// errProbeModelNeedsEndpoint is the refusal when resolution left this command with nothing to
+// call. Selection itself refuses first since ADR 0036 — a config that names no startup server
+// never gets past applyConfig, and every entry it could select carries an endpoint
+// (validateServers) — so this is the belt-and-braces answer, kept because the command that spends
+// tokens must never take an empty endpoint as permission to start. The model half cannot degrade
+// to a partial answer the way the host half can: with nothing to call there is no battery, and
+// inventing a "model unreachable" fingerprint would be exactly the identity-from-absent-evidence
+// this command must never mint.
 var errProbeModelNeedsEndpoint = errors.New(
-	"apogee probe model: no endpoint configured — set endpoint: in config.yaml, APOGEE_ENDPOINT, " +
-		"or pass --endpoint (run `apogee probe` for the free host report, which needs none)")
+	"apogee probe model: no endpoint to call — name the servers: entry to probe with server: in " +
+		"config.yaml or APOGEE_SERVER, or pass --endpoint (run `apogee probe` for the free host " +
+		"report, which needs none)")
 
 // errProbeModelNeedsLabel is the refusal when neither --model nor the server names a model. The
 // advertised label IS the identity the record claims (ADR 0021, Amendment 2026-07-22), so with

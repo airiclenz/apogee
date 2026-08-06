@@ -322,7 +322,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// loaded are reported here — last, so the notice closes the opening frame rather than
 	// separating the box from the scrollback it belongs to.
 	m.noteContextFiles()
-	// A session the binary could not resolve a server for opens ASKING (ADR 0036 decisions 3 and 5):
+	// A session the binary could not resolve a server for opens ASKING (ADR 0036 decisions 3 and 7):
 	// the `/server` picker, or `/settings` when nothing is configured to pick. It goes last of all —
 	// after every notice above — because it is the one thing the human has to act on before the
 	// session can do anything at all (prebound.go).

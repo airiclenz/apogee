@@ -32,8 +32,10 @@
 # the conversation. Config-file only (no flag or env): an invocation picks an entry by name
 # (--server) or points at an unlisted URL (--endpoint), and neither defines a server here.
 #
-# The default is empty — and a session needs a server, so with nothing listed apogee opens
-# /settings and points you back at this file. Add one entry and you are running.
+# The default is empty — and a session needs a server, so with nothing listed an interactive
+# apogee opens /settings and points you back at this file (`apogee headless` and `apogee probe`
+# have nobody to ask, so they refuse to start and print the same pointer). Add one entry and you
+# are running.
 #
 #   name       what the entry is called: the label /server lists it under, the argument
 #              `/server <name>` takes, the value server: below points at, and the host name the
@@ -78,7 +80,8 @@
 # Leave it unset and the first run ASKS: apogee starts with no server bound, opens the /server
 # picker over the list above, and records what you choose. A name no entry above carries is
 # handled the same way — apogee says which name went missing and opens the picker — rather than
-# refusing to start.
+# refusing to start. Only the interactive session asks: `apogee headless` and `apogee probe` have
+# no one in front of them, so an unset or stale name stops them with an error naming this file.
 #   flag: --server     env: APOGEE_SERVER
 # server: my-box
 

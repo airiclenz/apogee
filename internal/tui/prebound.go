@@ -7,7 +7,7 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The pre-bound session — a start with no upstream (ADR 0036 decisions 3 and 5)
+// The pre-bound session — a start with no upstream (ADR 0036 decisions 3, 4 and 7)
 // ----------------------------------------------------------------------------
 //
 // Every other state in this package describes a session that HAS a server. This one describes the

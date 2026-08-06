@@ -56,6 +56,14 @@ type options struct {
 	// and applyConfig then overwrites it with the resolved value. Empty ⇒ no entry is named.
 	startupServer string
 
+	// serverFlagBound says the command being run registers the `--server` flag. Only the root
+	// command does: `apogee headless` and `apogee probe` declare their own flag surface and take
+	// the startup name from `APOGEE_SERVER` / `server:` alone. Exactly one thing reads it — the
+	// startup refusal (selectStartupServer), which must offer a remedy the command printing it
+	// actually has, since a flag the parser would reject is worse than no suggestion at all. It is
+	// set beside the registration itself so the claim cannot drift away from the flag it describes.
+	serverFlagBound bool
+
 	// startupEphemeral records that the server this session started on is the EPHEMERAL unnamed
 	// entry a raw `--endpoint`/`APOGEE_ENDPOINT` override builds (ADR 0036 decision 6) rather than
 	// an entry out of `servers:`. It is a fact about the invocation, not about the file, and it is
@@ -67,7 +75,7 @@ type options struct {
 	// prebound says this session starts with NO upstream bound, and why — the zero value being the
 	// ordinary start, on the server selection determined. It is the one resolution outcome that
 	// does not come out of applyConfig's write-back but out of its refusal: the root command
-	// recognises startupUndetermined and turns it into this value (ADR 0036 decisions 3 and 5),
+	// recognises startupUndetermined and turns it into this value (ADR 0036 decisions 3 and 8),
 	// while every other Driver returns the refusal and stops. runRoot reads it to decide whether to
 	// construct the engine before the TUI starts or to hand the TUI the bind seam instead.
 	prebound tui.PreboundStart
@@ -253,7 +261,7 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 				// The one refusal this Driver answers instead of printing: resolution could not say
 				// which server to start on. The TUI can ASK — it has a picker, and a human in front
 				// of it — so it starts pre-bound and gets its engine from the answer (ADR 0036
-				// decisions 3 and 5). Every other error, and every other Driver, stops here.
+				// decisions 3 and 8). Every other error, and every other Driver, stops here.
 				var undetermined *startupUndetermined
 				if !errors.As(err, &undetermined) {
 					return err
@@ -275,6 +283,9 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 		"OpenAI-compatible LLM server URL to start on, unlisted and not saved (overrides --server)")
 	flags.StringVar(&opts.startupServer, "server", "",
 		"name of the servers: entry to start on (default: the last one /server switched to)")
+	// The claim beside the registration above: this command has the flag, so its startup refusal
+	// may offer it as the fix. The commands that do not register it say APOGEE_SERVER instead.
+	opts.serverFlagBound = true
 	flags.StringVar(&opts.model, "model", "",
 		"model name to request (default: the startup server's model: hint, else ask the server)")
 	flags.StringVar(&opts.mode, "mode", string(modeAskBefore),

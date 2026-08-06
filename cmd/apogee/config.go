@@ -914,16 +914,17 @@ type unconfinedHost struct {
 //
 // Name does three jobs with one value: it labels the entry for the user, it is the name the
 // session is switched by, and it becomes the footer's host alias once the session is on that
-// server — which is why it is required and must be unique (it mirrors `host-alias:`, which names
-// the startup endpoint the same way). Endpoint is required for the obvious reason.
+// server — which is why it is required and must be unique (ADR 0036 decision 1: the alias of the
+// server you are on is the name you call it). Endpoint is required for the obvious reason.
 //
 // APIKey and Model are optional. An empty key sends no Authorization header, the keyless
 // local-server default; an empty model leaves that server's discovery hint unset, so whatever it
-// serves is bound. APIKey is FILE-ONLY on purpose: APOGEE_API_KEY is a single value and it belongs
-// to the STARTUP server (the top-level `endpoint:`), so a keyed alternative carries its own key
-// here rather than borrowing that one. They carry `omitempty` because this type is also RENDERED
-// into a config file — the legacy migration writes an entry through the marshaller (configmigrate.go)
-// — and an optional field the user never set must not come back as an empty line in their file.
+// serves is bound. APIKey is FILE-ONLY on purpose: APOGEE_API_KEY is a single value and it overlays
+// the key of the ONE entry this run starts on (ADR 0036 decision 6), so every other entry carries
+// its own key here rather than borrowing that one. They carry `omitempty` because this type is
+// also RENDERED into a config file — the legacy migration writes an entry through the marshaller
+// (configmigrate.go) — and an optional field the user never set must not come back as an empty
+// line in their file.
 type serverEntry struct {
 	Name     string `yaml:"name"`
 	Endpoint string `yaml:"endpoint"`
@@ -956,7 +957,7 @@ func validateServers(servers []serverEntry) error {
 		seen[s.Name] = struct{}{}
 		if strings.TrimSpace(s.Endpoint) == "" {
 			return fmt.Errorf("apogee: servers: entry %d (%q): has no endpoint — give the server's "+
-				"OpenAI-compatible URL, the same kind of value the top-level endpoint: takes", i+1, s.Name)
+				"OpenAI-compatible URL, for example http://127.0.0.1:1111", i+1, s.Name)
 		}
 	}
 	return nil
@@ -1478,7 +1479,7 @@ func overrideSources(changed func(string) bool, getenv func(string) string) map[
 // [startupUndetermined], the refusal that says the config could not name a startup server. Every
 // Driver still receives it, so a driver that cannot ask a human refuses exactly as it did before
 // (item 3's hard errors); but the TUI answers it by starting pre-bound (ADR 0036 decisions 3 and
-// 5), and it can only do that if the rest of the resolution — the servers list to pick from, the
+// 7), and it can only do that if the rest of the resolution — the servers list to pick from, the
 // mode, the roots — is standing in opts by the time it reads the refusal.
 func applyConfig(opts *options, changed func(string) bool, getenv func(string) string, readFile func(string) ([]byte, error), notify func(string)) error {
 	opts.configDir = resolveConfigDir(opts.configDir, changed, getenv)
@@ -1561,7 +1562,8 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	// receives a fully-resolved opts to ask WITH. The startup entry is the zero one in that case,
 	// which writes the empty endpoint/model/key a session with no upstream honestly has.
 	raw := resolveStartupOverrides(*opts, changed, getenv)
-	startup, startupErr := resolveStartupEntry(raw, s.startupServer, s.servers, configFilePath(opts.configDir))
+	startup, startupErr := resolveStartupEntry(raw, s.startupServer, s.servers,
+		configFilePath(opts.configDir), opts.serverFlagBound)
 	opts.endpoint = startup.Endpoint
 	opts.model = startup.Model
 	opts.apiKey = startup.APIKey
@@ -1705,11 +1707,12 @@ func (o startupOverrides) overlay(entry serverEntry) serverEntry {
 //
 // With no endpoint override the list is the single definition, and the key and hint overrides
 // overlay the selected entry's own two optional fields.
-func resolveStartupEntry(o startupOverrides, name string, servers []serverEntry, configPath string) (serverEntry, error) {
+func resolveStartupEntry(o startupOverrides, name string, servers []serverEntry, configPath string,
+	serverFlag bool) (serverEntry, error) {
 	if o.endpoint != "" {
 		return serverEntry{Endpoint: o.endpoint, APIKey: o.apiKey, Model: o.model}, nil
 	}
-	entry, err := selectStartupServer(name, servers, configPath)
+	entry, err := selectStartupServer(name, servers, configPath, serverFlag)
 	if err != nil {
 		return serverEntry{}, err
 	}
@@ -1736,7 +1739,10 @@ func resolveStartupEntry(o startupOverrides, name string, servers []serverEntry,
 // carries (startupUndetermined) and the TUI reads that instead of printing it. The message itself
 // stays the permanent answer for the non-interactive drivers (headless, probe, bench): they have no
 // one to ask.
-func selectStartupServer(name string, servers []serverEntry, configPath string) (serverEntry, error) {
+//
+// serverFlag says whether the command printing that message registers `--server`, which is what
+// decides the remedy the two name-shaped refusals offer (startupServerRemedy).
+func selectStartupServer(name string, servers []serverEntry, configPath string, serverFlag bool) (serverEntry, error) {
 	chosen := strings.TrimSpace(name)
 	switch {
 	case len(servers) == 0:
@@ -1749,8 +1755,8 @@ func selectStartupServer(name string, servers []serverEntry, configPath string) 
 		return serverEntry{}, &startupUndetermined{
 			start: tui.PreboundStart{Reason: tui.PreboundFirstBoot},
 			msg: fmt.Sprintf("apogee: no startup server is chosen — %s configures %s but "+
-				"records no server:.\n\nName the one to start on (or pass --server <name>):\n\nserver: %s\n",
-				configPath, serverNameList(servers), servers[0].Name),
+				"records no server:.\n\nName the one to start on (%s):\n\nserver: %s\n",
+				configPath, serverNameList(servers), startupServerRemedy(serverFlag), servers[0].Name),
 		}
 	}
 	for _, s := range servers {
@@ -1761,17 +1767,31 @@ func selectStartupServer(name string, servers []serverEntry, configPath string) 
 	return serverEntry{}, &startupUndetermined{
 		start: tui.PreboundStart{Reason: tui.PreboundStaleChoice, Name: chosen},
 		msg: fmt.Sprintf("apogee: server: names %q, which no servers: entry in %s carries "+
-			"(configured: %s).\n\nFix the name (or pass --server <name>).", chosen, configPath,
-			serverNameList(servers)),
+			"(configured: %s).\n\nFix the name (%s).", chosen, configPath,
+			serverNameList(servers), startupServerRemedy(serverFlag)),
 	}
+}
+
+// startupServerRemedy is the OTHER way to answer "which server", offered by the two refusals above
+// that a name would fix. It follows the flag surface of the command the message is printed by: the
+// root command registers `--server`, and the non-interactive commands that actually PRINT these
+// refusals — `apogee headless`, `apogee probe` — do not, so naming the flag there would send the
+// user to a parser that rejects it. What every command has is the environment variable, beside the
+// `server:` key the message already names.
+func startupServerRemedy(serverFlag bool) string {
+	if serverFlag {
+		return "or pass --server <name>"
+	}
+	return "or set APOGEE_SERVER=<name>"
 }
 
 // startupUndetermined is selection's refusal: the config, the flags and the environment together
 // could not say which server this session starts on. It is an ERROR first — every Driver receives
 // it, and one that has nobody to ask prints it and stops, which is the permanent behaviour for
 // headless, probe and bench — and a reason second: the TUI recognises the type, takes the reason
-// out of it, and starts pre-bound instead (ADR 0036 decisions 3 and 5), because asking through the
-// picker fixes in one keystroke what a refusal would send to file surgery.
+// out of it, and starts pre-bound instead (ADR 0036 decisions 3, 4 and 7 — the three reasons it
+// carries), because asking through the picker fixes in one keystroke what a refusal would send to
+// file surgery.
 //
 // The message is carried rather than formatted here so each of the three cases keeps the wording
 // that names ITS remedy, and so the type has exactly one job: pairing that message with the reason.

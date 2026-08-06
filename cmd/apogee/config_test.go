@@ -818,7 +818,7 @@ func TestApplyConfigStartupServerOverrideSelects(t *testing.T) {
 
 // The three ways selection has no answer. Each is a hard error naming the config file and showing
 // what to write — the permanent behaviour for the non-interactive drivers — and each carries the
-// REASON that lets the TUI answer it by asking instead (ADR 0036 decisions 3 and 5). The resolved
+// REASON that lets the TUI answer it by asking instead (ADR 0036 decisions 3, 4 and 7). The resolved
 // opts must survive the refusal intact, because the pre-bound TUI asks with exactly that: the
 // servers list it offers, and every other key the session runs on.
 func TestApplyConfigStartupServerRefusals(t *testing.T) {
@@ -856,7 +856,9 @@ func TestApplyConfigStartupServerRefusals(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
 				t.Fatalf("write config: %v", err)
 			}
-			opts := options{configDir: home, mode: "ask-before"}
+			// serverFlagBound as the root command sets it: these messages name `--server` as the
+			// fix, and only a command that registers the flag may say so (see the remedy test).
+			opts := options{configDir: home, mode: "ask-before", serverFlagBound: true}
 			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
 				os.ReadFile, noNotify)
 			if err == nil {
@@ -890,6 +892,47 @@ func TestApplyConfigStartupServerRefusals(t *testing.T) {
 			}
 			if opts.startupEphemeral {
 				t.Error("startupEphemeral = true; nothing was selected, so there is no row to synthesize")
+			}
+		})
+	}
+}
+
+// The remedy a refusal offers has to be one the command printing it actually HAS. Only the root
+// command registers `--server` (root.go's flag block); `apogee headless` and `apogee probe` — the
+// drivers that PRINT these refusals rather than asking a human — declare their own flag surface
+// without it, so a message naming the flag there would send the user to a parser that rejects it.
+// Both name-shaped refusals are pinned, in both directions: what is offered, and what must not be.
+func TestSelectStartupServerRemedyFollowsTheFlagSurface(t *testing.T) {
+	t.Parallel()
+	servers := []serverEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}}
+	tests := []struct {
+		name       string
+		chosen     string
+		serverFlag bool
+		want       string
+		unwanted   string
+	}{
+		{name: "nothing chosen, on a command with the flag", serverFlag: true,
+			want: "--server <name>", unwanted: "APOGEE_SERVER"},
+		{name: "nothing chosen, on a command without it",
+			want: "APOGEE_SERVER=<name>", unwanted: "--server"},
+		{name: "a stale name, on a command with the flag", chosen: "gone", serverFlag: true,
+			want: "--server <name>", unwanted: "APOGEE_SERVER"},
+		{name: "a stale name, on a command without it", chosen: "gone",
+			want: "APOGEE_SERVER=<name>", unwanted: "--server"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := selectStartupServer(tt.chosen, servers, "/home/config.yaml", tt.serverFlag)
+			if err == nil {
+				t.Fatal("selection answered a question the config cannot answer")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("the refusal does not offer %q: %v", tt.want, err)
+			}
+			if strings.Contains(err.Error(), tt.unwanted) {
+				t.Errorf("the refusal offers %q, which this command has no way to accept: %v", tt.unwanted, err)
 			}
 		})
 	}

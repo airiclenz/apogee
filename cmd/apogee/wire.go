@@ -538,13 +538,15 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Rebind:    rebind,
 		// The `/server` half: the servers this session can move to (display and identity only —
 		// the keys and hints stay here) and the one verb that moves it. Both are always wired;
-		// with no `servers:` block the list is the single synthesized row for the endpoint this
-		// session started on, which is exactly "nothing to switch to" without a special case.
+		// the list is the `servers:` block verbatim, plus the one row an ephemeral
+		// `--endpoint`/`APOGEE_ENDPOINT` start synthesizes for itself (upstreamChoices). It can
+		// therefore be EMPTY — a pre-bound start on a config that lists nothing — which is
+		// exactly "nothing to switch to" without a special case.
 		Servers:      serverChoices(choices),
 		SwitchServer: switchServer,
-		// The pre-bound half of the same list (ADR 0036 decisions 3 and 5): why this session has no
-		// upstream yet — first boot, a `server:` naming an entry that is gone, or nothing configured
-		// at all — and the seam that ends it. Both are always wired; on the ordinary start Prebound
+		// The pre-bound half of the same list (ADR 0036 decisions 3, 4 and 7): why this session has
+		// no upstream yet — first boot, a `server:` naming an entry that is gone, or nothing
+		// configured at all — and the seam that ends it. Both are always wired; on the ordinary start Prebound
 		// is the zero value, which says the engine was constructed before the program began and
 		// leaves every flow below exactly as it was.
 		Prebound:   opts.prebound,

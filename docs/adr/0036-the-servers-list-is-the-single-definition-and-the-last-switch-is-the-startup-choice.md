@@ -80,6 +80,13 @@ on an endpoint no entry names — a launcher profile load, the ephemeral overrid
 — have no name to write and write nothing, silently: `server:` points into the list, and a pointer
 to something unlisted would be a lie the next launch would trip over.
 
+*(Amended 2026-08-06 by the implementation: a failed recording surfaces as a **transcript note
+under the move it belongs to** — "could not record the server choice: …" — not as a status-line
+warning. That slot carries STANDING session facts, what a surface that has gone leaves behind
+(`layout.md`, "the two facts an *idle* frame may still carry"), while a one-off write failure is
+news about an act, which is what a note is. The rest of this decision stands: the write is
+best-effort and never blocks or unwinds the switch.)*
+
 **3. First boot ASKS, and engine construction is DEFERRED to the answer.** With a non-empty list and
 no `server:` (a fresh install, a hand-written config), the TUI starts **pre-bound**: no Agent is
 constructed, the engine-facing seams route through a holder that is nil-safe until bound, and the
