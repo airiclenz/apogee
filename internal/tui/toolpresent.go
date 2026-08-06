@@ -177,6 +177,19 @@ type toolView struct {
 	Details toolBody
 
 	name string
+
+	// args is the call's parsed arguments, kept for the one presenter shape that needs the REQUEST
+	// back when the result lands (toolPresenter.outcome). It is retained only for such a presenter
+	// and dropped at presentation time for every other, so a write_file's whole file content is not
+	// held for the life of the session behind a field one tool reads.
+	//
+	// It is display state's raw material and never display text: sanitize does not reach it, because
+	// nothing here is painted — every line the hook builds from it is a body line, and the seam
+	// strips those on the way out (enrichWithResult defers finishDisplay). It is deliberately not on
+	// the wire either (wireToolView): what a saved transcript keeps is the finished record, and the
+	// only call that could miss its arguments on replay is one still awaiting its answer — which
+	// falls back to the summary-only block it had before this existed.
+	args map[string]any
 }
 
 // toolOutcome is what a prose extractor returns: the one-line Summary that rides the branch
@@ -235,6 +248,18 @@ type toolPresenter struct {
 	// report nothing structured (a fixed sentence, free-form output).
 	detail func(content string) toolOutcome
 
+	// outcome renders a result the way detail does, but with the call's OWN ARGUMENTS in hand
+	// beside the content — the seam for a tool whose outcome is only half a result. It takes
+	// precedence over detail (enrichWithResult), so an entry setting both would leave the latter
+	// unreachable; the one entry that sets it, ask_user, sets it alone.
+	//
+	// ask_user is what the shape is for. What the human answered comes back in the result, but the
+	// question they answered and the choices they were offered were never in one: those are in the
+	// CALL, and a block that records the exchange after the popup is gone needs both halves. Reading
+	// them here costs nothing anyone can see — they crossed the wire before the tool ran, so the
+	// record is a render-time act and the engine stays wire-silent (ADR 0031).
+	outcome func(args map[string]any, content string) toolOutcome
+
 	// body renders the lines laid out BENEATH the branch when the summary supplied the
 	// branch line itself. Exactly one entry sets it — view_diff, the only tool whose body is
 	// read off its RESULT — so the asymmetry is intentional, not an oversight. A body derived
@@ -264,8 +289,10 @@ type toolPresenter struct {
 // sub-agent report) on as a body the collapsed paint shows the gist of: the chat compresses it
 // to a first line plus a remainder count until the block is expanded, and the model gets the
 // full text either way. One tool's result is nobody's words but the human's — ask_user's, which is
-// the answer they typed — so it takes quotedFirstLineDetail and the block quotes that line rather
-// than respelling it.
+// the answer they typed — so its branch line goes through quotedFirstLineDetail and the block quotes
+// that line rather than respelling it. It is also the one tool whose result is only half its
+// outcome, so it is the one entry setting an `outcome` hook instead of a `detail` one: the question
+// and the choices it recalls beneath that line were in the CALL (askUserAnswerRecord).
 //
 // The three edit tools and write_file are the group whose body owes nothing to a result: what they
 // put in a file is stated in the REQUEST, so each sets an argBody that reads its own arguments as
@@ -391,10 +418,10 @@ var toolRegistry = map[string]toolPresenter{
 		detail: outputDetail, // the report's gist; the nested run already rendered railed
 	},
 	"ask_user": {
-		label:  "Ask User",
-		verb:   "asking",
-		target: firstLineArg("question"),
-		detail: quotedFirstLineDetail, // the user's own answer — quoted, never respelled
+		label:   "Ask User",
+		verb:    "asking",
+		target:  firstLineArg("question"),
+		outcome: askUserAnswerRecord, // the answer quoted on the branch, the exchange recorded beneath
 	},
 	"present_document": {
 		label:  "Present",
@@ -441,6 +468,9 @@ func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
 	}
 	if p.argBody != nil {
 		tv.Details = newToolBody(p.argBody(args))
+	}
+	if p.outcome != nil {
+		tv.args = args // the request this presenter's result hook reads back (toolView.args)
 	}
 	tv.finishDisplay(ws)
 	return tv
@@ -525,18 +555,20 @@ func (tv *toolView) sanitize() {
 	tv.Details.stripEscapes()
 }
 
-// enrichWithResult folds a tool's result into the view, in three layers. An error result
+// enrichWithResult folds a tool's result into the view, in four layers. An error result
 // (the tool flagged it IsError — a normal in-band outcome the model reacts to) is the
 // one-line summary, so an errored call still groups with its neighbours. A result carrying a
 // typed domain.ToolSummary is worded by summaryLine, with the presenter's body renderer
-// filling the half beneath it (view_diff alone). Everything else falls to prose: a known
-// tool's extractor splits the text into a summary and a body, and an unknown tool's result is
-// shown raw as body lines, so nothing is ever silently dropped.
+// filling the half beneath it (view_diff alone). Everything else falls to prose, through one of
+// two extractor shapes: a presenter's `outcome` hook reads the retained REQUEST beside the result
+// (ask_user alone — its block records the question the answer replies to), and a plain `detail`
+// extractor reads the result alone. An unknown tool's result is shown raw as body lines, so
+// nothing is ever silently dropped.
 //
 // The first two layers WORD the summary themselves — an "error: …" line, a typed phrase — so both
-// mark it as the block's own (namedSummary). The prose layer hands its outcome's mark straight
-// through, because that extractor is the one that may promote the tool's output onto the branch
-// instead of wording anything (outputDetail), and only it knows which it did.
+// mark it as the block's own (namedSummary). Both prose layers hand their outcome's mark straight
+// through, because an extractor is the one thing that may promote the tool's output onto the branch
+// instead of wording anything (outputDetail, quotedFirstLineDetail), and only it knows which it did.
 //
 // Every one of those layers words itself from result.Content, which is tool output and therefore
 // repo-controlled, so the finishDisplay seam is deferred rather than repeated: it runs on whichever
@@ -555,6 +587,12 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 		if known && p.body != nil {
 			tv.Details = tv.Details.with(p.body(result.Content))
 		}
+		return
+	}
+	if known && p.outcome != nil {
+		out := p.outcome(tv.args, result.Content)
+		tv.Summary = out.Summary
+		tv.Details = tv.Details.with(out.Details)
 		return
 	}
 	if known && p.detail != nil {
@@ -703,6 +741,129 @@ func firstLineDetail(content string) toolOutcome {
 // absolute path wrote that path, and the block quotes people the way it quotes files.
 func quotedFirstLineDetail(content string) toolOutcome {
 	return promotedOutput(clipDetail(firstLine(content)))
+}
+
+// askUserAnswerRecord renders an ANSWERED ask_user call. The branch line is what it always was —
+// the human's answer, quoted and never respelled (quotedFirstLineDetail) — and beneath it the block
+// now keeps the permanent RECORD of an exchange the screen otherwise took away with the popup:
+// every line of the question as it was put, one line per offered choice ticked or unticked, and any
+// answer line no choice accounts for (askExchangeLines).
+//
+// It runs only when a result lands, so a question still on screen is untouched: while the human is
+// answering, the popup IS the live view of the offering and the block stays the summary-only card it
+// has always been. The record materialises with the answer.
+//
+// Nothing in it crossed the wire for its sake. The question and the choices are the model's own
+// arguments, kept on the view at presentation time (toolView.args), and the answer is the result the
+// tool already returned — so the engine is untouched, the tool's result content is still exactly
+// AskAnswer.Text, and no token is spent on the record (ADR 0031). That is what earns the tool's
+// description the right to tell the model NOT to restate a question it asks: the transcript keeps
+// this instead.
+func askUserAnswerRecord(args map[string]any, content string) toolOutcome {
+	out := quotedFirstLineDetail(content)
+	out.Details = askExchangeLines(args, content)
+	return out
+}
+
+// askExchangeLines lays the answered exchange out beneath the branch, in three groups: the
+// question's own lines, the offered choices each behind "[x]" or "[ ]", and then every answer line
+// that named no choice. A question offering none still gets the first group — the record is uniform,
+// and a free-text question with its answer on the branch above it reads as one card either way.
+//
+// The third group is what makes the record honest about a MULTI-LINE answer. The branch holds only
+// the first line of what the human typed (quotedFirstLineDetail), so the rest of a several-line
+// answer used to reach the screen nowhere at all; here every line of it lands, either as a tick
+// beside the choice it names or as a line of its own.
+//
+// A question that offered NO choices is the one place that group starts at the second line. Its
+// first line is already the branch directly above, with no list in between, so recording it would
+// open the body by repeating the row over it. Where choices WERE offered the same line is kept: a
+// list of unticked boxes says only that the human took none of them, and the line beneath says what
+// they said instead — the two are read together, and the list stands between them.
+//
+// A line names a choice when it EQUALS that choice as the human was offered it — trimmed, then
+// escape-stripped, the same two acts in the same order the tool and the popup perform on the way out
+// (tools.sanitiseChoices, Model.checkedLabels) — so what is ticked here is what was ticked there,
+// and a hostile choice string carrying an ESC byte is compared as it was painted rather than
+// quietly failing to match. Equality is the whole test: the answer contract is the label verbatim,
+// one per line (domain.AskAnswer), and anything looser would tick a box the human did not.
+//
+// The markers are the popup's own pinned ASCII pair rather than a second spelling of them
+// (askCheckedMarker/askUncheckedMarker, docs/design/user-questions-layout.md), and they are drawn
+// for a single-select question exactly as for a multi-select one: this is a record of what was
+// asked and answered, not a menu anyone can still act on.
+func askExchangeLines(args map[string]any, content string) []detailLine {
+	choices := offeredChoices(args)
+	answers := answerLines(content)
+
+	given := make(map[string]bool, len(answers))
+	for _, a := range answers {
+		given[a] = true
+	}
+	offered := make(map[string]bool, len(choices))
+	for _, c := range choices {
+		offered[c] = true
+	}
+
+	lines := make([]detailLine, 0, len(choices)+len(answers)+1)
+	question, _ := args["question"].(string)
+	if question = strings.TrimRight(question, "\n"); question != "" {
+		for _, ln := range splitLines(question) {
+			lines = append(lines, detailLine{Text: clipDetail(ln)})
+		}
+	}
+	for _, c := range choices {
+		marker := askUncheckedMarker
+		if given[c] {
+			marker = askCheckedMarker
+		}
+		lines = append(lines, detailLine{Text: clipDetail(marker + " " + c)})
+	}
+	for i, a := range answers {
+		if i == 0 && len(choices) == 0 {
+			continue // already the branch line directly above, with no list between the two
+		}
+		if !offered[a] {
+			lines = append(lines, detailLine{Text: clipDetail(a)})
+		}
+	}
+	return lines
+}
+
+// offeredChoices reads the choices an ask_user call put to the human — in the order they were
+// offered, spelled the way the popup painted them: trimmed and blank-dropped (the tool's own
+// sanitiseChoices, which is what actually reached the human) and then escape-stripped (the popup's).
+// A non-string entry is skipped rather than guessed at, and an absent or malformed array yields
+// none, which is simply the free-text question: a record with no checkbox list, never an error.
+func offeredChoices(args map[string]any) []string {
+	list, ok := args["choices"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		choice, ok := item.(string)
+		if !ok {
+			continue
+		}
+		if cleaned := stripEscapes(strings.TrimSpace(choice)); cleaned != "" {
+			out = append(out, cleaned)
+		}
+	}
+	return out
+}
+
+// answerLines splits an ask_user result into the lines the reply contract puts in it: one ticked
+// label per line for a multi-select answer, a single line for everything else (domain.AskAnswer).
+// The trailing newline is dropped so a reply ending in one does not record a blank line the human
+// never typed; a blank line BETWEEN two lines is kept, because that is the shape of what they wrote.
+// An empty answer has no lines at all rather than one empty one.
+func answerLines(content string) []string {
+	trimmed := strings.TrimRight(content, "\n")
+	if trimmed == "" {
+		return nil
+	}
+	return splitLines(trimmed)
 }
 
 // outputDetail splits free-form output (a command run, a diagnostics report, a sub-agent

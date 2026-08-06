@@ -136,6 +136,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **An answered Ask User block keeps a record of the question, the choices and what was picked.**
+  The popup that put the question takes the offering off the screen with it, so the block left
+  behind said only what the human answered — and of a several-line answer, only its FIRST line: the
+  rest reached the screen nowhere at all. The answered block now carries the exchange beneath its
+  branch: every line of the question as it was put, one line per offered choice behind `[x]` or
+  `[ ]` with the given answer(s) ticked, and any answer line no choice accounts for. It becomes an
+  ordinary expandable block on the strength of that body — one record line while collapsed, the whole
+  record when opened. The branch line itself is unchanged, still the human's own words quoted and
+  never respelled, and a question still waiting for its answer is untouched: while it is up the popup
+  IS the live view of the offering, and the record materialises when the answer lands.
+  - **Nothing crossed the wire for it.** The question and the choices are the model's own call
+    arguments and the answer is the result the tool already returned, so the record is a render-time
+    act on what the transcript was holding anyway — no tool result grows, no token is spent, and the
+    engine stays wire-silent (ADR 0031).
+
 - **Breaking (config), with a one-time automatic migration: the `servers:` list is the single
   definition of what apogee can talk to.** The top-level `endpoint:`, `api-key:`, `host-alias:` and
   `model:` quadruple is retired from the schema — one `servers:` entry now carries all of it as

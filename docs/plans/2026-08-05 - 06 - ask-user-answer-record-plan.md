@@ -56,7 +56,19 @@
   grouping/collapse machinery changes beyond what the new body triggers automatically,
   any version bump.
 
-## 1. Presenter: answered ask_user calls carry a question-and-choices record body
+## 1. Presenter: answered ask_user calls carry a question-and-choices record body — ✅ DONE (2026-08-06)
+
+NOTES (2026-08-06): two readings recorded rather than assumed. (a) The unmatched-answer group
+follows the item's two statements exactly, which are asymmetric on purpose: with choices offered
+EVERY unmatched line is appended including the first (the "custom typed answer with choices
+offered" test bullet), and with NO choices the group starts at the second line ("+ any answer lines
+beyond the first", stated in both **What** and **Tests**) — with no list between them, recording
+the first line would open the body by repeating the branch directly above it. (b) The CHANGELOG
+entry for the whole feature lands here, under Unreleased → Changed, since the behaviour lands with
+this item and the plan assigns no doc to it (item 2 owns `layout.md`, item 3 owns `ISSUES.md`).
+Also: the args map is retained on `toolView` only for a presenter that HAS an outcome hook, so no
+other call's arguments are held for the session; and the `[x]`/`[ ]` glyphs reuse the existing
+`askCheckedMarker`/`askUncheckedMarker` constants rather than a second spelling of the pinned pair.
 
 **What:**
 

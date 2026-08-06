@@ -418,6 +418,132 @@ func TestPresentToolCallInFlightHasNoOutcome(t *testing.T) {
 	}
 }
 
+// TestAskUserAnswerRecord pins the permanent record an ANSWERED ask_user block keeps of an
+// exchange the popup showed and then took away: the question as it was put, every offered choice
+// behind "[x]" or "[ ]", and any answer line no choice accounts for.
+//
+// The branch line is the invariant across every row — the human's own answer, quoted, never
+// respelled — because the record is an ADDITION beneath it and not a re-wording of it. The rows
+// cover both selection shapes, a typed answer that matched nothing, the multi-line answer whose
+// later lines used to reach the screen nowhere at all, a multi-line question, and the free-text
+// question that offers no boxes to tick.
+func TestAskUserAnswerRecord(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		args        string
+		answer      string
+		wantSummary string
+		wantBody    []string
+	}{
+		{
+			name:        "single-select ticks the one chosen box",
+			args:        `{"question":"Which mode?","choices":["Plan","Ask before","Auto"]}`,
+			answer:      "Ask before",
+			wantSummary: "Ask before",
+			wantBody:    []string{"Which mode?", "[ ] Plan", "[x] Ask before", "[ ] Auto"},
+		},
+		{
+			name:        "multi-select ticks every label the answer names",
+			args:        `{"question":"Which files?","choices":["main.go","doc.go","render.go"],"multi_select":true}`,
+			answer:      "main.go\nrender.go",
+			wantSummary: "main.go",
+			wantBody:    []string{"Which files?", "[x] main.go", "[ ] doc.go", "[x] render.go"},
+		},
+		{
+			name:        "a typed answer ticks nothing and is recorded after the list",
+			args:        `{"question":"Which mode?","choices":["Plan","Auto"]}`,
+			answer:      "neither — stay in ask-before",
+			wantSummary: "neither — stay in ask-before",
+			wantBody:    []string{"Which mode?", "[ ] Plan", "[ ] Auto", "neither — stay in ask-before"},
+		},
+		{
+			name:        "every line of a multi-line answer is kept, not just the branch's",
+			args:        `{"question":"How should it behave?","choices":["Fail closed.","Fail open."]}`,
+			answer:      "Neither.\n\nRetry twice, then refuse.",
+			wantSummary: "Neither.",
+			wantBody: []string{"How should it behave?", "[ ] Fail closed.", "[ ] Fail open.",
+				"Neither.", "", "Retry twice, then refuse."},
+		},
+		{
+			name:        "a multi-line question is recorded whole",
+			args:        `{"question":"Ship it?\nThe migration is irreversible.","choices":["Ship","Hold"]}`,
+			answer:      "Hold",
+			wantSummary: "Hold",
+			wantBody:    []string{"Ship it?", "The migration is irreversible.", "[ ] Ship", "[x] Hold"},
+		},
+		{
+			name:        "a free-text question still gets the record, with no boxes",
+			args:        `{"question":"What should the flag be called?"}`,
+			answer:      "confine-to-workspace",
+			wantSummary: "confine-to-workspace",
+			wantBody:    []string{"What should the flag be called?"},
+		},
+		{
+			name:        "with no choices the body starts at the answer's SECOND line",
+			args:        `{"question":"What should the flag be called?"}`,
+			answer:      "confine-to-workspace\n(keep the old name as an alias)",
+			wantSummary: "confine-to-workspace",
+			wantBody:    []string{"What should the flag be called?", "(keep the old name as an alias)"},
+		},
+		{
+			name:        "a sloppy choices array degrades to the free-text record",
+			args:        `{"question":"Pick one","choices":["  ","Only this one",7]}`,
+			answer:      "Only this one",
+			wantSummary: "Only this one",
+			wantBody:    []string{"Pick one", "[x] Only this one"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			call := domain.ToolCall{ID: "1", Tool: "ask_user", Arguments: []byte(tc.args)}
+			tv := presentToolCall(call, workspaceRoot{})
+			tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: tc.answer}, workspaceRoot{})
+
+			if tv.Summary.Text != tc.wantSummary {
+				t.Errorf("summary = %q, want %q (the answer, quoted)", tv.Summary.Text, tc.wantSummary)
+			}
+			if !tv.Summary.quoted {
+				t.Error("the answer on the branch must stay marked quoted — it is the human's own spelling")
+			}
+			body := make([]string, 0, tv.Details.len())
+			for _, d := range tv.Details.all() {
+				if d.Kind != detailPlain {
+					t.Errorf("record line %q has kind %v, want detailPlain", d.Text, d.Kind)
+				}
+				body = append(body, d.Text)
+			}
+			if !reflect.DeepEqual(body, tc.wantBody) {
+				t.Errorf("record body = %q, want %q", body, tc.wantBody)
+			}
+		})
+	}
+}
+
+// A question still on the screen keeps the summary-only card it always had: the popup is the live
+// view of the offering while the human answers, and the record materialises only with the answer
+// (the ratified timing call). This is the row that would fail if the body were built from the
+// arguments at presentation time, the way an edit tool's is.
+func TestAskUserPendingCallHasNoRecord(t *testing.T) {
+	t.Parallel()
+
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "ask_user",
+		Arguments: []byte(`{"question":"Which mode?","choices":["Plan","Auto"]}`)}, workspaceRoot{})
+
+	if tv.Summary.Text != "" || tv.Details.len() != 0 {
+		t.Errorf("pending question outcome = %+v / %+v; want both halves empty", tv.Summary, tv.Details)
+	}
+	if tv.Target != "Which mode?" {
+		t.Errorf("target = %q, want the question's first line", tv.Target)
+	}
+	if !groupable(tv) {
+		t.Error("a pending question must still group with its neighbours")
+	}
+}
+
 // TestDiffBody proves view_diff's body renderer is the diff kinds' producer: "+ " lines are
 // detailDiffAdded, "- " lines detailDiffRemoved, context plain — and that it RETAINS the whole
 // diff, however long. The cap that keeps a rewrite from flooding the chat is the collapsed
