@@ -114,11 +114,12 @@ func formatElapsed(d time.Duration) string {
 	return fmt.Sprintf("%dm %02ds", secs/secondsPerMinute, secs%secondsPerMinute)
 }
 
-// statusTargetRunes caps a tool target in the status line. It is far tighter than
+// statusTargetCells caps a tool target in the status line, in the CELLS the screen spends on it
+// (toolPhrase measures it through the width authority — width.go). It is far tighter than
 // clipDetail's transcript cap: the left slot shares one row with the context gauge, so a long
 // path or a pasted command must not push the gauge off the line. The gap < 1 truncation in
 // statusLine stays the floor for a window too narrow even for this.
-const statusTargetRunes = 32
+const statusTargetCells = 32
 
 // toolActivityLabel builds the actTool phrase for a call from the presentation registry: the
 // tool's active verb and, when the call names one, the target it acts on ("reading · main.go",
@@ -131,10 +132,13 @@ const statusTargetRunes = 32
 // workspace-relative path the block beneath it will. That matters here more than it looks —
 // foldActivity paints this label the moment a call is ANNOUNCED, before any approval gate runs, so
 // it is the earliest point at which a hostile model's argument reaches the screen. It also buys the
-// left slot its width back: statusTargetRunes clips at 32, which a project-relative path fits and
-// an absolute one routinely did not.
-func toolActivityLabel(call domain.ToolCall, ws workspaceRoot) string {
-	return toolPhrase(presentToolCall(call, ws))
+// left slot its width back: statusTargetCells clips at 32 cells, which a project-relative path fits
+// and an absolute one routinely did not.
+//
+// measure is the width authority the cap is spent through (toolPhrase), threaded in rather than
+// hard-wired so the budget is counted in the measure the painter is actually using (width.go).
+func toolActivityLabel(measure widthAuthority, call domain.ToolCall, ws workspaceRoot) string {
+	return toolPhrase(measure, presentToolCall(call, ws))
 }
 
 // toolPhrase is the composition itself: a call's view worded as the sentence fragment naming what
@@ -145,20 +149,23 @@ func toolActivityLabel(call domain.ToolCall, ws workspaceRoot) string {
 //
 // It takes the view rather than the call, since the transcript's own entries carry views already
 // sanitized by presentToolCall; toolActivityLabel is the seam that builds one from a raw call.
-func toolPhrase(tv toolView) string {
+func toolPhrase(measure widthAuthority, tv toolView) string {
 	if tv.Target == "" {
 		return tv.Verb
 	}
-	// The target is EXPANDED before the cap counts it (expandTabs, render.go). Nothing downstream
-	// mis-measures it — statusLeft composes the phrase through a style, which rewrites the tab into
-	// its four spaces before th.measure reads the result, and the gist's line is wrapped by wrapText,
-	// which settles its own tabs — so the row never overruns and no tab reaches the screen. What the
-	// tab defeats is the CAP itself: statusTargetRunes is spent in runes, and a tab is one rune the
-	// screen pays four cells for, so a target clipped to 32 runes painted up to 139 cells. statusLeft
-	// then truncated that over-wide phrase to the whole window, exactly as it should, and the gauge
-	// this cap exists to keep on the row was dropped from an 80-column status line. Counted over the
-	// expanded target the cap bounds the cells the slot actually spends, which is what it promised.
-	return tv.Verb + " · " + clipRunes(expandTabs(tv.Target), statusTargetRunes)
+	// The cap is spent in CELLS, through the width authority (width.go) — the painter's own measure,
+	// so the budget the slot promises is the budget the screen bills. Spent in RUNES it was no budget
+	// at all: a double-width glyph is one rune the screen pays two cells for, so a 32-rune CJK path
+	// painted up to 64 cells, statusLeft truthfully truncated that over-wide phrase against the whole
+	// window, and the gauge this cap exists to keep on an 80-column row went off it. The ellipsis is
+	// spent INSIDE the budget (Truncate's tail), so the clipped target totals at most
+	// statusTargetCells cells rather than the cap plus one more.
+	//
+	// The target is EXPANDED before the cap counts it (expandTabs, render.go) and stays so: statusLeft
+	// composes the phrase through a style, which rewrites the tab into its four spaces before
+	// th.measure reads the result, and the gist's line is wrapped by wrapText, which settles its own
+	// tabs — so no tab ever reaches the screen, and the cap must count the form that does.
+	return tv.Verb + " · " + measure.Truncate(expandTabs(tv.Target), statusTargetCells, "…")
 }
 
 // setActivity moves the model to a new activity. The elapsed clock restarts only when the
@@ -199,7 +206,7 @@ func (m Model) foldActivity(e domain.Event, openCall bool) Model {
 	case domain.StreamResetEvent:
 		m.setActivity(actRetrying, "", e.Depth)
 	case domain.ToolCallEvent:
-		m.setActivity(actTool, toolActivityLabel(e.Call, m.transcript.ws), e.Depth)
+		m.setActivity(actTool, toolActivityLabel(m.th.measure, e.Call, m.transcript.ws), e.Depth)
 	case domain.ToolResultEvent:
 		// One result does not end the tool phase while another call is still open (a parallel
 		// batch); today's loop dispatches sequentially, so this normally falls straight through

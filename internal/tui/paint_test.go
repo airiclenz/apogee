@@ -893,31 +893,41 @@ func TestPaintedTabBearingToolTargetKeepsItsColumn(t *testing.T) {
 // not: statusLeft composes the phrase through th.statusBar.Render, which rewrites the tab into its
 // four spaces BEFORE th.measure reads the result, so the status line's own arithmetic is honest and
 // the row paints exactly one window wide with or without a tab in it. What is wrong sits further
-// upstream, in the CAP. statusTargetRunes is the promise that the left slot cannot push the gauge
-// off the row, and toolPhrase spends it in RUNES — so a tab, one rune the screen pays four cells
-// for, bought four times the room the cap thought it was selling. A path of 32 runes clipped to the
-// cap painted 91 cells (probed), statusLeft then truthfully truncated that to the whole window, and
-// the gauge the cap exists to protect was gone from an 80-column row.
+// upstream, in the CAP. statusTargetCells is the promise that the left slot cannot push the gauge
+// off the row, and toolPhrase used to spend it in RUNES — so a tab, one rune the screen pays four
+// cells for, bought four times the room the cap thought it was selling. A path of 32 runes clipped
+// to the cap painted 91 cells (probed), statusLeft then truthfully truncated that to the whole
+// window, and the gauge the cap exists to protect was gone from an 80-column row.
+//
+// The tab half was fixed by expanding the target in front of the cap; the DOUBLE-WIDTH half is the
+// probe the rune-vs-cell issue called for and this row is it — a CJK path is 32 runes the screen
+// pays 64 cells for, no expansion can flatten it, and only counting the cap in the painter's own
+// measure (the width authority) bounds what the slot actually spends.
 //
 // The plain row is the fixture's oracle rather than a constant: its target is the cap's own design
 // case — 32 runes of a path that has no tab in it — so a gauge that survives beside it is the gauge
-// the tab-bearing row is owed.
+// the other two rows are owed.
 //
 // A target with a tab in it is a real target: a tab is legal in a POSIX filename and the model names
 // the file it wants read, so the status line does not get to assume the name is tame.
 //
 // Both measures are swept because the cap is spent in front of both: the tab weighs one rune in
 // either, so this is not a case the two disagree about — it is one they were both being lied to
-// about.
+// about. The CJK path is the case where the measures agree on the glyph (two cells in both) and the
+// rune count was the thing lying.
 func TestPaintedTabBearingToolTargetKeepsTheGauge(t *testing.T) {
-	// 16 "a\t" pairs and a suffix: past the cap either way, so the clip is what sets the width. Raw
-	// it is 27 cells and the screen pays 91 for it; expanded, the cap holds it to its own 32.
+	// Every target here is past the cap, so the clip is what sets the width. The tab-bearing one is
+	// 16 "a\t" pairs and a suffix: raw it measures 27 cells and the screen pays 91 for it; expanded,
+	// the cap holds it to its own 32.
 	targets := []struct {
 		name string
 		path string
 	}{
 		{"plain — the cap's design case", strings.Repeat("a", 32) + ".go"},
 		{"tab-bearing", strings.Repeat("a\t", 16) + ".go"},
+		// 32 runes the screen pays 64 cells for: past the cap either way, and twice its budget when
+		// the cap is counted in runes.
+		{"double-width", strings.Repeat("字", 32) + ".go"},
 	}
 
 	for _, tc := range paintMethods {

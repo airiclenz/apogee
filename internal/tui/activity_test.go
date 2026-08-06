@@ -83,26 +83,41 @@ func TestToolActivityLabel(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := toolActivityLabel(tc.call, workspaceRoot{}); got != tc.want {
+			if got := toolActivityLabel(newWidthAuthority(), tc.call, workspaceRoot{}); got != tc.want {
 				t.Errorf("toolActivityLabel() = %q, want %q", got, tc.want)
 			}
 		})
 	}
 
+	// The cap is spent in CELLS, ellipsis included, so the clipped target totals the budget rather
+	// than the budget plus a cell — and a double-width path spends the same 32 the ASCII one does,
+	// which is the whole point of measuring rather than counting runes.
 	t.Run("a long target is clipped to the status cap", func(t *testing.T) {
-		got := toolActivityLabel(domain.ToolCall{
-			Tool:      "read_file",
-			Arguments: []byte(`{"path":"` + longPath + `"}`),
-		}, workspaceRoot{})
-		if !strings.HasPrefix(got, "reading · ") {
-			t.Fatalf("clipped label lost its verb: %q", got)
-		}
-		target := strings.TrimPrefix(got, "reading · ")
-		if !strings.HasSuffix(target, "…") {
-			t.Errorf("long target %q was not clipped: %q", longPath, target)
-		}
-		if n := len([]rune(target)); n != statusTargetRunes+1 { // the cap plus the ellipsis
-			t.Errorf("clipped target is %d runes, want %d", n, statusTargetRunes+1)
+		measure := newWidthAuthority()
+		for _, tc := range []struct {
+			name string
+			path string
+		}{
+			{"an ASCII path", longPath},
+			{"a double-width path", strings.Repeat("字", 32) + ".go"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				got := toolActivityLabel(measure, domain.ToolCall{
+					Tool:      "read_file",
+					Arguments: []byte(`{"path":"` + tc.path + `"}`),
+				}, workspaceRoot{})
+				if !strings.HasPrefix(got, "reading · ") {
+					t.Fatalf("clipped label lost its verb: %q", got)
+				}
+				target := strings.TrimPrefix(got, "reading · ")
+				if !strings.HasSuffix(target, "…") {
+					t.Errorf("long target %q was not clipped: %q", tc.path, target)
+				}
+				if n := measure.Width(target); n > statusTargetCells {
+					t.Errorf("clipped target paints %d cells, want at most the cap's %d: %q",
+						n, statusTargetCells, target)
+				}
+			})
 		}
 	})
 }

@@ -961,8 +961,10 @@ func clipDetail(s string) string {
 }
 
 // clipRunes truncates s to n runes with an ellipsis, counting runes rather than bytes so a
-// multi-byte path is not cut mid-character. The status line clips far tighter than the
-// transcript does (statusTargetRunes), so the cap is a parameter rather than the one constant.
+// multi-byte path is not cut mid-character. clipDetail is its one caller: the status line's own
+// target cap is spent in CELLS through the width authority (toolPhrase, activity.go), because a
+// row it shares with the context gauge has to bound what the screen bills rather than what the
+// string counts.
 func clipRunes(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {

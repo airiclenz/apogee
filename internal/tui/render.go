@@ -417,7 +417,7 @@ func insideCollapsedRun(entries []entry, depth int) bool {
 func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool) blockPaint {
 	view := head.tool
 	if !head.expanded {
-		view.Summary = subAgentSummary(head, span)
+		view.Summary = subAgentSummary(th.measure, head, span)
 		view.Details = toolBody{} // the zero body: no lines, and so nothing to lay out beneath
 	}
 	return renderToolBlock(th, []toolView{view}, railedWidth(width, head.depth), blockState{
@@ -445,7 +445,7 @@ func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool
 // the phrase for the call it has open. Nothing respells it in either case — this is composed at
 // paint, long after the shortening seam ran on the way in — so the mark is a statement about the
 // text rather than a switch, and it is the one that stays true if a seam ever reads it.
-func subAgentSummary(head entry, span []entry) branchSummary {
+func subAgentSummary(measure widthAuthority, head entry, span []entry) branchSummary {
 	calls := 0
 	for i := range span {
 		if span[i].kind == entryToolCall {
@@ -456,7 +456,7 @@ func subAgentSummary(head entry, span []entry) branchSummary {
 	if fill := subAgentFill(head); fill != "" {
 		text += " · " + fill
 	}
-	if gist := subAgentGist(head, span); gist != "" {
+	if gist := subAgentGist(measure, head, span); gist != "" {
 		text += " · " + gist
 	}
 	return quotedSummary(detailLine{Text: text})
@@ -486,7 +486,10 @@ func subAgentFill(head entry) string {
 //
 // Once the report lands the head has a gist of its own and that is the line — the summary a short
 // report was compressed to, or, where the report was long enough to become a body, its first line.
-func subAgentGist(head entry, span []entry) string {
+//
+// measure is the width authority the live phrase's target cap is spent through (toolPhrase,
+// activity.go), threaded down from the theme the render layer already carries.
+func subAgentGist(measure widthAuthority, head entry, span []entry) string {
 	if head.done {
 		if head.tool.Summary.Text != "" {
 			return head.tool.Summary.Text
@@ -498,7 +501,7 @@ func subAgentGist(head entry, span []entry) string {
 	}
 	for i := len(span) - 1; i >= 0; i-- {
 		if e := span[i]; e.kind == entryToolCall && !e.done {
-			return toolPhrase(e.tool)
+			return toolPhrase(measure, e.tool)
 		}
 	}
 	return ""

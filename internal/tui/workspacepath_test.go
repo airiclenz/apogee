@@ -360,7 +360,7 @@ func TestActivityLabelSharesTheWorkspaceRelativePath(t *testing.T) {
 	t.Parallel()
 
 	ws := newWorkspaceRoot("/home/me/proj")
-	got := toolActivityLabel(domain.ToolCall{Tool: "read_file",
+	got := toolActivityLabel(newWidthAuthority(), domain.ToolCall{Tool: "read_file",
 		Arguments: []byte(`{"path":"/home/me/proj/docs/plan.md"}`)}, ws)
 	if want := "reading · docs/plan.md"; got != want {
 		t.Errorf("activity label = %q, want %q", got, want)

@@ -22,7 +22,14 @@
   - The block-cursor keyboard ISSUES entry — deliberately deferred there; not this plan's business.
   - The uncommitted `cmd/apogee/probe*` stdout work in the tree — unrelated in-flight work; no item touches those files.
 
-## 1. Spend the status-line target cap in cells via the width authority
+## 1. Spend the status-line target cap in cells via the width authority — ✅ DONE (2026-08-06)
+
+NOTES (2026-08-06): beyond the item's literal list — a CHANGELOG `[Unreleased] / Fixed` entry (repo
+convention for a user-visible fix); the `statusTargetRunes` mention in `paint_test.go`'s fixture
+comment rewritten too (the item's own grep acceptance requires it); and the unit clip test
+(`activity_test.go`) gained a double-width sub-case beside the ASCII one while its rune arithmetic
+was converted to a cell assertion. `subAgentSummary` took the measure parameter as the minimal
+thread from `renderSubAgentRun`'s `th.measure` down to `subAgentGist`.
 
 **What:** Move the cap's spend from runes to the cells it promised, at the cap site.
 

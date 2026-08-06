@@ -681,7 +681,7 @@ func TestStripEscapesDropsControlCharacters(t *testing.T) {
 // before any approval gate runs — which makes it the earliest point a hostile model's argument
 // reaches the screen.
 func TestToolActivityLabelCarriesNoEscape(t *testing.T) {
-	label := toolActivityLabel(domain.ToolCall{
+	label := toolActivityLabel(newWidthAuthority(), domain.ToolCall{
 		Tool:      "terminal",
 		Arguments: escapedArgs(t, "command", "npm "+escOSC52+"test"),
 	}, workspaceRoot{})
@@ -690,7 +690,7 @@ func TestToolActivityLabelCarriesNoEscape(t *testing.T) {
 		t.Errorf("stripping ate the benign label text: %q", label)
 	}
 
-	unknown := toolActivityLabel(domain.ToolCall{Tool: "mcp" + escCSI + "_thing"}, workspaceRoot{})
+	unknown := toolActivityLabel(newWidthAuthority(), domain.ToolCall{Tool: "mcp" + escCSI + "_thing"}, workspaceRoot{})
 	assertNoESCIn(t, "the unregistered-tool activity label", unknown)
 }
 

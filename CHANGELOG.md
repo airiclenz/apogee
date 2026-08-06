@@ -192,6 +192,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A double-width tool target no longer pushes the context gauge off the status line.** The left
+  slot caps the target it shows so the gauge always has room beside it, and that cap was spent in
+  RUNES while the screen bills CELLS: a CJK path or a filename carrying an emoji is 32 runes the
+  terminal pays up to 64 cells for, so the phrase outgrew its budget, the whole row was then
+  truncated against the window, and the gauge the cap exists to protect was gone from an 80-column
+  line. The cap is now measured through the width authority — the same measure the painter is
+  using — so 32 means 32 columns whatever the glyphs are, ellipsis included. A plain-ASCII target
+  under the cap is unchanged. The tab half of the same defect was already fixed; this closes the
+  rest of it.
+
 - **The TUI drops every control character from untrusted text, not only the ESC byte.** The
   transcript's sanitizer is the seam every model-, repo- and disk-supplied string passes on its way
   to the screen, and it removed the ESC that opens an ANSI sequence while letting the rest of the
