@@ -101,16 +101,16 @@ surface is this Driver's composition), "the scheduler" (that names the library b
 share, not this Driver).
 
 **Sub-agent**:
-A nested, focused agent loop the top-level agent spawns for one delegated sub-task, with
-its own Session. It is itself an instance of the **Embeddable
-agent**, spawned in-process; its events nest into the parent's event stream at **`Depth =
-parent+1`**. Its **context window is not reduced**: the child inherits the parent's `Config`
-verbatim (`internal/agent/subagent.go`), so it works against a window — and a Budget over
-it — of the same size the parent has. How full that window got is **visible per run**: the
-TUI paints the run's own reading on its collapsed call block (`N tool calls · 12k/32k ·
-<gist>`) and `apogee headless` prints one `sub-agent: <used>/<limit> · <task>` line on
-stderr per run. Each reading belongs to the agent that filled it — it never moves the
-parent's gauge and never accrues to an enclosing run. Its privileges are always **≤ the parent's** (mode, guardrails, Confinement,
+A nested, focused agent loop the top-level agent spawns for one delegated sub-task, with its
+own Session. It is itself an instance of the **Embeddable agent**, spawned in-process; its
+events nest into the parent's event stream at **`Depth = parent+1`**. Its **context window is
+not reduced**: the child inherits the parent's `Config` verbatim (`internal/agent/subagent.go`),
+so it works against a window — and a Budget over it — of the same size the parent has. How
+full that window got is **visible per run**: the TUI paints the run's own reading on its
+collapsed call block (`N tool calls · 12k/32k · <gist>`) and `apogee headless` prints one
+`sub-agent: <used>/<limit> · <task>` line on stderr per run. Each reading belongs to the
+agent that filled it — it never moves the parent's gauge and never accrues to an enclosing
+run. Its privileges are always **≤ the parent's** (mode, guardrails, Confinement,
 tool set) — see [ADR 0005](docs/adr/0005-sub-agent-privileges-are-bounded-by-the-parent.md).
 The *shape* is [ADR 0013](docs/adr/0013-the-sub-agent-orchestrator-is-the-recursion-point-with-isolated-live-guard-state.md):
 the model reaches it through a **`sub_agent` tool** that dispatch treats as a **recursion

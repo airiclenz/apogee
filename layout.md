@@ -639,14 +639,18 @@ beside it. It **ticks as each of the child's Turns lands** and **freezes on the 
 a finished run goes on saying what it filled however long the scrollback holds it. And unlike the
 count it is **not transitive**: each agent fills a window of its own, so a nested run's reading
 rides that nested block and never accrues to the run above it. A collapsed run is thereby the one
-block that reads as a single summarised line: its own
-**report body is elided along with the span**, because the summary slot already says that report's
-first line and no block prints the same text twice in two adjacent rows. It grows no
-`… +N more lines` marker either — the transitive count is what says there is work behind the
-header, and the header is a toggle target however short the report is, so nothing is unreachable.
-Expanding the run reveals the report in full and the inner blocks *in their own states*, each
-collapsed unless it was itself clicked open: the cascade is this one rule applied at every depth,
-not a special case.
+block that reads as a single summarised line: its own **report body is elided along with the
+span**, because the summary slot already says that report's first line and no block prints the
+same text twice in two adjacent rows. It grows no `… +N more lines` marker either — the transitive
+count is what says there is work behind the header, and the header is a toggle target however
+short the report is, so nothing is unreachable. **A run's live text is inside the run from its
+first token**: while the delegate is generating, the streamed preview paints at the depth that
+produced it — railed under the run's own `⤷ sub-agent` label when the run is expanded, and elided
+with the whole span when it is collapsed, where the blinking head and the status line's
+`sub-agent · responding` already say a delegate is talking. A preview at the top level would say
+the opposite: that this is the main agent's answer. Expanding the run reveals the report in full
+and the inner blocks *in their own states*, each collapsed unless it was itself clicked open: the
+cascade is this one rule applied at every depth, not a special case.
 
 **The live star.** While a block still contains an open call — a call whose result has not
 landed, or a run whose report has not — its header glyph blinks: `✦` shows for half a second, then

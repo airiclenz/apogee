@@ -191,6 +191,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A sub-agent's live reply no longer appears in the main transcript before folding into its run
+  block.** While a delegate was generating, its streamed text painted as a top-level assistant
+  block in the parent's own voice, outside the collapsed run that was producing it, and jumped
+  inside only when the child's final message landed. The transcript kept a single streaming buffer
+  that never recorded whose tokens had filled it, so the preview had nowhere to paint but depth 0.
+  The buffer is routed by depth now: the live preview paints at the agent's own level — railed
+  under `⤷ sub-agent` in an expanded run, and elided with the rest of the span in a collapsed one,
+  where the blinking header and the status line's `sub-agent · responding` already say a delegate
+  is talking. Two leaks out of that same shared slot went with it: a delegate that ended without a
+  final message — cancelled, or faulted mid-turn — left text the parent's next event committed at
+  the top level for good, and a delegate re-streaming its turn wiped whatever the parent had
+  streamed. The buffer is committed at the depth that filled it and discarded only by the level
+  that owns it.
+
 - **`apogee probe` and `apogee probe model` print their report to stdout.** Both reports travelled
   on stderr, so `apogee probe > host.txt` wrote an empty file and put the whole report in the
   terminal — the command's product now goes to stdout, where a redirect or a pipe can take it, while
