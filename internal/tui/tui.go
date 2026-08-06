@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 
@@ -267,6 +268,22 @@ type Options struct {
 	// seam from Version so the box reads clean while /version and --version keep the full string;
 	// the TUI stays format-agnostic (cmd/apogee resolves both). Empty ⇒ unwired.
 	BaseVersion string
+
+	// TracePath and DiagPath are the two hidden diagnostic seams (`--tui-trace` and `--tui-diag`,
+	// cmd/apogee/root.go), each empty unless a path was named on the command line and each costing
+	// nothing when it is. TracePath collects every byte the renderer writes to the terminal, one
+	// quoted Go string per write, which is what makes a rendering bug arguable from the stream that
+	// caused it rather than from a screenshot. DiagPath collects what the terminal said about
+	// itself — TERM and the emulator's own variables, the size, the resolved colour profile, every
+	// mode report, and the width method the painter ends up on.
+	//
+	// They are paths rather than writers because the binary resolves them from flags and the
+	// renderer is the side that knows WHEN the seams must be live: the trace has to be installed as
+	// bubbletea's output before the program is built, and the diag log has to be on the Model
+	// before the first message reaches Update. See diagnostics.go for the one constraint that
+	// decides the trace's shape.
+	TracePath string
+	DiagPath  string
 
 	// Confinement is the host's confinement situation as the composition root resolved it, for
 	// the /confine status report to name. The TUI never derives it — internal/platform is the
@@ -976,12 +993,57 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	// the Step that emitted it (worker.go, sink.go). It is wired HERE rather than through newModel
 	// because the sink is the Bridge's, and Run is where the two meet.
 	m.flushEvents = br.sink.flush
-	program := tea.NewProgram(m, tea.WithContext(ctx))
+	// The --tui-diag half of the diagnostic seam (diagnostics.go). It is opened HERE, between
+	// newModel and the program, because that is the only window in which both halves of its
+	// contract can be met: the Model exists, so the log can be put on it before any message
+	// reaches Update, and the loop has not started, so the start-up facts are recorded before
+	// anything can change them. nil ⇒ off, and every observation point is nil-safe.
+	if opts.DiagPath != "" {
+		diag, err := newDiagLog(opts.DiagPath)
+		if err != nil {
+			// Named so the human knows which of the two paths they got wrong; the wrapped error
+			// already carries the path and what was refused about it.
+			return fmt.Errorf("--tui-diag: %w", err)
+		}
+		defer func() { _ = diag.Close() }()
+		m.diag = diag
+		diag.start(os.Getenv, m.th.measure.Method())
+	}
+	// The --tui-trace half. traced is nil unless a path was named, in which case it is the file
+	// this run owns and must close; the options are otherwise exactly what they have always been.
+	teaOpts, traced, err := programOptions(ctx, opts)
+	if err != nil {
+		return err
+	}
+	if traced != nil {
+		defer func() { _ = traced.Close() }()
+	}
+	program := tea.NewProgram(m, teaOpts...)
 	// Bind before Run: the program exists now, and the first Send cannot occur until a
 	// worker is launched, which only happens after the user submits into the running loop.
 	br.Bind(program)
-	_, err := program.Run()
+	_, err = program.Run()
 	return err
+}
+
+// programOptions builds the Bubble Tea options [Run] starts the program with, and opens the
+// traced output when [Options.TracePath] named one — the two are one decision, since the traced
+// output IS an option and is also a file the caller has to close.
+//
+// It is a function of its own so a test can pin the thing this seam most needs pinning: with no
+// trace path, the program is constructed with EXACTLY the option it has always had and no
+// wrapper at all. An always-on wrapper would be invisible in every other test while quietly
+// changing what the renderer believes about its terminal on every run — see tracedOutput.
+func programOptions(ctx context.Context, opts Options) ([]tea.ProgramOption, *tracedOutput, error) {
+	teaOpts := []tea.ProgramOption{tea.WithContext(ctx)}
+	if opts.TracePath == "" {
+		return teaOpts, nil, nil
+	}
+	traced, err := newTracedOutput(os.Stdout, opts.TracePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("--tui-trace: %w", err)
+	}
+	return append(teaOpts, tea.WithOutput(traced)), traced, nil
 }
 
 // The three screen-control sequences apogee sends on its own behalf. Everything else on the wire

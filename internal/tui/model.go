@@ -56,6 +56,13 @@ type Model struct {
 	// stays nil in the model tests, which inject eventMsg past the sink entirely.
 	flushEvents func()
 
+	// diag is the --tui-diag log (diagnostics.go), or nil — which is the normal state, the flag
+	// being hidden and off by default. It is held by POINTER because it owns a mutex and an open
+	// file, which no value-copied Model may carry by value (the no-copy invariant in doc.go), and
+	// every method on it is nil-safe so the observation points below are unconditional lines
+	// rather than a branch each. Only Run can wire it, like flushEvents above.
+	diag *diagLog
+
 	// Session-record write single-flight (the per-Turn save pipeline AND the /sessions verbs).
 	// Every write to the store — Save, Rename, Delete — runs off the Update loop on a Cmd
 	// goroutine, and no two of them may overlap: Store.Rename is a read-modify-write of the whole
@@ -491,6 +498,13 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	defer func() { next = reportActivity(next) }()
 
+	// The --tui-diag observation point (diagnostics.go). It consumes nothing — every message it
+	// recognises still reaches the switch below — so a session with the flag on behaves exactly
+	// like one without it, and with the flag off (the normal case) m.diag is nil and this is a
+	// nil check. It sits above the switch rather than inside three cases because one of the three
+	// (the colour profile) has no case of its own and adding one would change what happens to it.
+	m.diag.observe(msg)
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -511,6 +525,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// there was no case for it and it fell through to the input widget, which ignores it.
 		before := m.th.measure
 		m.th.measure = m.th.measure.observe(msg)
+		// What the report MADE of the measure, beside the report itself — the diag log records
+		// the mode number and value above, and this is the consequence a rendering bug is
+		// actually argued from (diagnostics.go). Change-suppressed, so only the one report that
+		// moves it writes a line.
+		m.diag.record(diagWidthMethod, widthMethodName(m.th.measure.Method()))
 		if m.th.measure != before && m.ready {
 			m.layout() // the measure moved: re-wrap and repaint everything against the new one
 		}

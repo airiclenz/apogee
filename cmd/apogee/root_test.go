@@ -386,3 +386,86 @@ func TestRootCommandBareInvocationSurvivesSubcommands(t *testing.T) {
 		}
 	})
 }
+
+// TestRootCommandTUIDiagnosticFlagsAreHiddenAndDefaultOff pins the whole surface contract of the
+// two rendering-diagnostic seams: they are real flags on the shipped binary — so a rendering bug
+// is capturable from a stock build rather than from a patched renderer — but they stay out of
+// --help, because the root's advertised flag set is deliberately minimal, and they default to
+// empty, which is the off state the renderer checks for.
+func TestRootCommandTUIDiagnosticFlagsAreHiddenAndDefaultOff(t *testing.T) {
+	t.Parallel()
+	cmd := newRootCommand((&recordingLauncher{}).launch)
+
+	for _, name := range []string{"tui-trace", "tui-diag"} {
+		flag := cmd.Flags().Lookup(name)
+		if flag == nil {
+			t.Fatalf("--%s is not registered", name)
+		}
+		if !flag.Hidden {
+			t.Errorf("--%s is not hidden; it would appear in --help", name)
+		}
+		if flag.DefValue != "" {
+			t.Errorf("--%s defaults to %q, want empty (the off state)", name, flag.DefValue)
+		}
+	}
+
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--help returned an error: %v", err)
+	}
+	for _, name := range []string{"--tui-trace", "--tui-diag"} {
+		if strings.Contains(out.String(), name) {
+			t.Errorf("--help lists %s; the diagnostic flags are meant to be hidden\n%s", name, out.String())
+		}
+	}
+}
+
+// TestRunRootWiresTheTUIDiagnosticFlags proves the two paths reach the renderer, which is the
+// only thing the binary owes them — what a named path MEANS is internal/tui's (diagnostics.go).
+func TestRunRootWiresTheTUIDiagnosticFlags(t *testing.T) {
+	t.Parallel()
+	rec := &recordingLauncher{}
+	opts := options{
+		endpoint:  "http://127.0.0.1:1111",
+		model:     "fake",
+		mode:      "ask-before",
+		workspace: t.TempDir(),
+		tuiTrace:  filepath.Join(t.TempDir(), "trace.txt"),
+		tuiDiag:   filepath.Join(t.TempDir(), "diag.txt"),
+	}
+
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+	if rec.opts.TracePath != opts.tuiTrace {
+		t.Errorf("opts.TracePath = %q; want %q", rec.opts.TracePath, opts.tuiTrace)
+	}
+	if rec.opts.DiagPath != opts.tuiDiag {
+		t.Errorf("opts.DiagPath = %q; want %q", rec.opts.DiagPath, opts.tuiDiag)
+	}
+}
+
+// TestRunRootLeavesTheTUIDiagnosticFlagsOffByDefault is the other half: an ordinary run must hand
+// the renderer two empty paths, so no trace file is ever opened and no wrapper is ever installed
+// on a session nobody asked to debug.
+func TestRunRootLeavesTheTUIDiagnosticFlagsOffByDefault(t *testing.T) {
+	t.Parallel()
+	rec := &recordingLauncher{}
+	opts := options{
+		endpoint:  "http://127.0.0.1:1111",
+		model:     "fake",
+		mode:      "ask-before",
+		workspace: t.TempDir(),
+	}
+
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+	if rec.opts.TracePath != "" || rec.opts.DiagPath != "" {
+		t.Errorf("opts.TracePath = %q and opts.DiagPath = %q; want both empty",
+			rec.opts.TracePath, rec.opts.DiagPath)
+	}
+}

@@ -620,6 +620,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// (steady always — there is no blink key). Selected here, like the two above, so the
 		// renderer never parses a config name.
 		CursorShape: cursorShape,
+		// The two hidden rendering-diagnostic seams (--tui-trace / --tui-diag), passed through as
+		// the paths they are: empty on every ordinary run, and the renderer decides what a named
+		// one means and when it goes live.
+		TracePath: opts.tuiTrace,
+		DiagPath:  opts.tuiDiag,
 		// The single source of truth (the embedded top-level VERSION file). Version carries the
 		// full string (provenance included) that /version prints and --version mirrors; BaseVersion
 		// is the release version alone (no provenance), the clean value the start-up box displays.

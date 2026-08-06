@@ -185,6 +185,14 @@ type options struct {
 	// own tea.CursorShape for tui.Options.
 	cursorShape string
 
+	// tuiTrace and tuiDiag are the two hidden rendering-diagnostic flags (--tui-trace and
+	// --tui-diag), each a file path and each empty by default. They are flag-only — there is
+	// deliberately no config key and no environment variable, because a permanently-on trace is a
+	// growing file nobody asked for; a diagnostic is something you turn on for one run. runRoot
+	// hands both straight to tui.Options, which owns what they mean.
+	tuiTrace string
+	tuiDiag  string
+
 	// overrides records which HIGHER-precedence source beat the config file for a key this run,
 	// keyed by registry path (`mode` → sourceFlag when --mode was given, `model` → sourceEnv when
 	// APOGEE_MODEL was set). It is the one resolution fact the resolved values above cannot carry:
@@ -302,6 +310,19 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 		"resume this workspace's most recent saved session (mutually exclusive with --resume)")
 	flags.StringVar(&opts.configDir, "config", "",
 		"apogee home directory for config/library/sessions (default: ~/.apogee)")
+
+	// The two rendering-diagnostic seams. Hidden, because they are for debugging apogee rather
+	// than for using it, and the root's advertised flag set is deliberately minimal — but real
+	// flags on the shipped binary, so a rendering bug can be captured from a stock build instead
+	// of from a patched renderer nobody runs.
+	flags.StringVar(&opts.tuiTrace, "tui-trace", "",
+		"append every byte the renderer writes to the terminal to this file (one quoted string per write)")
+	flags.StringVar(&opts.tuiDiag, "tui-diag", "",
+		"log the terminal's reported capabilities, size, colour profile and mode answers to this file")
+	// MarkHidden's only error is "no such flag", which the two registrations directly above make
+	// impossible; there is nothing for a caller to do about it and nowhere to report it.
+	_ = flags.MarkHidden("tui-trace")
+	_ = flags.MarkHidden("tui-diag")
 
 	// --resume names one session, --continue picks the newest; asking for both is a flag error.
 	cmd.MarkFlagsMutuallyExclusive("resume", "continue")

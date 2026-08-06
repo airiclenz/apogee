@@ -6,7 +6,7 @@
   measurements that separate four live hypotheses, fixes the cause, and pins the fix with a
   regression test that runs headless on Windows CI.
 - **Date:** 2026-08-06
-- **Status:** in progress — item 4 (the diagnosis) ✅ done 2026-08-06; items 1-3 and 5-8 open
+- **Status:** in progress — items 1, 2 and 4 (the diagnosis) ✅ done 2026-08-06; items 3 and 5-8 open
 - **Predecessor:** `docs/handoffs/2026-08-06 - 00 - windows-tui-ghosting-debug.md` — the symptom
   report and the first (unsuccessful) dependency-bump attempt. This plan supersedes its debug
   plan; the symptom description there is still ground truth.
@@ -175,7 +175,16 @@ open, consistent with the modal contract.
 
 **Commit:** `feat(tui): ctrl+l forces a full repaint`
 
-## 2. A supported trace seam — `--tui-trace` and `--tui-diag`
+## 2. A supported trace seam — `--tui-trace` and `--tui-diag` — ✅ DONE (2026-08-06)
+
+NOTES (2026-08-06): no deviation from the item's text; two things worth recording.
+(a) **No user-facing docs and no CHANGELOG entry** — item 8 explicitly owns "document the two
+hidden flags … where the other diagnostics are documented" and the CHANGELOG line, and item 8 is
+not yet done. Same call item 1 made for `⌃l`.
+(b) **`github.com/charmbracelet/x/term` moves from indirect to direct in `go.mod`** (one line, via
+`go mod tidy`; `go.sum` unchanged). The compile-time `var _ term.File = (*tracedOutput)(nil)`
+assertion the item asks for is only worth having against the real interface, which means importing
+it.
 
 **What:** Give apogee its own diagnostic seam so no future Windows rendering bug needs a patched
 bubbletea.
