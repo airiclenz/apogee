@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -69,8 +71,10 @@ func walkSchema(t *testing.T, typ reflect.Type, prefix string, described map[str
 // string is caught even though its path did not change. Pointers are transparent (a *bool is
 // the schema's way of distinguishing an explicit `false` from an absent key), and kind
 // structured accepts a plain string as well as the composite types, because
-// system-prompt-text/-file are single strings whose value is multi-line prose — no text field
-// edits those, so the surface treats them as blocks.
+// system-prompt-text is a single string whose value is multi-line prose — no single-line field
+// edits that, so the surface treats it as a block. A string LIST is a slice, and the one kind
+// whose Go type says nothing about its ELEMENTS — that a name list holds names and not blocks is
+// what kindStringList asserts, and what the writer's own round-trip proves.
 func kindMatchesType(kind configKind, typ reflect.Type) bool {
 	typ = derefType(typ)
 	switch kind {
@@ -80,6 +84,8 @@ func kindMatchesType(kind configKind, typ reflect.Type) bool {
 		return typ.Kind() == reflect.Int
 	case kindString, kindEnum, kindServer:
 		return typ.Kind() == reflect.String
+	case kindStringList:
+		return typ.Kind() == reflect.Slice && derefType(typ.Elem()).Kind() == reflect.String
 	case kindStructured:
 		switch typ.Kind() {
 		case reflect.Slice, reflect.Map, reflect.Struct, reflect.String:
@@ -265,6 +271,10 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 		{"mode", "yolo", "invalid --mode"},
 		{"ui.spinner", "twirl", "invalid ui.spinner"},
 		{"cursor-shape", "sideways", "invalid cursor-shape"},
+		{"system-prompt-file", "", "name a file to read the prompt from"},
+		{"context-files.names", "[../secrets.md]", "climbs out of the workspace"},
+		{"context-files.names", "[AGENTS.md, ./AGENTS.md]", "listed twice"},
+		{"context-files.names", "[/etc/motd]", "not workspace-relative"},
 	} {
 		t.Run(tt.path+"="+tt.value, func(t *testing.T) {
 			t.Parallel()
@@ -304,11 +314,48 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		{"mode", string(modeAuto)},
 		{"ui.spinner", "glitter"},
 		{"cursor-shape", "bar"},
+		// A RELATIVE prompt file is resolved against the apogee home, which this pure check does not
+		// hold, so it is accepted here and answered by the apply (validateSystemPromptFile).
+		{"system-prompt-file", "prompts/apogee.md"},
+		{"context-files.names", "[AGENTS.md, docs/CLAUDE.md]"},
+		{"context-files.names", "[]"}, // the second documented spelling of "off"
 	} {
 		t.Run(tt.path+"="+tt.value, func(t *testing.T) {
 			t.Parallel()
 			if err := mustKey(tt.path).Validate(tt.value); err != nil {
 				t.Errorf("%s = %q was refused: %v", tt.path, tt.value, err)
+			}
+		})
+	}
+}
+
+// The `system-prompt-file` hook's other half — the one that needs a filesystem: an ABSOLUTE path is
+// checked for real, so a prompt file typed with a finger-slip is refused on the row instead of at the
+// next launch, and a directory is refused as the not-a-prompt-file it is.
+func TestSystemPromptFileValidatorChecksAnAbsolutePath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	present := filepath.Join(dir, "prompt.md")
+	if err := os.WriteFile(present, []byte("You are apogee.\n"), 0o600); err != nil {
+		t.Fatalf("write the fixture prompt: %v", err)
+	}
+	validate := mustKey("system-prompt-file").Validate
+
+	if err := validate(present); err != nil {
+		t.Errorf("a readable prompt file was refused: %v", err)
+	}
+	for _, tt := range []struct{ name, value, wantMsg string }{
+		{"a file that is not there", filepath.Join(dir, "absent.md"), "there is no such file"},
+		{"a directory", dir, "it is a directory"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := validate(tt.value)
+			if err == nil {
+				t.Fatalf("%s was accepted", tt.value)
+			}
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.wantMsg)
 			}
 		})
 	}

@@ -89,6 +89,11 @@ var settingValues = map[string]func(options) string{
 	"llama-launcher":     func(o options) string { return o.llamaLauncher },
 	"mode":               func(o options) string { return o.mode },
 	"system-prompt-text": func(o options) string { return countSummary(lineCount(o.systemPrompt.global.text), "line") },
+	// The path AS WRITTEN, blank when the key names no file — the three other editable string rows'
+	// answer (present.command, present.host, web-search-endpoint), and the only safe one: this row's
+	// value is what the edit field is SEEDED with, so a word standing in for emptiness would be a word
+	// the next ⏎ persisted as a path, and a row reading "none" against a blank default would arm a
+	// reset for a key with no line to remove.
 	"system-prompt-file": func(o options) string { return o.systemPrompt.global.file },
 	"system-prompt-models": func(o options) string {
 		return countSummary(len(o.systemPrompt.models), "model")
@@ -170,17 +175,23 @@ func settingsRows(opts options) []tui.SettingRow {
 }
 
 // settingKind projects a registry kind onto the renderer's vocabulary. The two vocabularies are
-// spelled the same on purpose — they describe the same five shapes — but the mapping is explicit so
+// spelled alike on purpose — they mostly describe the same shapes — but the mapping is explicit so
 // that a kind added to the registry has to be given an edit idiom deliberately rather than reaching
 // the pane as an unhandled string. An unmapped kind falls back to structured, the read-only end:
 // the surface that cannot say what a value is must not offer to write it.
+//
+// kindStringList is the one kind that does NOT get a renderer kind of its own, and deliberately: what
+// the pane does with a name list is exactly what it does with a string — open a field on the row and
+// type the one line the value is written on. The list-ness is the WRITER's business (kindStringList,
+// parseSettingList), and giving the renderer a kind for it would only be a second name for the same
+// idiom.
 func settingKind(kind configKind) tui.SettingKind {
 	switch kind {
 	case kindBool:
 		return tui.SettingBool
 	case kindInt:
 		return tui.SettingInt
-	case kindString:
+	case kindString, kindStringList:
 		return tui.SettingString
 	case kindEnum:
 		return tui.SettingEnum
@@ -226,6 +237,10 @@ func boolValue(v bool) string { return strconv.FormatBool(v) }
 // listValue spells a resolved name list the way the template's inline form spells it
 // ("[AGENTS.md]"), so the row and the registry's default for the key read alike. An empty list is
 // "[]" rather than "none": the key holds a list, and an empty one is a value the user can have set.
+//
+// It is also the CANONICAL spelling the splice writer verifies a written list against
+// (configwrite.go): the row's text and the value a reader takes back out of the file are one string,
+// or an edit would come back reading differently from what was typed.
 func listValue(names []string) string { return "[" + strings.Join(names, ", ") + "]" }
 
 // countSummary summarizes a structured block by how much is in it ("3 servers"). Zero returns

@@ -1,9 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -24,9 +29,9 @@ import (
 // configKind is what a key HOLDS, which is what decides how it is displayed and whether
 // the settings surface can edit it in place. It is deliberately coarser than the Go type:
 // enum is a string with a closed vocabulary (the parse site owns the set — see EnumValues),
-// and structured is the terminator — a list, a map, a nested block, or a multi-line text
-// value whose editor is a separate concern (a text field cannot express it, so the surface
-// points at config.yaml instead).
+// and structured is the terminator — a map, a nested block, a list of blocks, or a multi-line
+// text value whose editor is a separate concern (a single-line text field cannot express it,
+// so the surface points at config.yaml instead).
 type configKind string
 
 const (
@@ -35,6 +40,12 @@ const (
 	kindString     configKind = "string"
 	kindEnum       configKind = "enum"
 	kindStructured configKind = "structured"
+	// kindStringList is a list of plain names written on ONE line as a flow sequence
+	// (`names: [AGENTS.md, CLAUDE.md]`). It is a kind of its own rather than structured because a
+	// single-line text field CAN express it — the surface edits the line as the comma-separated text
+	// it reads as, and the writer renders the list back through the YAML marshaller. Only a list of
+	// SCALARS qualifies; a list of blocks (`servers:`, `unconfined-hosts:`) stays structured.
+	kindStringList configKind = "string-list"
 	// kindServer is a string whose vocabulary is this config's OWN `servers:` block: a closed set
 	// like an enum's, but one no static table can hold, so EnumValues stays empty and the surface
 	// asks the session for the list (tui.SettingServer). It is the writer's kindString in every
@@ -145,8 +156,14 @@ var keyRegistry = []configKey{
 		Desc: "The system prompt written inline — the standing instructions sent ahead of your first message.",
 	},
 	{
-		Path: "system-prompt-file", Kind: kindStructured,
-		Desc: "A file to read the system prompt from instead of writing it inline.",
+		// A plain path on a plain line, so the pane types it like any other string. What it names is
+		// still the whole system prompt: the write persists the path and the apply RE-READS the block
+		// and re-resolves it per model (the dispatcher's system-prompt entry), because these three keys
+		// are one prompt and only the file can spell all of it (ADR 0023).
+		Path: "system-prompt-file", Kind: kindString,
+		Editable: true,
+		Validate: validateSystemPromptFile,
+		Desc:     "A file to read the system prompt from instead of writing it inline.",
 	},
 	{
 		Path: "system-prompt-models", Kind: kindStructured,
@@ -158,8 +175,13 @@ var keyRegistry = []configKey{
 		Desc:     "Fold the workspace context files below into the system prompt at session start.",
 	},
 	{
-		Path: "context-files.names", Kind: kindStructured, Default: "[AGENTS.md]",
-		Desc: "Workspace-root file names folded into the system prompt, in list order.",
+		// The one list the file writes on a single line, and therefore the one a text field can edit
+		// (kindStringList): the row is typed as the comma-separated names it shows, and the writer
+		// renders them back as the flow sequence the template documents.
+		Path: "context-files.names", Kind: kindStringList, Default: "[AGENTS.md]",
+		Editable: true,
+		Validate: validateContextFileNames, // the startup check itself: contextFilesSettings.validate
+		Desc:     "Workspace-root file names folded into the system prompt, in list order.",
 	},
 	{
 		Path: "confine-to-workspace", Kind: kindBool, Default: "true",
@@ -301,6 +323,58 @@ func validateSearchEndpoint(value string) error {
 	}
 	return fmt.Errorf("apogee: invalid web-search-endpoint %q: it is not a URL — give a search "+
 		"endpoint, or off to disable web search", value)
+}
+
+// validateSystemPromptFile refuses a `system-prompt-file:` the next launch could not read. Two
+// refusals and no third:
+//
+//   - EMPTY, which is not how this key is cleared. An empty string is a SET of nothing, and the
+//     deliberate way to take the prompt file away is the reset backspace arms, which removes the
+//     line (ADR 0035) and hands the key back to the commented example that documents it.
+//   - a named file that is not there, or that cannot be opened — the check resolveSystemPrompt makes
+//     when it selects the prompt, moved ahead of the write so a path typed with a finger-slip is
+//     refused on the row rather than at the next launch.
+//
+// The existence half runs only on a path this function can resolve ON ITS OWN: an absolute one, or a
+// `~` one, which expandUserPath makes absolute. A RELATIVE path is resolved against the apogee home —
+// the directory config.yaml lives in, so a prompt file travels with the configuration
+// (resolveSystemPrompt) — which a validator holding nothing but the value cannot know. Such a value is
+// accepted here and answered by the APPLY a moment later, whose failure lands on the same row: better
+// than refusing a path that is perfectly good, and better than resolving it against a second base.
+func validateSystemPromptFile(value string) error {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return errors.New(`apogee: invalid system-prompt-file "": name a file to read the prompt from, ` +
+			"or reset the key to take the file away")
+	}
+	path, err := expandUserPath(v)
+	if err != nil || !filepath.IsAbs(path) {
+		return nil // resolved against the apogee home, which this check does not hold
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("apogee: invalid system-prompt-file %q: there is no such file", value)
+		}
+		return fmt.Errorf("apogee: invalid system-prompt-file %q: it cannot be read", value)
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err == nil && info.IsDir() {
+		return fmt.Errorf("apogee: invalid system-prompt-file %q: it is a directory, not a prompt file", value)
+	}
+	return nil
+}
+
+// validateContextFileNames refuses a `context-files.names:` list the next launch would refuse, through
+// the startup check itself (contextFilesSettings.validate): an empty entry, a name that is not
+// workspace-relative, one that climbs out with "..", and the same name listed twice.
+//
+// The value arrives as the FILE spells it — the one-line flow sequence — so it is read back into a
+// list by the same parse the writer renders from (parseSettingList), and what is checked is therefore
+// the list a reader takes out of the file rather than a second reading of the keystrokes. An EMPTY
+// list is a value, not an error: `names: []` is the second documented spelling of "off".
+func validateContextFileNames(value string) error {
+	return contextFilesSettings{names: parseSettingList(value)}.validate()
 }
 
 // validateContextWindow refuses a negative token pin. Zero is the default and means "follow the

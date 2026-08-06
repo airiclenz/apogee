@@ -644,17 +644,16 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// now runs. The dispatcher owns the resolution from a registry path and a file-spelled value
 		// onto a live engine seam — the renderer holds neither schema nor engine mutator.
 		ApplySetting: applySettingFor(settingsApplier{
-			engine:       engine,
-			live:         live,
-			binding:      holder.Binding,
-			rebind:       rebind,
-			configPath:   filepath.Join(roots.config, "config.yaml"),
-			contextFiles: opts.contextFiles,
-			skills:       skillProvider,
-			tools:        toolSet,
-			roots:        roots,
-			launcher:     launcher,
-			present:      presentation,
+			engine:     engine,
+			live:       live,
+			binding:    holder.Binding,
+			rebind:     rebind,
+			configPath: filepath.Join(roots.config, "config.yaml"),
+			skills:     skillProvider,
+			tools:      toolSet,
+			roots:      roots,
+			launcher:   launcher,
+			present:    presentation,
 		}),
 		Skills: skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
@@ -752,20 +751,33 @@ type liveSettings struct {
 	// (ADR 0023). It is held whole rather than per key because selection is whole-entry replacement:
 	// the three keys are one prompt, and resolveSystemPrompt collapses them per model at every rebind.
 	systemPrompt systemPromptSettings
+
+	// contextFilesEnable and contextFileNames are the `context-files:` block's two keys as the session
+	// holds them NOW. They live here because each key's edit has to carry the OTHER half — the engine
+	// takes the pair (Agent.SetContextFiles) — so switching the block back on installs the names as
+	// they stand rather than the ones this run launched with.
+	contextFilesEnable bool
+	contextFileNames   []string
 }
 
 // newLiveSettings seeds the holder with what THIS run resolved. manualIDs is passed in rather than
 // re-derived because runRoot has already validated the block against the catalogue and holds the
 // answer — deriving it twice is how the two spellings of the same list start to drift.
+//
+// The context-file PAIR is seeded from the resolved name list, which is the very read the pane's own
+// two rows are formatted from (settingsrows.go): the two spellings of "off" collapse into an empty
+// list at startup, so an enable read back off that list and a row showing `false` say the same thing.
 func newLiveSettings(opts options, manualIDs []apogee.MechanismID) *liveSettings {
 	return &liveSettings{
-		pinnedWindow:    opts.contextWindow,
-		servers:         opts.servers,
-		manualIDs:       manualIDs,
-		mechanisms:      opts.mechanisms,
-		validatedEnable: opts.validatedSetsEnable,
-		validatedAlias:  opts.validatedSetsAlias,
-		systemPrompt:    opts.systemPrompt,
+		pinnedWindow:       opts.contextWindow,
+		servers:            opts.servers,
+		manualIDs:          manualIDs,
+		mechanisms:         opts.mechanisms,
+		validatedEnable:    opts.validatedSetsEnable,
+		validatedAlias:     opts.validatedSetsAlias,
+		systemPrompt:       opts.systemPrompt,
+		contextFilesEnable: len(opts.contextFiles) > 0,
+		contextFileNames:   opts.contextFiles,
 	}
 }
 
@@ -830,6 +842,25 @@ func (s *liveSettings) setSystemPrompt(sp systemPromptSettings) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.systemPrompt = sp
+}
+
+// setContextFilesEnable flips the `context-files:` off-switch and reports the names to install with
+// it. The pair is read and written under ONE lock because the engine takes it as a pair: an enable
+// that read the names outside the lock could install a half of one edit beside a half of another.
+func (s *liveSettings) setContextFilesEnable(on bool) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.contextFilesEnable = on
+	return s.contextFileNames
+}
+
+// setContextFileNames replaces the `context-files.names:` list and reports the switch to install it
+// under — setContextFilesEnable's mirror, and the other half of the same pair.
+func (s *liveSettings) setContextFileNames(names []string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.contextFileNames = names
+	return s.contextFilesEnable
 }
 
 // rebindInputs projects the live values onto a COPY of the startup snapshot and hands back the three
@@ -971,8 +1002,6 @@ type settingsApplier struct {
 	// configPath is the config.yaml this session resolved — re-read whole for the keys whose value is
 	// a structure no single string can spell.
 	configPath string
-	// contextFiles are the workspace context-file names THIS run resolved.
-	contextFiles []string
 	// skills is the shared skill catalogue: the SAME Provider the loop resolves attached ids against
 	// and the "/" menu lists, so re-pointing it at another source layering moves both at once.
 	skills settingsSkills
@@ -1030,12 +1059,19 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			if err != nil {
 				return "", err
 			}
-			// contextFiles are the names THIS run resolved — what the enable switch turns back on. A
-			// block that started off resolves to no names at all (the two spellings of "off" collapse at
-			// startup), so switching it on live installs nothing until the names themselves are editable;
-			// the file's names are read at the next session boundary either way, which is what the
-			// boundary note on the row is telling the human about.
-			a.engine.SetContextFiles(on, a.contextFiles)
+			// The names the session holds NOW: this run's resolution until a names edit replaced them.
+			// A block that STARTED off resolved to no names at all (the two spellings of "off" collapse
+			// at startup), so what switching it back on installs is whatever the names row has since
+			// been given — which is why the two keys share one holder rather than one closure each.
+			a.engine.SetContextFiles(on, a.live.setContextFilesEnable(on))
+			return contextFileNote, nil
+		case "context-files.names":
+			// The value arrives as the FILE spells it — the one-line flow sequence the writer just
+			// rendered — and is read back by the same parse, so the engine is handed the list a reader
+			// takes out of the file rather than a second reading of the keystrokes. The switch travels
+			// with it: names alone are not a state the engine can be put into.
+			names := parseSettingList(value)
+			a.engine.SetContextFiles(a.live.setContextFileNames(names), names)
 			return contextFileNote, nil
 		case "use-project-skills":
 			on, err := settingBool(key, value)

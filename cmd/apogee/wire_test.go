@@ -2264,7 +2264,7 @@ func (s *applySettingSpy) drove() int {
 }
 
 // Every key the dispatcher knows lands on ITS seam and no other, carrying the value the file spells.
-// The context-files switch is the one that answers with a boundary note, because its names are folded
+// The context-files keys are the ones that answer with a boundary note, because their names are folded
 // into the standing prompt only at a session boundary (ADR 0037 decision 3) — every other key is in
 // force the moment it returns, which is what an empty note means.
 func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
@@ -2325,12 +2325,29 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 				}
 			},
 		},
+		{
+			// The names arrive as the FILE spells them — the one-line flow sequence the writer just
+			// rendered — and reach the seam parsed back into the list a reader takes out of it, with
+			// the switch the session is running carried along beside them.
+			name: "context-files.names", key: "context-files.names", value: "[NOTES.md, docs/HOWTO.md]",
+			wantNote: contextFileNote,
+			check: func(t *testing.T, spy *applySettingSpy) {
+				t.Helper()
+				want := []string{"NOTES.md", "docs/HOWTO.md"}
+				if len(spy.contextFiles) != 1 || !spy.contextFiles[0].enable ||
+					!slices.Equal(spy.contextFiles[0].names, want) {
+					t.Errorf("SetContextFiles = %+v, want one call with %v and the switch on",
+						spy.contextFiles, want)
+				}
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			spy := &applySettingSpy{}
-			note, err := applySettingFor(settingsApplier{engine: spy, contextFiles: names})(tt.key, tt.value)
+			live := newLiveSettings(options{contextFiles: names}, nil)
+			note, err := applySettingFor(settingsApplier{engine: spy, live: live})(tt.key, tt.value)
 			if err != nil {
 				t.Fatalf("apply %s=%s: %v", tt.key, tt.value, err)
 			}
@@ -2339,6 +2356,47 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 			}
 			tt.check(t, spy)
 		})
+	}
+}
+
+// The `context-files:` block is TWO keys and one engine call, so each key's apply has to carry the
+// other's current half — which is why they share the live holder rather than a captured startup value.
+// The case that proves it is the one the startup snapshot could not answer: a block that launched OFF
+// resolves to no names at all, so the switch alone has nothing to install until the names row has been
+// given some, and then it installs exactly those.
+func TestApplySettingCarriesTheOtherHalfOfTheContextFilesBlock(t *testing.T) {
+	t.Parallel()
+	spy := &applySettingSpy{}
+	live := newLiveSettings(options{}, nil) // a session that launched with the block off
+	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+
+	if _, err := apply("context-files.enable", "true"); err != nil {
+		t.Fatalf("apply the switch: %v", err)
+	}
+	if len(spy.contextFiles) != 1 || len(spy.contextFiles[0].names) != 0 {
+		t.Fatalf("SetContextFiles = %+v, want the switch on with no names to install yet", spy.contextFiles)
+	}
+
+	if _, err := apply("context-files.names", "[NOTES.md]"); err != nil {
+		t.Fatalf("apply the names: %v", err)
+	}
+	want := []string{"NOTES.md"}
+	if len(spy.contextFiles) != 2 || !spy.contextFiles[1].enable ||
+		!slices.Equal(spy.contextFiles[1].names, want) {
+		t.Fatalf("SetContextFiles = %+v, want %v under the switch this session turned on",
+			spy.contextFiles, want)
+	}
+
+	// And back the other way: the switch now installs the names the names row gave it, not the empty
+	// list this run launched with.
+	if _, err := apply("context-files.enable", "false"); err != nil {
+		t.Fatalf("apply the switch off: %v", err)
+	}
+	if _, err := apply("context-files.enable", "true"); err != nil {
+		t.Fatalf("apply the switch on again: %v", err)
+	}
+	if n := len(spy.contextFiles); n != 4 || !slices.Equal(spy.contextFiles[3].names, want) {
+		t.Errorf("SetContextFiles = %+v, want the last call to re-install %v", spy.contextFiles, want)
 	}
 }
 

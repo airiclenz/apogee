@@ -660,8 +660,67 @@ func renderSettingValue(k configKey, value string) (string, string, error) {
 		// the switch seam itself — not by a vocabulary this table could hold (kindServer).
 		text, err := renderScalar(v)
 		return text, v, err
+	case kindStringList:
+		// The two spellings a surface may offer — the file's own `[a, b]` and the bare `a, b` a human
+		// types over it — are one list (parseSettingList), and it goes back into the file in the
+		// canonical one, so a re-set of what is already there rewrites nothing.
+		names := parseSettingList(v)
+		text, err := renderScalarList(names)
+		return text, listValue(names), err
 	}
 	return "", "", fmt.Errorf("%s is not a simple value; edit it in config.yaml", k.Path)
+}
+
+// parseSettingList reads a list value as a surface offers it: the file's own one-line flow spelling
+// (`[AGENTS.md, CLAUDE.md]`) or the bare comma-separated text a human types, which are the same list
+// with and without its brackets — the edit field is SEEDED with the row's value, so a human correcting
+// one name hands the value back still wearing them. Entries are trimmed and empty ones dropped, so a
+// trailing comma and the space after it cost nothing.
+//
+// It is the one parse: the writer renders the file's text from it and the live-apply dispatcher hands
+// the engine the list it returns (wire.go), so what the file carries and what the session runs cannot
+// be two different readings of the same keystrokes.
+func parseSettingList(value string) []string {
+	v := strings.TrimSpace(value)
+	if inner, ok := strings.CutPrefix(v, "["); ok {
+		v = strings.TrimSuffix(inner, "]")
+	}
+	parts := strings.Split(v, ",")
+	names := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if name := strings.TrimSpace(part); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// renderScalarList renders a name list as the one-line flow sequence the file carries
+// (`[AGENTS.md, CLAUDE.md]`), through the YAML marshaller — which owns the quoting, so a name that
+// would mean something else bare (`off`, `12`, one carrying a comma or a colon) comes back quoted and
+// the file still parses. An empty list renders as `[]`, the documented second spelling of "off".
+//
+// A list that will not fit on one line is refused for the reason a scalar that will not is: this
+// writer replaces the single line its key sits on, and the marshaller folds a long flow sequence
+// across several.
+func renderScalarList(names []string) (string, error) {
+	node := yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
+	for _, name := range names {
+		item := &yaml.Node{}
+		if err := item.Encode(name); err != nil {
+			return "", fmt.Errorf("render the value: %w", err)
+		}
+		node.Content = append(node.Content, item)
+	}
+	out, err := yaml.Marshal(&node)
+	if err != nil {
+		return "", fmt.Errorf("render the value: %w", err)
+	}
+	text := strings.TrimRight(string(out), "\n")
+	if strings.Contains(text, "\n") {
+		return "", errors.New("the list does not fit on one line")
+	}
+	return text, nil
 }
 
 // renderScalar renders one value as the YAML text for it, quoted by the marshaller where a bare
@@ -683,6 +742,7 @@ func renderScalar(v any) (string, error) {
 // (nil when the file does not set it) and, for a nested key, its parent block.
 type scalarTarget struct {
 	key        string     // the leaf key as the file spells it
+	kind       configKind // what the key holds, and with it the value shapes its line may carry
 	parent     string     // the block the key sits in, empty for a top-level key
 	keyNode    *yaml.Node // the leaf key, nil when the key has no active line
 	valueNode  *yaml.Node // its value, nil with keyNode
@@ -711,7 +771,7 @@ func (t scalarTarget) childIndent() int {
 // key's line is.
 func scalarTargetIn(doc *yaml.Node, k configKey) (scalarTarget, error) {
 	head, rest, nested := strings.Cut(k.Path, ".")
-	t := scalarTarget{key: head}
+	t := scalarTarget{key: head, kind: k.Kind}
 	if nested {
 		t.parent, t.key = head, rest
 	}
@@ -839,13 +899,8 @@ func scalarLineParts(lines []string, t scalarTarget) (head, gap, tail string, er
 	}
 	head, gap = raw[:indent+len(t.key)+1], " "
 	if !isNullNode(t.valueNode) {
-		switch {
-		case t.valueNode.Kind != yaml.ScalarNode:
-			return "", "", "", fmt.Errorf("its %s: holds a list or a block, not a single value; edit the file by hand", t.key)
-		case t.valueNode.Line != line:
-			return "", "", "", fmt.Errorf("its %s: value does not sit on the same line as its key; edit the file by hand", t.key)
-		case t.valueNode.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0:
-			return "", "", "", fmt.Errorf("its %s: value is written as a multi-line block; edit the file by hand", t.key)
+		if err := t.valueFitsOneLine(line); err != nil {
+			return "", "", "", err
 		}
 		if start := t.valueNode.Column - 1; start > len(head) && start <= len(raw) && strings.TrimSpace(raw[len(head):start]) == "" {
 			gap = raw[len(head):start]
@@ -867,6 +922,37 @@ func scalarLineParts(lines []string, t scalarTarget) (head, gap, tail string, er
 		}
 	}
 	return head, gap, tail, nil
+}
+
+// valueFitsOneLine reports whether the target's EXISTING value is one this writer may rewrite in
+// place: a value that begins and ends on the key's own line, so replacing that line leaves nothing of
+// it behind. What counts as one differs by kind and by nothing else — a plain scalar for every kind
+// but the list, and for a list a FLOW sequence ([...]) that also opens and closes there.
+//
+// A block sequence is refused rather than folded into one line: the file is the user's, and turning
+// four lines of theirs into one is a rewrite they did not ask for. It is the same refusal the flow-
+// style mapping gets one level up, in the other direction.
+func (t scalarTarget) valueFitsOneLine(line int) error {
+	if t.kind == kindStringList {
+		switch {
+		case t.valueNode.Kind != yaml.SequenceNode:
+			return fmt.Errorf("its %s: holds a single value, not a list; edit the file by hand", t.key)
+		case t.valueNode.Style&yaml.FlowStyle == 0:
+			return fmt.Errorf("its %s: list is written one item per line; edit the file by hand", t.key)
+		case t.valueNode.Line != line || maxNodeLine(t.valueNode) != line:
+			return fmt.Errorf("its %s: list does not sit on the same line as its key; edit the file by hand", t.key)
+		}
+		return nil
+	}
+	switch {
+	case t.valueNode.Kind != yaml.ScalarNode:
+		return fmt.Errorf("its %s: holds a list or a block, not a single value; edit the file by hand", t.key)
+	case t.valueNode.Line != line:
+		return fmt.Errorf("its %s: value does not sit on the same line as its key; edit the file by hand", t.key)
+	case t.valueNode.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0:
+		return fmt.Errorf("its %s: value is written as a multi-line block; edit the file by hand", t.key)
+	}
+	return nil
 }
 
 // scalarInsertion is the lines to insert for a key the file does not set, and the 1-based line to
@@ -1019,6 +1105,10 @@ func verifiedSplice(data, updated []byte, k configKey, want string, set bool) ([
 // reader sees it — the round-trip half of the verification: a splice must put the value where the
 // PARSER looks for it, not merely somewhere that reads correctly in the text. A path that is
 // absent, or that runs through a value which is not a block, reports not-set.
+//
+// A list of plain values reads back as the one-line spelling the writer renders and the row shows
+// (listValue), so a name list is verified the same way a scalar is. A list holding anything else —
+// the blocks under `servers:` — is not a value a settings path names at all, and reports not-set.
 func scalarAtPath(data []byte, path string) (string, bool, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(data, &doc); err != nil {
@@ -1034,11 +1124,21 @@ func scalarAtPath(data []byte, path string) (string, bool, error) {
 			return "", false, nil
 		}
 	}
-	switch node.(type) {
+	switch v := node.(type) {
 	case nil: // a bare `key:` — set, with nothing in it
 		return "", true, nil
-	case map[string]any, []any:
+	case map[string]any:
 		return "", false, nil
+	case []any:
+		names := make([]string, 0, len(v))
+		for _, item := range v {
+			switch item.(type) {
+			case nil, map[string]any, []any:
+				return "", false, nil
+			}
+			names = append(names, fmt.Sprint(item))
+		}
+		return listValue(names), true, nil
 	}
 	return fmt.Sprint(node), true, nil
 }

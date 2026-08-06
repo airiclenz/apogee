@@ -183,7 +183,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"llama-launcher":       "off",
 		"mode":                 "auto",
 		"system-prompt-text":   "2 lines",
-		"system-prompt-file":   noneSettingValue,
+		"system-prompt-file":   "", // unset, and an editable string row's blank is what the field seeds from
 		"system-prompt-models": "1 model",
 		"context-files.enable": "true",
 		"context-files.names":  "[AGENTS.md, CLAUDE.md]",
@@ -312,12 +312,15 @@ func TestSettingsRowsProjectRegistryMetadata(t *testing.T) {
 			t.Errorf("row %q does not carry its registry row: %+v", k.Path, row)
 		}
 	}
-	// The kinds themselves are a closed projection: every registry kind maps to its own renderer
-	// kind, and only a structured key reads as structured (the read-only end the fallback lands on).
+	// The kinds themselves are a closed projection, and only a structured key reads as structured
+	// (the read-only end the fallback lands on). The one many-to-one is deliberate: a name list is
+	// typed on its row exactly as a string is, so it projects onto the string idiom and keeps its
+	// list-ness on the writer's side of the seam (settingKind).
 	for kind, want := range map[configKind]tui.SettingKind{
 		kindBool:       tui.SettingBool,
 		kindInt:        tui.SettingInt,
 		kindString:     tui.SettingString,
+		kindStringList: tui.SettingString,
 		kindEnum:       tui.SettingEnum,
 		kindServer:     tui.SettingServer,
 		kindStructured: tui.SettingStructured,

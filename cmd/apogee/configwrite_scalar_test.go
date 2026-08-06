@@ -259,7 +259,9 @@ func TestSpliceScalarSettingRoundTripsEveryEditableKey(t *testing.T) {
 }
 
 // plausibleValue is a valid value for a key, different enough from the defaults to be visible in
-// the file: the first of an enum's vocabulary, and a fixed literal for everything else.
+// the file: the first of an enum's vocabulary, and a fixed literal for everything else. A list's
+// literal is spelled the way the file spells one, which is also what the sweep reads back — a value
+// written and re-read has to come back the same string or the writer's round-trip means nothing.
 func plausibleValue(t *testing.T, k configKey) string {
 	t.Helper()
 	switch k.Kind {
@@ -274,6 +276,8 @@ func plausibleValue(t *testing.T, k configKey) string {
 		return k.EnumValues[0]
 	case kindString, kindServer:
 		return "apogee-test-value"
+	case kindStringList:
+		return "[apogee-test.md, docs/apogee-test.md]"
 	}
 	t.Fatalf("%s has no writable kind (%s)", k.Path, k.Kind)
 	return ""
@@ -292,6 +296,58 @@ func assertOnlyKeyChanged(t *testing.T, before, after, path string) {
 	}
 	if !sameApartFrom(b, a, path) {
 		t.Errorf("the edit changed more than %s:\n%s", path, after)
+	}
+}
+
+// The list kind end to end, on the file the users actually have: the seeded template, which documents
+// `context-files:` as a commented example and sets none of it. The block is created below that
+// example, a second edit REWRITES the one line it created rather than adding another, and the reset
+// takes the block back out — leaving the template byte-for-byte as it shipped.
+func TestSpliceScalarSettingWritesAListOnOneLine(t *testing.T) {
+	t.Parallel()
+	k := mustKey("context-files.names")
+	template := string(defaultConfigYAML)
+
+	created, err := setScalarSetting([]byte(template), k, "NOTES.md, docs/HOWTO.md")
+	if err != nil {
+		t.Fatalf("create the block: %v", err)
+	}
+	at, inserted := splicedInsertion(t, template, string(created))
+	want := []string{"context-files:", "  names: [NOTES.md, docs/HOWTO.md]"}
+	if !slices.Equal(inserted, want) {
+		t.Fatalf("inserted %q at line %d, want %q — one line for the block and one for the list", inserted, at, want)
+	}
+	// The block lands under the commented example that documents it, not at the end of the file
+	// (ADR 0035's insert-below-example call).
+	if lines := splitConfigLines([]byte(template)); at >= len(lines) {
+		t.Errorf("the block was appended at line %d of %d, want it below the commented example", at, len(lines))
+	}
+	if got, ok, err := scalarAtPath(created, k.Path); err != nil || !ok || got != "[NOTES.md, docs/HOWTO.md]" {
+		t.Fatalf("the created list reads %q (set=%v, err=%v)", got, ok, err)
+	}
+
+	// A second edit is a REWRITE of that one line: same line count, and the flow sequence already
+	// there is a value this writer may replace (valueFitsOneLine).
+	updated, err := setScalarSetting(created, k, "[AGENTS.md]")
+	if err != nil {
+		t.Fatalf("rewrite the list: %v", err)
+	}
+	if before, after := len(splitConfigLines(created)), len(splitConfigLines(updated)); before != after {
+		t.Errorf("the rewrite changed the line count from %d to %d", before, after)
+	}
+	if got, ok, err := scalarAtPath(updated, k.Path); err != nil || !ok || got != "[AGENTS.md]" {
+		t.Fatalf("the rewritten list reads %q (set=%v, err=%v)", got, ok, err)
+	}
+	assertOnlyKeyChanged(t, string(created), string(updated), k.Path)
+
+	// And the reset removes the block whole — the `names:` line and the `context-files:` key it was
+	// the only child of — which is the template again, comment for comment.
+	reset, err := deleteScalarSetting(updated, k)
+	if err != nil {
+		t.Fatalf("reset the list: %v", err)
+	}
+	if string(reset) != template {
+		t.Errorf("the reset did not restore the template:\n%s", reset)
 	}
 }
 
@@ -430,6 +486,32 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 			content: "mode: auto\n",
 			path:    "llama-launcher", value: "http://box:7331",
 			wantMsg: "looks like a URL",
+		},
+		{
+			name:    "a context-file name that climbs out of the workspace",
+			content: "mode: auto\n",
+			path:    "context-files.names", value: "[../secrets.md]",
+			wantMsg: "climbs out of the workspace",
+		},
+		{
+			name:    "a prompt file cleared by writing nothing, which is what the reset is for",
+			content: "mode: auto\n",
+			path:    "system-prompt-file", value: "",
+			wantMsg: "name a file to read the prompt from",
+		},
+		// The list kind's own two shapes: what a `names:` line may hold, and what it may not. Both are
+		// the user's layout rather than a defect, so both are refused rather than rewritten.
+		{
+			name:    "a list key holding a single value",
+			content: "context-files:\n  names: AGENTS.md\n",
+			path:    "context-files.names", value: "[NOTES.md]",
+			wantMsg: "not a list",
+		},
+		{
+			name:    "a list written one item per line is a layout this writer will not fold",
+			content: "context-files:\n  names:\n    - AGENTS.md\n    - CLAUDE.md\n",
+			path:    "context-files.names", value: "[NOTES.md]",
+			wantMsg: "one item per line",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

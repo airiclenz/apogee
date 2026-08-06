@@ -1400,6 +1400,46 @@ func TestSettingsPaneBufferEditsAStringAndPersistsIt(t *testing.T) {
 	}
 }
 
+// A name list is edited as the one LINE it is written on: `context-files.names:` reaches the pane as
+// a string row (cmd/apogee's settingKind), so the field opens seeded with the list the row shows, and
+// the line the human hands back goes to BOTH seams verbatim — the binary parses it once, into the
+// file's spelling and into the engine's list, and this renderer parses nothing. The boundary note the
+// apply answers with lands on the row, because a name list moves at the next session boundary.
+func TestSettingsPaneEditsANameListAsOneLine(t *testing.T) {
+	rows := []SettingRow{{
+		Path: "context-files.names", Section: "System prompt", Kind: SettingString,
+		Value: "[AGENTS.md]", Default: "[AGENTS.md]", Editable: true,
+		Desc: "Workspace-root file names folded into the system prompt.",
+	}}
+	log := &settingsWriteLog{applyNote: "applies at next clear"}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter())
+
+	if m.settings.editor.value() != "[AGENTS.md]" {
+		t.Fatalf("buffer = %q, want it seeded with the list the row shows", m.settings.editor.value())
+	}
+	for range len("]") {
+		m = step(t, m, keyBackspace())
+	}
+	m = typeSetting(t, m, ", docs/CLAUDE.md]")
+	m = step(t, m, keyEnter())
+
+	edit := settingEdit{path: "context-files.names", value: "[AGENTS.md, docs/CLAUDE.md]"}
+	if want := []settingEdit{edit}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if want := []settingEdit{edit}; !reflect.DeepEqual(log.applies, want) {
+		t.Fatalf("applies = %+v, want the same line the write took: %+v", log.applies, want)
+	}
+	if got, want := m.settingsValueCell(rows[0]), edit.value+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q", got, want)
+	}
+	if got, want := m.settingsNote(rows[0]), "· applies at next clear"; got != want {
+		t.Errorf("note = %q, want %q", got, want)
+	}
+}
+
 // The caret keys the value field answers — the widget's own key map, which is the chat box's
 // (lineeditor.go). alt+← is the word jump on every terminal; the Kitty-only ctrl+← is not needed to
 // state that the jump is there.
