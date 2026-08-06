@@ -285,7 +285,7 @@ func caretOffset(value string, row, col int) int {
 // (logical row, column) the textarea positions its cursor by. The mouse needs only the forward
 // direction (a click names a cell, the caret follows), but a completion that splices text into the
 // MIDDLE of a draft needs this one: the new caret is known as an offset into the new value, and the
-// widget can only be driven by row and column ([promptEditor.caretToOffset]).
+// widget can only be driven by row and column ([lineEditor.caretToOffset]).
 //
 // An offset past the end of a line lands at that line's end rather than wrapping into the next,
 // which is what makes the two functions inverses at every position, the line ends included: the

@@ -219,7 +219,9 @@ NOTES (2026-08-06): the spec moved — it is `docs/layout/settings-screen-layout
 
 **Commit:** `feat(tui): settings pane chrome — description header, white sections, spacers, edit highlight`
 
-## 10. Single-line value editing with real cursor movement
+## 10. Single-line value editing with real cursor movement — ✅ DONE (2026-08-06)
+
+NOTES (2026-08-06): the item's open design question was answered by the owner: the shared single-line editing logic is EXTRACTED into `internal/tui/lineeditor.go` (`lineEditor` — the textarea plus the whole caret family: `caretTo`/`reseatCaret`/`seatCaret`/`caretToOffset`/`caretByteOffset`/`deleteSelection`/`reseatInput`, moved off `promptEditor`, which now EMBEDS it), used by both the prompt editor and the settings pane; the pane does NOT hold a configured `promptEditor`. Two consequences worth knowing. (a) Promotion is now two levels deep for the Model (`Model` → `promptEditor` → `lineEditor`), so `m.input` and `m.caretTo(...)` resolve exactly as before and no call site outside these two files moved. (b) The row paints a caret GLYPH at the caret's offset (`lineEditor.textWithCaret`) rather than the widget's own view or the real terminal cursor: the popup module styles rows whole and takes plain escape-free cells (doc.go), and a popup row has no seat for `tea.View.Cursor` — item 11, which seats the caret from a mouse click, is what gives the row a content rect, and the real cursor is a question for it or later. Also: `settingsPane` is no longer a comparable struct (it carries the widget), so `TestSettingsPaneEscCloses` asserts its zero value with `reflect.DeepEqual`; and the field is built single-line (`lineEditor.singleLine` disables the newline binding and the vertical navigation), because a value carrying a newline would break the one row it is painted in.
 
 **What:** Replace the append/pop-only edit buffer (`settingsBufferKey`, `settings.go:398-420`; `buf` + `settingsCaret`) with a textarea-backed single-line editor, per spec requirement 7 (keyboard half; mouse is item 11):
 

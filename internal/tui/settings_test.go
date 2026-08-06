@@ -191,7 +191,9 @@ func TestSettingsPaneNavigationWrapsAndSwallowsEveryOtherKey(t *testing.T) {
 func TestSettingsPaneEscCloses(t *testing.T) {
 	m := step(t, openSettingsPane(t, settingsModel(t, settingsTestRows(6))), keyEsc())
 
-	if m.settings != (settingsPane{}) {
+	// DeepEqual rather than ==: the pane carries the edit field's widget now, which is not a
+	// comparable type. The claim is unchanged — esc leaves the pane at exactly its zero value.
+	if !reflect.DeepEqual(m.settings, settingsPane{}) {
 		t.Errorf("pane = %+v, want the zero value (closed)", m.settings)
 	}
 	if pane := m.renderSettings(); pane != "" {
@@ -1225,10 +1227,11 @@ func settingsIntRow() SettingRow {
 	}
 }
 
-// ⏎ on a string or an int row opens a buffer ON the row, seeded with the value the key holds — so a
-// human correcting a port edits it rather than retyping it — and ⏎ commits what is in the buffer
-// through the write seam. The caret and the buffer are painted in the value's own column, and the
-// legend switches to the two keys that end the edit.
+// ⏎ on a string or an int row opens a FIELD on the row (lineeditor.go), seeded with the value the key
+// holds and with the caret at the end of it — so a human correcting a port edits it rather than
+// retyping it — and ⏎ commits what the field holds through the write seam. The field's text and its
+// caret are painted in the value's own column, and the legend switches to the two keys that end the
+// edit.
 func TestSettingsPaneBufferEditsAStringAndPersistsIt(t *testing.T) {
 	rows := []SettingRow{settingsStringRow()}
 	log := &settingsWriteLog{}
@@ -1239,8 +1242,8 @@ func TestSettingsPaneBufferEditsAStringAndPersistsIt(t *testing.T) {
 	if m.settings.kind != settingsValueBuffer {
 		t.Fatalf("pane = %+v, want the edit buffer open", m.settings)
 	}
-	if m.settings.buf != "http://box:1111" {
-		t.Errorf("buffer = %q, want it seeded with the value the key holds", m.settings.buf)
+	if m.settings.editor.value() != "http://box:1111" {
+		t.Errorf("buffer = %q, want it seeded with the value the key holds", m.settings.editor.value())
 	}
 	pane := strip(m.renderSettings())
 	for _, want := range []string{"endpoint", "http://box:1111" + settingsCaret, settingsBufferHint} {
@@ -1249,7 +1252,8 @@ func TestSettingsPaneBufferEditsAStringAndPersistsIt(t *testing.T) {
 		}
 	}
 
-	// Backspace pops runes off the buffer inside an edit; it does not arm a reset there.
+	// Backspace deletes inside an edit — at the caret, which is at the end here; it does not arm a
+	// reset there.
 	for range len("1111") {
 		m = step(t, m, keyBackspace())
 	}
@@ -1263,15 +1267,165 @@ func TestSettingsPaneBufferEditsAStringAndPersistsIt(t *testing.T) {
 	if want := []settingEdit{{path: "endpoint", value: "http://box:2222"}}; !reflect.DeepEqual(log.writes, want) {
 		t.Fatalf("writes = %+v, want %+v", log.writes, want)
 	}
-	if m.settings.kind != settingsKeyList || m.settings.buf != "" {
+	if m.settings.kind != settingsKeyList || m.settings.editor.value() != "" {
 		t.Errorf("pane = %+v after the commit, want the buffer closed and empty", m.settings)
 	}
 	if got, want := m.settingsValueCell(rows[0]), "http://box:2222"+settingsEditMarker; got != want {
 		t.Errorf("value cell = %q, want %q", got, want)
 	}
 	// A re-opened buffer starts from what was WRITTEN, not from the resolution the pane opened over.
-	if reopened := step(t, m, keyEnter()); reopened.settings.buf != "http://box:2222" {
-		t.Errorf("re-opened buffer = %q, want the value this pane persisted", reopened.settings.buf)
+	if reopened := step(t, m, keyEnter()); reopened.settings.editor.value() != "http://box:2222" {
+		t.Errorf("re-opened buffer = %q, want the value this pane persisted", reopened.settings.editor.value())
+	}
+}
+
+// The caret keys the value field answers — the widget's own key map, which is the chat box's
+// (lineeditor.go). alt+← is the word jump on every terminal; the Kitty-only ctrl+← is not needed to
+// state that the jump is there.
+func keyLeft() tea.KeyPressMsg     { return tea.KeyPressMsg{Code: tea.KeyLeft} }
+func keyRight() tea.KeyPressMsg    { return tea.KeyPressMsg{Code: tea.KeyRight} }
+func keyHome() tea.KeyPressMsg     { return tea.KeyPressMsg{Code: tea.KeyHome} }
+func keyEnd() tea.KeyPressMsg      { return tea.KeyPressMsg{Code: tea.KeyEnd} }
+func keyDelete() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyDelete} }
+func keyWordLeft() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModAlt} }
+
+// The two keys that insert a newline in the CHAT box (newPromptEditor rebinds them there because
+// plain ⏎ submits). In a settings value they must do nothing at all.
+func keyAltEnter() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt} }
+func keyCtrlJ() tea.KeyPressMsg    { return tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl} }
+
+// pressSettings drives a run of keypresses through the open pane in order, the way a human presses
+// them — a caret walk and the rune it ends in are one gesture, and reading them as one line is what
+// makes the case below legible.
+func pressSettings(t *testing.T, m Model, keys ...tea.KeyPressMsg) Model {
+	t.Helper()
+	for _, k := range keys {
+		m = step(t, m, k)
+	}
+	return m
+}
+
+// The value row is edited in a real field, not an append-and-pop buffer: the caret MOVES and every
+// edit lands where it stands (plan item 10, spec requirement 7). Each case opens the field on a row
+// seeded with its own value, walks the caret and types, then asserts both halves — what the field
+// holds, and what the row PAINTS, since the caret glyph is drawn at the caret and is therefore the
+// only thing on the screen that says where the next keystroke goes.
+func TestSettingsPaneValueFieldEditsAtTheCaret(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		seed  string
+		keys  []tea.KeyPressMsg
+		value string // what the field holds afterwards
+		cell  string // what the row's value column paints
+	}{{
+		name:  "a rune inserts where ← left the caret",
+		seed:  "http://box:1234",
+		keys:  []tea.KeyPressMsg{keyLeft(), keyLeft(), keyLeft(), keyLeft(), keyRune('9')},
+		value: "http://box:91234",
+		cell:  "http://box:9" + settingsCaret + "1234",
+	}, {
+		name:  "→ walks back over what ← passed",
+		seed:  "http://box:1234",
+		keys:  []tea.KeyPressMsg{keyLeft(), keyLeft(), keyRight(), keyRune('0')},
+		value: "http://box:12304",
+		cell:  "http://box:1230" + settingsCaret + "4",
+	}, {
+		name:  "home seats the caret at the front",
+		seed:  "http://box:1234",
+		keys:  []tea.KeyPressMsg{keyHome(), keyRune('X')},
+		value: "Xhttp://box:1234",
+		cell:  "X" + settingsCaret + "http://box:1234",
+	}, {
+		name:  "end brings it back to the tail",
+		seed:  "http://box:1234",
+		keys:  []tea.KeyPressMsg{keyHome(), keyEnd(), keyRune('5')},
+		value: "http://box:12345",
+		cell:  "http://box:12345" + settingsCaret,
+	}, {
+		name:  "backspace takes the rune BEFORE the caret, not the last one",
+		seed:  "http://box:1234",
+		keys:  []tea.KeyPressMsg{keyLeft(), keyLeft(), keyBackspace()},
+		value: "http://box:134",
+		cell:  "http://box:1" + settingsCaret + "34",
+	}, {
+		name:  "delete takes the rune the caret stands on",
+		seed:  "http://box:1234",
+		keys:  []tea.KeyPressMsg{keyHome(), keyDelete()},
+		value: "ttp://box:1234",
+		cell:  settingsCaret + "ttp://box:1234",
+	}, {
+		name:  "the word jump crosses to the start of the last word",
+		seed:  "open -a Safari",
+		keys:  []tea.KeyPressMsg{keyWordLeft(), keyRune('X')},
+		value: "open -a XSafari",
+		cell:  "open -a X" + settingsCaret + "Safari",
+	}, {
+		// The field is single-line (lineEditor.singleLine), and it has to be: a value carrying a
+		// newline would break the row it is painted in — the popup module lays out one line per row.
+		name:  "no key can split a single-line value",
+		seed:  "http://box:1234",
+		keys:  []tea.KeyPressMsg{keyAltEnter(), keyCtrlJ()},
+		value: "http://box:1234",
+		cell:  "http://box:1234" + settingsCaret,
+	}}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			row := settingsStringRow()
+			row.Value = tc.seed
+			m, _ := settingsEditModel(t, []SettingRow{row}, &settingsWriteLog{})
+
+			m = step(t, m, keyEnter()) // the field opens seeded, caret at the end of the value
+			m = pressSettings(t, m, tc.keys...)
+
+			if got := m.settings.editor.value(); got != tc.value {
+				t.Errorf("field = %q, want %q", got, tc.value)
+			}
+			if pane := strip(m.renderSettings()); !strings.Contains(pane, tc.cell) {
+				t.Errorf("the row does not paint %q:\n%s", tc.cell, pane)
+			}
+		})
+	}
+}
+
+// An edit made in the middle of a value commits and cancels exactly as one typed at its end: ⏎
+// persists what the field HOLDS (where the caret stands is not part of a value), esc drops the field
+// whole and writes nothing. The field goes with either ending — a pane back in its key list is not
+// holding a half-typed value.
+func TestSettingsPaneValueFieldCommitsAndCancelsAMidStringEdit(t *testing.T) {
+	rows := []SettingRow{settingsStringRow()} // http://box:1111
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = pressSettings(t, m, keyEnter(), keyLeft(), keyLeft(), keyLeft(), keyLeft(), keyRune('9'))
+	m = step(t, m, keyEnter())
+
+	want := []settingEdit{{path: "endpoint", value: "http://box:91111"}}
+	if !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if !reflect.DeepEqual(log.applies, want) {
+		t.Errorf("applies = %+v, want %+v — a mid-string edit applies like any other", log.applies, want)
+	}
+	if m.settings.kind != settingsKeyList || m.settings.editor.value() != "" {
+		t.Errorf("pane = %+v after the commit, want the field closed and empty", m.settings)
+	}
+
+	// And the cancel: a caret walk and a typed rune, then esc — the file keeps what the commit above
+	// put in it and the row goes on showing that.
+	cancelled := pressSettings(t, m, keyEnter(), keyHome(), keyRune('X'), keyEsc())
+
+	if !reflect.DeepEqual(log.writes, want) {
+		t.Errorf("writes = %+v, want %+v — esc persists nothing", log.writes, want)
+	}
+	if cancelled.settings.kind != settingsKeyList || cancelled.settings.editor.value() != "" {
+		t.Errorf("pane = %+v after esc, want the field closed and empty", cancelled.settings)
+	}
+	if got, cell := cancelled.settingsValueCell(rows[0]), "http://box:91111"+settingsEditMarker; got != cell {
+		t.Errorf("value cell = %q, want %q — the abandoned edit left no trace", got, cell)
 	}
 }
 
@@ -1285,7 +1439,7 @@ func TestSettingsPaneBufferCancelAndEmptyCommitWriteNothing(t *testing.T) {
 
 	cancelled := step(t, typeSetting(t, step(t, m, keyEnter()), "8080"), keyEsc())
 
-	if cancelled.settings.kind != settingsKeyList || cancelled.settings.buf != "" {
+	if cancelled.settings.kind != settingsKeyList || cancelled.settings.editor.value() != "" {
 		t.Errorf("pane = %+v after esc, want the buffer closed and empty", cancelled.settings)
 	}
 	if !cancelled.settings.open {
@@ -1327,8 +1481,8 @@ func TestSettingsPaneBufferKeepsARefusedValueForCorrection(t *testing.T) {
 	if m.settings.kind != settingsValueBuffer {
 		t.Fatalf("pane = %+v, want the buffer still open on a refused value", m.settings)
 	}
-	if m.settings.buf != "099999" {
-		t.Errorf("buffer = %q, want the typed value kept for correction", m.settings.buf)
+	if m.settings.editor.value() != "099999" {
+		t.Errorf("buffer = %q, want the typed value kept for correction", m.settings.editor.value())
 	}
 	if len(m.settingEdits) != 0 {
 		t.Errorf("edits = %+v, want none: a refused write changed no file", m.settingEdits)
@@ -1391,8 +1545,8 @@ func TestSettingsPaneMaskedRowBuffersVisiblyAndKeepsItsMask(t *testing.T) {
 	m, _ := settingsEditModel(t, rows, log)
 
 	m = step(t, m, keyEnter())
-	if m.settings.buf != "" {
-		t.Fatalf("buffer = %q, want it empty: the pane never held the old secret", m.settings.buf)
+	if m.settings.editor.value() != "" {
+		t.Fatalf("buffer = %q, want it empty: the pane never held the old secret", m.settings.editor.value())
 	}
 	m = typeSetting(t, m, "sk-live-42")
 	if pane := strip(m.renderSettings()); !strings.Contains(pane, "sk-live-42"+settingsCaret) {
@@ -1582,7 +1736,7 @@ func TestSettingsSecondStepsFallBackWhenTheirKeyGoesAway(t *testing.T) {
 			rows = []SettingRow{settingsBoolRow()} // the provider drops the row under the step
 			m = step(t, m, keyEnter())
 
-			if m.settings.kind != settingsKeyList || m.settings.buf != "" {
+			if m.settings.kind != settingsKeyList || m.settings.editor.value() != "" {
 				t.Errorf("pane = %+v, want the key list back and no buffer", m.settings)
 			}
 			if len(log.writes) != 0 || len(log.resets) != 0 {

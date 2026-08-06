@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -19,6 +18,11 @@ import (
 // m.caretTo(...) all still resolve — which keeps the value-copied Model idiom and every existing
 // call site (and its tests) unchanged while the input state gains a home.
 //
+// The FIELD half of it — the textarea and the caret arithmetic over it — has since moved down one
+// level into [lineEditor] (lineeditor.go), which this type embeds and the /settings value row builds
+// its own of: a text field is not a chat prompt, and the pane must not inherit this one's vocabulary
+// (recall, submit, the slash menu). Promotion means nothing above here moved.
+//
 // The lift is deliberately PARTIAL (design decision Option C): only methods that touch nothing but
 // the editor's own fields live here. Methods that also read Model state the editor does not own —
 // the theme, the window width/height, the display Options, the lifecycle state — stay on the Model
@@ -31,8 +35,12 @@ import (
 // promptEditor owns the chat input cluster. The zero value is not usable — build one with
 // newPromptEditor, which focuses the textarea and installs the file cache.
 type promptEditor struct {
-	// input is the message textarea (Bubbles widget), the black-interior auto-growing field.
-	input textarea.Model
+	// lineEditor is the field itself — the textarea and the caret arithmetic over it (lineeditor.go),
+	// shared with the /settings value row. It is EMBEDDED so its field and methods promote onto the
+	// promptEditor and on through the Model (m.input, m.caretTo(...) still resolve), which is the same
+	// posture the Model embeds this type in: the chat box is a text field with the chat machinery
+	// below around it.
+	lineEditor
 
 	// autocomplete is the chat mini-language suggestion overlay shown while typing: one merged menu
 	// of commands and skills on a "/" token, and workspace files on "@". Every region follows the
@@ -122,26 +130,17 @@ func ParseCursorShape(s string) (tea.CursorShape, error) {
 	return defaultCursorShape, fmt.Errorf("unknown cursor shape %q (known shapes: %s)", s, strings.Join(names, ", "))
 }
 
-// newPromptEditor builds the idle input cluster: a focused, black-interior, auto-growing textarea
-// (its newline binding repurposed because plain Enter submits) and an empty workspace file cache.
-// shape is the caret's shape: the widget's simulated cursor is retired here (steadyCursor) and
-// [Model.View] hands Bubble Tea the REAL terminal cursor at the caret instead, steady in that
-// shape. The Focus Cmd is discarded — the focus STATE is what matters at construction, and a
-// retired virtual cursor has no blink to schedule, so that Cmd is nil now anyway.
+// newPromptEditor builds the idle input cluster: the shared text field (newLineEditor — focused,
+// black-interior, the terminal's own steady caret in the given shape), given the chat box's own two
+// differences from every other field in this package, and an empty workspace file cache.
 func newPromptEditor(shape tea.CursorShape) promptEditor {
-	ta := textarea.New()
-	ta.Placeholder = idlePlaceholder
-	ta.Prompt = "" // the rounded border is the frame; no inline prompt gutter (layout.md)
-	ta.ShowLineNumbers = false
-	ta.CharLimit = 0 // no limit; the model, not the widget, bounds a turn
+	e := newLineEditor(shape)
+	e.input.Placeholder = idlePlaceholder
 	// Plain Enter submits (intercepted in handleKey), so the textarea's newline binding is
 	// repurposed: shift+enter works on terminals that support the Kitty keyboard protocol,
 	// and alt+enter / ctrl+j are byte-distinct fallbacks that insert a newline everywhere.
-	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "alt+enter", "ctrl+j")
-	blackenInput(&ta)
-	steadyCursor(&ta, shape)
-	ta.Focus()
-	return promptEditor{input: ta, files: &fileCache{}}
+	e.input.KeyMap.InsertNewline.SetKeys("shift+enter", "alt+enter", "ctrl+j")
+	return promptEditor{lineEditor: e, files: &fileCache{}}
 }
 
 // submitParse parses the editor's current input through the chat mini-language (command.go): the
@@ -180,136 +179,4 @@ func (e *promptEditor) reset() {
 // derives from the window), so the Model passes it in rather than the editor duplicating it.
 func (e promptEditor) rows(innerWidth int) int {
 	return clampInt(inputContentRows(e.input.Value(), innerWidth), minInputRows, maxInputRows)
-}
-
-// reseatCaret drives the textarea caret to an absolute visual (soft-wrapped) row through the
-// widget's own primitives: MoveToBegin resets to the top — which "unscrolls" its internal
-// viewport to offset 0 — and each CursorDown steps down one visual row, clamping at the end.
-// Walking down from the top re-clamps a scroll offset the widget left stale (its SetHeight only
-// repositions when the caret falls outside the view, never when the box grows), so the caret
-// lands on its real visual row with the least scroll that keeps it visible. It re-derives none
-// of the textarea's wrap, so the geometry holds across bubbles releases. It serves caretTo — a
-// mouse click names a VISUAL row, which is the only thing this walk can express; a caret named by
-// a LOGICAL row and column is seated by seatCaret instead, whose step cannot stall.
-func (e *promptEditor) reseatCaret(visRow int) {
-	e.input.MoveToBegin()
-	for i := 0; i < visRow; i++ {
-		e.input.CursorDown()
-	}
-}
-
-// caretTo positions the textarea caret at the given absolute visual cell and returns the
-// caret's rune offset into the value. It re-seats to the target visual row through reseatCaret
-// (the widget's own wrap-aware walk), then LineInfo locates the landed visual line — so the
-// result matches what the textarea actually draws without re-deriving its wrap.
-func (e *promptEditor) caretTo(visRow, visCol int) int {
-	e.reseatCaret(visRow)
-	li := e.input.LineInfo()
-	// visCol is a display-cell offset from the row's start, but SetCursorColumn indexes runes
-	// into the logical line — the two diverge on any CJK/emoji row. Walk the landed visual
-	// sub-line's runes, accumulating display width, to convert the cell column to a rune offset;
-	// StartColumn (a rune offset) then anchors it back into the logical line. Feeding the raw
-	// cell column would drop the caret on the wrong rune, and a drag-copy would then put
-	// different text on the clipboard than the highlight showed.
-	sub := visualSubline(e.input.Value(), e.input.Line(), li.StartColumn, li.Width)
-	e.input.SetCursorColumn(li.StartColumn + cellToRuneOffset(sub, visCol))
-	return caretOffset(e.input.Value(), e.input.Line(), e.input.Column())
-}
-
-// caretByteOffset reports where the caret stands as a BYTE offset into the editor's value. The
-// widget positions its cursor by logical row and RUNE column while the chat mini-language scans the
-// value by byte (command.go, autocomplete.go), so every completion region reads the caret through
-// this one conversion instead of each doing its own — and every one of them is then a pure function
-// of (value, offset), unit-testable without driving a widget.
-func (e promptEditor) caretByteOffset() int {
-	value := e.input.Value()
-	return byteOffsetOf(value, caretOffset(value, e.input.Line(), e.input.Column()))
-}
-
-// seatCaret drives the textarea caret to a LOGICAL (row, column) and re-clamps the widget's
-// internal scroll onto it — the one seat both the completion splice (caretToOffset) and the
-// auto-grow re-clamp (reseatInput) are expressed in. Like reseatCaret it re-derives none of the
-// textarea's wrap; unlike reseatCaret it steps LOGICAL lines, which is what makes it total.
-//
-// The step is Height-aware, and that is the whole point. bubbles' CursorDown leaves a logical line
-// only when the caret already sits on that line's LAST wrapped sub-row (RowOffset+1 >= Height);
-// anywhere above it, the step guesses the next sub-row's column as min(StartColumn+Width+2,
-// len(line)-1). A logical line that ends with a space exactly at a row boundary wraps to a PHANTOM
-// trailing sub-line (bubbles' wrap appends one), and that len(line)-1 clamp can never reach it — so
-// a walk of bare CursorDowns stands still forever on such a line: it neither crosses it nor moves at
-// all. CursorEnd first puts the caret at the end of the logical line, which IS the last sub-row
-// (phantom included) at every width, so the following CursorDown always lands on the next logical
-// line. Each pass therefore advances Line() by exactly one and the walk cannot stall or spin; the
-// break is unreachable defence, since offsetToLineCol clamps row to a line the value has.
-//
-// MoveToBegin unscrolls to offset 0 first, so the walk down re-clamps the offset with the least
-// scroll that keeps the caret visible (bubbles repositions only when the caret falls OUTSIDE the
-// view, so a box that just grew keeps a stale downward offset — ISSUES #2). SetCursorColumn does
-// not reposition, so the final SetHeight — at the height the box already has, hence a no-op to the
-// geometry — re-runs the widget's own repositioning on the seated caret without moving it, which is
-// what keeps a caret deep inside a wrapped line on screen.
-func (e *promptEditor) seatCaret(row, col int) {
-	e.input.MoveToBegin()
-	for e.input.Line() < row {
-		before := e.input.Line()
-		e.input.CursorEnd()  // the logical line's last wrapped sub-row, phantom included
-		e.input.CursorDown() // ⇒ the next logical line
-		if e.input.Line() == before {
-			break // unreachable: the last logical line is the last row offsetToLineCol can name
-		}
-	}
-	e.input.SetCursorColumn(col)
-	e.input.SetHeight(e.input.Height())
-}
-
-// caretToOffset drives the caret to a BYTE offset into the current value — caretByteOffset's
-// inverse, and what re-seats the caret after a completion splices over a token in the MIDDLE of a
-// draft (acceptAutocomplete), where the widget's own MoveToEnd would jump to the wrong place.
-// offsetToLineCol names the logical row and column; seatCaret walks to them. An offset past the end
-// lands at the end.
-func (e *promptEditor) caretToOffset(byteOff int) {
-	value := e.input.Value()
-	row, col := offsetToLineCol(value, runeOffsetOf(value, byteOff))
-	e.seatCaret(row, col)
-}
-
-// deleteSelection cuts a prompt drag-selection's span out of the value and leaves the caret where
-// that span began. It is what Backspace and Del mean while the box holds a highlight: the human can
-// SEE what is selected, so the destructive keys must take exactly that rather than the one rune
-// beside the caret (ISSUES.md — the highlight used to vanish and the selected text survive).
-//
-// The span arrives as an argument rather than being read off e.sel because handleKey's chokepoint
-// has already dropped the live selection by the time the two keys are routed (model.go): what it
-// stashed there is the authority, and passing it in keeps that the ONLY copy. The span is
-// normalised first — a right-to-left drag stores head before anchor, the same posture selectionText
-// copies under (mouse.go) — and sliced in RUNES, so a multi-byte selection loses whole characters
-// instead of splitting one.
-//
-// The rebuild-and-reseat shape is removeCompletionToken's (autocomplete.go): SetValue over the two
-// surviving flanks, then drive the caret back to the cut by offset, since the widget leaves its
-// cursor wherever the new value put it. caretToOffset counts BYTES while a selection counts RUNES,
-// so byteOffsetOf bridges the two — read against the NEW value, whose first lo runes are exactly
-// the head that survived the cut.
-func (e *promptEditor) deleteSelection(sel promptSel) {
-	lo, hi := sel.anchorOff, sel.headOff
-	if lo > hi {
-		lo, hi = hi, lo
-	}
-	r := []rune(e.input.Value())
-	lo = clampInt(lo, 0, len(r))
-	hi = clampInt(hi, lo, len(r))
-	e.input.SetValue(string(r[:lo]) + string(r[hi:]))
-	e.caretToOffset(byteOffsetOf(e.input.Value(), lo))
-}
-
-// reseatInput re-clamps the prompt textarea's internal scroll after a SetHeight changed the box's
-// height. bubbles repositions the view only when the caret falls outside it, so a box that
-// auto-grows keeps a stale downward offset — the first content line scrolls out of sight with a
-// phantom blank row below (ISSUES #2). Re-seating the caret where it already stands is the whole
-// fix: seatCaret unscrolls to the top and walks back down, which re-clamps the offset to the
-// current height and leaves the caret exactly where it was. layout() calls this only on a height
-// change, which never happens during vertical caret navigation, so the textarea's remembered goal
-// column is untouched.
-func (e *promptEditor) reseatInput() {
-	e.seatCaret(e.input.Line(), e.input.Column())
 }

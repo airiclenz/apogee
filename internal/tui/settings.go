@@ -107,14 +107,20 @@ const (
 // said, never what the config now holds (the provider answers that, from the resolution this run made).
 // The journal of what this surface has CHANGED is not here — it outlives the overlay and so lives a
 // level up, on the Model ([Model.settingEdits]). sub is the value sub-list's highlight, meaningful only
-// while kind is [settingsEnumList]; buf is the string/int edit buffer, meaningful only while kind is
-// [settingsValueBuffer], and it is a plain string so the whole pane stays a value the Model can copy.
+// while kind is [settingsEnumList]; editor is the field a string or an int is typed into, meaningful
+// only while kind is [settingsValueBuffer].
+//
+// The editor is a [lineEditor] held BY VALUE, as the Model holds the prompt's own (ADR 0011): the
+// widget is copy-safe and carries no self-referential no-copy type, which is what lets the pane stay
+// a plain value on a Model that is copied every Update. Its zero value is an inert widget — a
+// textarea nothing has focused, which answers "" and takes no keys — so a closed pane is still
+// exactly the zero value, and no state outside settingsValueBuffer can type into anything.
 type settingsPane struct {
 	open     bool
 	kind     settingsKind
 	selected int
 	sub      int
-	buf      string
+	editor   lineEditor
 	failure  settingFailure
 }
 
@@ -181,9 +187,14 @@ const (
 	settingsDescLines = 2
 )
 
-// settingsCaret is the cell drawn after the edit buffer's text — the /sessions rename idiom's own
-// glyph, and the whole of the caret this mini-editor has: the buffer appends and pops at its end, so
-// there is no position to move and nothing to draw one at.
+// settingsCaret is the glyph drawn AT the caret in an open edit buffer — the /sessions rename idiom's
+// own, now standing wherever the caret does rather than always after the last rune: the value is
+// edited in a real field ([lineEditor]), so there is a position to draw, and drawing it is how the row
+// says where the next keystroke lands.
+//
+// It is a glyph in the cell rather than the terminal's own cursor because the pane paints through the
+// popup module, whose cells are plain escape-free text it styles whole (doc.go) — there is no seat on
+// a popup row for the real cursor the chat box gets (lineEditor.textWithCaret).
 const settingsCaret = "▏"
 
 // settingsUnsetValue is how the value cell spells a value that is not there — the state a reset
@@ -343,7 +354,7 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // written and nothing is kept: a buffer whose key is no longer there has nothing to save, and a
 // confirmation for a row that left cannot be confirmed.
 func (m Model) settingsAbandonStep() (tea.Model, tea.Cmd) {
-	m.settings.kind, m.settings.sub, m.settings.buf = settingsKeyList, 0, ""
+	m.settings.kind, m.settings.sub, m.settings.editor = settingsKeyList, 0, lineEditor{}
 	m.layout()
 	return m, nil
 }
@@ -384,7 +395,7 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 		return m, nil
 	case SettingString, SettingInt:
 		m.settings.kind = settingsValueBuffer
-		m.settings.buf = m.settingsBufferSeed(row)
+		m.settings.editor = newSettingsEditor(m.opts.CursorShape, m.settingsBufferSeed(row))
 		m.layout()
 		return m, nil
 	case SettingStructured:
@@ -433,36 +444,49 @@ func (m Model) settingsBufferSeed(row SettingRow) string {
 	return m.settingsPersistedValue(row)
 }
 
-// settingsBufferKey routes a keypress in the string/int edit buffer — the /sessions rename idiom
-// (sessions.go): printable text appends, backspace pops the last RUNE (never the last byte, which
-// would leave half a grapheme in the buffer and half a value in the file), ⏎ commits and esc
-// abandons. Everything else is swallowed, as everywhere else in this modal pane.
+// newSettingsEditor is the field a string or an int row is typed into: a single-line [lineEditor]
+// (lineeditor.go — the chat box's own field, minus the chat), seeded with what the key holds and with
+// the caret at the end of it, which is where a human correcting a port starts.
+//
+// Single-line is the whole configuration it needs: ⏎ then belongs to this pane (commit) rather than to
+// the widget, and a scalar config value has no second line to walk to. shape is the `cursor-shape`
+// key's selection, passed for the same reason the prompt takes it — the field is built the same way
+// wherever it is built.
+func newSettingsEditor(shape tea.CursorShape, seed string) lineEditor {
+	e := newLineEditor(shape)
+	e.singleLine()
+	e.setValue(seed)
+	return e
+}
+
+// settingsBufferKey routes a keypress in the string/int edit buffer: ⏎ commits, esc abandons, and
+// every other key goes to the FIELD (lineEditor.editKey) — which is the whole of the editing this
+// pane does not write itself. What the human gets there is what the chat box gives: insertion at the
+// caret, backspace and delete around it, ←/→ and the word jumps, home/end (spec requirement 7).
 //
 // The buffer is the one state in which backspace does not arm a reset: inside an edit it means what
 // it means in every other text field on the screen. That is exactly why the two idioms can share the
-// key — the pane's kind says which of them is being typed at.
+// key — the pane's kind says which of them is being typed at, and the field claims backspace only
+// while it is open.
 func (m Model) settingsBufferKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		// An abandoned edit takes its refusal with it: the ✗ on this row is the reason THIS buffer
 		// was not accepted, and leaving it up after the human walked away from the edit would report
 		// a failure against a row nobody is editing any more.
-		m.settings.kind, m.settings.buf = settingsKeyList, ""
+		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
 		m.settings.failure = settingFailure{}
 		m.layout()
 		return m, nil
 	case "enter":
 		return m.settingsCommitBuffer(row)
-	case "backspace":
-		if r := []rune(m.settings.buf); len(r) > 0 {
-			m.settings.buf = string(r[:len(r)-1])
-		}
-		return m, nil
 	}
-	if msg.Text != "" { // a printable keypress carries its rune(s) in Text
-		m.settings.buf += msg.Text
-	}
-	return m, nil
+	// Whatever Cmd the widget asks for is returned rather than dropped, exactly as the chat box
+	// returns it (model.go) — a single-line field asks for none today (lineEditor.singleLine), and
+	// swallowing one silently is how that stops being true unnoticed. The frame is NOT laid out
+	// again: the field is one cell of one row, so nothing typed into it changes what the pane
+	// measures.
+	return m, m.settings.editor.editKey(msg)
 }
 
 // settingsCommitBuffer persists what was typed, and stays in the buffer when the binary will not have
@@ -477,16 +501,16 @@ func (m Model) settingsBufferKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model
 // abandoned edit than a request to persist emptiness, and the deliberate way to take a value away is
 // the reset backspace arms.
 func (m Model) settingsCommitBuffer(row SettingRow) (tea.Model, tea.Cmd) {
-	value := stripEscapes(strings.TrimSpace(m.settings.buf))
+	value := stripEscapes(strings.TrimSpace(m.settings.editor.value()))
 	if value == "" {
-		m.settings.kind, m.settings.buf = settingsKeyList, ""
+		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
 		m.layout()
 		return m, nil
 	}
 	next, landed := m.settingsPersist(row, value)
 	m = next
 	if landed {
-		m.settings.kind, m.settings.buf = settingsKeyList, ""
+		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
 	}
 	m.layout()
 	return m, nil
@@ -966,18 +990,20 @@ func (m Model) settingsEditing(row SettingRow) bool {
 	return false
 }
 
-// settingBufferCells is the row being typed into: the same four columns, with the buffer and its caret
-// where the value goes. The value the key HOLDS is deliberately not shown beside it — the buffer opened
-// seeded with it (settingsBufferSeed), so what is on the row is what will be written, and a second
-// copy of the old value would only make the human wonder which one the ⏎ takes.
+// settingBufferCells is the row being typed into: the same four columns, with the FIELD where the
+// value goes — its text with the caret drawn in at the position the next keystroke will land
+// (lineEditor.textWithCaret). The value the key HOLDS is deliberately not shown beside it — the field
+// opened seeded with it (settingsBufferSeed), so what is on the row is what will be written, and a
+// second copy of the old value would only make the human wonder which one the ⏎ takes.
 //
-// The buffer is escape-stripped here like every other cell: it is keystrokes, and a paste is
+// The field's text is escape-stripped here like every other cell: it is keystrokes, and a paste is
 // keystrokes too — a bracketed paste carrying an OSC 8 opener would otherwise reach the popup module,
-// which strips nothing (doc.go).
+// which strips nothing (doc.go). The caret glyph is added before the strip because it is this
+// package's own and has nothing to strip.
 func (m Model) settingBufferCells(row SettingRow) popupRow {
 	return popupRow{
 		stripEscapes(row.Path),
-		stripEscapes(m.settings.buf) + settingsCaret,
+		stripEscapes(m.settings.editor.textWithCaret(settingsCaret)),
 		stripEscapes(settingsSourceMarker(row.Source)),
 		stripEscapes(m.settingsNote(row)),
 	}
