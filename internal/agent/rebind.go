@@ -49,8 +49,9 @@ var (
 // identity — it applies what it is handed, atomically.
 //
 // It is deliberately NOT the whole Config: mode, approvals, confinement, tools, the model
-// profile (`model-profile` is global, not per-model — see Config.Profile) and the conversation
-// are session state that a model switch has no business resetting.
+// profile (`model-profile` is global, not per-model — see Config.Profile; SetProfile is its
+// separate, explicit door) and the conversation are session state that a model switch has no
+// business resetting.
 type RebindSpec struct {
 	// Model is the model id to send on the wire. Required — an empty spec is refused.
 	Model string
@@ -82,7 +83,8 @@ type RebindSpec struct {
 // cannot satisfy leaves every existing binding, and the whole conversation, exactly as it was.
 //
 // What stands: the conversation and Turn counters, the autonomy mode, session approvals, the
-// confinement flag, the resolved tools, and the model profile with its parse-seam collaborators.
+// confinement flag, the resolved tools, and the model profile with its parse-seam collaborators —
+// the profile is global rather than per-model, so it moves only through SetProfile, never here.
 // What resets: the token estimator (its chars→token calibration described the OLD model) and the
 // compaction saturation latch (it was judged against the old window).
 func (a *Agent) Rebind(spec RebindSpec) error {

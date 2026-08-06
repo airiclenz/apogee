@@ -27,8 +27,8 @@ import (
 // An Agent is not safe for concurrent use by multiple goroutines; drive one Agent
 // from one goroutine (Step/Run), and observe it from another only via its EventSink.
 // The methods touching loop state fall into three call classes. Idle-only calls (Submit,
-// ClearContext, RestoreSession, Compact, Rebind, SwapTools, AbortExchange) need a quiescent
-// boundary with no Exchange mid-flight. Between-Steps calls by the goroutine DRIVING the loop
+// ClearContext, RestoreSession, Compact, Rebind, SwapTools, SetProfile, AbortExchange) need a
+// quiescent boundary with no Exchange mid-flight. Between-Steps calls by the goroutine DRIVING the loop
 // (Snapshot, Interject) are additionally valid at the boundary between two Steps of an open
 // Exchange: that goroutine owns the conversation there, so the boundary itself is the
 // synchronization — no lock, and no other goroutine may make the call (ADR 0025). The
@@ -47,7 +47,10 @@ type Agent struct {
 	// construction (processing.ParserFor): the text-format tool-call parser recovers a call from
 	// the visible content of a non-native model, and stripper lifts the inline thinking/harmony
 	// channel out of that content. A native, no-inline-thinking profile (the zero value) yields
-	// no-op parsers, so the content path is byte-identical to the pre-profile loop.
+	// no-op parsers, so the content path is byte-identical to the pre-profile loop. SetProfile
+	// re-selects both from a new profile at an idle boundary (the settings surface's
+	// `model-profile` edit) — the one door for that, since Rebind deliberately leaves the profile
+	// alone; cfg.Profile moves with them, so the emit half (toolInstructions) follows.
 	textParser processing.ToolCallParser
 	stripper   processing.ContentStripper
 

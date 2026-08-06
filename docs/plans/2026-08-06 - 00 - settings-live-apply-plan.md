@@ -324,9 +324,11 @@ NOTES (2026-08-06): three consequences worth knowing. The multi-line field switc
 
 **Commit:** `feat(settings): system-prompt-text edits in-pane in a multiline editor`
 
-## 15. Model-profile live apply: SetProfile
+## 15. Model-profile live apply: SetProfile — ✅ DONE (2026-08-06)
 
 Depends on item 5 (class precedent only — no code dependency).
+
+NOTES (2026-08-06): two deviations from the item's literal text. (a) The parameter type is `domain.ModelProfile`, not `ProfileConfig` — no such type exists in this codebase, and `Config.Profile` (the field the swap writes) is a `domain.ModelProfile`; `modelProfileConfig` is `cmd/apogee`'s ON-DISK schema, which the root already projects with `toModelProfile`, so the resolved value the engine takes is the domain type exactly as the item's own wire-silence clause requires. (b) The mid-run refusal WRAPS `domain.ErrInputPending` with its reason (`…: the model profile can only be swapped between runs`) rather than returning it bare as `Rebind` does — item 5's reason applies verbatim: `errors.Is` still matches the idle-only class, and this refusal is user-facing (item 17 renders it inside the row's `saved — live apply failed: <error>` note, where the bare "cannot submit input mid-exchange" would name something the user never did). Also worth knowing: validating with `ParserFor` alone is sufficient for the emit half too — `processing.InstructionsFor` refuses exactly the formats `ParserFor` refuses, which is what keeps `toolInstructions`' defensively-caught error path unreachable at runtime. A fourth test beyond the three the item names covers the stripper half of the swap, since a profile is two collaborators and only one of them is a parser.
 
 **What:** `internal/agent`: `SetProfile(profile ProfileConfig) error` in the idle-only validate-then-commit class: validate by running `processing.ParserFor` for the new profile (the `construct.go:69` path); on success swap `a.textParser`, `a.stripper` and `a.cfg.Profile` atomically at idle; refuse mid-run like `Rebind`. The emit half needs nothing — `InstructionsFor(a.cfg.Profile, menu)` is read per request (`agent/wire.go:55`). `Rebind`'s deliberate profile exclusion (`rebind.go:52`, `wire.go:685`) STAYS — `SetProfile` is the separate, explicit door; state that in both doc comments. The signature takes the resolved profile value (the root resolves from file, as at startup) — the engine never reads config files (ADR 0031 wire-silence).
 
