@@ -194,6 +194,97 @@ func TestRenderPopupSelectedRowHighlight(t *testing.T) {
 	}
 }
 
+// popupLineWith is the rendered pane's first line whose visible text contains want — the line an
+// assertion about ONE row's styling has to reach without reconstructing the row's own padding.
+func popupLineWith(t *testing.T, out, want string) string {
+	t.Helper()
+	for _, ln := range popupLines(out) {
+		if strings.Contains(strip(ln), want) {
+			return ln
+		}
+	}
+	t.Fatalf("no rendered line carries %q:\n%s", want, strip(out))
+	return ""
+}
+
+// A row's KIND decides how it is painted, ahead of the selection (popupSpec.rowKinds): a section
+// header is white where the content rows are faint, and the row being EDITED carries the edit tone
+// instead of the selection's own bar — the /settings pane's two treatments, owned by the module so
+// every pane that ever divides or edits a list looks the same doing it.
+func TestRenderPopupRowKindsPaintHeadingsAndTheEditedRow(t *testing.T) {
+	th := newTheme()
+	spec := popupSpec{
+		title: "settings",
+		rows: []popupRow{
+			{"UPSTREAM"}, {"server", "macStudio"}, {""}, {"AUTONOMY"}, {"mode", "ask-before"},
+		},
+		rowKinds: []popupRowKind{popupRowHeading, popupRowEditing, popupRowPlain, popupRowHeading, popupRowPlain},
+		selected: 1,
+		hint:     "esc close",
+		maxRows:  8,
+	}
+	out := renderPopup(th, spec, 50)
+
+	if !colorActive(th) {
+		t.Skip("no colour on this profile: the styles are the whole claim")
+	}
+	for _, tc := range []struct {
+		name  string
+		text  string
+		want  lipgloss.Style
+		avoid lipgloss.Style
+	}{
+		{"section header", "UPSTREAM", th.popupHeading, th.statusFaint},
+		{"edited row", "server", th.popupEdit, th.userBlock},
+		{"plain row", "mode", th.statusFaint, th.popupEdit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			line := popupLineWith(t, out, tc.text)
+			if !strings.Contains(line, styleSGR(tc.want)) {
+				t.Errorf("line %q carries no %q SGR", strip(line), styleSGR(tc.want))
+			}
+			if strings.Contains(line, styleSGR(tc.avoid)) {
+				t.Errorf("line %q still carries the %q SGR it must not", strip(line), styleSGR(tc.avoid))
+			}
+		})
+	}
+}
+
+// The body block may open with a LABEL the module paints as a heading (popupSpec.bodyLead) — and
+// only where the line it is drawing still opens with it: a pane too narrow to seat the label breaks
+// it across lines, and bolding what survived would be styling a word that is no longer the label.
+func TestRenderPopupBodyLeadIsAHeadingOnlyWhileItSurvives(t *testing.T) {
+	th := newTheme()
+	spec := popupSpec{
+		title:       "settings",
+		body:        "Description: which autonomy the session runs at",
+		bodyLead:    "Description:",
+		maxBodyRows: -1,
+		rows:        singleCellRows([]string{"mode"}),
+		selected:    0,
+		hint:        "esc close",
+		maxRows:     8,
+	}
+	out := renderPopup(th, spec, 60)
+
+	if got := strip(out); !strings.Contains(got, spec.body) {
+		t.Errorf("the body lost its text:\n%s", got)
+	}
+	if !colorActive(th) {
+		t.Skip("no colour on this profile: the styling is the rest of the claim")
+	}
+	line := popupLineWith(t, out, "Description:")
+	if !strings.Contains(line, styleSGR(th.popupBodyLead)) {
+		t.Errorf("the body label is not painted as a heading: %q", line)
+	}
+
+	// Ten cells of inner width: the label itself is hard-broken, so no line opens with it.
+	narrow := renderPopup(th, spec, 14)
+	if strings.Contains(narrow, styleSGR(th.popupBodyLead)) {
+		t.Errorf("a broken label was still styled as one:\n%s", strip(narrow))
+	}
+}
+
 // A spec with selected = −1 paints no marker and no highlight: every row is faint, no ❯ appears,
 // and the userBlock SGR is absent from the output.
 func TestRenderPopupNoSelection(t *testing.T) {

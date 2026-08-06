@@ -176,6 +176,9 @@ type theme struct {
 	startupBorder lipgloss.Style // the one-time start-up card: the prompt box's rounded glyphs, no black fill (transparent, self-closing) — shares its shape with popupBorder
 	popupBorder   lipgloss.Style // selector-popup chrome (renderPopup): startupBorder's rounded shape, filled solid black so the pane reads as a distinct overlay
 	popupBody     lipgloss.Style // a popup's wrapped body block (renderPopup): normal white on black — between presentTitle (bold) and statusFaint (chrome) in the hierarchy
+	popupBodyLead lipgloss.Style // the LABEL a popup's body block may open with (popupSpec.bodyLead — the /settings header's "Description:"): popupBody bolded, so the label reads as the heading of the sentence it leads rather than as a second colour inside it
+	popupHeading  lipgloss.Style // a SECTION header row inside a popup's row list (popupRowHeading — /settings' UPSTREAM, AUTONOMY, …): white on the pane's black, one weight above the faint rows it opens, so the divisions of a long list are found without being read (docs/layout/settings-screen-layout.md)
+	popupEdit     lipgloss.Style // the row a pane is EDITING (popupRowEditing): the selection's own full-width bar with its text lit in the accent tone instead of white — the row is selected either way, and what the colour says is that the next keypress goes INTO it
 	popupAccent   lipgloss.Style // the SELECTED row of a MENU-style popup (popupSpec.menuRows): its ❯ and its label lit as one bold accent-orange run on the pane's black, with no highlight bar behind them — the cue th.userBlock's full-width bar is replaced by wherever a pane is a menu rather than a list
 	statusFaint   lipgloss.Style // dim status text, bg-free (approval/ask prompts)
 	statusBar     lipgloss.Style // status-line segments: faint on black
@@ -254,6 +257,18 @@ func newTheme() theme {
 							Background(colBlack).
 							Padding(0, 1),
 		popupBody: lipgloss.NewStyle().Foreground(colWhite).Background(colBlack), // wrapped body prose: normal white, not bold (title) nor faint (chrome)
+		// The body's label and the row list's section headers are the same argument in two places:
+		// white where the prose around them is white and the chrome below them is faint, so a heading
+		// is told from what it heads by WEIGHT and by tone rather than by a rule or a badge. The label
+		// is bolded because it stands inside a line it shares with the text it introduces; a section
+		// header has a line of its own and needs no more than the tone to be found.
+		popupBodyLead: lipgloss.NewStyle().Bold(true).Foreground(colWhite).Background(colBlack),
+		popupHeading:  lipgloss.NewStyle().Foreground(colWhite).Background(colBlack),
+		// An edited row keeps the selection's dark-gray field — it IS the selected row — and changes
+		// what is written on it: the accent tone the theme spends on "this is apogee's own", bolded
+		// against the white the same bar carries when the row is merely highlighted. Light rather than
+		// a second block of colour, popupAccent's argument on a field that is already there.
+		popupEdit: lipgloss.NewStyle().Bold(true).Foreground(colCode).Background(colDarkGray),
 		// A menu's selected row is marked by LIGHT rather than by a block of colour: bold in the
 		// accent tone the theme already spends on "this is apogee's own" — colCode, the orange the
 		// tool label, the sub-agent rail and the auto-mode marker all carry — against the faint gray

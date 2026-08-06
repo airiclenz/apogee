@@ -30,7 +30,9 @@ import (
 //     interior cell (including the gap after a short row) is left on the terminal background.
 //   - The module owns the marker (glyphUser + a space on the selected row, two spaces
 //     otherwise — or glyphMenuUnselected in menu style, popupSpec.menuRows), the selected-row
-//     highlight (th.userBlock's full bar, or the menu's accent run instead), the scroll windowing
+//     highlight (th.userBlock's full bar, or the menu's accent run instead), the per-row treatment
+//     a caller asks for by KIND (popupSpec.rowKinds: a section header's white label, an edited
+//     row's own field), the scroll windowing
 //     (popupRowWindow), and — since the column contract below — the COLUMN ALIGNMENT of the rows
 //     themselves: callers hand over the FULL row list plus the global selected index, and
 //     renderPopup lays the rows out, windows around the selection, and truncates every content
@@ -66,8 +68,10 @@ import (
 //     shape — a `name:` line with its value's own lines indented beneath it — and the blank
 //     separators survive), each segment is word-wrapped to the inner budget,
 //     and the flattened block is capped at spec.maxBodyRows — negative = uncapped, ZERO = no body
-//     rows at all, the same sense maxRows carries. Past a positive cap the last row becomes an
-//     explicit faint "… (+N more lines)" marker counting the hidden lines, so the body never
+//     rows at all, the same sense maxRows carries. Its first line may open with a LABEL
+//     (popupSpec.bodyLead) the module paints as a heading, which is the one styled run inside a
+//     block that is otherwise prose. Past a positive cap the last row becomes an explicit faint
+//     "… (+N more lines)" marker counting the hidden lines, so the body never
 //     exceeds its cap and truncation is never silent. wrapText is ANSI-unaware, so body arrives
 //     PLAIN and escape-stripped — the module wraps first and styles after.
 //   - HIDING CONTENT IS NEVER SILENT, at any budget OR any width — and that holds for the ROWS as
@@ -152,6 +156,24 @@ type popupFloor struct {
 // stay aligned. A one-cell row (singleCellRows) is the degenerate case: one column, laid out as
 // the plain label it holds.
 type popupRow []string
+
+// popupRowKind is what a row IS to the painter, where being it changes how the row is drawn. The
+// zero value is the row every pane has always had — content, faint until the selection lands on it
+// — so a spec that states no kinds at all renders exactly as it did before kinds existed.
+//
+// The two named kinds are the /settings pane's, and they are stated by the CALLER for the reason
+// every other row fact is: the module lays rows out and knows nothing about what they mean. A
+// SECTION HEADER is a label the row list is divided by rather than a row the selection can land on,
+// and the eye has to find it without reading it (docs/layout/settings-screen-layout.md); a row being
+// EDITED is the one the next keypress goes into, and saying so in colour is what tells a human
+// typing into a list which of its rows is the field.
+type popupRowKind int
+
+const (
+	popupRowPlain   popupRowKind = iota // content: faint, or the selection's own bar/accent
+	popupRowHeading                     // a section label dividing the list (th.popupHeading)
+	popupRowEditing                     // the row the pane is being typed into (th.popupEdit)
+)
 
 // popupSpec describes one boxed selector popup. title and hint each drop their row when empty;
 // body is plain, escape-stripped prose the module word-wraps to the inner budget and caps at
@@ -240,13 +262,30 @@ type popupRow []string
 //
 // Either pad is drawn only out of the lines the seated rows LEFT OVER (popupRowLines), so it never
 // pushes an option out of the window: a short pane loses its breathing room rather than a decision.
+//
+// rowKinds says what each row IS where that changes how it is painted (popupRowKind) — a section
+// header, a row being edited — parallel to rows, and short or nil for a pane whose rows are all
+// content, which is every pane but /settings. It is a list rather than a flag pair because the fact
+// belongs to a ROW: a header is one whether or not the selection is near it, and the selection
+// itself already travels as an index.
+//
+// bodyLead is a run at the FRONT of the body's first line that is painted as a heading
+// (th.popupBodyLead) instead of as prose — the "Description:" label of the /settings pane's own
+// header. It is a lead rather than a block of its own because it is part of the sentence: the label
+// and the text after it wrap as one paragraph and are budgeted as one block, so a caller that has to
+// state its prose's height before the block is composed (popupBodyLineCount) still states the height
+// the painter will pay. The module bolds it where the first line still opens with it and paints the
+// line plain where truncation took it, so the styling can never claim a label the pane is not
+// showing.
 type popupSpec struct {
 	title         string
 	titleInBorder bool
 	titleFromBody bool
 	body          string
+	bodyLead      string
 	maxBodyRows   int
 	rows          []popupRow
+	rowKinds      []popupRowKind
 	menuRows      bool
 	wrapRows      bool
 	rowGap        bool
@@ -255,6 +294,17 @@ type popupSpec struct {
 	selected      int
 	hint          string
 	maxRows       int
+}
+
+// rowKind is what row i of the spec is: what rowKinds says, or plain where it says nothing. Every
+// read goes through here so a caller may state kinds for the rows that have one and leave the slice
+// short — or leave it out entirely, which is what keeps a spec that never heard of kinds rendering
+// as it always did.
+func (s popupSpec) rowKind(i int) popupRowKind {
+	if i < 0 || i >= len(s.rowKinds) {
+		return popupRowPlain
+	}
+	return s.rowKinds[i]
 }
 
 // renderPopup paints the bordered selector pane described by spec at the given TOTAL width
@@ -291,7 +341,7 @@ func renderPopup(th theme, spec popupSpec, width int) string {
 	// fit changes what that row says: a pane granted no body rows and no row window reports those
 	// elisions on its title, the one row it still has (popupTitleLine). Composing in the other order
 	// would mean either a silent drop or a fifth row the frame has not got.
-	body, hiddenBody := popupBodyLines(th, spec.body, spec.maxBodyRows, inner, blackFill)
+	body, hiddenBody := popupBodyLines(th, spec.body, spec.bodyLead, spec.maxBodyRows, inner, blackFill)
 	rows, hiddenRows := popupRowLines(th, spec, inner, blackFill)
 
 	// The two counts merge into the ONE marker the title row can seat: a hidden body block and a
@@ -523,7 +573,7 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 			if j > 0 {
 				lead = strings.Repeat(" ", popupRowIndent)
 			}
-			out = append(out, popupRowLine(th, spec, blackFill, truncateToWidth(th, lead+text, inner), selected, inner))
+			out = append(out, popupRowLine(th, spec, blackFill, truncateToWidth(th, lead+text, inner), i, selected, inner))
 		}
 	}
 	if padBelow {
@@ -535,8 +585,19 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 // popupRowLine styles ONE painted line of a row — the whole row when it did not wrap, and every line
 // of it when it did, so a selected answer is lit or barred over its full height rather than on its
 // first line with its tail reading as somebody else's row.
-func popupRowLine(th theme, spec popupSpec, blackFill lipgloss.Style, row string, selected bool, inner int) string {
-	switch {
+//
+// The row's KIND is read before its selection (popupSpec.rowKinds), because the two named kinds both
+// outrank it: a row being EDITED is selected by construction and has to say which of the two states
+// it is in, and a section HEADER is a label the selection cannot land on at all, so a kind that
+// disagreed with the selection would be describing a row the pane cannot produce.
+func popupRowLine(th theme, spec popupSpec, blackFill lipgloss.Style, row string, i int, selected bool, inner int) string {
+	switch kind := spec.rowKind(i); {
+	case kind == popupRowEditing:
+		// Squared like the selection bar below and for the same reason — the field is what says the
+		// whole row is the field — in the edit tone rather than in the selection's own.
+		return th.popupEdit.Render(squareLine(th.measure, row, inner))
+	case kind == popupRowHeading:
+		return blackFill.Render(th.popupHeading.Render(row))
 	case selected && spec.menuRows:
 		// No squareLine here, deliberately: the accent is on the CHOSEN WORDS, so it stops where
 		// they do and the rest of the row stays the pane's own black (drawTitledBox pads it out on
@@ -777,7 +838,11 @@ func popupWrappedRowHeights(th theme, rows []popupRow, width int) []int {
 // put the marker on: the block is empty, the count is the whole body, and renderPopup carries the
 // marker up to the title row (popupTitleLine). So "hidden > 0 with no lines" is the pane's signal
 // that it owes the human a word about prose it cannot show, not a licence to drop it quietly.
-func popupBodyLines(th theme, body string, maxBodyRows, inner int, blackFill lipgloss.Style) ([]string, int) {
+//
+// lead is the spec's bodyLead: the run at the front of the FIRST line the module paints as a heading
+// rather than as prose. It is styled after the wrap and after the truncation, never before, so the
+// label is bolded only where the line the pane is drawing still opens with it.
+func popupBodyLines(th theme, body, lead string, maxBodyRows, inner int, blackFill lipgloss.Style) ([]string, int) {
 	if body == "" {
 		return nil, 0
 	}
@@ -800,13 +865,34 @@ func popupBodyLines(th theme, body string, maxBodyRows, inner int, blackFill lip
 	}
 
 	out := make([]string, 0, len(wrapped)+1)
-	for _, ln := range wrapped {
-		out = append(out, blackFill.Render(th.popupBody.Render(truncateToWidth(th, ln, inner))))
+	for i, ln := range wrapped {
+		line := truncateToWidth(th, ln, inner)
+		if i == 0 {
+			out = append(out, blackFill.Render(popupBodyLeadLine(th, line, lead)))
+			continue
+		}
+		out = append(out, blackFill.Render(th.popupBody.Render(line)))
 	}
 	if marker != "" {
 		out = append(out, blackFill.Render(th.statusFaint.Render(truncateToWidth(th, marker, inner))))
 	}
 	return out, hidden
+}
+
+// popupBodyLeadLine styles a body line whose front is a LABEL (popupSpec.bodyLead): the label as a
+// heading, the rest of the line as the prose it leads. Both halves carry the pane's own black field,
+// like every other styled run this module composes (skillAccent's argument, theme.go): a style with
+// no background of its own would cut a notch of the terminal's through the pane, and each run's
+// own reset ends the fill the enclosing black would otherwise have carried past it.
+//
+// A line that does NOT open with the label is painted plain — the width the pane was drawn at cut
+// the label off (truncateToWidth), and a heading style over what survived would be bolding a word
+// that is no longer the label.
+func popupBodyLeadLine(th theme, line, lead string) string {
+	if lead == "" || !strings.HasPrefix(line, lead) {
+		return th.popupBody.Render(line)
+	}
+	return th.popupBodyLead.Render(lead) + th.popupBody.Render(strings.TrimPrefix(line, lead))
 }
 
 // popupBodyWrapped breaks a body block into the lines it wants at the given inner width, before any

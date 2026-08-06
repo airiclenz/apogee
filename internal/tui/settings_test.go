@@ -228,10 +228,14 @@ func TestSettingsPaneClampsSelectionToRowsThatShrank(t *testing.T) {
 	}
 }
 
-// The row schema: a single-cell header wherever the section changes, then one row per key with its
-// value, its override marker and its read-only pointer each in a column of its own (the Column
-// contract, layout.md). The selection indexes KEYS and the display index follows the headers, so the
-// ❯ can never land on a label there is nothing to do with.
+// The row schema: a blank spacer and a single-cell header wherever the section changes, then one row
+// per key with its value, its override marker and its read-only pointer each in a column of its own
+// (the Column contract, layout.md). The selection indexes KEYS and the display index follows the
+// labels, so the ❯ can never land on one there is nothing to do with — and each display row carries
+// what it IS (popupRowKind), which is how the painter tells a section label from the keys under it.
+//
+// The FIRST section takes no spacer: the description header above the list closes with a blank line
+// of its own (settingsBody), and a second would open the pane on a gap.
 func TestSettingsDisplayRowsInterleaveSectionHeaders(t *testing.T) {
 	rows := []SettingRow{
 		{Path: "endpoint", Section: "Upstream", Value: "http://h:1111", Editable: true},
@@ -248,8 +252,13 @@ func TestSettingsDisplayRowsInterleaveSectionHeaders(t *testing.T) {
 		{"endpoint", "http://h:1111", "", ""},
 		{"mode", "auto", "(env)", ""},
 		{"servers", "3 servers", "", "· edit in config.yaml"},
+		{""},
 		{"Interface"},
 		{"ui.spinner", "snake", "", ""},
+	}
+	wantKinds := []popupRowKind{
+		popupRowHeading, popupRowPlain, popupRowPlain, popupRowPlain,
+		popupRowPlain, popupRowHeading, popupRowPlain,
 	}
 	if len(got.rows) != len(want) {
 		t.Fatalf("display rows = %q, want %q", got.rows, want)
@@ -259,8 +268,182 @@ func TestSettingsDisplayRowsInterleaveSectionHeaders(t *testing.T) {
 			t.Errorf("row %d = %q, want %q", i, got.rows[i], want[i])
 		}
 	}
-	if want := 5; got.selected != want {
-		t.Errorf("selected display row = %d, want %d — the headers above it shift it down", got.selected, want)
+	if !reflect.DeepEqual(got.kinds, wantKinds) {
+		t.Errorf("row kinds = %v, want %v", got.kinds, wantKinds)
+	}
+	if want := 6; got.selected != want {
+		t.Errorf("selected display row = %d, want %d — the labels above it shift it down", got.selected, want)
+	}
+}
+
+// The description header is the pane's own first block: the "Description:" label, what the key under
+// the ❯ is FOR beside it, and a blank line closing it off from the list
+// (docs/layout/settings-screen-layout.md). It follows the selection, and it is a FIXED-height region
+// — a one-line description and a four-line one compose the same number of lines — so walking the
+// list moves the highlight and nothing else (ADR 0037 decision 9). What a long description loses is
+// its tail, to an ellipsis, rather than the list losing a row to it.
+func TestSettingsPaneDescriptionHeaderNamesTheSelectedRowAtAFixedHeight(t *testing.T) {
+	rows := settingsTestRows(4)
+	rows[0].Desc = "Short."
+	rows[1].Desc = strings.Repeat("a description with plenty to say for itself ", 6)
+	m := openSettingsPane(t, settingsModel(t, rows))
+
+	first := strings.Split(m.settingsBody(rows), "\n")
+	if want := settingsDescLabel + " " + rows[0].Desc; first[0] != want {
+		t.Errorf("header line = %q, want %q", first[0], want)
+	}
+	if want := settingsDescLines + 1; len(first) != want {
+		t.Errorf("a one-line description composed %d header lines, want the fixed %d", len(first), want)
+	}
+	if last := first[len(first)-1]; last != "" {
+		t.Errorf("the header does not end on its blank line: %q", last)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, settingsDescLabel+" Short.") {
+		t.Errorf("the pane does not paint the header:\n%s", pane)
+	}
+	if colorActive(m.th) {
+		if got := m.renderSettings(); !strings.Contains(got, styleSGR(m.th.popupBodyLead)) {
+			t.Errorf("the %q label is not painted as a heading:\n%s", settingsDescLabel, strip(got))
+		}
+	}
+
+	moved := step(t, m, keyDown())
+	second := strings.Split(moved.settingsBody(rows), "\n")
+	if want := settingsDescLines + 1; len(second) != want {
+		t.Fatalf("a long description composed %d header lines, want the same fixed %d", len(second), want)
+	}
+	if tail := second[settingsDescLines-1]; !strings.HasSuffix(tail, "…") {
+		t.Errorf("the region's last line = %q, want the overflow elided into it", tail)
+	}
+	if strings.Contains(strip(moved.renderSettings()), settingsDescLabel+" Short.") {
+		t.Errorf("the header still describes the row above the selection:\n%s", strip(moved.renderSettings()))
+	}
+	// The fixed height is what the list is spared: the same keys are on the screen either way.
+	if a, b := strings.Count(strip(m.renderSettings()), "key-"), strings.Count(strip(moved.renderSettings()), "key-"); a != b {
+		t.Errorf("the list jumped from %d rows to %d when the description changed length", a, b)
+	}
+}
+
+// The pane names itself in BOLD (docs/layout/settings-screen-layout.md's **SETTINGS**) — and it does
+// so through the shared chrome every popup's title is painted with (th.presentTitle) rather than
+// through anything of its own. That is the point of pinning it here: a requirement met by the module
+// is one this pane cannot drift away from, and the guard says which style carries it.
+func TestSettingsPaneTitleIsPaintedBold(t *testing.T) {
+	m := settingsFrameModel(t, 80, 30, 6)
+
+	if !colorActive(m.th) {
+		t.Skip("no colour on this profile: the weight is the whole claim")
+	}
+	line := popupLineWith(t, m.renderSettings(), settingsTitle)
+	if !strings.Contains(line, styleSGR(m.th.presentTitle)) {
+		t.Errorf("the pane's title is not painted as a heading: %q", line)
+	}
+}
+
+// The sections read as sections: a blank line above each label after the first, the label itself in
+// white where the rows under it are faint (docs/layout/settings-screen-layout.md requirements 3 and
+// 4). The spacer is a display row like any other — it scrolls with the list — and no keypress can
+// land the selection on either.
+func TestSettingsPaneSectionsAreSpacedAndLabelledInWhite(t *testing.T) {
+	m := settingsFrameModel(t, 80, 40, 8)
+
+	lines := popupLines(m.renderSettings())
+	label := -1
+	for i, ln := range lines {
+		if popupInterior(ln) == "Interface" {
+			label = i
+			break
+		}
+	}
+	if label < 1 {
+		t.Fatalf("no section label on the pane:\n%s", strip(m.renderSettings()))
+	}
+	if above := popupInterior(lines[label-1]); above != "" {
+		t.Errorf("the row above the section label is %q, want the spacer", above)
+	}
+	if !colorActive(m.th) {
+		return // the styling is the rest of the claim, and this profile emits none
+	}
+	if !strings.Contains(lines[label], styleSGR(m.th.popupHeading)) {
+		t.Errorf("the section label is not painted white: %q", lines[label])
+	}
+	if strings.Contains(lines[label], styleSGR(m.th.statusFaint)) {
+		t.Errorf("the section label is still painted as a faint row: %q", lines[label])
+	}
+}
+
+// The row being EDITED says so in colour (docs/layout/settings-screen-layout.md requirement 2): the
+// buffer's row carries the edit tone rather than the plain selection bar, and the pane knows it is
+// editing whichever second step holds a row — the buffer typed into on the row, or the enum
+// sub-list answering about it.
+func TestSettingsPaneLightsTheRowItIsEditing(t *testing.T) {
+	rows := []SettingRow{settingsStringRow(), settingsEnumRow()}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	if display := m.settingsDisplayRows(rows, 0); display.kinds[display.selected] != popupRowPlain {
+		t.Fatalf("a row nothing is editing has kind %v, want it plain", display.kinds[display.selected])
+	}
+
+	m = step(t, m, keyEnter())
+
+	display := m.settingsDisplayRows(rows, 0)
+	if got := display.kinds[display.selected]; got != popupRowEditing {
+		t.Errorf("the buffered row has kind %v, want %v", got, popupRowEditing)
+	}
+	if !m.settingsEditing(rows[0]) || m.settingsEditing(rows[1]) {
+		t.Error("settingsEditing does not name the buffered row alone")
+	}
+	if colorActive(m.th) {
+		line := popupLineWith(t, m.renderSettings(), rows[0].Path)
+		if !strings.Contains(line, styleSGR(m.th.popupEdit)) {
+			t.Errorf("the edited row is not lit: %q", line)
+		}
+		if strings.Contains(line, styleSGR(m.th.userBlock)) {
+			t.Errorf("the edited row still carries the plain selection bar: %q", line)
+		}
+	}
+
+	// The enum's second step holds a row too, and it is the parent row that is being edited.
+	enum := step(t, step(t, m, keyEsc()), keyDown())
+	if enum = step(t, enum, keyEnter()); enum.settings.kind != settingsEnumList {
+		t.Fatalf("pane = %+v, want the value sub-list open", enum.settings)
+	}
+	if !enum.settingsEditing(rows[1]) {
+		t.Error("the enum sub-list's parent row does not read as the row being edited")
+	}
+}
+
+// The header and the legend are the pane's, and the LIST is what gives way: at every window the pane
+// is drawn in the legend is on the screen and the description block keeps its lines ahead of the
+// rows — and where the frame is too short to seat the whole region, what it dropped is counted
+// (popupElisionMarker) rather than dropped quietly.
+func TestSettingsPaneSeatsItsHeaderAndLegendAtEveryHeight(t *testing.T) {
+	for _, height := range []int{smallestOverlayWindow, 13, 14, 16, 20, 24, 30} {
+		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
+			pane := strip(settingsFrameModel(t, 80, height, 40).frameOverlays().settings)
+			if pane == "" {
+				return // the pane gave way whole; the status line carries that fact (its own test)
+			}
+			if !strings.Contains(pane, settingsHint) {
+				t.Errorf("the pane dropped its legend:\n%s", pane)
+			}
+			if !strings.Contains(pane, settingsDescLabel) && !elisionMarkerPattern.MatchString(pane) {
+				t.Errorf("the pane dropped its description header with no accounting:\n%s", pane)
+			}
+		})
+	}
+
+	// With rows to spare the whole region is seated — label, description, blank — and the list
+	// scrolls under it.
+	pane := strip(settingsFrameModel(t, 80, 30, 40).frameOverlays().settings)
+	if want := settingsDescLabel + " what key-00 is for"; !strings.Contains(pane, want) {
+		t.Errorf("the header does not describe the selected row (%q):\n%s", want, pane)
+	}
+	for _, want := range []string{"key-00", settingsHint} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("the pane does not show %q:\n%s", want, pane)
+		}
 	}
 }
 

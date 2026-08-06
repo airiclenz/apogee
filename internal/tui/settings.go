@@ -40,6 +40,14 @@ import (
 // marker, the mask, the "edit in config.yaml" pointer — is already on the row (see [SettingRow]), so
 // nothing here formats a config value or decides what may be written.
 //
+// What it does own is the SHAPE of the screen those rows are read on
+// (docs/layout/settings-screen-layout.md): a fixed two-line description header naming what the key
+// under the cursor is for (settingsBody), the sections set off by a blank line and labelled in white
+// above the faint rows they open (settingsDisplayRows), and the row being typed into lit in the edit
+// tone. All three are stated to the popup module rather than drawn here — the pane composes rows and
+// a body, the module paints them (popupSpec.rowKinds, popupSpec.bodyLead) — so /settings looks like
+// every other overlay in the frame and differs only where it says something the others do not.
+//
 // And it WRITES, one key per deliberate edit (ADR 0035): ⏎ on a bool row toggles it, ⏎ on an enum row
 // opens the value sub-list, and what is committed goes out through [Options.WriteSetting] — the
 // binary's comment-preserving splice writer, never this package's idea of YAML. The renderer's whole
@@ -148,12 +156,29 @@ type settingFailure struct {
 // says is that the row is being typed into — and the reset's is the one line the pane ASKS anything:
 // backspace armed something destructive, so the hint is where the confirmation is spelled out, which
 // is the /sessions delete-confirm posture with ⏎ in place of y.
+//
+// The key list's own legend names the reset as well as the two keys that open and close the pane
+// (docs/layout/settings-screen-layout.md's hint is a minimum, not an exhaustion): backspace is the
+// only act of this pane that is not discoverable from the row it works on, and a key that removes a
+// line from a file the human maintains by hand is exactly the one worth spelling out.
 const (
 	settingsTitle      = "Settings"
-	settingsHint       = "↑/↓ select · ⏎ edit · esc close"
+	settingsHint       = "↑/↓ select · ⏎ edit · ⌫ reset · esc close"
 	settingsEnumHint   = "↑/↓ select · ⏎ set · esc back"
 	settingsBufferHint = "⏎ save · esc cancel"
 	settingsResetHint  = "⏎ confirm reset · esc cancel"
+)
+
+// The pane's description header: the label its first line opens with, and the number of lines the
+// description itself is allowed to take under it. Two lines because a registry description is a
+// sentence and a sentence rarely fits one at eighty columns — and no more than two because the
+// region is FIXED (ADR 0037 decision 9): every row's description is composed to exactly this height,
+// so moving the selection down the list moves nothing else on the screen. What a longer description
+// loses is its tail, to an ellipsis in the painter's own measure (truncateToWidth), rather than the
+// list losing a row to it.
+const (
+	settingsDescLabel = "Description:"
+	settingsDescLines = 2
 )
 
 // settingsCaret is the cell drawn after the edit buffer's text — the /sessions rename idiom's own
@@ -858,50 +883,87 @@ func (m Model) settingsSelection(n int) int {
 // ----------------------------------------------------------------------------
 
 // settingsDisplay is the pane's row list as the popup module takes it — the setting rows with their
-// section headers interleaved — plus where the selected KEY landed among them. The two travel
-// together because they are one composition: inserting a header shifts every row after it, so a
-// selection index derived separately would highlight the wrong row the moment a section opened above
-// it.
+// section headers and the spacers above them interleaved — what each of those rows IS to the painter
+// (popupRowKind), and where the selected KEY landed among them. The three travel together because
+// they are one composition: inserting a header shifts every row after it, so a selection index or a
+// kind list derived separately would decorate the wrong row the moment a section opened above it.
 type settingsDisplay struct {
 	rows     []popupRow
-	selected int // index into rows of the selected key row; −1 when nothing is highlighted
+	kinds    []popupRowKind // parallel to rows: which are section headers, which is being edited
+	selected int            // index into rows of the selected key row; −1 when nothing is highlighted
 }
 
-// settingsDisplayRows composes the FULL row list the pane paints: a single-cell header row wherever
-// the section changes, then one four-cell row per key. Rows arrive in the provider's order, which is
-// the config template's order (ADR 0035), so the pane reads in the order the file does and a key
-// added to the registry appears where it was added.
+// settingsDisplayRows composes the FULL row list the pane paints: a blank spacer and a single-cell
+// header row wherever the section changes, then one four-cell row per key. Rows arrive in the
+// provider's order, which is the config template's order (ADR 0035), so the pane reads in the order
+// the file does and a key added to the registry appears where it was added.
 //
-// Headers are rows the popup module paints and NOT rows the selection can land on. That is why the
-// selection indexes the setting rows and this method reports where the highlighted one ended up:
-// ↑/↓ walks keys, the headers scroll past with them, and no keypress can leave the ❯ on a label
-// there is nothing to do with.
+// Headers and spacers are rows the popup module paints and NOT rows the selection can land on. That
+// is why the selection indexes the setting rows and this method reports where the highlighted one
+// ended up: ↑/↓ walks keys, the labels scroll past with them, and no keypress can leave the ❯ on a
+// label there is nothing to do with.
+//
+// The spacer is what makes the sections read as sections (docs/layout/settings-screen-layout.md) —
+// a header flush against the last key of the section above it divides nothing — and the FIRST
+// header is the one that goes without: the description header above it already closes with a blank
+// line of its own (settingsBody), and two blanks would open the pane on a gap.
 func (m Model) settingsDisplayRows(rows []SettingRow, selected int) settingsDisplay {
 	if len(rows) == 0 {
 		return settingsDisplay{rows: singleCellRows([]string{noSettingsRow}), selected: -1}
 	}
-	out := make([]popupRow, 0, len(rows)+len(rows)/4) //nolint:mnd // a header every few keys, at a guess
+	out := make([]popupRow, 0, len(rows)+len(rows)/2) //nolint:mnd // a header and a spacer every few keys, at a guess
+	kinds := make([]popupRowKind, 0, cap(out))
+	add := func(row popupRow, kind popupRowKind) {
+		out, kinds = append(out, row), append(kinds, kind)
+	}
 	display := -1
 	section := ""
 	for i, row := range rows {
 		if row.Section != "" && row.Section != section {
+			if len(out) > 0 {
+				add(popupRow{""}, popupRowPlain) // the spacer, blank in every column
+			}
 			section = row.Section
-			out = append(out, popupRow{stripEscapes(row.Section)})
+			add(popupRow{stripEscapes(row.Section)}, popupRowHeading)
 		}
 		if i == selected {
 			display = len(out)
 		}
-		cells := m.settingRowCells(row)
+		cells, kind := m.settingRowCells(row), popupRowPlain
 		// An open edit buffer replaces the SELECTED row's value cell, in place: the key stays where it
 		// was in the list and in its column, so the human types into the row they chose rather than
 		// into a prompt that has covered it (the /sessions rename idiom, one column narrower — a
 		// setting's row is a key and a value, and it is the value being typed).
-		if i == selected && m.settings.kind == settingsValueBuffer && settingsBufferable(row) {
-			cells = m.settingBufferCells(row)
+		if i == selected && m.settingsEditing(row) {
+			if m.settings.kind == settingsValueBuffer {
+				cells = m.settingBufferCells(row)
+			}
+			kind = popupRowEditing
 		}
-		out = append(out, cells)
+		add(cells, kind)
 	}
-	return settingsDisplay{rows: out, selected: display}
+	return settingsDisplay{rows: out, kinds: kinds, selected: display}
+}
+
+// settingsEditing reports whether the pane is EDITING the given row — the state the row is painted
+// in the edit tone for (popupRowEditing, docs/layout/settings-screen-layout.md requirement 2). Both
+// second steps that hold ONE row count, because for the human they are the same fact: the buffer,
+// which is typed into on the row itself, and the enum sub-list, which is answering about it. The
+// sub-list draws a pane of its own today (renderSettingsEnum) rather than a list with one row lit,
+// so what this reports there is the pane's STATE rather than a row currently on the screen — the
+// predicate is about which row is being edited, not about which renderer is up.
+//
+// The kind's own conditions are re-asked here (settingsBufferable, the enum's vocabulary) for the
+// reason the two targets re-ask them: the rows are re-derived under an open step, and a row that can
+// no longer hold the step it opened is not being edited whatever the pane's field still says.
+func (m Model) settingsEditing(row SettingRow) bool {
+	switch m.settings.kind {
+	case settingsValueBuffer:
+		return settingsBufferable(row)
+	case settingsEnumList:
+		return row.Editable && row.Kind == SettingEnum && len(row.EnumValues) > 0
+	}
+	return false
 }
 
 // settingBufferCells is the row being typed into: the same four columns, with the buffer and its caret
@@ -1040,28 +1102,51 @@ func settingsSourceLabel(row SettingRow) string {
 	return "the " + string(row.Source)
 }
 
-// settingsBody is the pane's one-line body block: what the SELECTED key is for
-// ([SettingRow.Desc]). It is the line popupBudget keeps for a body on every pane whether or not the
-// pane draws one, so a bodyless full-height pane would hand it back to the transcript — one stray
-// conversation row above a screen the human opened to read. Spent on the description it is the
-// difference between a list of key names and a list the human can act on.
+// settingsBody is the pane's DESCRIPTION HEADER: the "Description:" label, what the SELECTED key is
+// for ([SettingRow.Desc]) beside it, and one blank line closing the region off from the key list
+// under it (docs/layout/settings-screen-layout.md). It is the difference between a list of key names
+// and a list the human can act on — a registry description is where a key says what setting it
+// actually changes, and the pane has one row's worth of room to say it in.
 //
-// It is truncated to the pane's inner width HERE rather than left for the module to wrap, because
-// the budget it is composed against is exactly one line: a two-line description would spend that
-// line on "… (+2 more lines)" and the pane would say nothing at all about the row under the ❯. One
-// line, elided in the painter's own measure (truncateToWidth, ADR 0030), is the honest shape of a
-// caption on a row.
+// The region is a FIXED height (ADR 0037 decision 9) — settingsDescLines lines of description
+// whatever the description measures, plus the blank — and that is the whole point of composing it
+// here rather than handing the module a string to wrap: the header of a one-line description pads
+// out to the same height as the header of a three-line one, so walking the list with ↑/↓ moves the
+// highlight and nothing else. A list that re-flowed under every keypress would be a list nobody can
+// read down.
+//
+// The overflow is an ELLIPSIS on the last line rather than the module's "… (+N more lines)" marker:
+// the marker is honest about a body block whose tail the human may want, and a caption on the row
+// under the cursor is not that — it would spend one of the two lines saying that there was a third.
+// Truncation is in the painter's own measure (truncateToWidth, ADR 0030).
+//
+// With no row selected there is no header at all: the pane is then showing its own empty-list row
+// (noSettingsRow), and a label over nothing would describe nothing.
 func (m Model) settingsBody(rows []SettingRow) string {
 	sel := m.settingsSelection(len(rows))
 	if sel < 0 {
 		return ""
 	}
-	return truncateToWidth(m.th, stripEscapes(rows[sel].Desc), popupInnerWidth(m.th, m.width))
+	inner := popupInnerWidth(m.th, m.width)
+	lead := settingsDescLabel + " " + stripEscapes(rows[sel].Desc)
+	lines := wrapText(m.th, strings.TrimRight(lead, " "), inner)
+	if len(lines) > settingsDescLines {
+		// What did not fit is folded back onto the last line the region has and elided there, so the
+		// cut is stated where the text stops rather than by a line the region has not got.
+		rest := strings.Join(lines[settingsDescLines-1:], " ")
+		lines = append(lines[:settingsDescLines-1], truncateToWidth(m.th, rest, inner))
+	}
+	for len(lines) < settingsDescLines {
+		lines = append(lines, "")
+	}
+	// The blank line is the region's own: it is what sets the header off the list rather than
+	// something the first section header has to pay for a second time (settingsDisplayRows).
+	return strings.Join(append(lines, ""), "\n")
 }
 
 // renderSettings paints the open pane through the shared popup module: a titled, bordered pane
 // spanning the full window width (m.width, flush with the input box below), the selected key's
-// description as its body, the key rows with their section headers, and the key legend. It returns
+// description as its header, the key rows under their spaced section labels, and the key legend. It returns
 // "" when the pane is closed or when the frame cannot seat it, so View treats it exactly like the
 // picker's slot.
 //
@@ -1080,9 +1165,12 @@ func (m Model) renderSettings() string {
 	}
 	display := m.settingsDisplayRows(rows, m.settingsSelection(len(rows)))
 	body := m.settingsBody(rows)
-	// The body's own claim is its real wrapped height (one line, or none when no row is highlighted)
-	// rather than a taste, exactly as the ask prompt states its question's (popupFloor): the pane's
-	// caption is a line it will use, and claiming one it would not spend would cost the list a row.
+	// The body's own claim is its real height — the fixed description region and the blank under it
+	// (settingsBody), or none when no row is highlighted — rather than a taste, exactly as the ask
+	// prompt states its question's (popupFloor). Stating it is what seats the header ahead of the
+	// list on every window the pane is drawn in: the claim comes off the top of the grant, bounded
+	// only by the one line the rows keep for the row the window is anchored on, so it is the LIST
+	// that scrolls and never the header that goes.
 	maxBody, maxRows, seated := m.popupBudget(paneSettings, len(display.rows), len(display.rows),
 		popupChrome, popupFloor{body: popupBodyLineCount(m.th, body, m.width)})
 	if !seated {
@@ -1091,8 +1179,10 @@ func (m Model) renderSettings() string {
 	return renderPopup(m.th, popupSpec{
 		title:       settingsTitle,
 		body:        body,
+		bodyLead:    settingsDescLabel,
 		maxBodyRows: maxBody,
 		rows:        display.rows,
+		rowKinds:    display.kinds,
 		selected:    display.selected,
 		hint:        m.settingsPaneHint(),
 		maxRows:     maxRows,
