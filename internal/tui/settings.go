@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -38,7 +39,7 @@ import (
 // that disappears.
 //
 // Everything the pane needs in order to say what a row IS — the effective value, the override
-// marker, the mask, the "edit in config.yaml" pointer — is already on the row (see [SettingRow]), so
+// marker, the mask, the read-only row's pointer — is already on the row (see [SettingRow]), so
 // nothing here formats a config value or decides what may be written.
 //
 // What it does own is the SHAPE of the screen those rows are read on
@@ -415,6 +416,12 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 	}
 	row := rows[sel]
 	if !row.Editable {
+		// A block this pane cannot hold on a row is edited where it CAN be edited: the human's own
+		// editor, opened on the key's line (ADR 0037 decision 5). Every other read-only row still does
+		// nothing at all — the confinement pair's cell already says where their interlock lives.
+		if row.ExternalEdit {
+			return m.settingsExternalEdit(row)
+		}
 		return m, nil
 	}
 	switch row.Kind {
@@ -535,6 +542,120 @@ func (m Model) settingsFailed(row SettingRow, msg string) (tea.Model, tea.Cmd) {
 // noServerSwitchNote is what the `server` row says when the binary wired no switch seam — the
 // nil-seam degrade noSettingsWriterNote gives every other row, worded for the act this one performs.
 const noServerSwitchNote = "cannot switch server in this build"
+
+// settingsEditedMsg is the return of the external editor: which row launched it, and whether the
+// process itself ran. It is the pane's own message rather than a shared one because nothing else in
+// the frame suspends the program — the path is carried so the reload's outcome lands on the row the
+// human pressed ⏎ on, which is the only row they have any reason to be looking at.
+type settingsEditedMsg struct {
+	path string
+	err  error
+}
+
+// The two sentences the external edit refuses with. The first is binding C of ADR 0037: suspending
+// the whole program into an editor while a Step is streaming would take the transcript off the
+// screen mid-answer and leave the applies to queue behind a run — so the offer stands only between
+// runs, and the row says which. The second is the nil-seam degrade noSettingsWriterNote gives every
+// other row, worded for the act this one performs.
+const (
+	settingsEditBusyNote = "wait for the current run to finish"
+	noExternalEditNote   = "cannot open an editor in this build"
+)
+
+// settingsExternalEdit answers ⏎ on a row holding a structure no field can express: it suspends the
+// program into the human's own editor, opened on that key's line (ADR 0037 decision 5). The command
+// line is the binary's — which file, which line, which editor — and this only runs it
+// ([Options.ExternalEditSpec]).
+//
+// It is offered only between runs (binding C). Mid-run the row says to wait rather than the pane
+// queueing the edit: the alternative is tearing the alternate screen down over a streaming reply and
+// holding a file's worth of applies until it finishes, for a key nobody is waiting on that hard. In-
+// pane edits stay allowed mid-run — those apply through the seams that know how to refuse.
+//
+// The in-flight test names both halves of "a run", and the LATCH is the half that reaches here: a
+// streaming Step leaves this pane's keys unrouted entirely (the overlay is idle-only, handleKey), so
+// it is a launcher actuation — which runs on a Cmd goroutine with the session idle — that a human can
+// actually press ⏎ during. The busy check stands beside it because the sentence is about runs, not
+// about which of them today's routing happens to deliver.
+//
+// A refusal from the spec is the row's failure, and NOTHING is launched: an unreadable config or a
+// file shape the parse will not risk is exactly the moment not to hand a human an editor and a
+// promise to re-read it.
+func (m Model) settingsExternalEdit(row SettingRow) (tea.Model, tea.Cmd) {
+	if m.busy() || m.actuation.inFlight {
+		return m.settingsFailed(row, settingsEditBusyNote)
+	}
+	if m.opts.ExternalEditSpec == nil {
+		return m.settingsFailed(row, noExternalEditNote)
+	}
+	argv, err := m.opts.ExternalEditSpec(row.Path)
+	if err != nil {
+		return m.settingsFailed(row, stripEscapes(err.Error()))
+	}
+	if len(argv) == 0 {
+		return m.settingsFailed(row, noExternalEditNote)
+	}
+	// The last refusal goes with the keypress that acted past it: the human is leaving the screen,
+	// and a ✗ from an earlier attempt has nothing to say about the file they are about to edit.
+	m.settings.failure = settingFailure{}
+	m.layout()
+	return m, tea.ExecProcess(exec.Command(argv[0], argv[1:]...), func(err error) tea.Msg {
+		return settingsEditedMsg{path: row.Path, err: err}
+	})
+}
+
+// foldSettingsEdit is what happens when the editor exits: the binary re-reads the file, and every
+// key that came back different is journaled and applied — through the same two homes an in-pane
+// commit uses (settingsApplied), so a key edited in the file and a key edited on its row land
+// identically and neither has an apply path of its own.
+//
+// The editor's own failure ends the round trip without a re-read. A command that could not run
+// changed nothing, and a non-zero exit is how an editor SAYS to discard (`:cq`) — re-reading over
+// either would be answering a question the human declined to ask. Same for a reload that could not
+// parse or validate what it found: the file is left exactly as they wrote it and the reason lands on
+// the row they launched from, which is where they go back in from.
+//
+// Notes are per key, on the edit that earned them; a refusal is the pane's one failure slot, so a
+// reload in which two keys both refused shows the last of them — the slot describes the last attempt
+// rather than a row's condition ([settingFailure]), and this is one attempt.
+func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
+	rows := m.settingRows()
+	launched, ok := settingRowOf(rows, msg.path)
+	if !ok {
+		launched = SettingRow{Path: msg.path}
+	}
+	if msg.err != nil {
+		return m.settingsFailed(launched, stripEscapes(msg.err.Error()))
+	}
+	if m.opts.ReloadConfig == nil {
+		return m.settingsFailed(launched, noExternalEditNote)
+	}
+	applied, err := m.opts.ReloadConfig()
+	if err != nil {
+		return m.settingsFailed(launched, stripEscapes(err.Error()))
+	}
+	for _, a := range applied {
+		row, ok := settingRowOf(rows, a.Path)
+		if !ok {
+			continue // a key the pane does not list has no row to journal it on
+		}
+		m = m.settingsApplied(row, settingEdit{path: a.Path, value: a.Value})
+	}
+	m.layout()
+	return m, nil
+}
+
+// settingRowOf finds the row for a registry path in the list as it stands — the lookup both halves
+// of the round trip need, since what comes back from the binary is a path and what the journal and
+// the apply are about is a row.
+func settingRowOf(rows []SettingRow, path string) (SettingRow, bool) {
+	for _, r := range rows {
+		if r.Path == path {
+			return r, true
+		}
+	}
+	return SettingRow{}, false
+}
 
 // settingsBufferSeed is what a freshly opened edit buffer starts from: the value the pane believes the
 // file holds, so a human correcting a port edits the port rather than retyping it — and NOTHING for a
@@ -1302,7 +1423,7 @@ func (m Model) settingsPaneHint() string {
 }
 
 // settingRowCells is one key's row in the pane's fixed column schema — ["key", "value", "(env)",
-// "· edit in config.yaml"] — so the values line up in one column however long the keys beside them
+// "· use /confine"] — so the values line up in one column however long the keys beside them
 // run, the override marks in the next, and the last carries whatever else is true of the row. A tier
 // a key does not state is an EMPTY cell, which still pads, so a key with no override cannot slide the
 // note of the row under it sideways; a tier NO key states collapses away entirely (layoutPopupRow),

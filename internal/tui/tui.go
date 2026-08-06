@@ -337,6 +337,40 @@ type Options struct {
 	// degrade a bench or headless Driver composes deliberately (ADR 0031).
 	ApplySetting func(path, value string) (note string, err error)
 
+	// ExternalEditSpec is the command line that opens the config file at path's own line — the
+	// nested structures' whole edit idiom (ADR 0037 decision 5): a `servers:` list or a
+	// `model-profile:` block is a shape no row can hold, so ⏎ on such a row suspends the program
+	// into the human's own editor rather than growing a form for each of them.
+	//
+	// The binary resolves all three parts because it owns all three: the config file's location, the
+	// line that key sits on (its own splice writer already parses the document for it), and which
+	// editor this environment names — $VISUAL, then $EDITOR, then the platform's fallback, with a
+	// line-jump argument passed only to the editors known to take one. The renderer receives an argv
+	// it runs and nothing else, exactly as [WriteSetting] hands it a file format it never composes.
+	//
+	// An error is REPORTED on the row (an unreadable config, a file shape the parse refuses) and
+	// nothing is launched. nil ⇒ no external edit is available and ⏎ on those rows does nothing, the
+	// nil-seam degrade every provider here takes.
+	ExternalEditSpec func(path string) (argv []string, err error)
+
+	// ReloadConfig re-reads the config file after that external edit and reports which keys came
+	// back different — the return half of the same round trip. The binary re-runs the startup
+	// resolution over the file it alone can parse and diffs it against what the file said when the
+	// editor was launched (ExternalEditSpec takes that baseline), so what comes back is the human's
+	// edit and nothing else.
+	//
+	// A parse or validation failure returns the error with NOTHING applied and the file untouched:
+	// the human's own text stays exactly as they left it, and the row that launched the edit carries
+	// the reason so they can go back in and fix it.
+	//
+	// What is returned is not yet in force — the pane applies each key through [ApplySetting] and
+	// its own renderer-local keys itself, the same two homes an in-pane commit uses (ADR 0037
+	// decision 1), so a key edited in the file and a key edited on the row land the same way. The
+	// keys the reload never reports are the confinement pair, fenced to `/confine` (ADR 0012), and
+	// `server:`, whose live move is a deliberate act at the picker rather than a consequence of
+	// re-reading a file. nil ⇒ the round trip ends at the editor, and the pane says so.
+	ReloadConfig func() ([]AppliedSetting, error)
+
 	// Skills is the discovered skill catalog the merged "/" menu lists and an inline "/token"
 	// resolves against; nil ⇒ no skills are wired (the menu offers no skills and no token
 	// resolves). The binary backs it with a live skills.Provider and the agent loop resolves the SAME
@@ -835,8 +869,8 @@ const (
 // crash dump, and the pane has no use for it (item 8's editor buffers what the human types, it
 // never reveals what was stored).
 //
-// EditPointer is where a row this pane will not write IS edited — "edit in config.yaml" for a
-// structured block, "use /confine" for the confinement keys, whose acknowledgement interlock
+// EditPointer is where a row this pane will not write IS edited — the ⏎-opens-an-editor affordance
+// for a structured block, "use /confine" for the confinement keys, whose acknowledgement interlock
 // stays single-homed in `/confine` (ADR 0012). It is non-empty exactly when Editable is false.
 type SettingRow struct {
 	Path    string      // the key's yaml path with `.` between levels ("ui.spinner") — its display key and its identity
@@ -863,6 +897,31 @@ type SettingRow struct {
 	Masked      bool     // Value is a mask, not the value (api-key)
 	EditPointer string   // where a non-Editable key is edited instead; "" exactly when Editable
 	Desc        string   // the one-line description shown for the selected row
+
+	// ExternalEdit says ⏎ on this row suspends into the human's own editor ([Options.ExternalEditSpec]).
+	// It is DECLARED by the binary rather than inferred from the kind, for [SettingServer]'s reason:
+	// the confinement keys are structured and read-only too, and their interlock stays single-homed in
+	// `/confine` (ADR 0012), so "which read-only rows open an editor" is a fact about the schema and
+	// not a shape the renderer can read off a row. False for every editable row — those are written
+	// here — and false for the confinement pair, whose own pointer says where they go instead.
+	ExternalEdit bool
+}
+
+// AppliedSetting is one key a config reload found CHANGED — the return half of the `$EDITOR` round
+// trip (ADR 0037 decision 5), one entry per key whose value came back different from what the file
+// said when the editor was launched.
+//
+// Value is that new value in the same spelling a committed edit carries: the file's own spelling for
+// a scalar ("true", "32768"), the row's summary for a block ("3 servers"), and the prose ITSELF for
+// a [SettingText] key, whose row shows only a summary of it. That is what makes one struct enough
+// for both halves of what the pane does with it — journal the key (its ` *` marker and its new
+// value) and apply it, through exactly the two homes an in-pane commit applies through.
+//
+// It carries no note and no error: nothing is in force yet when the reload returns it, so what a
+// key had to say about landing is what the apply says, on the row, a moment later.
+type AppliedSetting struct {
+	Path  string // the key's registry path, as [SettingRow.Path] spells it
+	Value string // its new value, in the spelling the pane journals and applies
 }
 
 // ----------------------------------------------------------------------------

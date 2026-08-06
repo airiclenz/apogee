@@ -373,6 +373,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// the TUI is handed the display-and-identity projection of the same list, in the same order.
 	live := newLiveSettings(opts, manualIDs)
 
+	// The `$EDITOR` round trip's own half of the same story (ADR 0037 decision 5): the keys holding a
+	// structure no row can express are edited in the file, and this is what opens it at the right line
+	// and works out what came back different. It is built here rather than at the seam block below
+	// because its baseline is the file as it stands NOW, and now is before anything has been edited.
+	externalEdits := newExternalEdit(opts, os.Getenv)
+
 	// The rebind closure: the composition root's half of an observed model change. The TUI decides
 	// WHEN (at idle, or at the exchange-terminal boundary), this decides WHAT — because every input
 	// to the decision is config the binary owns (the per-model system prompt, ADR 0023; the
@@ -655,7 +661,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 			launcher:   launcher,
 			present:    presentation,
 		}),
-		Skills: skillProvider,
+		// The `$EDITOR` round trip for the keys no row can hold (ADR 0037 decision 5): out through a
+		// command line this binary resolves — the file, the key's own line, the editor this environment
+		// names — and back through a re-read that says which keys changed. The pane applies them
+		// through the same two homes an in-pane commit uses; nothing here applies anything, so the
+		// file's authority and the apply's single path both stay where they were (settingsedit.go).
+		ExternalEditSpec: externalEdits.spec,
+		ReloadConfig:     externalEdits.changed,
+		Skills:           skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
 		// on the shared Provider — the same one Config.Skills resolves against — so a skill added
 		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals
@@ -861,6 +874,35 @@ func (s *liveSettings) setContextFileNames(names []string) bool {
 	defer s.mu.Unlock()
 	s.contextFileNames = names
 	return s.contextFilesEnable
+}
+
+// setServers installs a re-read `servers:` list. Nothing in the engine holds one — the picker, the
+// switch and the `server:` recording all resolve names against this field (ADR 0036: one upstream
+// definition) — so this store IS the whole apply for that key. The caller validates first, the
+// setSystemPrompt posture: a list with a nameless or duplicated entry never displaces a working one.
+func (s *liveSettings) setServers(servers []serverEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.servers = servers
+}
+
+// setMechanisms installs a re-read `mechanisms:` block: the validated enabled ids and the block
+// itself, together, because the block's mere non-emptiness is what suppresses a matched Validated set
+// (whole-set-or-nothing, ADR 0016). Written apart they would describe two different configs for as
+// long as one rebind takes.
+func (s *liveSettings) setMechanisms(ids []apogee.MechanismID, block map[string]bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.manualIDs, s.mechanisms = ids, block
+}
+
+// setValidatedSets installs a re-read `validated-sets:` block — the surface's off-switch and its
+// carry-over map, the two inputs resolveValidatedSet keys a match on, moved together for
+// setMechanisms' reason.
+func (s *liveSettings) setValidatedSets(enable bool, alias map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.validatedEnable, s.validatedAlias = enable, alias
 }
 
 // rebindInputs projects the live values onto a COPY of the startup snapshot and hands back the three
@@ -1124,6 +1166,27 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 				return "", err
 			}
 			return "", a.rideTheRebind()
+		case "servers":
+			// The `servers:` list reaches no engine seam at all: it is the single upstream definition
+			// (ADR 0036) that the picker, the `/server` switch and the choice recording resolve names
+			// against, and all three read the holder — so installing the re-read list IS the apply. The
+			// value the pane persisted is not read, for the system-prompt keys' reason: a list of blocks
+			// is a shape no single string spells.
+			return "", a.reloadServers()
+		case "mechanisms":
+			// Neither block is a value the engine holds either: they are INPUTS to the per-model
+			// resolution — the enable list and the whole-set-or-nothing suppression rule (ADR 0016) —
+			// so they land in the holder and are committed by the rebind, the one door a model change
+			// and a config change share (rideTheRebind).
+			if err := a.reloadMechanisms(); err != nil {
+				return "", err
+			}
+			return "", a.rideTheRebind()
+		case "validated-sets":
+			if err := a.reloadValidatedSets(); err != nil {
+				return "", err
+			}
+			return "", a.rideTheRebind()
 		default:
 			return "", fmt.Errorf("apogee: %s cannot be applied to the running session", key)
 		}
@@ -1172,6 +1235,59 @@ func (a settingsApplier) reloadSystemPrompt() error {
 		return err
 	}
 	a.live.setSystemPrompt(sp)
+	return nil
+}
+
+// reloadServers re-reads the `servers:` block and installs it on the holder, validate-then-commit:
+// an entry that could never be switched to — no name, no endpoint, or a name an earlier entry took —
+// is refused by the SAME check startup runs, before it can displace a list that works.
+//
+// Only the FILE layer carries the list (no flag, no environment variable names an upstream), so
+// re-reading that one layer resolves it exactly as startup resolved it — reloadSystemPrompt's own
+// reasoning, and the reason the migration notice is dropped here too.
+func (a settingsApplier) reloadServers() error {
+	l, err := loadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	if err != nil {
+		return err
+	}
+	if err := validateServers(l.servers); err != nil {
+		return err
+	}
+	a.live.setServers(l.servers)
+	return nil
+}
+
+// reloadMechanisms re-reads the `mechanisms:` block and installs both halves of it. The ids are
+// derived through the startup producer (mechanismIDs), which validates EVERY key of the block —
+// enabled and disabled alike — so a Mechanism id this build does not know is refused here rather than
+// silently arming nothing, exactly as it is at launch (ADR 0015 §1).
+func (a settingsApplier) reloadMechanisms() error {
+	l, err := loadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	if err != nil {
+		return err
+	}
+	ids, err := mechanismIDs(l.mechanisms, mechanisms.KnownIDs())
+	if err != nil {
+		return err
+	}
+	a.live.setMechanisms(ids, l.mechanisms)
+	return nil
+}
+
+// reloadValidatedSets re-reads the `validated-sets:` block. An absent off-switch resolves to ON, the
+// default resolveSettings starts from, so a block the human deleted goes back to the surface being
+// available rather than to it being off — the difference between "unset" and "false" that the file
+// layer's pointer carries.
+func (a settingsApplier) reloadValidatedSets() error {
+	l, err := loadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	if err != nil {
+		return err
+	}
+	enable := true
+	if l.validatedSetsEnable != nil {
+		enable = *l.validatedSetsEnable
+	}
+	a.live.setValidatedSets(enable, l.validatedSetsAlias)
 	return nil
 }
 

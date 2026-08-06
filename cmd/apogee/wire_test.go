@@ -2946,7 +2946,10 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	if _, err := rec.opts.ApplySetting("use-project-skills", "false"); err != nil {
 		t.Errorf("ApplySetting(use-project-skills): %v", err)
 	}
-	if _, err := rec.opts.ApplySetting("servers", "anything"); err == nil {
+	// `server` is the key with no dispatcher home BY DESIGN and permanently: its live apply is the
+	// picker's own switch (ADR 0037 decision 4), so a value arriving here is a value nothing can do
+	// anything with, and the refusal has to name it.
+	if _, err := rec.opts.ApplySetting("server", "anything"); err == nil {
 		t.Error("a key with no live seam applied silently; want a refusal naming it")
 	}
 }

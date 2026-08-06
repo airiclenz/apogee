@@ -243,7 +243,7 @@ func TestSettingsDisplayRowsInterleaveSectionHeaders(t *testing.T) {
 		{Path: "endpoint", Section: "Upstream", Value: "http://h:1111", Editable: true},
 		{Path: "mode", Section: "Upstream", Value: "auto", Editable: true,
 			Source: SettingFromEnv, SourceName: "APOGEE_MODE"},
-		{Path: "servers", Section: "Upstream", Value: "3 servers", EditPointer: "edit in config.yaml"},
+		{Path: "servers", Section: "Upstream", Value: "3 servers", EditPointer: "⏎ opens $EDITOR", ExternalEdit: true},
 		{Path: "ui.spinner", Section: "Interface", Value: "snake", Editable: true},
 	}
 
@@ -253,7 +253,7 @@ func TestSettingsDisplayRowsInterleaveSectionHeaders(t *testing.T) {
 		{"Upstream"},
 		{"endpoint", "http://h:1111", "", ""},
 		{"mode", "auto", "(env)", ""},
-		{"servers", "3 servers", "", "· edit in config.yaml"},
+		{"servers", "3 servers", "", "· ⏎ opens $EDITOR"},
 		{""},
 		{"Interface"},
 		{"ui.spinner", "snake", "", ""},
@@ -1271,7 +1271,7 @@ func TestSettingsPaneWithoutAWriterSaysSoOnTheRow(t *testing.T) {
 func TestSettingsPaneEnterNeverWritesARowItMayNotEdit(t *testing.T) {
 	rows := []SettingRow{
 		{Path: "servers", Section: "Upstream", Kind: SettingStructured, Value: "3 servers",
-			EditPointer: "edit in config.yaml", Desc: "The named server list."},
+			EditPointer: "⏎ opens $EDITOR", ExternalEdit: true, Desc: "The named server list."},
 		{Path: "unconfined-hosts", Section: "Confinement", Kind: SettingStructured, Value: "2 hosts",
 			EditPointer: "use /confine", Desc: "Machines acknowledged as disposable."},
 	}
@@ -1810,7 +1810,7 @@ func TestSettingsPaneResetIsANoOpOnADefaultValuedRow(t *testing.T) {
 	rows := []SettingRow{
 		settingsIntRow(), // value "0" == default "0"
 		{Path: "servers", Section: "Upstream", Kind: SettingStructured, Value: "3 servers",
-			EditPointer: "edit in config.yaml", Desc: "The named server list."},
+			EditPointer: "⏎ opens $EDITOR", ExternalEdit: true, Desc: "The named server list."},
 	}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -2058,5 +2058,219 @@ func TestSettingsPaneTextEditorPaintsTheCaretWhereItStands(t *testing.T) {
 	}
 	if pane := strip(m.renderSettings()); !strings.Contains(pane, ">"+settingsCaret+"Work step by step.") {
 		t.Errorf("the caret is not drawn where it stands:\n%s", pane)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The $EDITOR round trip (ADR 0037 decision 5)
+// ----------------------------------------------------------------------------
+
+// settingsStructuredRow is one row holding a shape no field can express — `servers:` as the registry
+// describes it: read-only in the pane, and edited in the human's own editor on the key's own line.
+func settingsStructuredRow() SettingRow {
+	return SettingRow{
+		Path: "servers", Section: "Upstream", Kind: SettingStructured, Value: "3 servers",
+		EditPointer: pointerForTest, ExternalEdit: true, Desc: "The named server list.",
+	}
+}
+
+// pointerForTest is the wording the binary projects onto those rows; the pane only paints it.
+const pointerForTest = "⏎ opens $EDITOR"
+
+// externalEditLog is the two seams of the round trip as spies: which key was asked for a command
+// line, and what the re-read reported back.
+type externalEditLog struct {
+	asked     []string
+	argv      []string
+	specErr   error
+	applied   []AppliedSetting
+	reloadErr error
+	reloads   int
+}
+
+func (l *externalEditLog) spec(path string) ([]string, error) {
+	l.asked = append(l.asked, path)
+	if l.specErr != nil {
+		return nil, l.specErr
+	}
+	return l.argv, nil
+}
+
+func (l *externalEditLog) reload() ([]AppliedSetting, error) {
+	l.reloads++
+	if l.reloadErr != nil {
+		return nil, l.reloadErr
+	}
+	return l.applied, nil
+}
+
+// externalEditModel is settingsEditModel with the round trip's two seams wired as well.
+func externalEditModel(t *testing.T, rows []SettingRow, log *settingsWriteLog, edit *externalEditLog) Model {
+	t.Helper()
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.WriteSetting = log.write
+	opts.ResetSetting = log.reset
+	opts.ApplySetting = log.apply
+	opts.ExternalEditSpec = edit.spec
+	opts.ReloadConfig = edit.reload
+	return openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+}
+
+// ⏎ on a structured row asks the binary for a command line and suspends into it. Nothing is written
+// and nothing is journaled yet — the file is the human's to change, and the journal is the return
+// trip's business.
+func TestSettingsPaneStructuredRowOpensTheExternalEditor(t *testing.T) {
+	rows := []SettingRow{settingsStructuredRow()}
+	log, edit := &settingsWriteLog{}, &externalEditLog{argv: []string{"vi", "+7", "/tmp/config.yaml"}}
+	m := externalEditModel(t, rows, log, edit)
+
+	next, cmd := stepCmd(t, m, keyEnter())
+	m = next
+
+	if want := []string{"servers"}; !reflect.DeepEqual(edit.asked, want) {
+		t.Errorf("spec asked for %v, want %v", edit.asked, want)
+	}
+	if cmd == nil {
+		t.Fatal("⏎ on a structured row returned no Cmd; the editor was never launched")
+	}
+	if len(log.writes) != 0 || len(m.settingEdits) != 0 {
+		t.Errorf("the launch wrote %+v and journaled %+v; both belong to the return trip", log.writes, m.settingEdits)
+	}
+	if got := m.settingsNote(rows[0]); got != "· "+pointerForTest {
+		t.Errorf("note = %q, want the row's own pointer — nothing failed", got)
+	}
+}
+
+// The offer stands only between runs (ADR 0037 binding C): suspending the whole program into an
+// editor mid-stream would take the answer off the screen and leave the applies queued behind it. The
+// launcher actuation is the in-flight state a human can actually press ⏎ during — a streaming Step
+// leaves this pane's keys unrouted altogether (the overlay is idle-only).
+func TestSettingsPaneRefusesTheExternalEditMidRun(t *testing.T) {
+	rows := []SettingRow{settingsStructuredRow()}
+	edit := &externalEditLog{argv: []string{"vi", "/tmp/config.yaml"}}
+	m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
+	m.actuation.inFlight = true
+
+	next, cmd := stepCmd(t, m, keyEnter())
+	m = next
+
+	if cmd != nil || len(edit.asked) != 0 {
+		t.Errorf("a mid-run ⏎ launched an editor (cmd=%v, asked=%v)", cmd != nil, edit.asked)
+	}
+	if got := m.settingsNote(rows[0]); got != "✗ "+settingsEditBusyNote {
+		t.Errorf("note = %q, want the wait note %q", got, settingsEditBusyNote)
+	}
+}
+
+// A build with no spec seam says so on the row, the nil-seam degrade every other act in this pane
+// takes — and launches nothing.
+func TestSettingsPaneSaysWhenThereIsNoExternalEditor(t *testing.T) {
+	rows := []SettingRow{settingsStructuredRow()}
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+
+	next, cmd := stepCmd(t, m, keyEnter())
+	m = next
+
+	if cmd != nil {
+		t.Error("⏎ launched something with no spec seam wired")
+	}
+	if got := m.settingsNote(rows[0]); got != "✗ "+noExternalEditNote {
+		t.Errorf("note = %q, want %q", got, noExternalEditNote)
+	}
+}
+
+// The return trip: every key the re-read found changed is journaled — so its row shows the new value
+// with the ` *` that says this session changed it — and applied through the same seam an in-pane
+// commit applies through, boundary note and all.
+func TestSettingsPaneAppliesWhatTheEditorChanged(t *testing.T) {
+	rows := []SettingRow{
+		settingsStructuredRow(),
+		{Path: "context-files.names", Section: "System prompt", Kind: SettingString,
+			Value: "[AGENTS.md]", Editable: true, Desc: "Workspace files folded into the prompt."},
+	}
+	log := &settingsWriteLog{applyNote: "applies at next clear"}
+	edit := &externalEditLog{applied: []AppliedSetting{
+		{Path: "servers", Value: "4 servers"},
+		{Path: "context-files.names", Value: "[AGENTS.md, CLAUDE.md]"},
+	}}
+	m := externalEditModel(t, rows, log, edit)
+
+	m = step(t, m, settingsEditedMsg{path: "servers"})
+
+	if edit.reloads != 1 {
+		t.Fatalf("reloads = %d, want exactly one re-read per round trip", edit.reloads)
+	}
+	if want := []settingEdit{
+		{path: "servers", value: "4 servers"},
+		{path: "context-files.names", value: "[AGENTS.md, CLAUDE.md]"},
+	}; !reflect.DeepEqual(log.applies, want) {
+		t.Fatalf("applies = %+v, want %+v", log.applies, want)
+	}
+	if len(log.writes) != 0 {
+		t.Errorf("the round trip wrote %+v; the human's own editor already changed the file", log.writes)
+	}
+	if got, want := m.settingsValueCell(rows[0]), "4 servers"+settingsEditMarker; got != want {
+		t.Errorf("servers cell = %q, want %q", got, want)
+	}
+	if got := m.settingsNote(rows[1]); got != "· applies at next clear" {
+		t.Errorf("note = %q, want the boundary note the apply handed back", got)
+	}
+}
+
+// A renderer-owned key changed in the file reaches its live home too: those keys ARE this Model's
+// own fields, so nothing behind the dispatcher would have anything to do with them.
+func TestSettingsPaneAppliesItsOwnKeysFromTheEditor(t *testing.T) {
+	rows := []SettingRow{settingsStructuredRow(), settingsBoolRow()}
+	log := &settingsWriteLog{}
+	edit := &externalEditLog{applied: []AppliedSetting{{Path: "auto-title", Value: "false"}}}
+	m := externalEditModel(t, rows, log, edit)
+
+	m = step(t, m, settingsEditedMsg{path: "servers"})
+
+	if m.opts.AutoTitle {
+		t.Error("auto-title stayed on; a renderer-owned key must apply on the return trip")
+	}
+	if len(log.applies) != 0 {
+		t.Errorf("a renderer-owned key was routed out to the dispatcher: %+v", log.applies)
+	}
+	if got, want := m.settingsValueCell(rows[1]), "false"+settingsEditMarker; got != want {
+		t.Errorf("auto-title cell = %q, want %q", got, want)
+	}
+}
+
+// A reload that could not parse or validate the file applies nothing and says why, on the row the
+// human launched from — which is where they go back in from.
+func TestSettingsPaneReportsAReloadItCouldNotMake(t *testing.T) {
+	rows := []SettingRow{settingsStructuredRow()}
+	edit := &externalEditLog{reloadErr: errors.New("apogee: parse config: line 4")}
+	m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
+
+	m = step(t, m, settingsEditedMsg{path: "servers"})
+
+	if len(m.settingEdits) != 0 {
+		t.Errorf("a refused reload journaled %+v; nothing landed", m.settingEdits)
+	}
+	if got := m.settingsNote(rows[0]); !strings.Contains(got, "parse config: line 4") {
+		t.Errorf("note = %q, want the reload's own reason", got)
+	}
+}
+
+// An editor that could not run — or that exited non-zero, which is how an editor SAYS to discard
+// (`:cq`) — ends the round trip without a re-read.
+func TestSettingsPaneDoesNotReReadAfterAFailedEditor(t *testing.T) {
+	rows := []SettingRow{settingsStructuredRow()}
+	edit := &externalEditLog{applied: []AppliedSetting{{Path: "servers", Value: "9 servers"}}}
+	m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
+
+	m = step(t, m, settingsEditedMsg{path: "servers", err: errors.New("exit status 1")})
+
+	if edit.reloads != 0 {
+		t.Errorf("reloads = %d, want none after an editor that did not finish cleanly", edit.reloads)
+	}
+	if got := m.settingsNote(rows[0]); !strings.Contains(got, "exit status 1") {
+		t.Errorf("note = %q, want the editor's own failure", got)
 	}
 }

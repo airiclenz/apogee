@@ -723,6 +723,12 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// included — lands as a note. Still not a Turn: no event, no gauge, no engine.
 		return m, m.foldManualTitle(msg)
 
+	case settingsEditedMsg:
+		// The external editor the /settings pane suspended into has exited: re-read the config the
+		// human just edited and apply every key that came back different (settings.go). Nothing else
+		// moves — the program was paused, not stopped, and the pane is still the screen.
+		return m.foldSettingsEdit(msg)
+
 	case sessionListMsg:
 		// Sessions.List() returned off the Update loop: open (or refresh) the /sessions browser
 		// over the metas, or note the empty/error case with no overlay (sessions.go).

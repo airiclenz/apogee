@@ -37,14 +37,17 @@ const maskedSettingValue = "••••"
 // row failed to render"; "none" is the answer to the question the row asks.
 const noneSettingValue = "none"
 
-// The two pointers a non-editable row carries — where the key IS edited. confine-to-workspace and
-// unconfined-hosts are the pair that do not go to the file's editor: their acknowledgement
-// interlock (a distinct affirmative act, never a default-yes) stays single-homed in /confine
-// (ADR 0012), so the pane sends the human there rather than growing a second way to loosen a
-// blast radius.
+// The two pointers a non-editable row carries — where the key IS edited. A structured block is
+// edited in the human's own editor, which the row's ⏎ opens for them on that key's line (ADR 0037
+// decision 5): the pane cannot hold a list of servers or a profile block on a row, but it can put
+// the cursor on the line that holds one, which is a good deal more than telling somebody the name of
+// a file. confine-to-workspace and unconfined-hosts are the pair that do NOT go there: their
+// acknowledgement interlock (a distinct affirmative act, never a default-yes) stays single-homed in
+// /confine (ADR 0012), so the pane sends the human there rather than growing a second way to loosen
+// a blast radius.
 const (
-	pointerConfigFile = "edit in config.yaml"
-	pointerConfine    = "use /confine"
+	pointerExternalEdit = "⏎ opens $EDITOR"
+	pointerConfine      = "use /confine"
 )
 
 // settingSection is one header the pane groups rows under: a NAME and the registry path that opens
@@ -173,19 +176,20 @@ func settingsRows(opts options) []tui.SettingRow {
 		}
 		source, sourceName := settingSource(k, opts.overrides)
 		rows = append(rows, tui.SettingRow{
-			Path:        k.Path,
-			Section:     section,
-			Kind:        settingKind(k.Kind),
-			Value:       value,
-			Text:        text,
-			Default:     k.Default,
-			Source:      source,
-			SourceName:  sourceName,
-			EnumValues:  k.EnumValues,
-			Editable:    k.Editable,
-			Masked:      k.Masked,
-			EditPointer: editPointer(k),
-			Desc:        k.Desc,
+			Path:         k.Path,
+			Section:      section,
+			Kind:         settingKind(k.Kind),
+			Value:        value,
+			Text:         text,
+			Default:      k.Default,
+			Source:       source,
+			SourceName:   sourceName,
+			EnumValues:   k.EnumValues,
+			Editable:     k.Editable,
+			Masked:       k.Masked,
+			EditPointer:  editPointer(k),
+			ExternalEdit: externallyEdited(k),
+			Desc:         k.Desc,
 		})
 	}
 	return rows
@@ -236,19 +240,28 @@ func settingSource(k configKey, overrides map[string]configSource) (tui.SettingS
 }
 
 // editPointer says where a key this pane will not write is edited instead — empty for an editable
-// key. The confinement pair is the one case that does not point at the file: their acknowledgement
+// key. The confinement pair is the one case that does not open an editor: their acknowledgement
 // interlock stays single-homed in /confine (ADR 0012), and GlobalOnly is exactly the property that
 // marks them, so the pointer follows the registry rather than a second list of paths.
 func editPointer(k configKey) string {
 	switch {
 	case k.Editable:
 		return ""
-	case k.GlobalOnly:
-		return pointerConfine
+	case externallyEdited(k):
+		return pointerExternalEdit
 	default:
-		return pointerConfigFile
+		return pointerConfine
 	}
 }
+
+// externallyEdited reports whether ⏎ on this key's row suspends into the human's own editor — the
+// affordance the pointer above advertises, stated as a predicate so the row's flag and its wording
+// cannot come to describe different sets of keys.
+//
+// It is every key the pane will not write except the confinement pair, rather than "every structured
+// key": what makes a key unopenable is its interlock (ADR 0012), not its shape, and a key that
+// became read-only for some other reason tomorrow should reach the editor like the rest.
+func externallyEdited(k configKey) bool { return !k.Editable && !k.GlobalOnly }
 
 // boolValue spells a bool the way the config file spells it.
 func boolValue(v bool) string { return strconv.FormatBool(v) }

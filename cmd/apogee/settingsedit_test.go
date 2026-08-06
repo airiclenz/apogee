@@ -1,0 +1,383 @@
+package main
+
+// The `$EDITOR` round trip's root half (ADR 0037 decision 5): which command line the pane is handed
+// on the way out, and which keys it is told changed on the way back.
+
+import (
+	"context"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/airiclenz/apogee/internal/tui"
+)
+
+// The editor ladder is $VISUAL, then $EDITOR, then the platform's own fallback (ADR 0037 binding B).
+// A variable carrying flags is honoured as the command line it is rather than looked up as a program
+// with a space in its name, and a blank or whitespace-only variable is no answer at all.
+func TestEditorArgvFollowsTheLadder(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		env  map[string]string
+		goos string
+		want []string
+	}{
+		{name: "VISUAL outranks EDITOR", env: map[string]string{"VISUAL": "hx", "EDITOR": "vi"}, goos: "linux", want: []string{"hx"}},
+		{name: "EDITOR when VISUAL is unset", env: map[string]string{"EDITOR": "nvim"}, goos: "darwin", want: []string{"nvim"}},
+		{name: "a command with flags", env: map[string]string{"EDITOR": "code -w"}, goos: "linux", want: []string{"code", "-w"}},
+		{name: "an empty variable is no answer", env: map[string]string{"VISUAL": "   ", "EDITOR": "nano"}, goos: "linux", want: []string{"nano"}},
+		{name: "the posix fallback", goos: "linux", want: []string{"vi"}},
+		{name: "the windows fallback", goos: "windows", want: []string{"notepad"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := editorArgv(func(k string) string { return tt.env[k] }, tt.goos)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("editorArgv = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// `+<line>` goes to the editors known to take it and to nothing else: an editor that does not know
+// the argument takes it as a FILENAME and opens an empty buffer called "+37", which is worse than
+// landing at the top of the file.
+func TestExternalEditPassesTheLineJumpOnlyToEditorsThatTakeOne(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, "mode: auto\nservers:\n  - name: local\n    endpoint: http://127.0.0.1:1111\n")
+
+	// `servers:` is on the second line of that fixture, and it is the line the jump names.
+	withVim := specFor(t, home, map[string]string{"EDITOR": "vim"}, "servers")
+	if want := []string{"vim", "+2", path}; !slices.Equal(withVim, want) {
+		t.Errorf("argv = %v, want %v", withVim, want)
+	}
+	withCode := specFor(t, home, map[string]string{"EDITOR": "code -w"}, "servers")
+	if want := []string{"code", "-w", path}; !slices.Equal(withCode, want) {
+		t.Errorf("argv = %v, want %v — an editor outside the allowlist is handed the file alone", withCode, want)
+	}
+	// A path-spelled editor is still recognised by its NAME, and a key the file does not set has no
+	// active line to jump to (this fixture documents no commented example either).
+	byPath := specFor(t, home, map[string]string{"EDITOR": filepath.Join("/usr", "bin", "nvim")}, "mcp-servers")
+	if want := []string{filepath.Join("/usr", "bin", "nvim"), path}; !slices.Equal(byPath, want) {
+		t.Errorf("argv = %v, want %v — no line to point at, so no jump", byPath, want)
+	}
+}
+
+// specFor builds the seam over a temp home and asks it for one key's command line.
+func specFor(t *testing.T, home string, env map[string]string, key string) []string {
+	t.Helper()
+	e := newExternalEdit(options{configDir: home}, func(k string) string { return env[k] })
+	argv, err := e.spec(key)
+	if err != nil {
+		t.Fatalf("spec(%s): %v", key, err)
+	}
+	return argv
+}
+
+// The return trip reports what the human CHANGED and nothing else: the baseline is taken when the
+// editor is launched, so a key they left alone is silent however this session resolved it. Two kinds
+// of key are never reported — the confinement pair, whose interlock stays single-homed in /confine
+// (ADR 0012), and `server:`, whose live move is a deliberate act at the picker (ADR 0037 decision 4).
+func TestExternalEditReloadReportsTheKeysTheFileChanged(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, "server: local\nmode: ask-before\nservers:\n"+
+		"  - name: local\n    endpoint: http://127.0.0.1:1111\n")
+
+	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+	if _, err := e.spec("servers"); err != nil { // the baseline the return trip diffs against
+		t.Fatalf("spec: %v", err)
+	}
+
+	writeSettingsFixture(t, path, "server: other\nmode: auto\nconfine-to-workspace: false\nservers:\n"+
+		"  - name: local\n    endpoint: http://127.0.0.1:1111\n"+
+		"  - name: other\n    endpoint: http://127.0.0.1:2222\n"+
+		"system-prompt-text: |\n  hand written\n")
+
+	applied, err := e.changed()
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	got := map[string]string{}
+	for _, a := range applied {
+		got[a.Path] = a.Value
+	}
+	want := map[string]string{"mode": "auto", "servers": "2 servers", "system-prompt-text": "hand written\n"}
+	for path, value := range want {
+		if got[path] != value {
+			t.Errorf("reload reported %s = %q, want %q", path, got[path], value)
+		}
+	}
+	for _, skipped := range []string{"server", "confine-to-workspace", "unconfined-hosts"} {
+		if v, ok := got[skipped]; ok {
+			t.Errorf("reload reported %s = %q; that key is never applied from a re-read", skipped, v)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("reload reported %v, want exactly %v", got, want)
+	}
+
+	// A second reload over an unchanged file reports nothing: the baseline moved with the first one.
+	if again, err := e.changed(); err != nil || len(again) != 0 {
+		t.Errorf("second reload = (%v, %v), want nothing changed", again, err)
+	}
+}
+
+// A text key is reported as the PROSE itself, not as the summary its row shows — the value an
+// in-pane commit of the same key would have carried, so the pane journals and applies one spelling.
+func TestExternalEditReloadCarriesProseForATextKey(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, "system-prompt-text: one\n")
+	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+	writeSettingsFixture(t, path, "system-prompt-text: |\n  first line\n  second line\n")
+
+	applied, err := e.changed()
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	if len(applied) != 1 || applied[0].Path != "system-prompt-text" {
+		t.Fatalf("reload = %+v, want the one prompt key", applied)
+	}
+	if want := "first line\nsecond line\n"; applied[0].Value != want {
+		t.Errorf("value = %q, want the prose %q", applied[0].Value, want)
+	}
+}
+
+// A file the startup resolution refuses is refused HERE, with nothing reported: the human's own text
+// is left exactly as they wrote it and the pane puts the reason on the row they launched from. The
+// baseline stands, so fixing the file and coming back reports the fix against what was there before.
+func TestExternalEditReloadRefusesAConfigItCannotResolve(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, "mode: ask-before\n")
+	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+
+	writeSettingsFixture(t, path, "mode: [this is not a mode]\n")
+	applied, err := e.changed()
+	if err == nil {
+		t.Fatalf("changed over a malformed config = %+v, want the refusal", applied)
+	}
+	if len(applied) != 0 {
+		t.Errorf("a refused reload reported %+v; nothing may be applied from a file that did not resolve", applied)
+	}
+
+	writeSettingsFixture(t, path, "mode: auto\n")
+	fixed, err := e.changed()
+	if err != nil {
+		t.Fatalf("changed after the fix: %v", err)
+	}
+	if len(fixed) != 1 || fixed[0].Path != "mode" || fixed[0].Value != "auto" {
+		t.Errorf("reload after the fix = %+v, want the mode change against the surviving baseline", fixed)
+	}
+}
+
+// A config that resolves but names no startup server is NOT a failure: it is the pre-bound start
+// ADR 0036 answers with a picker, and it is exactly the state a config is in halfway through having
+// its first `servers:` entry added by hand.
+func TestExternalEditReloadAcceptsAConfigWithNoStartupServer(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, "mode: ask-before\n")
+	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+
+	writeSettingsFixture(t, path, "mode: ask-before\nauto-compact: false\n")
+	applied, err := e.changed()
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	if len(applied) != 1 || applied[0].Path != "auto-compact" || applied[0].Value != "false" {
+		t.Errorf("reload = %+v, want the one changed key", applied)
+	}
+}
+
+// The `servers:` list reaches no engine seam: the picker, the switch and the choice recording all
+// resolve names against the holder, so installing the re-read list IS the apply — and the popup
+// provider, which projects that same list, offers the new entry the moment it lands.
+func TestApplySettingServersInstallsTheReReadList(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	launchOpts := options{servers: []serverEntry{{Name: "local", Endpoint: "http://127.0.0.1:1111"}}}
+	live := newLiveSettings(launchOpts, nil)
+	apply := applySettingFor(settingsApplier{engine: &applySettingSpy{}, live: live, configPath: path})
+
+	writeSettingsFixture(t, path, "servers:\n"+
+		"  - name: local\n    endpoint: http://127.0.0.1:1111\n"+
+		"  - name: box\n    endpoint: http://192.0.2.1:1111\n")
+	if _, err := apply("servers", "2 servers"); err != nil {
+		t.Fatalf("apply servers: %v", err)
+	}
+	names := []string{}
+	for _, c := range live.choices(launchOpts) {
+		names = append(names, c.Name)
+	}
+	if want := []string{"local", "box"}; !slices.Equal(names, want) {
+		t.Errorf("switchable servers = %v, want %v", names, want)
+	}
+
+	// Validate-then-commit: a list startup would refuse never displaces one that works.
+	writeSettingsFixture(t, path, "servers:\n  - endpoint: http://127.0.0.1:1111\n")
+	if _, err := apply("servers", "1 server"); err == nil {
+		t.Fatal("apply of a nameless server entry: want the refusal, got none")
+	}
+	if got := len(live.serverList()); got != 2 {
+		t.Errorf("server list holds %d entries, want the last good 2", got)
+	}
+}
+
+// `mechanisms:` and `validated-sets:` are inputs to the per-model resolution rather than values the
+// engine holds, so both land in the holder and are committed by the rebind — the one door a model
+// change and a config change share.
+func TestApplySettingMechanismBlocksRideTheRebind(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	live := newLiveSettings(options{validatedSetsEnable: true}, nil)
+	probe := &rebindProbe{}
+	apply := applySettingFor(settingsApplier{
+		engine:     &applySettingSpy{},
+		live:       live,
+		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
+		rebind:     probe.rebind,
+		configPath: path,
+	})
+
+	writeSettingsFixture(t, path, "validated-sets:\n  enable: false\n")
+	if _, err := apply("validated-sets", "off"); err != nil {
+		t.Fatalf("apply validated-sets: %v", err)
+	}
+	base, _, _ := live.rebindInputs(options{})
+	if base.validatedSetsEnable {
+		t.Error("validated-sets stayed on; the re-read block must reach the resolution inputs")
+	}
+	if len(probe.calls) != 1 {
+		t.Errorf("rebind drives = %+v, want the one re-drive that commits the block", probe.calls)
+	}
+
+	// A `mechanisms:` block naming an id this build does not have is refused by the startup producer,
+	// before it can replace a list that arms something.
+	writeSettingsFixture(t, path, "mechanisms:\n  no-such-mechanism: true\n")
+	if _, err := apply("mechanisms", "1 mechanism"); err == nil {
+		t.Fatal("apply of an unknown mechanism id: want the refusal, got none")
+	}
+	if len(probe.calls) != 1 {
+		t.Errorf("rebind drives = %+v, want no drive for a block that never installed", probe.calls)
+	}
+}
+
+// The composition root wires both halves of the round trip, and the spec it hands back names the
+// config file this session resolved.
+func TestRunRootWiresTheExternalEditSeams(t *testing.T) {
+	t.Parallel()
+	rec := &recordingLauncher{}
+	home := t.TempDir()
+	opts := options{
+		endpoint:  "http://127.0.0.1:1111",
+		model:     "fake",
+		mode:      "ask-before",
+		workspace: t.TempDir(),
+		configDir: home,
+	}
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+	if rec.opts.ExternalEditSpec == nil || rec.opts.ReloadConfig == nil {
+		t.Fatal("the composition root left an external-edit seam unwired")
+	}
+	argv, err := rec.opts.ExternalEditSpec("servers")
+	if err != nil {
+		t.Fatalf("ExternalEditSpec: %v", err)
+	}
+	if want := filepath.Join(home, "config.yaml"); argv[len(argv)-1] != want {
+		t.Errorf("argv ends with %q, want the session's config %q", argv[len(argv)-1], want)
+	}
+	// The seeded template is what the spec just created, and it changed nothing, so the return trip
+	// over it reports nothing.
+	applied, err := rec.opts.ReloadConfig()
+	if err != nil {
+		t.Fatalf("ReloadConfig: %v", err)
+	}
+	if len(applied) != 0 {
+		t.Errorf("ReloadConfig over an untouched config reported %+v, want nothing", applied)
+	}
+}
+
+// The value a reload carries for a plain row is the row's own displayed value, so what the pane
+// journals reads exactly as the row would have read had the run started with it.
+func TestAppliedValuePrefersProseOverASummary(t *testing.T) {
+	t.Parallel()
+	if got := appliedValue(tui.SettingRow{Value: "8 lines", Text: "the prose"}); got != "the prose" {
+		t.Errorf("appliedValue = %q, want the prose a text row carries beside its summary", got)
+	}
+	if got := appliedValue(tui.SettingRow{Value: "3 servers"}); got != "3 servers" {
+		t.Errorf("appliedValue = %q, want the row's own value", got)
+	}
+}
+
+// settingKeyLine points at the ACTIVE line a key is set on, else the commented example the seeded
+// template documents it with — which is where a human goes to set a key their file does not carry.
+func TestSettingKeyLineFallsBackToTheCommentedExample(t *testing.T) {
+	t.Parallel()
+	data := []byte(strings.Join([]string{
+		"# mcp-servers:",
+		"#   - name: files",
+		"mode: auto",
+		"",
+	}, "\n"))
+	if got := settingKeyLine(data, "mode"); got != 3 {
+		t.Errorf("active key line = %d, want 3", got)
+	}
+	if got := settingKeyLine(data, "mcp-servers"); got != 1 {
+		t.Errorf("commented example line = %d, want 1", got)
+	}
+	if got := settingKeyLine(data, "not-a-key"); got != 0 {
+		t.Errorf("unknown key line = %d, want 0", got)
+	}
+}
+
+// A malformed document still opens — at the top, with no jump. "Your config is malformed" is a
+// reason to hand somebody the file, not to keep it from them.
+func TestSettingKeyLineIsSilentAboutADocumentItCannotParse(t *testing.T) {
+	t.Parallel()
+	if got := settingKeyLine([]byte("mode: [unterminated\n"), "mode"); got != 0 {
+		t.Errorf("line = %d, want 0 for a document the parse refuses", got)
+	}
+}
+
+// The baseline seeded at construction is the FILE's own view, so a key an environment variable
+// outranks this run is not reported as changed the first time the pane opens an editor.
+func TestExternalEditBaselineIsTheFileNotTheResolution(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "mode: plan\n")
+	// The session resolved `auto` (an APOGEE_MODE override would do this); the file still says plan.
+	e := newExternalEdit(options{configDir: home, mode: "auto"}, func(string) string { return "" })
+
+	applied, err := e.changed()
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	if len(applied) != 0 {
+		t.Errorf("reload reported %+v over an unedited file; the baseline must be the file's own view", applied)
+	}
+}
+
+// A build with no config path to open refuses rather than launching an editor on a promise it
+// cannot keep — the same refusal every write in this package makes for the same reason.
+func TestExternalEditSpecRefusesWhenThereIsNoConfigPath(t *testing.T) {
+	t.Parallel()
+	e := &externalEdit{getenv: func(string) string { return "" }, goos: "linux"}
+	if argv, err := e.spec("servers"); err == nil {
+		t.Errorf("spec with no config path = %v, want the refusal", argv)
+	}
+}

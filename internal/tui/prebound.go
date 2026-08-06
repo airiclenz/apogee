@@ -107,7 +107,7 @@ func (m Model) preboundPhrase() string {
 //
 // Which pane comes up is the reason's own answer. The two reasons with something to pick open the
 // `/server` picker under a notice saying why it came up unasked. Nothing configured opens `/settings`
-// instead, where the read-only `servers` row's "edit in config.yaml" pointer is the guidance — and
+// instead, where the read-only `servers` row's ⏎-opens-an-editor pointer is the guidance — and
 // where that pane cannot open (no rows provider, the same degrade /settings itself takes) the notice
 // stands in for it, because a start-up that said nothing at all would read as a broken build.
 func (m *Model) openPrebound() {

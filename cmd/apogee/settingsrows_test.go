@@ -304,10 +304,12 @@ func TestSettingsRowsMarkOverriddenKeys(t *testing.T) {
 	}
 }
 
-// A row this pane will not write says where the key IS edited: the file for a structured block, and
-// /confine for the two confinement keys, whose acknowledgement interlock stays single-homed there
-// (ADR 0012). An editable row carries no pointer — the two fields are exact opposites, which is
-// what lets the pane branch on either one.
+// A row this pane will not write says where the key IS edited: the human's own editor for a
+// structured block, opened on that key's line (ADR 0037 decision 5), and /confine for the two
+// confinement keys, whose acknowledgement interlock stays single-homed there (ADR 0012). An editable
+// row carries no pointer — the two fields are exact opposites, which is what lets the pane branch on
+// either one — and the ExternalEdit flag names the same set the $EDITOR pointer does, since the
+// affordance and its wording are one predicate (externallyEdited).
 func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 	t.Parallel()
 
@@ -320,22 +322,35 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 		if r.Editable && r.Kind == tui.SettingStructured {
 			t.Errorf("row %q is editable but structured — nothing in the pane can edit a block", r.Path)
 		}
+		if r.ExternalEdit != (r.EditPointer == pointerExternalEdit) {
+			t.Errorf("row %q: externalEdit=%v with pointer %q — the flag and the wording name one set",
+				r.Path, r.ExternalEdit, r.EditPointer)
+		}
 	}
 	byPath := rowsByPath(t, rows)
 	for _, path := range []string{"confine-to-workspace", "unconfined-hosts"} {
 		if got := byPath[path].EditPointer; got != pointerConfine {
 			t.Errorf("row %q pointer = %q; want %q — the interlock stays in /confine", path, got, pointerConfine)
 		}
+		if byPath[path].ExternalEdit {
+			t.Errorf("row %q opens $EDITOR; the confinement interlock is single-homed in /confine", path)
+		}
 	}
 	// system-prompt-text is NOT among them since it became editable in its own multi-line field: the
 	// prose the file carries as a block is written in the pane now (tui.SettingText).
 	for _, path := range []string{"servers", "mcp-servers", "mechanisms", "system-prompt-models", "model-profile"} {
-		if got := byPath[path].EditPointer; got != pointerConfigFile {
-			t.Errorf("row %q pointer = %q; want %q", path, got, pointerConfigFile)
+		if got := byPath[path].EditPointer; got != pointerExternalEdit {
+			t.Errorf("row %q pointer = %q; want %q", path, got, pointerExternalEdit)
+		}
+		if !byPath[path].ExternalEdit {
+			t.Errorf("row %q carries the $EDITOR pointer but not the affordance", path)
 		}
 	}
 	if got := byPath["mode"].EditPointer; got != "" {
 		t.Errorf("editable row %q carries pointer %q; want none", "mode", got)
+	}
+	if byPath["mode"].ExternalEdit {
+		t.Errorf("editable row %q opens $EDITOR; it is written on the row", "mode")
 	}
 }
 
