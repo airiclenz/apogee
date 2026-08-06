@@ -6,10 +6,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/tui"
 	llamalauncher "github.com/airiclenz/llama-launcher/launcher"
 )
 
@@ -372,21 +374,21 @@ func TestLauncherConfigPathLadder(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 
-	if path, enabled := launcherConfigPath(options{llamaLauncher: "  OFF "}); enabled || path != "" {
+	if path, enabled := launcherConfigPath("  OFF "); enabled || path != "" {
 		t.Errorf("off ⇒ (%q, %v); want ('', false) — case and spacing are not a way back on", path, enabled)
 	}
 
 	explicit := filepath.Join(home, "elsewhere", "launcher.yaml")
-	if path, enabled := launcherConfigPath(options{llamaLauncher: explicit}); !enabled || path != explicit {
+	if path, enabled := launcherConfigPath(explicit); !enabled || path != explicit {
 		t.Errorf("explicit path ⇒ (%q, %v); want (%q, true) — a NAMED config stays on so the first "+
 			"verb can say it is missing", path, enabled, explicit)
 	}
-	if path, enabled := launcherConfigPath(options{llamaLauncher: "~/launcher.yaml"}); !enabled ||
+	if path, enabled := launcherConfigPath("~/launcher.yaml"); !enabled ||
 		path != filepath.Join(home, "launcher.yaml") {
 		t.Errorf("~ path ⇒ (%q, %v); want the expanded path under %q", path, enabled, home)
 	}
 
-	if path, enabled := launcherConfigPath(options{}); enabled || path != "" {
+	if path, enabled := launcherConfigPath(""); enabled || path != "" {
 		t.Errorf("auto-detect with no launcher config ⇒ (%q, %v); want ('', false) — a machine "+
 			"without the launcher simply has no local-server verbs", path, enabled)
 	}
@@ -398,8 +400,60 @@ func TestLauncherConfigPathLadder(t *testing.T) {
 	if err := os.WriteFile(auto, []byte("servers:\n  llamacpp: true\n"), 0o600); err != nil {
 		t.Fatalf("write launcher config: %v", err)
 	}
-	if path, enabled := launcherConfigPath(options{}); !enabled || path != auto {
+	if path, enabled := launcherConfigPath(""); !enabled || path != auto {
 		t.Errorf("auto-detect with a launcher config present ⇒ (%q, %v); want (%q, true)", path, enabled, auto)
+	}
+}
+
+// The path the verbs read MOVES with the key (ADR 0037): a config named in the `/settings` pane is
+// what the next verb reads, and clearing the key switches the integration off from the next verb —
+// both without a relaunch, because nothing about this bridge is connected to anything.
+func TestLauncherVerbsFollowThePathSwap(t *testing.T) {
+	t.Parallel()
+
+	cfg := launcherFixture(t, []string{"alpha.gguf"}, `
+servers:
+  llamacpp: true
+defaults:
+  server: llamacpp
+  host: 127.0.0.1
+profiles:
+  alpha:
+    model: alpha.gguf
+    port: 8080
+`)
+	ops := &fakeLauncher{cfg: cfg}
+	path := newLauncherPath("/etc/llama-launcher/first.yaml")
+	wiring := launcherWiring{ops: ops, path: path}
+
+	if _, err := wiring.profiles(); err != nil {
+		t.Fatalf("profiles on the startup path: %v", err)
+	}
+	path.set("/etc/llama-launcher/second.yaml")
+	if _, err := wiring.profiles(); err != nil {
+		t.Fatalf("profiles after the swap: %v", err)
+	}
+	want := []string{"/etc/llama-launcher/first.yaml", "/etc/llama-launcher/second.yaml"}
+	if !slices.Equal(ops.configPaths, want) {
+		t.Errorf("config reads = %v; want %v — the verb reads the file the key names NOW", ops.configPaths, want)
+	}
+
+	// Cleared: every verb reports the integration off, in the renderer's own sentence, and none of
+	// them touches the launcher at all.
+	path.set("")
+	reads := len(ops.configPaths)
+	verbs := map[string]error{}
+	_, verbs["profiles"] = wiring.profiles()
+	_, verbs["load"] = wiring.load("alpha", nil)
+	_, verbs["unload"] = wiring.unload("http://127.0.0.1:8080")
+	_, verbs["stop"] = wiring.stop("http://127.0.0.1:8080")
+	for verb, err := range verbs {
+		if !errors.Is(err, tui.ErrNoLauncher) {
+			t.Errorf("%s with the key cleared = %v; want tui.ErrNoLauncher", verb, err)
+		}
+	}
+	if len(ops.configPaths) != reads {
+		t.Errorf("a disabled verb still read a config: %v", ops.configPaths[reads:])
 	}
 }
 

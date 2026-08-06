@@ -115,13 +115,16 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// what makes bridge.Presenter() non-nil, and with it registers present_document — so the tool
 	// exists exactly where a presentation can be carried out, which in the TUI is always (rung 0,
 	// the transcript line, needs no mechanism at all).
-	rungs := presentationRungs(opts.present, roots.workspace, runtime.GOOS, os.Getenv)
-	bridge.SetPresentation(rungs)
-	if rungs.Docs != nil {
-		// The doc server's listener is owned by the app: it binds lazily on the first served
-		// presentation and closes with the session, like the MCP connections and the Agent below.
-		defer rungs.Docs.Close()
-	}
+	// It is a HOLDER rather than a value because the four `present.` keys are editable in the
+	// `/settings` pane and apply to the running session (ADR 0037): the holder rebuilds the ladder
+	// from the new block and re-installs it on the presenter the engine already captured.
+	presentation := newLivePresentation(
+		opts.present, roots.workspace, runtime.GOOS, os.Getenv, bridge.SetPresentation)
+	// The doc server's listener is owned by the app: it binds lazily on the first served
+	// presentation and closes with the session, like the MCP connections and the Agent below.
+	// Closing through the holder closes whichever server is current, which after a `present.port`
+	// edit is not the one this session started with.
+	defer presentation.close()
 
 	// The host's real Confiner backend, hoisted into a local so its Capabilities() can be read
 	// here for the degradation notice below — the backend probes once at construction, so this
@@ -475,19 +478,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 
 	// The llama-launcher seams (ADR 0029 D1): four closures over the bridge in launcher.go, which is
 	// the only file that names the library. The `llama-launcher:` key's three values resolve HERE,
-	// at the layer that knows the launcher — and when they resolve to "not enabled" all four members
-	// stay nil, which is the renderer's one-line degrade rather than a second configuration path.
-	// They are wired together or not at all, so the TUI's nil check on one speaks for all of them.
-	var launchProfilesSeam func() ([]tui.LaunchProfileChoice, error)
-	var loadProfileSeam func(name string, progress func(step string)) (tui.ProfileLoadResult, error)
-	var unloadServerSeam, stopServerSeam func(endpoint string) (tui.ActuationResult, error)
-	if launcherPath, launcherEnabled := launcherConfigPath(opts); launcherEnabled {
-		wiring := launcherWiring{sessionMover: mover, ops: realLauncher{}, path: launcherPath}
-		launchProfilesSeam = wiring.profiles
-		loadProfileSeam = wiring.load
-		unloadServerSeam = wiring.unload
-		stopServerSeam = wiring.stop
-	}
+	// at the layer that knows the launcher — into the live path holder, which is where "is the
+	// integration on" now lives (ADR 0037: the key is editable, so an off session can be switched on
+	// without a relaunch). The four members are wired UNCONDITIONALLY for that reason and answer
+	// tui.ErrNoLauncher while the holder is empty, which the renderer reads as the host having no
+	// launcher — the same degrade the nil seams used to express, now able to change its mind.
+	startPath, _ := launcherConfigPath(opts.llamaLauncher)
+	launcher := newLauncherPath(startPath)
+	launcherSeams := launcherWiring{sessionMover: mover, ops: realLauncher{}, path: launcher}
 
 	// The session-naming seam (ADR 0022 addendum): one out-of-band completion, built per call from
 	// whatever server and model the session is bound to at that moment — so a `/server` switch or a
@@ -580,12 +578,13 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		RecordServerChoice: recordServerChoice,
 		// The `/model`-over-profiles, `/unload-model`, `/stop-server` half (ADR 0029): browse the
 		// launcher's profiles, activate one — following it onto another server when it lives
-		// there — and free or stop the server this session is on. All four are nil when the
-		// integration is not configured, which is the whole of the degrade.
-		LaunchProfiles: launchProfilesSeam,
-		LoadProfile:    loadProfileSeam,
-		UnloadServer:   unloadServerSeam,
-		StopServer:     stopServerSeam,
+		// there — and free or stop the server this session is on. All four are wired for the life of
+		// the session and report tui.ErrNoLauncher while the integration is off, because `off` is now
+		// a value the human can change from inside the program (ADR 0037).
+		LaunchProfiles: launcherSeams.profiles,
+		LoadProfile:    launcherSeams.load,
+		UnloadServer:   launcherSeams.unload,
+		StopServer:     launcherSeams.stop,
 		// The resolved `ui:` block: which animation paints the status-line spinner, whether its
 		// colour loop runs, and whether the transcript's scroll bar is painted at all. Independent
 		// values, resolved and validated by applyConfig, so the renderer selects rather than parses.
@@ -649,6 +648,8 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 			skills:       skillProvider,
 			tools:        toolSet,
 			roots:        roots,
+			launcher:     launcher,
+			present:      presentation,
 		}),
 		Skills: skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
@@ -973,6 +974,11 @@ type settingsApplier struct {
 	// tools is the session's live tool set — where a tool is re-pointed in place, and the door a
 	// set-level change goes through.
 	tools *liveTools
+	// launcher is the config path the local-server verbs read, and with it whether they work at all.
+	launcher *launcherPath
+	// present is the presentation ladder, which rebuilds from a changed `present:` block and
+	// re-installs itself on the presenter the engine holds.
+	present *livePresentation
 	// roots are this session's resolved state dirs, which is what the skill source layering is spelled
 	// out of (the same three fields runRoot builds the startup Sources from).
 	roots stateRoots
@@ -1045,6 +1051,18 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			_ = a.skills.Reload()
 		case "web-search-endpoint":
 			return "", a.tools.setSearchEndpoint(value, a.engine)
+		case "llama-launcher":
+			// The startup ladder run a second time (ADR 0029 D4's three shapes), so `off` and a
+			// missing auto-detect both resolve to the empty path the verbs report themselves off
+			// from, and a named config is on from the next verb. Nothing is connected to rebuild —
+			// every verb re-reads the file — so the whole apply is this store.
+			if err := validateLlamaLauncher(value); err != nil {
+				return "", err
+			}
+			path, _ := launcherConfigPath(value)
+			a.launcher.set(path)
+		case "present.auto-open", "present.command", "present.port", "present.host":
+			return "", a.present.apply(key, value)
 		case "context-window":
 			tokens, err := settingInt(key, value)
 			if err != nil {
@@ -1237,6 +1255,120 @@ func presentationRungs(p presentSettings, workspace, goos string, env func(strin
 		}
 	}
 	return rungs
+}
+
+// livePresentation owns the `present:` block as it stands right now and the ladder built from it —
+// the presentation half of ADR 0037 decision 1. The four keys are editable in the `/settings` pane,
+// and a committed one lands here: the block is updated, the rungs are rebuilt exactly as startup
+// built them, and they are re-installed on the presenter (tui.Bridge.SetPresentation, which swaps
+// the rungs of the presenter the engine captured rather than making a second one).
+//
+// It also owns the doc server's LIFETIME, because a rebuild is the only thing that can end one
+// mid-session: the app's own teardown closes whatever is current, and an address change closes the
+// server it displaced (ADR 0037 binding D — the URLs a moved listener issued die with it, which is
+// inherent to changing the port).
+//
+// The mutex guards the pair — settings and rungs must never disagree — and the writes come from the
+// Update goroutine while the presenter reads its own copy of the rungs under its own lock.
+type livePresentation struct {
+	mu       sync.Mutex
+	settings presentSettings
+	rungs    tui.Presentation
+
+	// The three inputs presentationRungs takes beside the block, held so a rebuild is the identical
+	// call startup made. env is injected for the same reason it is injected there: so the whole
+	// holder is testable off whatever machine the tests run on.
+	workspace string
+	goos      string
+	env       func(string) string
+	// install hands the rebuilt ladder to the renderer; wired to tui.Bridge.SetPresentation.
+	install func(tui.Presentation)
+}
+
+// newLivePresentation builds this session's ladder and installs it — the call that also makes
+// bridge.Presenter() non-nil, and with it registers present_document.
+func newLivePresentation(p presentSettings, workspace, goos string, env func(string) string,
+	install func(tui.Presentation)) *livePresentation {
+	live := &livePresentation{
+		settings:  p,
+		workspace: workspace,
+		goos:      goos,
+		env:       env,
+		install:   install,
+	}
+	live.rungs = presentationRungs(p, workspace, goos, env)
+	install(live.rungs)
+	return live
+}
+
+// apply moves one `present.` key and re-installs the ladder built from the block it leaves behind.
+// The value is the one the file now spells; it is parsed here rather than trusted, exactly as the
+// other dispatcher entries parse theirs.
+func (l *livePresentation) apply(key, value string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	next := l.settings
+	switch key {
+	case "present.auto-open":
+		on, err := settingBool(key, value)
+		if err != nil {
+			return err
+		}
+		next.autoOpen = on
+	case "present.command":
+		next.command = value
+	case "present.port":
+		port, err := settingInt(key, value)
+		if err != nil {
+			return err
+		}
+		next.port = port
+	case "present.host":
+		next.host = value
+	default:
+		return fmt.Errorf("apogee: %s is not a presentation setting", key)
+	}
+	// The startup check on the whole block, so a value that would fail deep inside the first
+	// presentation is refused here instead — the same validate() the registry's own validator runs.
+	if err := next.validate(); err != nil {
+		return err
+	}
+
+	rungs := presentationRungs(next, l.workspace, l.goos, l.env)
+	// A doc server whose address did not move keeps SERVING: the listener stays bound and the grants
+	// it issued stay valid, because nothing about it changed (an auto-open or command edit on a
+	// remote session rebuilds an identical rung). One whose address did move is displaced, and the
+	// old one is closed below — after the new ladder is installed, so no presentation in between
+	// climbs to a server that is going away.
+	displaced := l.rungs.Docs
+	if displaced != nil && rungs.Docs != nil && sameDocServer(displaced, rungs.Docs) {
+		rungs.Docs, displaced = displaced, nil
+	}
+
+	l.settings, l.rungs = next, rungs
+	l.install(rungs)
+	if displaced != nil {
+		_ = displaced.Close()
+	}
+	return nil
+}
+
+// sameDocServer reports whether two doc servers would bind and advertise the same thing — the whole
+// of what configuration says about one (its three exported fields; everything else is the running
+// state a rebuilt value has none of). Equal means the bound listener may simply be carried over.
+func sameDocServer(a, b *present.DocServer) bool {
+	return a.Host == b.Host && a.Port == b.Port && a.Root == b.Root
+}
+
+// close ends the session's presentation: the current doc server's listener, whichever one that is
+// after any number of `present.port` edits. Idempotent, like DocServer.Close itself.
+func (l *livePresentation) close() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.rungs.Docs != nil {
+		_ = l.rungs.Docs.Close()
+	}
 }
 
 // registryWithMCP builds the Agent's tool registry: the built-in default tools scoped to the

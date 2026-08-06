@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1591,7 +1593,7 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 			live: newLiveSettings(options{contextWindow: 16384}, nil),
 		},
 		ops:  ops,
-		path: "/etc/llama-launcher/config.yaml",
+		path: newLauncherPath("/etc/llama-launcher/config.yaml"),
 	}
 	return wiring, agent, host, holder
 }
@@ -2164,19 +2166,20 @@ func TestActuationResultKeepsTheStepsBesideTheError(t *testing.T) {
 	}
 }
 
-// The `llama-launcher:` key decides whether the four seams exist at all: off wires them nil (the
-// renderer's one-line degrade), a named path wires them together — no half-wired state, so the
-// TUI's nil check on one member speaks for all four.
-func TestRunRootWiresTheLauncherSeamsTogetherOrNotAtAll(t *testing.T) {
+// The four seams exist for the whole session whatever `llama-launcher:` said at startup, because
+// the key is editable and applies live (ADR 0037): whether the integration works is a fact the
+// VERBS answer per call. Off, every one of them reports tui.ErrNoLauncher — the renderer's own
+// no-launcher sentence, which `/model` reads as "offer the models the server advertises".
+func TestRunRootWiresTheLauncherSeamsForTheWholeSession(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		key   string
-		wired bool
+		name    string
+		key     string
+		enabled bool
 	}{
-		{name: "off ⇒ no local-server verbs", key: "off"},
-		{name: "a named config ⇒ all four", key: filepath.Join(t.TempDir(), "launcher.yaml"), wired: true},
+		{name: "off ⇒ the verbs report the integration off", key: "off"},
+		{name: "a named config ⇒ the verbs act on it", key: filepath.Join(t.TempDir(), "launcher.yaml"), enabled: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2196,16 +2199,26 @@ func TestRunRootWiresTheLauncherSeamsTogetherOrNotAtAll(t *testing.T) {
 				t.Fatalf("runRoot: %v", err)
 			}
 
-			wired := map[string]bool{
+			for member, wired := range map[string]bool{
 				"LaunchProfiles": rec.opts.LaunchProfiles != nil,
 				"LoadProfile":    rec.opts.LoadProfile != nil,
 				"UnloadServer":   rec.opts.UnloadServer != nil,
 				"StopServer":     rec.opts.StopServer != nil,
-			}
-			for member, got := range wired {
-				if got != tt.wired {
-					t.Errorf("tui.Options.%s wired = %v; want %v", member, got, tt.wired)
+			} {
+				if !wired {
+					t.Errorf("tui.Options.%s is nil; want every launcher seam wired for the session", member)
 				}
+			}
+
+			// What the seams SAY is where off and on differ now. A named config that is not there
+			// fails as the launcher's own missing-file error, which is emphatically not the
+			// integration being off.
+			_, err := rec.opts.LaunchProfiles()
+			if got := errors.Is(err, tui.ErrNoLauncher); got == tt.enabled {
+				t.Errorf("LaunchProfiles error = %v (ErrNoLauncher = %v); want enabled = %v", err, got, tt.enabled)
+			}
+			if _, err := rec.opts.UnloadServer(upstream.URL); errors.Is(err, tui.ErrNoLauncher) == tt.enabled {
+				t.Errorf("UnloadServer error = %v; want the integration reported %v", err, tt.enabled)
 			}
 		})
 	}
@@ -2674,6 +2687,158 @@ func TestApplySettingUseProjectSkillsRescansTheSources(t *testing.T) {
 	if _, ok := provider.Get("project-only"); !ok {
 		t.Error("the project skill did not come back with the flag on again")
 	}
+}
+
+// The `llama-launcher:` key runs the startup ladder a second time and stores what it resolves —
+// which IS the apply, since every verb re-reads the config file for itself. A value the ladder
+// refuses never displaces the path the session is working from.
+func TestApplySettingLlamaLauncherSwapsThePath(t *testing.T) {
+	t.Parallel()
+	named := filepath.Join(t.TempDir(), "launcher.yaml")
+	path := newLauncherPath("/startup/launcher.yaml")
+	apply := applySettingFor(settingsApplier{launcher: path})
+
+	if note, err := apply("llama-launcher", named); err != nil || note != "" {
+		t.Fatalf("apply llama-launcher=%s: (%q, %v); want no note and no error", named, note, err)
+	}
+	if got := path.get(); got != named {
+		t.Errorf("path = %q; want %q — the next verb reads the config the key now names", got, named)
+	}
+
+	if _, err := apply("llama-launcher", "off"); err != nil {
+		t.Fatalf("apply llama-launcher=off: %v", err)
+	}
+	if got := path.get(); got != "" {
+		t.Errorf("path after off = %q; want empty — the verbs report the integration off from here", got)
+	}
+
+	if _, err := apply("llama-launcher", "http://box:7331"); err == nil {
+		t.Error("a URL was accepted; want the startup validator's refusal — this key takes a local path")
+	}
+	if got := path.get(); got != "" {
+		t.Errorf("a refused value moved the path to %q; want the last good value kept", got)
+	}
+}
+
+// A committed `present.` key rebuilds the ladder exactly as startup built it and re-installs it, so
+// the presenter the engine captured walks the new rungs from the next presentation (ADR 0037). A
+// value the block refuses changes nothing.
+func TestApplySettingPresentRebuildsTheLadder(t *testing.T) {
+	t.Parallel()
+	var installed []tui.Presentation
+	live := newLivePresentation(
+		presentSettings{autoOpen: true}, t.TempDir(), "darwin",
+		func(string) string { return "" }, // no SSH: a local session, so rungs 1/3
+		func(p tui.Presentation) { installed = append(installed, p) })
+	apply := applySettingFor(settingsApplier{present: live})
+
+	if len(installed) != 1 || installed[0].Opener == nil {
+		t.Fatalf("startup installed %+v; want one ladder carrying the opener", installed)
+	}
+
+	if _, err := apply("present.command", "zed {path}"); err != nil {
+		t.Fatalf("apply present.command: %v", err)
+	}
+	if len(installed) != 2 || installed[1].Opener == nil || installed[1].Opener.CommandOverride != "zed {path}" {
+		t.Fatalf("after present.command the ladder is %+v; want an opener carrying the override", installed)
+	}
+
+	if _, err := apply("present.auto-open", "false"); err != nil {
+		t.Fatalf("apply present.auto-open: %v", err)
+	}
+	if len(installed) != 3 || installed[2].Opener != nil {
+		t.Fatalf("after auto-open=false the ladder is %+v; want no opener at all", installed)
+	}
+
+	// The block's own validate, run before anything is installed: a port no server could bind is
+	// refused here rather than deep inside the first presentation.
+	for _, value := range []string{"not a number", "70000"} {
+		if _, err := apply("present.port", value); err == nil {
+			t.Errorf("present.port=%q was accepted; want the startup check's refusal", value)
+		}
+	}
+	if len(installed) != 3 {
+		t.Errorf("a refused value installed a ladder: %+v", installed[3:])
+	}
+}
+
+// The doc server's listener follows its ADDRESS and nothing else (ADR 0037 binding D): an edit that
+// leaves the address alone keeps the bound listener and every URL it issued, while a port change
+// closes it — the URLs die with it — and the next presentation binds the new port.
+func TestPresentPortEditRebindsTheDocServer(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	doc := filepath.Join(workspace, "report.html")
+	if err := os.WriteFile(doc, []byte("<h1>report</h1>"), 0o600); err != nil {
+		t.Fatalf("write doc: %v", err)
+	}
+
+	var installed []tui.Presentation
+	live := newLivePresentation(
+		presentSettings{autoOpen: true}, workspace, "linux",
+		// An SSH session: remote, so the ladder wires rung 2 and advertises the server-side address.
+		func(name string) string {
+			if name == "SSH_CONNECTION" {
+				return "10.0.0.1 51000 10.0.0.2 22"
+			}
+			return ""
+		},
+		func(p tui.Presentation) { installed = append(installed, p) })
+	t.Cleanup(live.close)
+
+	first := installed[0].Docs
+	if first == nil {
+		t.Fatal("a remote session wired no doc server; want rung 2")
+	}
+	url, err := first.Serve(doc)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+
+	// An edit that does not touch the address: the same server, still bound, still holding its grant.
+	if err := live.apply("present.command", "zed {path}"); err != nil {
+		t.Fatalf("apply present.command: %v", err)
+	}
+	if installed[1].Docs != first {
+		t.Error("an unrelated edit displaced the doc server; want the bound listener and its URLs kept")
+	}
+	if _, err := first.Serve(doc); err != nil {
+		t.Errorf("serve after an unrelated edit: %v; want the server still running", err)
+	}
+
+	port := freePort(t)
+	if err := live.apply("present.port", strconv.Itoa(port)); err != nil {
+		t.Fatalf("apply present.port: %v", err)
+	}
+	next := installed[2].Docs
+	if next == nil || next == first {
+		t.Fatalf("present.port installed %v; want a doc server on the new address", next)
+	}
+	if _, err := first.Serve(doc); err == nil {
+		t.Errorf("the displaced server still serves %q; want it closed with the port change", url)
+	}
+	moved, err := next.Serve(doc)
+	if err != nil {
+		t.Fatalf("serve on the new port: %v", err)
+	}
+	if want := ":" + strconv.Itoa(port) + "/"; !strings.Contains(moved, want) {
+		t.Errorf("URL = %q; want it served from %q", moved, want)
+	}
+}
+
+// freePort reserves an ephemeral port, releases it, and returns it — a port the doc server can bind
+// on its own without the test having to know one the machine happens to have free.
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve a port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatalf("release the reserved port: %v", err)
+	}
+	return port
 }
 
 // writeSkillFixture writes one SKILL.md into dir, the shape internal/skills discovers.

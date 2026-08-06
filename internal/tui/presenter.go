@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/present"
@@ -59,9 +60,34 @@ type Presentation struct {
 // second HasDesktop test here would contradict that on the one configuration the user was most
 // explicit about. Locality is the ladder's own and is never bypassed: present.command says which
 // application shows a document, not which machine the user is sitting at.
+//
+// The rungs are MUTABLE behind a lock (ADR 0037 decision 1): a `present.*` key committed in the
+// `/settings` pane rebuilds the ladder and installs it here, on the presenter the engine already
+// holds — the engine captured this pointer at construction, so replacing the presenter would be
+// invisible and swapping its rungs is the only way a live edit can reach a presentation. The lock
+// is real: the write comes from the Update goroutine (the pane's keypress) and climb reads from the
+// worker goroutine, inside a Step.
 type uiPresenter struct {
-	prog  *programRef
+	prog *programRef
+
+	mu    sync.RWMutex
 	rungs Presentation
+}
+
+// setRungs installs a rebuilt ladder for every presentation from here on. A presentation already
+// climbing keeps the rungs it read — one Present call sees one ladder — which is what makes a swap
+// safe beside a running Turn.
+func (p *uiPresenter) setRungs(rungs Presentation) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.rungs = rungs
+}
+
+// ladder is the read half: one snapshot per presentation, taken before the first rung is attempted.
+func (p *uiPresenter) ladder() Presentation {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.rungs
 }
 
 // uiPresenter is the engine's Presenter.
@@ -108,11 +134,12 @@ func (p *uiPresenter) Present(ctx context.Context, req domain.PresentRequest) (d
 // (ADR 0019 rung 2 is remote by definition). ctx is re-checked before each mechanism so a user stop
 // lands promptly instead of after a launch grace or a bind.
 func (p *uiPresenter) climb(ctx context.Context, req domain.PresentRequest) (domain.PresentMethod, string, string) {
-	if p.rungs.Local {
-		if p.rungs.Opener == nil || ctx.Err() != nil {
+	rungs := p.ladder()
+	if rungs.Local {
+		if rungs.Opener == nil || ctx.Err() != nil {
 			return domain.PresentShown, "", ""
 		}
-		err := p.rungs.Opener.Open(req.Path)
+		err := rungs.Opener.Open(req.Path)
 		switch {
 		case err == nil:
 			return domain.PresentOpened, "", ""
@@ -125,10 +152,10 @@ func (p *uiPresenter) climb(ctx context.Context, req domain.PresentRequest) (dom
 		}
 	}
 
-	if p.rungs.Docs == nil || !browserRenderable(req.Path) || ctx.Err() != nil {
+	if rungs.Docs == nil || !browserRenderable(req.Path) || ctx.Err() != nil {
 		return domain.PresentShown, "", ""
 	}
-	url, err := p.rungs.Docs.Serve(req.Path)
+	url, err := rungs.Docs.Serve(req.Path)
 	if err != nil {
 		return domain.PresentShown, "", "could not serve: " + clipDetail(firstLine(err.Error()))
 	}

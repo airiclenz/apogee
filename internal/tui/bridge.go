@@ -71,8 +71,18 @@ func (b *Bridge) Asker() domain.Asker { return b.asker }
 // Presenter. The composition root calls it before reading Presenter — the rungs come from config
 // (present.auto-open / command / port / host) and from the environment, neither of which the TUI
 // reads itself. A host that presents nothing simply never calls it.
+//
+// It may be called AGAIN, for the life of the session, to swap the ladder: one of those four keys
+// committed in the `/settings` pane rebuilds the rungs and re-installs them here (ADR 0037 decision
+// 1). The Presenter itself is created once and never replaced, because the engine captured it at
+// construction — a second presenter would be a value nothing dispatches to — so a later call moves
+// the rungs on the presenter that is already running (uiPresenter.setRungs, which locks).
 func (b *Bridge) SetPresentation(p Presentation) {
-	b.presenter = &uiPresenter{prog: b.prog, rungs: p}
+	if b.presenter == nil {
+		b.presenter = &uiPresenter{prog: b.prog, rungs: p}
+		return
+	}
+	b.presenter.setRungs(p)
 }
 
 // Presenter returns the Presenter the composition root installs in Config.Presenter, or nil when

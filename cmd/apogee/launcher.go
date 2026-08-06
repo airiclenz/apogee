@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/airiclenz/apogee/internal/tui"
 	llamalauncher "github.com/airiclenz/llama-launcher/launcher"
@@ -114,8 +115,12 @@ func (realLauncher) unload(backend, addr string) (*llamalauncher.StopResult, err
 //   - anything else ⇒ that path, `~` expanded, and on regardless of whether the file exists. A
 //     user who NAMED a config gets told at the first verb that it is missing (item 4's ladder);
 //     silently disabling the commands they configured would be the unhelpful answer.
-func launcherConfigPath(opts options) (string, bool) {
-	v := strings.TrimSpace(opts.llamaLauncher)
+//
+// It takes the key AS WRITTEN rather than the whole resolved snapshot, because the same ladder now
+// runs twice: once at startup, and again whenever the `/settings` pane commits a new value into the
+// live path below (ADR 0037).
+func launcherConfigPath(value string) (string, bool) {
+	v := strings.TrimSpace(value)
 	if strings.EqualFold(v, "off") {
 		return "", false
 	}
@@ -139,6 +144,44 @@ func launcherConfigPath(opts options) (string, bool) {
 		return "", false
 	}
 	return path, true
+}
+
+// launcherPath is the resolved config path the local-server verbs read, held so it can MOVE: the
+// `llama-launcher:` key is editable in the `/settings` pane and applies to the running session (ADR
+// 0037), which for this integration means nothing more than swapping this string. There is no
+// connection to rebuild — every verb re-reads the config file for itself (ADR 0029 D4) — so the
+// whole live apply is one atomic store, and the next verb reads the new file.
+//
+// Empty is the OFF state, and it is the state the four seams answer [tui.ErrNoLauncher] from. That
+// is why the seams are wired unconditionally now: whether the integration is on is a fact that can
+// change mid-session, so it cannot be expressed by whether a func value is nil.
+//
+// It is atomic rather than mutex-guarded because there is exactly one field and no invariant across
+// two: the store comes from the Update goroutine (the pane's keypress) and the loads come from the
+// TUI's actuation Cmd goroutine, which may be mid-verb when one lands. A verb that read the old path
+// finishes against the old config — the honest outcome for work already in flight.
+type launcherPath struct {
+	v atomic.Pointer[string]
+}
+
+// newLauncherPath holds the path this session starts on ("" when the integration is off).
+func newLauncherPath(path string) *launcherPath {
+	p := &launcherPath{}
+	p.set(path)
+	return p
+}
+
+// get reads the path the next verb will read its config from; empty means the integration is off.
+func (p *launcherPath) get() string {
+	if v := p.v.Load(); v != nil {
+		return *v
+	}
+	return ""
+}
+
+// set points every later verb at path (empty switches the integration off).
+func (p *launcherPath) set(path string) {
+	p.v.Store(&path)
 }
 
 // launchProfile is one row of `/model`'s launcher picker as this bridge assembles it — a Launch
@@ -432,12 +475,28 @@ func dialAddr(addr string) string {
 //
 // The bodies live here rather than in wire.go because they name facade types — RunningInstance,
 // StopResult, ResolvedProfile — and this file is the only place in apogee that may (see the header).
-// What wire.go keeps is the WIRING decision: whether the integration is on at all, and therefore
-// whether the four members are func values or nil.
+//
+// The four members are wired for the life of the session and the WHETHER moved inside them (ADR
+// 0037): `llama-launcher:` is editable in the `/settings` pane, so a session that started with the
+// integration off can turn it on, and one that started with it on can clear it. Each verb therefore
+// opens by asking the path holder, and answers [tui.ErrNoLauncher] while it is empty — the same
+// sentence the renderer's own unwired-seam branch says.
 type launcherWiring struct {
 	sessionMover
 	ops  launcherOps
-	path string
+	path *launcherPath
+}
+
+// enabled is every verb's first question: is the integration on right now, and against which config
+// file? The check lives here, at the bridge, rather than in realLauncher — that adapter is a proven
+// one-line delegation to the library (see its compile-time assertion above), and a disabled branch
+// inside it would be a reinterpretation the in-memory fake the tests wire could not share.
+func (w launcherWiring) enabled() (string, error) {
+	path := w.path.get()
+	if path == "" {
+		return "", tui.ErrNoLauncher
+	}
+	return path, nil
 }
 
 // profiles is [tui.Options.LaunchProfiles]: the row assembly above, projected onto the renderer's
@@ -450,7 +509,11 @@ type launcherWiring struct {
 // transcript through ProfileLoadResult.Notices — on the verb that actually acts on that config,
 // where they are news rather than noise repeated on every browse.
 func (w launcherWiring) profiles() ([]tui.LaunchProfileChoice, error) {
-	rows, _, err := launchProfiles(w.ops, w.path)
+	path, err := w.enabled()
+	if err != nil {
+		return nil, err
+	}
+	rows, _, err := launchProfiles(w.ops, path)
 	if err != nil {
 		return nil, err
 	}
@@ -481,10 +544,15 @@ func (w launcherWiring) profiles() ([]tui.LaunchProfileChoice, error) {
 // own words — and they travel out even beside an error, because a load that failed after warning
 // about the config still warned.
 func (w launcherWiring) load(name string, progress func(string)) (tui.ProfileLoadResult, error) {
+	path, err := w.enabled()
+	if err != nil {
+		return tui.ProfileLoadResult{}, err
+	}
+
 	var notices []string
 	collect := func(notice string) { notices = append(notices, notice) }
 
-	cfg, err := w.ops.loadConfig(w.path, collect)
+	cfg, err := w.ops.loadConfig(path, collect)
 	if err != nil {
 		return tui.ProfileLoadResult{Notices: notices}, err
 	}
@@ -628,11 +696,15 @@ func (w launcherWiring) stop(endpoint string) (tui.ActuationResult, error) {
 // MCP adapter, ADR 0029 D4), and acting on the nearest thing found instead would stop a server nobody
 // asked about.
 func (w launcherWiring) managedInstance(endpoint string) (*llamalauncher.RunningInstance, error) {
+	path, err := w.enabled()
+	if err != nil {
+		return nil, err
+	}
 	addr, err := endpointAddr(endpoint)
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := w.ops.loadConfig(w.path, nil)
+	cfg, err := w.ops.loadConfig(path, nil)
 	if err != nil {
 		return nil, err
 	}

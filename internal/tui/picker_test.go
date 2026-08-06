@@ -1141,6 +1141,22 @@ func TestModelCommandLauncherDegradesWithAnHonestNote(t *testing.T) {
 		assertPickerDegrade(t, m, onlyProfileLoadedNote)
 	})
 
+	t.Run("the integration reported off is not a degrade at all", func(t *testing.T) {
+		// `llama-launcher: off`, or a key cleared mid-session (ADR 0037): the seams stay wired for
+		// the session and say so per call. That is the host having no launcher, which /model answers
+		// with the models the server itself advertises — exactly what an unwired seam does.
+		fake := newLauncher()
+		fake.listErr = ErrNoLauncher
+		m := seededLoad(t, fake)
+
+		m, _ = typeCommand(t, m, "/model")
+
+		if !m.picker.open || m.picker.kind != pickerModel {
+			t.Fatalf("picker = {open:%v kind:%v}, want the advertised-model offering",
+				m.picker.open, m.picker.kind)
+		}
+	})
+
 	t.Run("the argument form takes the same ladder", func(t *testing.T) {
 		// A degrade must answer BOTH forms: an argument reaching the accept path past a config that
 		// cannot be read would actuate nothing and say nothing.

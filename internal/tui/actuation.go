@@ -109,6 +109,17 @@ const startupTimeoutCoda = " — the heartbeat will bind it if it comes up"
 // them and names the key that turns them on.
 const noLauncherNote = "llama-launcher not configured — set llama-launcher: in config.yaml or install the launcher"
 
+// ErrNoLauncher is that same statement as a condition a seam can REPORT, projected like
+// [ErrStartupTimeout] so no launcher vocabulary reaches this package. Since `llama-launcher:` became
+// live-editable (ADR 0037) the seams are wired for the whole session and the integration is off or
+// on inside them, which is a fact only a call can learn: a verb answers with this error while the
+// key is unset, and `/model` reads it as "there is no launcher here" and offers the models the
+// server itself advertises — exactly what an unwired seam used to mean.
+//
+// Its text IS noLauncherNote, so a verb that reports it and a verb that was never wired say the one
+// sentence to the human.
+var ErrNoLauncher = errors.New(noLauncherNote)
+
 // stopHeading is the line `/stop-server` puts ABOVE the launcher's recorded steps. The steps are
 // terse and subject-less ("Sending stop signal", "Waiting for shutdown"), so without a heading the
 // transcript never says what they were done TO — and "what was it stopping" is the whole question a

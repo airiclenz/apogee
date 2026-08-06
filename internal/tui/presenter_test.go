@@ -353,6 +353,46 @@ func TestBridgePresenterNilUntilInstalled(t *testing.T) {
 	onlyPresented(t, prog) // the installed presenter shares the Bridge's programRef
 }
 
+// TestBridgeSetPresentationSwapsTheLadderInPlace proves the live half of ADR 0037: a `present.` key
+// committed mid-session re-installs the rungs on the presenter the ENGINE already holds — the same
+// pointer, so the next presentation climbs the new ladder — rather than making a second presenter
+// nothing would ever dispatch to.
+func TestBridgeSetPresentationSwapsTheLadderInPlace(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := writeDoc(t, root, "report.html")
+
+	prog := newStubProgram()
+	b := NewBridge()
+	b.Bind(prog)
+	b.SetPresentation(Presentation{Local: true}) // a local session with no opener wired
+	before := b.Presenter()
+
+	out, err := before.Present(context.Background(),
+		domain.PresentRequest{Path: path, DisplayPath: "report.html"})
+	if err != nil {
+		t.Fatalf("Present: %v", err)
+	}
+	if out.Method != domain.PresentShown {
+		t.Fatalf("method = %q; want the baseline rung before the swap", out.Method)
+	}
+
+	// The host's `present.` block moved: this session is remote now and serves rung 2.
+	b.SetPresentation(Presentation{Docs: docServer(t, root)})
+	if after := b.Presenter(); after != before {
+		t.Error("the Presenter was replaced; the engine captured the first one, so the swap would be invisible")
+	}
+
+	out, err = before.Present(context.Background(),
+		domain.PresentRequest{Path: path, DisplayPath: "report.html"})
+	if err != nil {
+		t.Fatalf("Present after the swap: %v", err)
+	}
+	if out.Method != domain.PresentServed || !strings.Contains(out.Location, "192.168.64.2:") {
+		t.Errorf("outcome = %+v; want the swapped-in doc server to have carried this presentation", out)
+	}
+}
+
 // TestBrowserRenderableIsASubsetOfTheOpenerSet pins the relationship between the ladder's two
 // extension sets: rung 2 serves what a browser renders itself, rung 1 hands the OS handler the
 // wider set of what a desktop application renders (present.OpenerRenderable, the bound added

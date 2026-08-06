@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -372,6 +373,13 @@ const noProfilesNote = "no launch profiles defined — add profiles to the llama
 // seam reads, and the profiles it was supposed to hold. Each is one sentence and no overlay.
 func (m Model) pickLaunchProfile(args []string) (tea.Model, tea.Cmd) {
 	profiles, err := m.opts.LaunchProfiles()
+	if errors.Is(err, ErrNoLauncher) {
+		// The integration is wired but switched OFF right now — `llama-launcher: off`, or a key the
+		// pane cleared mid-session (ADR 0037). That is not a failure of /model: it is the host having
+		// no launcher, which is answered by the models the server itself advertises. The seam-nil
+		// branch above says the same thing about a host that never wired one.
+		return m.pickAdvertisedModel(args)
+	}
 	if err != nil {
 		// The one failure that sinks the list — no config at the configured path, a config that will
 		// not parse. It is the launcher's own words about a file on this machine, so it is

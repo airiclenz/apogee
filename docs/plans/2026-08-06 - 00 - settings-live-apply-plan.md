@@ -157,9 +157,11 @@ NOTES (2026-08-06): the item's premise for the web-search branch does not hold i
 
 **Commit:** `feat(settings): skills flag and web-search endpoint apply live`
 
-## 7. Live applies: llama-launcher and the presentation ladder
+## 7. Live applies: llama-launcher and the presentation ladder — ✅ DONE (2026-08-06)
 
 Depends on item 3.
+
+NOTES (2026-08-06): five deviations from the item's literal text. (a) Wiring the four launcher seams unconditionally would have silently cost `/model` its advertised-model offering — the renderer branches on those seams being nil (`picker.go:164`), so an "off" session would have met the launcher's error instead of the server's model list. The off state therefore became a REPORTED condition: a new projected sentinel `tui.ErrNoLauncher` whose text IS `noLauncherNote` (the sentence the unwired branch already said), which `pickLaunchProfile` reads as "no launcher on this host" and answers by falling back to `pickAdvertisedModel`; `/unload-model` and `/stop-server` print that same sentence through the ordinary error fold. (b) The enabled/empty check landed on `launcherWiring` (one `enabled()` gate every verb opens with) rather than inside `realLauncher`: that adapter is a proven one-line delegation to the library — its compile-time seam assertion is the point — and a disabled branch there could not be shared with the in-memory fake the tests wire. (c) `launcherConfigPath` now takes the key's raw value instead of the whole `options` snapshot, because the same three-shape ladder has to run a second time over a value the pane just committed. (d) The presenter's rungs setter is reached through `tui.Bridge.SetPresentation` rather than a new seam: it now creates the presenter once and swaps its rungs on every later call, so the root — which already holds the Bridge — needs nothing new, and the pointer the engine captured never moves. (e) A `present.` edit that leaves the doc server's ADDRESS alone (an auto-open or command edit on a remote session) carries the bound listener into the rebuilt ladder instead of replacing it; binding D's close fires on an address change alone, since killing live URLs for an unrelated edit buys nothing. Also renegotiated: `TestRunRootWiresTheLauncherSeamsTogetherOrNotAtAll` → `TestRunRootWiresTheLauncherSeamsForTheWholeSession` — the seams are always wired now, and what off and on differ by is what the verbs SAY.
 
 **What:**
 
