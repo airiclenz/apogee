@@ -868,7 +868,8 @@ const ctrlCQuitWindow = time.Second
 type ctrlCResetMsg struct{}
 
 // handleKey routes a keypress against the current state. Esc cancels an in-flight worker (and
-// is otherwise a no-op); Ctrl+C twice within ctrlCQuitWindow quits. Enter submits at idle — the
+// is otherwise a no-op); Ctrl+C twice within ctrlCQuitWindow quits; Ctrl+L forces a full repaint
+// and changes nothing else. Enter submits at idle — the
 // box plus any interjections a stop or an error left held, even on an empty box — answers a
 // pending ask, dismisses an error, and while a worker runs STAGES what was typed as an
 // interjection, launching nothing, so the single-worker invariant the seam relies on still
@@ -943,6 +944,21 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.lastCtrlC = now
 		return m, tea.Tick(ctrlCQuitWindow, func(time.Time) tea.Msg { return ctrlCResetMsg{} })
+	case "ctrl+l":
+		// The readline/terminal meaning of the key — redraw — and here it is a repair tool. The
+		// renderer paints each frame as a DIFF against its own model of the screen, so a terminal
+		// that disagrees with that model about where a write landed leaves cells the diff believes
+		// are already correct and never repaints (the Windows ghosting: see
+		// docs/plans/2026-08-06 - 04 - windows-tui-ghosting-plan.md). tea.ClearScreen drives the
+		// renderer's MoveTo(0,0) + Erase(), which marks the whole screen for a full repaint on the
+		// next frame — the same resync a terminal resize performs today, without resizing.
+		//
+		// It is a display command and nothing else: the Model is returned untouched, so the frame
+		// that lands is exactly the frame that would have landed anyway. Live in every state, and
+		// it steals nothing — the textarea binds no ctrl+l (its bindings are set in
+		// newPromptEditor / lineEditor.singleLine) — while the modal overlays above swallow it with
+		// every other key they do not claim, which is the contract they already keep.
+		return m, tea.ClearScreen
 	case "esc":
 		// Esc never ends the program; it only cancels an in-flight worker. At idle/errored it
 		// is a no-op (use Ctrl+C twice to exit), so a reflexive Esc never quits.

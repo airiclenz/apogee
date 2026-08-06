@@ -136,7 +136,22 @@ deliberately outside the repo. See its `README.md` for the full contract. In sho
 supported and permanent; the kit above already provides them well enough to take the measurements.
 This matters because item 4 can then run while another session is editing the codebase.
 
-## 1. `ctrl+l` forces a full repaint — relief that does not wait for the diagnosis
+## 1. `ctrl+l` forces a full repaint — relief that does not wait for the diagnosis — ✅ DONE (2026-08-06)
+
+NOTES (2026-08-06): two departures from the item's literal text, both forced by the codebase.
+(a) **There is no `/help` surface.** apogee's TUI has no `/help` verb — `commandSpecs`
+(`internal/tui/command.go:133`) is the whole registry of "/" verbs and it has no help row, and no
+overlay lists the chords either. The surface where the *other* global chords (`⇧⇥`, `PgUp`/`PgDn`,
+`esc`, `⌃c`) are listed is the README's keys paragraph, so `⌃l` was documented there
+(`README.md:257-263`) and in `handleKey`'s doc comment. If a `/help` verb is ever added, that is
+where this line belongs too.
+(b) **The hint line was checked and left alone, as instructed.** `idlePlaceholder` measures **60
+cells**; the shortest honest addition (`· ⌃l redraw`) takes it to **72**, which with the input box's
+borders and padding overruns an 80-column terminal. It was not added and nothing else was shrunk.
+The running legend (47 cells) has room, but a chord advertised in only one of the two states is
+worse than one advertised in neither.
+Also: no CHANGELOG entry — item 8 explicitly owns the user-visible CHANGELOG text for `ctrl+l`, and
+item 8 is not yet done.
 
 **What:** Bind `ctrl+l` in the global key switch (`internal/tui/model.go`, alongside
 `case "ctrl+c":` at L909) to return `tea.ClearScreen`, which drives bubbletea's

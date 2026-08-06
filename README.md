@@ -258,7 +258,9 @@ The keys are few, and the empty prompt box advertises them: `⏎` sends — *que
 the model works — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
 prompts you have already sent in this workspace, `esc` stops a run, `⌃c` quits. Beyond
 the box, `⇧⇥` cycles the autonomy mode — Plan → Ask-Before → Allow-Edits → Auto — at
-any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript.
+any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. `⌃l` is the
+readline redraw: it forces a full repaint, which is the way back from a terminal that
+has smeared or eaten part of the frame. It changes nothing but the pixels.
 
 ### The settings screen — `/settings`
 
