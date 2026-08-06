@@ -4,6 +4,16 @@ Status: accepted
 
 # The settings surface persists one key per deliberate edit
 
+> **Superseded in part by [ADR 0037](0037-every-settings-edit-applies-to-the-running-session.md)
+> (2026-08-06).** Decision 9 is replaced: **every** committed edit now applies to the running session
+> at ⏎, the `(next launch)` markers are deleted in favour of a ` *` session-edit marker, and a row
+> overridden by an env var or flag applies the edit anyway (noting that the override wins again next
+> launch). Decision 3's v1 simple-keys scope widens: the structured blocks become editable — three
+> in-pane, the six nested ones through a `$EDITOR` round-trip that reloads and applies — so the
+> "edit in `config.yaml`" pointer is gone. **Everything else here stands**, decision 2's persistence
+> contract above all (one key per deliberate edit, comment-preserving splice, re-parse verification,
+> atomic write), which ADR 0037 builds on unchanged.
+
 ## Context
 
 `~/.apogee/config.yaml` is a **documented, hand-edited document the user owns**: seeded once from

@@ -44,7 +44,7 @@
   - Changing startup precedence, the config home, the seeded template's content, or the splice writer's atomic-write contract.
   - New configuration keys.
 
-## 1. ADR 0037 — every settings edit applies to the running session
+## 1. ADR 0037 — every settings edit applies to the running session — ✅ DONE (2026-08-06)
 
 **What:** Write `docs/adr/0037-every-settings-edit-applies-to-the-running-session.md` recording the ratified design calls above as the settled policy: apply-on-⏎-commit; boundary semantics for prompt-prefix keys; pane-edit-outranks-override for the session; the `server` row as a live switch; hybrid structured editing with the `$EDITOR` jump; live MCP reconnect (validate-then-commit, keep-old-on-failure, startup stays fatal); the ` *` session-edit marker replacing "(next launch)"; the two engine-mutator classes as the only homes for new seams (ADR 0031 door-keeping restated). State explicitly: **supersedes ADR 0035 decision 9** (and widens decision 3's v1 simple-keys scope); ADR 0035's persistence contract (one key per deliberate edit, comment-preserving splice, atomic write) remains in force. Follow the house ADR format of `docs/adr/0035-*.md`/`0036-*.md`. Add the "superseded in part by 0037" cross-reference line to ADR 0035's header.
 
