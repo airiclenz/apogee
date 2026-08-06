@@ -951,8 +951,18 @@ func writtenLines(args map[string]any) []detailLine {
 	return changedLines([]editPair{replacedText("", content)})
 }
 
-// detailClipRunes caps one detail/target line so a minified blob or a wall-of-text report
-// cannot flood a row (the renderer soft-wraps, so an uncapped line becomes many rows).
+// detailClipRunes caps one detail/target line so a minified blob or a wall-of-text report cannot
+// flood the transcript (the renderer soft-wraps, so an uncapped line becomes many rows).
+//
+// The cap is a FLOOD bound and it is deliberately spent in RUNES, not in the cells the screen
+// bills. No rune paints more than two cells, so 160 runes buy at most 320 cells and therefore at
+// most twice the rows the same 160 runes of ASCII take — a wall of double-width text costs scroll,
+// never content. Cell-exactness is the STATUS LINE's requirement, not the transcript's: that row is
+// shared with the context gauge, so an over-wide left slot pushes something the reader needs off the
+// screen, which is why toolPhrase (activity.go) spends its own cap through the width authority. The
+// transcript shares nothing — a wide line wraps onto rows of its own and the block behind it paints
+// lower down, whole. TestPaintedWideDetailLineWrapsWithoutDisplacement (paint_test.go) is the probe
+// that measured all three of those claims and the pin that keeps them true.
 const detailClipRunes = 160
 
 // clipDetail truncates s to detailClipRunes runes with an ellipsis.
@@ -961,10 +971,9 @@ func clipDetail(s string) string {
 }
 
 // clipRunes truncates s to n runes with an ellipsis, counting runes rather than bytes so a
-// multi-byte path is not cut mid-character. clipDetail is its one caller: the status line's own
-// target cap is spent in CELLS through the width authority (toolPhrase, activity.go), because a
-// row it shares with the context gauge has to bound what the screen bills rather than what the
-// string counts.
+// multi-byte path is not cut mid-character. clipDetail is its one caller, and the rune spend is
+// settled there rather than a shortfall to be swept: see detailClipRunes for why the transcript's
+// bound is allowed to be a rune count where the status line's is not.
 func clipRunes(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {

@@ -51,9 +51,16 @@ thread from `renderSubAgentRun`'s `th.measure` down to `subAgentGist`.
 
 **Commit:** `fix(tui): spend the status target cap in cells via the width authority`
 
-## 2. Probe and pin the detail cap's bound; document the deliberate rune spend
+## 2. Probe and pin the detail cap's bound; document the deliberate rune spend — ✅ DONE (2026-08-06)
 
 Depends on item 1.
+
+NOTES (2026-08-06): of the three comments the item names, `clipDetail`'s one-liner ("truncates s to
+detailClipRunes runes with an ellipsis") was left as-is — it states a fact the rewrite does not
+change, and the settled-design paragraph lives on `detailClipRunes` above it with `clipRunes`
+pointing there. No CHANGELOG entry: this item changes no behavior, and item 1's Fixed entry already
+carries the user-visible half. The probe test needs a fixture helper, so `paintedDetailRows` and its
+`paintedDetail` result type were added beside it in `paint_test.go`.
 
 **What:** Resolve the SUSPECTED half the way ratified call 1 states — no behavior change; the probe becomes the pin.
 

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -962,6 +963,112 @@ func TestPaintedTabBearingToolTargetKeepsTheGauge(t *testing.T) {
 			})
 		}
 	}
+}
+
+// THE PROBE the rune-vs-cell issue asked for on the transcript side, landed as the pin: a detail
+// line of double-width text spends the SAME cap in runes that the status line now spends in cells
+// (detailClipRunes = 160, toolpresent.go), and that is deliberate here. This test is what turns
+// "SUSPECTED, UNPROBED" into a measured bound.
+//
+// The status line had to become cell-honest because its row is SHARED — an over-wide left slot
+// pushes the context gauge off it, and something the reader needs is gone. The transcript shares
+// nothing: a line too wide for the window soft-wraps onto rows of its own and the entry after it
+// simply paints lower down. So the cap here is a FLOOD bound, not a column budget, and runes bound
+// the flood well enough: no rune paints more than two cells, so 160 runes buy at most 320 cells and
+// therefore at most twice the rows the same 160 runes of ASCII would take. Two rows where one was
+// nominal is scroll, not loss.
+//
+// The three assertions are that sentence: the line stops at the cap, it wraps instead of overrunning
+// the window, and the block painted AFTER it is still there and still intact. The ASCII fixture is
+// the oracle for the row bound rather than a constant, because the row count follows the window
+// width and the wrap points, and a fixture that hard-coded either would be pinning the arithmetic
+// instead of the bound.
+//
+// Both measures are swept for the file's usual reason, though this is a case they agree on: a CJK
+// ideograph is two cells to WcWidth and to GraphemeWidth alike. That agreement is the point — the
+// rune count was the only thing lying, and it is allowed to, up to 2×.
+func TestPaintedWideDetailLineWrapsWithoutDisplacement(t *testing.T) {
+	const fill = "字" // two cells under either measure, and no expansion can flatten it
+
+	for _, tc := range paintMethods {
+		t.Run(tc.name, func(t *testing.T) {
+			wide := paintedDetailRows(t, tc.method, fill)
+			ascii := paintedDetailRows(t, tc.method, "a")
+
+			if n := strings.Count(strings.Join(wide.detail, ""), fill); n != detailClipRunes {
+				t.Errorf("the painted detail carries %d %q runes, want the cap's %d", n, fill, detailClipRunes)
+			}
+			if last := wide.detail[len(wide.detail)-1]; !strings.HasSuffix(strings.TrimRight(last, " "), "…") {
+				t.Errorf("the painted detail does not end in the clip marker: %q", last)
+			}
+			if len(wide.detail) < 2 {
+				t.Errorf("the wide detail painted %d row(s), want the soft wrap the cap tolerates", len(wide.detail))
+			}
+			if bound := 2 * len(ascii.detail); len(wide.detail) > bound {
+				t.Errorf("the wide detail painted %d rows against the same %d runes of ASCII on %d rows, past the two-cells-per-rune bound of %d",
+					len(wide.detail), detailClipRunes, len(ascii.detail), bound)
+			}
+			if !wide.neighbour {
+				t.Error("the block painted after the wide detail is gone from the transcript — the cap displaced a neighbour")
+			}
+			if wide.after <= wide.lastDetail {
+				t.Errorf("the neighbouring block paints on row %d, at or above the detail's last row %d — it was displaced",
+					wide.after, wide.lastDetail)
+			}
+		})
+	}
+}
+
+// paintedDetail is what the grid shows of one over-long detail line and of the block behind it.
+type paintedDetail struct {
+	detail     []string // the painted rows the detail line wrapped onto, in paint order
+	lastDetail int      // the grid row the last of them paints on
+	after      int      // the grid row the following block's header paints on, or -1
+	neighbour  bool     // the following block painted whole: header, target and summary
+}
+
+// paintedDetailRows drives one tool result whose whole body is detailClipRunes+40 of fill through
+// the transcript, with a second block behind it, and reports what the terminal painted.
+//
+// A row belongs to the detail when it holds nothing but fill and the clip marker, which is why the
+// fixture's body is a single repeated glyph — it names its own rows on the painted grid, with no
+// arithmetic about indents or wrap points standing between the assertion and what the screen shows.
+func paintedDetailRows(t *testing.T, method ansi.Method, fill string) paintedDetail {
+	t.Helper()
+	out := paintedDetail{lastDetail: -1, after: -1}
+
+	m := paintedAs(t, newTestModel(t), method)
+	m.transcript.reset() // drop the seeded start-up box, so the blocks sit at the top of the viewport
+	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+		CallID: "c1", Content: strings.Repeat(fill, detailClipRunes+40)}})
+	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "c2", Tool: "read_file", Arguments: []byte(`{"path":"neighbour.go"}`)}})
+	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "one line"}})
+	m.refreshViewport()
+
+	rows := transcriptPaintRows(t, m, method)
+	for i, row := range rows {
+		if w := paintedWidth(trimRight(row), method); w > m.width {
+			t.Errorf("transcript row %d paints %d columns, past the %d-column window: %q", i, w, m.width, row)
+		}
+		body := strings.TrimSpace(strip(row))
+		if body != "" && strings.Trim(body, fill+"…") == "" {
+			out.detail = append(out.detail, strip(row))
+			out.lastDetail = i
+		}
+		if strings.Contains(strip(row), "Read File") {
+			out.after = i
+		}
+	}
+	if len(out.detail) == 0 {
+		t.Fatalf("no detail row on the painted transcript — the fixture shows nothing:\n%s", strings.Join(rows, "\n"))
+	}
+	out.neighbour = out.after >= 0 && slices.ContainsFunc(rows, func(row string) bool {
+		return strings.Contains(strip(row), "neighbour.go") && strings.Contains(strip(row), "one line")
+	})
+	return out
 }
 
 // The stacked start-up card fits its own info rows to the card's content budget, so a value too wide
