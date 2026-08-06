@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -29,9 +30,8 @@ import (
 // configKind is what a key HOLDS, which is what decides how it is displayed and whether
 // the settings surface can edit it in place. It is deliberately coarser than the Go type:
 // enum is a string with a closed vocabulary (the parse site owns the set — see EnumValues),
-// and structured is the terminator — a map, a nested block, a list of blocks, or a multi-line
-// text value whose editor is a separate concern (a single-line text field cannot express it,
-// so the surface points at config.yaml instead).
+// and structured is the terminator — a map, a nested block, or a list of blocks, whose editor
+// is a separate concern (no field on a row can express one, so the surface opens the file).
 type configKind string
 
 const (
@@ -40,6 +40,13 @@ const (
 	kindString     configKind = "string"
 	kindEnum       configKind = "enum"
 	kindStructured configKind = "structured"
+	// kindText is a multi-line text value — prose, not a setting written on a line: the system
+	// prompt is the one the schema has. It is a kind of its own rather than structured because the
+	// surface DOES have an editor for it (a multi-line field replacing the pane's key list, ADR 0037
+	// decision 10), and rather than a string because no single line holds it — the writer carries it
+	// as a block scalar (`system-prompt-text: |` and the indented lines under it) and replaces that
+	// whole block, where every other kind replaces the one line its key sits on.
+	kindText configKind = "text"
 	// kindStringList is a list of plain names written on ONE line as a flow sequence
 	// (`names: [AGENTS.md, CLAUDE.md]`). It is a kind of its own rather than structured because a
 	// single-line text field CAN express it — the surface edits the line as the comma-separated text
@@ -152,8 +159,14 @@ var keyRegistry = []configKey{
 		Desc:     "Autonomy mode: how tool calls are gated, from least to most autonomous.",
 	},
 	{
-		Path: "system-prompt-text", Kind: kindStructured,
-		Desc: "The system prompt written inline — the standing instructions sent ahead of your first message.",
+		// Prose rather than a value on a line, so it is the one key the pane edits in a field of its
+		// own: ⏎ replaces the key list with a multi-line editor and ctrl+s commits it (ADR 0037
+		// decision 10). The write persists the block and the apply RE-READS it with its two siblings,
+		// for the reason system-prompt-file's does — these three keys are one prompt (ADR 0023).
+		Path: "system-prompt-text", Kind: kindText,
+		Editable: true,
+		Validate: validateSystemPromptText,
+		Desc:     "The system prompt written inline — the standing instructions sent ahead of your first message.",
 	},
 	{
 		// A plain path on a plain line, so the pane types it like any other string. What it names is
@@ -361,6 +374,29 @@ func validateSystemPromptFile(value string) error {
 	defer f.Close()
 	if info, err := f.Stat(); err == nil && info.IsDir() {
 		return fmt.Errorf("apogee: invalid system-prompt-file %q: it is a directory, not a prompt file", value)
+	}
+	return nil
+}
+
+// validateSystemPromptText refuses an inline prompt the next launch could not send. Two refusals, the
+// two validateSystemPromptFile makes for the other spelling of the same prompt:
+//
+//   - EMPTY, which is not how this key is cleared. A prompt of nothing is a SET of nothing, and the
+//     deliberate way to send no prompt at all is the reset backspace arms, which removes the block
+//     (ADR 0035) and hands the key back to the commented paragraph that documents it.
+//   - a template carrying a placeholder that is not one of the known three — the check
+//     resolveSystemPrompt makes when it selects the prompt (prompt.Validate), moved ahead of the
+//     write so a mistyped `{{ workspace }}` is refused on the row rather than at the next launch.
+//
+// The value is deliberately NOT quoted into either message, where every other validator quotes what
+// it refused: a prompt is many lines of prose and the pane renders this sentence on one row.
+func validateSystemPromptText(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return errors.New("apogee: invalid system-prompt-text: write the prompt inline, " +
+			"or reset the key to send none")
+	}
+	if err := prompt.Validate(value); err != nil {
+		return fmt.Errorf("apogee: invalid system-prompt-text: %w", err)
 	}
 	return nil
 }

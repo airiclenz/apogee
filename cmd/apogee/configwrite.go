@@ -667,6 +667,20 @@ func renderSettingValue(k configKey, value string) (string, string, error) {
 		names := parseSettingList(v)
 		text, err := renderScalarList(names)
 		return text, listValue(names), err
+	case kindText:
+		// The one kind whose file text is not a line but a BLOCK, and the block's indentation depends
+		// on where in the file its key sits — which is the splice's knowledge and not this function's.
+		// So what comes back here is the NORMALIZED VALUE for both halves, and spliceTextBlock renders
+		// the block from it. Normalizing is trimming the trailing newlines down to the single one a
+		// clip-chomped block scalar yields, which is what a reader takes back out of the file: without
+		// it a value typed with two blank lines at the end would come back differing from itself and
+		// verifiedSplice would refuse the edit. Nothing else is trimmed — a prompt's leading indentation
+		// and its trailing spaces are its own, and a literal block preserves both.
+		text := strings.TrimRight(value, "\n")
+		if text == "" {
+			return "", "", fmt.Errorf("%s has no text to write; reset the key to send no prompt at all", k.Path)
+		}
+		return text + "\n", text + "\n", nil
 	}
 	return "", "", fmt.Errorf("%s is not a simple value; edit it in config.yaml", k.Path)
 }
@@ -824,7 +838,9 @@ func isNullNode(n *yaml.Node) bool {
 	return n != nil && n.Kind == yaml.ScalarNode && n.Tag == "!!null"
 }
 
-// spliceScalarSet rewrites the key's active line, or inserts one where the key has none.
+// spliceScalarSet rewrites the key's active line, or inserts one where the key has none. A text key
+// is the one that occupies more than a line: its block replaces the block already there
+// (spliceTextBlock), and an insert puts the whole block where a scalar's single line would have gone.
 func spliceScalarSet(data []byte, k configKey, text string) ([]byte, error) {
 	doc, err := configDocument(data)
 	if err != nil {
@@ -834,6 +850,9 @@ func spliceScalarSet(data []byte, k configKey, text string) ([]byte, error) {
 	t, err := scalarTargetIn(doc, k)
 	if err != nil {
 		return nil, err
+	}
+	if t.isSet() && t.kind == kindText {
+		return spliceTextBlock(lines, t, text)
 	}
 	if t.isSet() {
 		head, gap, tail, err := scalarLineParts(lines, t)
@@ -871,10 +890,23 @@ func spliceScalarDelete(data []byte, k configKey) ([]byte, error) {
 	if !t.isSet() {
 		return nil, nil
 	}
-	if _, _, _, err := scalarLineParts(lines, t); err != nil {
+	last := t.keyNode.Line
+	if t.kind == kindText {
+		// A text key's value is a BLOCK, so what the reset removes is every line of it — the header
+		// line the key sits on and the indented lines under it (textLineParts). Removing only the key's
+		// own line would leave the prompt's text behind as a fragment the next parse would choke on.
+		_, _, end, err := textLineParts(lines, t)
+		if err != nil {
+			return nil, err
+		}
+		last = end
+	} else if _, _, _, err := scalarLineParts(lines, t); err != nil {
 		return nil, err
 	}
-	drop := []int{t.keyNode.Line}
+	drop := make([]int, 0, last-t.keyNode.Line+2)
+	for n := t.keyNode.Line; n <= last; n++ {
+		drop = append(drop, n)
+	}
 	if t.parentKey != nil && len(t.parentBody.Content) == 2 {
 		drop = append(drop, t.parentKey.Line)
 	}
@@ -955,6 +987,130 @@ func (t scalarTarget) valueFitsOneLine(line int) error {
 	return nil
 }
 
+// spliceTextBlock replaces a text key's whole block: the header line the key sits on, rebuilt from the
+// user's own indentation and end-of-line note, and the indented lines of the new value under it. It is
+// the one splice that spans more than a line, which is the whole of what a block scalar is.
+//
+// What stands above and below the block is carried over untouched, exactly as the single-line rewrite
+// carries over the rest of the file: the paragraph of comments that documents the prompt, and whatever
+// follows the last line of the old one.
+func spliceTextBlock(lines []string, t scalarTarget, text string) ([]byte, error) {
+	head, tail, end, err := textLineParts(lines, t)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(lines)+lineCount(text))
+	out = append(out, lines[:t.keyNode.Line-1]...)
+	out = append(out, head+" "+blockScalarHeader(text, listIndent)+tail)
+	out = append(out, indentLines(t.keyNode.Column-1, textBlockBody(text))...)
+	out = append(out, lines[end:]...)
+	return joinConfigLines(out), nil
+}
+
+// textLineParts is scalarLineParts for a block: the text through the key's colon, any end-of-line note
+// on that line, and the LAST line the value occupies — the three things a replacement or a removal of a
+// block needs. The gap a scalar keeps is not among them: a block scalar's header is `key: |`, one space
+// and an indicator, so there is no alignment to preserve.
+//
+// The shapes it refuses are the ones where the text and the node tree would disagree about where the
+// value ends. A block scalar ends where its indentation does (blockScalarEnd) and that is exact; a
+// value written on the key's own line ends there, which is checked rather than assumed — a plain
+// scalar may continue onto indented lines under it, and rewriting the first of them would leave the
+// rest behind. A `key:` with nothing under it is the empty case and is simply written over.
+func textLineParts(lines []string, t scalarTarget) (head, tail string, end int, err error) {
+	line := t.keyNode.Line
+	if line < 1 || line > len(lines) {
+		return "", "", 0, fmt.Errorf("its %s: sits on line %d, which is outside the file", t.key, line)
+	}
+	raw := lines[line-1]
+	indent := t.keyNode.Column - 1
+	if indent < 0 || indent > len(raw) || !strings.HasPrefix(raw[indent:], t.key+":") {
+		return "", "", 0, fmt.Errorf("its %s: line reads unexpectedly at line %d; edit the file by hand", t.key, line)
+	}
+	head = raw[:indent+len(t.key)+1]
+	// The note on the header line: a block scalar has value text of its own (the `|`), so the parser
+	// hangs the comment off the value — the bare-key fallback is scalarLineParts' and is kept for the
+	// same reason, an empty key holding no value node to carry it.
+	comment := t.valueNode.LineComment
+	if comment == "" {
+		comment = t.keyNode.LineComment
+	}
+	if at := strings.LastIndex(raw, comment); comment != "" && at > len(head) {
+		for at > 0 && (raw[at-1] == ' ' || raw[at-1] == '\t') {
+			at--
+		}
+		tail = raw[at:]
+	}
+	switch {
+	case isNullNode(t.valueNode):
+		return head, tail, line, nil // `key:` with nothing under it: the header line is the whole of it
+	case t.valueNode.Kind != yaml.ScalarNode:
+		return "", "", 0, fmt.Errorf("its %s: holds a list or a block, not a text value; edit the file by hand", t.key)
+	case t.valueNode.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0:
+		return head, tail, blockScalarEnd(lines, line, indent), nil
+	case t.valueNode.Line != line || blockScalarEnd(lines, line, indent) != line:
+		return "", "", 0, fmt.Errorf("its %s: value runs past the line its key sits on; edit the file by hand", t.key)
+	}
+	return head, tail, line, nil
+}
+
+// blockScalarEnd is the last line of the block written under the key on keyLine: YAML's own rule, which
+// is that the block runs for as long as the lines are indented deeper than the key. Blank lines are
+// passed over rather than ended on — one inside a prompt is part of the prompt — but they do not extend
+// the block either, so the blank line a user keeps between the prompt and the paragraph after it stays
+// outside the value, which is exactly where a clip-chomped block leaves it.
+func blockScalarEnd(lines []string, keyLine, indent int) int {
+	end := keyLine
+	for i := keyLine; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "" {
+			continue
+		}
+		if len(lines[i])-len(strings.TrimLeft(lines[i], " ")) <= indent {
+			break
+		}
+		end = i + 1
+	}
+	return end
+}
+
+// textBlockBody is the value as the lines of a block scalar, indented relative to the key they hang
+// under. An empty line is written EMPTY rather than as indentation alone: a literal block reads an
+// empty line as an empty line whatever its indentation, and trailing whitespace nobody typed is not
+// something a writer puts in a file it promised to leave as it found.
+func textBlockBody(value string) []string {
+	body := strings.Split(strings.TrimRight(value, "\n"), "\n")
+	out := make([]string, 0, len(body))
+	for _, line := range body {
+		if line == "" {
+			out = append(out, "")
+			continue
+		}
+		out = append(out, indentLine(listIndent, line))
+	}
+	return out
+}
+
+// blockScalarHeader is the `|` a text value's key line ends with — with an explicit indentation
+// indicator (`|2`) where the value's own first line opens with whitespace. A reader detects a block's
+// indentation from its first non-empty line, so without the indicator that leading space would be read
+// as indentation and silently disappear from the prompt. Every other value gets the plain `|` the
+// template itself is written with.
+//
+// Chomping is left at its default: the body is written with exactly one trailing newline
+// (renderSettingValue), which is what clip yields, so there is no indicator to spend on it.
+func blockScalarHeader(value string, indent int) string {
+	for _, line := range strings.Split(value, "\n") {
+		if line == "" {
+			continue // a truly empty leading line is no obstacle to the detection
+		}
+		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+			return "|" + strconv.Itoa(indent)
+		}
+		break
+	}
+	return "|"
+}
+
 // scalarInsertion is the lines to insert for a key the file does not set, and the 1-based line to
 // insert them after — 0 for "append at the end", the fallback when the file documents the key
 // nowhere. The four cases, in the order they are common:
@@ -969,24 +1125,49 @@ func (t scalarTarget) valueFitsOneLine(line int) error {
 //     ever above or below it;
 //   - a key whose block key is there with nothing under it: the first child of that block.
 func scalarInsertion(lines []string, t scalarTarget, text string) ([]string, int, error) {
-	setting := t.key + ": " + text
+	setting := settingLines(t, text)
 	switch {
 	case t.parent == "":
 		at, err := commentedExampleLine(lines, t.key)
-		return []string{setting}, at, err
+		return setting, at, err
 	case t.parentBody == nil:
 		at, err := commentedExampleBlockEnd(lines, t.parent)
-		return []string{t.parent + ":", indentLine(listIndent, setting)}, at, err
+		return append([]string{t.parent + ":"}, indentLines(listIndent, setting)...), at, err
 	case t.parentNull:
-		return []string{indentLine(t.childIndent(), setting)}, t.parentKey.Line, nil
+		return indentLines(t.childIndent(), setting), t.parentKey.Line, nil
 	default:
-		return []string{indentLine(t.childIndent(), setting)}, maxNodeLine(t.parentBody), nil
+		return indentLines(t.childIndent(), setting), maxNodeLine(t.parentBody), nil
 	}
+}
+
+// settingLines is the setting as the file writes it, at the key's own column: one `key: value` line for
+// every kind but text, and for text the block-scalar header plus the value's own lines under it. The
+// caller indents the whole of it into place, which is what lets one insertion path serve both.
+func settingLines(t scalarTarget, text string) []string {
+	if t.kind != kindText {
+		return []string{t.key + ": " + text}
+	}
+	return append([]string{t.key + ": " + blockScalarHeader(text, listIndent)}, textBlockBody(text)...)
 }
 
 // indentLine pads a rendered setting to the column it belongs in.
 func indentLine(indent int, text string) string {
 	return strings.Repeat(" ", indent) + text
+}
+
+// indentLines pads a whole rendered setting into its column, leaving empty lines empty — a blank line
+// inside a block scalar is blank at every indentation, and padding it out would put whitespace nobody
+// typed into the user's file.
+func indentLines(indent int, lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			out = append(out, "")
+			continue
+		}
+		out = append(out, indentLine(indent, line))
+	}
+	return out
 }
 
 // commentedExampleLine finds the line of the key's commented example — the `# key: value` line the

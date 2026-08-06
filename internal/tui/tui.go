@@ -789,7 +789,13 @@ const (
 	SettingInt        SettingKind = "int"
 	SettingString     SettingKind = "string"
 	SettingEnum       SettingKind = "enum"
-	SettingStructured SettingKind = "structured" // a list, a map, a block, or a multi-line text value
+	SettingStructured SettingKind = "structured" // a list, a map, or a block
+	// SettingText is a multi-line text value — the system prompt. It is not a string row with a
+	// longer value: no row holds prose, so the pane's [SettingRow.Value] carries a summary of it
+	// ("8 lines") and the text itself travels in [SettingRow.Text], which is what ⏎ opens a
+	// multi-line editor over (ADR 0037 decision 10). ctrl+s commits it, esc discards it, and ⏎ is
+	// free to mean a newline — the one edit idiom in this pane whose keys are not the list's.
+	SettingText SettingKind = "text"
 	// SettingServer is the `server:` row: an enum whose vocabulary is not in the row at all but in
 	// Servers above, because what this key may hold is whatever THIS config's `servers:` block
 	// names — a list the human can change mid-session. It picks from the same sub-list an enum
@@ -838,6 +844,13 @@ type SettingRow struct {
 	Kind    SettingKind // what the key holds, and with it the edit idiom ⏎ opens
 	Value   string      // the effective value as the file would spell it; a mask when Masked, a summary when structured
 	Default string      // the built-in default in the same spelling; "" ⇒ the key defaults to unset
+
+	// Text is the value ITSELF for a [SettingText] row, where Value is only a summary of it — the
+	// prose a multi-line editor opens on, and empty for every other kind. It is a field of its own
+	// rather than a longer Value because the two are read in different places: the row paints the
+	// summary and the editor is seeded with the text, and a row that painted its prompt would be a
+	// pane's worth of text on one line.
+	Text string
 
 	// Source and SourceName are the override marker: which higher-precedence source beat the file
 	// for this key this run, and what it is CALLED ("APOGEE_MODE", "--mode") so the note can name

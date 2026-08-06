@@ -1909,3 +1909,154 @@ func TestSettingsSecondStepsFallBackWhenTheirKeyGoesAway(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The multi-line text editor (plan item 14, ADR 0037 decision 10)
+// ----------------------------------------------------------------------------
+
+// keyCtrlS is the key that COMMITS the multi-line field — ⏎ belongs to the value there.
+func keyCtrlS() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl} }
+
+// settingsTextRow is the one text row the schema has — `system-prompt-text:` as the registry
+// describes it (cmd/apogee/registry.go): a value cell holding a SUMMARY of the prose, and the prose
+// itself beside it for the editor to open on.
+func settingsTextRow() SettingRow {
+	return SettingRow{
+		Path: "system-prompt-text", Section: "System prompt", Kind: SettingText,
+		Value: "2 lines", Text: "You are apogee.\nWork step by step.\n", Editable: true,
+		Desc: "The system prompt written inline — the standing instructions sent ahead of your first message.",
+	}
+}
+
+// ⏎ on a text row opens a multi-line field over the whole list, seeded with the prose the key holds;
+// ⏎ inside it inserts a newline; ctrl+s persists and applies what was written, and the row goes back
+// to a summary of it with the session-edit marker.
+func TestSettingsPaneTextEditorWritesTheProseOnCtrlS(t *testing.T) {
+	rows := []SettingRow{settingsTextRow()}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter())
+
+	if m.settings.kind != settingsTextEditor {
+		t.Fatalf("pane = %+v, want the multi-line field open", m.settings)
+	}
+	if got := m.settings.editor.value(); got != "You are apogee.\nWork step by step." {
+		t.Errorf("field = %q, want it seeded with the prompt, its trailing newline trimmed", got)
+	}
+	pane := strip(m.renderSettings())
+	for _, want := range []string{"Description:", "You are apogee.", "Work step by step.", settingsTextHint} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("the open field does not show %q:\n%s", want, pane)
+		}
+	}
+	if strings.Contains(pane, settingsHint) {
+		t.Errorf("the field is showing the key list's legend:\n%s", pane)
+	}
+
+	// ⏎ is the VALUE's key here: it adds a line rather than committing.
+	m = pressSettings(t, m, keyEnter(), keyRune('A'), keyRune('n'), keyRune('d'))
+	if m.settings.kind != settingsTextEditor {
+		t.Fatalf("pane = %+v, want the field still open — ⏎ inserts a newline", m.settings)
+	}
+	if len(log.writes) != 0 {
+		t.Fatalf("⏎ persisted %+v, want nothing", log.writes)
+	}
+
+	m = step(t, m, keyCtrlS())
+
+	want := []settingEdit{{path: "system-prompt-text", value: "You are apogee.\nWork step by step.\nAnd"}}
+	if !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if !reflect.DeepEqual(log.applies, want) {
+		t.Errorf("applies = %+v, want %+v — a prompt applies on the keypress that persists it", log.applies, want)
+	}
+	if m.settings.kind != settingsKeyList || m.settings.editor.value() != "" {
+		t.Errorf("pane = %+v after the commit, want the field closed and empty", m.settings)
+	}
+	if got, cell := m.settingsValueCell(rows[0]), "3 lines"+settingsEditMarker; got != cell {
+		t.Errorf("value cell = %q, want %q — a row shows a summary of prose, never the prose", got, cell)
+	}
+	// A re-opened field starts from what was WRITTEN, not from the resolution the pane opened over.
+	if reopened := step(t, m, keyEnter()); reopened.settings.editor.value() != want[0].value {
+		t.Errorf("re-opened field = %q, want the prompt this pane persisted", reopened.settings.editor.value())
+	}
+}
+
+// esc discards the whole edit — the key that walks away from a page of prose must not be the one that
+// persists it — and a field cleared to nothing writes nothing either: taking the prompt away is the
+// reset backspace arms, which is what the binary's own validator says in as many words.
+func TestSettingsPaneTextEditorDiscardsOnEsc(t *testing.T) {
+	rows := []SettingRow{settingsTextRow()}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	discarded := pressSettings(t, step(t, m, keyEnter()), keyRune('X'), keyEsc())
+
+	if discarded.settings.kind != settingsKeyList || discarded.settings.editor.value() != "" {
+		t.Errorf("pane = %+v after esc, want the field closed and empty", discarded.settings)
+	}
+	if !discarded.settings.open {
+		t.Error("esc out of the field closed the whole pane; it backs out of the EDIT")
+	}
+	if len(log.writes) != 0 || len(log.applies) != 0 {
+		t.Fatalf("an abandoned edit persisted %+v / applied %+v", log.writes, log.applies)
+	}
+	if got := discarded.settingsValueCell(rows[0]); got != "2 lines" {
+		t.Errorf("value cell = %q, want the row untouched", got)
+	}
+
+	emptied := step(t, m, keyEnter())
+	for range len(settingsTextRow().Text) {
+		emptied = step(t, emptied, keyBackspace())
+	}
+	emptied = step(t, emptied, keyCtrlS())
+
+	if len(log.writes) != 0 {
+		t.Fatalf("an empty field persisted %+v, want nothing", log.writes)
+	}
+	if emptied.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v, want the field closed", emptied.settings)
+	}
+}
+
+// A prompt the binary refuses keeps the field OPEN with the reason on the row it came from — the edit
+// buffer's contract, for its reason: the human fixes the placeholder they mistyped rather than writing
+// the prompt again.
+func TestSettingsPaneTextEditorKeepsARefusedPrompt(t *testing.T) {
+	rows := []SettingRow{settingsTextRow()}
+	log := &settingsWriteLog{err: errors.New(`apogee: invalid system-prompt-text: prompt: unknown placeholder "{{bogus}}"`)}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = pressSettings(t, step(t, m, keyEnter()), keyRune('!'), keyCtrlS())
+
+	if m.settings.kind != settingsTextEditor {
+		t.Fatalf("pane = %+v, want the field still open on a refused prompt", m.settings)
+	}
+	if got := m.settings.editor.value(); !strings.HasSuffix(got, "!") {
+		t.Errorf("field = %q, want the typed prose kept for correction", got)
+	}
+	if len(m.settingEdits) != 0 {
+		t.Errorf("edits = %+v, want none: a refused write changed no file", m.settingEdits)
+	}
+	if got := m.settingsNote(rows[0]); !strings.Contains(got, "unknown placeholder") {
+		t.Errorf("note = %q, want the refusal's reason", got)
+	}
+}
+
+// The field is a FIELD: the caret moves through the prose and the glyph says where the next keystroke
+// lands, on the line it stands on rather than always on the last one.
+func TestSettingsPaneTextEditorPaintsTheCaretWhereItStands(t *testing.T) {
+	rows := []SettingRow{settingsTextRow()}
+	m, _ := settingsEditModel(t, rows, &settingsWriteLog{})
+
+	m = pressSettings(t, step(t, m, keyEnter()), keyHome(), keyRune('>'))
+
+	if got := m.settings.editor.value(); got != "You are apogee.\n>Work step by step." {
+		t.Errorf("field = %q, want the rune inserted at the second line's start", got)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, ">"+settingsCaret+"Work step by step.") {
+		t.Errorf("the caret is not drawn where it stands:\n%s", pane)
+	}
+}

@@ -739,6 +739,9 @@ func (m Model) settingsPaint() (settingsPaint, bool) {
 	if _, sub := m.settingsEnumTarget(rows); sub {
 		return settingsPaint{}, false // the value sub-list is a menu of its own; no pointer names it
 	}
+	if _, text := m.settingsTextTarget(rows); text {
+		return settingsPaint{}, false // the multi-line field replaced the list; there are no key rows to name
+	}
 	spec, display, seated := m.settingsKeyListSpec(rows)
 	if !seated {
 		return settingsPaint{}, false

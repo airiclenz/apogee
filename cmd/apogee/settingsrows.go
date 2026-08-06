@@ -84,10 +84,13 @@ var settingSections = []settingSection{
 // path with no formatter renders as an empty value rather than panicking — a table gap must not
 // cost the user the whole surface mid-session — and that test is what keeps the gap from shipping.
 var settingValues = map[string]func(options) string{
-	"servers":            func(o options) string { return countSummary(len(o.servers), "server") },
-	"server":             func(o options) string { return o.startupServer },
-	"llama-launcher":     func(o options) string { return o.llamaLauncher },
-	"mode":               func(o options) string { return o.mode },
+	"servers":        func(o options) string { return countSummary(len(o.servers), "server") },
+	"server":         func(o options) string { return o.startupServer },
+	"llama-launcher": func(o options) string { return o.llamaLauncher },
+	"mode":           func(o options) string { return o.mode },
+	// A SUMMARY of the prompt, since no row holds prose — the text itself travels beside it
+	// (settingTexts) for the editor to open on. Blank when nothing is set inline, the answer every
+	// other row whose value seeds a field gives: "none" would be a word standing where the prompt goes.
 	"system-prompt-text": func(o options) string { return countSummary(lineCount(o.systemPrompt.global.text), "line") },
 	// The path AS WRITTEN, blank when the key names no file — the three other editable string rows'
 	// answer (present.command, present.host, web-search-endpoint), and the only safe one: this row's
@@ -125,6 +128,15 @@ var settingValues = map[string]func(options) string{
 	"model-profile":        func(o options) string { return profileSummary(o.profile) },
 }
 
+// settingTexts is the RAW value of the keys whose displayed value is only a summary of it — the
+// kindText rows, whose editor is seeded with the prose itself (tui.SettingRow.Text). It is a second,
+// deliberately tiny table rather than a second return from settingValues: exactly one key of the
+// schema is prose, and every other row would have to answer a question it has no answer to.
+// TestSettingTextsCoverEveryTextKey pins it to the registry.
+var settingTexts = map[string]func(options) string{
+	"system-prompt-text": func(o options) string { return o.systemPrompt.global.text },
+}
+
 // settingsRows builds the /settings pane's rows: one per registry key, in registry order (which is
 // the config template's order), each carrying its section, its effective value, and the metadata
 // the pane needs in order to render and later edit it.
@@ -155,12 +167,17 @@ func settingsRows(opts options) []tui.SettingRow {
 		case value == "" && k.Default != "":
 			value = k.Default
 		}
+		text := ""
+		if raw, ok := settingTexts[k.Path]; ok {
+			text = raw(opts)
+		}
 		source, sourceName := settingSource(k, opts.overrides)
 		rows = append(rows, tui.SettingRow{
 			Path:        k.Path,
 			Section:     section,
 			Kind:        settingKind(k.Kind),
 			Value:       value,
+			Text:        text,
 			Default:     k.Default,
 			Source:      source,
 			SourceName:  sourceName,
@@ -193,6 +210,8 @@ func settingKind(kind configKind) tui.SettingKind {
 		return tui.SettingInt
 	case kindString, kindStringList:
 		return tui.SettingString
+	case kindText:
+		return tui.SettingText
 	case kindEnum:
 		return tui.SettingEnum
 	case kindServer:

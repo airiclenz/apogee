@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -78,12 +79,13 @@ import (
 // APPLIED exactly as a written value is, so a reset cannot mean less to the session than a write.
 
 // settingsKind is what the open pane is DOING: reading its key list, asking which value one enum key
-// should take, holding the buffer a string or an int is being typed into, or waiting for a reset to
-// be confirmed. It is the picker's own two-step idiom (pickerKind, /schedule's cycle-then-mode pair):
-// one pane, one selection per step, and the step is a field rather than a second overlay — so there
-// is no state in which two settings surfaces are open and no second give-way rule to write.
+// should take, holding the buffer a string or an int is being typed into, waiting for a reset to be
+// confirmed, or holding the multi-line field a text key's prose is written in. It is the picker's own
+// two-step idiom (pickerKind, /schedule's cycle-then-mode pair): one pane, one selection per step, and
+// the step is a field rather than a second overlay — so there is no state in which two settings
+// surfaces are open and no second give-way rule to write.
 //
-// One field for all four is also what makes them mutually exclusive by construction: a pane cannot be
+// One field for all five is also what makes them mutually exclusive by construction: a pane cannot be
 // buffering a value and awaiting a reset confirmation at once, so no keypress has two meanings and no
 // state pair has to be reasoned about.
 type settingsKind int
@@ -93,6 +95,7 @@ const (
 	settingsEnumList                        // the selected enum key's closed vocabulary, one value per row
 	settingsValueBuffer                     // the selected string/int key's edit buffer, on its own row
 	settingsResetArmed                      // backspace armed the selected row's reset; ⏎ confirms it
+	settingsTextEditor                      // the selected text key's prose, in a multi-line field filling the pane
 )
 
 // settingsPane is the overlay's inline state on the Model. Its zero value is "closed", so it lives
@@ -177,12 +180,17 @@ type settingFailure struct {
 // (docs/layout/settings-screen-layout.md's hint is a minimum, not an exhaustion): backspace is the
 // only act of this pane that is not discoverable from the row it works on, and a key that removes a
 // line from a file the human maintains by hand is exactly the one worth spelling out.
+// The text editor's legend names the two keys that END it and nothing else, exactly as the buffer's
+// does — and it has to be read, because they are not the keys every other step of this pane ends on:
+// ⏎ belongs to the VALUE there (it inserts a newline in prose that has lines), so the commit moves to
+// ctrl+s and the abandon stays on esc (ADR 0037 decision 10).
 const (
 	settingsTitle      = "Settings"
 	settingsHint       = "↑/↓ select · ⏎ edit · ⌫ reset · esc close"
 	settingsEnumHint   = "↑/↓ select · ⏎ set · esc back"
 	settingsBufferHint = "⏎ save · esc cancel"
 	settingsResetHint  = "⏎ confirm reset · esc cancel"
+	settingsTextHint   = "ctrl+s save · esc discard"
 )
 
 // The pane's description header: the label its first line opens with, and the number of lines the
@@ -338,6 +346,12 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.settingsAbandonStep() // the buffered key went away — same fallback, same reason
 	}
+	if m.settings.kind == settingsTextEditor {
+		if row, ok := m.settingsTextTarget(rows); ok {
+			return m.settingsTextKey(msg, row)
+		}
+		return m.settingsAbandonStep() // the key being written went away — same fallback, same reason
+	}
 	if m.settings.kind == settingsResetArmed {
 		if row, ok := m.settingsResetTarget(rows); ok {
 			return m.settingsResetKey(msg, row)
@@ -386,7 +400,9 @@ func (m Model) settingsAbandonStep() (tea.Model, tea.Cmd) {
 //   - a bool is toggled and persisted on the spot, because a two-value key has no question to ask;
 //   - an enum asks which value, in a sub-list of its own (the /schedule two-step) — and so does the
 //     `server` row, whose vocabulary is this config's own `servers:` block ([SettingServer]);
-//   - a string or an int opens a buffer on the row, seeded with what the key holds; and
+//   - a string or an int opens a buffer on the row, seeded with what the key holds;
+//   - a text key's prose opens a multi-line field over the whole list, seeded with the same
+//     ([SettingText]) — the one step whose ⏎ is the value's rather than the pane's; and
 //   - a row the registry does not let this surface write does nothing at all — its own cell already
 //     says where it IS edited ([SettingRow.EditPointer]), so a refusal note here would only repeat it.
 //
@@ -421,6 +437,11 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 	case SettingString, SettingInt:
 		m.settings.kind = settingsValueBuffer
 		m.settings.editor = newSettingsEditor(m.opts.CursorShape, m.settingsBufferSeed(row))
+		m.layout()
+		return m, nil
+	case SettingText:
+		m.settings.kind = settingsTextEditor
+		m.settings.editor = newSettingsTextEditor(m.opts.CursorShape, m.settingsTextValue(row))
 		m.layout()
 		return m, nil
 	case SettingStructured:
@@ -586,6 +607,106 @@ func (m Model) settingsBufferKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model
 func (m Model) settingsCommitBuffer(row SettingRow) (tea.Model, tea.Cmd) {
 	value := stripEscapes(strings.TrimSpace(m.settings.editor.value()))
 	if value == "" {
+		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
+		m.layout()
+		return m, nil
+	}
+	next, landed := m.settingsPersist(row, value)
+	m = next
+	if landed {
+		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
+	}
+	m.layout()
+	return m, nil
+}
+
+// settingsTextValue is the prose a text row holds: what this pane last wrote for the key, else the
+// value the run resolved ([SettingRow.Text] — the row's own cell carries a summary of it and nothing
+// this can be seeded from). It is settingsPersistedValue for the one kind whose value is not what its
+// row shows, and it is what the editor OPENS on, so an edit made twice in one session starts the
+// second time from what the first one wrote.
+//
+// The trailing newline goes: a block scalar yields exactly one (the writer normalizes to it), and
+// seeding a field with it would open the editor on a blank last line the human did not type and would
+// have to delete to leave the prompt as it was.
+func (m Model) settingsTextValue(row SettingRow) string {
+	if edit, ok := m.settingEditOf(row.Path); ok {
+		return edit.value
+	}
+	return strings.TrimRight(row.Text, "\n")
+}
+
+// newSettingsTextEditor is the field a text row's prose is written in: a [lineEditor] left MULTI-LINE
+// — the one field in this package that keeps the widget's newline binding, because ⏎ here means what
+// it means in any editor and the commit moves to ctrl+s (ADR 0037 decision 10).
+//
+// It is left at the widget's own width, which is what makes ↑/↓ walk the prompt's LOGICAL lines: the
+// pane paints one line per line and wraps what does not fit (renderSettingsText), so a caret walking
+// the widget's idea of visual rows would step through wraps the pane never drew.
+func newSettingsTextEditor(shape tea.CursorShape, seed string) lineEditor {
+	e := newLineEditor(shape)
+	e.noPaste()
+	e.setValue(seed)
+	return e
+}
+
+// settingsTextTarget is the row an open text editor is writing, and whether there still IS one — the
+// settingsEnumTarget contract for the third second-step, and what keeps a ctrl+s from committing a
+// prompt into whatever key moved into that index.
+func (m Model) settingsTextTarget(rows []SettingRow) (SettingRow, bool) {
+	if m.settings.kind != settingsTextEditor {
+		return SettingRow{}, false
+	}
+	row, ok := m.settingsSelectedRow(rows)
+	if !ok || !settingsWritable(row) {
+		return SettingRow{}, false
+	}
+	return row, true
+}
+
+// settingsWritable reports whether a row is edited in the multi-line field: the one kind whose value
+// is prose, and only where the registry lets this surface write it (settingsBufferable's twin).
+func settingsWritable(row SettingRow) bool {
+	return row.Editable && row.Kind == SettingText
+}
+
+// settingsTextKey routes a keypress in the multi-line field: ctrl+s commits, esc discards, and every
+// other key goes to the FIELD — ⏎ among them, which is the whole difference between this step and the
+// one-line buffer. What the human gets is what the chat box gives, over several lines.
+//
+// esc discarding rather than committing is deliberate and is what the legend says (settingsTextHint):
+// the field holds a page of prose, and the key that walks away from an edit must not be the one that
+// persists it.
+func (m Model) settingsTextKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		// The refusal goes with the abandoned edit, the buffer's own reason: a ✗ left on the row would
+		// report a failure against an edit nobody is making any more.
+		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
+		m.settings.failure = settingFailure{}
+		m.layout()
+		return m, nil
+	case "ctrl+s":
+		return m.settingsCommitText(row)
+	}
+	// The frame IS laid out again, unlike the one-line buffer's: this field is the pane's row list, so
+	// a line added or removed changes how many rows the pane measures.
+	cmd := m.settings.editor.editKey(msg)
+	m.layout()
+	return m, cmd
+}
+
+// settingsCommitText persists the prose and stays in the field when the binary will not have it — the
+// edit buffer's contract, for its reason: a refused prompt is still on the screen with the reason
+// beside it, so the human fixes the placeholder they mistyped instead of writing the prompt again.
+//
+// An EMPTY field commits nothing at all and simply closes, the buffer's own posture: a prompt cleared
+// to nothing is far more likely to be an abandoned edit than a request to send no prompt, and the
+// deliberate way to take the prompt away is the reset backspace arms (which the binary's own validator
+// says in as many words).
+func (m Model) settingsCommitText(row SettingRow) (tea.Model, tea.Cmd) {
+	value := strings.TrimRight(stripEscapes(m.settings.editor.value()), "\n")
+	if strings.TrimSpace(value) == "" {
 		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
 		m.layout()
 		return m, nil
@@ -1111,12 +1232,13 @@ func (d settingsDisplay) settingKeyAt(i int) (int, bool) {
 }
 
 // settingsEditing reports whether the pane is EDITING the given row — the state the row is painted
-// in the edit tone for (popupRowEditing, docs/layout/settings-screen-layout.md requirement 2). Both
-// second steps that hold ONE row count, because for the human they are the same fact: the buffer,
-// which is typed into on the row itself, and the enum sub-list, which is answering about it. The
-// sub-list draws a pane of its own today (renderSettingsEnum) rather than a list with one row lit,
-// so what this reports there is the pane's STATE rather than a row currently on the screen — the
-// predicate is about which row is being edited, not about which renderer is up.
+// in the edit tone for (popupRowEditing, docs/layout/settings-screen-layout.md requirement 2). Every
+// second step that holds ONE row counts, because for the human they are the same fact: the buffer,
+// which is typed into on the row itself, the enum sub-list, which is answering about it, and the
+// multi-line field, which is writing its value. The last two draw a pane of their own
+// (renderSettingsEnum, renderSettingsText) rather than a list with one row lit, so what this reports
+// there is the pane's STATE rather than a row currently on the screen — the predicate is about which
+// row is being edited, not about which renderer is up.
 //
 // The kind's own conditions are re-asked here (settingsBufferable, the enum's vocabulary) for the
 // reason the two targets re-ask them: the rows are re-derived under an open step, and a row that can
@@ -1127,6 +1249,8 @@ func (m Model) settingsEditing(row SettingRow) bool {
 		return settingsBufferable(row)
 	case settingsEnumList:
 		return settingsPickable(row) && len(m.settingsVocabulary(row)) > 0
+	case settingsTextEditor:
+		return settingsWritable(row)
 	}
 	return false
 }
@@ -1171,6 +1295,8 @@ func (m Model) settingsPaneHint() string {
 		return settingsBufferHint
 	case settingsResetArmed:
 		return settingsResetHint
+	case settingsTextEditor:
+		return settingsTextHint
 	}
 	return settingsHint
 }
@@ -1217,6 +1343,10 @@ func (m Model) settingsValueCell(row SettingRow) string {
 // after a reset — the default the key went back to, which for a key that defaults to nothing is the
 // word for nothing rather than a blank the marker would float after.
 //
+// A TEXT row keeps a summary of what was written rather than the prose itself, which is what its cell
+// showed before the edit and all a row has room for — the count is re-derived here because the value
+// the pane wrote is newer than the one the provider resolved (settingsTextSummary).
+//
 // A masked row keeps the MASK it arrived with: the pane persisted a secret it never held and has
 // nothing to show for it ([SettingRow]), so the marker beside the mask is the whole of what such a
 // row says about having been written. A RESET of it is not a secret at all — a removed line left
@@ -1227,12 +1357,30 @@ func settingsEditedValue(row SettingRow, edit settingEdit) string {
 		return settingsUnsetValue
 	case edit.reset:
 		return row.Default
+	case row.Kind == SettingText:
+		return settingsTextSummary(edit.value)
 	case row.Masked:
 		return row.Value
 	case edit.value == "":
 		return settingsUnsetValue
 	}
 	return edit.value
+}
+
+// settingsTextSummary is how many lines a text value holds — the whole of what a ROW says about prose,
+// since a row is one line and a system prompt is a page of them. It is the pane's own spelling of the
+// summary the binary projects into [SettingRow.Value] (settingsrows.go), and it exists because the two
+// are needed at different times: the projection answers from the resolution the run started with, and
+// this answers for a value the pane wrote a moment ago, which no provider has heard about.
+func settingsTextSummary(text string) string {
+	value := strings.TrimSuffix(text, "\n")
+	if value == "" {
+		return ""
+	}
+	if n := strings.Count(value, "\n") + 1; n > 1 {
+		return strconv.Itoa(n) + " lines"
+	}
+	return "1 line"
 }
 
 // settingsNote is the row's last cell: what became of this pane's own writes to the key, else where a
@@ -1342,6 +1490,9 @@ func (m Model) renderSettings() string {
 	if row, ok := m.settingsEnumTarget(rows); ok {
 		return m.renderSettingsEnum(row)
 	}
+	if _, ok := m.settingsTextTarget(rows); ok {
+		return m.renderSettingsText(rows)
+	}
 	spec, display, ok := m.settingsKeyListSpec(rows)
 	if !ok {
 		return "" // the frame cannot seat this pane (settingsGiveWayNote says so on the status line)
@@ -1386,6 +1537,55 @@ func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDispla
 		hint:        m.settingsPaneHint(),
 		maxRows:     maxRows,
 	}, display, true
+}
+
+// renderSettingsText paints the multi-line field a text key's prose is written in — the pane's third
+// renderer, and the one that replaces the key LIST rather than one row of it. The frame around it does
+// not move: the same border, the same title, and the same description header naming the key being
+// written (settingsBody, which reads the SELECTED row and is therefore already about this key), so
+// what changes between the list and the field is only what is inside the box.
+//
+// The field is painted as ROWS because that is what the popup module takes — plain, escape-free cells
+// it styles whole (doc.go) — one row per line of the value, every one of them in the edit tone
+// (popupRowEditing) so the block reads as the field it is. The caret is a GLYPH inside the line it
+// stands on, for the reason it is one on a value row (settingsCaret): a popup row has no seat for the
+// terminal's own cursor.
+//
+// Two things the list does not ask for, both because this is a field and not a list. The rows WRAP
+// (popupSpec.wrapRows) — a prompt line longer than the pane must arrive whole, where a key row is
+// recognised from its start and can afford the ellipsis — and the selection follows the CARET's line,
+// which is what keeps the line being typed inside the scroll window on a prompt longer than the pane
+// (popupRowWindow re-derives around it every frame).
+func (m Model) renderSettingsText(rows []SettingRow) string {
+	lines := strings.Split(m.settings.editor.textWithCaret(settingsCaret), "\n")
+	text := make([]popupRow, 0, len(lines))
+	kinds := make([]popupRowKind, 0, len(lines))
+	for _, line := range lines {
+		text = append(text, popupRow{stripEscapes(line)})
+		kinds = append(kinds, popupRowEditing)
+	}
+	body := m.settingsBody(rows)
+	// The claim is in painted LINES, and a wrapping row costs more than one — so it is measured with
+	// the painter's own composition rather than counted off the value, which would ask for too few the
+	// moment a line wrapped and hide the tail of a prompt the pane had room for.
+	claim := popupRowBlockLines(popupRowHeights(popupRowBlocks(m.th, text, true, popupInnerWidth(m.th, m.width))), 0, 0)
+	maxBody, maxRows, seated := m.popupBudget(paneSettings, claim, claim, popupChrome,
+		popupFloor{body: popupBodyLineCount(m.th, body, m.width)})
+	if !seated {
+		return "" // the frame cannot seat this pane (settingsGiveWayNote says so on the status line)
+	}
+	return renderPopup(m.th, popupSpec{
+		title:       settingsTitle,
+		body:        body,
+		bodyLead:    settingsDescLabel,
+		maxBodyRows: maxBody,
+		rows:        text,
+		rowKinds:    kinds,
+		wrapRows:    true,
+		selected:    clampInt(m.settings.editor.caretLine(), 0, len(text)-1),
+		hint:        m.settingsPaneHint(),
+		maxRows:     maxRows,
+	}, m.width)
 }
 
 // renderSettingsEnum paints the value sub-list — the second step of an enum edit — in the SAME pane,

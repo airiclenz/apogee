@@ -95,6 +95,51 @@ func TestSettingValuesCoverEveryRegistryKey(t *testing.T) {
 	}
 }
 
+// The same guard for the second, tiny table: a kindText row whose prose nothing projects would open
+// its editor on an empty field and offer to overwrite the prompt with what was typed into it, and a
+// projection for a key that is not text would be prose no surface reads.
+func TestSettingTextsCoverEveryTextKey(t *testing.T) {
+	t.Parallel()
+
+	for _, k := range keyRegistry {
+		if _, ok := settingTexts[k.Path]; ok != (k.Kind == kindText) {
+			t.Errorf("registry key %q is kind %q but settingTexts projects it = %v — the raw value is "+
+				"carried for exactly the text keys", k.Path, k.Kind, ok)
+		}
+	}
+	for path := range settingTexts {
+		if _, ok := lookupKey(path); !ok {
+			t.Errorf("settingTexts projects %q, which the registry does not describe (renamed or removed key?)", path)
+		}
+	}
+}
+
+// The text row carries BOTH halves: the summary a row has space for, and the prose the editor opens
+// on. They are read in different places and neither stands in for the other.
+func TestSettingsRowsCarryThePromptTextBesideItsSummary(t *testing.T) {
+	t.Parallel()
+
+	opts := fabricatedSettings()
+	opts.systemPrompt = systemPromptSettings{global: promptSource{text: "one\ntwo\nthree\n"}}
+	row := rowsByPath(t, settingsRows(opts))["system-prompt-text"]
+	if row.Kind != tui.SettingText {
+		t.Errorf("row kind = %q; want %q", row.Kind, tui.SettingText)
+	}
+	if row.Value != "3 lines" {
+		t.Errorf("row value = %q; want the line summary", row.Value)
+	}
+	if row.Text != "one\ntwo\nthree\n" {
+		t.Errorf("row text = %q; want the prompt itself", row.Text)
+	}
+
+	opts.systemPrompt = systemPromptSettings{}
+	blank := rowsByPath(t, settingsRows(opts))["system-prompt-text"]
+	if blank.Value != "" || blank.Text != "" {
+		t.Errorf("an unset prompt reads {%q %q}; want both blank — the row seeds a field, so no word "+
+			"stands in for emptiness", blank.Value, blank.Text)
+	}
+}
+
 // Sections are runs over the registry's order, so every opener must exist, they must appear in
 // registry order, and the FIRST registry key must open one — otherwise the rows above the first
 // opener would carry no section at all.
@@ -282,7 +327,9 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 			t.Errorf("row %q pointer = %q; want %q — the interlock stays in /confine", path, got, pointerConfine)
 		}
 	}
-	for _, path := range []string{"servers", "mcp-servers", "mechanisms", "system-prompt-text", "model-profile"} {
+	// system-prompt-text is NOT among them since it became editable in its own multi-line field: the
+	// prose the file carries as a block is written in the pane now (tui.SettingText).
+	for _, path := range []string{"servers", "mcp-servers", "mechanisms", "system-prompt-models", "model-profile"} {
 		if got := byPath[path].EditPointer; got != pointerConfigFile {
 			t.Errorf("row %q pointer = %q; want %q", path, got, pointerConfigFile)
 		}

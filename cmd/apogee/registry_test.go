@@ -70,11 +70,12 @@ func walkSchema(t *testing.T, typ reflect.Type, prefix string, described map[str
 // schema holds the key in — the second half of the drift guard: a bool key retyped to a
 // string is caught even though its path did not change. Pointers are transparent (a *bool is
 // the schema's way of distinguishing an explicit `false` from an absent key), and kind
-// structured accepts a plain string as well as the composite types, because
-// system-prompt-text is a single string whose value is multi-line prose — no single-line field
-// edits that, so the surface treats it as a block. A string LIST is a slice, and the one kind
-// whose Go type says nothing about its ELEMENTS — that a name list holds names and not blocks is
-// what kindStringList asserts, and what the writer's own round-trip proves.
+// structured accepts a plain string as well as the composite types, because the Go type of a
+// value is not what makes it structured — what makes it structured is that no field edits it.
+// kindText is the string whose value is multi-line prose: the same Go type as kindString and a
+// different editor, which is the distinction the surface acts on. A string LIST is a slice, and
+// the one kind whose Go type says nothing about its ELEMENTS — that a name list holds names and
+// not blocks is what kindStringList asserts, and what the writer's own round-trip proves.
 func kindMatchesType(kind configKind, typ reflect.Type) bool {
 	typ = derefType(typ)
 	switch kind {
@@ -82,7 +83,7 @@ func kindMatchesType(kind configKind, typ reflect.Type) bool {
 		return typ.Kind() == reflect.Bool
 	case kindInt:
 		return typ.Kind() == reflect.Int
-	case kindString, kindEnum, kindServer:
+	case kindString, kindEnum, kindServer, kindText:
 		return typ.Kind() == reflect.String
 	case kindStringList:
 		return typ.Kind() == reflect.Slice && derefType(typ.Elem()).Kind() == reflect.String
@@ -272,6 +273,8 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 		{"ui.spinner", "twirl", "invalid ui.spinner"},
 		{"cursor-shape", "sideways", "invalid cursor-shape"},
 		{"system-prompt-file", "", "name a file to read the prompt from"},
+		{"system-prompt-text", "  ", "write the prompt inline"},
+		{"system-prompt-text", "You are apogee in {{ workspace }}.", "unknown placeholder"},
 		{"context-files.names", "[../secrets.md]", "climbs out of the workspace"},
 		{"context-files.names", "[AGENTS.md, ./AGENTS.md]", "listed twice"},
 		{"context-files.names", "[/etc/motd]", "not workspace-relative"},
@@ -317,6 +320,8 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		// A RELATIVE prompt file is resolved against the apogee home, which this pure check does not
 		// hold, so it is accepted here and answered by the apply (validateSystemPromptFile).
 		{"system-prompt-file", "prompts/apogee.md"},
+		// Prose over several lines, carrying the placeholders the renderer substitutes per request.
+		{"system-prompt-text", "You are apogee in {{workspace}}.\nToday is {{datetime}}, mode {{mode}}.\n"},
 		{"context-files.names", "[AGENTS.md, docs/CLAUDE.md]"},
 		{"context-files.names", "[]"}, // the second documented spelling of "off"
 	} {

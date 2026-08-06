@@ -258,6 +258,122 @@ func TestSpliceScalarSettingRoundTripsEveryEditableKey(t *testing.T) {
 	}
 }
 
+// The block-scalar writer, against the file it will actually meet: the seeded template, whose
+// `system-prompt-text:` block is its ONE active key and the only multi-line value the schema has. The
+// template is the hardest case the writer has — the prompt sits in the middle of twenty lines of
+// documentation, with more documentation directly under it — so what is checked is that every one of
+// those lines survives a set, a re-set and a reset, and that what a reader takes back out of the file
+// is what was written.
+func TestSpliceTextBlockRewritesTheTemplatesPrompt(t *testing.T) {
+	t.Parallel()
+	const key = "system-prompt-text"
+	k := mustKey(key)
+	template := string(defaultConfigYAML)
+
+	for _, tt := range []struct {
+		name       string
+		value      string
+		wantHeader string
+		wantLines  []string
+	}{
+		{
+			name:       "an ordinary multi-line prompt",
+			value:      "You are apogee.\nWork in {{workspace}}.\n",
+			wantHeader: key + ": |",
+			wantLines:  []string{"  You are apogee.", "  Work in {{workspace}}."},
+		},
+		{
+			name:       "blank lines and trailing spaces survive",
+			value:      "first line   \n\n\tindented by a tab\nlast   \n",
+			wantHeader: key + ": |",
+			wantLines:  []string{"  first line   ", "", "  \tindented by a tab", "  last   "},
+		},
+		{
+			// A first line that opens with whitespace would be read as the block's own indentation and
+			// vanish, so the header states the indentation explicitly instead.
+			name:       "a prompt whose first line is indented keeps its indentation",
+			value:      "  indented first line\nflush second line\n",
+			wantHeader: key + ": |2",
+			wantLines:  []string{"    indented first line", "  flush second line"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			updated, err := setScalarSetting([]byte(template), k, tt.value)
+			if err != nil {
+				t.Fatalf("set %s: %v", key, err)
+			}
+			if updated == nil {
+				t.Fatalf("set %s reported nothing to write", key)
+			}
+			got := string(updated)
+			assertCommentsSurvive(t, template, got)
+			assertOnlyKeyChanged(t, template, got, key)
+			if read, ok, err := scalarAtPath(updated, key); err != nil || !ok || read != tt.value {
+				t.Errorf("the file reads back %q (set=%v, err=%v), want %q", read, ok, err, tt.value)
+			}
+			lines := splitConfigLines(updated)
+			at := slices.Index(lines, tt.wantHeader)
+			if at < 0 {
+				t.Fatalf("no %q header line in:\n%s", tt.wantHeader, got)
+			}
+			if body := lines[at+1 : at+1+len(tt.wantLines)]; !slices.Equal(body, tt.wantLines) {
+				t.Errorf("the block reads %q, want %q", body, tt.wantLines)
+			}
+
+			// A re-set over the block this one wrote is the ordinary case after the first edit, and a
+			// reset takes the WHOLE block away rather than the header line it starts with.
+			again, err := setScalarSetting(updated, k, "A second prompt.\n")
+			if err != nil {
+				t.Fatalf("re-set %s: %v", key, err)
+			}
+			if read, ok, _ := scalarAtPath(again, key); !ok || read != "A second prompt.\n" {
+				t.Errorf("after the re-set the file reads %q (set=%v), want the second prompt", read, ok)
+			}
+			assertCommentsSurvive(t, template, string(again))
+
+			reset, err := deleteScalarSetting(updated, k)
+			if err != nil {
+				t.Fatalf("reset %s: %v", key, err)
+			}
+			if read, ok, _ := scalarAtPath(reset, key); ok {
+				t.Fatalf("after the reset, %s still reads %q", key, read)
+			}
+			assertCommentsSurvive(t, template, string(reset))
+			assertOnlyKeyChanged(t, got, string(reset), key)
+		})
+	}
+}
+
+// An empty prompt is not how the key is cleared: a block with nothing in it would be a set of nothing,
+// where the reset that removes the block is the deliberate act (validateSystemPromptText).
+func TestSpliceTextBlockRefusesAnEmptyPrompt(t *testing.T) {
+	t.Parallel()
+	if _, err := setScalarSetting(defaultConfigYAML, mustKey("system-prompt-text"), "\n\n"); err == nil {
+		t.Fatal("an empty prompt was written")
+	}
+}
+
+// assertCommentsSurvive checks that every comment line of the input is still in the output, in the same
+// order — the promise the whole writer exists for, and the one thing a multi-line splice can break that
+// a parsed comparison would never see: the file's documentation is not in fileConfig.
+func assertCommentsSurvive(t *testing.T, before, after string) {
+	t.Helper()
+	comments := func(text string) []string {
+		var out []string
+		for _, line := range splitConfigLines([]byte(text)) {
+			if isCommentLine(line) {
+				out = append(out, line)
+			}
+		}
+		return out
+	}
+	b, a := comments(before), comments(after)
+	if !slices.Equal(b, a) {
+		t.Errorf("the splice changed the file's comments: %d lines before, %d after\n%s", len(b), len(a), after)
+	}
+}
+
 // plausibleValue is a valid value for a key, different enough from the defaults to be visible in
 // the file: the first of an enum's vocabulary, and a fixed literal for everything else. A list's
 // literal is spelled the way the file spells one, which is also what the sweep reads back — a value
@@ -278,6 +394,11 @@ func plausibleValue(t *testing.T, k configKey) string {
 		return "apogee-test-value"
 	case kindStringList:
 		return "[apogee-test.md, docs/apogee-test.md]"
+	case kindText:
+		// Written the way a reader takes it back out of a clip-chomped block: several lines, a blank
+		// one among them, and exactly one trailing newline — the canonical spelling renderSettingValue
+		// normalizes to, so the sweep's read-back comparison is against the value as offered.
+		return "apogee test prompt, first line\n\nand a third line after a blank one\n"
 	}
 	t.Fatalf("%s has no writable kind (%s)", k.Path, k.Kind)
 	return ""

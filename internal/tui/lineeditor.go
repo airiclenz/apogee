@@ -86,6 +86,15 @@ func (e *lineEditor) singleLine() {
 	}
 }
 
+// noPaste switches the widget's own ctrl+v off, which [lineEditor.singleLine] does as one of the
+// several things it takes away and a MULTI-line field still needs on its own. The reason is the same
+// and it is stated there: the clipboard read comes back as a Msg of the widget package's own
+// unexported type, which [Model.Update] can only route to the chat box, so the binding would land a
+// paste in a box the human cannot see behind the pane in front of it.
+func (e *lineEditor) noPaste() {
+	e.input.KeyMap.Paste.SetEnabled(false)
+}
+
 // value is what the field currently holds.
 func (e lineEditor) value() string {
 	return e.input.Value()
@@ -116,6 +125,14 @@ func (e *lineEditor) editKey(msg tea.KeyPressMsg) tea.Cmd {
 // column) flattened, which is the coordinate every caller that slices the value counts in.
 func (e lineEditor) caretRune() int {
 	return caretOffset(e.input.Value(), e.input.Line(), e.input.Column())
+}
+
+// caretLine is the LOGICAL line the caret stands on — which line of a multi-line value the next
+// keystroke lands in. A surface that paints the value one line per line reads it to know which of
+// those lines to keep on the screen (renderSettingsText); the chat box has no use for it, because the
+// widget draws and scrolls itself there.
+func (e lineEditor) caretLine() int {
+	return e.input.Line()
 }
 
 // textWithCaret is the field as PLAIN TEXT with a caret glyph drawn into it at the caret's position.
