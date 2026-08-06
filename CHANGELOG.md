@@ -65,38 +65,56 @@ point is a **minor** bump, not a breaking change.
   Defined in `CONTEXT.md` ("Ask-user") and specced in `layout.md`, with the pinned mockup in
   `docs/design/user-questions-layout.md`.
 
-- **`/settings` — your whole configuration on one screen, editable where an edit is a single
-  value.** The verb opens the first **full-height** pane apogee has: one row per setting, in the
+- **`/settings` — your whole configuration on one screen, and every change takes effect in the
+  session you make it in.** The verb opens the first **full-height** pane apogee has: one row per
+  setting, in the
   order the starter `config.yaml` documents them and grouped under section headings, each showing
   the value *this run* resolved for it — with `(env)` or `(flag)` on the rows a higher-precedence
   source beat the file at, and `••••` where the upstream `api-key:` would be. Thirty-odd keys are a
   screen to read rather than a choice to scan, so the transcript gives way entirely while it is up;
-  `↑/↓` move the `❯`, the line under the list describes the key it is on, `esc` closes. It is
+  `↑/↓` move the `❯`, a fixed two-line `Description:` header above the list says what the key under
+  the cursor is for, section labels stand in white above the rows they open, the row being typed
+  into is lit, and the mouse works where the keys do — a click selects a row, the wheel walks the
+  list. `esc` closes. It is
   idle-only, and it is the first surface from which apogee writes your config at all.
   - **An edit is persisted the moment you commit it, one key at a time.** `⏎` toggles a true/false
-    row, opens the value list on a row with a fixed set, or opens a buffer on the row for a string
-    or a number. What lands in `~/.apogee/config.yaml` is a **line splice**: your comments, your
+    row, opens a selection popup on a row with a fixed set of values, opens a buffer on the row for
+    a string
+    or a number, or opens a multi-line field for the inline system prompt (`⏎` makes a new line,
+    `ctrl+s` saves, `esc` discards). A buffer is a real field: cursor keys, `home`/`end`, word jumps,
+    and a mouse that seats the caret and drags a selection, exactly as in the prompt box. What lands
+    in `~/.apogee/config.yaml` is a **line splice**: your comments, your
     layout and every other key untouched, the result re-parsed and compared against the original
     before it replaces the file, written atomically. A key that was still one of the file's
     commented examples has its active line inserted directly below that example, where the
     documentation for it already is. A value the key cannot hold — a port out of range, an endpoint
     with no host — is refused before anything is written, with the reason on the row and your text
     still in the buffer.
-  - **A saved edit says when it takes effect** rather than pretending it already has: the row wears
-    a `→ <value> (next launch)` marker, because the session is still running the value it started
-    with. `mode:` is the one exception — it has a live path, the same one `⇧⇥` drives — so its edit
-    applies at once and the row just shows the new value. Where an environment variable or a flag
-    outranks the file, the marker says both halves of the truth: saved, and still overridden this
-    run.
+  - **And what is saved is applied, on the same `⏎`.** No setting waits for a restart and no row
+    says "(next launch)": the key is routed to whatever puts it into effect — an engine setter, an
+    idle rebind, or the wiring that owns it — so the next thing apogee does uses it. The row keeps a
+    ` *` after its value (`false *`), which says *you changed this here, this session*, and it is
+    cleared only by a relaunch. The `context-files:` pair is the one that lands at a boundary
+    instead, because it is part of the prefix every request is cached against, and the row says so:
+    `· applies at next clear`. Where an environment variable or a flag outranks the file, the edit
+    still applies and is still written, and the row adds that the override wins again at your next
+    start; if a write lands but the live apply refuses it, the row says exactly that
+    (`saved — live apply failed: …`).
   - **`backspace` unsets a key**, arming a reset the hint line asks you to confirm with `⏎`. What
     that removes is the key's **line**, not its value: the setting goes back to following the
-    built-in default rather than being pinned to today's spelling of it.
-  - **Structured blocks stay read-only and say where they are edited.** `servers:`,
-    `mcp-servers:`, `mechanisms:`, `validated-sets:`, the system prompt and the model profile
-    render as a summary with an `· edit in config.yaml` pointer; the confinement keys carry
+    built-in default rather than being pinned to today's spelling of it — and that default is
+    applied on the same keypress, the row reporting it as `default *`.
+  - **The blocks no row can hold open your editor.** `servers:`, `mcp-servers:`, `mechanisms:`,
+    `validated-sets:`, `system-prompt-models:` and the model profile carry an `· ⏎ opens $EDITOR`
+    pointer, and that is what `⏎` does: apogee suspends into `$VISUAL`, else `$EDITOR`, else `vi`
+    (`notepad` on Windows), with the cursor on that key's line where the editor takes one. On return
+    the file is re-read, validated, and every key that changed is applied the way an in-pane edit is
+    — a changed `mcp-servers:` **reconnects**, dialling the new set first and swapping the tools over
+    only once it is up, so a server that will not come back leaves the old connections serving and
+    the reason on the row. The jump is offered between runs only. The confinement keys keep
     `· use /confine`, because switching Auto's fence off asks for an acknowledgement that stays
-    with that verb. Switching model or server likewise stays with `/model` and `/server` —
-    editing `endpoint:` or `model:` here persists the value and moves nothing now.
+    with that verb — and the `server:` row now performs the full **live switch**, the same move
+    `/server` makes, from the same list and recorded the same way.
   - **The pane cannot drift from the schema.** It renders from a new declarative key registry in
     the binary — one row per configuration key, with its kind, default, sources, editability and
     one-line description — and a reflection guard pins that registry to a bijection with the config
@@ -104,8 +122,10 @@ point is a **minor** bump, not a breaking change.
     quietly going missing from the screen. Settings resolution now reads each key's environment
     variable and flag name from the same rows, so source metadata has one home.
 
-  Ratified in ADR 0035, defined in `CONTEXT.md` ("Settings surface") and specced in `layout.md`
-  ("What 'height' means", where the full-height pane class is written down).
+  Ratified in ADR 0035 (the persistence contract) and ADR 0037 (the live apply, which supersedes
+  0035's mode-only decision), defined in `CONTEXT.md` ("Settings surface") and specced in
+  `layout.md` ("What 'height' means", where the full-height pane class is written down) with the
+  pinned mockup in `docs/layout/settings-screen-layout.md`.
 
 - **You can see how much context a sub-agent used.** A collapsed sub-agent run's summary line now
   states the delegate's own context fill between the call count and the gist —

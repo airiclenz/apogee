@@ -247,7 +247,7 @@ blue for a file your workspace has — so a typo is visible before you send.
 | `/server` | Move this session to another server you configured — picker, or `/server <name>` | — |
 | `/unload-model` | Free the model of the server this session is on — see [below](#local-servers--llama-launcher) | — |
 | `/stop-server` | Stop the server this session is on — see [below](#local-servers--llama-launcher) | — |
-| `/settings` | Browse every setting and edit the simple ones — see [below](#the-settings-screen--settings) | — |
+| `/settings` | Browse and change every setting, live — see [below](#the-settings-screen--settings) | — |
 
 A lone `/word` that names neither a command nor a skill is **not** sent to the model:
 apogee says `unknown command or skill: /…` and leaves your line in the box to fix.
@@ -266,40 +266,60 @@ any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript.
 in the order the starter `config.yaml` documents them and grouped under section headings,
 each row showing the value **this run resolved** for it. Where a higher-precedence source
 beat the file, the row says which — `(env)` or `(flag)` — so a key that reads one way in the
-file and another on screen explains itself. The conversation
-gives way entirely while the pane is up, because thirty-odd keys are a screen to read rather
-than a choice to scan: `↑/↓` move the `❯`, the line under the list describes the key it is
-on, and `esc` closes the pane and hands the transcript back. It needs a quiet engine, so it
-is **idle only**.
+file and another on screen explains itself. The conversation gives way
+entirely while the pane is up, because thirty-odd keys are a screen to read rather
+than a choice to scan: `↑/↓` move the `❯`, a fixed two-line `Description:` header above the
+list says what the key under the cursor is for, and `esc` closes the pane and hands the
+transcript back. Section labels stand in white above the rows they open, the row being typed
+into is lit, and the mouse works where the keys do — a click selects a row, the wheel walks
+the list one row per notch. It needs a quiet engine, so it is **idle only**.
 
 **Editing writes one key, when you ask.** `⏎` on a true/false row toggles it, `⏎` on a row
-with a fixed set of values opens that list, and `⏎` on a string or a number opens a buffer on
-the row itself. Each committed edit is spliced straight into `~/.apogee/config.yaml` — your
+with a fixed set of values — `mode:`, `server:` — opens that list to pick from, `⏎` on a
+string or a number opens a buffer on the row itself, and `⏎` on the inline system prompt
+opens a multi-line field over the list, where `⏎` makes a new line, `ctrl+s` saves and `esc`
+discards. A buffer is a real field: the arrow keys, `home`/`end` and word jumps move the
+caret, and the mouse seats it and drags a selection exactly as it does in the prompt box. Each
+committed edit is spliced straight into `~/.apogee/config.yaml` — your
 comments, your layout and every other key untouched, the result re-parsed and compared
 against the original before it replaces the file — and a key that was still one of the
 commented examples lands directly below it. A value the key cannot hold is refused before
 anything is written, with the reason on the row and your text still in the buffer. Nothing
 else is ever written: apogee still makes no edit to that file you did not ask for.
 
-**A saved edit says when it takes effect.** The row wears a `→ <value> (next launch)` marker,
-because the session is still running the value it started with and a row that claimed
-otherwise would be lying about which run it describes. `mode:` is the exception — it has a
-live path, the same one `⇧⇥` drives — so its edit applies now and the row simply shows the
-new value. On a key an environment variable or a flag is overriding, the marker tells the
-fuller truth: the file was written and something still outranks it.
+**And what is saved is applied — to the session you are in.** The `⏎` that persists a key
+also puts it into effect, so no setting waits for a restart: change `mode:`, `bypass:`, a
+mechanism switch, the web-search endpoint, the presentation keys or the model profile and the
+next thing apogee does uses it. The row keeps a ` *` after its value — `false *` — which says
+*you changed this here, this session*; it is cleared only by a relaunch. One pair lands at a
+boundary the session crosses anyway rather than mid-conversation, and says so on the row: the
+`context-files:` keys are part of the prefix every request is cached against, so they take
+effect at the next `/clear` — `· applies at next clear`. On a key an environment variable or
+a flag is overriding, the edit still applies and is still written, and the row adds that the
+override will win again the next time apogee starts — startup precedence is unchanged. If a
+write lands but the live apply refuses it, the row says exactly that
+(`saved — live apply failed: …`) rather than leaving you to guess which half happened.
 
 **`backspace` unsets.** On a row you have set, `backspace` arms a reset, the hint line asks
 for a confirming `⏎`, and what that sends **removes the key's line** from the file rather than
 writing today's default into it — so the key goes back to following the built-in default
-instead of being pinned to a copy of it.
+instead of being pinned to a copy of it. The default is applied on the same keypress, and the
+row reports it with the same marker: `default *`.
 
-**Some rows are read-only and say where they are edited instead.** Structured blocks —
-`servers:`, `mcp-servers:`, `mechanisms:`, `validated-sets:`, the system prompt, the model
-profile — render as a summary with an `· edit in config.yaml` pointer; the pane edits simple
-values only. The confinement keys carry `· use /confine`, because switching Auto's fence off
-asks for an acknowledgement that belongs with [that verb](#auto-modes-blast-radius). And
-moving a session stays with `/model` and `/server`: the `server:` row here says which entry
-the *next* launch starts on — the same line a switch records for you — and moves nothing now.
+**The blocks no row can hold open your editor.** `servers:`, `mcp-servers:`, `mechanisms:`,
+`validated-sets:`, `system-prompt-models:` and the model profile render as a summary with an
+`· ⏎ opens $EDITOR` pointer, and that is what `⏎` does: apogee suspends into `$VISUAL`, else
+`$EDITOR`, else `vi` (`notepad` on Windows), with the cursor on that key's line where the
+editor takes a line argument. On the way back the file is re-read and validated, and every key
+that changed is applied the way an in-pane edit is — a changed `mcp-servers:` **reconnects**,
+connecting the new set first and swapping the tools over only once it is up, so a server that
+will not come back leaves the old connections serving and the reason on the row; a changed
+`model-profile:` swaps the parser. A non-zero exit from the editor (`:cq`) discards the round
+trip. The jump is offered between runs only — mid-run the row asks you to wait, while in-pane
+edits stay open. The confinement keys are the one pair that goes nowhere near it: they carry
+`· use /confine`, because switching Auto's fence off asks for an acknowledgement that belongs
+with [that verb](#auto-modes-blast-radius). And the `server:` row **moves the session** — the
+same switch `/server` performs, chosen from the same list, recorded the same way.
 
 ## Sessions
 
@@ -365,7 +385,7 @@ That file is also readable and editable from inside apogee:
 run resolved for it, and writes a committed edit back as a **single key**, comments and
 layout preserved. Apogee writes that file in exactly three places and nowhere else: a
 committed edit you asked for, the `server:` line a `/server` switch records for your
-next launch, and the one-time migration of a config still written in the retired
+next start, and the one-time migration of a config still written in the retired
 schema — which copies the file aside first and says so on startup. "Your edits are
 never overwritten" stands: nothing is rewritten at upgrade, and no line you wrote is
 touched at any other time.
@@ -445,7 +465,7 @@ entries may share one. `endpoint` is required; `api-key` and `model` are optiona
 
 **`server:` keeps itself current.** Every `/server` switch onto a listed entry
 splices `server: <name>` back into the file — that one key, your comments and layout
-untouched — so the next launch starts where you left off. A move onto a server the
+untouched — so your next start begins where you left off. A move onto a server the
 list does not name (an `--endpoint` URL, a llama-launcher profile) has no name to
 record and writes nothing.
 

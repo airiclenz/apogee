@@ -412,28 +412,51 @@ _Avoid_: "trusted host" (it is not a trust store, and nothing is verified), "whi
 **Settings surface** (`/settings`):
 The **full-height pane over the key registry** — the in-app view of `~/.apogee/config.yaml`. The
 **key registry** is one declarative table describing every config key (path, kind, default,
-env-var and flag names, global-only, restart-required, editability, masking, one-line description);
+env-var and flag names, global-only, editability, masking, validation hook, one-line description);
 both the pane and [Resolution](#safety-and-autonomy)'s multi-source precedence read their metadata
 from it, and a reflection **bijection guard** against `fileConfig`'s yaml tags makes a schema key
 without a registry row a test failure — the screen cannot drift from the schema. The pane claims
 the **entire transcript row budget** while the frame floor (status line, input box, footer) stays
 drawn — a new pane class, `layout.md`'s first surface allowed to take all of it — lists every key
-with its resolved value and source marker, and **persists one key per committed edit**: spliced
+with its resolved value and source marker under white section headings and a fixed two-line
+description header, and **persists one key per committed edit**: spliced
 into the file comment-preserving, re-parsed and verified against the original apart from the target
 path, written atomically; an inserted key lands below its commented example, and **reset deletes
-the key's active line** rather than writing today's default. v1 edits **simple keys only**
-(bool / int / string / enum) — structured blocks render read-only with an "edit in config.yaml"
-pointer, `confine-to-workspace` / `unconfined-hosts` are display-only (that loosen stays
-single-homed in **`/confine`**), and **`mode` is the only live apply** (every other edit is marked
-"(next launch)"; the pane never rebinds a model or server). Idle-only. It **reconciles** the
+the key's active line** rather than writing today's default.
+Every committed edit is also **applied to the running session** (ADR 0037, superseding ADR 0035's
+mode-only live apply): the ⏎ that persists routes the key to whatever puts it into effect — an
+anytime-safe engine setter, an idle-only validate-then-commit rebind, or the composition root — so
+**no key waits for a restart** and no row says "(next launch)". What a row keeps instead is the
+**session edit journal**'s ` *` marker: *this surface changed this key this session*, cleared only
+by relaunch. The one deferral wording left is a **boundary note** for a key that lands at a
+boundary the session crosses anyway ("· applies at next clear", the `context-files:` pair, whose
+KV-prefix stability is deliberate); a pane edit **outranks an env/flag override** for the running
+session (the row notes that the override wins again at the next start, startup precedence
+unchanged), and a persist whose apply then failed says so ("saved — live apply failed: …").
+Editing is **hybrid**: simple keys are edited in the pane — a bool toggles, a 3-plus-option key
+opens a selection popup, a string or an int opens a real single-line field on its row (cursor keys
+and mouse), the inline system prompt a multi-line field (⏎ inserts a newline, ctrl+s commits) —
+while the six nested structures take an **`$EDITOR` round-trip**: ⏎ suspends into the human's own
+editor at that key's line, and on return the file is re-read, validated and every changed key
+applied through those same two homes (a changed `mcp-servers:` **reconnects**, validate-then-commit:
+the new set is dialled first and the old sessions keep serving on failure; startup connect stays
+fatal). The `server` row performs the full **live switch**, identical to `/server`;
+`confine-to-workspace` / `unconfined-hosts` stay display-only with a "use /confine" pointer (that
+loosen stays single-homed in **`/confine`**, ADR 0012). Idle-only, and the `$EDITOR` jump is
+offered between runs only. It **reconciles** the
 standing "apogee never writes your config" claims (seeding never overwrites, Probe prints
 paste-ready YAML, `/model` does not rewrite the file): never *unprompted* — a settings-screen edit
 is a deliberate user act and names the file and entry it changed, the same fence ADR 0012 applies
 to `/confine off --save`. See
-[ADR 0035](docs/adr/0035-the-settings-surface-persists-one-key-per-deliberate-edit.md).
+[ADR 0035](docs/adr/0035-the-settings-surface-persists-one-key-per-deliberate-edit.md) (the
+persistence contract) and
+[ADR 0037](docs/adr/0037-every-settings-edit-applies-to-the-running-session.md) (the live apply).
 _Avoid_: "settings menu" / "preferences dialog" (it is a pane inside the frame, not a modal
-takeover), "config editor" (it edits declared scalar keys through a verified splice; it is not a
-text editor for the file), "auto-sync" (no boot-time key syncing exists — rejected in ADR 0035).
+takeover), "config editor" (it edits declared keys through a verified splice, and hands the file
+itself to `$EDITOR` for the rest; it is never a text editor of its own), "auto-sync" (no boot-time
+key syncing exists — rejected in ADR 0035), "pending edit" / "(next launch)" (nothing is pending —
+an edit applies on the ⏎ that persists it; the marker ADR 0035 introduced is abolished, not
+narrowed).
 
 **Safety guardrails**:
 Apogee's production safety set: Agent modes, Approval, path-safety (TOCTOU-safe at use time via a

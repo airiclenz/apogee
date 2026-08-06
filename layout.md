@@ -229,21 +229,45 @@ is the same **four rows** every pane's is, spent the same way (two borders, a ti
 below twelve rows it is not drawn at all, exactly as no pane is; the input box, the footer and both
 hairlines are the frame's floor here as everywhere; and a draft the human has grown takes its rows
 out of the same budget, so a long draft shrinks the pane rather than the box. Above the floor it
-spends the rows in the pane's own order: the **rows first**, its one body line — the description of
-the key under the `❯` — kept ahead of them by the same claim the ask prompt's question makes, so the
-caption is the line the pane would otherwise hand back. And when the frame can seat it nowhere, it
-does what every surface that disappears owes: it **leaves its fact on the status line**. For this pane
-the fact carries the way OUT as well — `settings — esc close` — because it is swallowing every
+spends the rows in the pane's own order: the **rows first**, its body block — the **description
+header**, which names what the key under the `❯` is for — kept ahead of them by the same claim the
+ask prompt's question makes, so the caption is the line the pane would otherwise hand back. That
+header is a **fixed-height region**: a `Description:` lead, at most **two lines** of the description
+itself whatever it measures, and one blank line closing it off from the list, so walking the list
+with `↑/↓` moves the highlight and nothing else (ADR 0037). A longer description loses its tail to
+an `…` on the second line rather than the list losing a row to it. And when the frame can seat it
+nowhere, it does what every surface that disappears owes: it **leaves its fact on the status line**.
+For this pane the fact carries the way OUT as well — `settings — esc close` — because it is swallowing every
 keypress on a window that is showing none of it, and a frame that went quiet there would read as an
 idle session with a dead keyboard.
 
 **The value sub-list is the one state in which a full-height pane is short.** When `⏎` on an enum key
-turns the pane into the second step of its edit — the list of values that key may take (ADR 0035) —
-the pane paints that handful of rows and the ones it does not use go back to the **transcript** for as
-long as the question is open. That is the budget rule working as written rather than an exception to
+turns the pane into the second step of its edit — the list of values that key may take (ADR 0035), or
+the entries of `servers:` on the row that moves the session (ADR 0037) — the pane paints that handful
+of rows and the ones it does not use go back to the **transcript** for as long as the question is
+open. That is the budget rule working as written rather than an exception to
 it: the grant is the whole budget, and a pane spends the rows it *has*. It is also right for what the
 state is — four answers to one question, all on the screen at once, which is the approval menu's shape
 and not a screen to read.
+
+**The pane's other replaced state is a field, and it spends the budget the list would.** `⏎` on the
+inline system prompt turns the row list into the **multi-line editor** its prose is written in
+(ADR 0037): the same border, the same title and the same description header — which is already about
+the key being written, because it describes the selected row — with the value's own lines where the
+rows were, every one of them in the edit tone so the block reads as one field. Two things separate it
+from a list. Its rows **wrap** rather than truncate, because a prompt line longer than the pane must
+arrive whole where a key row is recognised from its start; and the scroll window follows the
+**caret's** line rather than a selection, so the line being typed stays on screen in a prompt longer
+than the pane can seat.
+
+**Each step names its own keys on the hint row**, because the keys mean different things in each.
+The key list reads `↑/↓ select · ⏎ edit · ⌫ reset · esc close` — the reset is named because it is
+the one act of this pane no row advertises, and it removes a line from a file the human maintains by
+hand. The value sub-list reads `↑/↓ select · ⏎ set · esc back`, the single-line buffer
+`⏎ save · esc cancel`, and an armed reset `⏎ confirm reset · esc cancel` — the one line this pane
+asks anything on, the `/sessions` delete-confirm posture with `⏎` in place of `y`. The multi-line
+field reads `ctrl+s save · esc discard`, and it has to be read: `⏎` there belongs to the **value**,
+which is the whole difference between that step and every other.
 
 **What the approval prompt's body says is the call, in the call's own words.** The tool's raw name
 rides the top border, a non-empty reason leads the body as `Reason: …`, and the arguments follow it
@@ -1172,14 +1196,23 @@ reads as one block of prose instead of sliding back under a marker that says not
 single-cell row measures a hanging indent of zero and wraps exactly where it always did. The
 **`/settings` pane's key rows are four-cell** — the key, its value, an `(env)`/`(flag)` mark where a
 higher-precedence source beat the file, and a last tier carrying whatever else is true of the row:
-the `· edit in config.yaml` or `· use /confine` pointer of a key this pane will not write, else the
-`→ <value> (next launch)` marker of one it just wrote, else the reason a write was refused. That
+the reason the last act on it was refused, else the boundary note of an edit that landed at a
+boundary this session will cross rather than at once (`· applies at next clear`), else — on a row an
+environment variable or a flag is overriding — that the override wins again at the next start, else
+the `· ⏎ opens $EDITOR` or `· use /confine` pointer of a key this pane will not write. That
 tier is one column rather than three because a row is only ever one of those things at a time, and
 it and the mark before it both collapse away on a configuration with nothing overridden, nothing
 read-only and nothing edited yet — the same collapse that costs the `/` menu nothing for its
-`— idle only` tag. Its **section headings are single-cell rows**, so they sit at the pane's left
+`— idle only` tag. **A key this session changed here wears a ` *` on its value cell** — `false *` —
+and nothing else: an edit applies on the `⏎` that persists it (ADR 0037), so there is no pending
+value to point at and what is left worth saying is which rows were touched. Its **section headings
+are single-cell rows**, so they sit at the pane's left
 edge rather than inside the key column, and they are rows the module paints and the selection never
-lands on. The pane's second step — the values one enum key may take — is **two-cell**: the value,
+lands on; each opens on a **blank spacer row** — except the first, which the description header's own
+closing blank already sets off — and is painted a weight **above** the faint rows under it, so the
+divisions of a long list are found without being read. The row being **edited** is painted in the
+edit tone across its whole width, which is how a row says it is the field. The pane's second step —
+the values one enum key may take — is **two-cell**: the value,
 and a `(current)` mark on the one the key already holds.
 
 **`␣` ticks a multi-select answer, and `⏎` is still the one send.** A question the model marked
