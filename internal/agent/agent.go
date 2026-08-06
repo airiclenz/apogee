@@ -27,8 +27,8 @@ import (
 // An Agent is not safe for concurrent use by multiple goroutines; drive one Agent
 // from one goroutine (Step/Run), and observe it from another only via its EventSink.
 // The methods touching loop state fall into three call classes. Idle-only calls (Submit,
-// ClearContext, RestoreSession, Compact, Rebind, AbortExchange) need a quiescent boundary
-// with no Exchange mid-flight. Between-Steps calls by the goroutine DRIVING the loop
+// ClearContext, RestoreSession, Compact, Rebind, SwapTools, AbortExchange) need a quiescent
+// boundary with no Exchange mid-flight. Between-Steps calls by the goroutine DRIVING the loop
 // (Snapshot, Interject) are additionally valid at the boundary between two Steps of an open
 // Exchange: that goroutine owns the conversation there, so the boundary itself is the
 // synchronization — no lock, and no other goroutine may make the call (ADR 0025). The

@@ -124,7 +124,9 @@ NOTES (2026-08-06): four deviations from the item's literal text. (a) `liveSetti
 
 **Commit:** `feat(settings): context-window and system-prompt edits ride the rebind path live`
 
-## 5. Engine SwapTools — the one idle-only tool-registry mutator
+## 5. Engine SwapTools — the one idle-only tool-registry mutator — ✅ DONE (2026-08-06)
+
+NOTES (2026-08-06): two deviations from the item's literal text. (a) The mid-run refusal WRAPS `domain.ErrInputPending` with its reason (`…: the tool set can only be swapped between runs`) instead of returning it bare as `Rebind` does — `errors.Is` still matches the idle-only class, but this refusal is the only one in that class that is user-facing (items 6/17 render it inside the row's `saved — live apply failed: <error>` note, where the bare "cannot submit input mid-exchange" would name something the user never did). (b) The well-formedness half of the validation (nil entry, empty name, duplicate name) is DEFENCE ONLY and stays untested: `ToolRegistry`'s fields are unexported and its own `Register`/`Subset` already refuse all three, so no caller outside `internal/domain` can build a registry that trips it — the reachable validation is the nil-registry refusal, which is tested. Also worth knowing: `cfg.Tools` stays the immutable construction seed (only `resolveTools` reads it) — the swap replaces `a.tools` alone, and `newChildAgent` overrides `childCfg.Tools` from the live registry, so nothing ever reads the stale seed.
 
 **What:** `internal/agent`: add `SwapTools` in the idle-only validate-then-commit class (the `Rebind` shape, `agent.go:29`): it takes a fully built tool registry, validates (non-nil, well-formed; refuses while a run is in flight, same refusal idiom as `Rebind`), and atomically replaces `a.tools`. Sub-agents already build from the parent's live registry at spawn (the `subagent.go:132` inheritance idiom) — verify and state in the doc comment that a spawned-after-swap sub-agent sees the new registry. This is the single door for every tool-set change: web-search enable/disable (item 6), MCP reconnect (items 15/17). Binding F: no second registry-mutation path may appear later.
 
