@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
@@ -59,29 +60,73 @@ const (
 // is an ExternalEffectTool of kind network that reaches the network ONLY through the
 // embedded network funnel — the funnel applies url-safety and carries the url-filter marker
 // dispatch trusts (network.go). Stateless across Turns.
+//
+// The endpoint is the one thing about it that MOVES: `web-search-endpoint:` is a setting the
+// human can commit mid-session and have take effect at once (ADR 0037), and the registry holds
+// this pointer for the life of the session — so SetEndpoint re-points the tool in place rather
+// than a fresh registry being built for a URL change.
 type WebSearch struct {
 	toolSpec
 	networkTool
+
+	// mu guards the resolved endpoint triple below. The three are one decision (resolveSearchEndpoint
+	// derives them together) and are written from the host's Update goroutine while Execute reads
+	// them on the loop's worker goroutine, so they are read as a set — an Execute mid-SetEndpoint
+	// must never pair a new endpoint with the old provider's request shape.
+	mu       sync.RWMutex
 	endpoint string
 	provider searchProvider
 	disabled bool // the endpoint was the off sentinel — Execute reports gracefully, no request
 }
 
-// NewWebSearch returns the web_search tool. An empty endpoint selects the built-in
-// DuckDuckGo default; the sentinels "off"/"none"/"disabled" (case-insensitive) disable the
-// tool; anything else is a custom endpoint, filtered through guard. A scheme-less custom
-// endpoint (e.g. "search.example.com/s") self-heals to https:// — url.Parse reads it as a
-// bare path (Host == ""), and url-safety would otherwise reject every request. An endpoint
-// whose host is the built-in DuckDuckGo host IS the built-in provider: DDG answers only the
-// provider's request shape (POST + browser headers), so a config'd
-// "html.duckduckgo.com/html/" must not degrade to the custom-endpoint GET.
+// NewWebSearch returns the web_search tool for endpoint, resolved by resolveSearchEndpoint
+// (an empty endpoint is the built-in DuckDuckGo default; the off sentinels disable the tool;
+// anything else is a custom endpoint, filtered through guard).
 func NewWebSearch(guard security.URLGuard, endpoint string) *WebSearch {
+	t := &WebSearch{toolSpec: webSearchSpec, networkTool: networkTool{guard: guard}}
+	t.endpoint, t.provider, t.disabled = resolveSearchEndpoint(endpoint)
+	return t
+}
+
+// SetEndpoint re-points the tool at endpoint, resolved exactly as construction resolves it — so
+// the sentinels disable a live tool, an empty value hands it back to the built-in provider, and a
+// custom URL still self-heals. It takes effect from the next Execute; a search already in flight
+// finishes against the endpoint it started on.
+//
+// It is the whole of what a `web-search-endpoint:` edit has to do while web_search is registered:
+// the tool is stateless across Turns, so there is nothing to tear down and nothing to reconnect,
+// and the registry keeps the same pointer. Building a fresh registry is reserved for the case the
+// tool SET changes (Agent.SwapTools), which a URL change is not.
+func (t *WebSearch) SetEndpoint(endpoint string) {
+	e, p, disabled := resolveSearchEndpoint(endpoint)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.endpoint, t.provider, t.disabled = e, p, disabled
+}
+
+// config reads the resolved endpoint triple as one value, so a single Execute runs against a
+// single coherent configuration.
+func (t *WebSearch) config() (endpoint string, provider searchProvider, disabled bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.endpoint, t.provider, t.disabled
+}
+
+// resolveSearchEndpoint turns a configured `web-search-endpoint:` value into the three things
+// Execute runs on. An empty endpoint selects the built-in DuckDuckGo default; the sentinels
+// "off"/"none"/"disabled" (case-insensitive) disable the tool and store no endpoint at all;
+// anything else is a custom endpoint. A scheme-less custom endpoint (e.g. "search.example.com/s")
+// self-heals to https:// — url.Parse reads it as a bare path (Host == ""), and url-safety would
+// otherwise reject every request. An endpoint whose host is the built-in DuckDuckGo host IS the
+// built-in provider: DDG answers only the provider's request shape (POST + browser headers), so a
+// config'd "html.duckduckgo.com/html/" must not degrade to the custom-endpoint GET.
+func resolveSearchEndpoint(endpoint string) (string, searchProvider, bool) {
 	endpoint = strings.TrimSpace(endpoint)
 	switch strings.ToLower(endpoint) {
 	case "":
-		return &WebSearch{toolSpec: webSearchSpec, networkTool: networkTool{guard: guard}, endpoint: defaultSearchEndpoint, provider: providerDuckDuckGo}
+		return defaultSearchEndpoint, providerDuckDuckGo, false
 	case "off", "none", "disabled":
-		return &WebSearch{toolSpec: webSearchSpec, networkTool: networkTool{guard: guard}, disabled: true}
+		return "", providerDuckDuckGo, true
 	}
 	if u, err := url.Parse(endpoint); err != nil || u.Host == "" {
 		if healed, herr := url.Parse("https://" + endpoint); herr == nil && healed.Host != "" {
@@ -92,7 +137,7 @@ func NewWebSearch(guard security.URLGuard, endpoint string) *WebSearch {
 	if u, err := url.Parse(endpoint); err == nil && strings.EqualFold(u.Hostname(), defaultSearchHost) {
 		provider = providerDuckDuckGo
 	}
-	return &WebSearch{toolSpec: webSearchSpec, networkTool: networkTool{guard: guard}, endpoint: endpoint, provider: provider}
+	return endpoint, provider, false
 }
 
 // ExternalEffect reports that web_search reaches the network (kind network).
@@ -115,7 +160,12 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if strings.TrimSpace(args.Query) == "" {
 		return errorResult(call.ID, "query is required"), nil
 	}
-	if t.disabled {
+
+	// One read of the endpoint triple for the whole call: a SetEndpoint landing between the
+	// disabled check and the request must not send this search somewhere the disabled check
+	// never saw (ADR 0037 — the endpoint moves mid-session).
+	endpoint, provider, disabled := t.config()
+	if disabled {
 		// The host set the off sentinel. Graceful, not an error (§3a) — the model learns
 		// web search is unavailable and the turn continues. No request is made.
 		return okResult(call.ID, "web search is disabled on this host (web-search-endpoint: off); web_search is unavailable."), nil
@@ -127,25 +177,25 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	// parameters it already carries"); it must never reach a model-facing or logged string
 	// (security-review M2). It rides along as the funnel's safeLabel, so every failure
 	// message the funnel renders names this host and nothing else.
-	endpointHost := safeHost(t.endpoint)
+	endpointHost := safeHost(endpoint)
 
 	// The DuckDuckGo provider carries the query in a POST form body, so its reqURL is the
 	// bare endpoint: DDG's HTML front-end answers a GET with its bot-challenge ("anomaly")
 	// page — results come only over POST, the way its own search form submits. A custom
 	// endpoint keeps the `q` GET-parameter contract.
-	reqURL := t.endpoint
-	if t.provider != providerDuckDuckGo {
+	reqURL := endpoint
+	if provider != providerDuckDuckGo {
 		var err error
-		reqURL, err = buildSearchURL(t.endpoint, args.Query)
+		reqURL, err = buildSearchURL(endpoint, args.Query)
 		if err != nil {
-			return errorResult(call.ID, "could not build search url for host "+endpointHost+": "+scrubURLError(err, t.endpoint)), nil
+			return errorResult(call.ID, "could not build search url for host "+endpointHost+": "+scrubURLError(err, endpoint)), nil
 		}
 	}
 
 	method := http.MethodGet
 	var reqBody io.Reader
 	var header http.Header
-	if t.provider == providerDuckDuckGo {
+	if provider == providerDuckDuckGo {
 		method = http.MethodPost
 		reqBody = strings.NewReader(url.Values{"q": {args.Query}}.Encode())
 		// Browser-like headers: DuckDuckGo's HTML front-end serves challenge pages to bare
@@ -181,7 +231,7 @@ func (t *WebSearch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		// rate-limit or challenge page is noise, and the URL must stay scrubbed (M2).
 		return errorResult(call.ID, "search endpoint returned HTTP "+resp.status+" (host "+endpointHost+")"), nil
 	}
-	text, hits := renderSearch(t.provider, resp, args.Query)
+	text, hits := renderSearch(provider, resp, args.Query)
 	if hits == 0 {
 		// Nothing numbered to count: a "No results" sentinel, a cleaned HTML page, or a
 		// custom backend's verbatim document. There is no hit count to report, so the result

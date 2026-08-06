@@ -248,9 +248,22 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		return fmt.Errorf("apogee: connect MCP servers: %w", err)
 	}
 	defer mcpClient.Close()
-	if mcpTools := mcpClient.Tools(); len(mcpTools) > 0 {
-		cfg.Tools = registryWithMCP(roots.workspace, cfg, mcpTools)
-	}
+	// The registry is assembled HERE unconditionally rather than left to the engine's own
+	// resolveTools — which would build the identical set from this same Config — because the
+	// composition root has to keep the pointer. The settings surface re-points a live tool in place
+	// when only its configuration moved (the web_search endpoint, ADR 0037), and rebuilds the whole
+	// set through Agent.SwapTools when the SET has to change. Neither is reachable through a
+	// registry the engine built privately, and with no MCP server configured the two builds are the
+	// same tools in the same order, so this changes what the root HOLDS, never what the Agent runs.
+	cfg.Tools = registryWithMCP(roots.workspace, cfg, mcpClient.Tools())
+	toolSet := newLiveTools(cfg.Tools, func(endpoint string) *apogee.ToolRegistry {
+		// The set as this session would have built it with another search endpoint: the MCP tools
+		// are re-folded from the client rather than remembered, so a rebuild always carries the
+		// connections that are live NOW.
+		host := cfg
+		host.WebSearchEndpoint = endpoint
+		return registryWithMCP(roots.workspace, host, mcpClient.Tools())
+	})
 
 	// Resolve the catalogued Mechanisms enabled in config.yaml to the sorted ID list the engine arms
 	// (ADR 0015 §1: wire.go collapses to a YAML→ID-list producer). runRoot validates EVERY
@@ -633,6 +646,9 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 			rebind:       rebind,
 			configPath:   filepath.Join(roots.config, "config.yaml"),
 			contextFiles: opts.contextFiles,
+			skills:       skillProvider,
+			tools:        toolSet,
+			roots:        roots,
 		}),
 		Skills: skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
@@ -831,15 +847,97 @@ func (s *liveSettings) rebindInputs(base options) (options, []apogee.MechanismID
 // ----------------------------------------------------------------------------
 
 // settingsEngine is the engine surface the live-apply dispatcher drives: the anytime-safe mutator
-// class of ADR 0037 decision 2 and nothing else — one mutex, one field, consumed at a boundary the
-// loop crosses constantly, so a call is safe while a Step runs. It is an interface rather than the
-// holder itself so the dispatcher can be exercised against a spy with no Agent behind it, the
-// narrowing every seam this file hands the renderer already follows.
+// class of ADR 0037 decision 2 — one mutex, one field, consumed at a boundary the loop crosses
+// constantly, so a call is safe while a Step runs — plus the ONE idle-only mutator a settings edit
+// can reach, SwapTools (binding F). Nothing else: the second idle-only door, Rebind, is driven
+// through the rebind closure rather than from here, because a rebind is a per-MODEL resolution the
+// heartbeat also drives. It is an interface rather than the holder itself so the dispatcher can be
+// exercised against a spy with no Agent behind it, the narrowing every seam this file hands the
+// renderer already follows.
 type settingsEngine interface {
 	SetMode(apogee.Mode)
 	SetBypass(bool)
 	SetCompactionEnabled(bool)
 	SetContextFiles(enable bool, names []string)
+	SwapTools(*apogee.ToolRegistry) error
+}
+
+// settingsSkills is the skill-catalogue surface the dispatcher drives, narrowed off *skills.Provider
+// for settingsEngine's reason. The two calls are one act — re-point, then re-scan — because the
+// Provider deliberately keeps serving the catalogue it has until someone asks for a fresh one.
+type settingsSkills interface {
+	SetSources(skills.Sources)
+	Reload() error
+}
+
+// liveTools is the tool set the session is running on. It exists because two different kinds of
+// change can reach the tools mid-session and only one of them needs the engine: re-pointing a tool
+// that is already registered is a write on the tool itself (the registry holds the pointer, so the
+// loop resolves the same object), while adding or removing a tool is a whole-registry replacement
+// that has to go through Agent.SwapTools — the single door of ADR 0037 binding F.
+//
+// Holding the CURRENT registry is what keeps the first kind honest after the second has happened: a
+// swap installs a new registry on the Agent, and a root that kept looking up tools in the old one
+// would be re-pointing objects nothing dispatches to any more.
+//
+// The mutex guards the pointer for the same reason lateEngine's does: the writes come from the
+// Update goroutine (the pane's keypress) and the tools themselves are read on the loop's worker
+// goroutine, which reaches them through the Agent rather than through this holder.
+type liveTools struct {
+	mu      sync.Mutex
+	current *apogee.ToolRegistry
+
+	// build assembles the whole set as this session would have assembled it at startup, for a given
+	// web-search endpoint — host tools plus the MCP tools that are connected now.
+	build func(webSearchEndpoint string) *apogee.ToolRegistry
+}
+
+// newLiveTools holds the registry the session was constructed with, and the recipe for another.
+func newLiveTools(current *apogee.ToolRegistry, build func(webSearchEndpoint string) *apogee.ToolRegistry) *liveTools {
+	return &liveTools{current: current, build: build}
+}
+
+// setSearchEndpoint moves web_search to endpoint. While the tool is registered — the ordinary case,
+// since the built-in set always carries it (an "off" endpoint registers a tool that declines
+// gracefully rather than no tool at all) — the move is a write on the tool the registry already
+// holds: nothing is rebuilt, nothing is swapped, and the change is in force for the next call even
+// mid-run, which is the whole point of the tool owning a setter.
+//
+// The swap door is the fallback for a session whose registry has NO web_search to re-point — a set
+// narrowed by an earlier swap, or a registry an embedder assembled by hand. Then the endpoint is
+// part of the set's identity, so the set is rebuilt and handed to the engine; being idle-only, that
+// path can be refused mid-run, and the refusal is what the row reports over a value it has already
+// persisted (binding A).
+func (t *liveTools) setSearchEndpoint(endpoint string, engine settingsEngine) error {
+	if ws := t.webSearch(); ws != nil {
+		ws.SetEndpoint(endpoint)
+		return nil
+	}
+	next := t.build(endpoint)
+	if err := engine.SwapTools(next); err != nil {
+		return err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.current = next
+	return nil
+}
+
+// webSearch resolves the live web_search tool, or nil when the current set has none (or has
+// something else under that name — an embedder's own search tool is not one this may re-point).
+func (t *liveTools) webSearch() *tools.WebSearch {
+	t.mu.Lock()
+	registry := t.current
+	t.mu.Unlock()
+	if registry == nil {
+		return nil
+	}
+	found, ok := registry.Lookup("web_search")
+	if !ok {
+		return nil
+	}
+	ws, _ := found.(*tools.WebSearch)
+	return ws
 }
 
 // contextFileNote is the boundary sentence the `context-files:` keys carry back to the row: the name
@@ -869,6 +967,15 @@ type settingsApplier struct {
 	configPath string
 	// contextFiles are the workspace context-file names THIS run resolved.
 	contextFiles []string
+	// skills is the shared skill catalogue: the SAME Provider the loop resolves attached ids against
+	// and the "/" menu lists, so re-pointing it at another source layering moves both at once.
+	skills settingsSkills
+	// tools is the session's live tool set — where a tool is re-pointed in place, and the door a
+	// set-level change goes through.
+	tools *liveTools
+	// roots are this session's resolved state dirs, which is what the skill source layering is spelled
+	// out of (the same three fields runRoot builds the startup Sources from).
+	roots stateRoots
 }
 
 // applySettingFor builds the [tui.Options.ApplySetting] dispatcher: the one place a key the pane has
@@ -919,6 +1026,25 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			// boundary note on the row is telling the human about.
 			a.engine.SetContextFiles(on, a.contextFiles)
 			return contextFileNote, nil
+		case "use-project-skills":
+			on, err := settingBool(key, value)
+			if err != nil {
+				return "", err
+			}
+			// The same layering startup spells, with the flag as it now stands. Re-pointing alone would
+			// change nothing anybody sees — the Provider serves the catalogue it has until asked for a
+			// fresh one — so the re-scan is part of the same act.
+			a.skills.SetSources(skills.Sources{
+				Home:             a.roots.config,
+				Workspace:        a.roots.workspace,
+				UseProjectSkills: on,
+			})
+			// The scan's error is soft and is dropped here for the reason the "/" menu's reload drops
+			// it: Load never signals an unusable catalogue — a malformed skill is skipped and shown in
+			// the /skills report — so a partial scan is not a failed apply.
+			_ = a.skills.Reload()
+		case "web-search-endpoint":
+			return "", a.tools.setSearchEndpoint(value, a.engine)
 		case "context-window":
 			tokens, err := settingInt(key, value)
 			if err != nil {
@@ -1870,6 +1996,19 @@ func (e *lateEngine) SetContextFiles(enable bool, names []string) {
 	if agent != nil {
 		agent.SetContextFiles(enable, names)
 	}
+}
+
+// SwapTools replaces the session's tool set outright (ADR 0037 binding F — the one door for a
+// tool-set change). Unlike the four setters above it is NOT remembered while unbound, and does not
+// need to be: the tools an unbound session will start with are Config.Tools, the registry the
+// composition root holds and rebuilds directly, so nothing is lost by refusing here — there is
+// simply no Agent yet whose set could differ from it.
+func (e *lateEngine) SwapTools(registry *apogee.ToolRegistry) error {
+	agent := e.bound()
+	if agent == nil {
+		return errNoServerBound
+	}
+	return agent.SwapTools(registry)
 }
 
 // ConfineToWorkspace reports the blast radius the next tool call will read: the Agent's own once

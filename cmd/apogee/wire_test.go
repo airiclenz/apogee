@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 	llamalauncher "github.com/airiclenz/llama-launcher/launcher"
@@ -2222,6 +2223,10 @@ type applySettingSpy struct {
 	bypass       []bool
 	compaction   []bool
 	contextFiles []contextFileChoice
+	swaps        []*apogee.ToolRegistry
+	// swapErr is the idle-only refusal a busy engine answers a swap with, so the dispatcher's
+	// keep-the-persisted-value path is exercisable without a run in flight.
+	swapErr error
 }
 
 func (s *applySettingSpy) SetMode(m apogee.Mode)        { s.modes = append(s.modes, m) }
@@ -2229,6 +2234,20 @@ func (s *applySettingSpy) SetBypass(on bool)            { s.bypass = append(s.by
 func (s *applySettingSpy) SetCompactionEnabled(on bool) { s.compaction = append(s.compaction, on) }
 func (s *applySettingSpy) SetContextFiles(on bool, n []string) {
 	s.contextFiles = append(s.contextFiles, contextFileChoice{enable: on, names: n})
+}
+
+func (s *applySettingSpy) SwapTools(registry *apogee.ToolRegistry) error {
+	if s.swapErr != nil {
+		return s.swapErr
+	}
+	s.swaps = append(s.swaps, registry)
+	return nil
+}
+
+// drove reports how many engine seams the spy was driven through in total — the assertion a key that
+// should have touched nothing makes.
+func (s *applySettingSpy) drove() int {
+	return len(s.modes) + len(s.bypass) + len(s.compaction) + len(s.contextFiles) + len(s.swaps)
 }
 
 // Every key the dispatcher knows lands on ITS seam and no other, carrying the value the file spells.
@@ -2318,7 +2337,7 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 	tests := []struct {
 		name, key, value, wantIn string
 	}{
-		{name: "a key with no live seam", key: "web-search-endpoint", value: "off", wantIn: "web-search-endpoint"},
+		{name: "a key with no live seam", key: "mcp-servers", value: "", wantIn: "mcp-servers"},
 		{name: "a key that is not a setting", key: "nonsense", value: "1", wantIn: "nonsense"},
 		{name: "a bool that is not one", key: "bypass", value: "yes please", wantIn: "bypass is true or false"},
 		{name: "a mode outside the ladder", key: "mode", value: "yolo", wantIn: "invalid"},
@@ -2334,7 +2353,7 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 			if !strings.Contains(err.Error(), tt.wantIn) {
 				t.Errorf("error = %q, want it to contain %q", err, tt.wantIn)
 			}
-			if len(spy.modes)+len(spy.bypass)+len(spy.compaction)+len(spy.contextFiles) != 0 {
+			if spy.drove() != 0 {
 				t.Errorf("a refused apply still drove the engine: %+v", spy)
 			}
 		})
@@ -2404,7 +2423,7 @@ func TestApplySettingContextWindowPinRidesTheRebind(t *testing.T) {
 	if len(probe.calls) != 2 || probe.calls[1].window != 8192 {
 		t.Errorf("rebind drives = %+v, want a second drive carrying the observed 8192", probe.calls)
 	}
-	if len(spy.modes)+len(spy.bypass)+len(spy.compaction)+len(spy.contextFiles) != 0 {
+	if spy.drove() != 0 {
 		t.Errorf("a rebind-riding key drove an anytime-safe mutator: %+v", spy)
 	}
 }
@@ -2534,6 +2553,140 @@ func writeSettingsFixture(t *testing.T, path, body string) {
 	}
 }
 
+// A search endpoint is a tool's configuration, not a change of WHICH tools exist — so while
+// web_search is registered (the ordinary case: the built-in set always carries it) the apply is a
+// write on the tool the registry already holds. The engine hears nothing, which is what lets the
+// endpoint move mid-run.
+func TestApplySettingWebSearchEndpointMovesTheRegisteredTool(t *testing.T) {
+	t.Parallel()
+	registry := tools.NewDefaultRegistryWithHost(t.TempDir(), tools.HostTools{})
+	spy := &applySettingSpy{}
+	apply := applySettingFor(settingsApplier{
+		engine: spy,
+		tools:  newLiveTools(registry, func(string) *apogee.ToolRegistry { return apogee.NewToolRegistry() }),
+	})
+
+	if _, err := apply("web-search-endpoint", "https://search.example.com/s"); err != nil {
+		t.Fatalf("apply web-search-endpoint: %v", err)
+	}
+	found, ok := registry.Lookup("web_search")
+	if !ok {
+		t.Fatal("web_search left the registry; the endpoint move must not rebuild the set")
+	}
+	if _, ok := found.(*tools.WebSearch); !ok {
+		t.Fatalf("web_search is a %T; the registry must still hold the tool that was re-pointed", found)
+	}
+	if spy.drove() != 0 {
+		t.Errorf("re-pointing a registered tool drove the engine: %+v", spy)
+	}
+}
+
+// The swap door is the OTHER case: a set with no web_search to re-point cannot answer the edit in
+// place, so the whole set is rebuilt and handed to the engine (ADR 0037 binding F). The rebuilt set
+// becomes the live one, which is what makes the NEXT edit an in-place move again — a root still
+// looking up tools in the swapped-out registry would be re-pointing an object nothing dispatches to.
+func TestApplySettingWebSearchEndpointSwapsWhenTheToolIsAbsent(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	var built []string
+	spy := &applySettingSpy{}
+	live := newLiveTools(apogee.NewToolRegistry(), func(endpoint string) *apogee.ToolRegistry {
+		built = append(built, endpoint)
+		return tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{WebSearchEndpoint: endpoint})
+	})
+	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
+
+	if _, err := apply("web-search-endpoint", "https://first.example.com/s"); err != nil {
+		t.Fatalf("apply web-search-endpoint: %v", err)
+	}
+	if want := []string{"https://first.example.com/s"}; !slices.Equal(built, want) {
+		t.Fatalf("rebuilds = %v, want %v", built, want)
+	}
+	if len(spy.swaps) != 1 {
+		t.Fatalf("SwapTools calls = %d, want 1: an absent tool is a set-level change", len(spy.swaps))
+	}
+	if _, ok := spy.swaps[0].Lookup("web_search"); !ok {
+		t.Error("the swapped-in registry has no web_search; the rebuild must carry the tool the edit is about")
+	}
+
+	// The second edit finds web_search in the set the first one installed, so it moves in place.
+	if _, err := apply("web-search-endpoint", "https://second.example.com/s"); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	if len(built) != 1 || len(spy.swaps) != 1 {
+		t.Fatalf("the second edit rebuilt again (rebuilds %v, swaps %d); the live set must be the swapped-in one", built, len(spy.swaps))
+	}
+}
+
+// SwapTools is idle-only, so a run in flight refuses it. The refusal is REPORTED — the row renders it
+// over a value the file already carries (binding A) — and the session stays on the set it had, which
+// is what makes re-committing the edit a retry rather than a second half-application.
+func TestApplySettingWebSearchSwapRefusalKeepsTheOldSet(t *testing.T) {
+	t.Parallel()
+	old := apogee.NewToolRegistry()
+	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
+	live := newLiveTools(old, func(endpoint string) *apogee.ToolRegistry {
+		return tools.NewDefaultRegistryWithHost(t.TempDir(), tools.HostTools{WebSearchEndpoint: endpoint})
+	})
+	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
+
+	if _, err := apply("web-search-endpoint", "off"); err == nil {
+		t.Fatal("apply web-search-endpoint: want the engine's refusal, got none")
+	}
+	if live.current != old {
+		t.Error("a refused swap still became the live set; the session must keep the tools it had")
+	}
+}
+
+// `use-project-skills` moves WHICH dirs are skill sources, so the apply re-points the shared Provider
+// and re-scans: the flag is not something a catalogue already loaded can answer. One Provider feeds
+// the loop and the "/" menu (ADR 0032), so both see the same set the moment the edit lands.
+func TestApplySettingUseProjectSkillsRescansTheSources(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	roots, err := resolveRoots(t.TempDir(), workspace)
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	writeSkillFixture(t, filepath.Join(workspace, "skills", "project-only"),
+		"---\nid: project-only\nsummary: from the bare project folder\n---\nbody")
+
+	provider := skills.NewProvider(skills.Sources{
+		Home:             roots.config,
+		Workspace:        roots.workspace,
+		UseProjectSkills: true,
+	})
+	if _, ok := provider.Get("project-only"); !ok {
+		t.Fatal("the fixture skill is not discovered with the flag on; the test proves nothing")
+	}
+	apply := applySettingFor(settingsApplier{engine: &applySettingSpy{}, skills: provider, roots: roots})
+
+	if _, err := apply("use-project-skills", "false"); err != nil {
+		t.Fatalf("apply use-project-skills=false: %v", err)
+	}
+	if _, ok := provider.Get("project-only"); ok {
+		t.Error("the project skill still resolves with the flag off; the re-scan did not happen")
+	}
+
+	if _, err := apply("use-project-skills", "true"); err != nil {
+		t.Fatalf("apply use-project-skills=true: %v", err)
+	}
+	if _, ok := provider.Get("project-only"); !ok {
+		t.Error("the project skill did not come back with the flag on again")
+	}
+}
+
+// writeSkillFixture writes one SKILL.md into dir, the shape internal/skills discovers.
+func writeSkillFixture(t *testing.T, dir, content string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
+	}
+}
+
 // The seam is wired at the composition root, over this run's resolved context-file names: without it
 // the pane would persist and apply nothing, which is the Driver degrade and not what the binary
 // composes (ADR 0031).
@@ -2560,6 +2713,15 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	}
 	if note != contextFileNote {
 		t.Errorf("note = %q, want %q", note, contextFileNote)
+	}
+	// The two keys whose seam is a live OBJECT rather than an engine call — the tool registry the
+	// root holds and the shared skill Provider — so an unwired member would panic rather than
+	// degrade, and this is where the wiring is proved.
+	if _, err := rec.opts.ApplySetting("web-search-endpoint", "off"); err != nil {
+		t.Errorf("ApplySetting(web-search-endpoint): %v", err)
+	}
+	if _, err := rec.opts.ApplySetting("use-project-skills", "false"); err != nil {
+		t.Errorf("ApplySetting(use-project-skills): %v", err)
 	}
 	if _, err := rec.opts.ApplySetting("servers", "anything"); err == nil {
 		t.Error("a key with no live seam applied silently; want a refusal naming it")

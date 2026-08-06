@@ -89,3 +89,43 @@ func TestProviderAlwaysUsable(t *testing.T) {
 		t.Errorf("Reload over a missing dir errored: %v", err)
 	}
 }
+
+// TestProviderSetSourcesLandsOnTheNextReload is the live half of the source layering: WHICH dirs are
+// sources is itself configuration (`use-project-skills:` gates the workspace's bare skills/ folder),
+// and a Provider whose sources were frozen at construction could only answer a change of it by being
+// rebuilt — which would strand the loop and the "/" menu on two different catalogues. SetSources
+// re-points the scan; the catalogue in force is untouched until the Reload that is the caller's own
+// decision, exactly as an edited skill on disk is.
+func TestProviderSetSourcesLandsOnTheNextReload(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "global",
+		"---\nid: global\nsummary: the library skill\n---\nbody G")
+	writeSkill(t, filepath.Join(workspace, "skills"), "project",
+		"---\nid: project\nsummary: the bare project-folder skill\n---\nbody P")
+
+	src := Sources{Home: home, Workspace: workspace, UseProjectSkills: true}
+	p := NewProvider(src)
+	if _, ok := p.Get("project"); !ok {
+		t.Fatal("the project skill is not discovered with the flag on; the fixture proves nothing")
+	}
+
+	src.UseProjectSkills = false
+	p.SetSources(src)
+	if _, ok := p.Get("project"); !ok {
+		t.Error("SetSources dropped the project skill on its own; installing the new sources is not a scan")
+	}
+
+	if err := p.Reload(); err != nil {
+		t.Fatalf("Reload soft error: %v", err)
+	}
+	if _, ok := p.Get("project"); ok {
+		t.Error("the project skill survived a reload with the flag off; the scan used the old sources")
+	}
+	if len(p.ResolveSkills([]string{"project"})) != 0 {
+		t.Error("the loop's seam still resolves the project skill; both consumers read the one snapshot")
+	}
+	if _, ok := p.Get("global"); !ok {
+		t.Error("the library skill went with it; only the workspace's bare skills/ folder is gated")
+	}
+}
