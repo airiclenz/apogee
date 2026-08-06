@@ -240,8 +240,9 @@ type Options struct {
 	// bug. It is what the `ui.show-scrollbar` config key selected, INVERTED at the composition root
 	// (cmd/apogee's wire.go is the one place the polarity flips): the config key is positive and
 	// defaults to true, while this field must have the zero value mean today's behaviour — the bar
-	// shown — so the hand-built Options of the layout tests keep the width they pin. The value is
-	// fixed for the process lifetime, so the wrap width it decides never changes mid-run.
+	// shown — so the hand-built Options of the layout tests keep the width they pin. A `/settings`
+	// edit of the key moves it mid-session (ADR 0037) and re-lays out, so the wrap width it decides
+	// changes exactly when the human changes it and never on its own.
 	HideScrollbar bool
 
 	// CursorShape is the shape the prompt's caret is drawn with — what the `cursor-shape` config
@@ -316,6 +317,25 @@ type Options struct {
 	// Same contract as WriteSetting in every other respect — synchronous, path-addressed,
 	// errors reported, nil ⇒ unavailable.
 	ResetSetting func(path string) error
+
+	// ApplySetting makes one persisted key take effect in the RUNNING session — the apply half of
+	// every `/settings` edit (ADR 0037 decision 1: validate → persist → apply, on the same ⏎). path
+	// and value are WriteSetting's, so the pane hands the apply exactly what it handed the write and
+	// no second spelling of a value exists; the binary resolves that string into whatever the engine
+	// seam takes (a mode, a bool, a name list) because it owns the schema, as it owns the file
+	// format behind WriteSetting.
+	//
+	// note is a short boundary sentence for a key that cannot land NOW and lands at a boundary the
+	// session will cross anyway — "applies at next clear" for the context files, whose prefix is
+	// frozen for the session on purpose (ADR 0026). Empty means it is already in effect, which is
+	// the answer for almost every key. It is never "(next launch)": a key that could only take
+	// effect at the next start has no business in this seam.
+	//
+	// An error is REPORTED and does not unwind the write (ADR 0037 decision 1): the file already
+	// expresses the intent, so the row says "saved — live apply failed: …" and a re-committed edit
+	// retries the apply. nil ⇒ no live apply at all: the pane persists and applies nothing, the
+	// degrade a bench or headless Driver composes deliberately (ADR 0031).
+	ApplySetting func(path, value string) (note string, err error)
 
 	// Skills is the discovered skill catalog the merged "/" menu lists and an inline "/token"
 	// resolves against; nil ⇒ no skills are wired (the menu offers no skills and no token

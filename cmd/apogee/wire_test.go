@@ -2206,3 +2206,198 @@ func TestRunRootWiresTheLauncherSeamsTogetherOrNotAtAll(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The live-apply dispatcher (ADR 0037)
+// ----------------------------------------------------------------------------
+
+// applySettingSpy is the settingsEngine surface as a witness: it records which seam the dispatcher
+// drove and with what, so the mapping from registry path to engine call is asserted without an Agent
+// — the narrow-interface reason applySettingFor takes one at all.
+type applySettingSpy struct {
+	modes        []apogee.Mode
+	bypass       []bool
+	compaction   []bool
+	contextFiles []contextFileChoice
+}
+
+func (s *applySettingSpy) SetMode(m apogee.Mode)        { s.modes = append(s.modes, m) }
+func (s *applySettingSpy) SetBypass(on bool)            { s.bypass = append(s.bypass, on) }
+func (s *applySettingSpy) SetCompactionEnabled(on bool) { s.compaction = append(s.compaction, on) }
+func (s *applySettingSpy) SetContextFiles(on bool, n []string) {
+	s.contextFiles = append(s.contextFiles, contextFileChoice{enable: on, names: n})
+}
+
+// Every key the dispatcher knows lands on ITS seam and no other, carrying the value the file spells.
+// The context-files switch is the one that answers with a boundary note, because its names are folded
+// into the standing prompt only at a session boundary (ADR 0037 decision 3) — every other key is in
+// force the moment it returns, which is what an empty note means.
+func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
+	t.Parallel()
+	names := []string{"AGENTS.md", "CLAUDE.md"}
+	tests := []struct {
+		name     string
+		key      string
+		value    string
+		wantNote string
+		check    func(t *testing.T, spy *applySettingSpy)
+	}{
+		{
+			name: "mode", key: "mode", value: "allow-edits",
+			check: func(t *testing.T, spy *applySettingSpy) {
+				t.Helper()
+				if want := []apogee.Mode{modeAllowEdits}; !slices.Equal(spy.modes, want) {
+					t.Errorf("SetMode = %v, want %v", spy.modes, want)
+				}
+			},
+		},
+		{
+			name: "bypass", key: "bypass", value: "true",
+			check: func(t *testing.T, spy *applySettingSpy) {
+				t.Helper()
+				if want := []bool{true}; !slices.Equal(spy.bypass, want) {
+					t.Errorf("SetBypass = %v, want %v", spy.bypass, want)
+				}
+			},
+		},
+		{
+			name: "auto-compact", key: "auto-compact", value: "false",
+			check: func(t *testing.T, spy *applySettingSpy) {
+				t.Helper()
+				if want := []bool{false}; !slices.Equal(spy.compaction, want) {
+					t.Errorf("SetCompactionEnabled = %v, want %v", spy.compaction, want)
+				}
+			},
+		},
+		{
+			name: "context-files.enable on carries this run's names", key: "context-files.enable", value: "true",
+			wantNote: contextFileNote,
+			check: func(t *testing.T, spy *applySettingSpy) {
+				t.Helper()
+				if len(spy.contextFiles) != 1 || !spy.contextFiles[0].enable ||
+					!slices.Equal(spy.contextFiles[0].names, names) {
+					t.Errorf("SetContextFiles = %+v, want one call with %v", spy.contextFiles, names)
+				}
+			},
+		},
+		{
+			name: "context-files.enable off", key: "context-files.enable", value: "false",
+			wantNote: contextFileNote,
+			check: func(t *testing.T, spy *applySettingSpy) {
+				t.Helper()
+				if len(spy.contextFiles) != 1 || spy.contextFiles[0].enable {
+					t.Errorf("SetContextFiles = %+v, want one call with the switch off", spy.contextFiles)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			spy := &applySettingSpy{}
+			note, err := applySettingFor(spy, names)(tt.key, tt.value)
+			if err != nil {
+				t.Fatalf("apply %s=%s: %v", tt.key, tt.value, err)
+			}
+			if note != tt.wantNote {
+				t.Errorf("note = %q, want %q", note, tt.wantNote)
+			}
+			tt.check(t, spy)
+		})
+	}
+}
+
+// What the dispatcher will not apply, it REFUSES by name — the write has already landed, so a silent
+// success would leave the file and the session disagreeing with nothing said about it. A key this
+// build cannot apply and a value its seam cannot take are the same kind of answer.
+func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, key, value, wantIn string
+	}{
+		{name: "a key with no live seam", key: "web-search-endpoint", value: "off", wantIn: "web-search-endpoint"},
+		{name: "a key that is not a setting", key: "nonsense", value: "1", wantIn: "nonsense"},
+		{name: "a bool that is not one", key: "bypass", value: "yes please", wantIn: "bypass is true or false"},
+		{name: "a mode outside the ladder", key: "mode", value: "yolo", wantIn: "invalid"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			spy := &applySettingSpy{}
+			note, err := applySettingFor(spy, nil)(tt.key, tt.value)
+			if err == nil {
+				t.Fatalf("apply %s=%s: want a refusal naming the key, got note %q", tt.key, tt.value, note)
+			}
+			if !strings.Contains(err.Error(), tt.wantIn) {
+				t.Errorf("error = %q, want it to contain %q", err, tt.wantIn)
+			}
+			if len(spy.modes)+len(spy.bypass)+len(spy.compaction)+len(spy.contextFiles) != 0 {
+				t.Errorf("a refused apply still drove the engine: %+v", spy)
+			}
+		})
+	}
+}
+
+// The seam is wired at the composition root, over this run's resolved context-file names: without it
+// the pane would persist and apply nothing, which is the Driver degrade and not what the binary
+// composes (ADR 0031).
+func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
+	t.Parallel()
+	rec := &recordingLauncher{}
+	opts := options{
+		endpoint:     "http://127.0.0.1:1111",
+		model:        "fake",
+		mode:         "ask-before",
+		workspace:    t.TempDir(),
+		configDir:    t.TempDir(),
+		contextFiles: []string{"AGENTS.md"},
+	}
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+	if rec.opts.ApplySetting == nil {
+		t.Fatal("tui.Options.ApplySetting is nil; the composition root did not wire the dispatcher")
+	}
+	note, err := rec.opts.ApplySetting("context-files.enable", "true")
+	if err != nil {
+		t.Fatalf("ApplySetting: %v", err)
+	}
+	if note != contextFileNote {
+		t.Errorf("note = %q, want %q", note, contextFileNote)
+	}
+	if _, err := rec.opts.ApplySetting("servers", "anything"); err == nil {
+		t.Error("a key with no live seam applied silently; want a refusal naming it")
+	}
+}
+
+// The anytime-safe mutators are REMEMBERED while the session has no engine and applied the moment one
+// is constructed — the SetMode posture, for the same reason: the settings pane is open before a server
+// is chosen (ADR 0036 decision 3), and an edit that persisted must not be the only half that happened.
+// A key never moved here leaves the Agent on the seed its Config carried.
+func TestLateEngineRemembersSettingsMovedBeforeTheBind(t *testing.T) {
+	t.Parallel()
+	e := newLateEngine(modeAskBefore, true)
+
+	e.SetBypass(true)
+	e.SetCompactionEnabled(false)
+	e.SetContextFiles(true, []string{"AGENTS.md"})
+
+	if e.pendingBypass == nil || !*e.pendingBypass {
+		t.Errorf("pendingBypass = %v, want true held for the bind", e.pendingBypass)
+	}
+	if e.pendingCompaction == nil || *e.pendingCompaction {
+		t.Errorf("pendingCompaction = %v, want false held for the bind", e.pendingCompaction)
+	}
+	if e.pendingContextFiles == nil || !e.pendingContextFiles.enable {
+		t.Fatalf("pendingContextFiles = %+v, want the pair held for the bind", e.pendingContextFiles)
+	}
+	if want := []string{"AGENTS.md"}; !slices.Equal(e.pendingContextFiles.names, want) {
+		t.Errorf("pending names = %v, want %v", e.pendingContextFiles.names, want)
+	}
+
+	// A holder nothing moved holds nothing: the Agent is then constructed from its Config alone.
+	fresh := newLateEngine(modeAskBefore, true)
+	if fresh.pendingBypass != nil || fresh.pendingCompaction != nil || fresh.pendingContextFiles != nil {
+		t.Errorf("a fresh holder already carries overrides: %+v", fresh)
+	}
+}

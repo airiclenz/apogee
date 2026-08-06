@@ -383,6 +383,14 @@ type settingsWriteLog struct {
 	writes []settingEdit
 	resets []string
 	err    error
+
+	// The apply half of the same keypress (ADR 0037): the dispatcher the binary wires behind
+	// [Options.ApplySetting], as a spy. applies records every key routed OUT of the renderer — the
+	// renderer-owned keys never reach it — note is the boundary sentence the seam hands back, and
+	// applyErr is an apply that failed AFTER the write landed.
+	applies   []settingEdit
+	applyNote string
+	applyErr  error
 }
 
 // write and reset are the two [Options] seams. A refusal records nothing, exactly as a real refused
@@ -403,9 +411,20 @@ func (l *settingsWriteLog) reset(path string) error {
 	return nil
 }
 
-// settingsEditModel is a model with the pane OPEN over rows and both writer seams wired to log — the
-// state every edit flow below starts from. The engine comes back too, so a live apply can be asserted
-// where it actually lands (Engine.SetMode).
+// apply is the third seam. The ATTEMPT is recorded whether or not it succeeds, because that is the
+// question the failure case asks: the apply was made, the write already stood, and the row has to
+// say so.
+func (l *settingsWriteLog) apply(path, value string) (string, error) {
+	l.applies = append(l.applies, settingEdit{path: path, value: value})
+	if l.applyErr != nil {
+		return "", l.applyErr
+	}
+	return l.applyNote, nil
+}
+
+// settingsEditModel is a model with the pane OPEN over rows and all three settings seams wired to
+// log — the state every edit flow below starts from. The engine comes back too, for the flows that
+// have something to assert about it.
 func settingsEditModel(t *testing.T, rows []SettingRow, log *settingsWriteLog) (Model, *fakeEngine) {
 	t.Helper()
 	eng := &fakeEngine{}
@@ -413,6 +432,7 @@ func settingsEditModel(t *testing.T, rows []SettingRow, log *settingsWriteLog) (
 	opts.SettingsRows = func() []SettingRow { return rows }
 	opts.WriteSetting = log.write
 	opts.ResetSetting = log.reset
+	opts.ApplySetting = log.apply
 	return openSettingsPane(t, newTestModelEng(t, eng, opts)), eng
 }
 
@@ -425,11 +445,13 @@ func settingsBoolRow() SettingRow {
 	}
 }
 
-// settingsEnumRow is one editable enum row — `ui.spinner:` and its closed vocabulary.
+// settingsEnumRow is one editable enum row — `ui.spinner:` and its closed vocabulary, which is the
+// REAL one this build animates (ParseSpinnerStyle): the key applies live in the renderer itself, so
+// a fixture vocabulary would be a value the apply then had to refuse.
 func settingsEnumRow() SettingRow {
 	return SettingRow{
 		Path: "ui.spinner", Section: "Interface", Kind: SettingEnum, Value: "snake", Default: "snake",
-		EnumValues: []string{"snake", "dots", "moon"}, Editable: true, Restart: true,
+		EnumValues: []string{"snake", "glitter", "classic"}, Editable: true, Restart: true,
 		Desc: "Which animation paints the status-line spinner.",
 	}
 }
@@ -484,7 +506,7 @@ func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
 		t.Fatalf("pane = %+v, want the sub-list open on the current value (row 0)", opened.settings)
 	}
 	pane := strip(opened.renderSettings())
-	for _, want := range []string{"ui.spinner", "snake", "dots", "moon", "(current)", settingsEnumHint} {
+	for _, want := range []string{"ui.spinner", "snake", "glitter", "classic", "(current)", settingsEnumHint} {
 		if !strings.Contains(pane, want) {
 			t.Errorf("the value sub-list does not show %q:\n%s", want, pane)
 		}
@@ -513,17 +535,26 @@ func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
 	// And a moved highlight commits what it points at.
 	log.writes = nil
 	committed := step(t, step(t, opened, keyDown()), keyEnter())
-	if want := []settingEdit{{path: "ui.spinner", value: "dots"}}; !reflect.DeepEqual(log.writes, want) {
+	if want := []settingEdit{{path: "ui.spinner", value: "glitter"}}; !reflect.DeepEqual(log.writes, want) {
 		t.Fatalf("writes = %+v, want %+v", log.writes, want)
 	}
-	if got, want := committed.settingsNote(rows[0]), "→ dots (next launch)"; got != want {
+	if got, want := committed.settingsNote(rows[0]), "→ glitter (next launch)"; got != want {
 		t.Errorf("marker = %q, want %q", got, want)
+	}
+	// The spinner is a key the RENDERER owns: it moved here, and the apply seam was never asked.
+	if committed.spin.style != SpinnerGlitter {
+		t.Errorf("spinner style = %q, want glitter — the commit changed what paints", committed.spin.style)
+	}
+	if len(log.applies) != 0 {
+		t.Errorf("applies = %+v, want none: a renderer-owned key never leaves the renderer", log.applies)
 	}
 }
 
-// `mode` is the one key an edit APPLIES as well as persists, through the same Engine.SetMode + opts.Mode
-// pair Shift+Tab drives — so the row shows the new value with no "(next launch)" caveat, because there
-// is nothing to wait for.
+// An edit APPLIES as well as persists (ADR 0037 decision 1), and every key that is not the renderer's
+// own goes out through the binary's dispatcher: the pane hands it the same path and the same value it
+// handed the writer, and knows nothing about the seam behind it. `mode` is the one key the pane also
+// MIRRORS, because the footer renders the mode from opts.Mode — so the row shows the new value with no
+// caveat, because there is nothing left to wait for.
 func TestSettingsPaneModeEditAppliesLiveAndMarksNothing(t *testing.T) {
 	rows := []SettingRow{{
 		Path: "mode", Section: "Autonomy", Kind: SettingEnum, Value: "ask-before", Default: "ask-before",
@@ -531,7 +562,7 @@ func TestSettingsPaneModeEditAppliesLiveAndMarksNothing(t *testing.T) {
 		Desc: "Autonomy mode: how tool calls are gated.",
 	}}
 	log := &settingsWriteLog{}
-	m, eng := settingsEditModel(t, rows, log)
+	m, _ := settingsEditModel(t, rows, log)
 
 	m = step(t, m, keyEnter()) // the sub-list, highlighted on ask-before
 	m = step(t, m, keyDown())  // allow-edits
@@ -540,8 +571,8 @@ func TestSettingsPaneModeEditAppliesLiveAndMarksNothing(t *testing.T) {
 	if want := []settingEdit{{path: "mode", value: "allow-edits"}}; !reflect.DeepEqual(log.writes, want) {
 		t.Fatalf("writes = %+v, want %+v", log.writes, want)
 	}
-	if got := eng.modesSet(); len(got) != 1 || got[0] != domain.ModeAllowEdits {
-		t.Errorf("engine SetMode = %v, want [allow-edits] — mode applies live", got)
+	if want := []settingEdit{{path: "mode", value: "allow-edits"}}; !reflect.DeepEqual(log.applies, want) {
+		t.Errorf("applies = %+v, want %+v — the persisted value goes straight to the dispatcher", log.applies, want)
 	}
 	if m.opts.Mode != domain.ModeAllowEdits {
 		t.Errorf("opts.Mode = %q, want allow-edits (the footer renders the mode from it)", m.opts.Mode)
@@ -551,6 +582,216 @@ func TestSettingsPaneModeEditAppliesLiveAndMarksNothing(t *testing.T) {
 	}
 	if got := m.settingsValueCell(rows[0]); got != "allow-edits" {
 		t.Errorf("value cell = %q, want the value the session is now running", got)
+	}
+}
+
+// settingsLiveBoolRow is one editable bool row that applies through the dispatcher — `bypass:` as the
+// registry describes it, minus the restart gate no key keeps once its edit takes effect.
+func settingsLiveBoolRow() SettingRow {
+	return SettingRow{
+		Path: "bypass", Section: "Mechanisms", Kind: SettingBool, Value: "false", Default: "false",
+		Editable: true, Desc: "Run with Mechanisms off.",
+	}
+}
+
+// A toggle persists and then applies, in that order and on the one keypress: the write seam is asked
+// first, and only what the file accepted is handed to the dispatcher (ADR 0037 decision 1). A refused
+// write reaches the apply seam not at all — the session must never run what the file does not say.
+func TestSettingsPaneToggleAppliesWhatItPersisted(t *testing.T) {
+	rows := []SettingRow{settingsLiveBoolRow()}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter())
+
+	want := []settingEdit{{path: "bypass", value: "true"}}
+	if !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if !reflect.DeepEqual(log.applies, want) {
+		t.Errorf("applies = %+v, want %+v — what persisted is what applies", log.applies, want)
+	}
+	if got := m.settingsValueCell(rows[0]); got != "true" {
+		t.Errorf("value cell = %q, want the value the session is now running", got)
+	}
+	if got := m.settingsNote(rows[0]); got != "" {
+		t.Errorf("marker = %q, want none: an applied edit has nothing to caveat", got)
+	}
+
+	// A refused write is not applied: the file is unchanged, so the session must be too.
+	log.err = errors.New("config.yaml is read-only")
+	m = step(t, m, keyEnter())
+	if len(log.applies) != 1 {
+		t.Errorf("applies = %+v, want only the first: a refused write has nothing to apply", log.applies)
+	}
+}
+
+// A key that cannot land NOW lands at a boundary this session will cross, and the row says which
+// (ADR 0037 decision 3). The note comes from the apply seam — the renderer holds no idea of what any
+// key's boundary is — and it is the only deferral wording the surface has.
+func TestSettingsPaneShowsTheApplyBoundaryNote(t *testing.T) {
+	rows := []SettingRow{{
+		Path: "context-files.enable", Section: "Prompt", Kind: SettingBool, Value: "false", Default: "true",
+		Editable: true, Desc: "Fold the workspace context files into the system prompt.",
+	}}
+	log := &settingsWriteLog{applyNote: "applies at next clear"}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter())
+
+	if got, want := m.settingsNote(rows[0]), "· applies at next clear"; got != want {
+		t.Errorf("marker = %q, want %q", got, want)
+	}
+	if got := m.settingsValueCell(rows[0]); got != "true" {
+		t.Errorf("value cell = %q, want the value the file and the seam now agree on", got)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, "applies at next clear") {
+		t.Errorf("the pane does not carry the boundary note:\n%s", pane)
+	}
+}
+
+// An apply that fails AFTER a successful write does not unwind it (ADR 0037 decision 1): the file
+// expresses what the human asked for, so the edit stands and the row reports the half that did not
+// happen. The wording is its own — "saved — live apply failed" is a different sentence from a refused
+// write, and has to read like one.
+func TestSettingsPaneApplyFailureKeepsTheWriteAndSaysSo(t *testing.T) {
+	rows := []SettingRow{settingsLiveBoolRow()}
+	log := &settingsWriteLog{applyErr: errors.New("no server is bound yet")}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter())
+
+	if want := []settingEdit{{path: "bypass", value: "true"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v — a failed apply must not unwind the write", log.writes, want)
+	}
+	if got := m.settingsValueCell(rows[0]); got != "true" {
+		t.Errorf("value cell = %q, want the persisted value: the file says it whatever the session runs", got)
+	}
+	want := "✗ saved — live apply failed: no server is bound yet"
+	if got := m.settingsNote(rows[0]); got != want {
+		t.Errorf("marker = %q, want %q", got, want)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, "saved — live apply failed") {
+		t.Errorf("the pane does not report the failed apply:\n%s", pane)
+	}
+
+	// Re-committing retries the apply against the same persisted value, and a retry that lands
+	// clears the failure — the row describes the last attempt, not a condition of the key.
+	log.applyErr = nil
+	m = step(t, m, keyEnter())
+	if got := m.settingsNote(rows[0]); got != "" {
+		t.Errorf("marker = %q, want none after a retry that landed", got)
+	}
+}
+
+// The keys whose whole effect is this screen are applied by the renderer itself and never leave it:
+// there is no engine on the other side of a spinner style, and routing one out to the binary and back
+// would only be a longer way to reach the Model's own fields.
+func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
+	tests := []struct {
+		name  string
+		row   SettingRow
+		check func(t *testing.T, m Model)
+	}{
+		{
+			name: "auto-title",
+			row: SettingRow{
+				Path: "auto-title", Section: "Session", Kind: SettingBool, Value: "true", Default: "true",
+				Editable: true, Desc: "Name a new session from its first prompt.",
+			},
+			check: func(t *testing.T, m Model) {
+				t.Helper()
+				if m.opts.AutoTitle {
+					t.Error("opts.AutoTitle is still on; the toggle did not reach the automatic naming call")
+				}
+			},
+		},
+		{
+			name: "ui.show-scrollbar",
+			row: SettingRow{
+				Path: "ui.show-scrollbar", Section: "Interface", Kind: SettingBool, Value: "true",
+				Default: "true", Editable: true, Desc: "Paint the transcript's scroll bar.",
+			},
+			check: func(t *testing.T, m Model) {
+				t.Helper()
+				if !m.opts.HideScrollbar {
+					t.Error("opts.HideScrollbar is still false; the bar was not taken away")
+				}
+				// The bar's gutter is transcript width: the flip must lay the frame out again, or the
+				// body would keep wrapping to a column it no longer pays for.
+				if got, want := m.viewport.Width(), 80; got != want {
+					t.Errorf("viewport width = %d, want %d — the hidden bar gives its column back", got, want)
+				}
+			},
+		},
+		{
+			name: "ui.spinner-color",
+			row: SettingRow{
+				Path: "ui.spinner-color", Section: "Interface", Kind: SettingBool, Value: "true",
+				Default: "true", Editable: true, Desc: "Run the spinner's colour loop.",
+			},
+			check: func(t *testing.T, m Model) {
+				t.Helper()
+				if m.spin.color {
+					t.Error("the spinner is still running its colour loop")
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rows := []SettingRow{tt.row}
+			log := &settingsWriteLog{}
+			m, _ := settingsEditModel(t, rows, log)
+
+			m = step(t, m, keyEnter())
+
+			if want := []settingEdit{{path: tt.row.Path, value: "false"}}; !reflect.DeepEqual(log.writes, want) {
+				t.Fatalf("writes = %+v, want %+v", log.writes, want)
+			}
+			if len(log.applies) != 0 {
+				t.Errorf("applies = %+v, want none: the renderer owns this key", log.applies)
+			}
+			tt.check(t, m)
+		})
+	}
+}
+
+// The cursor shape is the renderer's own too, and it is the one whose effect is not a field the pane
+// reads back: it restates the textarea's cursor styles, which is what the terminal draws the caret
+// from. A value this build's vocabulary does not know is reported rather than silently ignored.
+func TestSettingsPaneCursorShapeAppliesAndRefusesTheUnknown(t *testing.T) {
+	row := SettingRow{
+		Path: "cursor-shape", Section: "Interface", Kind: SettingEnum, Value: "block", Default: "block",
+		EnumValues: []string{"block", "underline", "bar"}, Editable: true,
+		Desc: "The shape the prompt's caret is drawn with.",
+	}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, []SettingRow{row}, log)
+
+	m = step(t, m, keyEnter()) // the sub-list, on block
+	m = step(t, m, keyDown())  // underline
+	m = step(t, m, keyEnter()) // commit
+
+	if m.opts.CursorShape != tea.CursorUnderline {
+		t.Errorf("opts.CursorShape = %v, want underline", m.opts.CursorShape)
+	}
+	if got := m.input.Styles().Cursor.Shape; got != tea.CursorUnderline {
+		t.Errorf("the input's cursor shape = %v, want underline — steadyCursor was not re-run", got)
+	}
+	if len(log.applies) != 0 {
+		t.Errorf("applies = %+v, want none: the renderer owns this key", log.applies)
+	}
+
+	// A name the renderer has no shape for is an apply failure on the row, not a silent no-op: the
+	// pane is not the only thing that can put a value in that file.
+	unknown := SettingRow{Path: "cursor-shape", Kind: SettingString, Editable: true}
+	m, _ = settingsEditModel(t, []SettingRow{unknown}, &settingsWriteLog{})
+	m = step(t, typeSetting(t, step(t, m, keyEnter()), "hourglass"), keyEnter())
+
+	if got := m.settingsNote(unknown); !strings.Contains(got, "saved — live apply failed") {
+		t.Errorf("marker = %q, want the apply's own refusal", got)
 	}
 }
 
@@ -1009,8 +1250,8 @@ func TestSettingsPaneResetIsANoOpOnADefaultValuedRow(t *testing.T) {
 	}
 }
 
-// `mode` is the one key a RESET applies as well as persists, through the same seam a written mode goes
-// through: the session drops back to the ladder's default now, and the row shows it with no caveat.
+// A RESET applies exactly as a write does, through the same dispatcher: the session drops back to the
+// ladder's default now, and the row shows it with no caveat.
 func TestSettingsPaneResetOfModeAppliesTheDefaultLive(t *testing.T) {
 	rows := []SettingRow{{
 		Path: "mode", Section: "Autonomy", Kind: SettingEnum, Value: "auto", Default: "ask-before",
@@ -1018,15 +1259,15 @@ func TestSettingsPaneResetOfModeAppliesTheDefaultLive(t *testing.T) {
 		Desc: "Autonomy mode: how tool calls are gated.",
 	}}
 	log := &settingsWriteLog{}
-	m, eng := settingsEditModel(t, rows, log)
+	m, _ := settingsEditModel(t, rows, log)
 
 	m = step(t, step(t, m, keyBackspace()), keyEnter())
 
 	if want := []string{"mode"}; !reflect.DeepEqual(log.resets, want) {
 		t.Fatalf("resets = %+v, want %+v", log.resets, want)
 	}
-	if got := eng.modesSet(); len(got) != 1 || got[0] != domain.ModeAskBefore {
-		t.Errorf("engine SetMode = %v, want [ask-before] — a reset of mode applies live too", got)
+	if want := []settingEdit{{path: "mode", value: "ask-before"}}; !reflect.DeepEqual(log.applies, want) {
+		t.Errorf("applies = %+v, want %+v — a reset applies the default it went back to", log.applies, want)
 	}
 	if m.opts.Mode != domain.ModeAskBefore {
 		t.Errorf("opts.Mode = %q, want ask-before (the footer renders the mode from it)", m.opts.Mode)

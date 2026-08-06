@@ -2747,8 +2747,9 @@ const (
 func (m *Model) layout() {
 	// The scroll-bar gutter column is reserved only while the bar is shown (ui.show-scrollbar,
 	// inverted into Options.HideScrollbar): a hidden bar gives the column back to the body rather
-	// than eating it invisibly. The setting is fixed for the process lifetime, so this cannot
-	// re-wrap the transcript mid-run — see bodyRightGutter (theme.go).
+	// than eating it invisibly. A `/settings` edit of the key moves it mid-session (ADR 0037) and
+	// lays out again from here, so the transcript re-wraps exactly once per deliberate change —
+	// see bodyRightGutter (theme.go).
 	width := m.width
 	if !m.opts.HideScrollbar {
 		width -= scrollbarWidth

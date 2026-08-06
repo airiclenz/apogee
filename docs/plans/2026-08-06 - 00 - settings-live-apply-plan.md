@@ -77,9 +77,11 @@ Godoc comments on each (start with the symbol name); update the mutator-class li
 
 **Commit:** `feat(agent): anytime-safe setters for bypass, compaction and context files`
 
-## 3. The ApplySetting seam and the live-apply dispatcher
+## 3. The ApplySetting seam and the live-apply dispatcher — ✅ DONE (2026-08-06)
 
 Depends on item 2.
+
+NOTES (2026-08-06): three deviations from the item's literal text, each to avoid leaving something half-wired. (a) The seam's `note` return is stored on `settingEdit` AND rendered NOW — `settingsNote` gains a `· <note>` branch ahead of the applied-live one — rather than stored for item 8: a value the pane took and never showed would be dead until then. The wording, the ` *` marker and the death of the pending-arrow branches stay item 8's. (b) `*lateEngine` gained `SetBypass` / `SetCompactionEnabled` / `SetContextFiles` (the new `settingsEngine` interface the dispatcher takes, so it is testable against a spy). They pass through to the Agent and are REMEMBERED while unbound — the `SetMode`/`SetConfineToWorkspace` posture, nil pointer = never moved — because `/settings` is open before a server is bound (ADR 0036 decision 3) and an edit that persisted must not be the only half that happened. (c) The `settingsEnumRow` test fixture's vocabulary became the REAL spinner styles (`snake, glitter, classic`): `ui.spinner` now applies in the renderer, which refuses a value `ParseSpinnerStyle` does not know. Also rewritten alongside `model.go`'s stale "process-constant" comment: the same claim in `Options.HideScrollbar`'s doc (`tui.go`), which the live apply falsifies. Known gap, item 13's to close: a `context-files:` block that started OFF resolves to no names, so switching it on live installs none until the names themselves are editable.
 
 **What:** Generalize the pane's live apply from the hard-coded `mode` case to every editable key, per ratified call 1 and binding A.
 

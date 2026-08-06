@@ -43,11 +43,16 @@ import (
 // opens the value sub-list, and what is committed goes out through [Options.WriteSetting] — the
 // binary's comment-preserving splice writer, never this package's idea of YAML. The renderer's whole
 // half of an edit is the ORDER (which key, which value) and what the row says afterwards. Nothing is
-// re-read to find out: the pane records what it persisted ([settingsPane.edits]) and marks the row
-// "(next launch)", because every other row is still showing the value THIS run resolved and a
-// mid-session file read would leave one row disagreeing with its neighbours about which run it is
-// describing. The one exception is `mode`, which has a live seam (Engine.SetMode) — the same one
-// Shift+Tab drives — so its edit takes effect now and the row simply shows the new value.
+// re-read to find out: the pane records what it persisted ([settingsPane.edits]) and marks the row,
+// because every other row is still showing the value THIS run resolved and a mid-session file read
+// would leave one row disagreeing with its neighbours about which run it is describing.
+//
+// And what is persisted is APPLIED, on the same ⏎ (ADR 0037 decision 1): the pane routes the key to
+// whatever puts it into effect — a field of its own for the keys whose effect is this screen, and
+// [Options.ApplySetting] for every key the engine or the composition root owns — so the session runs
+// what the file says the moment the file says it. A key that can only land at a boundary the session
+// will cross anyway says so on the row ("· applies at next clear"); a key that could only land at the
+// next launch does not exist.
 //
 // A string or an int is edited in a BUFFER on its own row (the /sessions rename idiom): ⏎ opens it,
 // the row's value cell becomes what is being typed with a caret after it, ⏎ commits and esc
@@ -59,8 +64,8 @@ import (
 // And backspace UNSETS: it arms a reset on a row that has something to reset, the hint line asks for
 // a confirming ⏎, and what that ⏎ sends is [Options.ResetSetting] — the key's line REMOVED from the
 // file rather than today's spelling of its default written into it (ADR 0035). The row then reports
-// the default it went back to, on exactly the terms a write reports its value: a marker, or — for
-// `mode` — the live apply and no marker at all.
+// the default it went back to, on exactly the terms a write reports its value — and the default is
+// APPLIED exactly as a written value is, so a reset cannot mean less to the session than a write.
 
 // settingsKind is what the open pane is DOING: reading its key list, asking which value one enum key
 // should take, holding the buffer a string or an int is being typed into, or waiting for a reset to
@@ -111,9 +116,15 @@ type settingsPane struct {
 // recorded is the DEFAULT the key went back to (empty when it defaults to unset) rather than anything
 // the human typed. The row's marker needs the difference — a reset of a masked key has no secret to
 // keep quiet about, and an empty value it returned to is spelled "unset" rather than as a blank.
+//
+// note is what the APPLY had to say about the value — the boundary sentence for a key that lands at
+// the next session boundary rather than at once ("applies at next clear"), empty for a key already
+// in force, which is almost all of them. It is carried on the edit rather than in a slot of its own
+// because it describes THIS key's landing and stays true for as long as the edit does.
 type settingEdit struct {
 	path  string
 	value string
+	note  string
 	reset bool
 }
 
@@ -485,8 +496,8 @@ func (m Model) settingsResetKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model,
 //
 // The outcomes are settingsWrite's, for the same reasons: no seam wired, or refused, changes nothing
 // but the row's own line; a reset that lands is recorded as the edit it is — the key now yields its
-// DEFAULT — and `mode`, the one key with a live seam, applies that default now. The armed state ends
-// either way: the question was answered.
+// DEFAULT — and that default is applied to the running session now, on the same terms a written
+// value is (settingsApplied). The armed state ends either way: the question was answered.
 func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
 	m.settings.kind = settingsKeyList
 	if m.opts.ResetSetting == nil {
@@ -513,9 +524,8 @@ func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
 //   - no writer wired — the row says so and nothing else moves (the nil-seam degrade);
 //   - refused — the row carries the error and the key is treated as UNCHANGED, because the file is
 //     unchanged: no edit is recorded, no live apply, no marker;
-//   - landed — the edit is recorded for the row's marker, and `mode` (the one key with a live seam)
-//     also takes effect now, through the same Engine.SetMode + opts.Mode pair Shift+Tab drives, so
-//     the footer's mode and the Agent's agree with the file the same instant.
+//   - landed — the edit is recorded for the row's marker AND applied to the running session on the
+//     same keypress (settingsApplied), so the session and the file agree the same instant.
 func (m Model) settingsWrite(row SettingRow, value string) (tea.Model, tea.Cmd) {
 	m, _ = m.settingsPersist(row, value)
 	m.layout()
@@ -539,29 +549,124 @@ func (m Model) settingsPersist(row SettingRow, value string) (Model, bool) {
 	return m.settingsApplied(row, settingEdit{path: row.Path, value: value}), true
 }
 
-// settingsApplied records an edit that LANDED and applies it live where a seam exists — the one place
-// both halves of "the file now says this" happen, so a write and a reset cannot drift apart on either
-// (a reset of `mode` must switch the running session's mode exactly as a write of it does).
+// settingsApplied records an edit that LANDED and puts it into effect — the one place both halves of
+// "the file now says this" happen, so a write and a reset cannot drift apart on either (a reset of
+// `mode` must switch the running session's mode exactly as a write of it does).
 //
-// The live apply is guarded on a non-empty value as well as on the key: a reset records the key's
-// DEFAULT, and a key whose default is unset would otherwise hand the Engine an empty mode — which
-// `mode` never is, and which the guard keeps from becoming a possibility a future live key inherits.
+// The apply is the third step of ADR 0037's validate → persist → apply, and it runs AFTER the write
+// has landed: the file already expresses what the human asked for, so an apply that fails does not
+// unwind it. The edit stays recorded, the row carries the failure instead (settingsApplyFailedNote),
+// and a re-committed edit retries the apply against the same persisted value.
+//
+// The apply is guarded on a non-empty value as well as on the key: a reset records the key's
+// DEFAULT, and a key whose default is unset would otherwise hand the seam an empty string to
+// resolve — which is a question about a key the file no longer sets, not a value it now holds.
 func (m Model) settingsApplied(row SettingRow, edit settingEdit) Model {
+	var applyErr error
+	if edit.value != "" {
+		m, edit.note, applyErr = m.settingsApplyLive(row.Path, edit.value)
+	}
 	m.settings = m.settings.recordEdit(edit)
-	if row.Path == settingsModeKey && edit.value != "" {
-		mode := domain.Mode(edit.value)
-		m.eng.SetMode(mode)
-		m.opts.Mode = mode // the footer renders the mode from opts.Mode (footerContent), as Shift+Tab does
+	if applyErr != nil {
+		m.settings.failure = settingFailure{path: row.Path, msg: settingsApplyFailedNote + applyErr.Error()}
 	}
 	return m
 }
 
-// settingsModeKey is the registry path of the one key an edit APPLIES as well as persists. It is
-// named here rather than derived from [SettingRow.Restart] because what makes it live is the
-// existence of a seam — Engine.SetMode — and not the absence of a restart: a future key that gains
-// one gets a line here beside it, which is the honest amount of coupling for a rebind-free live apply
-// (ADR 0035: the pane never triggers rebinds; /model and /server own those).
-const settingsModeKey = "mode"
+// settingsApplyLive puts one persisted key into effect and reports what the row has to say about it:
+// the boundary note (empty for a key that is simply in force now) and the refusal of an apply that
+// could not happen. Two classes of key and no third:
+//
+//   - the keys whose whole effect is on THIS screen (settingsApplyLocal) are applied here, because
+//     there is no engine on the other side of them to ask;
+//   - every other key goes out through [Options.ApplySetting], the binary's dispatcher, which owns
+//     the schema and therefore is the only thing that can turn the file's spelling of a value into
+//     whatever the engine seam behind it takes (ADR 0037 decision 2).
+//
+// `mode` is the one key with a foot in both: the seam moves the Agent, and the footer renders the
+// mode from opts.Mode — so the mirror Shift+Tab keeps in step is updated here too, but only once the
+// apply has LANDED, or the footer would report an autonomy the engine is not running.
+func (m Model) settingsApplyLive(path, value string) (Model, string, error) {
+	if applied, ok, err := m.settingsApplyLocal(path, value); ok {
+		return applied, "", err
+	}
+	if m.opts.ApplySetting == nil {
+		return m, "", nil // no live apply wired: the write stands on its own (ADR 0031's nil-seam degrade)
+	}
+	note, err := m.opts.ApplySetting(path, value)
+	if err != nil {
+		return m, "", err
+	}
+	if path == settingKeyMode {
+		m.opts.Mode = domain.Mode(value) // the footer renders the mode from opts.Mode (footerContent)
+	}
+	return m, note, nil
+}
+
+// settingsApplyLocal applies the keys the RENDERER itself owns — the ones whose entire effect is a
+// field on this Model — and reports whether the key was one of them. They are named rather than
+// derived because what makes a key local is that nothing behind [Options.ApplySetting] would have
+// anything to do with it: routing them out to the binary and back would only give the pane a longer
+// way to reach its own state.
+//
+// A value the renderer's own vocabulary does not know is returned as an apply error rather than
+// silently ignored. The binary validates before it writes, so this cannot happen through the pane —
+// but the pane is not the only thing that can put a value in the file, and a spinner style this
+// build has no animation for is worth a sentence on the row.
+func (m Model) settingsApplyLocal(path, value string) (Model, bool, error) {
+	switch path {
+	case settingKeyAutoTitle:
+		m.opts.AutoTitle = value == settingTrue
+	case settingKeyShowScrollbar:
+		// The config key is positive and the option is inverted (the polarity flips in cmd/apogee).
+		// The bar's gutter column is transcript width, so the frame is laid out again from here
+		// rather than left to the next resize.
+		m.opts.HideScrollbar = value != settingTrue
+		m.layout()
+	case settingKeySpinner:
+		style, err := ParseSpinnerStyle(value)
+		if err != nil {
+			return m, true, err
+		}
+		// Both halves: the option is the record of what is selected, m.spin is what paints. The
+		// frame counter is left where it is — every style's glyph indexes it modulo its own frame
+		// count — so a style swapped mid-run continues the animation instead of restarting it.
+		m.opts.Spinner, m.spin.style = style, style
+	case settingKeySpinnerColor:
+		on := value == settingTrue
+		m.opts.SpinnerColor, m.spin.color = on, on
+	case settingKeyCursorShape:
+		shape, err := ParseCursorShape(value)
+		if err != nil {
+			return m, true, err
+		}
+		// steadyCursor is idempotent: it restates the retired virtual cursor and the styles the real
+		// terminal cursor is drawn from, which is the whole of what the shape changes.
+		m.opts.CursorShape = shape
+		steadyCursor(&m.input, shape)
+	default:
+		return m, false, nil
+	}
+	return m, true, nil
+}
+
+// The registry paths this package names. settingKeyMode is the one key the pane MIRRORS after the
+// seam applied it (the footer's own copy); the rest are the renderer-owned keys settingsApplyLocal
+// puts into effect itself. Every other key is a path this package never spells — the binary's
+// dispatcher routes them by name, which is exactly the coupling ADR 0037 decision 2 keeps out here.
+const (
+	settingKeyMode          = "mode"
+	settingKeyAutoTitle     = "auto-title"
+	settingKeyShowScrollbar = "ui.show-scrollbar"
+	settingKeySpinner       = "ui.spinner"
+	settingKeySpinnerColor  = "ui.spinner-color"
+	settingKeyCursorShape   = "cursor-shape"
+)
+
+// settingsApplyFailedNote opens the row's failure when the WRITE landed and the apply did not: the
+// file has the new value and the session does not, which is a different sentence from a refused
+// write and has to read like one (ADR 0037 decision 1).
+const settingsApplyFailedNote = "saved — live apply failed: "
 
 // recordEdit returns the pane with edit recorded, replacing any earlier edit of the same key — the
 // last one is what the file says, whether it wrote a value or removed the line. The slice is built
@@ -859,8 +964,10 @@ func (m Model) settingsValueCell(row SettingRow) string {
 // settingsNote is the row's last cell: what became of this pane's own writes to the key, else where a
 // key it will not write IS edited. In precedence order, because each one outranks what it replaces:
 //
-//   - a refused write, because the human's last act on this row failed and nothing else about the row
-//     matters as much;
+//   - a refused write — or a write that landed on a key whose live apply then failed — because the
+//     human's last act on this row failed and nothing else about the row matters as much;
+//   - the apply's own boundary note for an edit that landed at a boundary rather than at once
+//     ("· applies at next clear"), which is the only deferral wording this surface has;
 //   - nothing at all for an edit that applied LIVE, because settingsValueCell already shows it and
 //     there is nothing left to caveat — this case is ahead of the override note deliberately, since a
 //     live apply outranks the source that beat the file at resolution time for as long as this run lasts;
@@ -878,6 +985,8 @@ func (m Model) settingsNote(row SettingRow) string {
 	}
 	edit, edited := m.settings.editOf(row.Path)
 	switch {
+	case edited && !row.Restart && edit.note != "":
+		return "· " + edit.note // applied, at a boundary this session will cross (ADR 0037 decision 3)
 	case edited && !row.Restart:
 		return "" // applied live: the value cell says it
 	case edited && row.Source != SettingFromFile:

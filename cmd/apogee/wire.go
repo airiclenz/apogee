@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -616,7 +617,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		ResetSetting: func(key string) error {
 			return resetConfigSetting(filepath.Join(roots.config, "config.yaml"), key)
 		},
-		Skills: skillProvider,
+		// And the apply half of the same keypress (ADR 0037): what the file now says, the session
+		// now runs. The dispatcher owns the resolution from a registry path and a file-spelled value
+		// onto a live engine seam — the renderer holds neither schema nor engine mutator.
+		ApplySetting: applySettingFor(engine, opts.contextFiles),
+		Skills:       skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
 		// on the shared Provider — the same one Config.Skills resolves against — so a skill added
 		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals
@@ -659,6 +664,90 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		fmt.Fprintln(os.Stdout, "Session saved · resume with: apogee --continue   (or /sessions inside apogee)")
 	}
 	return err
+}
+
+// ----------------------------------------------------------------------------
+// The live-apply dispatcher (the composition root's half of ADR 0037)
+// ----------------------------------------------------------------------------
+
+// settingsEngine is the engine surface the live-apply dispatcher drives: the anytime-safe mutator
+// class of ADR 0037 decision 2 and nothing else — one mutex, one field, consumed at a boundary the
+// loop crosses constantly, so a call is safe while a Step runs. It is an interface rather than the
+// holder itself so the dispatcher can be exercised against a spy with no Agent behind it, the
+// narrowing every seam this file hands the renderer already follows.
+type settingsEngine interface {
+	SetMode(apogee.Mode)
+	SetBypass(bool)
+	SetCompactionEnabled(bool)
+	SetContextFiles(enable bool, names []string)
+}
+
+// contextFileNote is the boundary sentence the `context-files:` keys carry back to the row: the name
+// list moves now, but the CONTENT is folded into the standing system prompt only at a session
+// boundary (ADR 0026's KV-prefix stability, restated by ADR 0037 decision 3). It is the only
+// deferral wording this dispatcher has — nothing here ever says "next launch".
+const contextFileNote = "applies at next clear"
+
+// applySettingFor builds the [tui.Options.ApplySetting] dispatcher: the one place a key the pane has
+// just persisted becomes a call on a live seam (ADR 0037 decision 1's apply step). It is keyed by
+// REGISTRY PATH because that is the only name the renderer knows a setting by — the pane hands back
+// the same path and the same file-spelled value it handed [tui.Options.WriteSetting], and the
+// resolution from that string into whatever the seam takes happens here, where the schema lives
+// (ADR 0031: the engine is handed values, never config text).
+//
+// It returns the row's boundary note and the apply's refusal. A key this build cannot apply is an
+// ERROR naming the key rather than a silent success: the write has already landed, so the honest
+// report is that the file changed and the session did not.
+//
+// contextFileNames are the workspace context-file names THIS run resolved — what the enable switch
+// turns back on. A block that started off resolves to no names at all (the two spellings of "off"
+// collapse at startup), so switching it on live installs nothing until the names themselves are
+// edited; the file's names are read at the next launch either way, which is what the boundary note
+// on the row is telling the human about.
+func applySettingFor(eng settingsEngine, contextFileNames []string) func(key, value string) (string, error) {
+	return func(key, value string) (string, error) {
+		switch key {
+		case "mode":
+			mode, err := parseMode(value)
+			if err != nil {
+				return "", err
+			}
+			eng.SetMode(mode)
+		case "bypass":
+			on, err := settingBool(key, value)
+			if err != nil {
+				return "", err
+			}
+			eng.SetBypass(on)
+		case "auto-compact":
+			on, err := settingBool(key, value)
+			if err != nil {
+				return "", err
+			}
+			eng.SetCompactionEnabled(on)
+		case "context-files.enable":
+			on, err := settingBool(key, value)
+			if err != nil {
+				return "", err
+			}
+			eng.SetContextFiles(on, contextFileNames)
+			return contextFileNote, nil
+		default:
+			return "", fmt.Errorf("apogee: %s cannot be applied to the running session", key)
+		}
+		return "", nil
+	}
+}
+
+// settingBool reads a bool exactly as the splice writer renders one (renderSettingValue), so the
+// value a key was persisted with is the value it is applied with. The message names the key, because
+// it lands on that key's row.
+func settingBool(key, value string) (bool, error) {
+	on, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		return false, fmt.Errorf("apogee: %s is true or false, not %q", key, value)
+	}
+	return on, nil
 }
 
 // ----------------------------------------------------------------------------
@@ -1291,13 +1380,30 @@ type lateEngine struct {
 	agent   *apogee.Agent
 	mode    apogee.Mode
 	confine bool
+
+	// The settings surface's anytime-safe mutators, held for the same reason the two above are: an
+	// edit committed while the server picker is still up must not fall between the file and the
+	// engine. A nil pointer means the key was never moved HERE, so a bind leaves the Agent on the
+	// seed its Config carried — which is the difference between "not moved" and "moved to false".
+	pendingBypass       *bool
+	pendingCompaction   *bool
+	pendingContextFiles *contextFileChoice
 }
 
-// The composition root's engine holder satisfies both seams it is handed across: the renderer's
-// narrow Engine, and the switcher half of the shared move (sessionMover).
+// contextFileChoice is one remembered SetContextFiles call. The pair travels together because
+// either half alone is a different instruction: names with the switch off install nothing.
+type contextFileChoice struct {
+	enable bool
+	names  []string
+}
+
+// The composition root's engine holder satisfies every seam it is handed across: the renderer's
+// narrow Engine, the switcher half of the shared move (sessionMover), and the live-apply
+// dispatcher's mutator surface.
 var (
 	_ tui.Engine       = (*lateEngine)(nil)
 	_ upstreamSwitcher = (*lateEngine)(nil)
+	_ settingsEngine   = (*lateEngine)(nil)
 )
 
 // errNoServerBound is what every conversation-touching call answers while the session has no
@@ -1334,6 +1440,15 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	// What the human may have moved while there was nothing to move it on.
 	agent.SetMode(e.mode)
 	agent.SetConfineToWorkspace(e.confine)
+	if e.pendingBypass != nil {
+		agent.SetBypass(*e.pendingBypass)
+	}
+	if e.pendingCompaction != nil {
+		agent.SetCompactionEnabled(*e.pendingCompaction)
+	}
+	if c := e.pendingContextFiles; c != nil {
+		agent.SetContextFiles(c.enable, c.names)
+	}
 	e.agent = agent
 	return nil
 }
@@ -1454,6 +1569,44 @@ func (e *lateEngine) SetConfineToWorkspace(confine bool) {
 	e.mu.Unlock()
 	if agent != nil {
 		agent.SetConfineToWorkspace(confine)
+	}
+}
+
+// SetBypass switches Mechanisms off or back on for the rest of the session (the settings surface's
+// `bypass` key), remembered while unbound for SetMode's reason: the pane can be opened before a
+// server is chosen, and an edit that persisted must not be the only half that happened.
+func (e *lateEngine) SetBypass(enabled bool) {
+	e.mu.Lock()
+	e.pendingBypass = &enabled
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetBypass(enabled)
+	}
+}
+
+// SetCompactionEnabled arms or disarms the automatic Compaction trigger (`auto-compact`), on the
+// same terms as SetBypass above.
+func (e *lateEngine) SetCompactionEnabled(enabled bool) {
+	e.mu.Lock()
+	e.pendingCompaction = &enabled
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetCompactionEnabled(enabled)
+	}
+}
+
+// SetContextFiles replaces the workspace context-file names folded in at the next session boundary
+// (`context-files:`), on the same terms as the two above. The pair is remembered together because
+// the switch and the names are one instruction.
+func (e *lateEngine) SetContextFiles(enable bool, names []string) {
+	e.mu.Lock()
+	e.pendingContextFiles = &contextFileChoice{enable: enable, names: names}
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetContextFiles(enable, names)
 	}
 }
 
