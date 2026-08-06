@@ -543,6 +543,75 @@ func assertNoESC(t *testing.T, s string) {
 	}
 }
 
+// TestTranscriptCodecRoundTripsASubAgentFill proves the fill a sub-agent run wears survives the
+// record: both halves of the pair reach the wire under their own members and come back on the head
+// that delegated, so a reopened session still says how much of its window that delegate had filled
+// — the reading as it stood when the run reported, not one a later window rebind could rewrite.
+//
+// The pair is ADDITIVE within transcriptVersion and needs no bump, on the wireEnvelope rule: a run
+// that never reported writes neither member, and a blob written before they existed decodes to the
+// zero pair — which is the nothing-to-say case the summary line already hides, so no migration.
+func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
+	t.Parallel()
+	const window = 32768
+
+	t.Run("a reported run carries its fill through the record", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentUsage(tr, 1, 12000, window)
+		subAgentReport(tr, "s1", "tests read", 0)
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		// The members are part of the record now, so pin their names and their spelling as integers.
+		if want := `"ctxUsed":12000,"ctxLimit":32768`; !strings.Contains(string(data), want) {
+			t.Errorf("wire blob does not carry %s:\n%s", want, data)
+		}
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 1 || got[0].kind != entryToolCall {
+			t.Fatalf("decoded %+v; want the one sub-agent run head", got)
+		}
+		if got[0].ctxUsed != 12000 || got[0].ctxLimit != window {
+			t.Errorf("replayed fill = %d/%d, want 12000/%d", got[0].ctxUsed, got[0].ctxLimit, window)
+		}
+	})
+
+	t.Run("a run that never reported writes neither member", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentReport(tr, "s1", "tests read", 0)
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		if strings.Contains(string(data), "ctx") {
+			t.Errorf("an empty fill reached the wire: %s", data)
+		}
+	})
+
+	t.Run("a blob written before the members decodes to the zero pair", func(t *testing.T) {
+		legacy := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"s1","done":true,` +
+			`"tool":{"label":"Sub-Agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
+		got, err := decodeTranscript(legacy)
+		if err != nil {
+			t.Fatalf("decodeTranscript(legacy): %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries; want the one run head", len(got))
+		}
+		if got[0].ctxUsed != 0 || got[0].ctxLimit != 0 {
+			t.Errorf("a blob predating the members decoded a fill of %d/%d; want 0/0 so the cell hides",
+				got[0].ctxUsed, got[0].ctxLimit)
+		}
+	})
+}
+
 // TestTranscriptCodecGoldenV1 pins the exact v1 wire shape: field names, the string kind enum,
 // the nested tool card with its name and coloured details, the presented Method as a domain
 // string, and omitempty behaviour. A change to any of these — a renamed field, a reordered kind

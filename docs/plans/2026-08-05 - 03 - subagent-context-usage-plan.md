@@ -70,7 +70,7 @@ NOTES (2026-08-06): two additions beyond the item's named files, both documentat
 
 **Commit:** `feat(tui): sub-agent summary line shows context usage`
 
-## 3. Persist the reading across session resume
+## 3. Persist the reading across session resume — ✅ DONE (2026-08-06)
 
 Depends on item 1.
 

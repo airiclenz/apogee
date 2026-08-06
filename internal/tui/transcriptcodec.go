@@ -57,11 +57,19 @@ type wireEnvelope struct {
 // no field here claims it any more, and json.Unmarshal ignores what it cannot place — so such a
 // record decodes as the plain send it now paints as, its invocations recorded by SkillSpans alone.
 type wireEntry struct {
-	Kind       string          `json:"kind"`
-	Text       string          `json:"text,omitempty"`
-	Depth      int             `json:"depth,omitempty"`
-	CallID     string          `json:"callID,omitempty"`
-	Done       bool            `json:"done,omitempty"`
+	Kind   string `json:"kind"`
+	Text   string `json:"text,omitempty"`
+	Depth  int    `json:"depth,omitempty"`
+	CallID string `json:"callID,omitempty"`
+	Done   bool   `json:"done,omitempty"`
+	// the fill a sub-agent run's head wears (entry.ctxUsed / ctxLimit): what the delegate's context
+	// held when it last reported, and the window that reading filled. Both members are ADDITIVE
+	// within transcriptVersion and travel together, because a fill says nothing without its limit —
+	// a blob written before they existed decodes to the zero pair, which is the same
+	// nothing-to-say case the summary line already hides (render.go, subAgentFill). Frozen at fold
+	// time, so what a record keeps is the reading as it stood when the run reported.
+	CtxUsed    int             `json:"ctxUsed,omitempty"`
+	CtxLimit   int             `json:"ctxLimit,omitempty"`
 	SkillSpans []wireSkillSpan `json:"skillSpans,omitempty"`
 	Tool       *wireToolView   `json:"tool,omitempty"`
 	Presented  *wirePresented  `json:"presented,omitempty"`
@@ -215,6 +223,8 @@ func toWireEntry(e *entry, kind string) wireEntry {
 		Depth:      e.depth,
 		CallID:     e.callID,
 		Done:       e.done,
+		CtxUsed:    e.ctxUsed,
+		CtxLimit:   e.ctxLimit,
 		SkillSpans: toWireSkillSpans(e.skillSpans),
 	}
 	if e.kind == entryToolCall || e.kind == entrySchedule {
@@ -281,11 +291,13 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 		return entry{}, false
 	}
 	e := entry{
-		kind:   kind,
-		text:   stripEscapes(w.Text),
-		depth:  w.Depth,
-		callID: w.CallID,
-		done:   w.Done,
+		kind:     kind,
+		text:     stripEscapes(w.Text),
+		depth:    w.Depth,
+		callID:   w.CallID,
+		done:     w.Done,
+		ctxUsed:  w.CtxUsed,
+		ctxLimit: w.CtxLimit,
 	}
 	// The offsets were measured against the text as SENT, and the text above has just been
 	// re-stripped as untrusted disk input, so a span is kept only while it still locates a run of
