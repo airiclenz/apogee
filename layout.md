@@ -479,7 +479,11 @@ took away: every line of the question as it was put, then one line per offered c
 where the answer named that choice and `[ ]` where it did not — the same ASCII pair the popup ticks
 with, box-drawing checkboxes rendering as tofu — and then any answer line no choice accounts for,
 which is where a typed reply lands and where the later lines of a multi-line answer land with it, so
-no part of what a human said goes unshown. Every line of that body is quoted in this same sense, the
+no part of what a human said goes unshown. That last group starts at the answer's **second** line
+when the question offered no choices at all, the first being the branch directly above with no list
+in between — recording it would open the body by repeating the row over it. Where choices were
+offered that line is kept: unticked boxes say only that the human took none of them, and the line
+beneath says what they said instead. Every line of that body is quoted in this same sense, the
 choice labels included. It is built from the **call's own arguments** and the answer already
 returned, so nothing crosses the wire for it and the model's view of the exchange is byte for byte
 what it was; and it exists **only once the answer has landed** — while the question is on the screen
