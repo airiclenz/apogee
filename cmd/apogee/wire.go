@@ -250,7 +250,15 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	if err != nil {
 		return fmt.Errorf("apogee: connect MCP servers: %w", err)
 	}
-	defer mcpClient.Close()
+	// The connections are held rather than captured, because `mcp-servers:` is editable mid-session
+	// (ADR 0037 decision 6): a reconnect dials a new set, swaps it in and tears the old one down, so
+	// what has to be closed at the end of the run is whatever the holder is on NOW — closing the
+	// client this line connected would leave the live sessions orphaned and tear down a set that was
+	// already closed hours ago.
+	mcpSet := newLiveMCP(mcpClient, func(servers []mcp.ServerConfig) (mcpSession, error) {
+		return mcp.Connect(ctx, servers, security.URLGuard{})
+	})
+	defer mcpSet.close()
 	// The registry is assembled HERE unconditionally rather than left to the engine's own
 	// resolveTools — which would build the identical set from this same Config — because the
 	// composition root has to keep the pointer. The settings surface re-points a live tool in place
@@ -258,14 +266,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// set through Agent.SwapTools when the SET has to change. Neither is reachable through a
 	// registry the engine built privately, and with no MCP server configured the two builds are the
 	// same tools in the same order, so this changes what the root HOLDS, never what the Agent runs.
-	cfg.Tools = registryWithMCP(roots.workspace, cfg, mcpClient.Tools())
-	toolSet := newLiveTools(cfg.Tools, func(endpoint string) *apogee.ToolRegistry {
+	cfg.Tools = registryWithMCP(roots.workspace, cfg, mcpSet.tools())
+	toolSet := newLiveTools(cfg.Tools, cfg.WebSearchEndpoint, func(endpoint string) *apogee.ToolRegistry {
 		// The set as this session would have built it with another search endpoint: the MCP tools
-		// are re-folded from the client rather than remembered, so a rebuild always carries the
+		// are re-folded from the holder rather than remembered, so a rebuild always carries the
 		// connections that are live NOW.
 		host := cfg
 		host.WebSearchEndpoint = endpoint
-		return registryWithMCP(roots.workspace, host, mcpClient.Tools())
+		return registryWithMCP(roots.workspace, host, mcpSet.tools())
 	})
 
 	// Resolve the catalogued Mechanisms enabled in config.yaml to the sorted ID list the engine arms
@@ -657,6 +665,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 			configPath: filepath.Join(roots.config, "config.yaml"),
 			skills:     skillProvider,
 			tools:      toolSet,
+			mcp:        mcpSet,
 			roots:      roots,
 			launcher:   launcher,
 			present:    presentation,
@@ -927,10 +936,11 @@ func (s *liveSettings) rebindInputs(base options) (options, []apogee.MechanismID
 
 // settingsEngine is the engine surface the live-apply dispatcher drives: the anytime-safe mutator
 // class of ADR 0037 decision 2 — one mutex, one field, consumed at a boundary the loop crosses
-// constantly, so a call is safe while a Step runs — plus the ONE idle-only mutator a settings edit
-// can reach, SwapTools (binding F). Nothing else: the second idle-only door, Rebind, is driven
-// through the rebind closure rather than from here, because a rebind is a per-MODEL resolution the
-// heartbeat also drives. It is an interface rather than the holder itself so the dispatcher can be
+// constantly, so a call is safe while a Step runs — plus the two idle-only mutators a settings edit
+// reaches directly: SwapTools, the single door for a tool-set change (binding F), and SetProfile, the
+// single door for a dialect change. Nothing else: the third idle-only door, Rebind, is driven through
+// the rebind closure rather than from here, because a rebind is a per-MODEL resolution the heartbeat
+// also drives. It is an interface rather than the holder itself so the dispatcher can be
 // exercised against a spy with no Agent behind it, the narrowing every seam this file hands the
 // renderer already follows.
 type settingsEngine interface {
@@ -939,6 +949,7 @@ type settingsEngine interface {
 	SetCompactionEnabled(bool)
 	SetContextFiles(enable bool, names []string)
 	SwapTools(*apogee.ToolRegistry) error
+	SetProfile(apogee.ModelProfile) error
 }
 
 // settingsSkills is the skill-catalogue surface the dispatcher drives, narrowed off *skills.Provider
@@ -965,15 +976,21 @@ type settingsSkills interface {
 type liveTools struct {
 	mu      sync.Mutex
 	current *apogee.ToolRegistry
+	// endpoint is the web-search endpoint the live set was BUILT from. It is remembered because a
+	// rebuild driven by something else entirely — a reconnect to another set of MCP servers — must
+	// carry the endpoint this session is actually on, not the one it launched with: rebuilding from
+	// the startup value would quietly revert a search-endpoint edit made an hour earlier.
+	endpoint string
 
 	// build assembles the whole set as this session would have assembled it at startup, for a given
 	// web-search endpoint — host tools plus the MCP tools that are connected now.
 	build func(webSearchEndpoint string) *apogee.ToolRegistry
 }
 
-// newLiveTools holds the registry the session was constructed with, and the recipe for another.
-func newLiveTools(current *apogee.ToolRegistry, build func(webSearchEndpoint string) *apogee.ToolRegistry) *liveTools {
-	return &liveTools{current: current, build: build}
+// newLiveTools holds the registry the session was constructed with, the endpoint it was built from,
+// and the recipe for another.
+func newLiveTools(current *apogee.ToolRegistry, endpoint string, build func(webSearchEndpoint string) *apogee.ToolRegistry) *liveTools {
+	return &liveTools{current: current, endpoint: endpoint, build: build}
 }
 
 // setSearchEndpoint moves web_search to endpoint. While the tool is registered — the ordinary case,
@@ -990,15 +1007,36 @@ func newLiveTools(current *apogee.ToolRegistry, build func(webSearchEndpoint str
 func (t *liveTools) setSearchEndpoint(endpoint string, engine settingsEngine) error {
 	if ws := t.webSearch(); ws != nil {
 		ws.SetEndpoint(endpoint)
+		t.mu.Lock()
+		t.endpoint = endpoint
+		t.mu.Unlock()
 		return nil
 	}
+	return t.rebuildWith(endpoint, engine)
+}
+
+// rebuild reassembles the whole set as this session would assemble it NOW and hands it to the engine
+// — the door a change to the tool SET itself goes through when the change is not about any one tool's
+// configuration (ADR 0037 binding F). Today that is one caller: a reconnect to another set of MCP
+// servers, whose tools are part of the set's identity rather than a field on a tool already in it.
+func (t *liveTools) rebuild(engine settingsEngine) error {
+	t.mu.Lock()
+	endpoint := t.endpoint
+	t.mu.Unlock()
+	return t.rebuildWith(endpoint, engine)
+}
+
+// rebuildWith is the swap both doors share: build, hand to the engine, and become the live set only
+// once the engine has taken it. Being idle-only, SwapTools can refuse mid-run — and then nothing has
+// moved, which is what makes re-committing the edit a retry rather than a second half-application.
+func (t *liveTools) rebuildWith(endpoint string, engine settingsEngine) error {
 	next := t.build(endpoint)
 	if err := engine.SwapTools(next); err != nil {
 		return err
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.current = next
+	t.current, t.endpoint = next, endpoint
 	return nil
 }
 
@@ -1017,6 +1055,119 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 	}
 	ws, _ := found.(*tools.WebSearch)
 	return ws
+}
+
+// mcpSession is the connected-MCP surface a reconnect drives: the tools the servers advertise, and
+// the teardown that ends the connections. *mcp.Client is the only implementation that ships — it is
+// an interface for settingsEngine's reason, so the reconnect's ORDER (dial, swap, tear down) is
+// exercisable against a fake without a server process behind it.
+type mcpSession interface {
+	Tools() []apogee.Tool
+	Close() error
+}
+
+// liveMCP owns the MCP connections the session is running on and the recipe for another set of them.
+// It exists because `mcp-servers:` is editable mid-session (ADR 0037 decision 6) and a connection is
+// not a value: applying the key means dialling a new set, moving the tool registry onto it and tearing
+// the old set down, in that order, so that a set that cannot be reached leaves the session on the
+// connections it already has.
+//
+// The holder is what makes the tool registry's rebuild honest afterwards: the build recipe folds in
+// whatever this holder currently carries, so a rebuild driven by any reason at all — a search endpoint
+// edit, a later reconnect — carries the connections that are live now rather than the ones the
+// process started with.
+//
+// The mutex guards the pointer for liveTools' reason: the writes come from the Update goroutine and
+// the surfaced tools are called on the loop's worker goroutine, which reaches them through the
+// registry rather than through this holder.
+type liveMCP struct {
+	mu      sync.Mutex
+	current mcpSession
+
+	// connect dials a whole set, all-or-nothing, exactly as startup dialled the first one.
+	connect func(servers []mcp.ServerConfig) (mcpSession, error)
+}
+
+// newLiveMCP holds the sessions this run connected at startup, and the recipe for another set.
+func newLiveMCP(current mcpSession, connect func(servers []mcp.ServerConfig) (mcpSession, error)) *liveMCP {
+	return &liveMCP{current: current, connect: connect}
+}
+
+// tools surfaces what the connected servers advertise, for folding into a registry build.
+func (m *liveMCP) tools() []apogee.Tool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.current == nil {
+		return nil
+	}
+	return m.current.Tools()
+}
+
+// close tears down whatever set the session ended on — the run's own defer, which is why it reads the
+// holder rather than closing the client the process started with.
+func (m *liveMCP) close() error {
+	m.mu.Lock()
+	current := m.current
+	m.mu.Unlock()
+	return closeSession(current)
+}
+
+// swap installs a set and hands back the one it displaced, so a caller that has to put the old one
+// back — a reconnect whose registry swap was refused — holds it without a second lock.
+func (m *liveMCP) swap(next mcpSession) mcpSession {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	previous := m.current
+	m.current = next
+	return previous
+}
+
+// reconnect moves the session onto servers: validate-then-commit, where "validate" is the connection
+// itself (ADR 0037 decision 6). The new set is dialled FIRST — all-or-nothing, as at startup, but
+// reported rather than fatal, because a session that is already running is not a session to kill over
+// a server that has gone away — and only once the rebuilt registry has been taken by the engine are
+// the old sessions torn down. Every failure leaves the session on the connections and the tool set it
+// already had, which is what makes re-committing the edit a retry.
+//
+// A busy engine is one of those failures: SwapTools is idle-only, so a reconnect committed mid-run is
+// refused and reported on the row over a value the file already carries (ADR 0037 binding A).
+func (m *liveMCP) reconnect(servers []mcp.ServerConfig, set *liveTools, engine settingsEngine) error {
+	next, err := m.connect(servers)
+	if err != nil {
+		return mcpReconnectFailed(err)
+	}
+	// The rebuild below folds the holder's tools, so the new set has to be installed before it — and
+	// put back by hand if the engine will not take the registry built from it.
+	previous := m.swap(next)
+	if err := set.rebuild(engine); err != nil {
+		m.swap(previous)
+		// No orphan: the sessions just opened are torn down before the failure is reported, exactly as
+		// mcp.Connect rolls back a half-connected set. The close error is dropped because it describes
+		// connections nobody is going to use either way, and the failure worth reporting is the one
+		// that already happened.
+		_ = closeSession(next)
+		return mcpReconnectFailed(err)
+	}
+	// Nothing dispatches to the old sessions any more, so they go. A close that fails leaves the human
+	// nothing to do about it and does not turn a reconnect that worked into an apply that failed.
+	_ = closeSession(previous)
+	return nil
+}
+
+// closeSession tears a set down, tolerating the holder having none: an embedder that wired no MCP at
+// all is a dormant holder, and closing nothing is not an error.
+func closeSession(s mcpSession) error {
+	if s == nil {
+		return nil
+	}
+	return s.Close()
+}
+
+// mcpReconnectFailed is what the row says when a reconnect could not land. It names the outcome the
+// human most needs to know — that the servers they were talking to a moment ago are still connected —
+// because the alternative reading of a failed reconnect is that the session now has no MCP tools.
+func mcpReconnectFailed(err error) error {
+	return fmt.Errorf("reconnect failed: %w — previous connections kept", err)
 }
 
 // contextFileNote is the boundary sentence the `context-files:` keys carry back to the row: the name
@@ -1050,6 +1201,9 @@ type settingsApplier struct {
 	// tools is the session's live tool set — where a tool is re-pointed in place, and the door a
 	// set-level change goes through.
 	tools *liveTools
+	// mcp is the session's live MCP connections: the one key whose apply is a reconnect rather than a
+	// write, and the source of half the tool set the door above swaps.
+	mcp *liveMCP
 	// launcher is the config path the local-server verbs read, and with it whether they work at all.
 	launcher *launcherPath
 	// present is the presentation ladder, which rebuilds from a changed `present:` block and
@@ -1187,6 +1341,17 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 				return "", err
 			}
 			return "", a.rideTheRebind()
+		case "mcp-servers":
+			// The one key whose value is a set of live CONNECTIONS. It is not pushed and not
+			// re-resolved into a holder either: it is dialled, and the session moves onto the servers
+			// that answered (ADR 0037 decision 6). The value the pane persisted is not read, for the
+			// `servers:` reason — a list of blocks is a shape no single string spells.
+			return "", a.reconnectMCP()
+		case "model-profile":
+			// The dialect the model speaks (CONTEXT: Model profile) is a GLOBAL setting with its own
+			// engine door, deliberately not the per-model rebind: a model change is not a dialect
+			// change, so Rebind leaves the profile alone and SetProfile is where it moves.
+			return "", a.reloadProfile()
 		default:
 			return "", fmt.Errorf("apogee: %s cannot be applied to the running session", key)
 		}
@@ -1289,6 +1454,42 @@ func (a settingsApplier) reloadValidatedSets() error {
 	}
 	a.live.setValidatedSets(enable, l.validatedSetsAlias)
 	return nil
+}
+
+// reconnectMCP re-reads the `mcp-servers:` block and moves the session onto it. The dial and the
+// registry swap are liveMCP.reconnect's; what belongs here is the same one thing every structured
+// key's apply does — resolve the file layer exactly as startup resolved it — because only the FILE
+// carries this key (no flag, no environment variable names an MCP server).
+//
+// A file that no longer parses is refused before anything is dialled, so a typo in an unrelated key
+// cannot cost the session the servers it is talking to.
+func (a settingsApplier) reconnectMCP() error {
+	l, err := loadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	if err != nil {
+		return err
+	}
+	return a.mcp.reconnect(l.mcpServers, a.tools, a.engine)
+}
+
+// reloadProfile re-reads the `model-profile:` block and swaps it into the running engine. The
+// resolution is the composition root's (the on-disk schema projected through toModelProfile, exactly
+// as startup projects it) and the VALIDATION is the engine's: SetProfile builds the profile's two
+// collaborators before it commits, so a tool-call format this build cannot parse leaves the session
+// reading responses exactly as it did — and says so on the row.
+//
+// An absent block resolves to the zero profile, which is what startup would have resolved it to: a
+// human who deleted the block asked for native tool calls and no inline thinking channel, not for
+// whatever the process happened to launch with.
+func (a settingsApplier) reloadProfile() error {
+	l, err := loadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	if err != nil {
+		return err
+	}
+	var profile apogee.ModelProfile
+	if l.profile != nil {
+		profile = *l.profile
+	}
+	return a.engine.SetProfile(profile)
 }
 
 // settingInt reads a whole count the same way (kindInt's own validators do, validateContextWindow),
@@ -2065,6 +2266,10 @@ type lateEngine struct {
 	pendingBypass       *bool
 	pendingCompaction   *bool
 	pendingContextFiles *contextFileChoice
+	// pendingProfile is the same idea for the one IDLE-ONLY mutator that has to be remembered: a
+	// dialect swap needs an Agent to build its parsers, but a bind with no memory of the edit would
+	// install the profile the process started with (see SetProfile).
+	pendingProfile *apogee.ModelProfile
 }
 
 // contextFileChoice is one remembered SetContextFiles call. The pair travels together because
@@ -2125,6 +2330,15 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	}
 	if c := e.pendingContextFiles; c != nil {
 		agent.SetContextFiles(c.enable, c.names)
+	}
+	// The one remembered value that can be REFUSED: a dialect this build cannot parse. The Agent is
+	// released and the bind fails, which is exactly what a config carrying that profile at launch
+	// does — a session is never installed reading its model's replies in a language it does not have.
+	if p := e.pendingProfile; p != nil {
+		if err := agent.SetProfile(*p); err != nil {
+			_ = agent.Close()
+			return err
+		}
 	}
 	e.agent = agent
 	return nil
@@ -2298,6 +2512,29 @@ func (e *lateEngine) SwapTools(registry *apogee.ToolRegistry) error {
 		return errNoServerBound
 	}
 	return agent.SwapTools(registry)
+}
+
+// SetProfile swaps the dialect the session reads responses in (`model-profile`, ADR 0037's other
+// idle-only door). Unbound it is REMEMBERED and installed at the bind, like the anytime-safe setters
+// above and unlike SwapTools: a tool registry has a carrier across the bind already — Config.Tools,
+// which the composition root holds and hands over — while the profile a bind would otherwise install
+// is the one the process STARTED with, so a pre-bound edit that was only remembered nowhere would be
+// an edit that waits for the next launch, which ADR 0037 exists to abolish.
+//
+// A remembered profile is validated where a bound one is: at the Agent. It is built before anything
+// is submitted, so the only way it can fail there is a dialect this build cannot parse — the same
+// failure the file would have produced at construction had it carried that profile at launch, and it
+// is reported the same way, as a bind that did not happen.
+func (e *lateEngine) SetProfile(profile apogee.ModelProfile) error {
+	e.mu.Lock()
+	agent := e.agent
+	if agent == nil {
+		e.pendingProfile = &profile
+		e.mu.Unlock()
+		return nil
+	}
+	e.mu.Unlock()
+	return agent.SetProfile(profile)
 }
 
 // ConfineToWorkspace reports the blast radius the next tool call will read: the Agent's own once

@@ -18,6 +18,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/session"
@@ -2237,9 +2238,13 @@ type applySettingSpy struct {
 	compaction   []bool
 	contextFiles []contextFileChoice
 	swaps        []*apogee.ToolRegistry
+	profiles     []apogee.ModelProfile
 	// swapErr is the idle-only refusal a busy engine answers a swap with, so the dispatcher's
 	// keep-the-persisted-value path is exercisable without a run in flight.
 	swapErr error
+	// profileErr is the other idle-only refusal: a dialect the engine will not take, either because a
+	// run is in flight or because this build cannot parse it.
+	profileErr error
 }
 
 func (s *applySettingSpy) SetMode(m apogee.Mode)        { s.modes = append(s.modes, m) }
@@ -2257,10 +2262,19 @@ func (s *applySettingSpy) SwapTools(registry *apogee.ToolRegistry) error {
 	return nil
 }
 
+func (s *applySettingSpy) SetProfile(p apogee.ModelProfile) error {
+	if s.profileErr != nil {
+		return s.profileErr
+	}
+	s.profiles = append(s.profiles, p)
+	return nil
+}
+
 // drove reports how many engine seams the spy was driven through in total — the assertion a key that
 // should have touched nothing makes.
 func (s *applySettingSpy) drove() int {
-	return len(s.modes) + len(s.bypass) + len(s.compaction) + len(s.contextFiles) + len(s.swaps)
+	return len(s.modes) + len(s.bypass) + len(s.compaction) + len(s.contextFiles) +
+		len(s.swaps) + len(s.profiles)
 }
 
 // Every key the dispatcher knows lands on ITS seam and no other, carrying the value the file spells.
@@ -2408,7 +2422,10 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 	tests := []struct {
 		name, key, value, wantIn string
 	}{
-		{name: "a key with no live seam", key: "mcp-servers", value: "", wantIn: "mcp-servers"},
+		// `server` is the one key with no dispatcher home and never will have one: its live apply is
+		// the picker's own switch (ADR 0037 decision 4), so a value arriving here is a value nothing
+		// can do anything with. Every other editable key now has a seam.
+		{name: "a key with no live seam", key: settingKeyServer, value: "second", wantIn: "server"},
 		{name: "a key that is not a setting", key: "nonsense", value: "1", wantIn: "nonsense"},
 		{name: "a bool that is not one", key: "bypass", value: "yes please", wantIn: "bypass is true or false"},
 		{name: "a mode outside the ladder", key: "mode", value: "yolo", wantIn: "invalid"},
@@ -2634,7 +2651,7 @@ func TestApplySettingWebSearchEndpointMovesTheRegisteredTool(t *testing.T) {
 	spy := &applySettingSpy{}
 	apply := applySettingFor(settingsApplier{
 		engine: spy,
-		tools:  newLiveTools(registry, func(string) *apogee.ToolRegistry { return apogee.NewToolRegistry() }),
+		tools:  newLiveTools(registry, "", func(string) *apogee.ToolRegistry { return apogee.NewToolRegistry() }),
 	})
 
 	if _, err := apply("web-search-endpoint", "https://search.example.com/s"); err != nil {
@@ -2661,7 +2678,7 @@ func TestApplySettingWebSearchEndpointSwapsWhenTheToolIsAbsent(t *testing.T) {
 	workspace := t.TempDir()
 	var built []string
 	spy := &applySettingSpy{}
-	live := newLiveTools(apogee.NewToolRegistry(), func(endpoint string) *apogee.ToolRegistry {
+	live := newLiveTools(apogee.NewToolRegistry(), "", func(endpoint string) *apogee.ToolRegistry {
 		built = append(built, endpoint)
 		return tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{WebSearchEndpoint: endpoint})
 	})
@@ -2696,7 +2713,7 @@ func TestApplySettingWebSearchSwapRefusalKeepsTheOldSet(t *testing.T) {
 	t.Parallel()
 	old := apogee.NewToolRegistry()
 	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
-	live := newLiveTools(old, func(endpoint string) *apogee.ToolRegistry {
+	live := newLiveTools(old, "", func(endpoint string) *apogee.ToolRegistry {
 		return tools.NewDefaultRegistryWithHost(t.TempDir(), tools.HostTools{WebSearchEndpoint: endpoint})
 	})
 	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
@@ -2706,6 +2723,280 @@ func TestApplySettingWebSearchSwapRefusalKeepsTheOldSet(t *testing.T) {
 	}
 	if live.current != old {
 		t.Error("a refused swap still became the live set; the session must keep the tools it had")
+	}
+}
+
+// fakeMCPSession stands in for a connected set of MCP servers: what it advertises, and whether it has
+// been torn down. The reconnect is exercised against the mcpSession seam rather than a real
+// *mcp.Client because what lives in the composition root is the ORDER of the act — dial, swap, tear
+// down, and each failure's way back to the set that was serving — while the dialling itself is
+// internal/mcp's, and its own tests connect to a real fixture server over a real transport.
+type fakeMCPSession struct {
+	tools  []apogee.Tool
+	closed bool
+}
+
+func (f *fakeMCPSession) Tools() []apogee.Tool { return f.tools }
+func (f *fakeMCPSession) Close() error         { f.closed = true; return nil }
+
+// mcpFixtureTool is one tool a fake server advertises, named so a registry can be asked whose tools
+// reached it.
+type mcpFixtureTool struct{ name string }
+
+func (t mcpFixtureTool) Name() string            { return t.name }
+func (t mcpFixtureTool) Description() string     { return "a tool surfaced from a fake MCP server" }
+func (t mcpFixtureTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (t mcpFixtureTool) Execute(context.Context, apogee.ToolCall) (apogee.ToolResult, error) {
+	return apogee.ToolResult{}, nil
+}
+
+// mcpFixture wires the two holders a reconnect drives the way the composition root wires them: the
+// registry's build recipe folds whatever the MCP holder is carrying NOW. That coupling is the point —
+// it is what makes the swap-then-rebuild order observable in the registry the engine is handed, and
+// what a reverted swap has to put back.
+type mcpFixture struct {
+	set   *liveMCP
+	tools *liveTools
+	built []string // the endpoints the whole set was rebuilt for, in order
+}
+
+func newMCPFixture(start mcpSession, endpoint string, connect func([]mcp.ServerConfig) (mcpSession, error)) *mcpFixture {
+	f := &mcpFixture{}
+	f.set = newLiveMCP(start, connect)
+	f.tools = newLiveTools(apogee.NewToolRegistry(), endpoint, func(e string) *apogee.ToolRegistry {
+		f.built = append(f.built, e)
+		registry := apogee.NewToolRegistry()
+		for _, tool := range f.set.tools() {
+			// The fixture names its own tools, so the only registration that can fail is one this
+			// test wrote wrong — and then the Lookup assertions below say so in the caller's terms.
+			_ = registry.Register(tool)
+		}
+		return registry
+	})
+	return f
+}
+
+// toolNames is what a set advertises, for an assertion about WHICH connections a holder is on.
+func toolNames(tools []apogee.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, t := range tools {
+		names = append(names, t.Name())
+	}
+	return names
+}
+
+// mcpServersFixture is the `mcp-servers:` block a reconnect re-reads — the one place the new set
+// comes from, since a list of server blocks is a shape no single string spells.
+const mcpServersFixture = "mcp-servers:\n" +
+	"  - name: docs\n" +
+	"    transport: streamable-http\n" +
+	"    endpoint: https://mcp.example.com/\n"
+
+// The headline of ADR 0037 decision 6: a committed `mcp-servers:` edit DIALS. The new set answers
+// first, the whole tool registry is rebuilt around what it advertises and handed to the engine, and
+// only then are the connections it replaced torn down — so at no instant is the session without the
+// tools of one set or the other.
+func TestApplySettingMCPReconnectSwapsTheToolsAndClosesTheOldSessions(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+
+	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "gone__echo"}}}
+	next := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__search"}}}
+	var dialled [][]mcp.ServerConfig
+	fixture := newMCPFixture(old, "https://search.example.com/s", func(servers []mcp.ServerConfig) (mcpSession, error) {
+		dialled = append(dialled, servers)
+		return next, nil
+	})
+	spy := &applySettingSpy{}
+	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+
+	note, err := apply("mcp-servers", "1 server")
+	if err != nil || note != "" {
+		t.Fatalf("apply mcp-servers = (%q, %v), want a silent success: the servers are connected NOW", note, err)
+	}
+	if len(dialled) != 1 || len(dialled[0]) != 1 {
+		t.Fatalf("dialled = %+v, want exactly one dial of one server", dialled)
+	}
+	if got := dialled[0][0]; got.Name != "docs" || got.Transport != mcp.TransportStreamableHTTP ||
+		got.Endpoint != "https://mcp.example.com/" {
+		t.Fatalf("dialled %+v, want the file's own block (docs, streamable-http, mcp.example.com)", got)
+	}
+	if len(spy.swaps) != 1 {
+		t.Fatalf("SwapTools calls = %d, want 1: another server's tools are a change of the SET", len(spy.swaps))
+	}
+	if _, ok := spy.swaps[0].Lookup("docs__search"); !ok {
+		t.Error("the swapped-in registry has none of the new server's tools")
+	}
+	if _, ok := spy.swaps[0].Lookup("gone__echo"); ok {
+		t.Error("the swapped-in registry still carries the old server's tools")
+	}
+	if !old.closed {
+		t.Error("the old sessions are still open; a reconnect that landed leaves no orphan behind it")
+	}
+	if next.closed {
+		t.Error("the sessions the session is now running on were torn down")
+	}
+	if endpoints := []string{"https://search.example.com/s"}; !slices.Equal(fixture.built, endpoints) {
+		t.Errorf("rebuilds = %v, want %v: a rebuild carries the endpoint the session is on", fixture.built, endpoints)
+	}
+}
+
+// A rebuild is the whole set, so it has to be the set as the session is configured NOW — otherwise a
+// reconnect would quietly revert a web-search endpoint edited an hour earlier, which is a key nobody
+// touched being changed by a key somebody did.
+func TestMCPReconnectRebuildsWithTheEndpointTheSessionIsOn(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+
+	fixture := newMCPFixture(&fakeMCPSession{}, "https://launch.example.com/s", func([]mcp.ServerConfig) (mcpSession, error) {
+		return &fakeMCPSession{}, nil
+	})
+	spy := &applySettingSpy{}
+	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+
+	// The fixture's registry has no web_search to re-point, so the endpoint edit goes through the
+	// swap door — and the endpoint it installed is what the reconnect must build the next set from.
+	if _, err := apply("web-search-endpoint", "https://moved.example.com/s"); err != nil {
+		t.Fatalf("apply web-search-endpoint: %v", err)
+	}
+	if _, err := apply("mcp-servers", "1 server"); err != nil {
+		t.Fatalf("apply mcp-servers: %v", err)
+	}
+	want := []string{"https://moved.example.com/s", "https://moved.example.com/s"}
+	if !slices.Equal(fixture.built, want) {
+		t.Errorf("rebuilds = %v, want %v — the reconnect rebuilt from the startup endpoint", fixture.built, want)
+	}
+}
+
+// A set that cannot be reached costs the session nothing: the dial fails before anything has moved,
+// the connections it is using stay open, and the row is told both halves of that in one sentence.
+func TestApplySettingMCPReconnectKeepsTheOldSessionsWhenTheDialFails(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+
+	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "serving__echo"}}}
+	fixture := newMCPFixture(old, "", func([]mcp.ServerConfig) (mcpSession, error) {
+		return nil, errors.New("mcp: connect to server \"docs\": dial: connection refused")
+	})
+	spy := &applySettingSpy{}
+	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+
+	_, err := apply("mcp-servers", "1 server")
+	if err == nil {
+		t.Fatal("apply mcp-servers: want the dial's failure reported, got none")
+	}
+	for _, want := range []string{"reconnect failed", "connection refused", "previous connections kept"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err, want)
+		}
+	}
+	if old.closed {
+		t.Error("the sessions that are still serving were torn down by a reconnect that never happened")
+	}
+	if spy.drove() != 0 || len(fixture.built) != 0 {
+		t.Errorf("a failed dial still moved the tool set (swaps %d, rebuilds %v)", len(spy.swaps), fixture.built)
+	}
+	if names := toolNames(fixture.set.tools()); !slices.Equal(names, []string{"serving__echo"}) {
+		t.Errorf("live MCP tools = %v, want the old set still installed", names)
+	}
+}
+
+// The other failure is the engine's: SwapTools is idle-only, so a reconnect committed mid-run is
+// refused. The session keeps the connections and the tools it had — and the sessions dialled for the
+// swap that did not happen are torn down rather than left orphaned, exactly as a half-connected set
+// is rolled back at startup.
+func TestApplySettingMCPReconnectKeepsEverythingWhenTheEngineIsBusy(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+
+	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "serving__echo"}}}
+	next := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__search"}}}
+	fixture := newMCPFixture(old, "", func([]mcp.ServerConfig) (mcpSession, error) { return next, nil })
+	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
+	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+
+	_, err := apply("mcp-servers", "1 server")
+	if err == nil {
+		t.Fatal("apply mcp-servers: want the engine's refusal, got none")
+	}
+	if !strings.Contains(err.Error(), "previous connections kept") {
+		t.Errorf("error = %q, want the row told the old connections stand", err)
+	}
+	if old.closed {
+		t.Error("a refused swap tore down the sessions the run is still using")
+	}
+	if !next.closed {
+		t.Error("the sessions dialled for a swap that was refused are orphaned")
+	}
+	if names := toolNames(fixture.set.tools()); !slices.Equal(names, []string{"serving__echo"}) {
+		t.Errorf("live MCP tools = %v, want the holder back on the set that is serving", names)
+	}
+}
+
+// `model-profile` is the dialect the session reads replies in, and it has its own engine door: the
+// block is re-read and RESOLVED here — the on-disk schema is the composition root's business (ADR
+// 0031: the engine is handed values, never config text) — and handed over as a value.
+func TestApplySettingModelProfileSwapsTheDialect(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, "model-profile:\n"+
+		"  tool-call-format: markdown-fenced\n"+
+		"  thinking:\n"+
+		"    style: delimited\n"+
+		"    start: \"<think>\"\n"+
+		"    end: \"</think>\"\n")
+	spy := &applySettingSpy{}
+	apply := applySettingFor(settingsApplier{engine: spy, configPath: path})
+
+	if _, err := apply("model-profile", "markdown-fenced"); err != nil {
+		t.Fatalf("apply model-profile: %v", err)
+	}
+	want := apogee.ModelProfile{
+		ToolCallFormat: apogee.FormatMarkdownFenced,
+		Thinking: apogee.ThinkingProfile{
+			Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>",
+		},
+	}
+	if len(spy.profiles) != 1 || spy.profiles[0] != want {
+		t.Fatalf("SetProfile = %+v, want one call with %+v", spy.profiles, want)
+	}
+
+	// A block the human DELETED resolves to the zero profile — native tool calls, no inline thinking
+	// channel — which is what a launch from that same file would have resolved, not whatever dialect
+	// the process happens to be running.
+	writeSettingsFixture(t, path, "auto-title: true\n")
+	if _, err := apply("model-profile", "native"); err != nil {
+		t.Fatalf("apply model-profile with the block gone: %v", err)
+	}
+	if len(spy.profiles) != 2 || spy.profiles[1] != (apogee.ModelProfile{}) {
+		t.Errorf("SetProfile = %+v, want the second call to carry the zero profile", spy.profiles)
+	}
+}
+
+// A profile the engine will not take — a run in flight, or a dialect this build cannot parse — is
+// REPORTED over a value the file already carries (binding A). The session keeps reading replies the
+// way it was, which is the engine's own validate-then-commit; here the assertion is that the refusal
+// reaches the row rather than being swallowed by a dispatcher that already wrote the file.
+func TestApplySettingModelProfileRefusalIsReported(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, "model-profile:\n  tool-call-format: nonsense\n")
+	spy := &applySettingSpy{profileErr: errors.New("unknown tool-call format \"nonsense\"")}
+	apply := applySettingFor(settingsApplier{engine: spy, configPath: path})
+
+	_, err := apply("model-profile", "nonsense")
+	if err == nil {
+		t.Fatal("apply model-profile: want the engine's refusal, got none")
+	}
+	if !strings.Contains(err.Error(), "nonsense") {
+		t.Errorf("error = %q, want it to name what the engine refused", err)
+	}
+	if len(spy.profiles) != 0 {
+		t.Errorf("a refused profile was recorded as applied: %+v", spy.profiles)
 	}
 }
 
@@ -2946,6 +3237,15 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	if _, err := rec.opts.ApplySetting("use-project-skills", "false"); err != nil {
 		t.Errorf("ApplySetting(use-project-skills): %v", err)
 	}
+	// And the third live object: the MCP connections. With no servers configured the reconnect dials
+	// a dormant set and swaps the registry around it, which is a no-op the session cannot tell from
+	// the outside — but an unwired holder would panic here rather than degrade quietly.
+	if _, err := rec.opts.ApplySetting("mcp-servers", "none"); err != nil {
+		t.Errorf("ApplySetting(mcp-servers): %v", err)
+	}
+	if _, err := rec.opts.ApplySetting("model-profile", "native"); err != nil {
+		t.Errorf("ApplySetting(model-profile): %v", err)
+	}
 	// `server` is the key with no dispatcher home BY DESIGN and permanently: its live apply is the
 	// picker's own switch (ADR 0037 decision 4), so a value arriving here is a value nothing can do
 	// anything with, and the refusal has to name it.
@@ -2979,9 +3279,49 @@ func TestLateEngineRemembersSettingsMovedBeforeTheBind(t *testing.T) {
 		t.Errorf("pending names = %v, want %v", e.pendingContextFiles.names, want)
 	}
 
+	// The model profile is remembered on the same terms, though its own door is idle-only: unbound
+	// there is no Agent to refuse it, and a bind with no memory of the edit would install the dialect
+	// the process started with — which is the "(next launch)" outcome ADR 0037 exists to abolish.
+	if err := e.SetProfile(apogee.ModelProfile{ToolCallFormat: apogee.FormatMarkdownFenced}); err != nil {
+		t.Fatalf("SetProfile while unbound: %v, want it held for the bind", err)
+	}
+	if e.pendingProfile == nil || e.pendingProfile.ToolCallFormat != apogee.FormatMarkdownFenced {
+		t.Errorf("pendingProfile = %+v, want the edited dialect held for the bind", e.pendingProfile)
+	}
+
 	// A holder nothing moved holds nothing: the Agent is then constructed from its Config alone.
 	fresh := newLateEngine(modeAskBefore, true)
-	if fresh.pendingBypass != nil || fresh.pendingCompaction != nil || fresh.pendingContextFiles != nil {
+	if fresh.pendingBypass != nil || fresh.pendingCompaction != nil || fresh.pendingContextFiles != nil ||
+		fresh.pendingProfile != nil {
 		t.Errorf("a fresh holder already carries overrides: %+v", fresh)
+	}
+}
+
+// The remembered profile is installed at the bind, and it is validated there — by the Agent, which is
+// the only thing that can build a dialect's parsers. A profile this build cannot read makes the bind
+// FAIL, exactly as a config carrying that profile at launch does, and the holder is left free to bind
+// again once the human has fixed it: no Agent is ever installed reading replies in a language it
+// does not have.
+func TestLateEngineBindRefusesAProfileItCannotParse(t *testing.T) {
+	t.Parallel()
+	engine := newLateEngine(modeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	cfg := validCfg(t)
+
+	if err := engine.SetProfile(apogee.ModelProfile{
+		Thinking: apogee.ThinkingProfile{Style: "telepathy"},
+	}); err != nil {
+		t.Fatalf("SetProfile while unbound: %v", err)
+	}
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(cfg) }); err == nil {
+		t.Fatal("Bind with an unreadable profile succeeded; want the dialect refused")
+	}
+
+	// Left free: the failed bind installed nothing, so a corrected profile still gets its session.
+	if err := engine.SetProfile(apogee.ModelProfile{ToolCallFormat: apogee.FormatMarkdownFenced}); err != nil {
+		t.Fatalf("SetProfile after the refused bind: %v", err)
+	}
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(cfg) }); err != nil {
+		t.Fatalf("Bind after the refused one: %v, want the holder still free", err)
 	}
 }
