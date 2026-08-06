@@ -35,6 +35,12 @@ const (
 	kindString     configKind = "string"
 	kindEnum       configKind = "enum"
 	kindStructured configKind = "structured"
+	// kindServer is a string whose vocabulary is this config's OWN `servers:` block: a closed set
+	// like an enum's, but one no static table can hold, so EnumValues stays empty and the surface
+	// asks the session for the list (tui.SettingServer). It is the writer's kindString in every
+	// respect — one name on one line — and it is declared apart from it so a surface can offer the
+	// choice as a picker rather than as a text field.
+	kindServer configKind = "server"
 )
 
 // configKey describes one key of the config schema: what it is, where it may be set from,
@@ -106,12 +112,17 @@ var keyRegistry = []configKey{
 		Desc: "The servers you run models on — name, endpoint, and what each one needs.",
 	},
 	{
-		// A plain string rather than an enum, even though its values ARE a closed set: EnumValues is
-		// static and TestRegistryEnumValuesMatchParseSites recovers each vocabulary from its parse
+		// A kind of its own rather than an enum, even though its values ARE a closed set: EnumValues
+		// is static and TestRegistryEnumValuesMatchParseSites recovers each vocabulary from its parse
 		// site, while the names this key takes are whatever THIS config's `servers:` list spells. A
 		// name that matches no entry is therefore refused where the list is known — at selection —
 		// rather than by a vocabulary this table cannot hold.
-		Path: "server", Kind: kindString,
+		//
+		// Editable, and the edit is the `/server` SWITCH itself (ADR 0037 decision 4): the surface
+		// offers the configured entries, the session moves to the one chosen, and the move records it
+		// as the entry the next session starts on (ADR 0036 decision 2) — which is why nothing writes
+		// this key through saveConfigSetting on the surface's behalf.
+		Path: "server", Kind: kindServer,
 		EnvVar: envServer, FlagName: "server",
 		Editable: true,
 		Desc:     "Which servers: entry a session starts on; /server records the last one chosen.",

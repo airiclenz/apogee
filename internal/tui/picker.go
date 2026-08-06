@@ -256,28 +256,51 @@ func (m Model) runServerCommand(args []string) (tea.Model, tea.Cmd) {
 	if len(args) > 1 {
 		return m.pickerNote(serverUsage)
 	}
-	if m.opts.SwitchServer == nil || len(m.opts.Servers) == 0 {
+	servers := m.servers()
+	if m.opts.SwitchServer == nil || len(servers) == 0 {
 		return m.pickerNote(noServersNote)
 	}
 	if len(args) == 1 {
-		for _, choice := range m.opts.Servers {
-			if choice.Name == args[0] {
-				return m.switchToServer(choice)
-			}
+		if choice, ok := serverNamed(servers, args[0]); ok {
+			return m.switchToServer(choice)
 		}
 		return m.pickerNote(fmt.Sprintf(
-			"unknown server %q — configured: %s", args[0], serverNameList(m.opts.Servers)))
+			"unknown server %q — configured: %s", args[0], serverNameList(servers)))
 	}
 	m.picker = picker{open: true, kind: pickerServer, selected: m.currentServerRow()}
 	m.layout()
 	return m, nil
 }
 
+// servers is the switchable Upstreams as they stand RIGHT NOW ([Options.Servers], a provider): the
+// one read every surface that offers a server goes through, so the picker, the pre-bound ask and the
+// settings pane's popup all offer what the `servers:` block says at the moment they are drawn rather
+// than what it said at launch. An unwired provider is an empty list — the nil-seam degrade every
+// other seam takes.
+func (m Model) servers() []ServerChoice {
+	if m.opts.Servers == nil {
+		return nil
+	}
+	return m.opts.Servers()
+}
+
+// serverNamed is the choice called name, and whether the list still holds one — the resolution both
+// "/server <name>" and the settings pane's popup make before anything is asked to move, so a name
+// that left the list between the offer and the accept is answered rather than acted on.
+func serverNamed(servers []ServerChoice, name string) (ServerChoice, bool) {
+	for _, choice := range servers {
+		if choice.Name == name {
+			return choice, true
+		}
+	}
+	return ServerChoice{}, false
+}
+
 // currentServerRow is the row the server picker opens on: the one this session is on, identified by
 // endpoint — the same comparison the "· current" mark is drawn by, and the same one the binary used
 // when it decided whether the startup endpoint still needed a row of its own.
 func (m Model) currentServerRow() int {
-	for i, choice := range m.opts.Servers {
+	for i, choice := range m.servers() {
 		if choice.Endpoint == m.opts.Endpoint {
 			return i
 		}
@@ -570,7 +593,14 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 		picked := m.offeredModels()[m.picker.selected]
 		return m.bindPickedModel(picked.ID, picked.ContextWindow)
 	case pickerServer:
-		return m.switchToServer(m.opts.Servers[m.picker.selected])
+		// The one kind whose list is a PROVIDER (Options.Servers): the rows are re-read here rather
+		// than trusted from the frame that drew them, so a `servers:` block that shrank under the
+		// open overlay costs the accept and not the process.
+		servers := m.servers()
+		if m.picker.selected >= len(servers) {
+			return m, nil
+		}
+		return m.switchToServer(servers[m.picker.selected])
 	case pickerLoad:
 		return m.startProfileLoad(m.picker.profiles[m.picker.selected].Name)
 	case pickerCycle:
@@ -618,7 +648,7 @@ func (m Model) pickerCount() int {
 	case pickerModel:
 		return len(m.offeredModels())
 	case pickerServer:
-		return len(m.opts.Servers)
+		return len(m.servers())
 	case pickerLoad:
 		return len(m.picker.profiles)
 	case pickerCycle:
@@ -750,8 +780,9 @@ func (m Model) modelRows() []popupRow {
 // the aliases measure; the mark is an empty cell on every server but one, and when the session is on
 // none of them that third column collapses away.
 func (m Model) serverRows() []popupRow {
-	rows := make([]popupRow, 0, len(m.opts.Servers))
-	for _, choice := range m.opts.Servers {
+	servers := m.servers()
+	rows := make([]popupRow, 0, len(servers))
+	for _, choice := range servers {
 		current := ""
 		if choice.Endpoint == m.opts.Endpoint {
 			current = currentRowCell

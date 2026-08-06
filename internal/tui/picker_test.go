@@ -413,6 +413,12 @@ var twoServers = []ServerChoice{
 	{Name: "remote", Endpoint: "http://remote:8080"},
 }
 
+// staticServers is the [Options.Servers] provider a test that never changes its list wires: the same
+// choices every time it is asked, which is what a session whose `servers:` block nobody edits has.
+func staticServers(servers []ServerChoice) func() []ServerChoice {
+	return func() []ServerChoice { return servers }
+}
+
 // remoteWindow is the `context-window:` pin the fake switch reports back — GLOBAL config, so it
 // survives the move, which is what lets a test tell an adopted result from a cleared one.
 const remoteWindow = 8192
@@ -448,7 +454,7 @@ func (f *fakeSwitch) switchTo(name string) (ServerSwitchResult, error) {
 func seededServers(t *testing.T, sw *fakeSwitch) (Model, *fakeRebind) {
 	t.Helper()
 	opts := testOpts
-	opts.Servers = twoServers
+	opts.Servers = staticServers(twoServers)
 	opts.SwitchServer = sw.switchTo
 	return seededPicker(t, opts)
 }
@@ -565,7 +571,7 @@ func TestServerSwitchHappyPath(t *testing.T) {
 func seededServersRecording(t *testing.T, sw *fakeSwitch, rec *fakeRecorder) (Model, *fakeRebind) {
 	t.Helper()
 	opts := testOpts
-	opts.Servers = twoServers
+	opts.Servers = staticServers(twoServers)
 	opts.SwitchServer = sw.switchTo
 	opts.RecordServerChoice = rec.record
 	return seededPicker(t, opts)
@@ -666,7 +672,7 @@ func TestServerSwitchRetiresTheOldChain(t *testing.T) {
 func TestServerSwitchBlocksSendsUntilTheFirstBind(t *testing.T) {
 	sw := &fakeSwitch{}
 	opts := testOpts
-	opts.Servers = twoServers
+	opts.Servers = staticServers(twoServers)
 	opts.SwitchServer = sw.switchTo
 	rb := &fakeRebind{}
 	eng := &fakeEngine{}
@@ -798,7 +804,7 @@ func TestServerCommandAnswersWithoutSwitching(t *testing.T) {
 			}()},
 			{name: "unwired seam", opts: func() Options {
 				o := testOpts
-				o.Servers = twoServers
+				o.Servers = staticServers(twoServers)
 				return o
 			}()},
 		} {
@@ -821,7 +827,7 @@ func TestServerCommandIsIdleOnly(t *testing.T) {
 	}
 	sw := &fakeSwitch{}
 	opts := testOpts
-	opts.Servers = twoServers
+	opts.Servers = staticServers(twoServers)
 	opts.SwitchServer = sw.switchTo
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	m, _ = typeCommand(t, m, "open the exchange")

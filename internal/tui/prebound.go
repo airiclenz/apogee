@@ -134,7 +134,7 @@ func (m *Model) openPrebound() {
 // With nothing configured there is nothing to re-open, so the guidance note is the whole answer.
 func (m Model) preboundRefusal() (tea.Model, tea.Cmd) {
 	m.transcript.addNote(preboundNotice(m.opts.Prebound))
-	if len(m.opts.Servers) > 0 && m.opts.BindServer != nil {
+	if len(m.servers()) > 0 && m.opts.BindServer != nil {
 		m.picker = picker{open: true, kind: pickerServer, selected: m.currentServerRow()}
 	}
 	m.layout()

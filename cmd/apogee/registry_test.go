@@ -78,7 +78,7 @@ func kindMatchesType(kind configKind, typ reflect.Type) bool {
 		return typ.Kind() == reflect.Bool
 	case kindInt:
 		return typ.Kind() == reflect.Int
-	case kindString, kindEnum:
+	case kindString, kindEnum, kindServer:
 		return typ.Kind() == reflect.String
 	case kindStructured:
 		switch typ.Kind() {

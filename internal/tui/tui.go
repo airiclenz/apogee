@@ -425,13 +425,20 @@ type Options struct {
 	Rebind func(model string, contextWindow int) (RebindResult, error)
 
 	// Servers are the upstream servers this session can be switched to — the `/server` picker's
-	// rows, in the order the binary assembled them: every `servers:` entry from config.yaml,
-	// preceded by the endpoint this session started on whenever no entry already names it (so the
-	// way back is always offered). It is display and identity only; what a switch actually needs
-	// to talk to a server stays in the binary, behind SwitchServer.
+	// rows and the `/settings` server row's popup, in the order the binary assembled them: every
+	// `servers:` entry from config.yaml, preceded by the endpoint this session started on whenever
+	// no entry already names it (so the way back is always offered). It is display and identity
+	// only; what a switch actually needs to talk to a server stays in the binary, behind
+	// SwitchServer.
 	//
-	// nil/empty ⇒ nothing to switch to, and `/server` says so rather than opening an empty overlay.
-	Servers []ServerChoice
+	// A PROVIDER rather than a slice, the SettingsRows posture: the `servers:` block is itself
+	// something the human can change mid-session (ADR 0037's `$EDITOR` jump), so the list is asked
+	// for every time one is drawn rather than frozen at launch — an entry added a moment ago is
+	// offered without restarting apogee.
+	//
+	// nil, or an empty answer ⇒ nothing to switch to, and `/server` says so rather than opening an
+	// empty overlay.
+	Servers func() []ServerChoice
 
 	// SwitchServer moves the whole session to the server named name: the binary re-points the
 	// provider client at that endpoint with that key (Agent.SwitchUpstream), swaps in a heartbeat
@@ -783,6 +790,13 @@ const (
 	SettingString     SettingKind = "string"
 	SettingEnum       SettingKind = "enum"
 	SettingStructured SettingKind = "structured" // a list, a map, a block, or a multi-line text value
+	// SettingServer is the `server:` row: an enum whose vocabulary is not in the row at all but in
+	// Servers above, because what this key may hold is whatever THIS config's `servers:` block
+	// names — a list the human can change mid-session. It picks from the same sub-list an enum
+	// does and never opens a text buffer, and its ⏎ is a SWITCH rather than a write: the session
+	// moves (SwitchServer) and the move records the choice (RecordServerChoice, ADR 0036
+	// decision 2), which is this key's whole persistence.
+	SettingServer SettingKind = "server"
 )
 
 // SettingSource is which precedence source supplied the value a row shows. The zero value is the
@@ -831,7 +845,7 @@ type SettingRow struct {
 	Source     SettingSource
 	SourceName string
 
-	EnumValues  []string // the closed vocabulary, non-empty exactly for [SettingEnum]
+	EnumValues  []string // the closed vocabulary, non-empty exactly for [SettingEnum] ([SettingServer] reads Options.Servers instead)
 	Editable    bool     // this pane may write the key — and, since ADR 0037, apply it on the same ⏎
 	Masked      bool     // Value is a mask, not the value (api-key)
 	EditPointer string   // where a non-Editable key is edited instead; "" exactly when Editable

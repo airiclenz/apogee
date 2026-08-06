@@ -3113,7 +3113,7 @@ func TestOverlayPaneSitsFlushOnBottomChrome(t *testing.T) {
 			return m
 		}},
 		{"server picker", func(t *testing.T) Model {
-			m := modelWithOverlayRoomAt(t, 80, 24, Options{Workspace: "/ws/a", Servers: servers})
+			m := modelWithOverlayRoomAt(t, 80, 24, Options{Workspace: "/ws/a", Servers: staticServers(servers)})
 			m.picker = picker{open: true, kind: pickerServer}
 			m.layout()
 			return m

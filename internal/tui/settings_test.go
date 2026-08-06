@@ -733,6 +733,127 @@ func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
 	}
 }
 
+// settingsServerRow is the `server:` row as the registry describes it (cmd/apogee/registry.go): a
+// row picked from a sub-list like an enum, but with no vocabulary of its own — what it may hold is
+// whatever [Options.Servers] answers with — and whose ⏎ is the `/server` switch rather than a write.
+func settingsServerRow() SettingRow {
+	return SettingRow{
+		Path: "server", Section: "Upstream", Kind: SettingServer, Value: "test-host",
+		Editable: true, Desc: "Which servers: entry a session starts on.",
+	}
+}
+
+// settingsServerModel is the pane OPEN over that one row with the upstream seams wired: the live
+// list of switchable servers and the spy that records every move it is asked to make. The three
+// settings seams are wired too, so a test can prove this row reaches none of them.
+func settingsServerModel(t *testing.T, servers func() []ServerChoice, sw *fakeSwitch, log *settingsWriteLog) Model {
+	t.Helper()
+	rows := []SettingRow{settingsServerRow()}
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.WriteSetting, opts.ResetSetting, opts.ApplySetting = log.write, log.reset, log.apply
+	opts.Servers, opts.SwitchServer = servers, sw.switchTo
+	return openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+}
+
+// ⏎ on the `server` row opens the same sub-list an enum opens — never a text buffer — over the
+// servers this session can move to, with "(current)" on the one it is ON (ADR 0037 decision 4). The
+// list is the PROVIDER's answer at the moment the question is asked, so a `servers:` block that
+// gained an entry mid-session offers it the next time the row is opened.
+func TestSettingsServerRowPicksFromTheLiveList(t *testing.T) {
+	servers := twoServers
+	m := settingsServerModel(t, func() []ServerChoice { return servers }, &fakeSwitch{}, &settingsWriteLog{})
+
+	opened := step(t, m, keyEnter())
+
+	if opened.settings.kind != settingsEnumList {
+		t.Fatalf("pane = %+v, want the value sub-list — the server row never opens a text buffer", opened.settings)
+	}
+	if opened.settings.sub != 0 {
+		t.Errorf("sub = %d, want the row for the server this session is on", opened.settings.sub)
+	}
+	pane := strip(opened.renderSettings())
+	for _, want := range []string{"server", "test-host", "remote", "(current)", settingsEnumHint} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("the server sub-list does not show %q:\n%s", want, pane)
+		}
+	}
+
+	// The block gains an entry under the closed pane; the next open offers it.
+	servers = append(append([]ServerChoice{}, twoServers...), ServerChoice{Name: "laptop", Endpoint: "http://laptop:9"})
+	reopened := step(t, step(t, opened, keyEsc()), keyEnter())
+	if got := len(reopened.settingsVocabulary(settingsServerRow())); got != 3 {
+		t.Fatalf("vocabulary = %d values, want the three the provider now answers with", got)
+	}
+	if pane := strip(reopened.renderSettings()); !strings.Contains(pane, "laptop") {
+		t.Errorf("the reopened sub-list does not offer the entry added since:\n%s", pane)
+	}
+}
+
+// Choosing a server MOVES the session: the switch seam is driven exactly as `/server` drives it, the
+// fold states the move in the transcript, and the row shows the chosen name with the marker that says
+// this session changed it. Nothing is written through the settings writer — the recorded choice IS
+// this key's persistence (ADR 0036 decision 2), which the seam's own half performs.
+func TestSettingsServerRowSwitchesTheSession(t *testing.T) {
+	sw, log := &fakeSwitch{}, &settingsWriteLog{}
+	m := settingsServerModel(t, staticServers(twoServers), sw, log)
+
+	m = step(t, m, keyEnter()) // the sub-list, on test-host
+	m = step(t, m, keyDown())  // remote
+	m = step(t, m, keyEnter()) // commit
+
+	if want := []string{"remote"}; !reflect.DeepEqual(sw.calls, want) {
+		t.Fatalf("SwitchServer calls = %v, want %v", sw.calls, want)
+	}
+	if len(log.writes) != 0 || len(log.applies) != 0 {
+		t.Errorf("writes = %+v, applies = %+v; the server row goes through neither", log.writes, log.applies)
+	}
+	if m.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v, want the key list back — the question was answered", m.settings)
+	}
+	if got, want := m.settingsValueCell(settingsServerRow()), "remote"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the server now on the wire, marked as chosen here", got, want)
+	}
+	if got := m.settingsNote(settingsServerRow()); got != "" {
+		t.Errorf("note = %q, want none: the move happened and the value cell says so", got)
+	}
+	if m.opts.Endpoint != twoServers[1].Endpoint {
+		t.Errorf("endpoint = %q, want the moved-to server %q", m.opts.Endpoint, twoServers[1].Endpoint)
+	}
+	if got := plainTranscript(m); !strings.Contains(got, "switching server") {
+		t.Errorf("the switch is not folded into the transcript:\n%s", got)
+	}
+}
+
+// A refusal from the seam means the session did not move, and it lands on the ROW that asked rather
+// than in a transcript this full-height pane is covering. Nothing is journaled: the row still shows
+// the server the session is on, with no marker claiming a change.
+func TestSettingsServerRowRefusalLandsOnTheRow(t *testing.T) {
+	sw := &fakeSwitch{answer: func(string) (ServerSwitchResult, error) {
+		return ServerSwitchResult{}, errors.New("dial tcp: refused")
+	}}
+	log := &settingsWriteLog{}
+	m := settingsServerModel(t, staticServers(twoServers), sw, log)
+
+	m = step(t, m, keyEnter())
+	m = step(t, m, keyDown())
+	m = step(t, m, keyEnter())
+
+	row := settingsServerRow()
+	if got, want := m.settingsNote(row), "✗ dial tcp: refused"; got != want {
+		t.Errorf("note = %q, want %q", got, want)
+	}
+	if got := m.settingsValueCell(row); got != row.Value {
+		t.Errorf("value cell = %q, want the unchanged %q — a refused switch changed nothing", got, row.Value)
+	}
+	if m.opts.Endpoint != testOpts.Endpoint {
+		t.Errorf("endpoint = %q, want the session left where it was (%q)", m.opts.Endpoint, testOpts.Endpoint)
+	}
+	if len(log.writes) != 0 {
+		t.Errorf("writes = %+v, want none", log.writes)
+	}
+}
+
 // An edit APPLIES as well as persists (ADR 0037 decision 1), and every key that is not the renderer's
 // own goes out through the binary's dispatcher: the pane hands it the same path and the same value it
 // handed the writer, and knows nothing about the seam behind it. `mode` is the one key the pane also

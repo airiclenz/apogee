@@ -319,6 +319,7 @@ func TestSettingsRowsProjectRegistryMetadata(t *testing.T) {
 		kindInt:        tui.SettingInt,
 		kindString:     tui.SettingString,
 		kindEnum:       tui.SettingEnum,
+		kindServer:     tui.SettingServer,
 		kindStructured: tui.SettingStructured,
 	} {
 		if got := settingKind(kind); got != want {

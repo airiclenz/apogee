@@ -561,7 +561,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// `--endpoint`/`APOGEE_ENDPOINT` start synthesizes for itself (upstreamChoices). It can
 		// therefore be EMPTY — a pre-bound start on a config that lists nothing — which is
 		// exactly "nothing to switch to" without a special case.
-		Servers:      serverChoices(live.choices(opts)),
+		//
+		// Projected from the HOLDER on every ask rather than snapshotted at launch, so a `servers:`
+		// block the human edits mid-session (ADR 0037) is offered by the picker and by the settings
+		// pane's server row the moment the edit lands — the same list the two closures above resolve
+		// a name against, in the same order.
+		Servers:      func() []tui.ServerChoice { return serverChoices(live.choices(opts)) },
 		SwitchServer: switchServer,
 		// The pre-bound half of the same list (ADR 0036 decisions 3, 4 and 7): why this session has
 		// no upstream yet — first boot, a `server:` naming an entry that is gone, or nothing

@@ -879,8 +879,8 @@ func TestRunRootStartsPreboundWithoutAnEngine(t *testing.T) {
 			}
 			// And the way out is wired: the picker's rows are the configured list (no synthesized
 			// row, because no ephemeral startup exists) and BindServer is what ends the state.
-			if len(rec.opts.Servers) != len(tt.servers) {
-				t.Errorf("tui.Options.Servers = %+v; want the configured list %+v", rec.opts.Servers, tt.servers)
+			if choices := rec.opts.Servers(); len(choices) != len(tt.servers) {
+				t.Errorf("tui.Options.Servers() = %+v; want the configured list %+v", choices, tt.servers)
 			}
 			if rec.opts.BindServer == nil {
 				t.Error("tui.Options.BindServer is nil; the pre-bound session has no way to bind one")

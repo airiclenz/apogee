@@ -254,12 +254,13 @@ func TestRunRootSwitchServerRepointsTheSession(t *testing.T) {
 		{Name: "workstation", Endpoint: first.URL},
 		{Name: "second", Endpoint: second.URL},
 	}
-	if len(rec.opts.Servers) != len(wantChoices) {
-		t.Fatalf("tui.Options.Servers = %+v; want %+v", rec.opts.Servers, wantChoices)
+	choices := rec.opts.Servers()
+	if len(choices) != len(wantChoices) {
+		t.Fatalf("tui.Options.Servers() = %+v; want %+v", choices, wantChoices)
 	}
 	for i := range wantChoices {
-		if rec.opts.Servers[i] != wantChoices[i] {
-			t.Errorf("Servers[%d] = %+v; want %+v", i, rec.opts.Servers[i], wantChoices[i])
+		if choices[i] != wantChoices[i] {
+			t.Errorf("Servers()[%d] = %+v; want %+v", i, choices[i], wantChoices[i])
 		}
 	}
 	if rec.opts.Heartbeat == nil || rec.opts.SwitchServer == nil {

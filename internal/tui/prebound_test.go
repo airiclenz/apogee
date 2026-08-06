@@ -57,7 +57,7 @@ func (f *fakeRecorder) record(name string) (bool, error) {
 func preboundOpts(reason PreboundReason, name string) Options {
 	opts := testOpts
 	opts.Endpoint, opts.HostAlias, opts.Model, opts.ContextWindow = "", "", "", 0
-	opts.Servers = twoServers
+	opts.Servers = staticServers(twoServers)
 	opts.Prebound = PreboundStart{Reason: reason, Name: name}
 	return opts
 }

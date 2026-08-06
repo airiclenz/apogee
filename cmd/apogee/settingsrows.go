@@ -184,6 +184,8 @@ func settingKind(kind configKind) tui.SettingKind {
 		return tui.SettingString
 	case kindEnum:
 		return tui.SettingEnum
+	case kindServer:
+		return tui.SettingServer
 	default:
 		return tui.SettingStructured
 	}

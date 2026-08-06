@@ -384,7 +384,8 @@ func (m Model) settingsAbandonStep() (tea.Model, tea.Cmd) {
 // which is the row's kind and nothing else:
 //
 //   - a bool is toggled and persisted on the spot, because a two-value key has no question to ask;
-//   - an enum asks which value, in a sub-list of its own (the /schedule two-step);
+//   - an enum asks which value, in a sub-list of its own (the /schedule two-step) — and so does the
+//     `server` row, whose vocabulary is this config's own `servers:` block ([SettingServer]);
 //   - a string or an int opens a buffer on the row, seeded with what the key holds; and
 //   - a row the registry does not let this surface write does nothing at all — its own cell already
 //     says where it IS edited ([SettingRow.EditPointer]), so a refusal note here would only repeat it.
@@ -403,15 +404,18 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 	switch row.Kind {
 	case SettingBool:
 		return m.settingsWrite(row, toggledSetting(m.settingsPersistedValue(row)))
-	case SettingEnum:
-		if len(row.EnumValues) == 0 {
-			return m, nil // an enum with no vocabulary has nothing to offer (the registry pins this)
+	case SettingEnum, SettingServer:
+		values := m.settingsVocabulary(row)
+		if len(values) == 0 {
+			// Nothing to offer: an enum with no vocabulary (the registry pins this), or a `servers:`
+			// block that names nothing to switch to (the noServersNote case, one pane over).
+			return m, nil
 		}
 		// The sub-list opens ON the value the key holds, not at the top of the list: the human who
 		// presses ⏎ twice has then confirmed what was already set — which saveConfigSetting writes
 		// nothing for — where a highlight reset to the first row would have silently changed the key.
 		m.settings.kind = settingsEnumList
-		m.settings.sub = max(0, indexOfSetting(row.EnumValues, m.settingsPersistedValue(row)))
+		m.settings.sub = max(0, indexOfSetting(values, m.settingsCurrentValue(row)))
 		m.layout()
 		return m, nil
 	case SettingString, SettingInt:
@@ -432,8 +436,13 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 // The sub-list closes on ⏎ whether the write lands or is refused: the question was answered, and a
 // refusal belongs on the row that asked it (settingsNote), where it is still on the screen after the
 // pane returns to its list.
+//
+// What ⏎ then DOES is the row's, not this function's: every enum is persisted and applied
+// (settingsWrite), while the `server` row is switched (settingsSwitchServer) — the one row whose
+// value is not written by this pane at all.
 func (m Model) settingsEnumKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd) {
-	n := len(row.EnumValues)
+	values := m.settingsVocabulary(row)
+	n := len(values)
 	switch msg.String() {
 	case "esc":
 		m.settings.kind, m.settings.sub = settingsKeyList, 0
@@ -446,12 +455,65 @@ func (m Model) settingsEnumKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, 
 		m.settings.sub = (m.settings.sub + 1) % n
 		return m, nil
 	case "enter":
-		value := row.EnumValues[clampInt(m.settings.sub, 0, n-1)]
+		value := values[clampInt(m.settings.sub, 0, n-1)]
 		m.settings.kind, m.settings.sub = settingsKeyList, 0
+		if row.Kind == SettingServer {
+			return m.settingsSwitchServer(row, value)
+		}
 		return m.settingsWrite(row, value)
 	}
 	return m, nil // swallowed, like every key the pane does not act on
 }
+
+// settingsSwitchServer answers the `server` row's popup, and what it does is the whole of `/server`
+// (ADR 0037 decision 4): the session MOVES to the chosen entry, and the move records that entry as
+// the one the next session starts on — which is this key's entire persistence, so no WriteSetting
+// call stands behind this row (ADR 0036 decision 2).
+//
+// Two of the outcomes are the picker's own and are delegated rather than restated, so a switch driven
+// from this pane and one driven from `/server` cannot answer differently: a PRE-BOUND session
+// constructs its engine instead of moving one ([Model.bindToServer]), and choosing the server the
+// session is already on is answered rather than acted on. Neither is an edit of the key, so neither
+// is journaled — the first is a first binding and the second changed nothing.
+//
+// What this path owns is where a refusal goes. The seam is validate-then-commit, so an error means
+// the session did not move, and the sentence belongs on the ROW that asked (settingsNote) rather
+// than in a transcript this pane is covering. A move that landed is journaled, so the row shows the
+// server now on the wire with the ` *` that says this session chose it; everything the human sees of
+// the move itself — the restated start-up box, the switching note, the recording — is
+// [Model.foldServerSwitch]'s, and this pane adds nothing to it.
+func (m Model) settingsSwitchServer(row SettingRow, name string) (tea.Model, tea.Cmd) {
+	choice, ok := serverNamed(m.servers(), name)
+	if !ok {
+		// The popup is fed from this very list, so this is a list that moved under an open question.
+		return m.settingsFailed(row, "unknown server: "+stripEscapes(name))
+	}
+	if m.prebound() || choice.Endpoint == m.opts.Endpoint {
+		return m.switchToServer(choice)
+	}
+	if m.opts.SwitchServer == nil {
+		return m.settingsFailed(row, noServerSwitchNote)
+	}
+	from := hostDisplay(m.opts) // the label the footer used for the old server, captured before it moves
+	result, err := m.opts.SwitchServer(choice.Name)
+	if err != nil {
+		return m.settingsFailed(row, stripEscapes(err.Error()))
+	}
+	m = m.recordSettingEdit(settingEdit{path: row.Path, value: choice.Name})
+	return m.foldServerSwitch(from, result, recordServerChoice(m.opts.RecordServerChoice, choice.Name))
+}
+
+// settingsFailed puts msg on row as this pane's one failure slot and repaints — the outcome shape
+// every refused act in the pane ends in (settingsNote paints it, the next landed edit clears it).
+func (m Model) settingsFailed(row SettingRow, msg string) (tea.Model, tea.Cmd) {
+	m.settings.failure = settingFailure{path: row.Path, msg: msg}
+	m.layout()
+	return m, nil
+}
+
+// noServerSwitchNote is what the `server` row says when the binary wired no switch seam — the
+// nil-seam degrade noSettingsWriterNote gives every other row, worded for the act this one performs.
+const noServerSwitchNote = "cannot switch server in this build"
 
 // settingsBufferSeed is what a freshly opened edit buffer starts from: the value the pane believes the
 // file holds, so a human correcting a port edits the port rather than retyping it — and NOTHING for a
@@ -829,10 +891,54 @@ func (m Model) settingsEnumTarget(rows []SettingRow) (SettingRow, bool) {
 		return SettingRow{}, false
 	}
 	row := rows[sel]
-	if !row.Editable || row.Kind != SettingEnum || len(row.EnumValues) == 0 {
+	if !settingsPickable(row) || len(m.settingsVocabulary(row)) == 0 {
 		return SettingRow{}, false
 	}
 	return row, true
+}
+
+// settingsPickable reports whether a row is edited in the value SUB-LIST: the two kinds that answer a
+// ⏎ with a closed list of values, and only where the registry lets this surface act on the key at all.
+func settingsPickable(row SettingRow) bool {
+	return row.Editable && (row.Kind == SettingEnum || row.Kind == SettingServer)
+}
+
+// settingsVocabulary is the list a row's sub-list offers, however that row comes by one: the
+// registry's own [SettingRow.EnumValues] for an enum, and the switchable Upstreams for the `server`
+// row, whose vocabulary is what THIS config's `servers:` block names and therefore cannot live in a
+// static table ([SettingServer]).
+//
+// Every step of the sub-list asks this — the open, the walk, the accept, the paint — so a list that
+// changed under an open question is one list wherever it is read, and the accept can only ever take a
+// value the frame the human answered was showing.
+func (m Model) settingsVocabulary(row SettingRow) []string {
+	if row.Kind != SettingServer {
+		return row.EnumValues
+	}
+	servers := m.servers()
+	names := make([]string, 0, len(servers))
+	for _, choice := range servers {
+		names = append(names, choice.Name)
+	}
+	return names
+}
+
+// settingsCurrentValue is the value a sub-list opens on and marks "(current)": what the pane believes
+// the file holds (settingsPersistedValue) for every key but one.
+//
+// The `server` row is that one, and its honest answer is the server the session is ON — identified by
+// endpoint, the picker's own comparison — rather than the entry the key names: `/server` moves a
+// session and rewrites the key without this pane ever hearing about it, so a value read off the
+// launch resolution would mark the server the session has left.
+func (m Model) settingsCurrentValue(row SettingRow) string {
+	if row.Kind == SettingServer {
+		for _, choice := range m.servers() {
+			if choice.Endpoint == m.opts.Endpoint {
+				return choice.Name
+			}
+		}
+	}
+	return m.settingsPersistedValue(row)
 }
 
 // settingsSelectedRow is the highlighted row, and whether there is one — the read every second step
@@ -1020,7 +1126,7 @@ func (m Model) settingsEditing(row SettingRow) bool {
 	case settingsValueBuffer:
 		return settingsBufferable(row)
 	case settingsEnumList:
-		return row.Editable && row.Kind == SettingEnum && len(row.EnumValues) > 0
+		return settingsPickable(row) && len(m.settingsVocabulary(row)) > 0
 	}
 	return false
 }
@@ -1297,9 +1403,10 @@ func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDispla
 // read the key's name — is the thing this pane just replaced. The value the key already holds carries a
 // "(current)" cell of its own, so the question can be answered without remembering the answer to it.
 func (m Model) renderSettingsEnum(row SettingRow) string {
-	current := m.settingsPersistedValue(row)
-	values := make([]popupRow, 0, len(row.EnumValues))
-	for _, value := range row.EnumValues {
+	current := m.settingsCurrentValue(row)
+	vocabulary := m.settingsVocabulary(row)
+	values := make([]popupRow, 0, len(vocabulary))
+	for _, value := range vocabulary {
 		cell := ""
 		if value == current {
 			cell = "(current)"

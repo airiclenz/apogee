@@ -226,8 +226,8 @@ func TestRootStartsPreboundWhenNothingIsChosen(t *testing.T) {
 		t.Errorf("tui.Options.Prebound = %+v; want %+v", rec.opts.Prebound, want)
 	}
 	// The list it will ask WITH survived the refusal, and so did the seam that ends it.
-	if len(rec.opts.Servers) != 1 || rec.opts.Servers[0].Name != "laptop" {
-		t.Errorf("tui.Options.Servers = %+v; want the configured list", rec.opts.Servers)
+	if choices := rec.opts.Servers(); len(choices) != 1 || choices[0].Name != "laptop" {
+		t.Errorf("tui.Options.Servers() = %+v; want the configured list", choices)
 	}
 	if rec.opts.BindServer == nil {
 		t.Error("tui.Options.BindServer is nil; the pre-bound session cannot bind the server it picks")

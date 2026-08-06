@@ -259,9 +259,11 @@ NOTES (2026-08-06): that last clause needed the clearing to run in BOTH directio
 
 **Commit:** `feat(tui): mouse selection, caret seating and wheel in the settings pane`
 
-## 12. The server row: selection popup driving the live switch
+## 12. The server row: selection popup driving the live switch — ✅ DONE (2026-08-06)
 
 Depends on items 3 and 4.
+
+NOTES (2026-08-06): five deviations from the item's literal text. (a) `Options.Servers` BECAME the provider (the item's first alternative) rather than gaining a second field beside it: two fields answering "which servers" is how they drift, and the picker already tolerates a list that moves under it (`pickerCount` re-reads, `clampSelection` follows). One accessor, `Model.servers()`, is now the single read — so `picker.go` and `prebound.go` changed too, and `/server` itself is live for free, which is what item 16's `$EDITOR` edit of `servers:` needs on both surfaces. `acceptPicker` gained a bounds guard: it is the one place that INDEXES the provider's answer, and a list that shrank under an open overlay must cost the accept and not the process. (b) The affordance is declared as a KIND — registry `kindServer` → `tui.SettingServer` — not as a path the renderer spells: `settingsBufferable` then excludes the row by construction ("never a free-text buffer" without a special case), and the plan's own later items add kinds for the same reason (13's `kindStringList`, 14's `kindText`). `configwrite.go` therefore learned the kind as well (it renders exactly as `kindString`): `recordServerChoice` still splices `server:` through that writer, so a kind it did not know would have broken the recording half of every `/server` switch. (c) The `(current)` marker and the row the sub-list OPENS on come from the session's ENDPOINT (`settingsCurrentValue`), not from the persisted value the enum sub-list uses: `/server` moves a session and rewrites the key without this pane's journal hearing about it, so the launch resolution would mark the server the session has left. (d) Two selections are delegated to `Model.switchToServer` and journal nothing — a PRE-BOUND session (which binds rather than moves) and the server the session is already on (which changes nothing). Neither is an edit of the key, and delegating is what keeps a switch driven from this pane and one driven from `/server` from answering differently. (e) No `Options.Servers` snapshot survives in `wire.go`; the three `cmd/apogee` tests that asserted the slice now call the provider.
 
 **What:** Ratified call 4.
 

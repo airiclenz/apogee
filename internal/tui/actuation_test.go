@@ -229,7 +229,7 @@ func TestActuationLatchRefusesEveryMoveWhileHeld(t *testing.T) {
 	fake := newLauncher()
 	m, rb := wireLauncher(t, fake)
 	sw := &fakeSwitch{}
-	m.opts.Servers, m.opts.SwitchServer = twoServers, sw.switchTo
+	m.opts.Servers, m.opts.SwitchServer = staticServers(twoServers), sw.switchTo
 	eng := m.eng.(*fakeEngine)
 	m, _ = startLoad(t, m, "alpha")
 	want := "profile load in flight — alpha"

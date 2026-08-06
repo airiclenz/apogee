@@ -272,7 +272,7 @@ func plausibleValue(t *testing.T, k configKey) string {
 			t.Fatalf("%s is an enum with no vocabulary", k.Path)
 		}
 		return k.EnumValues[0]
-	case kindString:
+	case kindString, kindServer:
 		return "apogee-test-value"
 	}
 	t.Fatalf("%s has no writable kind (%s)", k.Path, k.Kind)
