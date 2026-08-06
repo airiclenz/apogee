@@ -102,9 +102,11 @@ NOTES (2026-08-06): three deviations from the item's literal text, each to avoid
 
 **Commit:** `feat(settings): live-apply dispatcher — every editable key applies on commit`
 
-## 4. Mutable settings holder and the rebind-riding applies
+## 4. Mutable settings holder and the rebind-riding applies — ✅ DONE (2026-08-06)
 
 Depends on item 3.
+
+NOTES (2026-08-06): four deviations from the item's literal text. (a) `liveSettings` owns two values beyond the four enumerated: the `system-prompt-*` block and the LAST OBSERVED context window. The prompt block is forced by the item's own second bullet — `rebindSpecFor` re-resolves the prompt per rebind out of the options snapshot (`wire.go:791`), so a re-read block reaches the engine only if the holder owns it; the observed window is what a pin CLEARED to `0` must bind, or "discover-live" would *unbind* the window (the next beat reports no change and never re-drives). The overlay lives in one method, `rebindInputs`, which every re-resolution now opens with. (b) The rebind re-drive is SYNCHRONOUS and root-side: the dispatcher calls the same closure `Options.Rebind` is wired to, on the Update goroutine the pane's keypress arrives on. The TUI's `pendingRebind` deferral the item names is reachable only from a heartbeat observation, and routing a settings edit into it needs a renderer seam this item's file list does not open — so mid-run the engine's own idle-only refusal surfaces as the row's `saved — live apply failed` note (binding A) and a re-committed edit retries. Consequence, worth knowing: the TUI's `m.opts.ContextWindow` mirror (the gauge's denominator, `model.go:2459`) refreshes at the next TUI-driven rebind rather than on the keypress — the ENGINE is on the new pin immediately. (c) `recordServerChoice` was pointed at the holder's server list beside the two switch closures the item names: three closures resolving names against two lists is how they drift, and today the value is identical. (d) `applySettingFor` now takes one `settingsApplier` struct instead of growing a parameter per key class; the function name and the `ApplySetting` seam signature are unchanged. `sessionMover` and `scheduleWiring` hold the holder in place of their captured `pinnedWindow`/`manualIDs`.
 
 **What:** Un-freeze the composition root's startup snapshot so rebind-derived values can change mid-session.
 

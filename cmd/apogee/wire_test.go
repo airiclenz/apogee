@@ -1585,9 +1585,12 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 	holder := newUpstreamHolder()
 	holder.Bind(endpoint, "", "", heartbeat.NewMonitor(endpoint, "", ""))
 	wiring := launcherWiring{
-		sessionMover: sessionMover{agent: agent, holder: holder, host: host, pinnedWindow: 16384},
-		ops:          ops,
-		path:         "/etc/llama-launcher/config.yaml",
+		sessionMover: sessionMover{
+			agent: agent, holder: holder, host: host,
+			live: newLiveSettings(options{contextWindow: 16384}, nil),
+		},
+		ops:  ops,
+		path: "/etc/llama-launcher/config.yaml",
 	}
 	return wiring, agent, host, holder
 }
@@ -2295,7 +2298,7 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			spy := &applySettingSpy{}
-			note, err := applySettingFor(spy, names)(tt.key, tt.value)
+			note, err := applySettingFor(settingsApplier{engine: spy, contextFiles: names})(tt.key, tt.value)
 			if err != nil {
 				t.Fatalf("apply %s=%s: %v", tt.key, tt.value, err)
 			}
@@ -2324,7 +2327,7 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			spy := &applySettingSpy{}
-			note, err := applySettingFor(spy, nil)(tt.key, tt.value)
+			note, err := applySettingFor(settingsApplier{engine: spy})(tt.key, tt.value)
 			if err == nil {
 				t.Fatalf("apply %s=%s: want a refusal naming the key, got note %q", tt.key, tt.value, note)
 			}
@@ -2335,6 +2338,199 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 				t.Errorf("a refused apply still drove the engine: %+v", spy)
 			}
 		})
+	}
+}
+
+// rebindProbe stands in for the composition root's own rebind closure ([tui.Options.Rebind]): it
+// records what the dispatcher drove it with, so the rebind-RIDING keys can be told apart from the
+// pushed ones without an Agent or a server behind either.
+type rebindProbe struct {
+	calls []rebindCall
+	err   error
+}
+
+// rebindCall is one drive: the model the session was bound to, and the observation it was re-driven
+// with (0 until a beat has named a window).
+type rebindCall struct {
+	model  string
+	window int
+}
+
+func (p *rebindProbe) rebind(model string, window int) (tui.RebindResult, error) {
+	p.calls = append(p.calls, rebindCall{model: model, window: window})
+	if p.err != nil {
+		return tui.RebindResult{}, p.err
+	}
+	return tui.RebindResult{Model: model, ContextWindow: window}, nil
+}
+
+// The window pin has no engine setter of its own: it is a per-model binding, so a committed edit
+// lands in the live holder and the whole per-model resolution is re-driven over it — the same door a
+// heartbeat-observed model change goes through. Clearing the pin re-drives with the window the last
+// beat reported, which is what keeps `0` meaning discover-live (ADR 0024) rather than "unknown".
+func TestApplySettingContextWindowPinRidesTheRebind(t *testing.T) {
+	t.Parallel()
+	live := newLiveSettings(options{contextWindow: 4096}, nil)
+	live.observe(8192) // what the last landed beat could name about the server's own window
+	probe := &rebindProbe{}
+	spy := &applySettingSpy{}
+	apply := applySettingFor(settingsApplier{
+		engine:  spy,
+		live:    live,
+		binding: func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
+		rebind:  probe.rebind,
+	})
+
+	note, err := apply("context-window", "32768")
+	if err != nil {
+		t.Fatalf("apply context-window: %v", err)
+	}
+	if note != "" {
+		t.Errorf("note = %q, want none: the pin is in force the moment the rebind commits", note)
+	}
+	if live.pin() != 32768 {
+		t.Errorf("pin = %d, want the edited 32768", live.pin())
+	}
+	if want := []rebindCall{{model: "bound-model", window: 8192}}; !slices.Equal(probe.calls, want) {
+		t.Fatalf("rebind drives = %+v, want %+v", probe.calls, want)
+	}
+
+	if _, err := apply("context-window", "0"); err != nil {
+		t.Fatalf("apply context-window=0: %v", err)
+	}
+	if live.pin() != 0 {
+		t.Errorf("pin = %d, want 0 — the cleared pin hands the window back to the server", live.pin())
+	}
+	if len(probe.calls) != 2 || probe.calls[1].window != 8192 {
+		t.Errorf("rebind drives = %+v, want a second drive carrying the observed 8192", probe.calls)
+	}
+	if len(spy.modes)+len(spy.bypass)+len(spy.compaction)+len(spy.contextFiles) != 0 {
+		t.Errorf("a rebind-riding key drove an anytime-safe mutator: %+v", spy)
+	}
+}
+
+// Before a server is bound there is no model to rebind FOR (ADR 0036 decision 3 opens the pane on a
+// session that has none). The edit is still recorded in the holder — the first beat's rebind resolves
+// it in — and the row is told nothing, because nothing failed.
+func TestApplySettingRideIsSilentBeforeAServerIsBound(t *testing.T) {
+	t.Parallel()
+	live := newLiveSettings(options{}, nil)
+	probe := &rebindProbe{}
+	apply := applySettingFor(settingsApplier{
+		engine:  &applySettingSpy{},
+		live:    live,
+		binding: func() upstreamBinding { return upstreamBinding{} },
+		rebind:  probe.rebind,
+	})
+
+	note, err := apply("context-window", "16384")
+	if err != nil || note != "" {
+		t.Fatalf("apply context-window unbound = (%q, %v), want it to land quietly", note, err)
+	}
+	if len(probe.calls) != 0 {
+		t.Errorf("rebind drives = %+v, want none: nothing is bound to rebind", probe.calls)
+	}
+	if live.pin() != 16384 {
+		t.Errorf("pin = %d, want the edit held at 16384 for the first bind", live.pin())
+	}
+}
+
+// A refused rebind — Agent.Rebind is idle-only, so an open Exchange is one — is reported rather than
+// swallowed: the file already says the new value, so the honest answer is that the session has not
+// taken it yet. The holder keeps the edit, which is what makes a re-committed edit a retry.
+func TestApplySettingReportsARefusedRebind(t *testing.T) {
+	t.Parallel()
+	live := newLiveSettings(options{}, nil)
+	probe := &rebindProbe{err: errors.New("input pending")}
+	apply := applySettingFor(settingsApplier{
+		engine:  &applySettingSpy{},
+		live:    live,
+		binding: func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
+		rebind:  probe.rebind,
+	})
+
+	if _, err := apply("context-window", "16384"); err == nil {
+		t.Fatal("apply context-window: want the rebind's refusal, got none")
+	}
+	if live.pin() != 16384 {
+		t.Errorf("pin = %d, want the persisted 16384 kept for the retry", live.pin())
+	}
+}
+
+// The three `system-prompt-*` keys are ONE prompt (ADR 0023), and `system-prompt-models:` is a map no
+// single string spells — so the apply re-READS the block the pane just wrote and lets the rebind
+// re-resolve it per model, exactly as startup does. The spec the rebind builds is the assertion: it
+// is what the engine is handed.
+func TestApplySettingSystemPromptReResolvesFromTheFile(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	roots, err := resolveRoots(home, t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	path := filepath.Join(roots.config, "config.yaml")
+	launchOpts := options{systemPrompt: systemPromptSettings{
+		global: promptSource{text: "the launch prompt"},
+	}}
+	live := newLiveSettings(launchOpts, nil)
+
+	// The rebind closure the composition root wires: it re-resolves through the holder, so what the
+	// dispatcher installed there is what the spec carries.
+	var spec apogee.RebindSpec
+	rebind := func(model string, window int) (tui.RebindResult, error) {
+		base, manualIDs, pinnedWindow := live.rebindInputs(launchOpts)
+		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow)
+		if err != nil {
+			return tui.RebindResult{}, err
+		}
+		spec = got
+		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
+	}
+	apply := applySettingFor(settingsApplier{
+		engine:     &applySettingSpy{},
+		live:       live,
+		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
+		rebind:     rebind,
+		configPath: path,
+	})
+
+	// What the pane's write left behind, then the apply that follows it.
+	writeSettingsFixture(t, path, "system-prompt-text: the edited prompt\n")
+	if _, err := apply("system-prompt-text", "the edited prompt"); err != nil {
+		t.Fatalf("apply system-prompt-text: %v", err)
+	}
+	if spec.SystemPrompt != "the edited prompt" {
+		t.Errorf("RebindSpec.SystemPrompt = %q, want the re-read %q", spec.SystemPrompt, "the edited prompt")
+	}
+
+	// A per-model entry is the same round trip: the map cannot travel as a value, so only the re-read
+	// can carry it.
+	writeSettingsFixture(t, path, "system-prompt-models:\n  bound-model:\n    system-prompt-text: the per-model prompt\n")
+	if _, err := apply("system-prompt-models", ""); err != nil {
+		t.Fatalf("apply system-prompt-models: %v", err)
+	}
+	if spec.SystemPrompt != "the per-model prompt" {
+		t.Errorf("RebindSpec.SystemPrompt = %q, want the per-model entry to win", spec.SystemPrompt)
+	}
+
+	// Validate-then-commit: a block the file cannot express never displaces a prompt that works.
+	writeSettingsFixture(t, path, "system-prompt-text: both\nsystem-prompt-file: both.md\n")
+	if _, err := apply("system-prompt-file", "both.md"); err == nil {
+		t.Fatal("apply of a contradictory block: want the refusal, got none")
+	}
+	if _, err := apply("context-window", "0"); err != nil {
+		t.Fatalf("re-drive after the refusal: %v", err)
+	}
+	if spec.SystemPrompt != "the per-model prompt" {
+		t.Errorf("RebindSpec.SystemPrompt = %q, want the last GOOD block still installed", spec.SystemPrompt)
+	}
+}
+
+// writeSettingsFixture writes a config.yaml the way the pane's splice writer leaves one behind.
+func writeSettingsFixture(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }
 

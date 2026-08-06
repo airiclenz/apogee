@@ -33,14 +33,16 @@ type scheduleWiring struct {
 	// overrides only what a Firing must decide differently (below).
 	base apogee.Config
 
-	// The four inputs rebindSpecFor re-resolves a per-model binding from. They are held rather than
-	// folded into base because a Firing binds the model that is CURRENT, and the system prompt
-	// (ADR 0023) and the validated Mechanism set (ADR 0016) are both keyed on it: a session that
-	// rebound mid-run would otherwise fire the launch model's prompt at the model it has moved to.
-	opts         options
-	roots        stateRoots
-	manualIDs    []apogee.MechanismID
-	pinnedWindow int
+	// The inputs rebindSpecFor re-resolves a per-model binding from. They are held rather than folded
+	// into base because a Firing binds the model that is CURRENT, and the system prompt (ADR 0023) and
+	// the validated Mechanism set (ADR 0016) are both keyed on it: a session that rebound mid-run would
+	// otherwise fire the launch model's prompt at the model it has moved to. opts is the launch
+	// snapshot; live is the half of it a `/settings` edit can have moved since (ADR 0037), read at
+	// FIRING time for the same reason the binding is — and safely, because the holder is
+	// goroutine-safe and this runs on the Scheduler's own goroutine.
+	opts  options
+	roots stateRoots
+	live  *liveSettings
 
 	// binding reads the CURRENT Upstream binding; wired to upstreamHolder.Binding, the same seam the
 	// naming call reads for the same reason.
@@ -70,7 +72,8 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	// Firing runs with the Budget inactive, which for one bounded prompt is the honest degrade
 	// rather than a guess. The per-session notices are dropped: they are a launch's narration, and a
 	// Firing's narration is its own session record.
-	spec, _, err := rebindSpecFor(w.opts, w.roots, w.manualIDs, binding.Model, 0, w.pinnedWindow)
+	base, manualIDs, pinnedWindow := w.live.rebindInputs(w.opts)
+	spec, _, err := rebindSpecFor(base, w.roots, manualIDs, binding.Model, 0, pinnedWindow)
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: resolve the firing's bindings: %w", err)
 	}

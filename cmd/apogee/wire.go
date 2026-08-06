@@ -343,17 +343,19 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		}
 	}
 
-	// The servers this session can be moved to: the `servers:` entries, plus a synthesized row for
-	// the startup endpoint only when that endpoint came from a raw override and is therefore in no
-	// entry (upstreamChoices), so the way back is always offered. The
-	// closure below resolves a name against THIS list (it needs the key and the hint); the TUI is
-	// handed the display-and-identity projection of the same list, in the same order.
-	choices := upstreamChoices(opts)
-
-	// The `context-window:` pin, captured before anything can move it. Startup no longer probes, so
-	// a non-zero value here is the user's pin and nothing else — which is what lets rebindSpecFor
-	// implement decision 9 ("a pin is never overridden by the heartbeat") with one comparison.
-	pinnedWindow := opts.contextWindow
+	// The startup snapshot's MUTABLE half (ADR 0037): the `context-window:` pin, the `servers:` list,
+	// the manual Mechanism ids and the `validated-sets:`/`system-prompt-*` inputs — every value below
+	// that a committed `/settings` edit can now move mid-session. The closures that used to capture
+	// each of them by value read this holder instead, so the next thing that re-resolves — a rebind, a
+	// server switch, a scheduled Firing — sees what the human changed rather than what the process
+	// launched with. Seeded from opts, so a session nobody edits behaves exactly as it did.
+	//
+	// The servers this session can be moved to are derived from it the same way they always were: the
+	// `servers:` entries plus a synthesized row for the startup endpoint only when that endpoint came
+	// from a raw override and is therefore in no entry (upstreamChoices), so the way back is always
+	// offered. The closures below resolve a name against THAT list (they need the key and the hint);
+	// the TUI is handed the display-and-identity projection of the same list, in the same order.
+	live := newLiveSettings(opts, manualIDs)
 
 	// The rebind closure: the composition root's half of an observed model change. The TUI decides
 	// WHEN (at idle, or at the exchange-terminal boundary), this decides WHAT — because every input
@@ -364,7 +366,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// touching the engine, and Agent.Rebind is itself validate-then-commit, so a refused rebind
 	// leaves the session bound exactly where it was.
 	rebind := func(model string, window int) (tui.RebindResult, error) {
-		spec, notices, err := rebindSpecFor(opts, roots, manualIDs, model, window, pinnedWindow)
+		// What the beat could name about the server's own window, remembered before it is resolved
+		// against the pin: a later pin EDIT re-drives this closure with no beat of its own, and a
+		// cleared pin has to bind the discovered window rather than unbind it (ADR 0024).
+		live.observe(window)
+		base, manualIDs, pinnedWindow := live.rebindInputs(opts)
+		spec, notices, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
@@ -391,7 +398,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// The one fold that re-points a session at another Upstream, shared by `/server`'s switch and
 	// a profile load's follow-the-profile: engine switch, Monitor swap, stored model cleared, in order
 	// (see sessionMover.move, which carries the reasoning).
-	mover := sessionMover{agent: engine, holder: holder, host: host, pinnedWindow: pinnedWindow}
+	mover := sessionMover{agent: engine, holder: holder, host: host, live: live}
 
 	// The server-switch closure: the composition root's half of `/server`. The TUI decides WHEN
 	// (at idle, on an explicit act by the human), this decides everything the move touches —
@@ -402,7 +409,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// All this closure adds to the shared fold is RESOLUTION, and it comes first: a name that
 	// resolves to nothing never reaches the engine, so the session is left exactly where it was.
 	switchServer := func(name string) (tui.ServerSwitchResult, error) {
-		entry, err := findServer(choices, name)
+		entry, err := findServer(live.choices(opts), name)
 		if err != nil {
 			return tui.ServerSwitchResult{}, err
 		}
@@ -423,7 +430,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// this seam at all — is skipped SILENTLY: false with no error, which the renderer states by
 	// saying nothing about a recording.
 	recordServerChoice := func(name string) (bool, error) {
-		if !configuredServer(opts.servers, name) {
+		if !configuredServer(live.serverList(), name) {
 			return false, nil
 		}
 		if err := saveConfigSetting(filepath.Join(roots.config, "config.yaml"), "server", name); err != nil {
@@ -439,7 +446,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// second construction, so an already-bound session is told to use `/server` instead of quietly
 	// growing a second engine.
 	bindServer := func(name string) (tui.ServerSwitchResult, error) {
-		entry, err := findServer(choices, name)
+		entry, err := findServer(live.choices(opts), name)
 		if err != nil {
 			return tui.ServerSwitchResult{}, err
 		}
@@ -449,7 +456,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		return tui.ServerSwitchResult{
 			Endpoint:      entry.Endpoint,
 			HostAlias:     entry.Name,
-			ContextWindow: pinnedWindow,
+			ContextWindow: live.pin(),
 		}, nil
 	}
 
@@ -487,13 +494,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// rather than ignored because a scheduler that failed to build must not be handed on as a
 	// working seam.
 	firings := scheduleWiring{
-		base:         cfg,
-		opts:         opts,
-		roots:        roots,
-		manualIDs:    manualIDs,
-		pinnedWindow: pinnedWindow,
-		binding:      holder.Binding,
-		store:        store,
+		base:    cfg,
+		opts:    opts,
+		roots:   roots,
+		live:    live,
+		binding: holder.Binding,
+		store:   store,
 	}
 	gate := newIdleGate()
 	schedules, err := schedule.New(schedule.Config{
@@ -544,7 +550,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// `--endpoint`/`APOGEE_ENDPOINT` start synthesizes for itself (upstreamChoices). It can
 		// therefore be EMPTY — a pre-bound start on a config that lists nothing — which is
 		// exactly "nothing to switch to" without a special case.
-		Servers:      serverChoices(choices),
+		Servers:      serverChoices(live.choices(opts)),
 		SwitchServer: switchServer,
 		// The pre-bound half of the same list (ADR 0036 decisions 3, 4 and 7): why this session has
 		// no upstream yet — first boot, a `server:` naming an entry that is gone, or nothing
@@ -620,8 +626,15 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// And the apply half of the same keypress (ADR 0037): what the file now says, the session
 		// now runs. The dispatcher owns the resolution from a registry path and a file-spelled value
 		// onto a live engine seam — the renderer holds neither schema nor engine mutator.
-		ApplySetting: applySettingFor(engine, opts.contextFiles),
-		Skills:       skillProvider,
+		ApplySetting: applySettingFor(settingsApplier{
+			engine:       engine,
+			live:         live,
+			binding:      holder.Binding,
+			rebind:       rebind,
+			configPath:   filepath.Join(roots.config, "config.yaml"),
+			contextFiles: opts.contextFiles,
+		}),
+		Skills: skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
 		// on the shared Provider — the same one Config.Skills resolves against — so a skill added
 		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals
@@ -667,6 +680,153 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 }
 
 // ----------------------------------------------------------------------------
+// The live settings holder (the mutable half of the startup snapshot — ADR 0037)
+// ----------------------------------------------------------------------------
+
+// liveSettings owns the resolved values that used to be captured BY VALUE in runRoot's closures and
+// were therefore frozen for the life of the process. ADR 0037 decision 1 ends that freeze: a key
+// committed in the `/settings` pane applies to the RUNNING session, and the keys that are not engine
+// mutators of their own reach the engine by being re-resolved — at the next rebind, the next server
+// switch, the next scheduled Firing. Something has to hold what those re-resolutions read, and this
+// is it: one place, one mutex, seeded from opts so a session nobody edits behaves exactly as before.
+//
+// What lives here is the exception list, not a second configuration path. Everything else about a run
+// stays in the immutable `options` snapshot the closures still carry, and a value only earns a field
+// here once a seam puts it into effect (ADR 0031: no value the human can move without the engine
+// hearing about it).
+//
+// The mutex is real work rather than ceremony. The writes come from the Update goroutine — the pane's
+// keypress, through the live-apply dispatcher below — while a scheduled Firing reads them from the
+// Scheduler's own goroutine (scheduleWiring.fire), so the fields are genuinely shared. It is an
+// RWMutex because reads are the common case (every rebind takes one) and they never nest.
+type liveSettings struct {
+	mu sync.RWMutex
+
+	// pinnedWindow is the `context-window:` key in tokens: > 0 is the user's pin, which outranks
+	// whatever the server reports (ADR 0024 decision 9), and 0 means "discover it, live".
+	pinnedWindow int
+	// observedWindow is the window the last beat could name — remembered because a pin EDIT re-drives
+	// the rebind closure with no beat of its own, and a pin CLEARED to 0 must then bind the discovered
+	// window rather than unbind it. Nothing outside a beat knows this number.
+	observedWindow int
+
+	// servers is the `servers:` list: the single upstream definition (ADR 0036), which the switch
+	// list, the `server:` recording check and the pane's picker all resolve names against.
+	servers []serverEntry
+
+	// manualIDs and mechanisms are the two halves of the `mechanisms:` block: the validated enabled
+	// ids the engine arms, and the block itself, whose mere non-emptiness is what suppresses a matched
+	// Validated set (whole-set-or-nothing, ADR 0016). They move together or the suppression rule and
+	// the enable list would describe different configs.
+	manualIDs  []apogee.MechanismID
+	mechanisms map[string]bool
+
+	// validatedEnable and validatedAlias are the `validated-sets:` block's own two keys — the surface's
+	// off-switch and its carry-over map — the other inputs resolveValidatedSet keys a match on.
+	validatedEnable bool
+	validatedAlias  map[string]string
+
+	// systemPrompt is the `system-prompt-text` / `system-prompt-file` / `system-prompt-models` trio
+	// (ADR 0023). It is held whole rather than per key because selection is whole-entry replacement:
+	// the three keys are one prompt, and resolveSystemPrompt collapses them per model at every rebind.
+	systemPrompt systemPromptSettings
+}
+
+// newLiveSettings seeds the holder with what THIS run resolved. manualIDs is passed in rather than
+// re-derived because runRoot has already validated the block against the catalogue and holds the
+// answer — deriving it twice is how the two spellings of the same list start to drift.
+func newLiveSettings(opts options, manualIDs []apogee.MechanismID) *liveSettings {
+	return &liveSettings{
+		pinnedWindow:    opts.contextWindow,
+		servers:         opts.servers,
+		manualIDs:       manualIDs,
+		mechanisms:      opts.mechanisms,
+		validatedEnable: opts.validatedSetsEnable,
+		validatedAlias:  opts.validatedSetsAlias,
+		systemPrompt:    opts.systemPrompt,
+	}
+}
+
+// pin reports the context-window pin in force right now — what a first binding and a server move
+// adopt as the session's window, since the pin is global and survives both.
+func (s *liveSettings) pin() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.pinnedWindow
+}
+
+// setPin moves the pin. 0 restores discover-live, which the next rebind binds from the observed
+// window below rather than from nothing.
+func (s *liveSettings) setPin(tokens int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pinnedWindow = tokens
+}
+
+// observe records the context window a landed beat reported. A beat that could not name one (0) is
+// not evidence the window changed — only that this beat could not say — so it is dropped rather than
+// written, exactly as the TUI's own observation treats it.
+func (s *liveSettings) observe(window int) {
+	if window <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.observedWindow = window
+}
+
+// observed reports the last window a beat could name (0 until one has). It is what a rebind driven by
+// something OTHER than a beat — a pin edit — passes as the observation, so an unpinned session lands
+// on the server's own window instead of on "unknown".
+func (s *liveSettings) observed() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.observedWindow
+}
+
+// serverList reports the `servers:` entries as they stand now — the question the `server:` recording
+// seam asks, which is about the FILE's list and not about the switchable rows below.
+func (s *liveSettings) serverList() []serverEntry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.servers
+}
+
+// choices assembles the servers this session can be MOVED to from the list as it stands now: the same
+// upstreamChoices derivation startup made, re-run against the live list rather than the launch one, so
+// the one row it may synthesize — the ephemeral `--endpoint` startup, a fact about the invocation that
+// no edit can change — is still exactly where it was.
+func (s *liveSettings) choices(base options) []serverEntry {
+	base.servers = s.serverList()
+	return upstreamChoices(base)
+}
+
+// setSystemPrompt installs a re-read `system-prompt-*` block. The caller validates first: this is the
+// commit half of a validate-then-commit, so a block the file cannot express never displaces a working
+// prompt.
+func (s *liveSettings) setSystemPrompt(sp systemPromptSettings) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.systemPrompt = sp
+}
+
+// rebindInputs projects the live values onto a COPY of the startup snapshot and hands back the three
+// arguments rebindSpecFor takes them as. It is the one place the overlay is spelled out, so a caller
+// cannot re-resolve half from the holder and half from the launch: every re-resolution — the rebind
+// closure, a scheduled Firing — opens with this call.
+func (s *liveSettings) rebindInputs(base options) (options, []apogee.MechanismID, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	base.contextWindow = s.pinnedWindow
+	base.servers = s.servers
+	base.mechanisms = s.mechanisms
+	base.validatedSetsEnable = s.validatedEnable
+	base.validatedSetsAlias = s.validatedAlias
+	base.systemPrompt = s.systemPrompt
+	return base, s.manualIDs, s.pinnedWindow
+}
+
+// ----------------------------------------------------------------------------
 // The live-apply dispatcher (the composition root's half of ADR 0037)
 // ----------------------------------------------------------------------------
 
@@ -688,6 +848,29 @@ type settingsEngine interface {
 // deferral wording this dispatcher has — nothing here ever says "next launch".
 const contextFileNote = "applies at next clear"
 
+// settingsApplier is everything a committed key can have to reach, in one value rather than in a
+// constructor that grows an argument per key class. It is composed at the composition root, where all
+// six members already exist, and it is what makes the dispatcher exercisable without a session: every
+// member is either a narrow interface, a closure, or a plain value a test can supply.
+type settingsApplier struct {
+	// engine is the anytime-safe mutator class: a key here is in force the moment it returns.
+	engine settingsEngine
+	// live is the startup snapshot's mutable half — where a key that is re-RESOLVED rather than
+	// pushed (the window pin, the system prompt) is written before the re-resolution is driven.
+	live *liveSettings
+	// binding reads the Upstream binding as it stands now; wired to upstreamHolder.Binding. Its Model
+	// is what a rebind must be driven FOR — an empty one means nothing is bound yet.
+	binding func() upstreamBinding
+	// rebind is [tui.Options.Rebind]'s own closure: the per-model re-resolution, which reads live
+	// through rebindInputs and commits through the engine's idle-only Rebind.
+	rebind func(model string, window int) (tui.RebindResult, error)
+	// configPath is the config.yaml this session resolved — re-read whole for the keys whose value is
+	// a structure no single string can spell.
+	configPath string
+	// contextFiles are the workspace context-file names THIS run resolved.
+	contextFiles []string
+}
+
 // applySettingFor builds the [tui.Options.ApplySetting] dispatcher: the one place a key the pane has
 // just persisted becomes a call on a live seam (ADR 0037 decision 1's apply step). It is keyed by
 // REGISTRY PATH because that is the only name the renderer knows a setting by — the pane hands back
@@ -699,12 +882,11 @@ const contextFileNote = "applies at next clear"
 // ERROR naming the key rather than a silent success: the write has already landed, so the honest
 // report is that the file changed and the session did not.
 //
-// contextFileNames are the workspace context-file names THIS run resolved — what the enable switch
-// turns back on. A block that started off resolves to no names at all (the two spellings of "off"
-// collapse at startup), so switching it on live installs nothing until the names themselves are
-// edited; the file's names are read at the next launch either way, which is what the boundary note
-// on the row is telling the human about.
-func applySettingFor(eng settingsEngine, contextFileNames []string) func(key, value string) (string, error) {
+// Two classes of key and no third. One is PUSHED at an engine mutator and is in force on return. The
+// other is re-RESOLVED: the new value lands in the holder and the per-model resolution is re-driven
+// over it (rideTheRebind), which is how the window pin and the system prompt reach an engine that has
+// no setter for either — the same path a heartbeat-observed model change already takes.
+func applySettingFor(a settingsApplier) func(key, value string) (string, error) {
 	return func(key, value string) (string, error) {
 		switch key {
 		case "mode":
@@ -712,31 +894,111 @@ func applySettingFor(eng settingsEngine, contextFileNames []string) func(key, va
 			if err != nil {
 				return "", err
 			}
-			eng.SetMode(mode)
+			a.engine.SetMode(mode)
 		case "bypass":
 			on, err := settingBool(key, value)
 			if err != nil {
 				return "", err
 			}
-			eng.SetBypass(on)
+			a.engine.SetBypass(on)
 		case "auto-compact":
 			on, err := settingBool(key, value)
 			if err != nil {
 				return "", err
 			}
-			eng.SetCompactionEnabled(on)
+			a.engine.SetCompactionEnabled(on)
 		case "context-files.enable":
 			on, err := settingBool(key, value)
 			if err != nil {
 				return "", err
 			}
-			eng.SetContextFiles(on, contextFileNames)
+			// contextFiles are the names THIS run resolved — what the enable switch turns back on. A
+			// block that started off resolves to no names at all (the two spellings of "off" collapse at
+			// startup), so switching it on live installs nothing until the names themselves are editable;
+			// the file's names are read at the next session boundary either way, which is what the
+			// boundary note on the row is telling the human about.
+			a.engine.SetContextFiles(on, a.contextFiles)
 			return contextFileNote, nil
+		case "context-window":
+			tokens, err := settingInt(key, value)
+			if err != nil {
+				return "", err
+			}
+			// 0 keeps meaning discover-live (ADR 0024): the re-drive below binds the window the last
+			// beat reported, so clearing a pin hands the session back to the server rather than to
+			// "unknown". No note — the pin is what the Budget and Compaction measure against from the
+			// moment the rebind commits.
+			a.live.setPin(tokens)
+			return "", a.rideTheRebind()
+		case "system-prompt-text", "system-prompt-file", "system-prompt-models":
+			// The value the pane persisted is deliberately not read here: these three keys are ONE
+			// prompt (ADR 0023, whole-entry selection) and `system-prompt-models:` is a map no single
+			// string spells, so the block is re-read from the file the pane just wrote and re-resolved
+			// per model by the rebind — exactly the resolution startup made.
+			if err := a.reloadSystemPrompt(); err != nil {
+				return "", err
+			}
+			return "", a.rideTheRebind()
 		default:
 			return "", fmt.Errorf("apogee: %s cannot be applied to the running session", key)
 		}
 		return "", nil
 	}
+}
+
+// rideTheRebind re-drives the per-model resolution for the model the session is bound to right now.
+// It is how a key with no engine setter of its own is applied: the value is already in the holder,
+// rebindSpecFor reads it there, and Agent.Rebind commits the whole per-model binding atomically —
+// one door for a model change and a config change alike, rather than a second, subtly different way
+// to move the same four fields.
+//
+// With no model bound — a cold start before the first beat, or the gap a `/server` switch opens —
+// there is nothing to rebind and nothing to report: the holder carries the change, and the first beat
+// that binds a model resolves it in. A refusal from the engine (Rebind is idle-only, so an open
+// Exchange is one) is returned, which the pane renders as the row's apply failure over the value it
+// has already persisted; re-committing the edit retries it at a quieter moment.
+func (a settingsApplier) rideTheRebind() error {
+	model := a.binding().Model
+	if model == "" {
+		return nil
+	}
+	_, err := a.rebind(model, a.live.observed())
+	return err
+}
+
+// reloadSystemPrompt re-reads the `system-prompt-*` block from the config file and installs it on the
+// holder, validate-then-commit: a block the file cannot express — both spellings of one prompt at
+// once, an entry with neither — is refused before it displaces a prompt that works.
+//
+// Only the FILE layer carries these keys (there is no flag or environment variable for a prompt), so
+// re-reading that one layer resolves them exactly as startup resolved them. The migration notice is
+// dropped rather than surfaced: a file still in the retired schema was already migrated and announced
+// at launch, and this read happens after the pane has just written to it.
+func (a settingsApplier) reloadSystemPrompt() error {
+	l, err := loadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	if err != nil {
+		return err
+	}
+	var sp systemPromptSettings
+	if l.systemPrompt != nil {
+		sp = *l.systemPrompt
+	}
+	if err := sp.validate(); err != nil {
+		return err
+	}
+	a.live.setSystemPrompt(sp)
+	return nil
+}
+
+// settingInt reads a whole count the same way (kindInt's own validators do, validateContextWindow),
+// so a value the registry accepted is a value this parses. Negative is refused here too rather than
+// trusted from the file: the pane is not the only thing that can write one.
+func settingInt(key, value string) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("apogee: %s is a count of 0 or more, not %q", key, value)
+	}
+	return n, nil
 }
 
 // settingBool reads a bool exactly as the splice writer renders one (renderSettingValue), so the

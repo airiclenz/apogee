@@ -185,10 +185,13 @@ type modelStamper interface {
 // It holds the collaborators rather than closing over them so the fold can be driven directly in a
 // test, which is what makes the launcher seams built on it testable without a live server.
 type sessionMover struct {
-	agent        upstreamSwitcher
-	holder       *upstreamHolder
-	host         modelStamper
-	pinnedWindow int
+	agent  upstreamSwitcher
+	holder *upstreamHolder
+	host   modelStamper
+	// live is the composition root's mutable settings holder, read for the `context-window:` pin at
+	// MOVE time rather than captured at launch: the pin is global, it survives a move, and since ADR
+	// 0037 a `/settings` edit can have changed it since the session started.
+	live *liveSettings
 }
 
 // move re-points the whole session at endpoint and reports what the display should adopt.
@@ -218,7 +221,7 @@ func (m sessionMover) move(endpoint, alias, hint, apiKey string) (tui.ServerSwit
 	return tui.ServerSwitchResult{
 		Endpoint:      endpoint,
 		HostAlias:     alias,
-		ContextWindow: m.pinnedWindow,
+		ContextWindow: m.live.pin(),
 	}, nil
 }
 

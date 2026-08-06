@@ -105,10 +105,12 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	}
 	base.Tools = registryWithMCP(roots.workspace, base, []apogee.Tool{sessionOnlyTool{}})
 
+	launchOpts := options{endpoint: "http://launch.invalid", model: "launch-model"}
 	w := scheduleWiring{
 		base:  base,
-		opts:  options{endpoint: "http://launch.invalid", model: "launch-model"},
+		opts:  launchOpts,
 		roots: roots,
+		live:  newLiveSettings(launchOpts, nil),
 		// The binding the session has MOVED to since launch (a /server switch, a rebind). The Firing
 		// must follow it rather than the launch values in opts above.
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: url, Model: "bound-model"} },
@@ -176,12 +178,14 @@ func TestScheduleFiringReportsAPerModelResolutionFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
+	launchOpts := options{systemPrompt: systemPromptSettings{
+		models: map[string]promptSource{"bound-model": {file: "no-such-prompt.md"}},
+	}}
 	w := scheduleWiring{
-		base: apogee.Config{WorkspaceDir: roots.workspace},
-		opts: options{systemPrompt: systemPromptSettings{
-			models: map[string]promptSource{"bound-model": {file: "no-such-prompt.md"}},
-		}},
+		base:  apogee.Config{WorkspaceDir: roots.workspace},
+		opts:  launchOpts,
 		roots: roots,
+		live:  newLiveSettings(launchOpts, nil),
 		binding: func() upstreamBinding {
 			return upstreamBinding{Endpoint: "http://unused.invalid", Model: "bound-model"}
 		},
@@ -268,6 +272,7 @@ func newScheduleHarness(t *testing.T, endpoint string) *scheduleHarness {
 			SessionsDir:  roots.sessions,
 		},
 		roots:   roots,
+		live:    newLiveSettings(options{}, nil),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: endpoint, Model: "bound-model"} },
 		store:   store,
 	}
