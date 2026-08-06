@@ -2062,6 +2062,100 @@ func TestSettingsPaneTextEditorPaintsTheCaretWhereItStands(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// Pasting into a settings field (spec requirement 7 — a field the human can paste into)
+// ----------------------------------------------------------------------------
+
+// A bracketed paste lands in whichever field the pane has open, and NEVER in the chat box behind it:
+// the pane is full-height, so a paste that fell through would fill a draft the human cannot see. The
+// value buffer flattens what it takes — a value carrying a newline would break the one row it is
+// painted in — while the multi-line field keeps the lines, which is what it is for.
+func TestSettingsPasteLandsInTheOpenField(t *testing.T) {
+	cases := []struct {
+		name    string
+		row     SettingRow
+		content string
+		want    string // the field's value after the paste
+	}{
+		{"value buffer", settingsStringRow(), "/one", "http://box:1111/one"},
+		{"value buffer flattens a pasted newline", settingsStringRow(), "/one\n", "http://box:1111/one "},
+		{"multi-line field keeps the lines", settingsTextRow(), "\nAnd stop.",
+			"You are apogee.\nWork step by step.\nAnd stop."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m, _ := settingsEditModel(t, []SettingRow{c.row}, &settingsWriteLog{})
+			m = step(t, m, keyEnter()) // the field opens seeded with the value, caret at its end
+
+			m = step(t, m, tea.PasteMsg{Content: c.content})
+
+			if got := m.settings.editor.value(); got != c.want {
+				t.Errorf("field = %q, want %q", got, c.want)
+			}
+			if got := m.input.Value(); got != "" {
+				t.Errorf("the chat box behind the pane took the paste: %q", got)
+			}
+		})
+	}
+}
+
+// With no field open the pane still SWALLOWS a paste, exactly as it swallows every key it does not act
+// on: the box it would otherwise land in is one the human cannot read past a full-height pane.
+func TestSettingsPasteIsSwallowedWithNoFieldOpen(t *testing.T) {
+	m, _ := settingsEditModel(t, []SettingRow{settingsStringRow()}, &settingsWriteLog{})
+
+	m = step(t, m, tea.PasteMsg{Content: "stray"})
+
+	if got := m.input.Value(); got != "" {
+		t.Errorf("the chat box behind the pane took the paste: %q", got)
+	}
+	if m.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v, want the key list untouched", m.settings)
+	}
+}
+
+// A paste is an EDIT, so it drops the field's drag-selection for handleKey's own reason: the value is
+// about to change under a span whose offsets would then name other runes.
+func TestSettingsPasteDropsTheFieldSelection(t *testing.T) {
+	m, _ := settingsEditModel(t, []SettingRow{settingsStringRow()}, &settingsWriteLog{})
+	m = step(t, m, keyEnter())
+	m.settings.sel = promptSel{active: true, anchorOff: 0, headOff: 4}
+
+	if pasted := step(t, m, tea.PasteMsg{Content: "x"}); pasted.settings.sel.active {
+		t.Errorf("the paste left the drag-selection armed: %+v", pasted.settings.sel)
+	}
+}
+
+// ctrl+v in a settings field asks the widget for the clipboard — the binding is live in BOTH fields
+// now that the reply has a route home — and the reply, whose type is the widget package's own and
+// unexported, is delivered by the route rather than by its type (settingsEditorMsg, the arm
+// [Model.Update] ends on).
+func TestSettingsFieldTakesCtrlVAndItsReplyIsRoutable(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		row  SettingRow
+	}{{"value buffer", settingsStringRow()}, {"multi-line field", settingsTextRow()}} {
+		t.Run(c.name, func(t *testing.T) {
+			m, _ := settingsEditModel(t, []SettingRow{c.row}, &settingsWriteLog{})
+			m = step(t, m, keyEnter())
+
+			_, cmd := stepCmd(t, m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+			if cmd == nil {
+				t.Error("ctrl+v in the field returned no Cmd; the widget's clipboard read is switched off")
+			}
+			// The reply comes back as an opaque Msg: what makes it reach this field is that the pane
+			// claims it on the way past, which is the whole of the route.
+			if _, _, claimed := m.settingsEditorMsg(tea.PasteMsg{Content: "x"}); !claimed {
+				t.Error("the pane does not claim a Msg for its own open field")
+			}
+		})
+	}
+	closed := settingsModel(t, []SettingRow{settingsStringRow()})
+	if _, _, claimed := closed.settingsEditorMsg(tea.PasteMsg{Content: "x"}); claimed {
+		t.Error("a closed pane claimed a Msg; the chat box's own messages are the chat box's")
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The $EDITOR round trip (ADR 0037 decision 5)
 // ----------------------------------------------------------------------------
 

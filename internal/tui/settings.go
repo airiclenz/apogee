@@ -385,6 +385,56 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil // any other key is swallowed by the modal
 }
 
+// settingsOwnsInput reports whether the pane is the surface the keyboard is on: open, at the one
+// state its verb runs in. It is the gate [Model.handleKey] routes keypresses by, stated once because
+// the two message kinds that are TEXT rather than keystrokes have to be routed by exactly the same
+// rule (settingsPaste, settingsEditorMsg) — a paste that followed a different rule from the keys
+// would land in the draft behind a pane the human cannot see past.
+func (m Model) settingsOwnsInput() bool {
+	return m.state == stateIdle && m.settings.open
+}
+
+// settingsPaste routes a bracketed paste while the pane owns the keyboard: into the field when one is
+// open, and NOWHERE when none is. The second half is the pane's modality applied to the one edit that
+// does not arrive as a keypress — the pane is full-height, so a paste falling through to the chat box
+// would fill a draft the human cannot see (handleKey's own reason for swallowing every key it does not
+// act on).
+func (m Model) settingsPaste(msg tea.PasteMsg) (Model, tea.Cmd, bool) {
+	if next, cmd, claimed := m.settingsEditorMsg(msg); claimed {
+		return next, cmd, true
+	}
+	return m, nil, m.settingsOwnsInput()
+}
+
+// settingsEditorMsg hands a Msg that is TEXT to whichever field the pane has open — the terminal's
+// bracketed paste, and the clipboard reply the widget's own ctrl+v asks for, which is a Msg of the
+// widget package's own unexported type and can therefore be recognised by nothing but the route it
+// took ([lineEditor.editMsg]). claimed is false wherever there is no field to type into, which leaves
+// the chat box's own messages to the chat box.
+//
+// The value buffer flattens what arrives and the multi-line field does not — the field's own
+// invariant, imposed where the text enters it (lineEditor.editMsg) — and only the multi-line field
+// lays the frame out again, for settingsTextKey's reason: it IS the pane's row list, so a pasted line
+// changes how many rows the pane measures, while a value buffer is one cell of one row.
+func (m Model) settingsEditorMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
+	if !m.settingsOwnsInput() {
+		return m, nil, false
+	}
+	switch m.settings.kind {
+	case settingsValueBuffer:
+		// The value is about to change under the highlight, so the span goes first — settingsKey's
+		// chokepoint rule for the edits that arrive as keystrokes, and the same one here.
+		m.settings.sel = promptSel{}
+		return m, m.settings.editor.editMsg(msg), true
+	case settingsTextEditor:
+		m.settings.sel = promptSel{}
+		cmd := m.settings.editor.editMsg(msg)
+		m.layout()
+		return m, cmd, true
+	}
+	return m, nil, false
+}
+
 // settingsAbandonStep drops a second step whose row went away and swallows the keypress that found
 // it gone — the enum sub-list's fallback, shared by the buffer and the armed reset. Nothing is
 // written and nothing is kept: a buffer whose key is no longer there has nothing to save, and a
@@ -766,7 +816,6 @@ func (m Model) settingsTextValue(row SettingRow) string {
 // the widget's idea of visual rows would step through wraps the pane never drew.
 func newSettingsTextEditor(shape tea.CursorShape, seed string) lineEditor {
 	e := newLineEditor(shape)
-	e.noPaste()
 	e.setValue(seed)
 	return e
 }
@@ -1678,11 +1727,43 @@ func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDispla
 // which is what keeps the line being typed inside the scroll window on a prompt longer than the pane
 // (popupRowWindow re-derives around it every frame).
 func (m Model) renderSettingsText(rows []SettingRow) string {
+	spec, ok := m.settingsTextSpec(rows)
+	if !ok {
+		return "" // the frame cannot seat this pane (settingsGiveWayNote says so on the status line)
+	}
+	view, place := renderPopupPlaced(m.th, spec, m.width)
+	// The drag-selection is overlaid on the COMPOSED field, the key list's own idiom one state along:
+	// the module takes plain cells and styles rows whole (doc.go), so a shaded run cannot be handed to
+	// it as a cell.
+	return m.highlightSettingsText(view, place)
+}
+
+// settingsTextLines is the field as the pane PAINTS it: one string per LINE of the value, the caret
+// drawn in as a glyph where the next keystroke lands ([lineEditor.textWithCaret]) and every line
+// escape-stripped like any other cell handed the popup module (doc.go).
+//
+// It is a derivation of its own for settingsEditText's reason one state along: the MOUSE reads these
+// very strings — a click's column is turned into a rune offset by measuring them, and the highlight
+// measures them back the other way (mouse.go) — so the glyph the human clicks on is the glyph the
+// caret lands at.
+func (m Model) settingsTextLines() []string {
 	lines := strings.Split(m.settings.editor.textWithCaret(settingsCaret), "\n")
+	for i, line := range lines {
+		lines[i] = stripEscapes(line)
+	}
+	return lines
+}
+
+// settingsTextSpec composes the multi-line field's [popupSpec] for THIS frame. It is a step of its own
+// for settingsKeyListSpec's reason: the painter is not the composition's only reader, since a click
+// maps back through the very rows, the very wrap and the very window that were drawn (settingsTextPaint,
+// mouse.go). ok is false when the frame cannot seat the pane at all.
+func (m Model) settingsTextSpec(rows []SettingRow) (popupSpec, bool) {
+	lines := m.settingsTextLines()
 	text := make([]popupRow, 0, len(lines))
 	kinds := make([]popupRowKind, 0, len(lines))
 	for _, line := range lines {
-		text = append(text, popupRow{stripEscapes(line)})
+		text = append(text, popupRow{line})
 		kinds = append(kinds, popupRowEditing)
 	}
 	body := m.settingsBody(rows)
@@ -1693,9 +1774,9 @@ func (m Model) renderSettingsText(rows []SettingRow) string {
 	maxBody, maxRows, seated := m.popupBudget(paneSettings, claim, claim, popupChrome,
 		popupFloor{body: popupBodyLineCount(m.th, body, m.width)})
 	if !seated {
-		return "" // the frame cannot seat this pane (settingsGiveWayNote says so on the status line)
+		return popupSpec{}, false
 	}
-	return renderPopup(m.th, popupSpec{
+	return popupSpec{
 		title:       settingsTitle,
 		body:        body,
 		bodyLead:    settingsDescLabel,
@@ -1706,7 +1787,7 @@ func (m Model) renderSettingsText(rows []SettingRow) string {
 		selected:    clampInt(m.settings.editor.caretLine(), 0, len(text)-1),
 		hint:        m.settingsPaneHint(),
 		maxRows:     maxRows,
-	}, m.width)
+	}, true
 }
 
 // renderSettingsEnum paints the value sub-list — the second step of an enum edit — in the SAME pane,

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -40,6 +42,12 @@ type lineEditor struct {
 	// input is the widget: the black-interior field whose simulated cursor is retired in favour of
 	// the terminal's own (steadyCursor).
 	input textarea.Model
+
+	// oneLine records the confinement [lineEditor.singleLine] applied, because text can still arrive
+	// carrying a newline: a paste is not a keystroke, so the newline BINDING being switched off does
+	// not cover it. The field keeps its own invariant rather than asking every caller to remember it
+	// (lineEditor.editMsg → flattenLine).
+	oneLine bool
 }
 
 // newLineEditor builds the part every text field in this package shares: a focused, black-interior
@@ -67,32 +75,24 @@ func newLineEditor(shape tea.CursorShape) lineEditor {
 // would otherwise walk the caret across the visual rows a long value wraps to, which is not
 // something the single row the field is drawn on can show.
 //
-// The widget's own ctrl+v goes too, and for a reason outside the field: the clipboard read it starts
-// comes back as a Msg of the widget package's own unexported type, which [Model.Update] can only
-// route to the chat box (the one textarea it knows by name) — so leaving the binding on would land a
-// paste in a box the human cannot even see behind this pane. Inert is the honest state until a field
-// away from the prompt has a Msg route of its own.
+// The widget's own ctrl+v STAYS, and what it needs is not a binding but a route: the clipboard read
+// it starts comes back as a Msg of the widget package's own unexported type, so it is delivered by
+// whichever surface owns the keyboard rather than by the type of the Msg ([Model.Update]'s default
+// arm, through Model.settingsEditorMsg). What such a paste may carry that no keystroke can is a
+// NEWLINE, which is why the confinement is recorded (oneLine) and re-imposed on the text that
+// arrives (lineEditor.editMsg).
 func (e *lineEditor) singleLine() {
 	e.input.SetHeight(1)
+	e.oneLine = true
 	for _, b := range []*key.Binding{
 		&e.input.KeyMap.InsertNewline,
 		&e.input.KeyMap.LineNext,
 		&e.input.KeyMap.LinePrevious,
 		&e.input.KeyMap.PageUp,
 		&e.input.KeyMap.PageDown,
-		&e.input.KeyMap.Paste,
 	} {
 		b.SetEnabled(false)
 	}
-}
-
-// noPaste switches the widget's own ctrl+v off, which [lineEditor.singleLine] does as one of the
-// several things it takes away and a MULTI-line field still needs on its own. The reason is the same
-// and it is stated there: the clipboard read comes back as a Msg of the widget package's own
-// unexported type, which [Model.Update] can only route to the chat box, so the binding would land a
-// paste in a box the human cannot see behind the pane in front of it.
-func (e *lineEditor) noPaste() {
-	e.input.KeyMap.Paste.SetEnabled(false)
 }
 
 // value is what the field currently holds.
@@ -119,6 +119,54 @@ func (e *lineEditor) editKey(msg tea.KeyPressMsg) tea.Cmd {
 	var cmd tea.Cmd
 	e.input, cmd = e.input.Update(msg)
 	return cmd
+}
+
+// editMsg hands one NON-key Msg to the field and returns whatever Cmd it asks for — editKey's
+// counterpart for the two messages that are text rather than keystrokes: the terminal's bracketed
+// paste (tea.PasteMsg) and the clipboard reply the widget's own ctrl+v asked for, whose type is the
+// widget package's own and unexported. Neither can be recognised by a surface that switches on Msg
+// type, so the ROUTE is the surface that owns the keyboard (Model.settingsEditorMsg), and this is
+// where such a Msg enters the field.
+//
+// A single-line field is flattened afterwards because this is the one door a newline can come
+// through: the newline BINDING is off (lineEditor.singleLine) but pasted text carries its own line
+// breaks, and a value holding one would break the single row it is painted in (settingBufferCells).
+func (e *lineEditor) editMsg(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	e.input, cmd = e.input.Update(msg)
+	if e.oneLine {
+		e.flattenLine()
+	}
+	return cmd
+}
+
+// flattenLine folds a multi-line value onto one line, each newline becoming the space that stands
+// where the break was, and leaves the caret on the same rune it stood on: the substitution is one
+// rune for one rune, so every offset into the value still names what it named. It is what keeps a
+// field built single-line single-line when text arrives from somewhere other than the keyboard
+// (lineEditor.editMsg).
+//
+// A space rather than nothing at all: the two lines were separate words, and a commit trims what a
+// trailing newline leaves behind (settingsCommitBuffer's TrimSpace), so a path copied from a terminal
+// with its line ending still on it pastes as the path.
+func (e *lineEditor) flattenLine() {
+	value := e.input.Value()
+	if !strings.Contains(value, "\n") {
+		return
+	}
+	off := e.caretRune()
+	e.input.SetValue(strings.ReplaceAll(value, "\n", " "))
+	e.caretToRune(off)
+}
+
+// stepLine walks the caret one LOGICAL line up or down, keeping the column it stands in and clamping
+// at the value's first and last lines. It is the step a surface that paints one line per logical line
+// scrolls by (the /settings multi-line field under the wheel, mouse.go): the widget's own CursorUp and
+// CursorDown walk the VISUAL rows of its own wrap, which is not what such a surface drew.
+func (e *lineEditor) stepLine(delta int) {
+	value := e.input.Value()
+	row := clampInt(e.input.Line()+delta, 0, strings.Count(value, "\n"))
+	e.seatCaret(row, e.input.Column())
 }
 
 // caretRune is where the caret stands as a RUNE offset into the value — the widget's own (row,

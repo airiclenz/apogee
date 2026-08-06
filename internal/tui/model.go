@@ -527,6 +527,13 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// the wrong runes). It lands wherever the box is editable — including while a worker runs,
 		// where the pasted text is staged as an interjection (ADR 0025) — and is dropped at the
 		// inert states, exactly as keys are. Mirrors handleKey's edit path.
+		//
+		// The /settings pane is asked FIRST and for the same reason handleKey asks it first: while it
+		// is open it is the surface the human is typing at, and the box below is one they cannot see
+		// (settings.go).
+		if next, cmd, claimed := m.settingsPaste(msg); claimed {
+			return next, cmd
+		}
 		if !m.inputEditable() {
 			return m, nil
 		}
@@ -838,6 +845,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// sees its own (a focus/blur report, say). The cursor is no longer among them: with the
 		// virtual cursor retired no blink Msg is ever scheduled, and the real cursor is placed
 		// by View rather than driven by a Msg chain.
+		//
+		// "The focused input" is the /settings field while the pane has one open, and this arm is the
+		// only route such a field can be reached by: the clipboard reply its own ctrl+v asks for is a
+		// Msg of the widget package's own unexported type, which no switch above can name
+		// (settingsEditorMsg, lineEditor.editMsg).
+		if next, cmd, claimed := m.settingsEditorMsg(msg); claimed {
+			return next, cmd
+		}
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
@@ -890,7 +905,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// FULL-HEIGHT pane (frameRowPlan), so the input box behind it is a box the human cannot read —
 	// a keystroke falling through to it would edit an invisible draft. Idle-only, like its verb
 	// (commandSpecs), and it swallows every key it does not act on (settings.go).
-	if m.state == stateIdle && m.settings.open {
+	if m.settingsOwnsInput() {
 		return m.settingsKey(msg)
 	}
 

@@ -81,8 +81,11 @@ point is a **minor** bump, not a breaking change.
     row, opens a selection popup on a row with a fixed set of values, opens a buffer on the row for
     a string
     or a number, or opens a multi-line field for the inline system prompt (`⏎` makes a new line,
-    `ctrl+s` saves, `esc` discards). A buffer is a real field: cursor keys, `home`/`end`, word jumps,
-    and a mouse that seats the caret and drags a selection, exactly as in the prompt box. What lands
+    `ctrl+s` saves, `esc` discards). Both are real fields: cursor keys, `home`/`end`, word jumps, a
+    paste that lands in the field you can see rather than in the chat box behind the pane, and a
+    mouse that seats the caret, drags a selection and — in the multi-line field — walks the prose
+    under the wheel, exactly as in the prompt box. A value row folds a pasted line break onto its one
+    line; the system-prompt field keeps every line you gave it. What lands
     in `~/.apogee/config.yaml` is a **line splice**: your comments, your
     layout and every other key untouched, the result re-parsed and compared against the original
     before it replaces the file, written atomically. A key that was still one of the file's

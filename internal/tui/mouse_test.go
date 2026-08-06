@@ -2240,6 +2240,151 @@ func TestSettingsWheelWalksTheKeyList(t *testing.T) {
 	}
 }
 
+// settingsTextEditModel is a model with the multi-line field OPEN over the given prose — the state the
+// pointer tests below act in. The prose is the row's own, so what the field is seeded with is what the
+// registry would have handed it.
+func settingsTextEditModel(t *testing.T, prose string) Model {
+	t.Helper()
+	row := settingsTextRow()
+	row.Text = prose
+	m, _ := settingsEditModel(t, []SettingRow{row}, &settingsWriteLog{})
+	m = step(t, m, keyEnter())
+	if m.settings.kind != settingsTextEditor {
+		t.Fatalf("pane = %+v, want the multi-line field open", m.settings)
+	}
+	return m
+}
+
+// A click in the multi-line field seats the caret at the glyph under the pointer, wherever in the prose
+// that is (spec requirement 7 — the same mouse the prompt box has). The three cases are the three ways a
+// painted line can differ from the value's own: a line of its own, a line the pane had to WRAP — where
+// the break dropped a blank that is still in the value — and a line of two-cell glyphs, where a mapping
+// that counted runes rather than display cells would land one glyph out.
+func TestSettingsTextClickSeatsTheCaretInTheProse(t *testing.T) {
+	cases := []struct {
+		name    string
+		prose   string
+		want    string // the run the pointer is put on
+		wantOff int    // the rune offset into the prose the caret must land at
+		wrapped bool   // the clicked line is one the pane had to break
+	}{
+		{"a line of its own", "You are apogee.\nWork step by step.", "step by", 21, false},
+		{"a wrapped continuation", "You are apogee.\n" + strings.Repeat("alpha ", 20) + "omega.", "omega.", 136, true},
+		{"double-width glyphs", "You are apogee.\n日本語abc", "本", 17, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := settingsTextEditModel(t, c.prose)
+			paint, ok := m.settingsTextPaint()
+			if !ok {
+				t.Fatal("the field is not on the frame")
+			}
+			if wrapped := len(paint.blocks[1]) > 1; wrapped != c.wrapped {
+				t.Fatalf("the prose's second line paints on %d rows, want wrapped = %v", len(paint.blocks[1]), c.wrapped)
+			}
+			x, y := settingsFrameCell(t, m, c.want)
+
+			m = step(t, m, leftClick(x, y))
+
+			if got := m.settings.editor.caretRune(); got != c.wantOff {
+				t.Errorf("caret at rune %d, want %d (the %q the pointer was on)", got, c.wantOff, c.want)
+			}
+			if !m.settings.sel.active || m.settings.sel.anchorOff != c.wantOff || m.settings.sel.headOff != c.wantOff {
+				t.Errorf("a bare click should arm a collapsed selection at %d, got %+v", c.wantOff, m.settings.sel)
+			}
+			if m.settings.editor.value() != c.prose {
+				t.Errorf("the click changed the prose to %q", m.settings.editor.value())
+			}
+			if m.sel.active || m.transcriptSel.active {
+				t.Errorf("a click on the field armed another surface's selection: %+v / %+v", m.sel, m.transcriptSel)
+			}
+		})
+	}
+}
+
+// A drag in the multi-line field selects ACROSS its lines — the newline between them included, since
+// that is what the value holds — the span is shaded on every line it covers, and the release copies
+// exactly those runes.
+func TestSettingsTextDragSelectsAcrossLines(t *testing.T) {
+	m := settingsTextEditModel(t, "You are apogee.\nWork step by step.")
+
+	x, y := settingsFrameCell(t, m, "You are apogee.")
+	m = step(t, m, leftClick(x, y))
+	if m.settings.sel.anchorOff != 0 {
+		t.Fatalf("anchor at %d, want the prose's first rune", m.settings.sel.anchorOff)
+	}
+	head, headY := settingsFrameCell(t, m, "step by")
+	m = step(t, m, leftDrag(head, headY))
+
+	const want = "You are apogee.\nWork "
+	if got := selectionText(m.settings.editor.value(), m.settings.sel.anchorOff, m.settings.sel.headOff); got != want {
+		t.Fatalf("selected text = %q, want %q", got, want)
+	}
+	if colorActive(m.th) {
+		for _, line := range []string{"You are apogee.", "Work "} {
+			if row := popupLineWith(t, m.renderSettings(), line); !strings.Contains(row, styleSGR(m.th.selection)) {
+				t.Errorf("the dragged span is not shaded on the line holding %q: %q", line, row)
+			}
+		}
+	}
+
+	m, cmd := stepCmd(t, m, leftRelease(head, headY))
+	if cmd == nil {
+		t.Fatal("release of a non-empty selection should return a copy Cmd, got nil")
+	}
+	if flash := fmt.Sprintf("copied %d chars", len([]rune(want))); !strings.Contains(m.flash, flash) {
+		t.Fatalf("flash = %q, want %q", m.flash, flash)
+	}
+}
+
+// The wheel walks the multi-line field one prose line per notch — the caret is what its scroll window
+// follows, so moving the caret IS the scroll — and clamps at the first and last lines, where a wheel
+// must not roll round. A notch above the pane is still the transcript's.
+func TestSettingsTextWheelWalksTheProse(t *testing.T) {
+	lines := make([]string, 12)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%02d", i)
+	}
+	m := settingsTextEditModel(t, strings.Join(lines, "\n"))
+	if got := m.settings.editor.caretLine(); got != len(lines)-1 {
+		t.Fatalf("the field opened with the caret on line %d, want the last (%d)", got, len(lines)-1)
+	}
+	paneTop, _, ok := m.settingsPaneRect()
+	if !ok {
+		t.Fatal("the pane is not on the frame")
+	}
+	wheel := func(m Model, button tea.MouseButton, y int) Model {
+		return step(t, m, tea.MouseWheelMsg{X: 10, Y: y, Button: button})
+	}
+	inside := paneTop + 1
+
+	m = wheel(m, tea.MouseWheelUp, inside)
+	if got := m.settings.editor.caretLine(); got != len(lines)-2 {
+		t.Fatalf("caret on line %d after one notch up, want %d", got, len(lines)-2)
+	}
+	for range len(lines) + 4 {
+		m = wheel(m, tea.MouseWheelUp, inside)
+	}
+	if got := m.settings.editor.caretLine(); got != 0 {
+		t.Fatalf("caret on line %d after rolling past the top, want it clamped at 0", got)
+	}
+	for range len(lines) + 4 {
+		m = wheel(m, tea.MouseWheelDown, inside)
+	}
+	if got := m.settings.editor.caretLine(); got != len(lines)-1 {
+		t.Fatalf("caret on line %d after rolling past the end, want it clamped at %d", got, len(lines)-1)
+	}
+	if m.settings.editor.value() != strings.Join(lines, "\n") {
+		t.Errorf("the wheel changed the prose to %q", m.settings.editor.value())
+	}
+	if paneTop > 0 {
+		above := wheel(m, tea.MouseWheelUp, paneTop-1)
+		if got := above.settings.editor.caretLine(); got != len(lines)-1 {
+			t.Errorf("a notch above the pane moved the caret to line %d", got)
+		}
+	}
+}
+
 // The transcript above a short pane keeps its drag while the pane's edit field holds a highlight of its
 // own — the pane claims only its OWN rows, in BOTH directions. The direction this guards is the one a
 // live selection makes silent: a settings span left armed answers every motion and every release from

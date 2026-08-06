@@ -319,12 +319,15 @@ func (s popupSpec) rowKind(i int) popupRowKind {
 // a description wrapped differently than it guessed.
 //
 // Mapping a line back to a row is a subtraction only where every row is ONE line — a spec with
-// neither popupSpec.wrapRows nor popupSpec.rowGap, which is what /settings is. A spec whose rows can
-// cost more than a line each would need their heights as well, and the caller that needs that can
-// have them when it exists.
+// neither popupSpec.wrapRows nor popupSpec.rowGap, which is what the /settings key list is. A spec
+// whose rows cost more than a line each maps through blocks instead: the lines each row was composed
+// into, in order, so the caller walks the window counting the heights the painter actually drew. The
+// /settings multi-line field is that caller (settingsTextPaint) — its rows are the prompt's lines and
+// they wrap.
 type popupPlacement struct {
-	rowsAt     int // painted row index of the row block's first line
-	start, end int // the window of spec.rows that block holds
+	rowsAt     int        // painted row index of the row block's first line
+	start, end int        // the window of spec.rows that block holds
+	blocks     [][]string // the composed lines of EVERY row, the window's and the rows outside it alike
 }
 
 // popupBoxBorderRow is the one row drawTitledBox draws above a pane's content lines: its top border.
@@ -398,6 +401,7 @@ func renderPopupPlaced(th theme, spec popupSpec, width int) (string, popupPlacem
 		rowsAt: popupBoxBorderRow + len(lines) + len(body) + block.lead,
 		start:  block.start,
 		end:    block.end,
+		blocks: block.blocks,
 	}
 	lines = append(lines, body...)
 	lines = append(lines, block.lines...)
@@ -551,16 +555,17 @@ func singleCellRows(labels []string) []popupRow {
 }
 
 // popupRowBlock is a spec's composed row list: the painted lines, how many rows the window could not
-// seat at all (hidden), the [start, end) window of spec.rows the lines hold, and how many lines the
+// seat at all (hidden), the [start, end) window of spec.rows the lines hold, how many lines the
 // block leads with before its first ROW (lead — the blank popupSpec.rowPadAbove asks for, and nothing
-// else). The counts travel with the lines because renderPopup owes two different answers about the
-// same composition: what to paint, and where among the painted rows each row landed
-// (popupPlacement).
+// else), and the per-row composition all of that was derived from (blocks). The counts travel with the
+// lines because renderPopup owes two different answers about the same composition: what to paint, and
+// where among the painted rows each row landed (popupPlacement).
 type popupRowBlock struct {
 	lines      []string
 	hidden     int
 	start, end int
 	lead       int
+	blocks     [][]string // what each row was composed into, before the window and the styling
 }
 
 // popupRowLines composes the spec's rows into the styled, black-filled content lines the pane
@@ -617,7 +622,7 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 	if start == end {
 		// No row on the screen: with rows on offer this is the budget's call, and the pane owes the
 		// human the count (an empty offering owes nothing — there is no list to hide).
-		return popupRowBlock{hidden: len(blocks), start: start, end: end}
+		return popupRowBlock{hidden: len(blocks), start: start, end: end, blocks: blocks}
 	}
 	if popupRowBlockLines(heights[start:end], gap, popupRowPadLines(padAbove, padBelow)) > capLines {
 		// The block fits, the blank lines around it do not: the rows come first.
@@ -662,7 +667,34 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 	if padBelow {
 		out = append(out, "")
 	}
-	return popupRowBlock{lines: out, start: start, end: end, lead: blockLead}
+	return popupRowBlock{lines: out, start: start, end: end, lead: blockLead, blocks: blocks}
+}
+
+// popupWrapOffsets is where each line of a wrapped SINGLE-CELL row began in the row's own text: the
+// rune offset of blocks[i]'s j-th line into the text it was composed from. It is the wrap read
+// backwards, and it exists for the one caller that has to answer in the row's own coordinates rather
+// than in the pane's — the pointer in the /settings multi-line field, which turns a clicked cell into
+// a caret position in the prompt being written (mouse.go).
+//
+// The walk is a match rather than an arithmetic because a word wrap DROPS the blank it broke on
+// (popupRowBlocks → wrapText): each line is looked for at the cursor, blanks are stepped over until it
+// is found there, and the cursor then advances by the line's own length. Stepping over blanks ONLY
+// where the line does not already start at the cursor is what keeps a line the wrap kept its
+// indentation on (a hard break inside a run of spaces) landing on its own first space rather than
+// past it. A single-cell row is the whole of the contract: a columned row's continuation lines carry
+// a hanging indent that is not in the text at all (popupWrappedRowLines), and no caller needs that.
+func popupWrapOffsets(text string, lines []string) []int {
+	runes := []rune(text)
+	offsets := make([]int, len(lines))
+	at := 0
+	for i, line := range lines {
+		for at < len(runes) && runes[at] == ' ' && !strings.HasPrefix(string(runes[at:]), line) {
+			at++
+		}
+		offsets[i] = at
+		at = min(at+len([]rune(line)), len(runes))
+	}
+	return offsets
 }
 
 // popupRowLine styles ONE painted line of a row — the whole row when it did not wrap, and every line
