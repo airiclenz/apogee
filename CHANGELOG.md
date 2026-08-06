@@ -125,9 +125,10 @@ point is a **minor** bump, not a breaking change.
     itself on.
   - **`apogee headless` reports the same thing per run.** Before its closing summary it prints one
     stderr line per sub-agent run, in finish order — `sub-agent: 12k/32k · review the wire seam` —
-    the task being the delegated prompt's first line, stripped of control characters and clipped,
-    with any whitespace control folded to a space so the label stays on one line. Runs with no
-    reading are skipped, stdout stays answer-only, and the summary line itself is unchanged.
+    the task being the delegated prompt's first line, stripped of control characters and clipped:
+    every C0 control and DEL is dropped as it is from the answer, except the newline and the tab,
+    which fold to a space here so the label cannot forge a second line or a false column. Runs with
+    no reading are skipped, stdout stays answer-only, and the summary line itself is unchanged.
 
   Closes the standing issue "I cannot see how much of its context a sub agent has used"; specced in
   `layout.md` ("A sub-agent run collapses to its call block") and defined in `CONTEXT.md`
@@ -190,6 +191,17 @@ point is a **minor** bump, not a breaking change.
     is menu-only, so the tag now says what it means everywhere it appears.
 
 ### Fixed
+
+- **The TUI drops every control character from untrusted text, not only the ESC byte.** The
+  transcript's sanitizer is the seam every model-, repo- and disk-supplied string passes on its way
+  to the screen, and it removed the ESC that opens an ANSI sequence while letting the rest of the
+  class through: a bare BEL rang the terminal bell, a CR rewound the line so what followed overwrote
+  what you had already read, and a NUL or a DEL took string length while occupying no display cell —
+  the same lie to the column math that an unstripped ESC tells the pane. Streamed model text, a
+  stored session file and a picker row's label all arrive through it, so any of the three could
+  scramble a frame. The whole C0 class goes now, DEL with it, while the newline and the tab a body is
+  wrapped and railed by come through untouched. `apogee headless` closed the same gap on its own
+  output; this is the other half of it.
 
 - **A sub-agent's live reply no longer appears in the main transcript before folding into its run
   block.** While a delegate was generating, its streamed text painted as a top-level assistant

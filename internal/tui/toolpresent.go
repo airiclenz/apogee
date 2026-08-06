@@ -141,9 +141,9 @@ func (b toolBody) with(more []detailLine) toolBody {
 	return newToolBody(append(b.lines, more...))
 }
 
-// stripEscapes removes the ESC byte from every line's text in place (the sanitize seam's work on
-// the body). It cannot disturb how a body paints: a line's Kind is set by its producer and the
-// strip only ever rewrites Text.
+// stripEscapes runs the package's control-character strip over every line's text in place (the
+// sanitize seam's work on the body). It cannot disturb how a body paints: a line's Kind is set by
+// its producer and the strip only ever rewrites Text.
 func (b *toolBody) stripEscapes() {
 	for i := range b.lines {
 		b.lines[i].Text = stripEscapes(b.lines[i].Text)

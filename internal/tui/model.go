@@ -4266,9 +4266,14 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int, floor popupFlo
 // gives way before an option does on a window too short for both.
 //
 // Every model-authored string (tool name, reason, args) is escape-stripped at this call site;
-// stripEscapes removes only the ESC byte, so the raw tool name is preserved verbatim. The menu's own
-// rows are ours, not the model's, so nothing there needs stripping. Empty/null arguments add no
-// body. Only the top-level (Depth == 0) prompt is rendered this phase.
+// stripEscapes drops the C0 control characters and DEL (keeping \n and \t) and passes every
+// printable rune through, so the tool name the human is deciding about arrives with its printable
+// text intact and loses only what the terminal would have OBEYED rather than shown — the ESC that
+// opens a sequence, the CR that could rewind the name's own row. That is a claim about the
+// TERMINAL, not about the name: a name written entirely in printable characters, lookalikes and
+// all, reaches this pane exactly as the model wrote it. The menu's own rows are ours, not the
+// model's, so nothing there needs stripping. Empty/null arguments add no body. Only the top-level
+// (Depth == 0) prompt is rendered this phase.
 //
 // The guarantee this security surface holds is NOT that the whole reason is always on the screen —
 // no pane can promise that on a terminal with four rows to give. It is that the human is never

@@ -492,10 +492,11 @@ func formatTokens(n int) string {
 // terminal often enough that the strip belongs at this render seam, exactly as the transcript
 // strips at its own.
 //
-// It began as a copy of internal/tui's identically named helper and has widened past it; the
-// duplication stands for the reason it always did — that one is unexported in a package the
-// binary's CLI half must not depend on, and this is a few lines of pure function against a one-way
-// dependency.
+// It began as a copy of internal/tui's identically named helper and widened ahead of it for a
+// while; that twin has since caught up, and the two drop the same class and keep the same two
+// characters again. The duplication stands for the reason it always did — that one is unexported
+// in a package the binary's CLI half must not depend on, and this is a few lines of pure function
+// against a one-way dependency.
 func stripEscapes(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\t' {

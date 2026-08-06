@@ -230,7 +230,8 @@ func (t *transcript) addInterjected(text string, spans []skillSpan) {
 // repo SKILL.md's front matter (/skills), the model id a server advertises (rebindNote), a
 // launcher profile name, an error string quoting a workspace path — and the per-producer
 // discipline that preceded this had in fact missed several of them. A caller that strips first is
-// harmless: stripEscapes is idempotent and allocates nothing when there is no ESC byte.
+// harmless: stripEscapes is idempotent, and it hands its input straight back unallocated whenever
+// there is nothing to rewrite — no control character, no DEL, no invalid UTF-8 byte.
 func (t *transcript) addNote(text string) {
 	t.entries = append(t.entries, entry{kind: entryNote, text: stripEscapes(text)})
 }
@@ -762,20 +763,39 @@ func (t *transcript) addError(source, msg string, depth int) {
 // Formatting helpers
 // ----------------------------------------------------------------------------
 
-// stripEscapes removes the ESC control byte (0x1b) from untrusted text so a model- or
-// repo-supplied string can never introduce a terminal escape sequence — an OSC 52 clipboard
-// write (\x1b]52;...), a CSI cursor/screen game — at the transcript boundary. Every ANSI
-// sequence begins with ESC, so dropping that one byte neutralises the sequence regardless of
-// how a streamed chunk split it, while leaving ordinary text (including \n and \t) intact. The
-// styling the renderer adds afterwards is applied by lipgloss to already-stripped text, so its
-// own escapes are unaffected. Not exploitable in the current layout (the footer always renders
-// after transcript content, and the cellbuf drops non-SGR escapes when printable cells follow),
-// but a trailing-position escape DOES survive the cellbuf — this closes that gap at the source.
+// stripEscapes removes the C0 control characters — and DEL, their ASCII sibling — from untrusted
+// text, keeping the two that ordinary prose is written with: the newline and the tab. A control
+// character in a model- or repo-supplied string is an instruction to the terminal rather than a
+// character in the text, and each of them reaches something this package guards: ESC opens an ANSI
+// sequence — an OSC 52 clipboard write (\x1b]52;...), a CSI cursor/screen game, the OSC 8 opener the
+// pane's cellbuf deliberately honours — BEL rings the bell and closes an OSC 52 payload, CR rewinds
+// the line so what follows overwrites what the reader already saw, and NUL or DEL takes string
+// length while occupying no display cell, which is the same lie to the column math an unstripped ESC
+// tells. Dropping the whole class neutralises all of them regardless of how a streamed chunk split a
+// sequence, where dropping ESC alone left the rest to arrive intact. The styling the renderer adds
+// afterwards is applied by lipgloss to already-stripped text, so its own escapes are unaffected.
+//
+// The newline and the tab survive because THIS package's biggest callers are wrapped bodies, where
+// they are the structure rather than a hazard: the streamed buffer (appendToken), the canonical
+// message (commitAssistant), a tool result's content (addToolResult, which then splits it into
+// detail lines), and everything a session file re-strips on the way back in (transcriptcodec.go).
+// Dropping or folding them there would run paragraphs together and flatten a command's output into
+// one line. The one-line cells that also strip — a popup row, a settings value — legitimately carry
+// neither, and the character that actually rewinds a line beside them, CR, goes either way.
 func stripEscapes(s string) string {
-	if !strings.ContainsRune(s, 0x1b) {
-		return s // the overwhelmingly common case: no ESC, no allocation
-	}
-	return strings.ReplaceAll(s, "\x1b", "")
+	// strings.Map returns s itself, unallocated, when it rewrites nothing: the overwhelmingly common
+	// case of text carrying no control character at all. An invalid UTF-8 byte is the one thing it
+	// rewrites unasked — normalising it to U+FFFD, and paying for the copy — which is benign at a
+	// terminal seam, where a lone 0x80 had no display of its own to lose.
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1 // strings.Map's "drop this rune"
+		}
+		return r
+	}, s)
 }
 
 // stripEscapesAll escape-strips every string in xs, returning a new slice (nil for nil), so a

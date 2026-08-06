@@ -635,6 +635,47 @@ func escapedArgs(t *testing.T, key, value string) json.RawMessage {
 	return raw
 }
 
+// The seam's sanitizer, pinned character by character. A control character in untrusted text is an
+// instruction to the terminal rather than a character in the text — ESC opens an ANSI sequence, BEL
+// rings the bell and closes an OSC 52 clipboard payload, CR rewinds the line so what follows
+// overwrites what the reader already saw, and NUL or DEL takes string length while occupying no
+// display cell — and stripping ESC alone left every one of the others to arrive intact. The two the
+// renderer wraps and rails a body BY, the newline and the tab, are the class's only survivors.
+func TestStripEscapesDropsControlCharacters(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain text passes through untouched", "just a note", "just a note"},
+		{"ESC opens an ANSI sequence", "safe\x1b[31mred", "safe[31mred"},
+		{"BEL rings the bell", "safe\x07text", "safetext"},
+		{"CR rewinds the line", "shown\rhidden", "shownhidden"},
+		{"CRLF leaves the newline behind", "first\r\nsecond", "first\nsecond"},
+		{"an OSC 52 clipboard write is left inert", "safe " + escOSC52 + " text", "safe ]52;c;cGFyaQ== text"},
+		{"a CSI screen game goes with it", "safe" + escCSI + "text", "safe[2J[Htext"},
+		{"NUL, backspace and the rest of C0 go too", "a\x00b\x08c\x1fd", "abcd"},
+		{"DEL goes with them", "a\x7fb", "ab"},
+		{"the newline and the tab are the body's own", "para\n\nnext\tcolumn", "para\n\nnext\tcolumn"},
+		{"non-ASCII text is not control text", "héllo — 世界 ✓", "héllo — 世界 ✓"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripEscapes(tc.in)
+			if got != tc.want {
+				t.Errorf("stripEscapes(%q) = %q; want %q", tc.in, got, tc.want)
+			}
+			for _, r := range got {
+				if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f {
+					t.Errorf("stripEscapes(%q) left %#U behind: %q", tc.in, r, got)
+				}
+			}
+			if again := stripEscapes(got); again != got {
+				t.Errorf("stripEscapes is not idempotent: %q became %q", got, again) // every seam may strip twice
+			}
+		})
+	}
+}
+
 // The status line's tool phrase is built only from presentToolCall's view, so it inherits the tool
 // card's seam. It is pinned here because foldActivity paints it the moment a call is ANNOUNCED —
 // before any approval gate runs — which makes it the earliest point a hostile model's argument
@@ -701,8 +742,8 @@ func TestAutocompleteRowsStripEscapes(t *testing.T) {
 // fully-typed token and ⏎ re-accepted instead of submitting.
 //
 // The payload here is the CSI one, whose bytes are all printable once the ESCs are gone, so the
-// composer can be compared verbatim (escOSC52 also carries a BEL, which the widget's sanitizer eats
-// but stripEscapes deliberately leaves — stripEscapes removes the ESC introducer, nothing else).
+// composer can be compared verbatim — where escOSC52's trailing BEL would leave the two sides to be
+// compared across two sanitizers that agree on it only by coincidence.
 func TestAcceptedFileRowMatchesItsValue(t *testing.T) {
 	m := newTestModel(t)
 	m.opts.Workspace = "/ws"
@@ -1255,6 +1296,69 @@ func TestSubAgentStreamResidueIsNotAttributedToTheParent(t *testing.T) {
 	}
 	if committed != 1 {
 		t.Errorf("committed %d assistant entries, want the delegate's residue kept as exactly 1", committed)
+	}
+}
+
+// TestParentMessageKeepsTheDelegatesStreamInsideItsRun is the residue rule on the MESSAGE path,
+// where the loss is silent rather than misattributed. commitAssistant has a rescue for a blank
+// canonical text — it falls back to the buffer — but a parent that answers with words of its own
+// never reaches it, so without the foreign-depth close the abandoned delegate's streamed words would
+// be overwritten by the parent's answer and vanish from the transcript entirely. Closing at the
+// buffer's OWN depth first keeps them, inside the run they were streamed in, and the parent's
+// answer still commits as the top-level answer it is.
+func TestParentMessageKeepsTheDelegatesStreamInsideItsRun(t *testing.T) {
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	streamAt(tr, 1, "child words")
+
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 0}, Text: "parent answer"})
+
+	var child, parent *entry
+	for i := range tr.entries {
+		e := &tr.entries[i]
+		if e.kind != entryAssistant {
+			continue
+		}
+		switch {
+		case strings.Contains(e.text, "child words"):
+			child = e
+		case strings.Contains(e.text, "parent answer"):
+			parent = e
+		}
+	}
+	if child == nil {
+		t.Fatalf("the parent's message discarded the delegate's streamed words:\n%s", renderPlain(tr, 80))
+	}
+	if child.depth != 1 {
+		t.Errorf("the delegate's words committed at depth %d, want 1 — inside its run", child.depth)
+	}
+	if parent == nil {
+		t.Fatalf("the parent's own answer committed no entry:\n%s", renderPlain(tr, 80))
+	}
+	if parent.depth != 0 {
+		t.Errorf("the parent's answer committed at depth %d, want 0", parent.depth)
+	}
+
+	// Where the two land is a paint, not only a field: collapsed, the run elides the delegate's words
+	// and the parent's answer stands alone; expanded, the words come back railed under the descent.
+	if got := renderPlain(tr, 80); strings.Contains(got, "child words") || !strings.Contains(got, "parent answer") {
+		t.Errorf("the collapsed run did not elide the delegate's words beside the parent's answer:\n%s", got)
+	}
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the run expanded")
+	}
+	want := strings.Join([]string{
+		"✦ Sub-Agent ▾",
+		"  ┕ survey the tests",
+		"",
+		"│ ⤷ sub-agent",
+		"│",
+		"│ ✦ child words",
+		"",
+		"✦ parent answer",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("expanded run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 

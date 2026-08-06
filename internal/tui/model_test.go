@@ -2171,10 +2171,11 @@ func TestModelAskSingleSelectRenderIsUnchanged(t *testing.T) {
 }
 
 // The question and choices are escape-stripped before rendering, so a model-authored ESC byte
-// never reaches the terminal (D8, hardening). stripEscapes removes only the ESC byte, leaving the
-// color code as INERT literal text ("[31mred"); had the ESC survived, plain() would have consumed
-// the whole "\x1b[31m" as a real SGR sequence and the literal would be gone — so its presence in
-// the stripped View is exactly the proof the strip happened at the call site.
+// never reaches the terminal (D8, hardening). stripEscapes drops the control characters and keeps
+// every printable rune, so the ESC goes and the rest of the sequence stays behind as INERT literal
+// text ("[31mred"); had the ESC survived, plain() would have consumed the whole "\x1b[31m" as a
+// real SGR sequence and the literal would be gone — so its presence in the stripped View is
+// exactly the proof the strip happened at the call site.
 func TestModelAskEscapeStrips(t *testing.T) {
 	m, _ := newAskModel(t, domain.AskRequest{
 		Question: "pick\x1b[31mred",
