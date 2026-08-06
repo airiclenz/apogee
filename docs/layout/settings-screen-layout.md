@@ -7,7 +7,9 @@
 - text edit mode must allow using the cursors to move in the text (same functionality like in the prompt edit window incl. usage of mouse)
 
 ╭─────────────────────────────────────── **SETTINGS** ────────────────────────────────────────╮
-│ **Description:** <The description of the currently selected settings lands here. Longer...> │
+│                                                                                             │
+│ **Description:** The description of the currently selected settings lands here. Longer      │
+│ are continued in the 2nd line. There are max two lines for the description.                 │
 │                                                                                             │
 │ UPSTREAM                                                                                    │
 │ · servers                2 servers            edit in config.yaml                           │
