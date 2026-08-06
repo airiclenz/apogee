@@ -151,6 +151,82 @@ func TestExternalEditReloadCarriesProseForATextKey(t *testing.T) {
 	}
 }
 
+// A structured block whose SUMMARY did not move is still a change. Repointing the single
+// `mcp-servers:` entry at another machine leaves the row reading "1 server" character for character,
+// and a diff over row summaries alone reports nothing — so nothing reconnects and the edit waits for
+// a relaunch, which is the deferral ADR 0037 abolishes.
+func TestExternalEditReloadReportsAnMCPServerRepointedUnderTheSameSummary(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, "mcp-servers:\n  - name: files\n    transport: streamable-http\n"+
+		"    endpoint: http://127.0.0.1:7331/mcp\n")
+	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+
+	writeSettingsFixture(t, path, "mcp-servers:\n  - name: files\n    transport: streamable-http\n"+
+		"    endpoint: http://192.0.2.1:7331/mcp\n")
+	applied, err := e.changed()
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	if len(applied) != 1 || applied[0].Path != "mcp-servers" {
+		t.Fatalf("reload = %+v, want the repointed mcp-servers block", applied)
+	}
+	if applied[0].Value != "1 server" {
+		t.Errorf("value = %q, want the row's own summary %q", applied[0].Value, "1 server")
+	}
+
+	// The baseline moved with it, so the same file re-read reports nothing.
+	if again, err := e.changed(); err != nil || len(again) != 0 {
+		t.Errorf("second reload = (%v, %v), want nothing changed", again, err)
+	}
+}
+
+// The same blind spot on the other proved key: a model profile keeps its format and its thinking
+// STYLE — so its row keeps reading "markdown-fenced, thinking delimited" — while the delimiters the
+// stripper actually matches on are replaced. Nothing about the summary can say so.
+func TestExternalEditReloadReportsThinkingDelimitersUnderTheSameSummary(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	profile := func(start, end string) string {
+		return "model-profile:\n  tool-call-format: markdown-fenced\n  thinking:\n    style: delimited\n" +
+			"    start: \"" + start + "\"\n    end: \"" + end + "\"\n"
+	}
+	writeSettingsFixture(t, path, profile("<think>", "</think>"))
+	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+
+	writeSettingsFixture(t, path, profile("<|channel|>", "<|message|>"))
+	applied, err := e.changed()
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	if len(applied) != 1 || applied[0].Path != "model-profile" {
+		t.Fatalf("reload = %+v, want the re-delimited model-profile block", applied)
+	}
+	if want := "markdown-fenced, thinking delimited"; applied[0].Value != want {
+		t.Errorf("value = %q, want the row's own summary %q", applied[0].Value, want)
+	}
+}
+
+// Every structured key is diffed by the value it holds rather than by the summary its row shows, and
+// the pin is mechanical: a structured key added to the registry without a projection here is a key
+// whose edits would silently fail to apply.
+func TestSettingStructuresCoverEveryStructuredKey(t *testing.T) {
+	t.Parallel()
+	for _, k := range keyRegistry {
+		_, described := settingStructures[k.Path]
+		switch {
+		case k.Kind == kindStructured && !described:
+			t.Errorf("structured key %q has no entry in settingStructures, so a reload would diff it "+
+				"by its row summary and miss any change that summarizes alike", k.Path)
+		case k.Kind != kindStructured && described:
+			t.Errorf("key %q is kind %q, whose row shows its whole value; a structure projection for it "+
+				"is a second answer to a question the row already answers", k.Path, k.Kind)
+		}
+	}
+}
+
 // A file the startup resolution refuses is refused HERE, with nothing reported: the human's own text
 // is left exactly as they wrote it and the pane puts the reason on the row they launched from. The
 // baseline stands, so fixing the file and coming back reports the fix against what was there before.

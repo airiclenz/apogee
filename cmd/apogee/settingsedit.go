@@ -19,6 +19,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -49,16 +50,12 @@ var lineJumpEditors = map[string]bool{
 // comes back is the human's edit and not an environment variable outranking a key (which it still
 // does at the next launch — ADR 0037 decision 3) or an in-pane edit made an hour ago.
 //
-// It is projected through settingsRows — the very rows the pane paints — rather than through a
-// second per-key table: the values are then compared in the same spelling they are displayed in, and
-// a key added to the registry is diffed the day it is added rather than the day someone remembers.
-//
 // The mutex guards the baseline for the liveSettings reason: both seams are called from the Update
 // goroutine today, and a holder that is only accidentally single-threaded is a holder that breaks
 // quietly the first time it is not.
 type externalEdit struct {
 	mu       sync.Mutex
-	baseline []tui.SettingRow
+	baseline fileProjection
 
 	// opts is the session's resolved snapshot, for the two fields a re-resolution needs to answer
 	// from the same home and workspace this run does.
@@ -71,10 +68,23 @@ type externalEdit struct {
 	goos   string
 }
 
+// fileProjection is one reading of the config file, in the two spellings the round trip needs: the
+// rows the pane paints, and the resolved values behind them.
+//
+// Both, rather than the rows alone, because a row is a DISPLAY of a key and six of them display a
+// summary — "1 server", "on, 2 aliases", "harmony, thinking delimited". A summary is the right thing
+// to paint and the wrong thing to diff: repointing the one `mcp-servers:` entry at another machine
+// leaves it character-for-character identical. So the rows say what a changed key carries back
+// (appliedValue) and the values say WHETHER it changed (settingChanged).
+type fileProjection struct {
+	rows []tui.SettingRow
+	opts options
+}
+
 // newExternalEdit seeds the baseline from the file as it stands at launch. A projection that cannot
-// be made — a config that has since become unreadable — falls back to the session's own rows, which
-// are never nil: a baseline that exists and is a little stale reports one extra key, where a missing
-// baseline would report none at all and swallow the human's edit whole.
+// be made — a config that has since become unreadable — falls back to the session's own resolution,
+// whose rows are never nil: a baseline that exists and is a little stale reports one extra key,
+// where a missing baseline would report none at all and swallow the human's edit whole.
 func newExternalEdit(opts options, getenv func(string) string) *externalEdit {
 	e := &externalEdit{
 		opts:       opts,
@@ -82,11 +92,11 @@ func newExternalEdit(opts options, getenv func(string) string) *externalEdit {
 		getenv:     getenv,
 		goos:       runtime.GOOS,
 	}
-	rows, err := e.fileRows()
+	projected, err := e.projection()
 	if err != nil {
-		rows = settingsRows(opts)
+		projected = fileProjection{rows: settingsRows(opts), opts: opts}
 	}
-	e.baseline = rows
+	e.baseline = projected
 	return e
 }
 
@@ -110,9 +120,9 @@ func (e *externalEdit) spec(key string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if rows, err := e.fileRows(); err == nil {
+	if projected, err := e.projection(); err == nil {
 		e.mu.Lock()
-		e.baseline = rows
+		e.baseline = projected
 		e.mu.Unlock()
 	}
 	argv := editorArgv(e.getenv, e.goos)
@@ -135,7 +145,7 @@ func (e *externalEdit) spec(key string) ([]string, error) {
 // Two kinds of key are never reported: the confinement pair, whose interlock stays single-homed in
 // /confine (ADR 0012 — binding G), and `server:` (settingKeyServer).
 func (e *externalEdit) changed() ([]tui.AppliedSetting, error) {
-	after, err := e.fileRows()
+	after, err := e.projection()
 	if err != nil {
 		return nil, err
 	}
@@ -149,15 +159,57 @@ func (e *externalEdit) changed() ([]tui.AppliedSetting, error) {
 		if k.GlobalOnly || k.Path == settingKeyServer {
 			continue
 		}
-		if i >= len(before) || i >= len(after) {
+		if i >= len(before.rows) || i >= len(after.rows) {
 			break // a registry that changed shape under a running process cannot happen; do not guess
 		}
-		if before[i].Value == after[i].Value && before[i].Text == after[i].Text {
+		if !settingChanged(k, before, after, i) {
 			continue
 		}
-		applied = append(applied, tui.AppliedSetting{Path: k.Path, Value: appliedValue(after[i])})
+		applied = append(applied, tui.AppliedSetting{Path: k.Path, Value: appliedValue(after.rows[i])})
 	}
 	return applied, nil
+}
+
+// settingStructures is the LOSSLESS projection of the keys whose row shows only a SUMMARY of what
+// they hold. It is what the reload diff compares them by, because two different structures summarize
+// alike: repoint the one `mcp-servers:` entry at another machine and the row still reads "1 server";
+// change a model profile's thinking delimiters and it still reads "harmony, thinking delimited". A
+// diff over summaries reports neither, so neither applies, and the edit sits in the file waiting for
+// a relaunch — the deferral ADR 0037 exists to abolish.
+//
+// It is keyed by registry path and covers every structured key, `unconfined-hosts` included even
+// though the diff never reaches it (binding G skips the confinement pair before comparing): the table
+// answers "what does this key hold", which is a fact about the schema and not about who asks.
+// TestSettingStructuresCoverEveryStructuredKey pins it to the registry, so a structured key added
+// there is diffed properly the day it is added rather than the day someone remembers.
+//
+// The values are compared, never rendered — a `servers:` entry carries an api-key, and it stays as
+// far from a row as it has always been (maskedSettingValue).
+var settingStructures = map[string]func(options) any{
+	"servers":              func(o options) any { return o.servers },
+	"system-prompt-models": func(o options) any { return o.systemPrompt.models },
+	"unconfined-hosts":     func(o options) any { return o.unconfinedHosts },
+	"mcp-servers":          func(o options) any { return o.mcpServers },
+	"mechanisms":           func(o options) any { return o.mechanisms },
+	// The block's two resolved facts together: the off-switch decides whether the aliases do
+	// anything, and it is the pair that `validated-sets` applies.
+	"validated-sets": func(o options) any { return []any{o.validatedSetsEnable, o.validatedSetsAlias} },
+	"model-profile":  func(o options) any { return o.profile },
+}
+
+// settingChanged reports whether the key at registry index i came back holding something else.
+//
+// A key whose row shows its whole value is answered by the row — its displayed value, and the prose
+// a text row carries beside it — so it is compared in the same spelling it is displayed in. A key
+// whose row shows a summary is answered by its structure as well (settingStructures), and the two
+// tests are OR-ed rather than exclusive: the row still catches everything it ever caught, and the
+// structure catches what a summary cannot say.
+func settingChanged(k configKey, before, after fileProjection, i int) bool {
+	if structure, ok := settingStructures[k.Path]; ok &&
+		!reflect.DeepEqual(structure(before.opts), structure(after.opts)) {
+		return true
+	}
+	return before.rows[i].Value != after.rows[i].Value || before.rows[i].Text != after.rows[i].Text
 }
 
 // appliedValue is the value a changed row carries back: the prose itself for a text key, whose row
@@ -171,14 +223,16 @@ func appliedValue(row tui.SettingRow) string {
 	return row.Value
 }
 
-// fileRows projects the config file — and only the file — onto the pane's rows. It runs the STARTUP
-// resolution (applyConfig) with no flags and no environment, which is what makes the two sides of the
-// diff comparable and the validation the real one rather than a second, weaker copy of it.
+// projection reads the config file — and only the file — into the two views the diff needs. It runs
+// the STARTUP resolution (applyConfig) with no flags and no environment, which is what makes the two
+// sides of the diff comparable and the validation the real one rather than a second, weaker copy of
+// it; the rows come off that same resolution (settingsRows), so a key added to the registry is
+// diffed the day it is added rather than the day someone remembers.
 //
 // The undetermined-startup refusal is held rather than returned, exactly as the TUI's own start-up
 // holds it (root.go): resolution succeeded, it simply could not name a server, and a config being
 // edited towards its first `servers:` entry is in that state by definition.
-func (e *externalEdit) fileRows() ([]tui.SettingRow, error) {
+func (e *externalEdit) projection() (fileProjection, error) {
 	next := options{
 		configDir:       e.opts.configDir,
 		workspace:       e.opts.workspace,
@@ -187,9 +241,9 @@ func (e *externalEdit) fileRows() ([]tui.SettingRow, error) {
 	err := applyConfig(&next, noFlagChanged, noEnvironment, os.ReadFile, func(string) {})
 	var undetermined *startupUndetermined
 	if err != nil && !errors.As(err, &undetermined) {
-		return nil, err
+		return fileProjection{}, err
 	}
-	return settingsRows(next), nil
+	return fileProjection{rows: settingsRows(next), opts: next}, nil
 }
 
 // The two stubs that make applyConfig resolve from the FILE alone: no flag was set on this
