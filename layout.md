@@ -479,18 +479,18 @@ took away: every line of the question as it was put, then one line per offered c
 where the answer named that choice and `[ ]` where it did not — the same ASCII pair the popup ticks
 with, box-drawing checkboxes rendering as tofu — and then any answer line no choice accounts for,
 which is where a typed reply lands and where the later lines of a multi-line answer land with it, so
-no part of what a human said goes unshown. That last group starts at the answer's **second** line
-when the question offered no choices at all, the first being the branch directly above with no list
-in between — recording it would open the body by repeating the row over it. Where choices were
-offered that line is kept: unticked boxes say only that the human took none of them, and the line
-beneath says what they said instead. Every line of that body is quoted in this same sense, the
+no part of what a human said goes unshown. A question that offered no choices keeps this record all
+the same, minus the list: its question lines hang beneath as any other's do, and the last group
+starts one line later, at the answer's **second** line — the first is the branch directly above with
+no list in between, and recording it would open the body by repeating the row over it. Where choices
+were offered that line is kept: unticked boxes say only that the human took none of them, and the
+line beneath says what they said instead. Every line of that body is quoted in this same sense, the
 choice labels included. It is built from the **call's own arguments** and the answer already
 returned, so nothing crosses the wire for it and the model's view of the exchange is byte for byte
 what it was; and it exists **only once the answer has landed** — while the question is on the screen
-the popup is its live view and the block is the summary-only card any in-flight call is. A question
-that offered no choices keeps the record too, minus the list. An in-workspace path sitting inside
-file content is content, not a mention: shortened, it
-would show the human approving a write a spelling the file will not actually contain. Nothing
+the popup is its live view and the block is the summary-only card any in-flight call is. An
+in-workspace path sitting inside file content is content, not a mention: shortened, it would show
+the human approving a write a spelling the file will not actually contain. Nothing
 decides this by looking at a line, because a content line can look exactly like a path; a line is
 respelled only where the presenter that put it there says it is the block's own words — a path it
 names, or a summary it wrote itself (`1 - 154`, `replaced text in docs/plan.md`, `(no output)`).
