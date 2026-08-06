@@ -604,6 +604,10 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		LoadProfile:    launcherSeams.load,
 		UnloadServer:   launcherSeams.unload,
 		StopServer:     launcherSeams.stop,
+		// And the cheap question the two actuation verbs ask before they latch: is the integration on
+		// right now? It is one atomic load rather than a verb, so the refusal a switched-off session
+		// gets is synchronous — no "unloading…" frame for a verb that never runs.
+		LauncherEnabled: launcherSeams.on,
 		// The resolved `ui:` block: which animation paints the status-line spinner, whether its
 		// colour loop runs, and whether the transcript's scroll bar is painted at all. Independent
 		// values, resolved and validated by applyConfig, so the renderer selects rather than parses.
@@ -1231,6 +1235,13 @@ type settingsApplier struct {
 // no setter for either — the same path a heartbeat-observed model change already takes.
 func applySettingFor(a settingsApplier) func(key, value string) (string, error) {
 	return func(key, value string) (string, error) {
+		// A member this Driver did not compose is a legitimate configuration rather than a bug (ADR
+		// 0031: the engine stays sufficient for any Driver), so the key it would have been reached
+		// through is refused in the dispatcher's own words — never dereferenced. Asked first, so a
+		// key that cannot land does no work on its way to saying so.
+		if err := a.unreachable(key); err != nil {
+			return "", err
+		}
 		switch key {
 		case "mode":
 			mode, err := parseMode(value)
@@ -1353,10 +1364,63 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			// change, so Rebind leaves the profile alone and SetProfile is where it moves.
 			return "", a.reloadProfile()
 		default:
-			return "", fmt.Errorf("apogee: %s cannot be applied to the running session", key)
+			return "", cannotApply(key)
 		}
 		return "", nil
 	}
+}
+
+// cannotApply is the dispatcher's one refusal for a key that will not reach the session at all —
+// because this build knows no seam for it, or because this Driver composed the dispatcher without
+// the member that seam lives behind. It names the key, since the row it lands on is that key's, and
+// it is deliberately the SAME sentence for both: to the human they are one fact, that the file
+// changed and the session did not.
+func cannotApply(key string) error {
+	return fmt.Errorf("apogee: %s cannot be applied to the running session", key)
+}
+
+// unreachable reports, for one key, that this applier was composed without something that key's
+// apply has to reach. Every member is optional by design — a Driver builds the dispatcher out of
+// what it HAS, and a bench or a daemon has no presenter, no launcher and no skill catalogue (ADR
+// 0031) — so a nil member has to degrade to the refusal above rather than panic on the Update
+// goroutine, halfway through an edit that has already been written to the file.
+//
+// It is a second switch over the same keys, which is a drift risk taken deliberately and closed by a
+// test: TestApplySettingRefusesEveryKeyItCannotReach drives EVERY registry key through a zero
+// applier, so a key added to the dispatcher without a line here fails as the panic it would be.
+func (a settingsApplier) unreachable(key string) error {
+	// The rebind-riding keys share one triple: the value lands in the holder and the per-model
+	// resolution is re-driven over it, so all three members are what makes the apply an apply.
+	rides := a.live != nil && a.binding != nil && a.rebind != nil
+	reaches := true
+	switch key {
+	case "mode", "bypass", "auto-compact", "model-profile":
+		reaches = a.engine != nil
+	case "context-files.enable", "context-files.names":
+		reaches = a.engine != nil && a.live != nil
+	case "use-project-skills":
+		reaches = a.skills != nil
+	case "web-search-endpoint":
+		// The engine as well as the tool set: a registry with no web_search to re-point is rebuilt and
+		// handed through SwapTools, which is the swap door and not this holder's to skip.
+		reaches = a.tools != nil && a.engine != nil
+	case "llama-launcher":
+		reaches = a.launcher != nil
+	case "present.auto-open", "present.command", "present.port", "present.host":
+		reaches = a.present != nil
+	case "context-window", "system-prompt-text", "system-prompt-file", "system-prompt-models",
+		"mechanisms", "validated-sets":
+		reaches = rides
+	case "servers":
+		// The one re-read key with no rebind behind it: the holder IS the whole apply.
+		reaches = a.live != nil
+	case "mcp-servers":
+		reaches = a.mcp != nil && a.tools != nil && a.engine != nil
+	}
+	if reaches {
+		return nil
+	}
+	return cannotApply(key)
 }
 
 // rideTheRebind re-drives the per-model resolution for the model the session is bound to right now.

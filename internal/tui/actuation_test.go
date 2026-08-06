@@ -129,12 +129,20 @@ func (f *fakeLauncher) listCount() int {
 // wired, one beat folded — the state a human is in when they type /model on a launcher host.
 func wireLauncher(t *testing.T, fake *fakeLauncher) (Model, *fakeRebind) {
 	t.Helper()
+	return seededPicker(t, launcherOpts(fake))
+}
+
+// launcherOpts is the seam wiring alone, separated from the model build so a test can say what the
+// integration ANSWERS before the session starts: since `llama-launcher:` became editable the seams
+// are wired for the life of the session and the on/off answer moved inside them (ADR 0037), so
+// "wired" and "on" are two different things a test may need to set apart.
+func launcherOpts(fake *fakeLauncher) Options {
 	opts := testOpts
 	opts.LaunchProfiles = fake.list
 	opts.LoadProfile = fake.load
 	opts.UnloadServer = fake.act
 	opts.StopServer = fake.act
-	return seededPicker(t, opts)
+	return opts
 }
 
 // pumpTimeout is how long a test waits for one item off an actuation's channel. It is a deadlock
@@ -1047,6 +1055,40 @@ func TestUnloadAndStopWithoutTheLauncher(t *testing.T) {
 		if got := noteTexts(next); len(got) == 0 || got[len(got)-1] != noLauncherNote {
 			t.Errorf("%q: notes = %v, want %q", line, got, noLauncherNote)
 		}
+	}
+}
+
+// With the seams wired but the integration switched OFF — the state ADR 0037 created by making
+// `llama-launcher:` editable mid-session — both verbs say the same sentence, and say it on the
+// keypress. Latching first and letting the seam's own refusal come back through the pump would show
+// a frame of "unloading…" in the footer for a verb that never ran, where the unwired session above
+// answered instantly; the transient state is the defect, not the words.
+func TestUnloadAndStopWithTheLauncherSwitchedOff(t *testing.T) {
+	t.Parallel()
+
+	fake := newLauncher()
+	opts := launcherOpts(fake)
+	opts.LauncherEnabled = func() bool { return false }
+	m, _ := seededPicker(t, opts)
+
+	for _, line := range []string{"/unload-model", "/stop-server"} {
+		next, cmd := typeCommand(t, m, line)
+
+		if cmd != nil {
+			t.Errorf("%q returned a Cmd with the launcher switched off", line)
+		}
+		if next.actuation.inFlight {
+			t.Errorf("%q took the latch with the launcher switched off", line)
+		}
+		if label := next.actuationLabel(); label != "" {
+			t.Errorf("%q put %q in the footer for a verb that never ran", line, label)
+		}
+		if got := noteTexts(next); len(got) == 0 || got[len(got)-1] != noLauncherNote {
+			t.Errorf("%q: notes = %v, want %q", line, got, noLauncherNote)
+		}
+	}
+	if got := fake.actuated(); len(got) != 0 {
+		t.Errorf("the verbs ran against %v; want the refusal to have come before the seam", got)
 	}
 }
 

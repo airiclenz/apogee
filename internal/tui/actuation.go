@@ -105,8 +105,9 @@ var ErrStartupTimeout = errors.New("the launcher's health wait timed out")
 const startupTimeoutCoda = " — the heartbeat will bind it if it comes up"
 
 // noLauncherNote is the one line every launcher verb owes on a host where the integration is not
-// configured. All four seams are wired together or not at all, so one sentence answers for all of
-// them and names the key that turns them on.
+// configured — whether the seams were never wired (they are wired together or not at all) or are
+// wired and switched off (launcherOff). One sentence answers for all of them, and it names the key
+// that turns them on.
 const noLauncherNote = "llama-launcher not configured — set llama-launcher: in config.yaml or install the launcher"
 
 // ErrNoLauncher is that same statement as a condition a seam can REPORT, projected like
@@ -119,6 +120,17 @@ const noLauncherNote = "llama-launcher not configured — set llama-launcher: in
 // Its text IS noLauncherNote, so a verb that reports it and a verb that was never wired say the one
 // sentence to the human.
 var ErrNoLauncher = errors.New(noLauncherNote)
+
+// launcherOff reports the integration being switched off on a host whose seams ARE wired — the
+// state ADR 0037 created by making `llama-launcher:` editable mid-session. It is asked BEFORE the
+// actuation latch is taken, because a refusal that travels back through the pump is a refusal the
+// footer narrates first: the human watches "unloading…" appear and vanish for a verb that never
+// ran, where an unwired seam answered instantly. A seam that cannot answer — a nil
+// [Options.LauncherEnabled] — is not evidence of anything, so the verb goes ahead and reports for
+// itself.
+func (m Model) launcherOff() bool {
+	return m.opts.LauncherEnabled != nil && !m.opts.LauncherEnabled()
+}
 
 // stopHeading is the line `/stop-server` puts ABOVE the launcher's recorded steps. The steps are
 // terse and subject-less ("Sending stop signal", "Waiting for shutdown"), so without a heading the
@@ -230,7 +242,10 @@ func (m Model) startProfileLoad(name string) (tea.Model, tea.Cmd) {
 // endpoint is read HERE, on the Update loop, so the verb acts on the server the session is on at the
 // moment the human asked — not on wherever it may have moved to by the time the call returns.
 func (m Model) startServerActuation(verb string, act func(endpoint string) (ActuationResult, error)) (tea.Model, tea.Cmd) {
-	if act == nil {
+	// Both shapes of "there is no launcher here" are answered on this keypress and without the latch:
+	// a seam that was never wired, and one that is wired but switched off (launcherOff). They say the
+	// same sentence because they are the same fact to the human.
+	if act == nil || m.launcherOff() {
 		return m.pickerNote(noLauncherNote)
 	}
 	endpoint := m.opts.Endpoint

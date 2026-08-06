@@ -589,6 +589,20 @@ type Options struct {
 	UnloadServer func(endpoint string) (ActuationResult, error)
 	StopServer   func(endpoint string) (ActuationResult, error)
 
+	// LauncherEnabled reports whether the llama-launcher integration is switched ON right now. Since
+	// `llama-launcher:` became editable mid-session (ADR 0037) the four seams above can be wired for
+	// the life of the session with the answer moving INSIDE them, so "is there a launcher here" is no
+	// longer a question a nil check settles once — and the two actuation verbs have to settle it
+	// BEFORE they take the latch, or a session with no launcher shows a frame of "unloading…" in the
+	// footer on its way to the same refusal.
+	//
+	// It is the cheap, synchronous half of the check every verb makes again for itself: answerable
+	// on the Update loop from what the binary already holds, never a config read or a dial.
+	//
+	// nil ⇒ unknown, and the verbs are let through to answer for themselves — the posture of every
+	// hand-built Options, and the right one for a Driver whose seams cannot change their mind.
+	LauncherEnabled func() bool
+
 	// Schedules is the scheduler this session's Schedules live in (the [Scheduler] seam the binary
 	// backs with a live schedule.Scheduler); nil ⇒ scheduling is unwired and both verbs say so.
 	// The Model drives it synchronously on the Update loop — Add, Stop and List touch no engine

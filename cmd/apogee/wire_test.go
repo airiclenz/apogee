@@ -2201,14 +2201,22 @@ func TestRunRootWiresTheLauncherSeamsForTheWholeSession(t *testing.T) {
 			}
 
 			for member, wired := range map[string]bool{
-				"LaunchProfiles": rec.opts.LaunchProfiles != nil,
-				"LoadProfile":    rec.opts.LoadProfile != nil,
-				"UnloadServer":   rec.opts.UnloadServer != nil,
-				"StopServer":     rec.opts.StopServer != nil,
+				"LaunchProfiles":  rec.opts.LaunchProfiles != nil,
+				"LoadProfile":     rec.opts.LoadProfile != nil,
+				"UnloadServer":    rec.opts.UnloadServer != nil,
+				"StopServer":      rec.opts.StopServer != nil,
+				"LauncherEnabled": rec.opts.LauncherEnabled != nil,
 			} {
 				if !wired {
 					t.Errorf("tui.Options.%s is nil; want every launcher seam wired for the session", member)
 				}
+			}
+
+			// The fifth seam is the same fact asked without a verb: it is what lets the two actuation
+			// verbs refuse a switched-off session on the keypress, before the latch and the footer's
+			// "unloading…" frame.
+			if got := rec.opts.LauncherEnabled(); got != tt.enabled {
+				t.Errorf("LauncherEnabled() = %v; want the integration reported %v", got, tt.enabled)
 			}
 
 			// What the seams SAY is where off and on differ now. A named config that is not there
@@ -2443,6 +2451,36 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 			}
 			if spy.drove() != 0 {
 				t.Errorf("a refused apply still drove the engine: %+v", spy)
+			}
+		})
+	}
+}
+
+// The same sentence answers a key whose seam this Driver did not COMPOSE. Every member of the
+// applier is optional by design — a bench, a daemon or an embedder has no presenter, no launcher and
+// no skill catalogue (ADR 0031: the engine stays sufficient for any Driver) — so a missing member
+// degrades to the refusal rather than panicking on the Update goroutine, halfway through an edit the
+// file already carries. `use-project-skills` and `web-search-endpoint` are the two that used to.
+//
+// Driving EVERY registry key through a ZERO applier is also what keeps the nil guard in step with
+// the switch it mirrors: a key wired into one and not the other panics right here.
+func TestApplySettingRefusesEveryKeyItCannotReach(t *testing.T) {
+	t.Parallel()
+	apply := applySettingFor(settingsApplier{})
+	for _, k := range keyRegistry {
+		t.Run(k.Path, func(t *testing.T) {
+			t.Parallel()
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("apply %s reached a member this applier does not hold: %v", k.Path, r)
+				}
+			}()
+			note, err := apply(k.Path, k.Default)
+			if err == nil {
+				t.Fatalf("apply %s: want a refusal naming the key, got note %q", k.Path, note)
+			}
+			if !strings.Contains(err.Error(), k.Path) {
+				t.Errorf("error = %q, want it to name %q", err, k.Path)
 			}
 		})
 	}

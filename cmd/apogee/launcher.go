@@ -499,6 +499,16 @@ func (w launcherWiring) enabled() (string, error) {
 	return path, nil
 }
 
+// on is [tui.Options.LauncherEnabled]: enabled()'s question without the path, for the one caller
+// that has to ask it BEFORE it commits to anything — the renderer's pre-latch check on
+// `/unload-model` and `/stop-server` (actuation.go). It is answerable on the Update loop because the
+// answer is one atomic load: no config is read here, which is the whole difference between this and
+// asking a verb.
+func (w launcherWiring) on() bool {
+	_, err := w.enabled()
+	return err == nil
+}
+
 // profiles is [tui.Options.LaunchProfiles]: the row assembly above, projected onto the renderer's
 // type. A fresh config read every call is the point (ADR 0029 D4) — the picker opens on what the
 // launcher's config says now, not on what it said at launch.
