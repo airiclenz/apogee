@@ -453,7 +453,21 @@ returns 0; `make check` passes.
 
 **Commit:** `docs(config): the seeded template teaches the servers-list schema`
 
-## 11. Closing docs
+## 11. Closing docs — ✅ DONE (2026-08-06)
+
+NOTES (2026-08-05): the README rewrite reached four paragraphs outside the config section, each a
+statement this plan falsified. `/settings`: "`api-key:` shows as `••••`" (no row is masked since item
+3) and "editing `model:` or `endpoint:` here persists the value" (both rows are gone; the `server:`
+row took the job). Configuration: "that is the only way apogee ever writes your config" (the `server:`
+recording and the migration are two more). `apogee headless`: the refusal a driver with nobody to ask
+now gets, and where its startup server comes from — `APOGEE_SERVER` / `server:` only, since the
+command registers no `--server` flag (`headless.go` flag block; `probe` likewise). Registering the
+flag on the non-interactive drivers is left as an open follow-up for the owner, not done here.
+
+NOTES (2026-08-05): the migration paragraph names the four retired keys descriptively ("the endpoint,
+the api key, the alias and the model hint that used to sit outside any list") rather than spelling
+`host-alias:` — this item's own acceptance requires `grep -c "host-alias" README.md` to return 0, and
+apogee's refusal text spells the key names exactly where a user with an old config meets them.
 
 **What:** Depends on items 1–10. README: config section rewritten for the
 servers-list schema (example block, `server:` recording, first-boot ask, override

@@ -265,7 +265,7 @@ any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript.
 in the order the starter `config.yaml` documents them and grouped under section headings,
 each row showing the value **this run resolved** for it. Where a higher-precedence source
 beat the file, the row says which — `(env)` or `(flag)` — so a key that reads one way in the
-file and another on screen explains itself; `api-key:` shows as `••••`. The conversation
+file and another on screen explains itself. The conversation
 gives way entirely while the pane is up, because thirty-odd keys are a screen to read rather
 than a choice to scan: `↑/↓` move the `❯`, the line under the list describes the key it is
 on, and `esc` closes the pane and hands the transcript back. It needs a quiet engine, so it
@@ -297,8 +297,8 @@ instead of being pinned to a copy of it.
 profile — render as a summary with an `· edit in config.yaml` pointer; the pane edits simple
 values only. The confinement keys carry `· use /confine`, because switching Auto's fence off
 asks for an acknowledgement that belongs with [that verb](#auto-modes-blast-radius). And
-switching model or server stays with `/model` and `/server`: editing `model:` or `endpoint:`
-here persists the value for next launch and moves nothing now.
+moving a session stays with `/model` and `/server`: the `server:` row here says which entry
+the *next* launch starts on — the same line a switch records for you — and moves nothing now.
 
 ## Sessions
 
@@ -347,18 +347,27 @@ Settings resolve by precedence, highest first: a command-line flag overrides an
 overrides the built-in default. A documented starter `config.yaml` is written to
 `~/.apogee` on first run (your edits are never overwritten): every setting is
 there as a commented example, with one exception — `system-prompt-text:`, the
-default system prompt, ships active. Some settings are **file-only** (no flag or
-env) — the system prompt, the model profile, MCP servers, web-search endpoint,
-and the small-model mechanisms — and one, the upstream `api-key:`, has a file key
-and an environment variable but deliberately **no flag** (see
+default system prompt, ships active. Three keys carry all four layers —
+`server:` (`--server`, `APOGEE_SERVER`), `mode:` and `bypass:`. Every other key
+is **file-only** (no flag or env): the `servers:` list, the system prompt, the
+model profile, MCP servers, the web-search endpoint and the small-model
+mechanisms among them. Two raw overrides are not config keys at all — `--endpoint`
+/ `APOGEE_ENDPOINT` runs one session against a server the file does not list,
+while `APOGEE_API_KEY` and `--model` / `APOGEE_MODEL` carry that server's token
+and model hint or overlay those two fields of the listed entry a session starts
+on (see [The servers you run models on](#the-servers-you-run-models-on)). The
+upstream key has an environment variable but deliberately **no flag** (see
 [The upstream API key](#the-upstream-api-key)).
 
 That file is also readable and editable from inside apogee:
 [`/settings`](#the-settings-screen--settings) lists every setting with the value this
 run resolved for it, and writes a committed edit back as a **single key**, comments and
-layout preserved. That is the only way apogee ever writes your config — an edit you
-asked for, one key at a time — so "your edits are never overwritten" stands: nothing is
-written on apogee's own initiative, at upgrade or at any other time.
+layout preserved. Apogee writes that file in exactly three places and nowhere else: a
+committed edit you asked for, the `server:` line a `/server` switch records for your
+next launch, and the one-time migration of a config still written in the retired
+schema — which copies the file aside first and says so on startup. "Your edits are
+never overwritten" stands: nothing is rewritten at upgrade, and no line you wrote is
+touched at any other time.
 
 Catalogued mechanisms are opt-in by canonical ID. Every mechanism ships **off**
 until its A/B bench run proves it a win, so enabling one is a deliberate config
@@ -409,6 +418,66 @@ this key is the honest substitute. The cursor is shown wherever the box is edita
 (including while the model works) and hidden where it is not, such as at an approval
 prompt.
 
+### The servers you run models on
+
+The `servers:` list is the **single definition** of what apogee can talk to — one
+entry per OpenAI-compatible server — and the `server:` key names the one a session
+starts on.
+
+```yaml
+# ~/.apogee/config.yaml
+servers:
+  - name: workstation
+    endpoint: http://192.168.64.1:1111
+    model: gpt-oss-20b           # optional hint; the heartbeat binds what is served
+  - name: rented-box
+    endpoint: https://llm.example.com
+    api-key: sk-rented-token     # optional; only if that server wants one
+
+server: workstation
+```
+
+An entry's `name` is the label `/server` lists it under, the argument
+`/server <name>` takes, the value `server:` points at, and the host name the status
+footer shows while the session is on it — one name for all four jobs, so no two
+entries may share one. `endpoint` is required; `api-key` and `model` are optional.
+
+**`server:` keeps itself current.** Every `/server` switch onto a listed entry
+splices `server: <name>` back into the file — that one key, your comments and layout
+untouched — so the next launch starts where you left off. A move onto a server the
+list does not name (an `--endpoint` URL, a llama-launcher profile) has no name to
+record and writes nothing.
+
+**The first run asks.** With `server:` unset, apogee starts with **no server
+bound** — no engine constructed, nothing pointed anywhere — opens the `/server`
+picker over your entries, and records what you choose. A `server:` naming an entry
+that is gone is handled the same way: apogee says which name went missing and opens
+the picker, rather than refusing to start. With the list empty it opens
+[`/settings`](#the-settings-screen--settings) instead and points you back at this
+file — add an entry and restart. `apogee headless` and `apogee probe` have nobody
+to ask, so there a startup with no determinable server is refused outright, naming
+the config file and the line or block that would fix it.
+
+**An override runs one session elsewhere.** `--endpoint` / `APOGEE_ENDPOINT` starts
+this run on an unlisted server: it wins over any `server:` name, takes its bearer
+token from `APOGEE_API_KEY` and its model hint from `--model` / `APOGEE_MODEL`, and
+is never written back. `--server` / `APOGEE_SERVER` picks a listed entry by name
+instead, riding the ordinary flag-over-env-over-file precedence on the `server:`
+key; with no endpoint override, the key and hint variables overlay those two fields
+of whichever entry the session starts on.
+
+**A config in the retired schema migrates itself, once.** The four top-level keys
+this schema replaced — the endpoint, the api key, the alias and the model hint that
+used to sit outside any list — are folded into a `servers:` entry plus a `server:`
+pointer the first time this build reads the file: the original is copied to a
+timestamped `config.yaml.bak-YYYYMMDD-HHMMSS` sibling first, your comments and every
+other key survive the rewrite, the result is re-parsed and compared against the
+original before it replaces the file, and one startup line names what moved and
+where the backup is. If the fold cannot be made
+safely — no `endpoint:` among those keys, a name the list already uses, a `server:`
+you already set — **nothing is written at all** and the error carries the block to
+paste in their place. A config already in the new schema is never touched.
+
 ### The upstream API key
 
 A local server usually wants no credentials, but some do: llama.cpp started with
@@ -416,27 +485,34 @@ A local server usually wants no credentials, but some do: llama.cpp started with
 apogee that token and it rides **every** wire to the endpoint as
 `Authorization: Bearer <key>` — your conversation, the ten-second heartbeat, and
 both halves of `apogee probe` — so a keyed server never leaves the footer stuck
-on a `401` while the session works.
+on a `401` while the session works. It belongs to the server that wants it, so it
+lives in that server's entry:
 
 ```yaml
 # ~/.apogee/config.yaml
-api-key: sk-my-server-token
+servers:
+  - name: rented-box
+    endpoint: https://llm.example.com
+    api-key: sk-my-server-token
 ```
 
 ```console
 $ APOGEE_API_KEY=sk-my-server-token apogee
 ```
 
-The environment variable **overrides** the file, and there is **no `--api-key`
-flag** on purpose: a secret typed on the command line lands in your shell history
-and in `ps` output on every OS. Leave the key unset — the local default — and no
-`Authorization` header is sent at all, exactly as before this key existed.
+The environment variable **overlays** the key of the entry this session starts on
+(and carries the token for an `--endpoint` override, which has no entry to take one
+from), and there is **no `--api-key` flag** on purpose: a secret typed on the
+command line lands in your shell history and in `ps` output on every OS. Leave the
+key out — the local default — and no `Authorization` header is sent at all, exactly
+as before this key existed.
 
 The value is never displayed: `apogee probe` reports only *whether* a key was
-resolved (`api key: configured (sent as a bearer token)`), and the provider client
-redacts it from any error text the server echoes back. One caveat is yours to
-weigh: `config.yaml` is plain text, so on a shared machine prefer the environment
-variable, or restrict the file's permissions yourself.
+resolved (`api key: configured (sent as a bearer token)`), the settings screen
+summarizes the whole `servers:` block rather than rendering it, and the provider
+client redacts the key from any error text the server echoes back. One caveat is
+yours to weigh: `config.yaml` is plain text, so on a shared machine prefer the
+environment variable, or restrict the file's permissions yourself.
 
 ### Local servers — llama-launcher
 
@@ -708,8 +784,12 @@ The prompt is the single **quoted** argument; with no argument the whole of stdi
 the prompt, so `cat task.md | apogee headless` works too. Empty from both is a usage
 error. `--endpoint`, `--model`, `--workspace` and `--config` resolve exactly as a
 session's do — flag over `APOGEE_*` environment over `config.yaml` — so the run has the
-shape a session on this host would have. It is saved to `~/.apogee/sessions` and shows
-up in `/sessions` like any other; `--no-save` runs it and records nothing.
+shape a session on this host would have; which listed entry it starts on comes from
+`APOGEE_SERVER` or the `server:` key, there being no `--server` flag on this command.
+Nobody is there to answer a picker, so a run those sources leave with no server to start
+on is refused before anything is composed — the config file and the fix named, exit `2`. It is saved to
+`~/.apogee/sessions` and shows up in `/sessions` like any other; `--no-save` runs it and
+records nothing.
 
 `--mode` takes `plan` (the default, read-only) or `auto` — the two modes that never need
 a human. `ask-before` and `allow-edits` are refused, and so is `auto` on a host whose

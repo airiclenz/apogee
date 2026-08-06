@@ -105,6 +105,48 @@ point is a **minor** bump, not a breaking change.
   Ratified in ADR 0035, defined in `CONTEXT.md` ("Settings surface") and specced in `layout.md`
   ("What 'height' means", where the full-height pane class is written down).
 
+### Changed
+
+- **Breaking (config), with a one-time automatic migration: the `servers:` list is the single
+  definition of what apogee can talk to.** The top-level `endpoint:`, `api-key:`, `host-alias:` and
+  `model:` quadruple is retired from the schema — one `servers:` entry now carries all of it as
+  `name` (the label `/server` lists it under, the argument `/server <name>` takes, and the host
+  alias the footer shows), `endpoint`, an optional `api-key` and an optional `model` hint. A session
+  starts on the entry a new `server:` key names, the third key with all four precedence layers
+  beside `mode:` and `bypass:` (`--server`, `APOGEE_SERVER`).
+  - **A `/server` switch records where you left off.** Every move onto a listed entry splices
+    `server: <name>` back into `config.yaml` through the settings writer — that one key, comments
+    and layout untouched — and the move's own line says `· server: saved` when it did, so the next
+    launch starts where the last session ended. A move onto a server the list does not name (an
+    `--endpoint` override, a llama-launcher profile) has no name to record and writes nothing;
+    a write that fails lands as a note under the move, which stands either way.
+  - **The first run asks instead of refusing to start.** With `server:` unset — or naming an entry
+    that is gone, which is now stated and survivable rather than fatal — the TUI starts
+    **pre-bound**: no engine is constructed, the `/server` picker opens by itself over your entries,
+    and the choice both builds the session's engine and records the key. With no entries configured
+    at all it opens `/settings` instead and points back at `~/.apogee/config.yaml`. Construction is
+    merely deferred, never attempted without an endpoint, so ADR 0024's `errMissingEndpoint` posture
+    is untouched. Only the TUI can ask a human: `apogee headless` and `apogee probe` refuse a
+    startup with no determinable server instead, naming the config file and the fix.
+  - **Raw overrides still run one session elsewhere.** `--endpoint` / `APOGEE_ENDPOINT` builds an
+    ephemeral unlisted entry that wins over any name and is never persisted, taking its bearer token
+    from `APOGEE_API_KEY` and its model hint from `--model` / `APOGEE_MODEL`; with no endpoint
+    override those two variables overlay the corresponding fields of whichever entry the session
+    starts on. They are no longer config keys at all, so `/settings` no longer carries a row for
+    them — the `servers:` block is one summarized, file-edited row, and with it the pane's last
+    masked value is gone.
+  - **An old config migrates itself, once, with a backup.** The first read of a file still carrying
+    the quadruple folds it into a `servers:` entry plus a `server:` pointer: the original is copied
+    to a timestamped `config.yaml.bak-YYYYMMDD-HHMMSS` sibling first, comments and unrelated keys
+    survive, the rewrite is re-parsed and compared against the original before it replaces the file,
+    and one startup line names what moved and where the backup is. A fold that cannot be made safely
+    — no endpoint among those keys, a name the list already uses, a `server:` already set — writes
+    **nothing**, leaves the apogee home exactly as it found it, and refuses with a ready-to-paste
+    replacement block. A config already in the new schema is never touched.
+
+  Ratified in ADR 0036 (amending ADR 0028 and ADR 0035's write set), defined in `CONTEXT.md`
+  ("Upstream", `/server`) and documented in `README.md` ("The servers you run models on").
+
 ### Removed
 
 - **`/skill` — the two-step picker verb is gone.** Naming a skill is what invoking it already is:
