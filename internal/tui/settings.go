@@ -23,9 +23,10 @@ import (
 // The rows are DERIVED on every call, the picker's own posture: the provider is asked at each
 // render and at each keypress, and the selection is clamped against what came back rather than
 // against a list captured at open, so a list that changed under an open pane can never be indexed
-// past its end. What the provider answers is the resolution THIS run made — which is why an edit
-// persisted below is reported as a MARKER on the row rather than as a new value: the pane holds no
-// copy of the config that could disagree with the file.
+// past its end. What the provider answers is the resolution THIS run made, which is why a row this
+// pane has EDITED shows what the pane wrote rather than waiting for the provider to catch up — with a
+// ` *` saying so: the pane holds no copy of the config that could disagree with the file, only a
+// journal of what it changed itself.
 //
 // It is the one pane granted the WHOLE transcript row budget (frameRowPlan, layout.md): the registry's
 // keys and their section headers are not a choice to scan but a screen to read, so the conversation gives
@@ -43,7 +44,7 @@ import (
 // opens the value sub-list, and what is committed goes out through [Options.WriteSetting] — the
 // binary's comment-preserving splice writer, never this package's idea of YAML. The renderer's whole
 // half of an edit is the ORDER (which key, which value) and what the row says afterwards. Nothing is
-// re-read to find out: the pane records what it persisted ([settingsPane.edits]) and marks the row,
+// re-read to find out: the pane records what it persisted ([Model.settingEdits]) and marks the row,
 // because every other row is still showing the value THIS run resolved and a mid-session file read
 // would leave one row disagreeing with its neighbours about which run it is describing.
 //
@@ -52,7 +53,8 @@ import (
 // [Options.ApplySetting] for every key the engine or the composition root owns — so the session runs
 // what the file says the moment the file says it. A key that can only land at a boundary the session
 // will cross anyway says so on the row ("· applies at next clear"); a key that could only land at the
-// next launch does not exist.
+// next start does not exist. What a row keeps afterwards is a ` *` (settingsEditMarker), which says
+// this session changed the key here rather than that anything is still pending.
 //
 // A string or an int is edited in a BUFFER on its own row (the /sessions rename idiom): ⏎ opens it,
 // the row's value cell becomes what is being typed with a caret after it, ⏎ commits and esc
@@ -86,15 +88,17 @@ const (
 )
 
 // settingsPane is the overlay's inline state on the Model. Its zero value is "closed", so it lives
-// inline in the value-copied Model like [picker] and [sessionBrowser] (ADR 0011): plain values and
-// one slice that is REPLACED rather than appended into (recordEdit), never a self-referential type
-// held by value. selected indexes the SETTING rows the provider returns — not the display rows the
-// pane paints, which interleave unselectable section headers — and it is clamped rather than trusted,
-// because the list underneath it is re-derived on every key and every frame.
+// inline in the value-copied Model like [picker] and [sessionBrowser] (ADR 0011): plain values only,
+// never a self-referential type held by value. selected indexes the SETTING rows the provider returns
+// — not the display rows the pane paints, which interleave unselectable section headers — and it is
+// clamped rather than trusted, because the list underneath it is re-derived on every key and every
+// frame.
 //
-// edits and failure are the pane's memory of its OWN writes, and they are display-only: they say what
-// this pane persisted and what a refusal said, never what the config now holds (the provider answers
-// that, from the resolution this run made). sub is the value sub-list's highlight, meaningful only
+// Everything on it dies with the overlay, which is exactly what opening and closing it assign. failure
+// is the pane's memory of the last write it was REFUSED, and it is display-only: it says what a refusal
+// said, never what the config now holds (the provider answers that, from the resolution this run made).
+// The journal of what this surface has CHANGED is not here — it outlives the overlay and so lives a
+// level up, on the Model ([Model.settingEdits]). sub is the value sub-list's highlight, meaningful only
 // while kind is [settingsEnumList]; buf is the string/int edit buffer, meaningful only while kind is
 // [settingsValueBuffer], and it is a plain string so the whole pane stays a value the Model can copy.
 type settingsPane struct {
@@ -103,12 +107,11 @@ type settingsPane struct {
 	selected int
 	sub      int
 	buf      string
-	edits    []settingEdit
 	failure  settingFailure
 }
 
 // settingEdit is one key this pane PERSISTED this session and the value the file now yields for it —
-// the fact behind a row's "(next launch)" marker. It is not a cache of the config: the file is
+// the fact behind a row's ` *` marker (ADR 0037 decision 8). It is not a cache of the config: the file is
 // authoritative and the pane never reads it back, so this is only ever used to say "you changed this,
 // here to what".
 //
@@ -158,15 +161,19 @@ const (
 // there is no position to move and nothing to draw one at.
 const settingsCaret = "▏"
 
-// settingsUnsetValue is how a marker spells a value that is not there — the state a reset returns a
-// key with no built-in default to. "" would render as a marker that trailed off ("→  (next launch)"),
+// settingsUnsetValue is how the value cell spells a value that is not there — the state a reset
+// returns a key with no built-in default to. "" would leave the marker floating after a blank cell,
 // which is the one thing the row must not do after a deliberate act.
 const settingsUnsetValue = "unset"
 
-// settingsSavedNote is a masked key's whole marker: the act, with no value behind an arrow. It is the
-// note and not a label, because there is nothing for the arrow to point AT — the pane persisted a
-// secret it does not hold and will not describe.
-const settingsSavedNote = "saved (next launch)"
+// settingsEditMarker is the suffix on the value cell of every key this session changed THROUGH THIS
+// SURFACE — an in-pane edit or a reset — and the whole of what a row says about having been changed
+// (ADR 0037 decision 8). It replaces the deferral markers this pane used to paint: an edit APPLIES on
+// the ⏎ that persists it, so there is no pending value to point at and nothing to wait for, and what
+// is left worth saying is which rows this session touched. It is cleared only by a relaunch, because
+// the journal behind it is the SESSION's memory rather than the overlay's ([Model.settingEdits]): it
+// survives every close and reopen of the pane, as the edit it stands for survives them.
+const settingsEditMarker = " *"
 
 // The value cells of a bool row, spelled as the config file spells them — the two strings ⏎ toggles
 // between and hands [Options.WriteSetting], which is the whole of what "the value as the file would
@@ -282,6 +289,9 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc":
+		// The overlay goes whole — highlight, step, buffer, last refusal — and the session's edit
+		// journal does NOT: it is on the Model, and the ` *` markers it carries describe a session that
+		// is still running the values it recorded (ADR 0037 decision 8).
 		m.settings = settingsPane{}
 		m.layout()
 		return m, nil
@@ -566,7 +576,7 @@ func (m Model) settingsApplied(row SettingRow, edit settingEdit) Model {
 	if edit.value != "" {
 		m, edit.note, applyErr = m.settingsApplyLive(row.Path, edit.value)
 	}
-	m.settings = m.settings.recordEdit(edit)
+	m = m.recordSettingEdit(edit)
 	if applyErr != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: settingsApplyFailedNote + applyErr.Error()}
 	}
@@ -668,32 +678,33 @@ const (
 // write and has to read like one (ADR 0037 decision 1).
 const settingsApplyFailedNote = "saved — live apply failed: "
 
-// recordEdit returns the pane with edit recorded, replacing any earlier edit of the same key — the
-// last one is what the file says, whether it wrote a value or removed the line. The slice is built
-// FRESH rather than appended to, the value-copied Model's rule (ADR 0011, doc.go): an append could
-// write into an array a Model copy still in flight is sharing, and the copies are not ours to reason
-// about.
+// recordSettingEdit returns the Model with edit recorded in the session's journal, replacing any
+// earlier edit of the same key — the last one is what the file says, whether it wrote a value or
+// removed the line. The slice is built FRESH rather than appended to, the value-copied Model's rule
+// (ADR 0011, doc.go): an append could write into an array a Model copy still in flight is sharing, and
+// the copies are not ours to reason about.
 //
-// A landed write also clears the failure slot, which is one attempt's outcome and not one row's
+// A landed write also clears the pane's failure slot, which is one attempt's outcome and not one row's
 // condition: the human just saw a write succeed, and a refusal left over from a previous keypress
 // would go on contradicting it.
-func (p settingsPane) recordEdit(edit settingEdit) settingsPane {
-	next := make([]settingEdit, 0, len(p.edits)+1)
-	for _, e := range p.edits {
+func (m Model) recordSettingEdit(edit settingEdit) Model {
+	next := make([]settingEdit, 0, len(m.settingEdits)+1)
+	for _, e := range m.settingEdits {
 		if e.path != edit.path {
 			next = append(next, e)
 		}
 	}
-	p.edits = append(next, edit)
-	p.failure = settingFailure{}
-	return p
+	m.settingEdits = append(next, edit)
+	m.settings.failure = settingFailure{}
+	return m
 }
 
-// editOf is what this pane did to path and whether it did anything at all. A linear scan over at most
-// one edit per config key is the right shape here: the list is short, it is read once per row per
-// frame, and a map on the pane would be a reference the Model's copies would share.
-func (p settingsPane) editOf(path string) (settingEdit, bool) {
-	for _, e := range p.edits {
+// settingEditOf is what this session did to path through the settings surface, and whether it did
+// anything at all. A linear scan over at most one edit per config key is the right shape here: the list
+// is short, it is read once per row per frame, and a map would be a reference the Model's copies would
+// share.
+func (m Model) settingEditOf(path string) (settingEdit, bool) {
+	for _, e := range m.settingEdits {
 		if e.path == path {
 			return e, true
 		}
@@ -728,7 +739,7 @@ func indexOfSetting(values []string, value string) int {
 // two ⏎ presses on a bool return it to where it was and a sub-list re-opened after an edit opens on
 // the value that edit set — rather than both starting again from a resolution that is now behind the file.
 func (m Model) settingsPersistedValue(row SettingRow) string {
-	if edit, ok := m.settings.editOf(row.Path); ok {
+	if edit, ok := m.settingEditOf(row.Path); ok {
 		return edit.value
 	}
 	return row.Value
@@ -813,7 +824,7 @@ func (m Model) settingsResettable(row SettingRow) bool {
 	if !row.Editable {
 		return false
 	}
-	if _, edited := m.settings.editOf(row.Path); edited {
+	if _, edited := m.settingEditOf(row.Path); edited {
 		return true
 	}
 	return row.Value != row.Default
@@ -949,16 +960,38 @@ func (m Model) settingRowCells(row SettingRow) popupRow {
 }
 
 // settingsValueCell is the value column: what the SESSION is running for this key. That is the value
-// the provider resolved — with one exception, and it is the exception that keeps the column honest: an
-// edit this pane applied LIVE (mode) is what the session is running now, while the provider still
-// answers with the resolution this run started from. A restart-required edit is not shown here at all;
-// it is the row's marker, because the session is still running the old value and the column would
-// otherwise claim a change that has not happened yet.
+// the provider resolved, until this pane changes it — every edit and every reset applies on the ⏎
+// that persists it (ADR 0037 decision 1), so what this pane wrote IS what the session runs, while the
+// provider still answers with the resolution this run started from. Such a row carries the ` *` that
+// says this session changed it (settingsEditMarker).
 func (m Model) settingsValueCell(row SettingRow) string {
-	if edit, ok := m.settings.editOf(row.Path); ok && !row.Restart {
-		return edit.value
+	edit, ok := m.settingEditOf(row.Path)
+	if !ok {
+		return row.Value
 	}
-	return row.Value
+	return settingsEditedValue(row, edit) + settingsEditMarker
+}
+
+// settingsEditedValue is what an edited row shows in its value column: what this pane wrote, or —
+// after a reset — the default the key went back to, which for a key that defaults to nothing is the
+// word for nothing rather than a blank the marker would float after.
+//
+// A masked row keeps the MASK it arrived with: the pane persisted a secret it never held and has
+// nothing to show for it ([SettingRow]), so the marker beside the mask is the whole of what such a
+// row says about having been written. A RESET of it is not a secret at all — a removed line left
+// nothing to keep quiet about — so it reads like every other emptied key.
+func settingsEditedValue(row SettingRow, edit settingEdit) string {
+	switch {
+	case edit.reset && row.Default == "":
+		return settingsUnsetValue
+	case edit.reset:
+		return row.Default
+	case row.Masked:
+		return row.Value
+	case edit.value == "":
+		return settingsUnsetValue
+	}
+	return edit.value
 }
 
 // settingsNote is the row's last cell: what became of this pane's own writes to the key, else where a
@@ -968,56 +1001,33 @@ func (m Model) settingsValueCell(row SettingRow) string {
 //     human's last act on this row failed and nothing else about the row matters as much;
 //   - the apply's own boundary note for an edit that landed at a boundary rather than at once
 //     ("· applies at next clear"), which is the only deferral wording this surface has;
-//   - nothing at all for an edit that applied LIVE, because settingsValueCell already shows it and
-//     there is nothing left to caveat — this case is ahead of the override note deliberately, since a
-//     live apply outranks the source that beat the file at resolution time for as long as this run lasts;
-//   - a persisted edit the run is not using yet — "→ auto (next launch)" — or, on a row an environment
-//     variable or a flag is overriding, the fuller truth: the file was written and something still
-//     outranks it; and
+//   - on a row an environment variable or a flag is overriding, that the override will win again at
+//     the next start (ADR 0037 decision 4). The edit itself DID apply — a pane edit outranks an
+//     override for the running session — so the sentence is about precedence at the next start and
+//     not about the edit having failed to land;
+//   - nothing at all for every other edit, because settingsValueCell already shows what was written
+//     and its ` *` already says this session wrote it; and
 //   - the read-only row's pointer, which is the registry's own fact and the only one of these a pane
 //     that has written nothing ever paints.
 //
-// A masked key's marker carries the MASK rather than what was written ([SettingRow] holds no secret,
-// and neither does this): "saved" is the whole of what the row has to say about an api-key.
+// A masked key has no note of its own: the marker on its still-masked value cell is the whole of what
+// a row says about a secret it persisted and does not hold (settingsEditedValue).
 func (m Model) settingsNote(row SettingRow) string {
 	if m.settings.failure.path == row.Path && m.settings.failure.msg != "" {
 		return "✗ " + m.settings.failure.msg
 	}
-	edit, edited := m.settings.editOf(row.Path)
+	edit, edited := m.settingEditOf(row.Path)
 	switch {
-	case edited && !row.Restart && edit.note != "":
+	case edited && edit.note != "":
 		return "· " + edit.note // applied, at a boundary this session will cross (ADR 0037 decision 3)
-	case edited && !row.Restart:
-		return "" // applied live: the value cell says it
 	case edited && row.Source != SettingFromFile:
-		return "saved — overridden by " + settingsSourceLabel(row) + " this run"
-	case edited && row.Masked && !edit.reset:
-		// A written secret is reported as the ACT and never as the value: this package holds no
-		// api-key and no mask of one it could put behind an arrow ([SettingRow]), and "saved" is the
-		// whole of what the row has to say. A RESET of it falls through — a removed line left nothing
-		// to keep quiet about, so it says "unset" like every other emptied key.
-		return settingsSavedNote
+		return "· " + settingsSourceLabel(row) + " outranks at next launch"
 	case edited:
-		return "→ " + settingsPendingLabel(row, edit) + " (next launch)"
+		return "" // applied live: the value cell and its marker say it
 	case row.EditPointer != "":
 		return "· " + row.EditPointer
 	}
 	return ""
-}
-
-// settingsPendingLabel is what a marker calls the value the next launch will read: what this pane
-// wrote, or — after a reset — the default the key went back to, which for a key that defaults to
-// nothing is the word for nothing rather than a blank the arrow would trail off into.
-func settingsPendingLabel(row SettingRow, edit settingEdit) string {
-	switch {
-	case edit.reset && row.Default == "":
-		return settingsUnsetValue
-	case edit.reset:
-		return row.Default
-	case edit.value == "":
-		return settingsUnsetValue
-	}
-	return edit.value
 }
 
 // settingsSourceLabel names the source that beat the file for a row — "APOGEE_MODE", "--mode" — for

@@ -162,7 +162,6 @@ func settingsRows(opts options) []tui.SettingRow {
 			EnumValues:  k.EnumValues,
 			Editable:    k.Editable,
 			Masked:      k.Masked,
-			Restart:     k.RestartRequired,
 			EditPointer: editPointer(k),
 			Desc:        k.Desc,
 		})

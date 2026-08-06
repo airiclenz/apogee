@@ -191,9 +191,7 @@ func TestSettingsPaneNavigationWrapsAndSwallowsEveryOtherKey(t *testing.T) {
 func TestSettingsPaneEscCloses(t *testing.T) {
 	m := step(t, openSettingsPane(t, settingsModel(t, settingsTestRows(6))), keyEsc())
 
-	// Field-wise, not ==: the pane carries the edits it has persisted this session (a slice), so the
-	// "closed is the zero value" claim is made through DeepEqual rather than by comparison.
-	if !reflect.DeepEqual(m.settings, settingsPane{}) {
+	if m.settings != (settingsPane{}) {
 		t.Errorf("pane = %+v, want the zero value (closed)", m.settings)
 	}
 	if pane := m.renderSettings(); pane != "" {
@@ -436,12 +434,12 @@ func settingsEditModel(t *testing.T, rows []SettingRow, log *settingsWriteLog) (
 	return openSettingsPane(t, newTestModelEng(t, eng, opts)), eng
 }
 
-// settingsBoolRow is one editable, restart-required bool row — `auto-title:` as the registry describes
-// it (cmd/apogee/registry.go).
+// settingsBoolRow is one editable bool row — `auto-title:` as the registry describes it
+// (cmd/apogee/registry.go), a key the renderer itself applies.
 func settingsBoolRow() SettingRow {
 	return SettingRow{
 		Path: "auto-title", Section: "Session", Kind: SettingBool, Value: "true", Default: "true",
-		Editable: true, Restart: true, Desc: "Name a new session from its first prompt.",
+		Editable: true, Desc: "Name a new session from its first prompt.",
 	}
 }
 
@@ -451,15 +449,15 @@ func settingsBoolRow() SettingRow {
 func settingsEnumRow() SettingRow {
 	return SettingRow{
 		Path: "ui.spinner", Section: "Interface", Kind: SettingEnum, Value: "snake", Default: "snake",
-		EnumValues: []string{"snake", "glitter", "classic"}, Editable: true, Restart: true,
+		EnumValues: []string{"snake", "glitter", "classic"}, Editable: true,
 		Desc: "Which animation paints the status-line spinner.",
 	}
 }
 
 // ⏎ on a bool toggles it and persists the toggle immediately — no second question, because a two-value
-// key has none to ask. The run keeps the value it resolved, so the row keeps showing it and the MARKER
-// carries what the file now says; a second ⏎ toggles back from what was WRITTEN, not from the
-// resolution the pane opened over.
+// key has none to ask. What was written is APPLIED on the same keypress (ADR 0037 decision 1), so the
+// row shows it with the ` *` that says this session changed it; a second ⏎ toggles back from what was
+// WRITTEN, not from the resolution the pane opened over.
 func TestSettingsPaneTogglesABoolAndPersistsIt(t *testing.T) {
 	rows := []SettingRow{settingsBoolRow()}
 	log := &settingsWriteLog{}
@@ -470,14 +468,14 @@ func TestSettingsPaneTogglesABoolAndPersistsIt(t *testing.T) {
 	if want := []settingEdit{{path: "auto-title", value: "false"}}; !reflect.DeepEqual(log.writes, want) {
 		t.Fatalf("writes = %+v, want %+v", log.writes, want)
 	}
-	if got := m.settingsValueCell(rows[0]); got != "true" {
-		t.Errorf("value cell = %q, want the value THIS run is still using", got)
+	if got, want := m.settingsValueCell(rows[0]), "false"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the value the session is running, marked as changed here", got, want)
 	}
-	if got, want := m.settingsNote(rows[0]), "→ false (next launch)"; got != want {
-		t.Errorf("marker = %q, want %q", got, want)
+	if got := m.settingsNote(rows[0]); got != "" {
+		t.Errorf("marker = %q, want none: an applied edit has nothing to caveat", got)
 	}
-	if pane := strip(m.renderSettings()); !strings.Contains(pane, "→ false (next launch)") {
-		t.Errorf("the pane does not show the pending edit:\n%s", pane)
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, "false"+settingsEditMarker) {
+		t.Errorf("the pane does not show the edited value and its marker:\n%s", pane)
 	}
 
 	m = step(t, m, keyEnter())
@@ -486,8 +484,8 @@ func TestSettingsPaneTogglesABoolAndPersistsIt(t *testing.T) {
 	if !reflect.DeepEqual(log.writes, want) {
 		t.Fatalf("writes = %+v, want the second ⏎ to toggle back from what was written: %+v", log.writes, want)
 	}
-	if got, want := m.settingsNote(rows[0]), "→ true (next launch)"; got != want {
-		t.Errorf("marker = %q, want %q — one edit per key, the last one", got, want)
+	if got, want := m.settingsValueCell(rows[0]), "true"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — one edit per key, the last one", got, want)
 	}
 }
 
@@ -538,8 +536,8 @@ func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
 	if want := []settingEdit{{path: "ui.spinner", value: "glitter"}}; !reflect.DeepEqual(log.writes, want) {
 		t.Fatalf("writes = %+v, want %+v", log.writes, want)
 	}
-	if got, want := committed.settingsNote(rows[0]), "→ glitter (next launch)"; got != want {
-		t.Errorf("marker = %q, want %q", got, want)
+	if got, want := committed.settingsValueCell(rows[0]), "glitter"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q", got, want)
 	}
 	// The spinner is a key the RENDERER owns: it moved here, and the apply seam was never asked.
 	if committed.spin.style != SpinnerGlitter {
@@ -580,8 +578,8 @@ func TestSettingsPaneModeEditAppliesLiveAndMarksNothing(t *testing.T) {
 	if got := m.settingsNote(rows[0]); got != "" {
 		t.Errorf("marker = %q, want none: a live-applied edit has nothing to wait for", got)
 	}
-	if got := m.settingsValueCell(rows[0]); got != "allow-edits" {
-		t.Errorf("value cell = %q, want the value the session is now running", got)
+	if got, want := m.settingsValueCell(rows[0]), "allow-edits"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the value the session is now running", got, want)
 	}
 }
 
@@ -611,8 +609,8 @@ func TestSettingsPaneToggleAppliesWhatItPersisted(t *testing.T) {
 	if !reflect.DeepEqual(log.applies, want) {
 		t.Errorf("applies = %+v, want %+v — what persisted is what applies", log.applies, want)
 	}
-	if got := m.settingsValueCell(rows[0]); got != "true" {
-		t.Errorf("value cell = %q, want the value the session is now running", got)
+	if got, want := m.settingsValueCell(rows[0]), "true"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the value the session is now running", got, want)
 	}
 	if got := m.settingsNote(rows[0]); got != "" {
 		t.Errorf("marker = %q, want none: an applied edit has nothing to caveat", got)
@@ -642,8 +640,8 @@ func TestSettingsPaneShowsTheApplyBoundaryNote(t *testing.T) {
 	if got, want := m.settingsNote(rows[0]), "· applies at next clear"; got != want {
 		t.Errorf("marker = %q, want %q", got, want)
 	}
-	if got := m.settingsValueCell(rows[0]); got != "true" {
-		t.Errorf("value cell = %q, want the value the file and the seam now agree on", got)
+	if got, want := m.settingsValueCell(rows[0]), "true"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the value the file and the seam now agree on", got, want)
 	}
 	if pane := strip(m.renderSettings()); !strings.Contains(pane, "applies at next clear") {
 		t.Errorf("the pane does not carry the boundary note:\n%s", pane)
@@ -664,8 +662,8 @@ func TestSettingsPaneApplyFailureKeepsTheWriteAndSaysSo(t *testing.T) {
 	if want := []settingEdit{{path: "bypass", value: "true"}}; !reflect.DeepEqual(log.writes, want) {
 		t.Fatalf("writes = %+v, want %+v — a failed apply must not unwind the write", log.writes, want)
 	}
-	if got := m.settingsValueCell(rows[0]); got != "true" {
-		t.Errorf("value cell = %q, want the persisted value: the file says it whatever the session runs", got)
+	if got, want := m.settingsValueCell(rows[0]), "true"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q: the file says it whatever the session runs", got, want)
 	}
 	want := "✗ saved — live apply failed: no server is bound yet"
 	if got := m.settingsNote(rows[0]); got != want {
@@ -795,13 +793,14 @@ func TestSettingsPaneCursorShapeAppliesAndRefusesTheUnknown(t *testing.T) {
 	}
 }
 
-// A row an environment variable or a flag is overriding says the fuller truth after a write: the file
-// was changed and something still outranks it. Without it, an edit to an overridden key would look as
-// though it had done nothing.
-func TestSettingsPaneOverriddenRowSaysTheOverrideStillOutranksIt(t *testing.T) {
+// An edit to an overridden row APPLIES like any other — a pane edit outranks an environment variable
+// or a flag for the running session (ADR 0037 decision 4) — and what the row adds is the one thing that
+// is not obvious from that: the override wins again at the next start. Without the note, an edit whose
+// effect vanished on the next launch would look like an edit that had never landed.
+func TestSettingsPaneOverriddenRowSaysTheOverrideOutranksItAtTheNextStart(t *testing.T) {
 	rows := []SettingRow{{
 		Path: "bypass", Section: "Mechanisms", Kind: SettingBool, Value: "true", Default: "false",
-		Source: SettingFromEnv, SourceName: "APOGEE_BYPASS", Editable: true, Restart: true,
+		Source: SettingFromEnv, SourceName: "APOGEE_BYPASS", Editable: true,
 		Desc: "Run with Mechanisms off.",
 	}}
 	log := &settingsWriteLog{}
@@ -809,15 +808,98 @@ func TestSettingsPaneOverriddenRowSaysTheOverrideStillOutranksIt(t *testing.T) {
 
 	m = step(t, m, keyEnter())
 
-	if want := []settingEdit{{path: "bypass", value: "false"}}; !reflect.DeepEqual(log.writes, want) {
-		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	edits := []settingEdit{{path: "bypass", value: "false"}}
+	if !reflect.DeepEqual(log.writes, edits) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, edits)
 	}
-	want := "saved — overridden by APOGEE_BYPASS this run"
+	if !reflect.DeepEqual(log.applies, edits) {
+		t.Errorf("applies = %+v, want %+v — the edit outranks the override for THIS session", log.applies, edits)
+	}
+	if got, want := m.settingsValueCell(rows[0]), "false"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the value the session is running after the edit", got, want)
+	}
+	want := "· APOGEE_BYPASS outranks at next launch"
 	if got := m.settingsNote(rows[0]); got != want {
 		t.Errorf("marker = %q, want %q", got, want)
 	}
 	if pane := strip(m.renderSettings()); !strings.Contains(pane, "(env)") || !strings.Contains(pane, want) {
 		t.Errorf("the pane does not carry both the override marker and the note:\n%s", pane)
+	}
+}
+
+// Nothing this pane paints defers to a restart any more (ADR 0037 decision 8). Every edit idiom the
+// surface has — a renderer-owned toggle, a buffered string, a masked write, an overridden key, a key
+// with a boundary note, and a reset — leaves the same thing behind: the value the session is running
+// with a ` *` beside it. The old "(next launch)" markers described a state that cannot happen, so no
+// row, note or frame may still produce one.
+func TestSettingsPaneNeverDefersToTheNextLaunch(t *testing.T) {
+	rows := []SettingRow{
+		settingsBoolRow(),   // renderer-owned: applied without the seam
+		settingsStringRow(), // the buffered string
+		{Path: "api-key", Section: "Upstream", Kind: SettingString, Value: "••••",
+			Editable: true, Masked: true, Desc: "Bearer token."},
+		{Path: "bypass", Section: "Mechanisms", Kind: SettingBool, Value: "true", Default: "false",
+			Source: SettingFromEnv, SourceName: "APOGEE_BYPASS", Editable: true, Desc: "Mechanisms off."},
+		{Path: "context-files.enable", Section: "System prompt", Kind: SettingBool, Value: "false",
+			Default: "true", Editable: true, Desc: "Fold the workspace context files in."},
+	}
+	log := &settingsWriteLog{applyNote: "applies at next clear"}
+	m, _ := settingsEditModel(t, rows, log)
+
+	for i := range rows {
+		m.settings.selected = i
+		m = step(t, m, keyEnter()) // a bool toggles on the spot; a string opens its buffer
+		if m.settings.kind == settingsValueBuffer {
+			m = step(t, typeSetting(t, m, "x"), keyEnter())
+		}
+	}
+	m.settings.selected = 0
+	m = step(t, step(t, m, keyBackspace()), keyEnter()) // and the reset idiom, over the first edit
+
+	if len(m.settingEdits) != len(rows) {
+		t.Fatalf("edits = %+v, want one per row: an idiom above did not land", m.settingEdits)
+	}
+	if pane := strip(m.renderSettings()); strings.Contains(pane, "(next launch)") {
+		t.Errorf("a row still defers to the next launch:\n%s", pane)
+	}
+	for _, row := range rows {
+		if got := m.settingsNote(row); strings.Contains(got, "(next launch)") {
+			t.Errorf("row %q note = %q, want no deferral marker", row.Path, got)
+		}
+		if got := m.settingsValueCell(row); !strings.HasSuffix(got, settingsEditMarker) {
+			t.Errorf("row %q value cell = %q, want the session-edit marker on an edited row", row.Path, got)
+		}
+	}
+}
+
+// Only a relaunch clears the marker (ADR 0037 decision 8) — dismissing the pane is not one. The
+// journal lives on the Model rather than on the overlay for exactly this: the provider still answers
+// with the value THIS RUN resolved (`true`), so a reopened pane that had forgotten the edit would tell
+// a session running `false` that it was running `true` — the one lie the marker exists to prevent.
+func TestSettingsPaneEditMarkerSurvivesAReopen(t *testing.T) {
+	rows := []SettingRow{settingsBoolRow()}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, m, keyEnter()) // toggles `auto-title` to false, persists and applies it
+	want := "false" + settingsEditMarker
+	if got := m.settingsValueCell(rows[0]); got != want {
+		t.Fatalf("value cell = %q, want %q before the pane is dismissed", got, want)
+	}
+
+	m = openSettingsPane(t, step(t, m, keyEsc()))
+
+	if len(m.settingEdits) != 1 {
+		t.Fatalf("edits = %+v, want the one this session made: closing the pane dropped its journal", m.settingEdits)
+	}
+	if got := m.settingsValueCell(rows[0]); got != want {
+		t.Errorf("value cell = %q, want %q — the reopened pane forgot what this session changed", got, want)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, want) {
+		t.Errorf("the reopened pane does not show the edited value and its marker:\n%s", pane)
+	}
+	if !m.settingsResettable(rows[0]) {
+		t.Error("the reopened pane will not reset a key it wrote: the journal behind ⌫ died with the overlay")
 	}
 }
 
@@ -831,8 +913,8 @@ func TestSettingsPaneWriteErrorStaysOnTheRowAndChangesNothing(t *testing.T) {
 
 	m = step(t, m, keyEnter())
 
-	if len(log.writes) != 0 || len(m.settings.edits) != 0 {
-		t.Fatalf("a refused write left writes %+v / edits %+v, want neither", log.writes, m.settings.edits)
+	if len(log.writes) != 0 || len(m.settingEdits) != 0 {
+		t.Fatalf("a refused write left writes %+v / edits %+v, want neither", log.writes, m.settingEdits)
 	}
 	if got := m.settingsValueCell(rows[0]); got != "true" {
 		t.Errorf("value cell = %q, want the row untouched", got)
@@ -850,8 +932,11 @@ func TestSettingsPaneWriteErrorStaysOnTheRowAndChangesNothing(t *testing.T) {
 	log.err = nil
 	m = step(t, m, keyEnter())
 
-	if got, want := m.settingsNote(rows[0]), "→ false (next launch)"; got != want {
-		t.Errorf("marker = %q, want %q — a landed write replaces the refusal", got, want)
+	if got, want := m.settingsValueCell(rows[0]), "false"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — a landed write replaces the refusal", got, want)
+	}
+	if got := m.settingsNote(rows[0]); got != "" {
+		t.Errorf("marker = %q, want the refusal gone", got)
 	}
 }
 
@@ -865,8 +950,8 @@ func TestSettingsPaneWithoutAWriterSaysSoOnTheRow(t *testing.T) {
 
 	m = step(t, m, keyEnter())
 
-	if len(m.settings.edits) != 0 {
-		t.Fatalf("edits = %+v, want none: nothing was written", m.settings.edits)
+	if len(m.settingEdits) != 0 {
+		t.Fatalf("edits = %+v, want none: nothing was written", m.settingEdits)
 	}
 	if got := m.settingsNote(rows[0]); !strings.Contains(got, noSettingsWriterNote) {
 		t.Errorf("marker = %q, want %q", got, noSettingsWriterNote)
@@ -945,7 +1030,7 @@ func TestSettingsEnumSubListFallsBackWhenItsKeyGoesAway(t *testing.T) {
 func settingsStringRow() SettingRow {
 	return SettingRow{
 		Path: "endpoint", Section: "Upstream", Kind: SettingString, Value: "http://box:1111",
-		Editable: true, Restart: true, Desc: "The OpenAI-compatible LLM server URL.",
+		Editable: true, Desc: "The OpenAI-compatible LLM server URL.",
 	}
 }
 
@@ -953,7 +1038,7 @@ func settingsStringRow() SettingRow {
 func settingsIntRow() SettingRow {
 	return SettingRow{
 		Path: "present.port", Section: "Present", Kind: SettingInt, Value: "0", Default: "0",
-		Editable: true, Restart: true, Desc: "The document server's port; 0 picks a free one.",
+		Editable: true, Desc: "The document server's port; 0 picks a free one.",
 	}
 }
 
@@ -998,8 +1083,8 @@ func TestSettingsPaneBufferEditsAStringAndPersistsIt(t *testing.T) {
 	if m.settings.kind != settingsKeyList || m.settings.buf != "" {
 		t.Errorf("pane = %+v after the commit, want the buffer closed and empty", m.settings)
 	}
-	if got, want := m.settingsNote(rows[0]), "→ http://box:2222 (next launch)"; got != want {
-		t.Errorf("marker = %q, want %q", got, want)
+	if got, want := m.settingsValueCell(rows[0]), "http://box:2222"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q", got, want)
 	}
 	// A re-opened buffer starts from what was WRITTEN, not from the resolution the pane opened over.
 	if reopened := step(t, m, keyEnter()); reopened.settings.buf != "http://box:2222" {
@@ -1062,8 +1147,8 @@ func TestSettingsPaneBufferKeepsARefusedValueForCorrection(t *testing.T) {
 	if m.settings.buf != "099999" {
 		t.Errorf("buffer = %q, want the typed value kept for correction", m.settings.buf)
 	}
-	if len(m.settings.edits) != 0 {
-		t.Errorf("edits = %+v, want none: a refused write changed no file", m.settings.edits)
+	if len(m.settingEdits) != 0 {
+		t.Errorf("edits = %+v, want none: a refused write changed no file", m.settingEdits)
 	}
 	if got := m.settingsNote(rows[0]); !strings.Contains(got, "0-65535") {
 		t.Errorf("marker = %q, want the refusal's reason", got)
@@ -1112,11 +1197,12 @@ func TestSettingsPaneBufferCancelClearsTheRefusal(t *testing.T) {
 
 // The masked key is the one row the buffer does not seed: the pane holds a mask and not the secret
 // ([SettingRow]), so an api-key is typed whole. What is typed IS visible while typing — a human cannot
-// check a token they cannot see — and the marker afterwards says only that it was saved.
-func TestSettingsPaneMaskedRowBuffersVisiblyAndSaysOnlySaved(t *testing.T) {
+// check a token they cannot see — and what the row shows afterwards is the MASK with the session-edit
+// marker beside it: the ` *` says the key was changed here, and nothing on the row repeats the secret.
+func TestSettingsPaneMaskedRowBuffersVisiblyAndKeepsItsMask(t *testing.T) {
 	rows := []SettingRow{{
 		Path: "api-key", Section: "Upstream", Kind: SettingString, Value: "••••",
-		Editable: true, Masked: true, Restart: true, Desc: "Bearer token sent on every request.",
+		Editable: true, Masked: true, Desc: "Bearer token sent on every request.",
 	}}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -1135,8 +1221,11 @@ func TestSettingsPaneMaskedRowBuffersVisiblyAndSaysOnlySaved(t *testing.T) {
 	if want := []settingEdit{{path: "api-key", value: "sk-live-42"}}; !reflect.DeepEqual(log.writes, want) {
 		t.Fatalf("writes = %+v, want %+v", log.writes, want)
 	}
-	if got, want := m.settingsNote(rows[0]), settingsSavedNote; got != want {
-		t.Errorf("marker = %q, want %q — the row never repeats a secret", got, want)
+	if got, want := m.settingsValueCell(rows[0]), "••••"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the row never repeats a secret", got, want)
+	}
+	if got := m.settingsNote(rows[0]); got != "" {
+		t.Errorf("marker = %q, want none: the marked mask is the whole of what the row says", got)
 	}
 	if pane := strip(m.renderSettings()); strings.Contains(pane, "sk-live-42") {
 		t.Errorf("the committed secret is still on the screen:\n%s", pane)
@@ -1149,7 +1238,7 @@ func TestSettingsPaneMaskedRowBuffersVisiblyAndSaysOnlySaved(t *testing.T) {
 func TestSettingsPaneResetArmsConfirmsAndCancels(t *testing.T) {
 	rows := []SettingRow{{
 		Path: "auto-title", Section: "Session", Kind: SettingBool, Value: "false", Default: "true",
-		Editable: true, Restart: true, Desc: "Name a new session from its first prompt.",
+		Editable: true, Desc: "Name a new session from its first prompt.",
 	}}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -1186,8 +1275,8 @@ func TestSettingsPaneResetArmsConfirmsAndCancels(t *testing.T) {
 	if confirmed.settings.kind != settingsKeyList {
 		t.Errorf("pane = %+v, want the key list back after the confirmation", confirmed.settings)
 	}
-	if got, want := confirmed.settingsNote(rows[0]), "→ true (next launch)"; got != want {
-		t.Errorf("marker = %q, want %q — the default the key went back to", got, want)
+	if got, want := confirmed.settingsValueCell(rows[0]), "true"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the default the key went back to, marked as changed here", got, want)
 	}
 }
 
@@ -1198,7 +1287,7 @@ func TestSettingsPaneResetOfAnUnsetDefaultSaysUnset(t *testing.T) {
 	for _, row := range []SettingRow{
 		settingsStringRow(),
 		{Path: "api-key", Section: "Upstream", Kind: SettingString, Value: "••••",
-			Editable: true, Masked: true, Restart: true, Desc: "Bearer token."},
+			Editable: true, Masked: true, Desc: "Bearer token."},
 	} {
 		t.Run(row.Path, func(t *testing.T) {
 			log := &settingsWriteLog{}
@@ -1209,8 +1298,8 @@ func TestSettingsPaneResetOfAnUnsetDefaultSaysUnset(t *testing.T) {
 			if want := []string{row.Path}; !reflect.DeepEqual(log.resets, want) {
 				t.Fatalf("resets = %+v, want %+v", log.resets, want)
 			}
-			if got, want := m.settingsNote(row), "→ unset (next launch)"; got != want {
-				t.Errorf("marker = %q, want %q", got, want)
+			if got, want := m.settingsValueCell(row), settingsUnsetValue+settingsEditMarker; got != want {
+				t.Errorf("value cell = %q, want %q", got, want)
 			}
 		})
 	}
@@ -1275,8 +1364,8 @@ func TestSettingsPaneResetOfModeAppliesTheDefaultLive(t *testing.T) {
 	if got := m.settingsNote(rows[0]); got != "" {
 		t.Errorf("marker = %q, want none: a live-applied reset has nothing to wait for", got)
 	}
-	if got := m.settingsValueCell(rows[0]); got != "ask-before" {
-		t.Errorf("value cell = %q, want the default the session is now running", got)
+	if got, want := m.settingsValueCell(rows[0]), "ask-before"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the default the session is now running", got, want)
 	}
 }
 

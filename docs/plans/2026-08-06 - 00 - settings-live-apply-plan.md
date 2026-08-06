@@ -176,9 +176,13 @@ NOTES (2026-08-06): five deviations from the item's literal text. (a) Wiring the
 
 **Commit:** `feat(settings): llama-launcher path and presentation ladder apply live`
 
-## 8. The ` *` marker; death of "(next launch)"
+## 8. The ` *` marker; death of "(next launch)" — ✅ DONE (2026-08-06)
 
 Depends on items 3, 4, 6, 7.
+
+NOTES (2026-08-06): one deviation beyond the item's literal list of test updates. `cmd/apogee`'s `TestModeIsTheOnlyKeyAppliedWithoutARestart` was DELETED rather than renegotiated, and deliberately not replaced: it pinned "mode is the only key with `RestartRequired:false`", which is the exact claim this item retires, and the obvious successor guard — *every* editable key has a live home (renderer-owned or a dispatcher entry) — would fail today on `server`, whose apply is item 12's picker rather than an `ApplySetting` entry. That guard belongs with item 12, once the last editable key has its seam. What survives unchanged is the per-key dispatcher coverage (`TestApplySettingDrivesTheRightEngineSeam`, `TestApplySettingRefusesWhatItCannotApply`). Also worth knowing: the masked branch of the value cell shows the MASK plus the marker (`•••• *`) rather than the written secret, and a masked row now carries no note at all — the old `saved (next launch)` sentence had nowhere left to live.
+
+NOTES (2026-08-06): the edit journal moved OFF the pane. The item's text sites it at `settingsPane.edits`, but the pane is zeroed whole on close (`settings.go` esc) and on open (`runSettingsCommand`, `openPrebound`), so a journal living there died on every dismissal — the marker would clear without a relaunch, contradicting ratified call 8 / ADR 0037 decision 8. It is now `Model.settingEdits` with `recordEdit`/`editOf` as the Model methods `recordSettingEdit`/`settingEditOf`; the pane keeps only what dies with the overlay (highlight, step, buffer, last refusal) and its zero value is once again exactly "closed". Guard: `TestSettingsPaneEditMarkerSurvivesAReopen` (edit → esc → reopen still reads `false *` and still arms ⌫).
 
 **What:** Rework the row annotation layer to the ratified semantics (calls 3, 8; binding A):
 

@@ -620,8 +620,8 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// resolved and the marker for a key an environment variable or a flag overrode
 		// (settingsRows.go). A provider rather than a slice because the pane derives its rows on
 		// every paint — the picker's convention — and it closes over the resolved opts because the
-		// pane reports what the SESSION is running: a key persisted mid-session takes effect on the
-		// next launch, which is exactly what the row's "(next launch)" marker says.
+		// pane reports the resolution THIS run made: a key persisted mid-session is applied by the
+		// dispatcher below and shown from the pane's own journal, marked ` *` (ADR 0037 decision 8).
 		SettingsRows: func() []tui.SettingRow { return settingsRows(opts) },
 		// The pane's write half: one key per deliberate edit, spliced into the same config.yaml the
 		// acknowledgement above records a host in (ADR 0035). The registry decides what may be

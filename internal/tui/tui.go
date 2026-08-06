@@ -328,8 +328,8 @@ type Options struct {
 	// note is a short boundary sentence for a key that cannot land NOW and lands at a boundary the
 	// session will cross anyway — "applies at next clear" for the context files, whose prefix is
 	// frozen for the session on purpose (ADR 0026). Empty means it is already in effect, which is
-	// the answer for almost every key. It is never "(next launch)": a key that could only take
-	// effect at the next start has no business in this seam.
+	// the answer for almost every key. It never defers to a restart: a key that could only take
+	// effect the next time the process starts has no business in this seam.
 	//
 	// An error is REPORTED and does not unwind the write (ADR 0037 decision 1): the file already
 	// expresses the intent, so the row says "saved — live apply failed: …" and a re-committed edit
@@ -832,9 +832,8 @@ type SettingRow struct {
 	SourceName string
 
 	EnumValues  []string // the closed vocabulary, non-empty exactly for [SettingEnum]
-	Editable    bool     // this pane may write the key
+	Editable    bool     // this pane may write the key — and, since ADR 0037, apply it on the same ⏎
 	Masked      bool     // Value is a mask, not the value (api-key)
-	Restart     bool     // a change takes effect on the next launch — the "(next launch)" marker
 	EditPointer string   // where a non-Editable key is edited instead; "" exactly when Editable
 	Desc        string   // the one-line description shown for the selected row
 }

@@ -341,24 +341,3 @@ func TestRegistryValidateHooksSitOnEditableKeys(t *testing.T) {
 		}
 	}
 }
-
-// TestModeIsTheOnlyKeyAppliedWithoutARestart pins the equivalence the /settings pane's two live-apply
-// decisions rest on. The pane names `mode` when it decides what to APPLY (settings.go's settingsModeKey —
-// the seam Engine.SetMode exists for) but asks RestartRequired when it decides what to SHOW: a row with
-// no restart flag renders its edited value as the value the session is running, and a row with one
-// renders a "(next launch)" marker instead. Both are right today because those are the same one key; a
-// second RestartRequired:false row added without a live seam would silently make the pane claim an edit
-// had taken effect when nothing had applied it, and this test is what names that.
-func TestModeIsTheOnlyKeyAppliedWithoutARestart(t *testing.T) {
-	t.Parallel()
-	for _, k := range keyRegistry {
-		if !k.RestartRequired && k.Path != "mode" {
-			t.Errorf("registry row %q takes effect without a restart; give it a live seam in the "+
-				"/settings pane (internal/tui/settings.go: settingsModeKey) or mark it RestartRequired",
-				k.Path)
-		}
-	}
-	if mustKey("mode").RestartRequired {
-		t.Error("mode is now restart-required, so the pane's live apply would render a marker instead")
-	}
-}

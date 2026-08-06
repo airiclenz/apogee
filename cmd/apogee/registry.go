@@ -54,11 +54,11 @@ const (
 //
 // GlobalOnly marks the keys ADR 0012 fences to the global config: no flag, no env, and no
 // project config may set them, because a hostile repo's invocation environment must not be
-// able to loosen Auto's blast radius. RestartRequired says a change takes effect on the
-// next launch; it is false only where a runtime path to apply the new value already exists
-// (today: mode, through the same seam Shift+Tab drives). Editable is whether the settings
-// surface may write the key at all — false for every structured kind, and false for the
-// confinement keys, whose acknowledgement interlock stays single-homed in /confine. Masked
+// able to loosen Auto's blast radius. Editable is whether the settings surface may write the
+// key at all — false for every structured kind, and false for the confinement keys, whose
+// acknowledgement interlock stays single-homed in /confine — and, since ADR 0037, it is also
+// whether that surface APPLIES it: a key it writes takes effect in the running session on the
+// same keypress, so no key is gated on a restart and no row says one is. Masked
 // says the value must not be rendered in full — no row carries it today (the schema's one
 // secret is a `servers:` entry's api-key, nested inside a structured block). Desc is the
 // one-line description a surface shows, condensed from the template's own comments.
@@ -72,18 +72,17 @@ const (
 // resolution does not call it — it validates the parsed block it already builds — so this is
 // the write path's guard rather than a second schema.
 type configKey struct {
-	Path            string
-	Kind            configKind
-	Default         string
-	EnumValues      []string
-	EnvVar          string
-	FlagName        string
-	GlobalOnly      bool
-	RestartRequired bool
-	Editable        bool
-	Masked          bool
-	Validate        func(value string) error
-	Desc            string
+	Path       string
+	Kind       configKind
+	Default    string
+	EnumValues []string
+	EnvVar     string
+	FlagName   string
+	GlobalOnly bool
+	Editable   bool
+	Masked     bool
+	Validate   func(value string) error
+	Desc       string
 }
 
 // The closed vocabularies of the three enum keys, in the order their parse sites list them.
@@ -104,8 +103,7 @@ var (
 var keyRegistry = []configKey{
 	{
 		Path: "servers", Kind: kindStructured,
-		RestartRequired: true,
-		Desc:            "The servers you run models on — name, endpoint, and what each one needs.",
+		Desc: "The servers you run models on — name, endpoint, and what each one needs.",
 	},
 	{
 		// A plain string rather than an enum, even though its values ARE a closed set: EnumValues is
@@ -115,153 +113,145 @@ var keyRegistry = []configKey{
 		// rather than by a vocabulary this table cannot hold.
 		Path: "server", Kind: kindString,
 		EnvVar: envServer, FlagName: "server",
-		RestartRequired: true, Editable: true,
-		Desc: "Which servers: entry a session starts on; /server records the last one chosen.",
+		Editable: true,
+		Desc:     "Which servers: entry a session starts on; /server records the last one chosen.",
 	},
 	{
 		Path: "llama-launcher", Kind: kindString,
-		RestartRequired: true, Editable: true,
+		Editable: true,
 		Validate: validateLlamaLauncher, // the startup check itself, unwrapped: ADR 0029's three shapes
 		Desc:     "Which llama-launcher config the local-server verbs read; unset auto-detects, off disables.",
 	},
 	{
 		Path: "mode", Kind: kindEnum, Default: string(modeAskBefore), EnumValues: modeValues,
 		EnvVar: envMode, FlagName: "mode",
-		Editable: true, // the one live-appliable key: the Shift+Tab seam already switches mode mid-session
+		Editable: true, // Shift+Tab drives the same seam this key's live apply does
 		Validate: validateSettingMode,
 		Desc:     "Autonomy mode: how tool calls are gated, from least to most autonomous.",
 	},
 	{
 		Path: "system-prompt-text", Kind: kindStructured,
-		RestartRequired: true,
-		Desc:            "The system prompt written inline — the standing instructions sent ahead of your first message.",
+		Desc: "The system prompt written inline — the standing instructions sent ahead of your first message.",
 	},
 	{
 		Path: "system-prompt-file", Kind: kindStructured,
-		RestartRequired: true,
-		Desc:            "A file to read the system prompt from instead of writing it inline.",
+		Desc: "A file to read the system prompt from instead of writing it inline.",
 	},
 	{
 		Path: "system-prompt-models", Kind: kindStructured,
-		RestartRequired: true,
-		Desc:            "Per-model system prompts, keyed by resolved model name; a match replaces the global prompt whole.",
+		Desc: "Per-model system prompts, keyed by resolved model name; a match replaces the global prompt whole.",
 	},
 	{
 		Path: "context-files.enable", Kind: kindBool, Default: "true",
-		RestartRequired: true, Editable: true,
-		Desc: "Fold the workspace context files below into the system prompt at session start.",
+		Editable: true,
+		Desc:     "Fold the workspace context files below into the system prompt at session start.",
 	},
 	{
 		Path: "context-files.names", Kind: kindStructured, Default: "[AGENTS.md]",
-		RestartRequired: true,
-		Desc:            "Workspace-root file names folded into the system prompt, in list order.",
+		Desc: "Workspace-root file names folded into the system prompt, in list order.",
 	},
 	{
 		Path: "confine-to-workspace", Kind: kindBool, Default: "true",
-		GlobalOnly: true, RestartRequired: true,
-		Editable: false, // the acknowledgement interlock stays single-homed in /confine (ADR 0012)
-		Desc:     "Auto's blast radius: filesystem writes fenced to the workspace under OS confinement.",
+		GlobalOnly: true,
+		Editable:   false, // the acknowledgement interlock stays single-homed in /confine (ADR 0012)
+		Desc:       "Auto's blast radius: filesystem writes fenced to the workspace under OS confinement.",
 	},
 	{
 		Path: "unconfined-hosts", Kind: kindStructured,
-		GlobalOnly: true, RestartRequired: true,
-		Desc: "Machines acknowledged as disposable, where auto mode runs unconfined.",
+		GlobalOnly: true,
+		Desc:       "Machines acknowledged as disposable, where auto mode runs unconfined.",
 	},
 	{
 		Path: "web-search-endpoint", Kind: kindString,
-		RestartRequired: true, Editable: true,
+		Editable: true,
 		Validate: validateSearchEndpoint,
 		Desc:     "Search endpoint the web_search tool queries; unset uses DuckDuckGo, off disables it.",
 	},
 	{
 		Path: "mcp-servers", Kind: kindStructured,
-		RestartRequired: true,
-		Desc:            "External MCP servers connected at startup; their tools always ask in auto.",
+		Desc: "External MCP servers connected at startup; their tools always ask in auto.",
 	},
 	{
 		Path: "use-project-skills", Kind: kindBool, Default: "true",
-		RestartRequired: true, Editable: true,
-		Desc: "Discover skills from the workspace's bare skills/ folder as well as the libraries.",
+		Editable: true,
+		Desc:     "Discover skills from the workspace's bare skills/ folder as well as the libraries.",
 	},
 	{
 		Path: "auto-compact", Kind: kindBool, Default: "true",
-		RestartRequired: true, Editable: true,
-		Desc: "Fold older turns into a compact brief before the context window overflows.",
+		Editable: true,
+		Desc:     "Fold older turns into a compact brief before the context window overflows.",
 	},
 	{
 		Path: "auto-title", Kind: kindBool, Default: "true",
-		RestartRequired: true, Editable: true,
-		Desc: "Name a new session from its first prompt with one small extra completion.",
+		Editable: true,
+		Desc:     "Name a new session from its first prompt with one small extra completion.",
 	},
 	{
 		Path: "context-window", Kind: kindInt, Default: "0",
-		RestartRequired: true, Editable: true,
+		Editable: true,
 		Validate: validateContextWindow,
 		Desc:     "Pin the model context window in tokens; 0 discovers it from the server, live.",
 	},
 	{
 		Path: "present.auto-open", Kind: kindBool, Default: "true",
-		RestartRequired: true, Editable: true,
-		Desc: "Open a presented document in its application on a local desktop run.",
+		Editable: true,
+		Desc:     "Open a presented document in its application on a local desktop run.",
 	},
 	{
 		Path: "present.command", Kind: kindString,
-		RestartRequired: true, Editable: true,
-		Desc: "Open presented documents with this application instead of the OS default ({path} = the file).",
+		Editable: true,
+		Desc:     "Open presented documents with this application instead of the OS default ({path} = the file).",
 	},
 	{
 		Path: "present.port", Kind: kindInt, Default: "0",
-		RestartRequired: true, Editable: true,
+		Editable: true,
 		Validate: validatePresentPort,
 		Desc:     "The built-in document server's port; 0 picks a free one per session.",
 	},
 	{
 		Path: "present.host", Kind: kindString,
-		RestartRequired: true, Editable: true,
-		Desc: "Address the printed document URL advertises; empty is detected from the SSH connection.",
+		Editable: true,
+		Desc:     "Address the printed document URL advertises; empty is detected from the SSH connection.",
 	},
 	{
 		Path: "ui.spinner", Kind: kindEnum, Default: "snake", EnumValues: spinnerValues,
-		RestartRequired: true, Editable: true,
+		Editable: true,
 		Validate: validateSpinnerName,
 		Desc:     "The status-line spinner animation shown while a turn runs.",
 	},
 	{
 		Path: "ui.spinner-color", Kind: kindBool, Default: "true",
-		RestartRequired: true, Editable: true,
-		Desc: "Run the ten-second colour loop over the spinner glyph.",
+		Editable: true,
+		Desc:     "Run the ten-second colour loop over the spinner glyph.",
 	},
 	{
 		Path: "ui.show-scrollbar", Kind: kindBool, Default: "true",
-		RestartRequired: true, Editable: true,
-		Desc: "Paint the transcript's scroll bar and reserve the column it hangs in.",
+		Editable: true,
+		Desc:     "Paint the transcript's scroll bar and reserve the column it hangs in.",
 	},
 	{
 		Path: "cursor-shape", Kind: kindEnum, Default: "block", EnumValues: cursorShapeValues,
-		RestartRequired: true, Editable: true,
+		Editable: true,
 		Validate: validateCursorShapeName,
 		Desc:     "The shape the prompt's caret is drawn with; it is always steady.",
 	},
 	{
 		Path: "bypass", Kind: kindBool, Default: "false",
 		EnvVar: envBypass, FlagName: "bypass",
-		RestartRequired: true, Editable: true,
-		Desc: "Run with Mechanisms off; the structural context reducers stay on.",
+		Editable: true,
+		Desc:     "Run with Mechanisms off; the structural context reducers stay on.",
 	},
 	{
 		Path: "mechanisms", Kind: kindStructured,
-		RestartRequired: true,
-		Desc:            "Catalogued small-model Mechanisms to enable by canonical ID; every one defaults off.",
+		Desc: "Catalogued small-model Mechanisms to enable by canonical ID; every one defaults off.",
 	},
 	{
 		Path: "validated-sets", Kind: kindStructured,
-		RestartRequired: true,
-		Desc:            "The per-model Validated-set surface: its off-switch and explicit model aliases.",
+		Desc: "The per-model Validated-set surface: its off-switch and explicit model aliases.",
 	},
 	{
 		Path: "model-profile", Kind: kindStructured,
-		RestartRequired: true,
-		Desc:            "How the configured model speaks the wire: tool-call format and thinking-channel style.",
+		Desc: "How the configured model speaks the wire: tool-call format and thinking-channel style.",
 	},
 }
 

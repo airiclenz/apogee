@@ -119,6 +119,15 @@ type Model struct {
 	// is driven only at idle, and it is the frame's one full-height pane (frameRowPlan).
 	settings settingsPane
 
+	// settingEdits is the journal of every config key this SESSION changed through the settings surface
+	// — the fact behind each row's ` *` marker (ADR 0037 decision 8). It lives here rather than on the
+	// pane above because its lifetime is the session's and the pane's is one overlay: the human opens
+	// and dismisses /settings as often as they like, and a journal that died with the overlay would tell
+	// a session running an edited value that nothing had been edited. Only a relaunch clears it, which
+	// is what building a new Model is. One entry per key, and the slice is REPLACED rather than appended
+	// into (recordSettingEdit), so it is safe in the value-copied Model (ADR 0011).
+	settingEdits []settingEdit
+
 	// promptEditor owns the chat input cluster — the textarea, the autocomplete overlay (+ its
 	// skillRegion edge-trigger), the workspace file cache, and the prompt drag-selection
 	// (prompteditor.go). It is embedded ANONYMOUSLY so its fields and its

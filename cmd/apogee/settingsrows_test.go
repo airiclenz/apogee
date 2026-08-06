@@ -293,9 +293,8 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 }
 
 // The rest of each row is the registry row, projected: the kind (with it the edit idiom), the enum
-// vocabulary, the default, the next-launch marker and the description. The projection is asserted
-// against the table rather than restated, so a registry edit lands in the pane without a second
-// edit here.
+// vocabulary, the default, the editability and the description. The projection is asserted against
+// the table rather than restated, so a registry edit lands in the pane without a second edit here.
 func TestSettingsRowsProjectRegistryMetadata(t *testing.T) {
 	t.Parallel()
 
@@ -309,7 +308,7 @@ func TestSettingsRowsProjectRegistryMetadata(t *testing.T) {
 			t.Errorf("row %q enum values = %v; want %v", k.Path, row.EnumValues, k.EnumValues)
 		}
 		if row.Default != k.Default || row.Editable != k.Editable || row.Masked != k.Masked ||
-			row.Restart != k.RestartRequired || row.Desc != k.Desc {
+			row.Desc != k.Desc {
 			t.Errorf("row %q does not carry its registry row: %+v", k.Path, row)
 		}
 	}
