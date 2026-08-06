@@ -113,6 +113,26 @@ func TestPaintCacheRepaintsWhenTheKeyMoves(t *testing.T) {
 	if equalLines(settled.lines, blinked.lines) {
 		t.Error("the blink phase painted a live block identically — the fixture holds no open call")
 	}
+
+	// A delegate's context reading, which the collapsed run states on its summary line. It is the key
+	// field with no proxy: the reading appends no entry, extends no span and flips no flag, so a key
+	// that did not name it would answer with the previous figure — or, on the first reading, with a
+	// line that has no fill cell at all.
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	readCall(tr, "r1", "suite_test.go", 1, 90, 1)
+	before := tr.renderView(th, 80, false) // warm the run's block, with no reading on it yet
+	subAgentUsage(tr, 1, 12000, 32768)
+	first := tr.renderView(th, 80, false)
+	sameRender(t, "after the delegate's first reading", first, coldRender(tr, th, 80, false))
+	if equalLines(before.lines, first.lines) {
+		t.Error("the first context reading changed no line — the fixture's run paints no fill cell")
+	}
+	subAgentUsage(tr, 1, 18000, 32768)
+	second := tr.renderView(th, 80, false)
+	sameRender(t, "after the reading moved", second, coldRender(tr, th, 80, false))
+	if equalLines(first.lines, second.lines) {
+		t.Error("a moved reading served the previous figure — paintKey does not name it")
+	}
 }
 
 // A session switch re-uses head indices for a different conversation's entries, and reset is what
@@ -240,6 +260,28 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 			runCall(tr, "r2", "go test -run Suite", "--- FAIL: TestSuite\n    suite_test.go:12: gap\nFAIL", 1)
 			check("a second nested block, and the cascading count with it")
 			subAgentReport(tr, "s1", "Found 4 gaps\nin the suite", 0)
+		},
+	}, {
+		// A reading from a delegate that is still working: no entry appended, no span extended, no
+		// flag flipped — the whole of the movement is two numbers on a head the cache painted twice
+		// already, and they are painted (subAgentFill). The run is opened here rather than reusing the
+		// one above because that one has reported, and a reported run's figure is history.
+		name: "a context reading landing on an open run",
+		mutate: func() {
+			subAgentCall(tr, "s2", "check the docs", 0)
+			readCall(tr, "d1", "README.md", 1, 30, 1)
+			quiet := tr.renderView(th, width, blink)
+			check("the second run, before its delegate has reported")
+			subAgentUsage(tr, 1, 12000, 32768)
+			first := tr.renderView(th, width, blink)
+			check("the delegate's first reading")
+			if equalLines(quiet.lines, first.lines) {
+				t.Error("the first reading changed no line — the script's run paints no fill cell")
+			}
+			subAgentUsage(tr, 1, 18000, 32768)
+			if equalLines(first.lines, tr.renderView(th, width, blink).lines) {
+				t.Error("a moved reading served the previous figure — paintKey does not name it")
+			}
 		},
 	}, {
 		// The one mutation that rewrites an entry's facts in place while touching no flag the key

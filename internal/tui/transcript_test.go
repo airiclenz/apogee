@@ -915,11 +915,12 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	subAgentCall(tr, "s1", "survey the tests", 0)
 	readCall(tr, "c1", "a.go", 1, 5, 1)
 	runCall(tr, "c2", "go test", "ok   a\nok   b\nPASS", 1)
+	subAgentUsage(tr, 1, 12000, 32768)
 	subAgentReport(tr, "s1", "Found 4 gaps\nin the suite\nhere they are", 0)
 
 	collapsed := strings.Join([]string{
 		"✦ Sub-Agent ▸",
-		"  ┕ survey the tests 2 tool calls · Found 4 gaps",
+		"  ┕ survey the tests 2 tool calls · 12k/32k · Found 4 gaps",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != collapsed {
 		t.Errorf("collapsed run mismatch (collapsed is the default):\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
@@ -965,6 +966,9 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 // second time as the block's compact body. The rule holds whichever half of the outcome the report's
 // own size filled: a long report that became a body used to say its first line twice in adjacent
 // rows, and a one-line report that became a summary has no body to repeat it with.
+//
+// The fixture carries a context reading, so the two-row count also pins that the fill RIDES that one
+// summarised line rather than adding a row of its own.
 func TestCollapsedRunSaysItsGistOnce(t *testing.T) {
 	const gist = "Found 4 gaps"
 	cases := []struct {
@@ -979,6 +983,7 @@ func TestCollapsedRunSaysItsGistOnce(t *testing.T) {
 			tr := &transcript{}
 			subAgentCall(tr, "s1", "survey the tests", 0)
 			readCall(tr, "c1", "a.go", 1, 5, 1)
+			subAgentUsage(tr, 1, 12000, 32768)
 			subAgentReport(tr, "s1", tc.report, 0)
 
 			painted := renderPlain(tr, 80)
@@ -1004,6 +1009,11 @@ func TestCollapsedRunSaysItsGistOnce(t *testing.T) {
 // the calls and names what the span has open right now, in the same words the status line uses for
 // that call; once the report lands it counts the calls and shows the report's own gist. A run with
 // nothing to add to the count says the count alone rather than trailing an empty separator.
+//
+// Each tempo is pinned twice — with a context reading and without one. The delegate's fill takes the
+// middle cell whenever it has reported one, in the gauge's own whole-thousands spelling; where it has
+// not, the line degrades to exactly what it said before the reading existed, separator and all, which
+// is also what an old session decodes to.
 func TestSubAgentSummaryTempi(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -1046,6 +1056,47 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 			},
 			want: "  ┕ survey the tests 1 tool call · Found 4 gaps",
 		},
+		{
+			name: "working, having reported: the fill sits between the count and the live phrase",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsage(tr, 1, 12000, 32768)
+				tr.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 1},
+					Call: domain.ToolCall{ID: "c2", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)}})
+			},
+			want: "  ┕ survey the tests 2 tool calls · 12k/32k · searching · TODO",
+		},
+		{
+			name: "working with every call settled: the count and the fill, and no empty separator after it",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsage(tr, 1, 900, 32768)
+			},
+			want: "  ┕ survey the tests 1 tool call · 900/32k",
+		},
+		{
+			name: "finished: the reading the run ended on stands beside its report",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsage(tr, 1, 12000, 32768)
+				subAgentUsage(tr, 1, 18432, 32768)
+				subAgentReport(tr, "s1", "Found 4 gaps", 0)
+			},
+			want: "  ┕ survey the tests 1 tool call · 18k/32k · Found 4 gaps",
+		},
+		{
+			name: "a reading with no window behind it is no cell at all",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsage(tr, 1, 12000, 0) // an unbound window: a fill with no scale says nothing
+				subAgentReport(tr, "s1", "Found 4 gaps", 0)
+			},
+			want: "  ┕ survey the tests 1 tool call · Found 4 gaps",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1064,6 +1115,10 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 // TestSubAgentCountIsTransitive proves the one number covers the whole run: the span holds every
 // entry of every level below the head, so a nested run's calls — and the nested sub_agent call
 // itself — count toward the outer run's total without a second rule for depth.
+//
+// The fill on the very same line is the counter-example, and the reason the two cells cannot share a
+// rule: work done deeper down is still work this run commissioned, but context filled deeper down was
+// filled in a window of its own, so a grandchild's figure must never surface on the outer line.
 func TestSubAgentCountIsTransitive(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the repo", 0)
@@ -1071,13 +1126,20 @@ func TestSubAgentCountIsTransitive(t *testing.T) {
 	subAgentCall(tr, "s2", "read the tests", 1)
 	readCall(tr, "c2", "b.go", 1, 9, 2)
 	readCall(tr, "c3", "c.go", 1, 3, 2)
+	subAgentUsage(tr, 2, 7000, 32768) // the grandchild's own fill
 	subAgentReport(tr, "s2", "tests read", 1)
+	subAgentUsage(tr, 1, 12000, 32768) // the outer run's own fill
 	subAgentReport(tr, "s1", "survey complete", 0)
 
-	// One read at depth 1, the nested sub-agent call, and its two reads at depth 2.
-	want := "  ┕ survey the repo 4 tool calls · survey complete"
-	if branch := strings.Split(renderPlain(tr, 80), "\n")[1]; branch != want {
+	// One read at depth 1, the nested sub-agent call, and its two reads at depth 2 — against the
+	// outer run's OWN 12k, never the 19k the two windows would add up to.
+	painted := renderPlain(tr, 80)
+	want := "  ┕ survey the repo 4 tool calls · 12k/32k · survey complete"
+	if branch := strings.Split(painted, "\n")[1]; branch != want {
 		t.Errorf("transitive summary = %q; want %q", branch, want)
+	}
+	if strings.Contains(painted, "7k") {
+		t.Errorf("the nested run's fill surfaced on the collapsed outer run — a fill is not transitive:\n%s", painted)
 	}
 }
 

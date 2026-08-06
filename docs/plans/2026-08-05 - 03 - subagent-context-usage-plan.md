@@ -48,9 +48,11 @@ NOTES (2026-08-06): mechanism chosen under the item's "implementer's choice" cla
 
 **Commit:** `feat(tui): fold sub-agent usage onto its transcript run`
 
-## 2. Render the usage cell on the sub-agent summary line
+## 2. Render the usage cell on the sub-agent summary line — ✅ DONE (2026-08-06)
 
 Depends on item 1.
+
+NOTES (2026-08-06): two additions beyond the item's named files, both documentation of the code this item changed. `render.go` gained a small `subAgentFill(head entry) string` helper beside `subAgentSummary` (the omit-when-zero rule stated once, where the codec and the gauge precedent can be cited); `internal/tui/doc.go` (~56) had its one clause about the collapsed run's summary slot amended to name the fill cell and its non-transitivity — the sentence described the very composition this item changed. `paintKey` gained the reading as two int fields (`ctxUsed`/`ctxLimit`) rather than one composite, matching the entry's own pair. `TestCollapsedRunSaysItsGistOnce` keeps its 2-line pin unweakened and its fixture now carries a reading, so the pin also covers "the cell rides the existing summary line".
 
 **What:** Paint the stored reading as the summary line's middle cell, and make the paint cache honest about it.
 

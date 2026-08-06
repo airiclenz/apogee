@@ -380,17 +380,21 @@ func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool
 	}).railed(th, head.depth)
 }
 
-// subAgentSummary words a collapsed run's one line: how much work happened in there, then its gist
-// (layout.md, "A sub-agent run collapses to its call block"). The count is TRANSITIVE by
-// construction — the span holds every entry of every level below the head, so counting its tool
-// calls counts the grandchildren too, and the same rule read at a deeper head gives that level's
-// own total without a second rule.
+// subAgentSummary words a collapsed run's one line: how much work happened in there, how full the
+// delegate's own context got doing it, then its gist (layout.md, "A sub-agent run collapses to its
+// call block"). The count is TRANSITIVE by construction — the span holds every entry of every level
+// below the head, so counting its tool calls counts the grandchildren too, and the same rule read at
+// a deeper head gives that level's own total without a second rule.
 //
-// A run with nothing to say beyond the count — no call open yet, or a report that carried no line
-// at all — keeps the count alone rather than trailing an empty separator.
+// The fill is the exact opposite: it is the head's OWN frozen reading (subAgentFill) and never a
+// nested run's, because each agent fills a window of its own. It sits between the count and the gist
+// so the gist — the one part with no bound on its length — is what a narrow terminal clips.
 //
-// The line is marked QUOTED (branchSummary) for what its second half is: the child's own report,
-// or the phrase for the call it has open. Nothing respells it in either case — this is composed at
+// A run with nothing to say beyond the count — no reading yet, no call open, or a report that
+// carried no line at all — keeps the count alone rather than trailing an empty separator.
+//
+// The line is marked QUOTED (branchSummary) for what its last cell is: the child's own report, or
+// the phrase for the call it has open. Nothing respells it in either case — this is composed at
 // paint, long after the shortening seam ran on the way in — so the mark is a statement about the
 // text rather than a switch, and it is the one that stays true if a seam ever reads it.
 func subAgentSummary(head entry, span []entry) branchSummary {
@@ -401,10 +405,29 @@ func subAgentSummary(head entry, span []entry) branchSummary {
 		}
 	}
 	text := plural(calls, "tool call")
+	if fill := subAgentFill(head); fill != "" {
+		text += " · " + fill
+	}
 	if gist := subAgentGist(head, span); gist != "" {
 		text += " · " + gist
 	}
 	return quotedSummary(detailLine{Text: text})
+}
+
+// subAgentFill spells the run head's context reading as the gauge spells one — "12k/32k", the same
+// whole-thousands form the status line's window uses (formatTokens), so the two readings on screen
+// are read in one language. It is the pair frozen on the entry when the reading folded
+// (transcript.applyUsage), which is why a finished run keeps saying what it filled.
+//
+// A missing half means no cell at all: a fill without its limit is a number with no scale, and the
+// status gauge hides itself on the very same condition rather than showing one. That is also what a
+// run whose child never reported paints — and what a session recorded before the reading existed
+// decodes to (transcriptcodec.go), so nothing needs a migration to look right.
+func subAgentFill(head entry) string {
+	if head.ctxUsed <= 0 || head.ctxLimit <= 0 {
+		return ""
+	}
+	return formatTokens(head.ctxUsed) + "/" + formatTokens(head.ctxLimit)
 }
 
 // subAgentGist is the second half of a collapsed run's summary, in the two tempi layout.md gives it.

@@ -83,6 +83,15 @@ type paintKey struct {
 	live  bool   // whether the block still holds an open call (blockState.live), which is what makes the star blink
 	blink bool   // the frame's star phase, folded in ONLY while live — a settled block paints identically at either phase
 	flags string // one byte per covered entry: bit 0 expanded, bit 1 done (spanFlags)
+
+	// The head's context reading, which a collapsed sub-agent run states on its summary line
+	// (subAgentFill). It is the one input that moves with NO other movement the key can see: a
+	// UsageEvent appends no entry, extends no span and flips no flag, so a run whose delegate just
+	// reported would otherwise keep serving the previous figure until its next tool call. Both
+	// halves are named because both are painted, and the limit moves on its own when the window
+	// rebinds under a run that has not reported since.
+	ctxUsed  int
+	ctxLimit int
 }
 
 // cacheable reports whether a block with this key may be stored at all. Exactly one kind may not:
@@ -200,15 +209,17 @@ func (c *paintCache) clear() {
 // different one (blockState.live); everything else is read off the entries and the frame.
 func (t *transcript) blockKey(shape blockShape, head, n int, th theme, width int, blink, live bool) paintKey {
 	return paintKey{
-		shape:   shape,
-		kind:    t.entries[head].kind,
-		depth:   t.entries[head].depth,
-		width:   width,
-		measure: th.measure,
-		span:    n,
-		live:    live,
-		blink:   blink && live, // a settled block's paint does not depend on the phase; folding it in anyway would miss on every phase flip
-		flags:   spanFlags(t.entries[head : head+n]),
+		shape:    shape,
+		kind:     t.entries[head].kind,
+		depth:    t.entries[head].depth,
+		width:    width,
+		measure:  th.measure,
+		span:     n,
+		live:     live,
+		blink:    blink && live, // a settled block's paint does not depend on the phase; folding it in anyway would miss on every phase flip
+		flags:    spanFlags(t.entries[head : head+n]),
+		ctxUsed:  t.entries[head].ctxUsed,
+		ctxLimit: t.entries[head].ctxLimit,
 	}
 }
 
