@@ -573,9 +573,10 @@ func TestResolveValidatedSetAppliesOnAStoredProbeRecord(t *testing.T) {
 	}
 }
 
-// With no `model:` pinned anywhere, the probe discovers the active model and records a
-// fingerprint for it — but the next session start resolves identity from the pinned `model:`,
-// which is empty, so startup's ladder reaches nothing and NO set applies. The report must say
+// With no `model` hint pinned anywhere, the probe discovers the active model and records a
+// fingerprint for it — but the next session start resolves identity from the `model` hint on the
+// `servers:` entry it starts on, which is empty, so startup's ladder reaches nothing and NO set
+// applies. The report must say
 // that (and name the pin that would change it) instead of promising an auto-apply the reader's
 // machine never delivers (ADR 0021 §4 — the same defect class as the catalogue-skip parity).
 func TestProbeModelSuppressesTheClaimWhenNoModelIsPinned(t *testing.T) {
@@ -589,7 +590,7 @@ func TestProbeModelSuppressesTheClaimWhenNoModelIsPinned(t *testing.T) {
 		t.Errorf("the report claims a promotion an unpinned startup cannot resolve:\n%s", report)
 	}
 	for _, want := range []string{
-		"no `model:` is pinned in your config",
+		"no `model` is pinned on this session's `servers:` entry",
 		"pin `model: " + gemmaKey + "`",
 	} {
 		if !strings.Contains(report, want) {
@@ -597,7 +598,8 @@ func TestProbeModelSuppressesTheClaimWhenNoModelIsPinned(t *testing.T) {
 		}
 	}
 	// The record itself IS written — the suppression is about startup's identity resolution,
-	// not about the save, and pinning `model:` later makes the record take effect as stored.
+	// not about the save, and adding the entry's `model` hint later makes the record take effect
+	// as stored.
 	if _, _, ok := library.LoadProbeRecord(library.ProbeDir(configHome), srv.URL, gemmaKey); !ok {
 		t.Errorf("the record must still be written; only the effect claim is suppressed")
 	}

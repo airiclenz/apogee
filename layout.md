@@ -58,7 +58,7 @@
 │ at the clicked position. The background color of this box is black. The border      │
 │ of this prompt box are dark gray.                                                   │
 ╰─────────────────────────────────────────────────────────────────────────────────────╯
-  host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee                  ◐ ask before
+  workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee                 ◐ ask before
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 
 ---
@@ -845,9 +845,10 @@ fact goes the moment a server is bound.
 ## The footer's upstream slot
 
 **What it carries.** The footer's content row states the upstream on the left — `host ✦ model ✦
-workdir`, the sketch's `host-alias ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee` — and the autonomy
-mode on the right. The host falls back to the endpoint's own host when no alias is configured, and
-any segment nothing has named is dropped with its separator.
+workdir`, the sketch's `workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee` — and the autonomy
+mode on the right. The host is the bound `servers:` entry's own name — the name IS a server's alias
+(ADR 0036 decision 1) — falling back to the endpoint's own host for the unlisted `--endpoint` start
+that has no name, and any segment nothing has named is dropped with its separator.
 
 **The mode marker's symbol.** The mode is stated as a glyph and its word, one rung per shape:
 `⊞ plan`, `◐ ask before`, `✔ allow edits`, `▸▸ auto`. The glyph is rendered in the SAME styled run

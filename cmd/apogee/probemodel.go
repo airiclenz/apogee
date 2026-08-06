@@ -119,8 +119,9 @@ func probeModelCommand() *cobra.Command {
 			}
 
 			// The battery client, carrying the resolved bearer token exactly as the label
-			// discovery above does (`api-key:` / APOGEE_API_KEY; no flag — a secret does not
-			// belong in shell history). Both of this command's clients are keyed, so a keyed
+			// discovery above does (the startup `servers:` entry's own `api-key`, which
+			// APOGEE_API_KEY overlays; no flag — a secret does not belong in shell history).
+			// Both of this command's clients are keyed, so a keyed
 			// Upstream cannot refuse the probe while a session against it works.
 			client := provider.NewClient(opts.endpoint, label,
 				provider.WithRequestTimeout(batteryRequestTimeout), provider.WithAPIKey(opts.apiKey))
@@ -236,7 +237,8 @@ func recordProbeFingerprint(m probe.Model, roots stateRoots, opts options, save 
 // tier this model resolves to WITHOUT what this run recorded. The difference between the two
 // answers is the promotion, and computing it rather than assuming it is what keeps the effect
 // line true on a machine where an alias was already applying the set — or where startup's
-// identity ladder never reaches the record at all: an unpinned `model:` resolves nothing, and
+// identity ladder never reaches the record at all: a `servers:` entry with no `model` hint on
+// it resolves nothing, and
 // a model id naming a reachable weight file resolves at the weights tier above it. A LOADING
 // defect stays silent here: this is a courtesy line in a report, and a broken user file is
 // already loud at the startup path that owns it. A catalogue defect in the entry that would
@@ -252,11 +254,11 @@ func autoApplyKeys(m probe.Model, opts options, validatedDir, probeDir string) (
 	case with.kind == setSurfaceOff:
 		return nil, false, "`validated-sets: enable: false` turns the surface off, so no set applies as this session is configured"
 	// The probe discovered the label from the server, but startup resolves identity from the
-	// pinned `model:` — empty here, so the next session start resolves nothing and the record,
-	// though written, is never reached.
+	// `model` hint on the `servers:` entry it starts on — empty here, so the next session start
+	// resolves nothing and the record, though written, is never reached.
 	case with.kind == setNoIdentity:
-		return nil, false, "no `model:` is pinned in your config, so the next session start cannot resolve this identity — " +
-			"pin `model: " + m.Model + "` for the record to take effect"
+		return nil, false, "no `model` is pinned on this session's `servers:` entry, so the next session start " +
+			"cannot resolve this identity — pin `model: " + m.Model + "` on that entry for the record to take effect"
 	// The model id names a reachable weight file, so startup's ladder resolves at the weights
 	// tier (high) and never reads the behavioral record below it.
 	case with.fp.Confidence == domain.ConfidenceHigh:

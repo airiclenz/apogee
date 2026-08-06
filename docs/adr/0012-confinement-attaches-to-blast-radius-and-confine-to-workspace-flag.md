@@ -300,7 +300,7 @@ allow-for-session cache (contract §4's **mcp** row, unmoved). This amendment is
 unaffected, and subprocess network reach remains out of scope.
 
 **The trade-off.** A user who types a private `endpoint:` reaches that address, which is the
-intent — the same standing their `model.endpoint:` and their stdio `command:` already have. What is
+intent — the same standing their LLM server's own endpoint and their stdio `command:` already have. What is
 NOT accepted is that trust widening past the address they named, which is what the pin prevents.
 The floor remains a floor everywhere it bounds a model.
 

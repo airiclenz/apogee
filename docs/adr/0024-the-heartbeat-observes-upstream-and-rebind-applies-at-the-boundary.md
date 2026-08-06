@@ -121,7 +121,7 @@ heartbeat: offline state and the model list still live, no binding ever moves. `
 reports what was actually **bound**, never merely what was observed, and the display adopts *that*
 — so the footer can never advertise a model the wire is not using.
 
-**6. `context-window:` is a PIN; `model:` is a HINT.** A configured window is never overridden by
+**6. `context-window:` is a PIN; a configured `model` is a HINT.** A configured window is never overridden by
 the heartbeat, in the display or in the Budget — "leave unset to discover" stays the documented
 semantics, and the pin is the escape hatch for a server that misreports its window. A configured
 model is passed as the **discovery hint** (which fixes the multi-model wrong-window defect at its

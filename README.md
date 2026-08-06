@@ -18,7 +18,7 @@ terminal — or any standalone terminal — on Windows, macOS, and Linux. It run
 against any OpenAI-compatible endpoint: a local LLM server (llama.cpp, Ollama,
 LM Studio, vLLM) keeps your code on your machine and needs no API key, and a
 keyed one — a remote vLLM, an OpenAI-compatible cloud provider — is one
-`api-key:` away. Either way you get the full agentic tool-use loop, with
+`api-key` on its `servers:` entry away. Either way you get the full agentic tool-use loop, with
 autonomy fenced at the operating-system level rather than on trust.
 
 ## What this repo is
@@ -154,7 +154,8 @@ until then `SHA256SUMS` is the check that is actually worth making.
 
 - **Local-first, cloud-capable** — any OpenAI-compatible endpoint: a local server
   keeps every byte on your machine and needs no API key; a keyed one — a remote
-  vLLM, an OpenAI-compatible cloud provider — is one `api-key:` away.
+  vLLM, an OpenAI-compatible cloud provider — is one `api-key` on its
+  `servers:` entry away.
 - **Agentic tool use** — multi-step loop with file edits, shell, search, git, web,
   and sub-agents.
 - **Four autonomy modes** — Plan (read-only), Ask-Before (writes need approval),

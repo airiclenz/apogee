@@ -173,6 +173,7 @@ local cross-repo dev via an untracked `go.work`.
   model-profile abstraction (request-side, still unstarted) is untouched by all of this and
   remains the [P1] entry's live half.
 - Deliberate non-goals, so they are not re-opened as gaps: no auto-`/load` at startup (the
-  session starts at `endpoint:`, ADR 0028 D5); no log tailing inside apogee (unexported by the
+  session starts on the `servers:` entry `server:` names — ADR 0028 D5 as ADR 0036 D2 restates
+  it); no log tailing inside apogee (unexported by the
   facade; the launcher TUI/CLI/MCP own it); no mid-flight cancel (decision 6); no launcher
   rows in `/server` (decision 2).

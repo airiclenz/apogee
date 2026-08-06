@@ -101,12 +101,15 @@ Sanity check before any take: `cd demo/taskman && go test ./...` must print
 `Pending returned 1 tasks, want 2`.
 
 **2. `demo/home/` — isolated apogee home.** Copy the repo's seed template
-`cmd/apogee/defaults/config.yaml` to `demo/home/.apogee/config.yaml`, then set two keys
-(uncomment/edit):
+`cmd/apogee/defaults/config.yaml` to `demo/home/.apogee/config.yaml`, then name the one
+server the demo runs on (uncomment/edit) — the entry's `name` is the alias the footer shows:
 
 ```yaml
-endpoint: http://localhost:1111
-host-alias: mac-studio
+servers:
+  - name: mac-studio
+    endpoint: http://localhost:1111
+
+server: mac-studio
 ```
 
 Isolation via `HOME` (not `--config`) keeps the on-screen command pristine — the clip

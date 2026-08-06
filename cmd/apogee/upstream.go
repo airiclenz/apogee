@@ -29,7 +29,8 @@ import (
 // not expose one (it is per-server and immutable) and something at the composition root has to be
 // able to answer "which server is this session on RIGHT NOW". A profile load asks exactly that, to decide
 // whether the profile it just activated is already the session's server or somewhere else (ADR 0029
-// D2) — and the launch-time `endpoint:` is the wrong answer the moment a `/server` switch has moved.
+// D2) — and the endpoint of the entry the session launched on is the wrong answer the moment a
+// `/server` switch has moved.
 //
 // The key and the bound model ride along for the same reason, and answer the same question one step
 // further: an out-of-band call the composition root makes on the session's behalf — the session

@@ -865,7 +865,7 @@ apogee paints before the server has answered and can be started **before** its s
 together — wire model id, [System prompt](#context-and-history) template, context window, and the
 [Mechanism](#mechanism-and-hook-points) set — at a **quiescent boundary** (idle, or deferred to the
 end of the running [Exchange](#turns-and-stepping)), never mid-Exchange. A configured
-`context-window:` is a **pin** the heartbeat never overrides; a configured `model:` is a **hint**
+`context-window:` is a **pin** the heartbeat never overrides; a `servers:` entry's `model` is a **hint**
 that yields to what the server actually serves — and the hint **follows the binding**, restated on
 every commit, so discovery keeps resolving the model the session actually runs rather than the one
 config named at launch.

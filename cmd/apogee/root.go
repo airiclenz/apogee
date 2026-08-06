@@ -28,7 +28,8 @@ type options struct {
 	configDir       string
 
 	// Resolved display values handed to the TUI (not bound to flags). hostAlias is the
-	// footer's friendly host name (config key, else the endpoint host); contextWindow is the
+	// footer's friendly host name — the startup `servers:` entry's own name, which IS a server's
+	// alias since ADR 0036, else the endpoint host; contextWindow is the
 	// `context-window:` PIN in tokens, and nothing else — startup no longer probes, so a
 	// non-zero value means the user pinned the window and the heartbeat must never override it
 	// (ADR 0024, decision 9), while 0 means "discover it, live" and the first landed beat binds
@@ -36,8 +37,9 @@ type options struct {
 	hostAlias     string
 	contextWindow int
 
-	// apiKey is the upstream bearer token (`api-key:` in config.yaml, `APOGEE_API_KEY` in the
-	// environment), resolved-not-flag-bound like hostAlias above — but for a different reason:
+	// apiKey is the upstream bearer token (the startup `servers:` entry's own `api-key` field,
+	// which `APOGEE_API_KEY` overlays), resolved-not-flag-bound like hostAlias above — but for a
+	// different reason:
 	// there is deliberately no --api-key, because a secret on the command line lands in shell
 	// history and in `ps` output. applyConfig sets it from the resolved settings (env > file);
 	// empty ⇒ no Authorization header, which is the keyless local-server default. Its VALUE is

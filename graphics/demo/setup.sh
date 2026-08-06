@@ -39,12 +39,16 @@ git -C "$STAGE" -c user.email=demo@local -c user.name=demo \
     diff --cached --quiet || git -C "$STAGE" -c user.email=demo@local -c user.name=demo \
     commit -qm "taskman: stage with the planted Pending() bug"
 
-# Seed the isolated apogee config from the binary's own template, then set the two keys the
-# clip depends on. Isolation is via HOME rather than --config so the on-screen command stays
-# a bare `apogee …` and sessions never land in the real ~/.apogee.
-sed -e "s|^# endpoint: .*|endpoint: $ENDPOINT|" \
-    -e "s|^# host-alias: .*|host-alias: $HOST_ALIAS|" \
-    "$REPO/cmd/apogee/defaults/config.yaml" > "$DEMO_HOME/.apogee/config.yaml"
+# Seed the isolated apogee config from the binary's own template, then append the one server the
+# clip runs on. The `servers:` list is the single definition of what apogee can talk to and
+# `server:` names the entry a session starts on (ADR 0036); the entry's own name IS the alias the
+# footer shows, so one value does both jobs. Isolation is via HOME rather than --config so the
+# on-screen command stays a bare `apogee …` and sessions never land in the real ~/.apogee.
+{
+  cat "$REPO/cmd/apogee/defaults/config.yaml"
+  printf '\nservers:\n  - name: %s\n    endpoint: %s\n\nserver: %s\n' \
+      "$HOST_ALIAS" "$ENDPOINT" "$HOST_ALIAS"
+} > "$DEMO_HOME/.apogee/config.yaml"
 
 # env.sh is generated (not checked in) because it bakes in machine-specific absolute paths.
 # Tapes source it from a Hide block so none of this appears on camera.
@@ -74,6 +78,6 @@ chmod +x "$WORK/reset.sh"
 echo "demo rig ready"
 echo "  work dir : $WORK"
 echo "  stage    : $STAGE"
-echo "  endpoint : $ENDPOINT   host-alias: $HOST_ALIAS"
+echo "  endpoint : $ENDPOINT   server: $HOST_ALIAS"
 echo
 echo "next: ./record.sh hero    (or any tape name under tapes/)"

@@ -96,7 +96,8 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 				Workspace:  roots.workspace,
 				ConfigHome: roots.config,
 				Endpoint:   opts.endpoint,
-				// The resolved bearer token (`api-key:` / APOGEE_API_KEY, no flag): the
+				// The resolved bearer token (the startup `servers:` entry's own `api-key`,
+				// which APOGEE_API_KEY overlays; no flag): the
 				// probe must authenticate exactly as a session would, or a keyed server
 				// would be reported unreachable here and perfectly fine in a session. The
 				// report states its PRESENCE only; the value never reaches Host.

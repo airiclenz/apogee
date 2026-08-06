@@ -158,8 +158,9 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	cfg := apogee.Config{
 		Endpoint: opts.endpoint,
 		Model:    opts.model,
-		// The upstream bearer token, resolved from `api-key:` / APOGEE_API_KEY (env > file).
-		// Empty — the keyless local default — sends no Authorization header at all.
+		// The upstream bearer token, resolved from the startup `servers:` entry's own `api-key`,
+		// which APOGEE_API_KEY overlays. Empty — the keyless local default — sends no
+		// Authorization header at all.
 		APIKey:       opts.apiKey,
 		Mode:         mode,
 		Bypass:       opts.bypass,

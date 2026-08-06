@@ -1854,8 +1854,9 @@ func configFilePath(configDir string) string {
 // Upstream discovery is deliberately absent from this file. It used to live here as the
 // lowest-priority resolution layer (flag > env > file > discover), probing the server before the
 // first paint; it now belongs to the heartbeat, which asks the same question every ten seconds from
-// inside the running session (ADR 0024). `model:` and `context-window:` are what they always were —
-// a pinned model id and a pinned window — but neither is filled in from the wire any more: an unset
+// inside the running session (ADR 0024). A `servers:` entry's `model` hint and `context-window:`
+// are what they always were — a pinned model id and a pinned window — but neither is filled in
+// from the wire any more: an unset
 // model stays empty until the first beat binds one, and an unset window stays 0, which is why
 // opts.contextWindow > 0 now means "the user pinned it" and nothing else.
 

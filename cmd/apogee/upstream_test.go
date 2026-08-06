@@ -54,7 +54,7 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 		t.Errorf("Endpoint before the swap = %q; want the seeded %q", got, first.URL)
 	}
 	// The launch-time binding an out-of-band call (the session naming completion) would be built
-	// from: the endpoint, the configured `model:` pin, and the resolved key.
+	// from: the endpoint, the entry's own `model` hint, and the resolved key.
 	want := upstreamBinding{Endpoint: first.URL, Model: "model-a", APIKey: "key-a"}
 	if got := holder.Binding(); got != want {
 		t.Errorf("Binding before the swap = %+v; want the seeded %+v", got, want)
