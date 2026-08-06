@@ -927,6 +927,145 @@ func TestExpandedGroupPaintsIdentically(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The answered Ask User block: an ordinary body-bearing block (layout.md, "Collapsed and
+// expanded blocks")
+// ----------------------------------------------------------------------------
+
+// askUserCall folds an ask_user call and, where answer is non-empty, the human's reply — the two
+// halves the answered block's record is built from (the question and choices are the CALL's,
+// the ticks are the RESULT's). An empty answer leaves the question pending, which is the state the
+// popup owns and the block says nothing about.
+func askUserCall(tr *transcript, id, args, answer string) {
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: id, Tool: "ask_user", Arguments: []byte(args)}})
+	if answer != "" {
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id, Content: answer}})
+	}
+}
+
+// TestAnsweredAskUserBlockPaintsTheRecord walks the answered question through both block states:
+// the record is a body like any other, so it spends the same one-line budget with its remainder
+// marker collapsed and paints whole expanded, with the answer riding the branch throughout. No
+// painter rule is new here — that is the claim. Once the presenter hands the block a body, the
+// machinery already in place gives the exchange its permanent shape.
+func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
+	tr := &transcript{}
+	askUserCall(tr, "c1", `{"question":"Which mode?","choices":["Plan","Ask before","Auto"]}`, "Ask before")
+
+	collapsed := strings.Join([]string{
+		"✦ Ask User ▸",
+		"  ┕ Which mode? Ask before",
+		"    Which mode?",
+		"    … +3 more lines",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != collapsed {
+		t.Errorf("collapsed record mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
+	}
+
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false; want the answered question expanded")
+	}
+	expanded := strings.Join([]string{
+		"✦ Ask User ▾",
+		"  ┕ Which mode? Ask before",
+		"    Which mode?",
+		"    [ ] Plan",
+		"    [x] Ask before",
+		"    [ ] Auto",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != expanded {
+		t.Errorf("expanded record mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, expanded)
+	}
+
+	if !tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = false on the way back; want the block collapsed again")
+	}
+	if got := renderPlain(tr, 80); got != collapsed {
+		t.Errorf("re-collapsed record mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
+	}
+}
+
+// …and because the collapsed paint now hides something, the block becomes a toggle target by the
+// one predicate that decides both the affordance and the click (blockHidesWhenCollapsed): the
+// header is marked and wears its ▸/▾ indicator, the remainder marker is marked for the entry it
+// belongs to, and expanding takes the marker away while the header keeps the click that closes the
+// block again. A question still on the screen hides nothing and is no target at all.
+func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
+	const question = `{"question":"Which mode?","choices":["Plan","Ask before","Auto"]}`
+
+	t.Run("an answered question marks its header and its marker", func(t *testing.T) {
+		tr := &transcript{}
+		askUserCall(tr, "c1", question, "Ask before")
+
+		want := []blockMark{
+			{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User ▸"},
+			{line: 3, kind: targetMarker, entry: 0, text: "    … +3 more lines"},
+		}
+		if got := blockMarks(t, tr, 80); !reflect.DeepEqual(got, want) {
+			t.Errorf("collapsed marks mismatch:\n--- got ---\n%+v\n--- want ---\n%+v", got, want)
+		}
+
+		if !tr.toggleExpanded(0) {
+			t.Fatal("toggleExpanded(0) = false; want the answered question expanded")
+		}
+		want = []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User ▾"}}
+		if got := blockMarks(t, tr, 80); !reflect.DeepEqual(got, want) {
+			t.Errorf("expanded marks mismatch:\n--- got ---\n%+v\n--- want ---\n%+v", got, want)
+		}
+	})
+
+	t.Run("a pending question is no target", func(t *testing.T) {
+		tr := &transcript{}
+		askUserCall(tr, "c1", question, "")
+
+		if got := blockMarks(t, tr, 80); got != nil {
+			t.Errorf("pending question marks = %+v, want none — the popup is its live view", got)
+		}
+	})
+}
+
+// The record breaks the grouping a question used to fold into: a call carrying a body is not
+// groupable, so consecutive answered questions each keep a block of their own, each with the room
+// its own exchange needs. Pending ones still group — they carry no body yet — which is what makes
+// this the ordinary rule applying rather than a rule about Ask User.
+func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
+	t.Run("answered questions stand alone", func(t *testing.T) {
+		tr := &transcript{}
+		askUserCall(tr, "c1", `{"question":"Ship it?","choices":["Yes","No"]}`, "Yes")
+		askUserCall(tr, "c2", `{"question":"Tag it?","choices":["Yes","No"]}`, "No")
+
+		want := strings.Join([]string{
+			"✦ Ask User ▸",
+			"  ┕ Ship it? Yes",
+			"    Ship it?",
+			"    … +2 more lines",
+			"",
+			"✦ Ask User ▸",
+			"  ┕ Tag it? No",
+			"    Tag it?",
+			"    … +2 more lines",
+		}, "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("answered questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("pending questions still group", func(t *testing.T) {
+		tr := &transcript{}
+		askUserCall(tr, "c1", `{"question":"Ship it?","choices":["Yes","No"]}`, "")
+		askUserCall(tr, "c2", `{"question":"Tag it?","choices":["Yes","No"]}`, "")
+
+		want := strings.Join([]string{
+			"✦ Ask User",
+			"  ┝ Ship it?",
+			"  ┕ Tag it?",
+		}, "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("pending questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+}
+
+// ----------------------------------------------------------------------------
 // The collapsed prompt: a huge send paints three rows and a marker (layout.md, "Collapsed and
 // expanded blocks")
 // ----------------------------------------------------------------------------

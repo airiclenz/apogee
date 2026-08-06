@@ -119,7 +119,7 @@ a dedicated test using the `detailsText` helper):
 
 **Commit:** `feat(tui): answered ask_user blocks record the question, choices and answers`
 
-## 2. Paint behavior and layout.md spec for the answer record
+## 2. Paint behavior and layout.md spec for the answer record — ✅ DONE (2026-08-06)
 
 Depends on item 1.
 

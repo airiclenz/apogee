@@ -473,10 +473,19 @@ whole output is a single line puts that line on the branch beside the target
 (`┕ cat paths.txt  /home/me/proj/docs/plan.md`), and promotion changes where the text sits, never
 whose text it is — one row lower the identical line would have been a body. The answer to an
 `Ask User` question rides the branch on the same footing: it is the human's own words, not a report
-the block wrote, so it prints exactly as they typed it. A multi-select answer needs no rule of its
-own here — several ticked labels arrive as one multi-line answer, so its first line is promoted onto
-the branch and the rest rides the expandable detail beneath it, exactly as any other multi-line body
-does. An in-workspace path sitting inside file content is content, not a mention: shortened, it
+the block wrote, so it prints exactly as they typed it. Only its **first line** rides there, and
+what hangs beneath an answered question is the **record of the exchange** the popup showed and then
+took away: every line of the question as it was put, then one line per offered choice behind `[x]`
+where the answer named that choice and `[ ]` where it did not — the same ASCII pair the popup ticks
+with, box-drawing checkboxes rendering as tofu — and then any answer line no choice accounts for,
+which is where a typed reply lands and where the later lines of a multi-line answer land with it, so
+no part of what a human said goes unshown. Every line of that body is quoted in this same sense, the
+choice labels included. It is built from the **call's own arguments** and the answer already
+returned, so nothing crosses the wire for it and the model's view of the exchange is byte for byte
+what it was; and it exists **only once the answer has landed** — while the question is on the screen
+the popup is its live view and the block is the summary-only card any in-flight call is. A question
+that offered no choices keeps the record too, minus the list. An in-workspace path sitting inside
+file content is content, not a mention: shortened, it
 would show the human approving a write a spelling the file will not actually contain. Nothing
 decides this by looking at a line, because a content line can look exactly like a path; a line is
 respelled only where the presenter that put it there says it is the block's own words — a path it
@@ -586,6 +595,16 @@ that happens to open with `…` can never be mistaken for the affordance beneath
 top of this file shows both states side by side: a collapsed `Run ▸` over its remainder marker, and
 a `View Diff ▾` and a `Sub Agent ▾` deliberately drawn open so the shape of a full body appears
 too — the run among them, because collapsed it would stand alone and show nothing of what it holds.
+
+**An answered question is an ordinary block, and that is the whole rule.** Once the human has
+answered, the `Ask User` block carries the record of the exchange as its body (above), so
+everything in this section falls on it with nothing added: its header wears the `▸`/`▾` indicator
+and is a toggle target, collapsed it spends the one-line budget over its `… +N more lines`
+remainder and expanded it paints the whole record, and it no longer folds into a group with the
+question before it — a call carrying a body never does. None of that is true while the question is
+still on the screen, because the block has no body yet: it groups, it hides nothing, and its header
+is no target. The popup is the surface a question is answered on, exactly as the approval popup is
+the surface an action is approved on; the block is the *record*, and a record may collapse.
 
 **A huge prompt collapses to three rows.** A send whose body soft-wraps to *more than three* rows —
 a submitted `❯` prompt and a delivered `⧖` interjection alike, they are one shape — paints three:
