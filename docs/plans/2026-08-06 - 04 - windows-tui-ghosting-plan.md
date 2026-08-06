@@ -6,7 +6,7 @@
   measurements that separate four live hypotheses, fixes the cause, and pins the fix with a
   regression test that runs headless on Windows CI.
 - **Date:** 2026-08-06
-- **Status:** not started
+- **Status:** in progress — item 4 (the diagnosis) ✅ done 2026-08-06; items 1-3 and 5-8 open
 - **Predecessor:** `docs/handoffs/2026-08-06 - 00 - windows-tui-ghosting-debug.md` — the symptom
   report and the first (unsuccessful) dependency-bump attempt. This plan supersedes its debug
   plan; the symptom description there is still ground truth.
@@ -253,7 +253,10 @@ test the interactive path itself.
 
 **Commit:** `feat(probe): apogee probe terminal measures the terminal's real behaviour`
 
-## 4. DESIGN CALL — capture the evidence and pick the cause
+## 4. DESIGN CALL — capture the evidence and pick the cause — ✅ DONE (2026-08-06)
+
+> **Answer: H1 (last-column / pending wrap), amplified by H2. H3 and H4 ruled out.** Full evidence
+> in "Item 4 findings" at the end of this file; the verdict table is under "Item 4 — ANSWER".
 
 **Runnable now — does NOT depend on items 1-3.** Items 2 and 3 turn these capabilities into
 supported repo features; the prebuilt kit at `C:\Users\airic\apogee-ghosting-debug\` already
@@ -452,9 +455,11 @@ run and consult, which is intended: they are the two points where guessing would
 confident-sounding wrong answer, which is the specific failure mode that cost the previous
 session its dependency-bump attempt.
 
-## Item 4 findings — IN PROGRESS (2026-08-06)
+## Item 4 findings — ✅ COMPLETE (2026-08-06)
 
-Rows are recorded as the owner runs them. Nothing here is inferred from a row nobody performed.
+Every row was run by the owner on the Windows host; nothing here is inferred from a row nobody
+performed. The verdict is under "Item 4 — ANSWER" at the end of this section, and that verdict is
+the authoritative source for items 5 and 6.
 
 | Row | Status |
 |---|---|
