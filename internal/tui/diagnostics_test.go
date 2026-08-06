@@ -110,7 +110,7 @@ func TestTracedOutputCloseLeavesTheTerminalOpen(t *testing.T) {
 // TestProgramOptionsInstallNoTraceWhenTheFlagIsUnset is the guard against an always-on wrapper:
 // with no --tui-trace the program must be built with exactly the options it has always had.
 func TestProgramOptionsInstallNoTraceWhenTheFlagIsUnset(t *testing.T) {
-	opts, traced, err := programOptions(context.Background(), Options{})
+	opts, traced, err := programOptions(context.Background(), Options{}, nil)
 	if err != nil {
 		t.Fatalf("programOptions: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestProgramOptionsInstallNoTraceWhenTheFlagIsUnset(t *testing.T) {
 // output option and hands back the file the caller has to close.
 func TestProgramOptionsInstallTheTraceWhenTheFlagIsSet(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "trace.txt")
-	opts, traced, err := programOptions(context.Background(), Options{TracePath: path})
+	opts, traced, err := programOptions(context.Background(), Options{TracePath: path}, nil)
 	if err != nil {
 		t.Fatalf("programOptions: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestProgramOptionsInstallTheTraceWhenTheFlagIsSet(t *testing.T) {
 // not a silently-dropped flag that leaves them waiting for a file that never appears.
 func TestProgramOptionsReportAnUnopenableTracePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "no-such-dir", "trace.txt")
-	if _, _, err := programOptions(context.Background(), Options{TracePath: path}); err == nil {
+	if _, _, err := programOptions(context.Background(), Options{TracePath: path}, nil); err == nil {
 		t.Errorf("programOptions(%q) succeeded, want an error", path)
 	}
 }

@@ -1011,7 +1011,9 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	}
 	// The --tui-trace half. traced is nil unless a path was named, in which case it is the file
 	// this run owns and must close; the options are otherwise exactly what they have always been.
-	teaOpts, traced, err := programOptions(ctx, opts)
+	// programEnviron is the OTHER thing that can add an option here — the terminal apogee names
+	// itself to the painter as on Windows, and nil everywhere else (environ_windows.go).
+	teaOpts, traced, err := programOptions(ctx, opts, programEnviron())
 	if err != nil {
 		return err
 	}
@@ -1030,12 +1032,20 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 // traced output when [Options.TracePath] named one — the two are one decision, since the traced
 // output IS an option and is also a file the caller has to close.
 //
+// environ is the environment the painter should read, or nil to leave bubbletea on os.Environ()
+// — the Windows terminal-naming rule, and nothing at all anywhere else (environ_windows.go). It
+// arrives as a parameter rather than being read in here so both of its branches are testable
+// without a real terminal underneath the test.
+//
 // It is a function of its own so a test can pin the thing this seam most needs pinning: with no
 // trace path, the program is constructed with EXACTLY the option it has always had and no
 // wrapper at all. An always-on wrapper would be invisible in every other test while quietly
 // changing what the renderer believes about its terminal on every run — see tracedOutput.
-func programOptions(ctx context.Context, opts Options) ([]tea.ProgramOption, *tracedOutput, error) {
+func programOptions(ctx context.Context, opts Options, environ []string) ([]tea.ProgramOption, *tracedOutput, error) {
 	teaOpts := []tea.ProgramOption{tea.WithContext(ctx)}
+	if environ != nil {
+		teaOpts = append(teaOpts, tea.WithEnvironment(environ))
+	}
 	if opts.TracePath == "" {
 		return teaOpts, nil, nil
 	}

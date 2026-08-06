@@ -361,7 +361,42 @@ remain open.
 
 **Commit:** `docs(plans): record Windows ghosting measurements and root cause`
 
-## 5. Give the painter a real capability set on Windows
+## 5. Give the painter a real capability set on Windows — ✅ DONE (2026-08-07)
+
+NOTES (2026-08-06): the TERM-stack survey the item asks for, plus three departures from its
+literal text.
+(a) **Nothing else in the stack branches on `TERM` in a way this changes.** bubbletea's
+`termcap.go` holds only `RequestCapability`/`CapabilityMsg` — an opt-in XTGETTCAP command apogee
+never issues — and reads no environment at all. ultraviolet's decoder takes `TERM` for exactly one
+thing, `buildKeysTable(flags, term, useTerminfo)`, and `TerminalReader.UseTerminfo` is the zero
+value (bubbletea's `initInputReader` never sets it), so `buildTerminfoKeys` is unreachable and the
+key table is `TERM`-independent. The two remaining readers are also unmoved: `tea.go:972`
+`shouldQuerySynchronizedOutput` already returns true on all three Windows paths for reasons that
+never involve `TERM` (no `TERM_PROGRAM` and no `SSH_TTY` in conhost and Windows Terminal, the
+`TERM_PROGRAM`-is-not-Apple branch in VS Code), and `xterm-256color` matches none of its
+ghostty/wezterm/alacritty/kitty/rio substrings, so the mode-2026/2027 query goes out exactly as
+before; and `ultraviolet/terminal_renderer.go:245` branches on `HasPrefix(term, "linux")`, false
+before and after.
+(b) **`programOptions` gained an `environ []string` parameter** rather than calling the builder
+inside itself, and item 2's three test call sites pass `nil`. `go test` gives the binary a piped
+stdout, so a builder read in-place would take its "not a terminal" branch in every test and the
+injecting branch would be unreachable from a unit test; as a parameter both branches are pinned.
+The nil case still yields byte-identical options, which is what item 2's guard test asserts.
+(c) **"`TERM` is unset" is implemented as unset OR empty.** `TERM=` names no terminal type and is
+precisely the `xtermCaps("") → noCaps` case this item exists to remove, so it is treated as
+absent rather than as a description to respect. The lookup is `uv.Environ`'s, so the decision is
+taken on the same read the painter makes.
+(d) **`github.com/charmbracelet/colorprofile` moves from indirect to direct in `go.mod`** (one
+line, via `go mod tidy`; `go.sum` unchanged). The anti-regression test compares resolved
+`colorprofile.Profile` values, which means importing the package — the same call item 2 made for
+`x/term`.
+Still open, and the owner's to close: the two acceptance rows an agent cannot take — `apogee probe
+terminal` reporting the capability section `OK`, and colours unchanged by eye in Windows Terminal.
+The colour claim has a mechanical stand-in in the meantime:
+`TestInjectedEnvironmentResolvesTheSameColorProfile` was watched fail (`TrueColor -> ANSI256`,
+conhost row) with the `COLORTERM` clause disabled, so the clause is pinned by a test that has been
+seen red. Also: no CHANGELOG entry and no user-facing docs — item 8 owns both, the same call items
+1-3 made.
 
 Depends on item 4 (evidence), but is justified independently by finding 3 and should land even
 if H2 turns out not to be the primary cause — a renderer that believes the terminal cannot
