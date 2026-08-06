@@ -109,8 +109,8 @@ func TestE2ELiveModel(t *testing.T) {
 // liveAPIKey is the upstream bearer token every gated live run carries — the discovery client
 // here and in the smoke test, and the Agent's own client behind both. These are tests, so they
 // read APOGEE_API_KEY straight from the environment rather than through cmd/apogee's settings
-// layers (`api-key:` in config.yaml, env > file); the env var is the half a test can honour
-// without importing the command's config machinery. Empty — the keyless local-server default —
-// sends no Authorization header at all, so an unkeyed run is byte-identical to one made before
-// the key existed.
+// layers (a `servers:` entry's own `api-key`, with the env overlaying it); the env var is the half
+// a test can honour without importing the command's config machinery. Empty — the keyless
+// local-server default — sends no Authorization header at all, so an unkeyed run is
+// byte-identical to one made before the key existed.
 func liveAPIKey() string { return os.Getenv("APOGEE_API_KEY") }

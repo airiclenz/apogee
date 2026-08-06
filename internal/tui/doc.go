@@ -26,7 +26,7 @@
 // headers, ┝/┕ tool-detail branches, depth indenting, and the [userBlock] ranges the sticky
 // header rides on so the owning prompt sticks to the top while a reply streams). The
 // transcript now groups a tool call with its result by ToolCall ID, the input box is a rounded,
-// auto-growing black field, and the chrome is a braille status line plus a footer bar (host-alias
+// auto-growing black field, and the chrome is a braille status line plus a footer bar (host alias
 // ✦ model ✦ workdir, then the mode behind its own symbol ("◐ ask before", [modeMarker]) — the
 // workspace written with the home directory as `~`,
 // [workdirDisplay], resolved once at construction). The live token gauge (reserved at P2.7) is now

@@ -150,6 +150,11 @@ func (h Host) confinedLine() string {
 // runtime context window. Each probe reports its own outcome, so "the server is down" and "the
 // server is not llama.cpp" cannot be confused for one another.
 //
+// The no-endpoint shape is no longer reachable through `apogee probe` — startup selection refuses
+// before the report is gathered when no server is determinable (ADR 0036 decision 8) — but it stays
+// because [Host] is a value any Driver can assemble, and the zero [Discovery] is a report shape
+// rather than a fault.
+//
 // The api-key line sits beside the endpoint in BOTH the reached and the unreached shape,
 // because it is the endpoint's credential either way: on a failure it separates "no key was
 // sent" from "the key was rejected", and on a success it confirms the run everyone is about to
@@ -158,7 +163,7 @@ func (h Host) upstreamLines() []string {
 	d := h.Discovery
 	if !d.Attempted {
 		return []string{
-			field("endpoint", "(none — set endpoint: in config.yaml, APOGEE_ENDPOINT, or --endpoint)"),
+			field("endpoint", "(none — add a servers: entry to config.yaml, or set APOGEE_ENDPOINT / --endpoint)"),
 			field("reachable", "not asked — no endpoint is configured"),
 		}
 	}
@@ -199,7 +204,7 @@ func (h Host) apiKeyLine() string {
 	if h.APIKeyConfigured {
 		return "configured (sent as a bearer token)"
 	}
-	return "none — no api-key: in config.yaml and no APOGEE_API_KEY (a local server needs none)"
+	return "none — no api-key on the servers: entry and no APOGEE_API_KEY (a local server needs none)"
 }
 
 // field renders one "  label:        value" line, padded so the values align in a terminal.

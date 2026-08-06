@@ -698,7 +698,9 @@ func TestSettingsEnumSubListFallsBackWhenItsKeyGoesAway(t *testing.T) {
 // Editing: the string/int buffer, validation and reset-to-default (ADR 0035)
 // ----------------------------------------------------------------------------
 
-// settingsStringRow is one editable string row — `endpoint:` as the registry describes it.
+// settingsStringRow is one editable string row. Its path is a fixture, not a live registry key —
+// the pane's string editing is key-agnostic, so the row stands for whichever string keys the
+// registry carries (`server:` today).
 func settingsStringRow() SettingRow {
 	return SettingRow{
 		Path: "endpoint", Section: "Upstream", Kind: SettingString, Value: "http://box:1111",

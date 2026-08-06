@@ -830,9 +830,9 @@ func (m Model) settingsPaneHint() string {
 // true and a config with no read-only rows and no edits pays for neither.
 //
 // Every cell is escape-stripped here, at the producer, as the popup module's contract requires
-// (doc.go): a value is the CONFIG FILE's text — an endpoint, a host alias, a present command the
-// human typed — and a file on this machine is no more trusted than a model's reply. The mask, the
-// structured summary and the pointer wording all arrived decided ([SettingRow]); nothing here
+// (doc.go): a value is the CONFIG FILE's text — a server name, a present command the human typed —
+// and a file on this machine is no more trusted than a model's reply. The mask, the structured
+// summary and the pointer wording all arrived decided ([SettingRow]); nothing here
 // reformats a value or rules on what may be edited.
 func (m Model) settingRowCells(row SettingRow) popupRow {
 	return popupRow{

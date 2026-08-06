@@ -216,8 +216,9 @@ type Options struct {
 	// UsageEvent folds the turn's total-token count into ctxUsed (0 leaves the gauge hidden).
 	ContextWindow int
 
-	// HostAlias is a short, friendly name for the upstream host shown in the footer (a
-	// `host-alias` config key). Empty falls back to the endpoint URL's host at render time.
+	// HostAlias is a short, friendly name for the upstream host shown in the footer — the bound
+	// `servers:` entry's own name, which is what a server's alias now is (ADR 0036 decision 1).
+	// Empty falls back to the endpoint URL's host at render time.
 	HostAlias string
 
 	// Spinner is the status-line animation the `ui.spinner` config key selected. It is a SELECTION,
@@ -588,10 +589,12 @@ type RebindResult struct {
 
 // ServerChoice is one upstream server the `/server` picker offers. Name does three jobs with one
 // value — it labels the row, it is the name SwitchServer is called with, and it becomes the
-// footer's host alias once the session is on that server — mirroring `host-alias:`, which names the
-// startup endpoint exactly that way. Endpoint is shown beside it and is the identity the picker
-// marks the CURRENT row by (string-equal to [Options.Endpoint], the same comparison the binary used
-// when it decided whether the startup endpoint still needed a row of its own).
+// footer's host alias once the session is on that server — because the name IS the entry's identity
+// in the binary's `servers:` list, the single definition of what servers exist: the alias of the
+// server you are on is the name you call it (ADR 0036 decision 1). Endpoint is shown beside it and
+// is the identity the picker marks the CURRENT row by (string-equal to [Options.Endpoint]); the
+// comparison is the picker's own, since the binary builds the list from `servers:` verbatim and
+// prepends a row only for an ephemeral override start (ADR 0036 decision 6).
 //
 // It carries display and identity and nothing else: the per-server api key and discovery hint are
 // what the switch needs, and the switch is the binary's half of the seam, so the renderer never
