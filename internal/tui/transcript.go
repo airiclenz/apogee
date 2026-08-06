@@ -26,7 +26,14 @@ type transcript struct {
 	// not a strings.Builder: the Model is a value type copied on every
 	// Update, and a Builder forbids the copy — it panics copyCheck)
 	streaming bool // whether pending holds an un-committed assistant buffer
-	debug     bool // when set, MechanismFiredEvents are recorded (a hidden debug view)
+	// pendingDepth is WHOSE buffer pending holds: the sub-agent nesting level of the tokens that
+	// filled it. It is the streaming path's half of the depth routing every other assistant-text
+	// event already does through its Event's own Depth (apply), and it is needed because the buffer
+	// is a single slot shared by every level: without it a delegate's live answer paints as a
+	// top-level block until its MessageEvent lands, and a delegate that never sends one leaves its
+	// text to be committed as the PARENT's. It means nothing while streaming is false.
+	pendingDepth int
+	debug        bool // when set, MechanismFiredEvents are recorded (a hidden debug view)
 	// ws is the project root a tool card's paths are printed relative to (workspacepath.go), resolved
 	// once at construction from Options.Workspace. It lives here because addToolCall and
 	// addToolResult are reached through apply, which folds an Event with no Model in sight; it is a
@@ -313,6 +320,7 @@ func (t *transcript) reset() {
 	t.entries = nil
 	t.pending = ""
 	t.streaming = false
+	t.pendingDepth = 0
 	// The block-paint cache is keyed by ENTRY INDEX, and this is the one path that makes an index
 	// mean something else: the caller re-fills the list (a fresh start-up box, a replayed
 	// scrollback) before anything renders again, so pruning against the entry count at the next
@@ -422,7 +430,9 @@ func presentedStatus(v presentedView) string {
 // a block — it lands ON an entry the run already has, through applyUsage, which foldEvent
 // calls with the window a fill needs and apply cannot see) and fall to the default case with
 // every future variant. Each
-// case folds its event: tokens grow the in-progress buffer; a StreamReset discards it; a
+// case folds its event: tokens grow the in-progress buffer at the depth that emitted them (the
+// routing every other assistant-text case does through its own e.Depth); a StreamReset discards
+// the buffer its own level owns; a
 // Message commits it (canonical text); the first ToolCall of a Turn finalises the pre-tool
 // narration before recording the call; results, approvals, and recovered faults append
 // their own entries; a MechanismFired is surfaced only in the debug view. It renders only —
@@ -430,13 +440,13 @@ func presentedStatus(v presentedView) string {
 func (t *transcript) apply(e domain.Event) {
 	switch e := e.(type) {
 	case domain.TokenEvent:
-		t.appendToken(e.Text)
+		t.appendToken(e.Text, e.Depth)
 	case domain.StreamResetEvent:
-		t.discardPending()
+		t.discardPending(e.Depth)
 	case domain.MessageEvent:
 		t.commitAssistant(e.Text, e.Depth)
 	case domain.ToolCallEvent:
-		t.finalizeNarration(e.Depth)
+		t.finalizeNarration()
 		t.addToolCall(e.Call, e.Depth)
 	case domain.ToolResultEvent:
 		t.addToolResult(e.Result, e.Depth)
@@ -493,24 +503,43 @@ func (t *transcript) applyUsage(e domain.Event, window int) {
 	}
 }
 
-// appendToken grows the in-progress assistant buffer with one streamed chunk. The buffer
-// is committed by commitAssistant (a MessageEvent) or finalizeNarration (the first
+// appendToken grows the in-progress assistant buffer with one streamed chunk emitted at depth. The
+// buffer is committed by commitAssistant (a MessageEvent) or finalizeNarration (the first
 // ToolCall of the Turn), and is never rendered as a committed entry until then. The chunk is
 // escape-stripped as it lands (stripEscapes) so no ESC byte from the model's stream ever
 // reaches the terminal — even split across two chunks, since the byte is removed per chunk.
-func (t *transcript) appendToken(text string) {
+//
+// A chunk from a DIFFERENT level than the one already buffered closes the open buffer first, at its
+// own depth. There is one buffer slot for every level, and delegation is serialized (ADR 0014), so
+// a level change means the previous streamer is finished with it — normally having committed its
+// own text on the way out, but not when it faulted or was cancelled before its MessageEvent. Closing
+// here is what keeps that residue the CHILD's: finalizeNarration commits it inside the run it was
+// streamed in, instead of leaving it for the parent's next event to adopt as a top-level answer.
+func (t *transcript) appendToken(text string, depth int) {
+	if t.streaming && t.pendingDepth != depth {
+		t.finalizeNarration()
+	}
 	t.streaming = true
+	t.pendingDepth = depth
 	t.pending += stripEscapes(text)
 }
 
-// discardPending drops the in-progress assistant buffer for the current Turn. A
-// StreamResetEvent signals the loop is re-streaming the Turn (an ActionRetry post-response
+// discardPending drops the in-progress assistant buffer when the agent at depth re-streams its
+// Turn. A StreamResetEvent signals the loop is re-streaming (an ActionRetry post-response
 // decision re-called the Upstream), so the tokens accumulated so far are superseded and
 // must never be committed (events.go contract). The re-stream's tokens arrive next and the
 // Turn's MessageEvent carries the final, accepted text.
-func (t *transcript) discardPending() {
+//
+// It drops only the buffer the resetting agent OWNS: a re-stream is one level's Turn starting over,
+// so a delegate's reset may not wipe what its parent had streamed. A reset arriving with no buffer
+// open clears the slot either way, which is what it already meant.
+func (t *transcript) discardPending(depth int) {
+	if t.streaming && t.pendingDepth != depth {
+		return
+	}
 	t.streaming = false
 	t.pending = ""
+	t.pendingDepth = 0
 }
 
 // commitAssistant finalises the streamed buffer into a committed assistant entry on a
@@ -519,17 +548,27 @@ func (t *transcript) discardPending() {
 // that should reconcile to the same text (§0 event-sequence rule). A canonical text that is
 // blank falls back to the accumulated tokens so nothing streamed is lost, and a text that is
 // blank either way commits no entry at all — a lone ✦ marker line is itself an unneeded line.
+//
+// A buffer left open by a DIFFERENT level is closed at its own depth first (appendToken's rule),
+// so a message from the parent neither adopts a delegate's residue nor silently drops it.
 func (t *transcript) commitAssistant(canonical string, depth int) {
+	if t.streaming && t.pendingDepth != depth {
+		t.finalizeNarration()
+	}
 	// canonical is the MessageEvent's untrusted model text; strip its escapes (t.pending was
 	// already stripped as it streamed, so a double-strip there is a cheap no-op), then drop the
 	// blank lines the model padded the message with, so the block sits exactly one blank line
 	// from its neighbours instead of two or three (layout.md).
 	text := trimBlankLines(stripEscapes(canonical))
 	if text == "" {
+		// The fallback commits the BUFFER, so it commits at the buffer's own depth — which the
+		// guard above has already made equal to depth whenever there is anything to fall back to.
 		text = trimBlankLines(t.pending)
+		depth = t.pendingDepth
 	}
 	t.streaming = false
 	t.pending = ""
+	t.pendingDepth = 0
 	if text == "" {
 		return
 	}
@@ -541,13 +580,20 @@ func (t *transcript) commitAssistant(canonical string, depth int) {
 // streamed tokens are the canonical narration text. Only the first ToolCall finalises:
 // afterwards streaming is false, so the Turn's remaining ToolCalls add no empty entry. A
 // Turn that streamed nothing — or only blank lines — before its tool call commits nothing.
-func (t *transcript) finalizeNarration(depth int) {
+//
+// It takes no depth: the buffer is committed at the depth that FILLED it (t.pendingDepth) and never
+// at the arriving event's, because the two part company exactly where it matters — a delegate that
+// streamed and then faulted before its MessageEvent leaves the buffer standing, and the parent's
+// next tool call is what closes it.
+func (t *transcript) finalizeNarration() {
 	if !t.streaming {
 		return
 	}
 	text := trimBlankLines(t.pending)
+	depth := t.pendingDepth
 	t.streaming = false
 	t.pending = ""
+	t.pendingDepth = 0
 	if text == "" {
 		return
 	}

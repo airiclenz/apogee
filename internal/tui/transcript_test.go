@@ -1173,6 +1173,105 @@ func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The streamed buffer belongs to the depth that streamed it
+// ----------------------------------------------------------------------------
+
+// streamAt folds one streamed chunk at depth — the TokenEvent an agent at that nesting level
+// emits, which is the one assistant-text event whose depth used to be thrown away.
+func streamAt(tr *transcript, depth int, text string) {
+	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: depth}, Text: text})
+}
+
+// TestSubAgentStreamStaysInsideItsCollapsedRun is the elision rule applied to the LIVE buffer: a
+// collapsed run stands alone and everything beneath it is elided (layout.md), and a delegate's
+// answer is beneath it from its very first token — not only once its MessageEvent lands. Nothing is
+// lost by painting nothing: the head blinks live, carries the run's gist once there is work behind
+// it, and the status line already reads "⤷ sub-agent · responding".
+func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+
+	streamAt(tr, 1, "child words")
+
+	want := strings.Join([]string{
+		"✦ Sub-Agent",
+		"  ┕ survey the tests",
+	}, "\n")
+	got := renderPlain(tr, 80)
+	if got != want {
+		t.Errorf("collapsed run leaked its delegate's live stream:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// TestSubAgentStreamPreviewRailedWhenRunExpanded is the other half of the rule: an expanded run
+// shows the delegate's stream where it happens — railed at the child's depth, under the ⤷ label the
+// descent opens for it. The label is owed by the preview itself here: the child has produced no
+// entry yet, so nothing in the committed list has announced the level.
+func TestSubAgentStreamPreviewRailedWhenRunExpanded(t *testing.T) {
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	streamAt(tr, 1, "child words")
+
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the run expanded")
+	}
+
+	want := strings.Join([]string{
+		"✦ Sub-Agent",
+		"  ┕ survey the tests",
+		"",
+		"│ ⤷ sub-agent",
+		"│",
+		"│ ✦ child words",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("expanded run's live preview mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// TestSubAgentStreamResidueIsNotAttributedToTheParent pins the committed side: a delegate that
+// streamed and then never sent its MessageEvent (faulted, abandoned, cancelled) leaves text in the
+// buffer, and the parent's next event must not adopt it. The buffer closes at ITS OWN depth, so the
+// residue lands inside the run rather than as a permanent top-level answer in the main transcript.
+func TestSubAgentStreamResidueIsNotAttributedToTheParent(t *testing.T) {
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	streamAt(tr, 1, "child words")
+
+	readCall(tr, "c1", "a.go", 1, 5, 0)
+
+	committed := 0
+	for i := range tr.entries {
+		e := tr.entries[i]
+		if e.kind == entryAssistant {
+			committed++
+			if e.depth != 1 {
+				t.Errorf("entry %d: the delegate's stream committed at depth %d, want 1", i, e.depth)
+			}
+		}
+		if e.depth == 0 && strings.Contains(e.text, "child words") {
+			t.Errorf("entry %d: a depth-0 entry carries the delegate's text: %q", i, e.text)
+		}
+	}
+	if committed != 1 {
+		t.Errorf("committed %d assistant entries, want the delegate's residue kept as exactly 1", committed)
+	}
+}
+
+// TestStreamResetOnlyDiscardsItsOwnDepth is the mirror of the residue rule on the discard path: a
+// re-stream is one agent's Turn starting over (events.go), so it may only drop the buffer it owns.
+func TestStreamResetOnlyDiscardsItsOwnDepth(t *testing.T) {
+	tr := &transcript{}
+	streamAt(tr, 0, "parent words")
+
+	tr.apply(domain.StreamResetEvent{EventBase: domain.EventBase{Depth: 1}})
+
+	if !tr.streaming || tr.pending != "parent words" {
+		t.Errorf("a depth-1 re-stream wiped the parent's buffer: streaming=%v pending=%q", tr.streaming, tr.pending)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // A sub-agent's context fill folds onto its own run (transcript.applyUsage)
 // ----------------------------------------------------------------------------
 
@@ -1434,7 +1533,7 @@ func TestTranscriptReset(t *testing.T) {
 	tr := &transcript{}
 	tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
 	tr.addUser("hello", nil)
-	tr.appendToken("streamed ") // sets streaming=true and grows pending
+	tr.appendToken("streamed ", 1) // sets streaming=true, stamps the buffer's depth, grows pending
 	tr.debug = true
 
 	tr.reset()
@@ -1447,6 +1546,9 @@ func TestTranscriptReset(t *testing.T) {
 	}
 	if tr.streaming {
 		t.Error("streaming = true after reset, want false")
+	}
+	if tr.pendingDepth != 0 {
+		t.Errorf("pendingDepth = %d after reset, want 0", tr.pendingDepth)
 	}
 	if !tr.debug {
 		t.Error("debug = false after reset, want it preserved as true")

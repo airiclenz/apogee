@@ -118,6 +118,11 @@ func (p blockPaint) railed(th theme, depth int) blockPaint {
 // line (layout.md), railed at the depth the two blocks share so a sub-agent run's frame is
 // continuous through its separators (railSpacer).
 //
+// The in-progress buffer is painted by the SAME rules as a committed block of its depth
+// (transcript.pendingDepth): railed where it was streamed, announced by the ⤷ descent label when it
+// opens a level, and elided outright while it streams inside a collapsed run (insideCollapsedRun) —
+// there the head already blinks and carries the live gist, and the status line names the delegate.
+//
 // blink is this frame's phase of the live star ([spinnerAnim.blink]): it reaches only the header
 // glyph of a block that still holds an open call, and every other line of the transcript paints
 // identically at either phase. It is a PARAMETER rather than transcript state because the phase
@@ -228,13 +233,25 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		}
 		prevDepth = e.depth
 	}
-	if t.streaming {
+	if t.streaming && !insideCollapsedRun(t.entries, t.pendingDepth) {
+		// The live buffer is painted at the depth that FILLED it (transcript.pendingDepth), like
+		// every committed block above — the descent label included, which the preview owes itself
+		// when the delegate has streamed before producing any entry to announce the level.
+		if t.pendingDepth > prevDepth {
+			for d := prevDepth + 1; d <= t.pendingDepth; d++ {
+				appendBlock(false, d, len(t.entries), plainPaint(renderSubAgentLabel(th, d, width)))
+			}
+		}
 		// The in-progress buffer is trimmed of its trailing blank lines for display only: the
 		// buffer keeps them (a mid-stream "\n\n" may be a paragraph break about to be continued),
 		// but the preview must not grow a wobbling gap above the footer. An empty buffer still
 		// renders its lone marker line, so the human sees that streaming has begun.
-		preview := renderEntryLines(th, entry{kind: entryAssistant, text: trimTrailingBlankLines(t.pending)}, width, blink)
-		appendBlock(false, 0, len(t.entries), preview)
+		preview := renderEntryLines(th, entry{
+			kind:  entryAssistant,
+			text:  trimTrailingBlankLines(t.pending),
+			depth: t.pendingDepth,
+		}, width, blink)
+		appendBlock(false, t.pendingDepth, len(t.entries), preview)
 	}
 	return renderedTranscript{lines: lines, userBlocks: userBlocks, targets: targets}
 }
@@ -343,6 +360,37 @@ func subAgentSpan(entries []entry, i int) int {
 		n++
 	}
 	return n
+}
+
+// insideCollapsedRun reports whether a block about to be painted at depth would land inside a
+// sub-agent run that is currently COLLAPSED — the question subAgentSpan answers for committed
+// entries, asked on behalf of the one block that is not in the list: the live streaming preview
+// (renderView). A collapsed run stands alone and everything railed beneath it is elided
+// (layout.md), and a delegate's answer is beneath it from its first streamed token, not only once
+// its MessageEvent commits an entry the span rule can see.
+//
+// It keys on the open HEAD rather than on the span being non-empty, because a child that has
+// streamed but not yet called a tool has produced no nested entry at all — subAgentSpan is 0 there,
+// and a rule reading it would let exactly the first tokens through. Every enclosing level is asked,
+// so a nested run streaming inside a collapsed parent is elided by the parent's state as well as by
+// its own; each level's answer is its most recent still-open sub_agent head, the same backward scan
+// applyUsage attributes a reading by, and unambiguous for the same reason (delegation is serialized,
+// ADR 0014).
+func insideCollapsedRun(entries []entry, depth int) bool {
+	for level := depth - 1; level >= 0; level-- {
+		for i := len(entries) - 1; i >= 0; i-- {
+			head := entries[i]
+			if head.kind != entryToolCall || head.done ||
+				head.depth != level || head.tool.name != subAgentToolName {
+				continue
+			}
+			if !head.expanded {
+				return true
+			}
+			break // this level's run is open: a deeper one may still be collapsed
+		}
+	}
+	return false
 }
 
 // renderSubAgentRun paints the head block of a sub-agent run — the whole of what a COLLAPSED run

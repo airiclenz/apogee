@@ -48,7 +48,13 @@ func sameRender(t *testing.T, what string, got, want renderedTranscript) {
 // coldRender paints the same entries with no cache behind them — the oracle every warm render is
 // checked against. It borrows the entries slice rather than copying it: the renderer only reads.
 func coldRender(tr *transcript, th theme, width int, blink bool) renderedTranscript {
-	cold := &transcript{entries: tr.entries, pending: tr.pending, streaming: tr.streaming, ws: tr.ws}
+	cold := &transcript{
+		entries:      tr.entries,
+		pending:      tr.pending,
+		streaming:    tr.streaming,
+		pendingDepth: tr.pendingDepth,
+		ws:           tr.ws,
+	}
 	return cold.renderView(th, width, blink)
 }
 

@@ -39,12 +39,13 @@ func statsOf(m Model) statsFold {
 // stated as such deliberately: "this variant is inert in the view" is the documentation the
 // three separate switches never carried in one place.
 type foldCase struct {
-	name        string
-	event       domain.Event
-	wantEntries int       // transcript entries the fold appended (0 = none)
-	wantPending string    // the in-progress assistant buffer after the fold
-	wantPhrase  string    // the activity phrase after the fold ("" = the slot is left idle)
-	wantStats   statsFold // the stats after the fold (the zero value = foldStats moved nothing)
+	name             string
+	event            domain.Event
+	wantEntries      int       // transcript entries the fold appended (0 = none)
+	wantPending      string    // the in-progress assistant buffer after the fold
+	wantPendingDepth int       // whose buffer that is — the nesting level the tokens streamed at
+	wantPhrase       string    // the activity phrase after the fold ("" = the slot is left idle)
+	wantStats        statsFold // the stats after the fold (the zero value = foldStats moved nothing)
 }
 
 // foldCases is the variant table: every domain.Event, what it does to the view, and — by way
@@ -57,6 +58,18 @@ func foldCases() []foldCase {
 			wantPending: "hi",
 			wantPhrase:  "responding",
 			wantStats:   statsFold{genStarted: true}, // the generation clock starts on the first token
+		},
+		{
+			name: "TokenEvent at Depth 1 buffers at ITS OWN depth and says a sub-agent is responding",
+			// The streaming path routes by depth like every other assistant-text case: the buffer
+			// records whose tokens it holds, so the live preview paints inside the delegate's run
+			// and its residue can never be committed as the parent's answer (transcript.go).
+			event:            domain.TokenEvent{EventBase: domain.EventBase{Depth: 1}, Text: "hi"},
+			wantPending:      "hi",
+			wantPendingDepth: 1,
+			wantPhrase:       subAgentLabel + " · responding",
+			// No generation clock: the gauge times the conversation the human is steering, and a
+			// delegate's tokens are not it (foldStats).
 		},
 		{
 			name:       "ReasoningEvent is activity only — the transcript never shows reasoning",
@@ -225,6 +238,9 @@ func TestFoldEventFoldsEveryVariant(t *testing.T) {
 			}
 			if got := m.transcript.pending; got != tc.wantPending {
 				t.Errorf("pending buffer = %q, want %q", got, tc.wantPending)
+			}
+			if got := m.transcript.pendingDepth; got != tc.wantPendingDepth {
+				t.Errorf("pending buffer depth = %d, want %d", got, tc.wantPendingDepth)
 			}
 			if got := m.act.text(); got != tc.wantPhrase {
 				t.Errorf("activity phrase = %q, want %q", got, tc.wantPhrase)
