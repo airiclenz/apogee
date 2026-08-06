@@ -27,7 +27,7 @@
     "Collapsed and expanded blocks" (§ around line 494) govern block rendering; the claim
     around lines 442-447 that a multi-select answer's later lines "ride the expandable
     detail" is FALSE today (code drops them) and is corrected by item 2.
-  - `docs/design/user-questions-layout.md` — pins the ASCII `[x]`/`[ ]` checkbox pair
+  - `docs/layout/user-questions-layout.md` — pins the ASCII `[x]`/`[ ]` checkbox pair
     (box-drawing checkboxes render as tofu); markers also at
     `internal/tui/model.go:4315-4316`.
   - ADR 0031 — the engine stays wire-silent: the record body is a render-time act only;

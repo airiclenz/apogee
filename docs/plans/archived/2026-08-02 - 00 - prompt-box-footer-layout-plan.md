@@ -6,7 +6,7 @@
 in the bottom instead of the context size" and "remove the frame from the lower part of the
 prompt box". No engine, protocol, or persistence changes.
 
-**Authoritative sources (precedence):** the mockup `docs/design/prompt-box-layout.md`
+**Authoritative sources (precedence):** the mockup `docs/layout/prompt-box-layout.md`
 (currently untracked — item 1 commits it) and the owner-ratified decisions below outrank every
 item's prose. `layout.md` is amended BY this plan, so where today's `layout.md` disagrees with
 the mockup, the mockup wins. ADR 0011 / `internal/tui/doc.go` (the `Model` is value-copied —
@@ -52,7 +52,7 @@ retires the bullets is expected; tell the Phase 0 dirty-tree stop to proceed.
 
 ## 1. The context gauge names its window — `8k/98k 8% ▉…` — ✅ DONE (2026-08-02)
 
-NOTES (2026-08-02): `docs/design/prompt-box-layout.md` was no longer untracked at execution time —
+NOTES (2026-08-02): `docs/layout/prompt-box-layout.md` was no longer untracked at execution time —
 commit `731246a` (the plan's own commit) already carries it — so this item's "commit the mockup
 with this item" clause was already satisfied and no change to that file was needed.
 
@@ -68,7 +68,7 @@ with this item" clause was already satisfied and no change to that file was need
   `16k 50% █████░░░░░` → `16k/32k 50% █████░░░░░`) and the gauge example in "The status
   line's right slot" (~line 478). Do NOT touch the sketch's frame rows — those are item 3's.
 - `CHANGELOG.md` under `[Unreleased]`: the gauge now reads `used/window pct%`.
-- Commit `docs/design/prompt-box-layout.md` with this item — it is the authoritative mockup
+- Commit `docs/layout/prompt-box-layout.md` with this item — it is the authoritative mockup
   this plan implements and is currently untracked.
 
 **Tests:** extend `TestUsageEventDrivesGaugeAndThroughput` and `TestContextGaugeBarRendering`
@@ -144,7 +144,7 @@ put; `TestActuationFooterNarratesTheVerb` (`actuation_test.go:312`) likewise.
 ## 3. The prompt box closes its frame; the footer sheds its — ✅ DONE (2026-08-02)
 
 NOTES (2026-08-02): the item gained a **bottom hairline** mid-run. The owner amended the authoritative
-mockup `docs/design/prompt-box-layout.md` to carry a full-width rule below the footer ("Now the status
+mockup `docs/layout/prompt-box-layout.md` to carry a full-width rule below the footer ("Now the status
 line … is printed at the very bottom of the session chat. That does not look very good. Could we add a
 hairline (just inverted for the bottom) below the status line?"), and the plan's precedence rule puts the
 mockup over the item's prose. So the footer stays frameless in the sense the item means — no box borders

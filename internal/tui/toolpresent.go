@@ -789,7 +789,7 @@ func askUserAnswerRecord(args map[string]any, content string) toolOutcome {
 // one per line (domain.AskAnswer), and anything looser would tick a box the human did not.
 //
 // The markers are the popup's own pinned ASCII pair rather than a second spelling of them
-// (askCheckedMarker/askUncheckedMarker, docs/design/user-questions-layout.md), and they are drawn
+// (askCheckedMarker/askUncheckedMarker, docs/layout/user-questions-layout.md), and they are drawn
 // for a single-select question exactly as for a multi-select one: this is a record of what was
 // asked and answered, not a menu anyone can still act on.
 func askExchangeLines(args map[string]any, content string) []detailLine {
@@ -1185,7 +1185,7 @@ func prettyJSONDetails(raw json.RawMessage) []detailLine {
 
 // argumentValueIndent is the hanging indent an argument's value sits under, so a labelled argument
 // reads as a label with its value beneath it rather than as one run-on line
-// (docs/design/user-questions-layout.md, the approval box).
+// (docs/layout/user-questions-layout.md, the approval box).
 const argumentValueIndent = "  "
 
 // argumentDetails renders a tool call's arguments as LABELLED lines: one `name:` line per argument,

@@ -191,7 +191,7 @@ const (
 // titleInBorder moves the title OFF its own content row and into the top border, centred between
 // the border's own runes with one space each side — ╭────── Approve terminal? ──────╮ — so a
 // decision surface spends the row on what the decision turns on instead of on a heading
-// (docs/design/user-questions-layout.md). It costs the pane a row less than a title row does
+// (docs/layout/user-questions-layout.md). It costs the pane a row less than a title row does
 // (popupTitleBorderChrome), and with an EMPTY title it opens the pane on a plain unbroken border,
 // which is how a surface whose body is its own heading (the ask prompt's question) drops the
 // heading without dropping the box. It changes where the title is drawn and nothing about what it
@@ -200,7 +200,7 @@ const (
 //
 // titleFromBody is the identity a pane keeps when its body IS its heading and the window seats no
 // line of that body. The ask prompt is that pane: it draws no title, because the question says what
-// a heading over it would (docs/design/user-questions-layout.md) — but a question is BODY, and on the
+// a heading over it would (docs/layout/user-questions-layout.md) — but a question is BODY, and on the
 // shortest windows the single body row a pane is granted goes to the elision marker, which left the
 // box carrying a count and a key hint and nothing at all about what the live ⏎ would answer. Its
 // identity had become a number. With this set, the lead of the body falls back INTO the top border
@@ -217,7 +217,7 @@ const (
 // menuRows paints the row list as a MENU rather than as a list with a cursor in it: the selected row
 // is glyphUser plus its label lit in the accent (th.popupAccent), every other row is
 // glyphMenuUnselected plus its label faint, and NO row carries th.userBlock's full-width highlight
-// bar (docs/design/user-questions-layout.md). The difference is what the row list is FOR. A picker
+// bar (docs/layout/user-questions-layout.md). The difference is what the row list is FOR. A picker
 // offers a long scrolled list of things to look through, and the bar is the position marker that
 // finds the cursor in it; a decision surface offers four options to choose between, all of them on
 // screen at once, and there the bar is a banner across a quarter of the pane rather than a pointer —
@@ -230,7 +230,7 @@ const (
 // under its LAST column as well (popupRowHangingIndent), so a wrapped label lands under the label
 // rather than under the checkbox beside it — the way the body block
 // already breaks, so a long option arrives whole rather than ending in an ellipsis
-// (docs/design/user-questions-layout.md). It is the difference between a list of NAMES and a list of
+// (docs/layout/user-questions-layout.md). It is the difference between a list of NAMES and a list of
 // SENTENCES. A picker offers file paths and session titles — things a human recognises from the
 // start of them, where the ellipsis costs a tail already identified — while a decision surface
 // offers prose written for this one question, where the tail is often the whole of the point ("…
@@ -252,7 +252,7 @@ const (
 // mockup draws them.
 //
 // rowPadBelow closes the block with a blank line above the bottom border, and it is its OWN flag
-// because the mockup does not spend it on both surfaces (docs/design/user-questions-layout.md): the
+// because the mockup does not spend it on both surfaces (docs/layout/user-questions-layout.md): the
 // ask box closes its offering, the approval box ends on its last decision. That is the mockup being
 // consistent rather than arbitrary — the ask box's answers are already a blank line apart, so a
 // block ending flush against the border would read as one option crowded where its siblings are not,

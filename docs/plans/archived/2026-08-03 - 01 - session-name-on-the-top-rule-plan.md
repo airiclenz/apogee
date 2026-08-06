@@ -12,7 +12,7 @@ landed and are kept — this plan changes only what READS them.
 
 ## Authoritative sources
 
-- **The shape:** `docs/design/prompt-box-layout.md` — the owner's sketch, updated 2026-08-03. The
+- **The shape:** `docs/layout/prompt-box-layout.md` — the owner's sketch, updated 2026-08-03. The
   hairline row that was blank in the sketch now reads
   `▔▔▔▔▔▔ centered session name ▔▔▔▔▔▔`. If any item below disagrees with that sketch, the sketch
   wins.
@@ -48,7 +48,7 @@ that research needs re-deriving; it is why the route is being abandoned rather t
 ## Precondition — a clean tree
 
 The working tree carries uncommitted doc edits from the research session (`layout.md`, `README.md`,
-`TODO.md`) plus the owner's `docs/design/prompt-box-layout.md` sketch. Item 1 owns those regions
+`TODO.md`) plus the owner's `docs/layout/prompt-box-layout.md` sketch. Item 1 owns those regions
 **whole**, so either committing them or `git checkout --`-ing the three doc files works — but the
 tree must be clean before the run starts, or Phase 0 stops.
 
@@ -269,8 +269,8 @@ negative count, and a zero-width model is reachable before the first `WindowSize
 
 NOTES (2026-08-03): two elaborations on the item's literal text, both in `layout.md`. The sketch at
 line 49 carries the owner's own placeholder wording — `centered session name`, the exact label in
-`docs/design/prompt-box-layout.md` — rather than an invented example name, because "Match
-`docs/design/prompt-box-layout.md`" reads most safely as matching it verbatim; the row still measures
+`docs/layout/prompt-box-layout.md` — rather than an invented example name, because "Match
+`docs/layout/prompt-box-layout.md`" reads most safely as matching it verbatim; the row still measures
 the sketch's 87 columns (32 `▔`, space, 21-cell label, space, 32 `▔`). And the new section's **What it
 says** paragraph closes with one sentence on the centering bias (the extra column goes RIGHT), which
 the item lists only for item 2's doc comment: a reader of the spec who counts the sketch's two runs
@@ -284,7 +284,7 @@ Depends on items 1 and 2.
 - `layout.md`:
   - The sketch at the top of the file (~line 49) — the `▔` row above the status line gains a
     centered name, so the sketch a reader meets first shows the row as it paints. Match
-    `docs/design/prompt-box-layout.md`.
+    `docs/layout/prompt-box-layout.md`.
   - A new `## The top rule wears the session's name` section in the slot item 1 emptied (between
     `## The footer's upstream slot` and `## The staged-interjection band`). In the house voice, with
     the file's bold lead-ins: **What it says** (the shape, the two spaces, and that the name is

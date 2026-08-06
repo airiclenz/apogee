@@ -1002,7 +1002,7 @@ const popupTitleRowGolden = `╭────────────────
 
 // popupTitleInBorderGolden is that same spec with the title moved INTO the top border: the name
 // centred between two runs of the border rune with one space each side, and the content block one
-// row shorter for it — the pane's own drawing of docs/design/user-questions-layout.md's mockup.
+// row shorter for it — the pane's own drawing of docs/layout/user-questions-layout.md's mockup.
 const popupTitleInBorderGolden = `╭─────────── saved sessions ───────────╮
 │ a body line that is long enough to   │
 │ wrap once at forty cells             │
@@ -1143,7 +1143,7 @@ func TestRenderPopupTitleInBorderCarriesTheElisionCount(t *testing.T) {
 // when the body block came back with every one of its own lines traded for the elision marker. With
 // a line of the body on the screen the pane is already naming itself, and the flag must change
 // nothing at all — which is what keeps the untitled border the normal appearance of the surface that
-// asks for it (docs/design/user-questions-layout.md).
+// asks for it (docs/layout/user-questions-layout.md).
 func TestRenderPopupTitleFromBody(t *testing.T) {
 	t.Parallel()
 	th := newTheme()
@@ -1271,7 +1271,7 @@ func styleSGR(style lipgloss.Style) string {
 
 // popupMenuRowsGolden is popupTitleSpec's row list painted as a MENU: the selected row pointed at by
 // ❯, the other row led by ·, and the labels in one column either way — the pane's own drawing of
-// docs/design/user-questions-layout.md's option list. The bar the flag-off rendering paints behind
+// docs/layout/user-questions-layout.md's option list. The bar the flag-off rendering paints behind
 // the selected row leaves no trace here because ANSI is stripped; TestRenderPopupMenuRowsHaveNoBar
 // below is what pins its absence.
 const popupMenuRowsGolden = `╭──────────────────────────────────────╮
@@ -1414,7 +1414,7 @@ func popupStyledLines(lines []string, sgr string) []string {
 }
 
 // popupWrapSpec is a menu of answers written as SENTENCES — the shape a decision surface takes once
-// a model may offer prose (docs/design/user-questions-layout.md's multi-option mockup): two options
+// a model may offer prose (docs/layout/user-questions-layout.md's multi-option mockup): two options
 // that fit a line and one that no pane seats on one, the long one selected.
 func popupWrapSpec() popupSpec {
 	return popupSpec{
@@ -1571,7 +1571,7 @@ func TestRenderPopupRowGapSeparatesRowsOnly(t *testing.T) {
 
 // rowPadAbove and rowPadBelow set the row BLOCK one blank line off what stands above it and below
 // it, EACH END ON ITS OWN — the ask box asks for both, the approval box for the opening one alone
-// (docs/design/user-questions-layout.md) — and neither puts a line between rows that did not ask for
+// (docs/layout/user-questions-layout.md) — and neither puts a line between rows that did not ask for
 // a gap. The pad is also the LAST thing the row budget pays for: it is the only part of the block
 // that is not content, so a window that can seat every row unpadded keeps the rows and drops the
 // blanks — both ends together, since a block that kept one and dropped the other would move rather

@@ -769,7 +769,7 @@ func TestModelApprovalCancelClearsPrompt(t *testing.T) {
 	}
 }
 
-// The approval prompt paints as a MENU (docs/design/user-questions-layout.md): the raw tool name in
+// The approval prompt paints as a MENU (docs/layout/user-questions-layout.md): the raw tool name in
 // the TOP BORDER, the four decisions as menu rows with the pointer on Allow and their shortcut
 // letters aligned in a second column, the labelled args still in the body — and no legend row at
 // all, the letters now being written beside the options they take.
@@ -989,7 +989,7 @@ func TestModelApprovalArgsKeepIndentation(t *testing.T) {
 }
 
 // The shell tool's body reads as the command line it is about to run, under its own argument name
-// with the line indented beneath it (docs/design/user-questions-layout.md) — not as the JSON
+// with the line indented beneath it (docs/layout/user-questions-layout.md) — not as the JSON
 // envelope that carries it. The argument braces and the quoted key are gone: this is a rendering of
 // the same one fact, not an extra view beside it.
 func TestModelApprovalTerminalShowsCommandBlock(t *testing.T) {
@@ -1087,7 +1087,7 @@ func TestModelApprovalArgsReadAsLabelledLines(t *testing.T) {
 }
 
 // TestModelApprovalMenuSpacing pins the mockup's vertical spacing
-// (docs/design/user-questions-layout.md:13-22, the approval box): Reason: and Command: run ADJACENT
+// (docs/layout/user-questions-layout.md:13-22, the approval box): Reason: and Command: run ADJACENT
 // — two labelled facts about one call, and a blank line between them reads as two blocks — ONE blank
 // line sets the menu off from the body, the four decisions stay adjacent to each other, and the last
 // of them ends the box with the bottom border directly under it. That single blank is the whole of
@@ -1468,7 +1468,7 @@ func askModelPaneLines(t *testing.T, m Model) []string {
 }
 
 // TestModelAskPromptMenuChrome pins the surface the mockup asks for
-// (docs/design/user-questions-layout.md): no title of its own — the top border is unbroken and the
+// (docs/layout/user-questions-layout.md): no title of its own — the top border is unbroken and the
 // QUESTION is the pane's lead line — and the choices as a menu, ❯ on the answer ⏎ would send, · on
 // the rest, one blank line between each pair and one setting the block off above and below — this
 // box closes its offering, unlike the approval box's adjacent decisions. The spacing is asserted

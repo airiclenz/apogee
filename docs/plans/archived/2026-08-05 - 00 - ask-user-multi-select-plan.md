@@ -9,7 +9,7 @@
 - **Authoritative sources (precedence order):**
   1. The ratified design calls below (owner, 2026-08-05) and the pinned mockup they
      include — where anything disagrees with them, they win.
-  2. `docs/design/user-questions-layout.md` as amended by the ratified calls of
+  2. `docs/layout/user-questions-layout.md` as amended by the ratified calls of
      `docs/plans/archived/2026-08-04 - 03 - user-questions-menu-layout-plan.md`
      (menu-style rows: `❯` pointer + accented label, dim `·` rows, no background bar,
      no digit shortcuts, free-text custom answers always stay).
@@ -200,7 +200,7 @@ Depends on items 1–3. This item owns every cross-cutting doc amendment — no 
 touches these files.
 
 NOTES (2026-08-05): two records against the item's literal text.
-1. The note appended to `docs/design/user-questions-layout.md` is a short blockquote rather than
+1. The note appended to `docs/layout/user-questions-layout.md` is a short blockquote rather than
 literally "one line": besides naming this plan and its date as the amending authority, it states the
 ratified `␣`/`⏎` calls and the pinned `[x]`/`[ ]` glyphs, and it records that the gap the sketch draws as
 one space is the pop-up module's own two-space column gutter — item 3's NOTES 2 decided the gutter
@@ -219,7 +219,7 @@ stands, and a mockup pinned without that note would read as a spec the code deli
   checked). One sentence recording that the transcript needs no new rule: the answer is
   still the human's own words on the branch, and a multi-line answer rides the existing
   first-line-promoted, expandable-detail path.
-- `docs/design/user-questions-layout.md`: append the pinned multi-select mockup from
+- `docs/layout/user-questions-layout.md`: append the pinned multi-select mockup from
   this plan's header with a dated one-line note naming this plan as the amending
   authority.
 - `CHANGELOG.md` (`[Unreleased]` → `### Added`): one entry in the house voice (bold
@@ -231,7 +231,7 @@ states and nothing else changed.
 
 **Acceptance:**
 - `git diff --stat` touches only `CONTEXT.md`, `layout.md`,
-  `docs/design/user-questions-layout.md`, `CHANGELOG.md`
+  `docs/layout/user-questions-layout.md`, `CHANGELOG.md`
 - `make check`
 
 **Commit:** `docs: record ask_user multi-select in CONTEXT, layout spec, and changelog`

@@ -6,7 +6,7 @@
   wrapped multi-line options.
 - **Date:** 2026-08-04 · **Status:** ready
 - **Authoritative sources (precedence order):**
-  1. `docs/design/user-questions-layout.md` — the owner's mockup (pinned spec for visuals),
+  1. `docs/layout/user-questions-layout.md` — the owner's mockup (pinned spec for visuals),
      as amended by the ratified design calls below. Where an item disagrees with the mockup
      + design calls, the mockup + design calls win.
   2. `layout.md` — the TUI layout spec; item 7 reconciles it, earlier items must not
@@ -80,7 +80,7 @@ title; height accounting (chrome) is one row smaller with the flag on.
 - `make check`
 
 **Commit:** `feat(tui): popup painter learns title-in-border mode` — this commit also adds
-the previously untracked `docs/design/user-questions-layout.md` and this plan file.
+the previously untracked `docs/layout/user-questions-layout.md` and this plan file.
 
 ## 2. Painter: menu-style row rendering (pointer + color, no bar) — ✅ DONE (2026-08-04)
 
@@ -354,7 +354,7 @@ it, and it moves again with how tall the anchor row lands. Two painter additions
 `popupBodyLines` already did, factored out so the caller can cost the same block) and `popupBodyLineCount`. Docs:
 `layout.md` gained the rung ("Inside a pane's own grant the rows come first — except where the prose IS what is
 being decided") and a closing clause on the F3 paragraph; the CHANGELOG `[Unreleased]` ask bullet gained the
-matching sub-bullet. The mockup in `docs/design/user-questions-layout.md` is unchanged — this moves the rendering
+matching sub-bullet. The mockup in `docs/layout/user-questions-layout.md` is unchanged — this moves the rendering
 TOWARDS it.
 
 NOTES (2026-08-05): follow-up (run-level, owner-approved; not a plan item) — comments only, no behaviour change
@@ -460,7 +460,7 @@ Check `CONTEXT.md`'s Approver/Asker passage (~309-313) and ADR 0025's "a/d/s and
 dismiss own the keyboard" line (adr 0025 ~line 156) for contradictions — amend the
 CONTEXT.md wording if it now misdescribes the surface; ADRs are historical records: do not
 edit ADR 0025's body, but if its statement is now materially wrong, add a dated
-clarifying note at its end. `docs/design/user-questions-layout.md` stays as the pinned
+clarifying note at its end. `docs/layout/user-questions-layout.md` stays as the pinned
 mockup (committed in item 1); add a one-line status note at its top pointing at this plan.
 
 **Tests:** none (prose). `grep -n "a allow" layout.md` returns nothing;

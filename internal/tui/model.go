@@ -564,7 +564,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// on msg.Reply (the C3 rendezvous; P2.4).
 		m.state = stateAwaitingApproval
 		m.pending = &msg
-		m.approvalSel = 0       // the menu opens on Allow for every request (docs/design/user-questions-layout.md)
+		m.approvalSel = 0       // the menu opens on Allow for every request (docs/layout/user-questions-layout.md)
 		m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
 		m.layout()              // the pane the decision turns on outranks the draft's extra rows
 		return m, nil
@@ -1123,7 +1123,7 @@ type approvalOption struct {
 }
 
 // approvalMenu is the approval prompt's decision menu in the order it is painted
-// (docs/design/user-questions-layout.md). It is the ONE list the pane and the keys both read — the
+// (docs/layout/user-questions-layout.md). It is the ONE list the pane and the keys both read — the
 // rows renderPopup draws, the shortcut cells beside them, the order ↑/↓ walk, and (through
 // approvalKeys) the letters that take a row without walking to it — so a row can never be paintable
 // and unreachable, or reachable and unpainted.
@@ -4283,7 +4283,7 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int, floor popupFlo
 // human sees exactly the tool that will run), the body carries a non-empty Reason then the
 // arguments (approvalArgsBlock), and the decisions themselves are the pane's ROWS.
 //
-// It is a MENU rather than a legend (docs/design/user-questions-layout.md): the title rides the top
+// It is a MENU rather than a legend (docs/layout/user-questions-layout.md): the title rides the top
 // border, the four options of approvalMenu are menu-style rows with their shortcut letters aligned
 // in a second column, and the hint row that used to spell "a allow · d deny · …" is gone — the
 // letters are now written beside the options they take, where the eye already is. That is what pays
@@ -4438,7 +4438,7 @@ const askQuestionFloor = 3
 
 // askCheckedMarker and askUncheckedMarker are the checkbox glyphs a MULTI-SELECT question draws in
 // front of every option — the mockup's own, pinned by the owner
-// (docs/design/user-questions-layout.md): ASCII boxes rather than ☑/☐, because the pane is painted
+// (docs/layout/user-questions-layout.md): ASCII boxes rather than ☑/☐, because the pane is painted
 // in whatever font the terminal is set to and a box-drawing checkbox is exactly the kind of glyph
 // that lands as a blank or a double-width tofu there. They are the same width as each other, so
 // ticking a row repaints three cells and moves nothing.
@@ -4481,7 +4481,7 @@ func askChoiceRows(labels []string, multi bool, checked []bool) []popupRow {
 // is always visible in the chrome. Every model-authored string (question, choices) is
 // escape-stripped at this call site.
 //
-// The pane carries NO title (docs/design/user-questions-layout.md): "the assistant is asking:" said
+// The pane carries NO title (docs/layout/user-questions-layout.md): "the assistant is asking:" said
 // what the question itself says better, and a heading over a single question is a row spent on
 // nothing. So the top border is plain (popupSpec.titleInBorder with an empty title) and the question
 // is the pane's own heading — which also means the pane's chrome is its two borders and its hint row

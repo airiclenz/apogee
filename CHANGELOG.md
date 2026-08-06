@@ -63,7 +63,7 @@ point is a **minor** bump, not a breaking change.
     width wraps under its own text rather than under the box beside it.
 
   Defined in `CONTEXT.md` ("Ask-user") and specced in `layout.md`, with the pinned mockup in
-  `docs/design/user-questions-layout.md`.
+  `docs/layout/user-questions-layout.md`.
 
 - **`/settings` — your whole configuration on one screen, and every change takes effect in the
   session you make it in.** The verb opens the first **full-height** pane apogee has: one row per
@@ -1058,7 +1058,7 @@ point is a **minor** bump, not a breaking change.
     options nothing, and a window too short for both still puts an answer on the screen ahead of the
     question's third line.
 
-  Mocked up in `docs/design/user-questions-layout.md`; specced in `layout.md` (What "height" means,
+  Mocked up in `docs/layout/user-questions-layout.md`; specced in `layout.md` (What "height" means,
   The Column contract).
 
 - **A skill you invoked is the coloured token in your own text now, not a tag row under it.** A sent

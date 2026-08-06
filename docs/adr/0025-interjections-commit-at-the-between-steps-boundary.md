@@ -312,7 +312,7 @@ the feature.
 ("at `stateAwaitingApproval` and `stateErrored` the box stays inert: a/d/s and Enter-dismiss own the
 keyboard there") still describes the BOX correctly: neither state is editable, `inputEditable()` is
 unchanged, and `a`/`s`/`d` still send their decision on the spot. What has moved is what the
-approval pane does with the two keys beside them. It is a menu (`docs/design/user-questions-layout.md`,
+approval pane does with the two keys beside them. It is a menu (`docs/layout/user-questions-layout.md`,
 `layout.md`): ↑/↓ walk the highlight over `Allow` / `Always allow this session` / `Deny` / `Cancel`,
 and ⏎ **resolves the highlighted row** rather than dismissing anything — Enter-dismiss is the errored
 state's alone. Everything the menu does not claim, PgUp/PgDn included, still falls through to
