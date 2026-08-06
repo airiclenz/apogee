@@ -87,6 +87,12 @@ const (
 // because it is the same kind of per-entry fact the painter reads off the shared entries slice,
 // and it is deliberately absent from the wire form — the state is the view's alone, so a resumed
 // session paints everything collapsed and /clear forgets it with everything else.
+//
+// ctxUsed / ctxLimit are the CHILD's context fill on the head of a sub-agent run (applyUsage): how
+// much of its window the delegate had filled when it last reported, and the window that reading
+// filled. They are a pair by necessity — a fill says nothing without its limit — so they are
+// captured together at fold time and frozen there, which is what keeps a finished run's history
+// out of reach of a later window rebind.
 type entry struct {
 	kind      entryKind
 	text      string
@@ -101,6 +107,10 @@ type entry struct {
 	skillSpans []skillSpan
 	presented  presentedView
 	startup    startupView // entryStartup only: the one-time start-up box's logo + session facts
+	// the head of a sub-agent run only: the child's latest context reading and the window it
+	// filled, frozen together when the reading folded (applyUsage)
+	ctxUsed  int
+	ctxLimit int
 }
 
 // skillSpan is one invoked "/token" LOCATED in a sent message's text: the byte range [start,end)
@@ -407,9 +417,11 @@ func presentedStatus(v presentedView) string {
 
 // apply folds one engine Event into the transcript (the C6 rule). The switch covers the
 // eight transcript-rendered variants of the eleven-variant Event set, so the rendered set
-// stays honest as the engine evolves; the other three are not transcript entries
-// (ReasoningEvent feeds the activity line, UsageEvent the status-line stats, AuditEvent
-// nothing in the TUI) and fall to the default case with every future variant. Each
+// stays honest as the engine evolves; the other three append no entry (ReasoningEvent feeds
+// the activity line, AuditEvent nothing in the TUI, and a UsageEvent is a reading rather than
+// a block — it lands ON an entry the run already has, through applyUsage, which foldEvent
+// calls with the window a fill needs and apply cannot see) and fall to the default case with
+// every future variant. Each
 // case folds its event: tokens grow the in-progress buffer; a StreamReset discards it; a
 // Message commits it (canonical text); the first ToolCall of a Turn finalises the pre-tool
 // narration before recording the call; results, approvals, and recovered faults append
@@ -437,6 +449,47 @@ func (t *transcript) apply(e domain.Event) {
 	default:
 		// An unknown future variant: tolerate it. The set is sealed and additively
 		// versioned, so an unrecognised Event is rendered as nothing rather than a panic.
+	}
+}
+
+// applyUsage folds a sub-agent's context reading onto the run it belongs to — the transcript's
+// half of the UsageEvent, and the one fold apply cannot perform from the Event alone: a reading
+// is a FILL, and a fill means nothing beside the window it fills, which is a fact about the
+// Model rather than about the Event (foldEvent hands window in). Anything that is not a
+// Depth > 0 UsageEvent folds nothing: a Depth 0 reading is the human's own conversation, and
+// that one belongs to the status gauge alone (foldStats).
+//
+// A Depth N reading belongs to the most recent still-open sub-agent run whose head stands at
+// depth N-1 — derived from the depths already on the entries, exactly as subAgentSpan derives
+// the run itself, and unambiguous because delegation is serialized (ADR 0014). It is never
+// transitive: each agent fills its OWN window, so a nested run's reading stops at the nested
+// head and says nothing about its parent's fill. A reading that matches no open run — one that
+// arrived after its report, or before its call — folds nothing at all, as it did before this
+// entry field existed.
+//
+// The reading is the LATEST total and never a running sum: every Turn reports the whole context
+// it filled, so the newest number IS the fill. A total the server omitted falls back to
+// prompt+completion, the preference foldStats already reads usage by; a reading of nothing
+// leaves the previous one standing rather than blanking a run that had reported.
+func (t *transcript) applyUsage(e domain.Event, window int) {
+	usage, ok := e.(domain.UsageEvent)
+	if !ok || usage.Depth <= 0 {
+		return
+	}
+	total := usage.TotalTokens
+	if total == 0 {
+		total = usage.PromptTokens + usage.CompletionTokens
+	}
+	if total <= 0 {
+		return
+	}
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		head := &t.entries[i]
+		if head.kind == entryToolCall && !head.done &&
+			head.depth == usage.Depth-1 && head.tool.name == subAgentToolName {
+			head.ctxUsed, head.ctxLimit = total, window
+			return
+		}
 	}
 }
 

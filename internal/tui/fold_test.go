@@ -105,7 +105,12 @@ func foldCases() []foldCase {
 			wantEntries: 1,
 		},
 		{
-			name:      "UsageEvent is stats only — it moves the gauge and nothing else",
+			name: "UsageEvent at depth 0 moves the gauge and appends no entry",
+			// The top-level reading is the status line's: it lights the gauge and nothing in the
+			// scrollback. A sub-agent's reading (Depth > 0) appends no entry either — it lands ON
+			// the run block that is already there (transcript.applyUsage), which is a fold this
+			// fresh-Model table has no run to show, so the attribution is pinned in
+			// transcript_test.go and model_test.go instead.
 			event:     domain.UsageEvent{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200},
 			wantStats: statsFold{ctxUsed: 1200},
 		},

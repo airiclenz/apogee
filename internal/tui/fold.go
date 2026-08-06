@@ -31,6 +31,11 @@ import (
 func (m Model) foldEvent(e domain.Event) Model {
 	m = m.foldStats(e)
 	m.transcript.apply(e)
+	// The transcript fold's second half, and separate for one reason: a sub-agent's usage reading
+	// is a FILL, so it needs the window it fills — a Model fact no Event carries. It is HANDED in,
+	// by the same rule foldActivity is handed its answer below, rather than reached for sideways
+	// from inside the transcript.
+	m.transcript.applyUsage(e, m.opts.ContextWindow)
 	// foldActivity runs after apply and is HANDED what apply established: its ToolResultEvent
 	// rule asks whether a call is still open (a parallel batch holds the tool phrase), and only
 	// the call/result pairing apply performs can answer that.
@@ -39,7 +44,8 @@ func (m Model) foldEvent(e domain.Event) Model {
 
 // foldStats updates the live token stats from one engine Event (the eventMsg fold). Only the
 // top-level agent's (Depth 0) accounting drives the status line: a sub-agent's usage nests in
-// the stream, but the gauge tracks the conversation the human is steering. It marks when a
+// the stream, but the gauge tracks the conversation the human is steering — the child's reading
+// is not dropped, it fills its own run block instead (transcript.applyUsage). It marks when a
 // Turn's content begins streaming (its first token) so a later UsageEvent can time the
 // completion for a tokens/sec readout, resets that clock when the Turn re-streams, and on usage
 // adopts the new context fill (the gauge's Used) and throughput. It mutates the local copy and
@@ -56,7 +62,7 @@ func (m Model) foldStats(e domain.Event) Model {
 		}
 	case domain.UsageEvent:
 		if e.Depth != 0 {
-			break
+			break // a delegate's fill, which is its run block's business and not the gauge's
 		}
 		// Prefer the server's total; fall back to prompt+completion when it omits the sum.
 		total := e.TotalTokens

@@ -1111,6 +1111,164 @@ func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// A sub-agent's context fill folds onto its own run (transcript.applyUsage)
+// ----------------------------------------------------------------------------
+
+// subAgentUsage folds one reading a delegate at depth reported, against the window in force when
+// it landed — the UsageEvent a child's Turn emits, which reaches the parent's transcript at the
+// child's own nesting level.
+func subAgentUsage(tr *transcript, depth, total, window int) {
+	tr.applyUsage(domain.UsageEvent{EventBase: domain.EventBase{Depth: depth}, TotalTokens: total}, window)
+}
+
+// fillOf reads back the pair frozen on the entry at i: what the child's context held, out of the
+// window that reading filled.
+func fillOf(tr *transcript, i int) (used, limit int) {
+	return tr.entries[i].ctxUsed, tr.entries[i].ctxLimit
+}
+
+// TestSubAgentUsageFillsItsOwnRun pins the attribution rule: a reading belongs to the run that
+// produced it — the most recent still-open sub-agent head one level above the reading's depth —
+// and to nothing else. Each agent fills its own window, so the fill is neither cumulative across
+// the child's Turns nor transitive up the nesting, and a finished run's figure is history.
+func TestSubAgentUsageFillsItsOwnRun(t *testing.T) {
+	const window = 32768
+
+	t.Run("the reading lands on the open run one level above it", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		readCall(tr, "c1", "a.go", 1, 5, 1)
+
+		subAgentUsage(tr, 1, 12000, window)
+
+		if used, limit := fillOf(tr, 0); used != 12000 || limit != window {
+			t.Errorf("run fill = %d/%d, want 12000/%d on the head that delegated", used, limit, window)
+		}
+		if used, limit := fillOf(tr, 1); used != 0 || limit != 0 {
+			t.Errorf("the child's own read call took a fill (%d/%d); only a run head carries one", used, limit)
+		}
+	})
+
+	t.Run("the latest reading replaces the previous one — a fill, never a sum", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+
+		subAgentUsage(tr, 1, 8000, window)
+		subAgentUsage(tr, 1, 12000, window)
+		subAgentUsage(tr, 1, 0, window) // a Turn that reported nothing leaves the fill standing
+
+		if used, _ := fillOf(tr, 0); used != 12000 {
+			t.Errorf("run fill = %d, want the latest reading 12000 (not 20000, and not blanked)", used)
+		}
+	})
+
+	t.Run("a total the server omitted falls back to prompt+completion", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+
+		tr.applyUsage(domain.UsageEvent{
+			EventBase:    domain.EventBase{Depth: 1},
+			PromptTokens: 900, CompletionTokens: 100,
+		}, window)
+
+		if used, _ := fillOf(tr, 0); used != 1000 {
+			t.Errorf("run fill = %d, want 1000 (the same preference the gauge reads usage by)", used)
+		}
+	})
+
+	t.Run("a second run reads for itself while the finished one stays frozen", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentUsage(tr, 1, 12000, window)
+		subAgentReport(tr, "s1", "done", 0)
+
+		subAgentCall(tr, "s2", "survey the docs", 0)
+		subAgentUsage(tr, 1, 5000, window/2) // a rebound window: the second run measures against it
+
+		if used, limit := fillOf(tr, 0); used != 12000 || limit != window {
+			t.Errorf("the finished run's fill moved to %d/%d; a reported run is history", used, limit)
+		}
+		if used, limit := fillOf(tr, 1); used != 5000 || limit != window/2 {
+			t.Errorf("second run fill = %d/%d, want 5000/%d", used, limit, window/2)
+		}
+	})
+
+	t.Run("a nested run's reading stops at the nested head", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the repo", 0)
+		subAgentCall(tr, "s2", "read the tests", 1)
+
+		subAgentUsage(tr, 2, 7000, window)
+
+		if used, _ := fillOf(tr, 1); used != 7000 {
+			t.Errorf("nested run fill = %d, want the grandchild's 7000", used)
+		}
+		if used, _ := fillOf(tr, 0); used != 0 {
+			t.Errorf("the outer run took the nested reading (%d): a fill is not transitive", used)
+		}
+
+		subAgentUsage(tr, 1, 12000, window)
+		if used, _ := fillOf(tr, 0); used != 12000 {
+			t.Errorf("outer run fill = %d, want its own 12000", used)
+		}
+		if used, _ := fillOf(tr, 1); used != 7000 {
+			t.Errorf("nested run fill = %d, want its own 7000 left alone", used)
+		}
+	})
+
+	t.Run("a reading with no open run at its depth folds nothing", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			build func(tr *transcript)
+			depth int
+		}{
+			{
+				name:  "nothing delegated at all",
+				build: func(*transcript) {},
+				depth: 1,
+			},
+			{
+				name: "the run already reported",
+				build: func(tr *transcript) {
+					subAgentCall(tr, "s1", "survey the tests", 0)
+					subAgentReport(tr, "s1", "done", 0)
+				},
+				depth: 1,
+			},
+			{
+				name: "an ordinary open call is not a run head",
+				build: func(tr *transcript) {
+					tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+						ID: "c1", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)}})
+				},
+				depth: 1,
+			},
+			{
+				name: "the reading is the human's own conversation",
+				build: func(tr *transcript) {
+					subAgentCall(tr, "s1", "survey the tests", 0)
+				},
+				depth: 0, // the gauge's business (foldStats), never a run block's
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				tr := &transcript{}
+				tc.build(tr)
+
+				subAgentUsage(tr, tc.depth, 12000, window)
+
+				for i := range tr.entries {
+					if used, limit := fillOf(tr, i); used != 0 || limit != 0 {
+						t.Errorf("entry %d took a fill (%d/%d); the reading matched no open run", i, used, limit)
+					}
+				}
+			})
+		}
+	})
+}
+
+// ----------------------------------------------------------------------------
 // Tool call + result group by CallID
 // ----------------------------------------------------------------------------
 

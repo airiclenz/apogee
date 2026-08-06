@@ -29,7 +29,9 @@
   - Concurrent sub-agent fan-out identity (TODO.md:437-448) — bracketing relies on serialized delegation; if fan-out ever lands, `UsageEvent` needs an identity field then.
   - Bench driver output; persisting per-sub-agent usage into the session record `Meta` for headless (the TUI's transcript codec is the only persistence in this wave).
 
-## 1. Fold depth>0 usage onto its owning sub-agent transcript run
+## 1. Fold depth>0 usage onto its owning sub-agent transcript run — ✅ DONE (2026-08-06)
+
+NOTES (2026-08-06): mechanism chosen under the item's "implementer's choice" clause — the usage fold is a sibling method `transcript.applyUsage(e, window)` called from `foldEvent` (fold.go) rather than a `UsageEvent` case inside `apply`: `apply(e)` has 153 call sites across the package's tests, so threading the window through its signature was not viable, and a hidden window field on the transcript would have to be kept in sync with a rebindable `m.opts.ContextWindow`. `foldStats` keeps its `Depth != 0` break for the gauge (comment amended); the stale `apply` doc comment now describes the new routing. Entry fields are `ctxUsed` / `ctxLimit`.
 
 **What:** In `internal/tui`, stop discarding sub-agent usage and attach it to the owning transcript entry.
 

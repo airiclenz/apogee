@@ -313,7 +313,13 @@ func TestUsageEventDrivesGaugeAndThroughput(t *testing.T) {
 		t.Errorf("throughput readout empty after usage: %q", s)
 	}
 
-	// A sub-agent's usage (Depth > 0) nests in the stream but must not move the top-level gauge.
+	// A sub-agent's usage (Depth > 0) nests in the stream but must not move the top-level gauge:
+	// it fills the delegate's own run block instead, which is the block the delegation opened.
+	m = step(t, m, eventMsg{Event: domain.ToolCallEvent{
+		Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"survey the tests"}`)},
+	}})
+	head := len(m.transcript.entries) - 1
+
 	prev := m.ctxUsed
 	m = step(t, m, eventMsg{Event: domain.UsageEvent{
 		EventBase:    domain.EventBase{Depth: 1},
@@ -321,6 +327,10 @@ func TestUsageEventDrivesGaugeAndThroughput(t *testing.T) {
 	}})
 	if m.ctxUsed != prev {
 		t.Errorf("a Depth>0 UsageEvent changed the top-level gauge: %d -> %d", prev, m.ctxUsed)
+	}
+	if got := m.transcript.entries[head]; got.ctxUsed != 9 || got.ctxLimit != m.opts.ContextWindow {
+		t.Errorf("sub-agent run fill = %d/%d, want 9/%d (the child's reading in the window it inherited)",
+			got.ctxUsed, got.ctxLimit, m.opts.ContextWindow)
 	}
 }
 
