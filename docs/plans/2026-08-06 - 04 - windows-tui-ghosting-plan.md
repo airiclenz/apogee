@@ -6,7 +6,7 @@
   measurements that separate four live hypotheses, fixes the cause, and pins the fix with a
   regression test that runs headless on Windows CI.
 - **Date:** 2026-08-06
-- **Status:** in progress — items 1, 2 and 4 (the diagnosis) ✅ done 2026-08-06; items 3 and 5-8 open
+- **Status:** in progress — items 1-4 ✅ done 2026-08-06; items 5-8 open
 - **Predecessor:** `docs/handoffs/2026-08-06 - 00 - windows-tui-ghosting-debug.md` — the symptom
   report and the first (unsuccessful) dependency-bump attempt. This plan supersedes its debug
   plan; the symptom description there is still ground truth.
@@ -227,7 +227,32 @@ always-on wrapper); the diag log records a `ModeReportMsg` fed through `Update`.
 
 **Commit:** `feat(tui): hidden --tui-trace and --tui-diag seams`
 
-## 3. A terminal measurement probe — `apogee probe terminal`
+## 3. A terminal measurement probe — `apogee probe terminal` — ✅ DONE (2026-08-06)
+
+NOTES (2026-08-06): three departures from the item's literal text, plus one addition.
+(a) **The parser's tests are in `internal/probe`, not `cmd/apogee`.** The item's acceptance names
+`go test ./cmd/apogee/ -run 'ProbeTerminal'`, but ADR 0010's thin-root rule puts the logic where
+the host and model probes already live (`internal/probe/terminal.go`), so the table-driven CPR /
+DECRQM tests — clean, interleaved, out-of-order, truncated, and one report delivered a byte at a
+time — run as `go test ./internal/probe/ -run Terminal`. The acceptance command still covers what
+it names: the command's wiring, the two distinct failures, and the not-a-terminal degradation.
+(b) **Section 3's erase check and section 5's ECH/ICH are answered by an OS-level screen
+read-back, and only on Windows.** No VT sequence reports what is *in* a cell — DSR-CPR answers
+where the cursor is and nothing else — so "re-read the row to detect whether the tab erased what
+it passed over" is not portably possible. `internal/probe/terminal_{windows,other}.go` reads the
+console buffer with `ReadConsoleOutputCharacterW` where there is one and the report prints
+`unverified` where there is not, rather than guessing. Everything else in the probe is pure
+DSR-CPR and runs everywhere.
+(c) **The refusal covers stdin as well as stdout, and a terminal smaller than 40×8.** The probe
+reads its replies from stdin, so `apogee probe terminal < /dev/null` has nothing to measure even
+with stdout on a terminal; and the wrap section needs a row below the one it writes. Both refuse
+with a message naming the cause, both exit non-zero.
+(d) **Addition, for item 4's open question 1.** Section 4 prints the `GetConsoleScreenBufferInfo`
+cursor beside the DSR-CPR answer on Windows — the exact number that item's findings say a
+maintainer will ask for — so the two can be compared rather than one trusted.
+Also: no CHANGELOG entry and no user-facing docs. Item 8 explicitly owns "document … the probe
+command where the other diagnostics are documented" and the CHANGELOG line naming
+`apogee probe terminal`, and item 8 is not yet done — the same call items 1 and 2 made.
 
 Depends on item 2 only for convention, not for code.
 

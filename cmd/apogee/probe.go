@@ -20,6 +20,11 @@ import (
 // The model half — `apogee probe model`, which spends live tokens AND writes a fingerprint
 // record — is a separate, explicit child: the asymmetry in cost is the whole reason the command
 // has halves at all, and nothing about a reachable endpoint may cause the battery to run.
+//
+// `apogee probe terminal` joins them as a third subject. It sits on the FREE side of that split —
+// no agent, no model, no write — but it is a named child rather than part of the bare parent's
+// report because it is the one probe that needs the screen: it measures the terminal by painting
+// on the alternate screen and reading the cursor back, so it must be asked for.
 func newProbeCommand() *cobra.Command {
 	cmd := probeHostCommand("probe",
 		"Report this host: confinement, roots, and endpoint reachability",
@@ -36,6 +41,7 @@ func newProbeCommand() *cobra.Command {
 		"apogee probe host is the named child form of the host report bare `apogee probe`\n"+
 			"prints — identical output, spelled out for scripts."))
 	cmd.AddCommand(probeModelCommand())
+	cmd.AddCommand(probeTerminalCommand())
 
 	return cmd
 }
