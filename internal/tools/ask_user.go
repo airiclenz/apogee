@@ -10,7 +10,7 @@ import (
 
 var askUserSpec = toolSpec{
 	name:        "ask_user",
-	description: "Ask the human a free-text question and get their answer. Use this for a clarification or a decision only the user can make. It is not a tool-approval prompt; it is a direct question to the person. Optionally pass `choices` to offer a few answer options the human can pick from; they may still type a custom answer instead. When several choices could apply at once, set multi_select to true so the human can pick more than one.",
+	description: "Ask the human a free-text question and get their answer. Use this for a clarification or a decision only the user can make. It is not a tool-approval prompt; it is a direct question to the person. Optionally pass `choices` to offer a few answer options the human can pick from; they may still type a custom answer instead. When several choices could apply at once, set multi_select to true so the human can pick more than one. Never repeat the question or the choices in your own message before calling — the tool shows them to the human and the transcript keeps a record after they answer; restating them wastes tokens.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["question"],

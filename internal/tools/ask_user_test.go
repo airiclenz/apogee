@@ -280,6 +280,11 @@ func TestAskUser_AdvertisesMultiSelect(t *testing.T) {
 	if !strings.Contains(tool.Description(), "set multi_select to true so the human can pick more than one") {
 		t.Errorf("description does not offer multi_select to the model: %q", tool.Description())
 	}
+	// The popup puts the question and the transcript keeps the record, so a model that
+	// restates either in its own message before calling only spends tokens.
+	if !strings.Contains(tool.Description(), "Never repeat the question or the choices in your own message before calling") {
+		t.Errorf("description does not tell the model to skip restating the question: %q", tool.Description())
+	}
 
 	var schema struct {
 		Required   []string                  `json:"required"`

@@ -154,9 +154,16 @@ Depends on item 1.
 
 **Commit:** `test(tui): paint coverage and layout.md spec for the ask_user answer record`
 
-## 3. Model-facing description: never restate the question beforehand
+## 3. Model-facing description: never restate the question beforehand — ✅ DONE (2026-08-06)
 
 Depends on item 1 (the sentence promises a transcript record; the record must exist).
+
+NOTES (2026-08-06): the new assertion was added inside the existing
+`TestAskUser_AdvertisesMultiSelect` description test, per the item's "extend the description
+assertion" wording, rather than as a separate test function. One doc touch beyond the item's list:
+a sub-bullet on item 1's CHANGELOG entry, because that entry describes the record but claims
+"no token is spent" without mentioning the instruction that actually saves the tokens — a new
+top-level entry would have duplicated item 1's.
 
 **What:**
 

@@ -150,6 +150,10 @@ point is a **minor** bump, not a breaking change.
     arguments and the answer is the result the tool already returned, so the record is a render-time
     act on what the transcript was holding anyway — no tool result grows, no token is spent, and the
     engine stays wire-silent (ADR 0031).
+  - **The model is told to stop restating the question.** `ask_user`'s description now ends by
+    saying never to repeat the question or the choices in the message before the call: the popup
+    puts them to the human and the transcript keeps the record afterwards, so a preamble spelling
+    them out again buys nothing and spends tokens.
 
 - **Breaking (config), with a one-time automatic migration: the `servers:` list is the single
   definition of what apogee can talk to.** The top-level `endpoint:`, `api-key:`, `host-alias:` and
