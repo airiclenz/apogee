@@ -440,7 +440,9 @@ while the six nested structures take an **`$EDITOR` round-trip**: ⏎ suspends i
 editor at that key's line, and on return the file is re-read, validated and every changed key
 applied through those same two homes (a changed `mcp-servers:` **reconnects**, validate-then-commit:
 the new set is dialled first and the old sessions keep serving on failure; startup connect stays
-fatal). The `server` row performs the full **live switch**, identical to `/server`;
+fatal). The `server` row performs the full **live switch**, identical to `/server` — and takes no
+reset, since its line is the switch's own recording (ADR 0036) and deleting it would leave the
+session on a server the file no longer names, so `⌫` is inert there and its hint line says so;
 `confine-to-workspace` / `unconfined-hosts` stay display-only with a "use /confine" pointer (that
 loosen stays single-homed in **`/confine`**, ADR 0012). Idle-only, and the `$EDITOR` jump is
 offered between runs only. It **reconciles** the

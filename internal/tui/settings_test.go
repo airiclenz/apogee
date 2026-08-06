@@ -854,6 +854,83 @@ func TestSettingsServerRowRefusalLandsOnTheRow(t *testing.T) {
 	}
 }
 
+// Backspace is INERT on the `server` row, before and after this session has switched. The key's value
+// is the recording of a switch (ADR 0036 decision 2) and the row is a second entrance to that seam and
+// nothing else (ADR 0037 decision 5): a reset would splice the line away while the session went on
+// running against the server it named — the file and the wire disagreeing, with nothing journaled. The
+// legend says so too, naming no key that would do nothing here.
+func TestSettingsServerRowTakesNoReset(t *testing.T) {
+	sw, log := &fakeSwitch{}, &settingsWriteLog{}
+	m := settingsServerModel(t, staticServers(twoServers), sw, log)
+
+	if m.settingsResettable(settingsServerRow()) {
+		t.Error("the server row offers a reset: ⌫ would erase the recorded choice the session is running on")
+	}
+	armed := step(t, m, keyBackspace())
+	if armed.settings.kind != settingsKeyList {
+		t.Fatalf("pane state = %d, want %d — backspace armed a reset on the server row",
+			armed.settings.kind, settingsKeyList)
+	}
+	if pane := strip(armed.renderSettings()); !strings.Contains(pane, settingsNoResetHint) || strings.Contains(pane, "⌫ reset") {
+		t.Errorf("the legend still advertises a reset this row does not take:\n%s", pane)
+	}
+
+	// And it stays inert once a switch HAS journaled the key — the journal is what arms ⌫ on every
+	// other row (settingsResettable), so this is the case the kind has to answer.
+	m = step(t, step(t, step(t, m, keyEnter()), keyDown()), keyEnter()) // switch to remote
+	if _, edited := m.settingEditOf("server"); !edited {
+		t.Fatalf("the switch journaled nothing; this case needs a journaled edit to be about anything")
+	}
+	m = step(t, step(t, m, keyBackspace()), keyEnter()) // ⌫ then the ⏎ that would confirm a reset
+
+	if len(log.resets) != 0 {
+		t.Errorf("resets = %+v, want none: the server row's line is the switch seam's to write", log.resets)
+	}
+	if len(log.writes) != 0 {
+		t.Errorf("writes = %+v, want none", log.writes)
+	}
+	if got, want := m.settingsValueCell(settingsServerRow()), "remote"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the row still names the server the session is on", got, want)
+	}
+}
+
+// Choosing the server the session is already on changes nothing, which is exactly why the row has to
+// SAY so: the delegate answers in the transcript ([Model.switchToServer]) and this pane is drawn over
+// it, so a ⏎ nobody could see the effect of would read as a keypress that did nothing. Nothing is
+// switched and nothing is journaled — no marker claims a change that did not happen.
+func TestSettingsServerRowSaysWhenItIsAlreadyOnTheChosenServer(t *testing.T) {
+	sw, log := &fakeSwitch{}, &settingsWriteLog{}
+	m := settingsServerModel(t, staticServers(twoServers), sw, log)
+
+	m = step(t, step(t, m, keyEnter()), keyEnter()) // the sub-list opens on test-host; ⏎ confirms it
+
+	row := settingsServerRow()
+	if len(sw.calls) != 0 {
+		t.Errorf("SwitchServer calls = %v, want none: the session is already there", sw.calls)
+	}
+	if len(m.settingEdits) != 0 {
+		t.Errorf("edits = %+v, want none: nothing changed, so no marker may claim it did", m.settingEdits)
+	}
+	if got, want := m.settingsNote(row), "· "+settingsAlreadyOnNote+"test-host"; got != want {
+		t.Errorf("note = %q, want %q", got, want)
+	}
+	if got := m.settingsValueCell(row); got != row.Value {
+		t.Errorf("value cell = %q, want the unchanged %q", got, row.Value)
+	}
+	if pane := strip(m.renderSettings()); !strings.Contains(pane, settingsAlreadyOnNote+"test-host") {
+		t.Errorf("the confirmation is nowhere the human can read it with the pane open:\n%s", pane)
+	}
+	if got := plainTranscript(m); !strings.Contains(got, settingsAlreadyOnNote+"test-host") {
+		t.Errorf("the transcript lost the answer /server gives:\n%s", got)
+	}
+
+	// It is the last act's outcome, not the row's condition: the next landed switch replaces it.
+	m = step(t, step(t, step(t, m, keyEnter()), keyDown()), keyEnter())
+	if got := m.settingsNote(row); got != "" {
+		t.Errorf("note = %q, want none — the confirmation outlived the switch that answered it", got)
+	}
+}
+
 // An edit APPLIES as well as persists (ADR 0037 decision 1), and every key that is not the renderer's
 // own goes out through the binary's dispatcher: the pane hands it the same path and the same value it
 // handed the writer, and knows nothing about the seam behind it. `mode` is the one key the pane also

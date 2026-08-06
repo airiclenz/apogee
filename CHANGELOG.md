@@ -106,7 +106,10 @@ point is a **minor** bump, not a breaking change.
   - **`backspace` unsets a key**, arming a reset the hint line asks you to confirm with `⏎`. What
     that removes is the key's **line**, not its value: the setting goes back to following the
     built-in default rather than being pinned to today's spelling of it — and that default is
-    applied on the same keypress, the row reporting it as `default *`.
+    applied on the same keypress, the row reporting it as `default *`. The one row it does nothing
+    on is `server:`, whose line is the *recording* of a switch rather than a value the pane writes —
+    removing it would leave the session running against a server the file no longer names — so the
+    hint line drops the key there and choosing a server stays the way that key changes.
   - **The blocks no row can hold open your editor.** `servers:`, `mcp-servers:`, `mechanisms:`,
     `validated-sets:`, `system-prompt-models:` and the model profile carry an `· ⏎ opens $EDITOR`
     pointer, and that is what `⏎` does: apogee suspends into `$VISUAL`, else `$EDITOR`, else `vi`
@@ -117,7 +120,9 @@ point is a **minor** bump, not a breaking change.
     the reason on the row. The jump is offered between runs only. The confinement keys keep
     `· use /confine`, because switching Auto's fence off asks for an acknowledgement that stays
     with that verb — and the `server:` row now performs the full **live switch**, the same move
-    `/server` makes, from the same list and recorded the same way.
+    `/server` makes, from the same list and recorded the same way; picking the server you are
+    already on switches nothing and the row says `· already on <name>`, since the transcript where
+    `/server` would have said it is behind the pane.
   - **The pane cannot drift from the schema.** It renders from a new declarative key registry in
     the binary — one row per configuration key, with its kind, default, sources, editability and
     one-line description — and a reflection guard pins that registry to a bijection with the config

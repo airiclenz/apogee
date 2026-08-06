@@ -106,7 +106,15 @@ and a write whose apply then failed reads `✗ saved — live apply failed: …`
 The sub-list opens **on the value the key already holds**, so pressing `⏎` twice confirms rather than
 silently changes. The rows it does not use go back to the transcript while the question is open. The
 `server` row's vocabulary is this config's own `servers:` block, and committing it performs the full
-live switch — the same move `/server` makes.
+live switch — the same move `/server` makes. Confirming the server the session is **already on**
+switches nothing, and the row says so — `· already on macStudio` — because the answer `/server` gives
+in the transcript is behind this pane.
+
+The `server` row is also the one row **`⌫` does nothing on**, and its hint line reads
+`↑/↓ select · ⏎ edit · esc close` to say so. `server:` is not a value the pane writes but the
+*recording* of a switch (ADR 0036 decision 2), and the only door onto it is the switch itself
+(ADR 0037 decision 5): deleting the line would leave the session running against a server the file no
+longer names. Choosing a different server is how this key changes.
 
 ### The single-line field (string and int keys)
 

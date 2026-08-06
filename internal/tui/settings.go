@@ -136,6 +136,7 @@ type settingsPane struct {
 	editor   lineEditor
 	sel      promptSel
 	failure  settingFailure
+	answer   settingAnswer
 }
 
 // settingEdit is one key this pane PERSISTED this session and the value the file now yields for it —
@@ -168,6 +169,28 @@ type settingFailure struct {
 	msg  string
 }
 
+// settingAnswer is the pane's other outcome slot: an act that LANDED and left the row exactly as it
+// was. It is neither a change nor a refusal, so it can be neither of the two things a row already
+// says — a ` *` claiming this session changed the key, or a ✗ claiming the act was refused.
+//
+// One act has that shape today, and it is the `server` row's: choosing the server the session is
+// already on is answered rather than acted on ([Model.switchToServer]). The answer goes to the
+// TRANSCRIPT, which this full-height pane is covering, so a ⏎ that is honestly a no-op looks from
+// inside the pane like a keypress that did nothing at all. The row says it too, and that is all this
+// slot is for.
+//
+// Its lifetime is settingFailure's: one slot describing the last act rather than a row's condition,
+// replaced by the next landed edit (recordSettingEdit) or the next refusal (settingsFailed), and gone
+// with the overlay.
+type settingAnswer struct {
+	path string
+	msg  string
+}
+
+// settingsAlreadyOnNote opens the one answer this pane has, on the row that asked for it: the name of
+// the server the session is already running against completes the sentence.
+const settingsAlreadyOnNote = "already on "
+
 // settingsTitle names the pane, and the hints are the one-line key legends at its foot — one per
 // step, because the keys mean different things in each: in the key list ⏎ opens the selected row's
 // edit idiom and esc leaves the pane, while in a value sub-list ⏎ COMMITS the highlighted value and
@@ -181,17 +204,26 @@ type settingFailure struct {
 // (docs/layout/settings-screen-layout.md's hint is a minimum, not an exhaustion): backspace is the
 // only act of this pane that is not discoverable from the row it works on, and a key that removes a
 // line from a file the human maintains by hand is exactly the one worth spelling out.
+// On a row that takes no reset at all it names the two keys and stops (settingsNoResetHint): a legend
+// is what the human reads backspace's meaning off, so advertising it over the one row where it does
+// nothing is worse than saying nothing — they would press it and read the silence as a bug. The
+// distinction is the KIND's and not the moment's: a row that merely has nothing to reset right now
+// (settingsResettable) is one edit away from having something, and a legend flickering per value
+// would be unreadable. A READ-ONLY row keeps the full legend for the reason the legend names the
+// reset in the first place — its own cell already says where it is edited
+// ([SettingRow.EditPointer]), so backspace doing nothing there is not the only thing saying so.
 // The text editor's legend names the two keys that END it and nothing else, exactly as the buffer's
 // does — and it has to be read, because they are not the keys every other step of this pane ends on:
 // ⏎ belongs to the VALUE there (it inserts a newline in prose that has lines), so the commit moves to
 // ctrl+s and the abandon stays on esc (ADR 0037 decision 10).
 const (
-	settingsTitle      = "Settings"
-	settingsHint       = "↑/↓ select · ⏎ edit · ⌫ reset · esc close"
-	settingsEnumHint   = "↑/↓ select · ⏎ set · esc back"
-	settingsBufferHint = "⏎ save · esc cancel"
-	settingsResetHint  = "⏎ confirm reset · esc cancel"
-	settingsTextHint   = "ctrl+s save · esc discard"
+	settingsTitle       = "Settings"
+	settingsHint        = "↑/↓ select · ⏎ edit · ⌫ reset · esc close"
+	settingsNoResetHint = "↑/↓ select · ⏎ edit · esc close"
+	settingsEnumHint    = "↑/↓ select · ⏎ set · esc back"
+	settingsBufferHint  = "⏎ save · esc cancel"
+	settingsResetHint   = "⏎ confirm reset · esc cancel"
+	settingsTextHint    = "ctrl+s save · esc discard"
 )
 
 // The pane's description header: the label its first line opens with, and the number of lines the
@@ -552,7 +584,9 @@ func (m Model) settingsEnumKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, 
 // from this pane and one driven from `/server` cannot answer differently: a PRE-BOUND session
 // constructs its engine instead of moving one ([Model.bindToServer]), and choosing the server the
 // session is already on is answered rather than acted on. Neither is an edit of the key, so neither
-// is journaled — the first is a first binding and the second changed nothing.
+// is journaled — the first is a first binding and the second changed nothing. The second does get its
+// answer repeated on the ROW ([settingAnswer]), because the delegate says it in a transcript this
+// full-height pane is covering.
 //
 // What this path owns is where a refusal goes. The seam is validate-then-commit, so an error means
 // the session did not move, and the sentence belongs on the ROW that asked (settingsNote) rather
@@ -566,7 +600,17 @@ func (m Model) settingsSwitchServer(row SettingRow, name string) (tea.Model, tea
 		// The popup is fed from this very list, so this is a list that moved under an open question.
 		return m.settingsFailed(row, "unknown server: "+stripEscapes(name))
 	}
-	if m.prebound() || choice.Endpoint == m.opts.Endpoint {
+	if m.prebound() {
+		return m.switchToServer(choice)
+	}
+	if choice.Endpoint == m.opts.Endpoint {
+		// The delegate's answer is a transcript note, and this pane is drawn over the transcript — so
+		// from in here the ⏎ that confirmed the current server would look like a keypress that did
+		// nothing. The same sentence lands on the row (settingAnswer), where the human who pressed it is
+		// looking. It is not a failure and not an edit: nothing was refused and nothing changed, which is
+		// why it clears the failure slot rather than filling it.
+		m.settings.answer = settingAnswer{path: row.Path, msg: settingsAlreadyOnNote + stripEscapes(choice.Name)}
+		m.settings.failure = settingFailure{}
 		return m.switchToServer(choice)
 	}
 	if m.opts.SwitchServer == nil {
@@ -585,6 +629,7 @@ func (m Model) settingsSwitchServer(row SettingRow, name string) (tea.Model, tea
 // every refused act in the pane ends in (settingsNote paints it, the next landed edit clears it).
 func (m Model) settingsFailed(row SettingRow, msg string) (tea.Model, tea.Cmd) {
 	m.settings.failure = settingFailure{path: row.Path, msg: msg}
+	m.settings.answer = settingAnswer{} // the last act's outcome, replaced by this one's
 	m.layout()
 	return m, nil
 }
@@ -1107,9 +1152,9 @@ const settingsApplyFailedNote = "saved — live apply failed: "
 // (ADR 0011, doc.go): an append could write into an array a Model copy still in flight is sharing, and
 // the copies are not ours to reason about.
 //
-// A landed write also clears the pane's failure slot, which is one attempt's outcome and not one row's
-// condition: the human just saw a write succeed, and a refusal left over from a previous keypress
-// would go on contradicting it.
+// A landed write also clears the pane's failure and answer slots, which are one attempt's outcome and
+// not one row's condition: the human just saw a write succeed, and a refusal — or a confirmation that
+// nothing had changed — left over from a previous keypress would go on contradicting it.
 func (m Model) recordSettingEdit(edit settingEdit) Model {
 	next := make([]settingEdit, 0, len(m.settingEdits)+1)
 	for _, e := range m.settingEdits {
@@ -1119,6 +1164,7 @@ func (m Model) recordSettingEdit(edit settingEdit) Model {
 	}
 	m.settingEdits = append(next, edit)
 	m.settings.failure = settingFailure{}
+	m.settings.answer = settingAnswer{}
 	return m
 }
 
@@ -1287,14 +1333,41 @@ func settingsBufferable(row SettingRow) bool {
 // human can see — so the keypress is better as a no-op than as a confirmation prompt for a no-op. An
 // overridden row is still resettable: the FILE may well set it, and the row's own note says the
 // override outranks what the file says.
+//
+// A kind that takes no reset AT ALL is refused before either question is asked (settingsResetKind).
 func (m Model) settingsResettable(row SettingRow) bool {
-	if !row.Editable {
+	if !row.Editable || !settingsResetKind(row) {
 		return false
 	}
 	if _, edited := m.settingEditOf(row.Path); edited {
 		return true
 	}
 	return row.Value != row.Default
+}
+
+// settingsResetKind reports whether a row's KIND takes a reset at all. Every kind does but one: the
+// `server` row ([SettingServer]), where backspace is inert.
+//
+// Its value is not a value this pane writes. `server:` is the RECORDING of a switch the session
+// performed — written by the switch seam itself, which is this key's entire persistence (ADR 0036
+// decision 2) — and the row is a second entrance to that seam and nothing else (ADR 0037 decision 5,
+// ratified call 4). A reset would be a second door into the key that performs no rehome: it would
+// splice the line away while the session went on running against the server it named, so the file and
+// the wire would disagree with nothing journaled and nothing said. That is precisely the "second,
+// less-informed flow" decision 5 refuses.
+//
+// Nor is there anything to reset TO. A reset REMOVES the line rather than freezing today's default
+// (ADR 0035, restated by ADR 0037 decision 9), and this key's default is unset — which is not a server
+// a session can run against but the state ADR 0036 decision 3 answers by ASKING at the next launch.
+// Rendering that as the `default *` a reset shows (decision 8) would have the row claim the session is
+// on nothing while the heartbeat says otherwise. The alternative shape — reset meaning "switch to some
+// configured default and record it" — is the freezing the reset contract forbids, and it invents a
+// default the schema does not have.
+//
+// So the row simply has no reset, the hint line stops advertising one on it (settingsPaneHint), and
+// the way to change this key stays the one door it has: choose a server, and the session moves.
+func settingsResetKind(row SettingRow) bool {
+	return row.Kind != SettingServer
 }
 
 // clampSelection keeps selected inside a row list that moved under the open pane. An empty list pins
@@ -1459,7 +1532,11 @@ func (m Model) settingsEditText() string {
 // settingsPaneHint is the legend at the pane's foot: one per step, because the keys mean different
 // things in each — and the armed reset's is the one that ASKS, which is what makes backspace safe to
 // give a destructive act (settingsResetHint). The enum sub-list has its own renderer and its own hint.
-func (m Model) settingsPaneHint() string {
+//
+// In the key list the legend is the SELECTED row's: the one row this pane never resets drops the key
+// that would do nothing on it (settingsResetKind), and rows is passed rather than re-derived so the
+// legend is about the row the frame is highlighting.
+func (m Model) settingsPaneHint(rows []SettingRow) string {
 	switch m.settings.kind {
 	case settingsValueBuffer:
 		return settingsBufferHint
@@ -1467,6 +1544,9 @@ func (m Model) settingsPaneHint() string {
 		return settingsResetHint
 	case settingsTextEditor:
 		return settingsTextHint
+	}
+	if row, ok := m.settingsSelectedRow(rows); ok && !settingsResetKind(row) {
+		return settingsNoResetHint
 	}
 	return settingsHint
 }
@@ -1558,6 +1638,9 @@ func settingsTextSummary(text string) string {
 //
 //   - a refused write — or a write that landed on a key whose live apply then failed — because the
 //     human's last act on this row failed and nothing else about the row matters as much;
+//   - the answer to an act that landed and changed nothing ("· already on macStudio"), which is the
+//     only thing this row has to show for a keypress that moved neither the file nor the session
+//     ([settingAnswer]) — and which the value cell, showing what it showed before, cannot say;
 //   - the apply's own boundary note for an edit that landed at a boundary rather than at once
 //     ("· applies at next clear"), which is the only deferral wording this surface has;
 //   - on a row an environment variable or a flag is overriding, that the override will win again at
@@ -1574,6 +1657,9 @@ func settingsTextSummary(text string) string {
 func (m Model) settingsNote(row SettingRow) string {
 	if m.settings.failure.path == row.Path && m.settings.failure.msg != "" {
 		return "✗ " + m.settings.failure.msg
+	}
+	if m.settings.answer.path == row.Path && m.settings.answer.msg != "" {
+		return "· " + m.settings.answer.msg
 	}
 	edit, edited := m.settingEditOf(row.Path)
 	switch {
@@ -1704,7 +1790,7 @@ func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDispla
 		rows:        display.rows,
 		rowKinds:    display.kinds,
 		selected:    display.selected,
-		hint:        m.settingsPaneHint(),
+		hint:        m.settingsPaneHint(rows),
 		maxRows:     maxRows,
 	}, display, true
 }
@@ -1785,7 +1871,7 @@ func (m Model) settingsTextSpec(rows []SettingRow) (popupSpec, bool) {
 		rowKinds:    kinds,
 		wrapRows:    true,
 		selected:    clampInt(m.settings.editor.caretLine(), 0, len(text)-1),
-		hint:        m.settingsPaneHint(),
+		hint:        m.settingsPaneHint(rows),
 		maxRows:     maxRows,
 	}, true
 }

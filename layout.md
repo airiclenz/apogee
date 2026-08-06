@@ -263,7 +263,9 @@ than the pane can seat.
 **Each step names its own keys on the hint row**, because the keys mean different things in each.
 The key list reads `↑/↓ select · ⏎ edit · ⌫ reset · esc close` — the reset is named because it is
 the one act of this pane no row advertises, and it removes a line from a file the human maintains by
-hand. The value sub-list reads `↑/↓ select · ⏎ set · esc back`, the single-line buffer
+hand. On the `server` row it reads `↑/↓ select · ⏎ edit · esc close` instead: that key's line is the
+recording of a switch rather than a value the pane writes (ADR 0036 D2, ADR 0037 D5), so `⌫` is inert
+there and a legend is the only place a human could have read that from. The value sub-list reads `↑/↓ select · ⏎ set · esc back`, the single-line buffer
 `⏎ save · esc cancel`, and an armed reset `⏎ confirm reset · esc cancel` — the one line this pane
 asks anything on, the `/sessions` delete-confirm posture with `⏎` in place of `y`. The multi-line
 field reads `ctrl+s save · esc discard`, and it has to be read: `⏎` there belongs to the **value**,
