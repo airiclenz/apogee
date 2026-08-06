@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // ErrMode is returned when a Spec names an autonomy mode a Firing may not run in. A Firing
@@ -72,10 +74,34 @@ type Result struct {
 	// Plan Firing means the model kept reaching past its read-only floor; on an Auto Firing
 	// it means the run needed a human it did not have.
 	Denied int
+	// SubAgents reports how full each delegated run's context got, one entry per sub-agent
+	// run, in FINISH order (so a nested run precedes the run that spawned it). It is flat:
+	// the entries carry no nesting, because a reading belongs to exactly one run and never
+	// rolls up. Runs that reported no usage at all are absent, and a Firing that delegated
+	// nothing carries none.
+	SubAgents []SubAgentUsage
 	// Err is the run's own error — the loop's failure, or the cancellation that stopped it
 	// before an answer. It is nil on a Firing that reached its answer, even one whose
 	// record then failed to save (that failure is the returned error only).
 	Err error
+}
+
+// SubAgentUsage is one finished sub-agent run's context fill. It exists because that fill is
+// otherwise unobservable to a Firing's caller: the child fills a window of its OWN, so the
+// Firing's reading (the record's CtxUsed) says nothing about it, and the child Agent is
+// discarded the moment its run ends.
+type SubAgentUsage struct {
+	// Used is the run's final fill: the token total of the LAST usage its Turns reported,
+	// never a sum across them — each Turn restates the whole fill, it does not add to it.
+	Used int
+	// Limit is the window that fill sits in: the Firing's own Context.MaxContextTokens,
+	// which a sub-agent inherits verbatim. 0 means the Config named no window; a fill only
+	// means something beside its limit, so a surface omits the reading rather than
+	// spelling it against nothing.
+	Limit int
+	// Task is the first line of the delegated task, "" when the call carried none. Like
+	// FinalText it is RAW model output — a surface escape-strips it at its own render seam.
+	Task string
 }
 
 // Once performs one Firing and returns its Result: it validates the mode, constructs a
@@ -106,7 +132,7 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	// the EventSink construction requires, the record can relight its context gauge and the
 	// Result can carry the answer.
 	den := &denier{}
-	tap := &eventTap{inner: spec.Config.Events}
+	tap := &eventTap{inner: spec.Config.Events, window: spec.Config.Context.MaxContextTokens}
 	cfg := spec.Config
 	cfg.Approver = den
 	cfg.Asker = nil
@@ -135,6 +161,7 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		FinalText: tap.finalText(),
 		Turns:     step.TurnIndex + 1,
 		Denied:    den.count(),
+		SubAgents: tap.subAgentRuns(),
 		Err:       runErr,
 	}
 	if spec.Store == nil {
@@ -261,33 +288,58 @@ func (d *denier) count() int {
 
 // eventTap is the EventSink Once installs: it forwards every Event to the caller's sink
 // (nil ⇒ discarded, so a Firing needs no observer to satisfy Config.Events) and catches the
-// two facts the Result cannot recover once the run is over — the latest top-level
-// UsageEvent's token total and the latest top-level MessageEvent's text.
+// three facts the Result cannot recover once the run is over — the latest top-level
+// UsageEvent's token total, the latest top-level MessageEvent's text, and the final token
+// total of each SUB-AGENT run.
 //
-// The total becomes the record's CtxUsed, so a resumed Firing relights the context gauge
-// exactly as an interactive session does; the text becomes Result.FinalText, the Firing's
-// answer. Neither is read back off the snapshot: the fill is not in the snapshot at all,
-// and the answer must reach an UNPERSISTED run's Result too (there is no snapshot on that
-// path). Both cost one type assertion to catch in flight.
+// The top-level total becomes the record's CtxUsed, so a resumed Firing relights the context
+// gauge exactly as an interactive session does; the text becomes Result.FinalText, the
+// Firing's answer. Neither is read back off the snapshot: the fill is not in the snapshot at
+// all, and the answer must reach an UNPERSISTED run's Result too (there is no snapshot on
+// that path). Both cost one type assertion to catch in flight.
 //
-// Both readings are top-level only (Depth == 0): a sub-agent's usage belongs to its
-// parent's Turn, and a sub-agent's message is reported back to its parent, never to the
-// Firing's caller.
+// Those first two readings stay top-level only (Depth == 0): a sub-agent's usage fills a
+// window of its own rather than its parent's, and a sub-agent's message is reported back to
+// its parent, never to the Firing's caller. The third reading is the deeper half of that same
+// fact, not an exception to it — a delegated run's fill is real, is nobody else's, and dies
+// with the child Agent unless it is caught here. So the tap BRACKETS each run: the delegating
+// sub_agent ToolCallEvent at depth d opens a bracket for child depth d+1, usage at depth d+1
+// updates it, and the tool result closing that same call closes it into Result.SubAgents.
+// Nothing accrues across depths — a usage event only ever reaches the bracket at its OWN
+// depth — so a nested run's fill never lands on the run that spawned it.
+//
+// One bracket per depth suffices because delegation is SERIALIZED (ADR 0014): a second
+// delegation at a given depth cannot begin before the first one's result has landed. Should
+// concurrent fan-out ever land, UsageEvent would need a run identity and this bracketing
+// would have to follow it; until then an event with no matching bracket is dropped.
 type eventTap struct {
 	inner domain.EventSink
+	// window is the Firing's context window, stamped onto each finished run's reading: a
+	// sub-agent inherits the parent's Config verbatim, so its limit IS this number.
+	window int
 
 	mu    sync.Mutex
 	total int
 	final string
+	// open holds the in-flight sub-agent run per child depth; runs is the finished ones in
+	// finish order.
+	open map[int]*openSubAgent
+	runs []SubAgentUsage
 }
 
-// Emit records a top-level usage total and answer, and forwards the event unchanged.
+// openSubAgent is one sub-agent run in flight: the delegating call that will close it, the
+// task it was given, and the latest fill its own Turns have reported.
+type openSubAgent struct {
+	callID string
+	task   string
+	used   int
+}
+
+// Emit records a top-level usage total and answer, tracks the sub-agent runs that pass
+// through, and forwards the event unchanged.
 func (t *eventTap) Emit(e domain.Event) {
 	switch ev := e.(type) {
 	case domain.UsageEvent:
-		if ev.Depth != 0 {
-			break
-		}
 		// Prefer the server's total; fall back to prompt+completion when it omits the sum
 		// (the same degrade the interactive gauge applies).
 		total := ev.TotalTokens
@@ -295,9 +347,7 @@ func (t *eventTap) Emit(e domain.Event) {
 			total = ev.PromptTokens + ev.CompletionTokens
 		}
 		if total > 0 {
-			t.mu.Lock()
-			t.total = total
-			t.mu.Unlock()
+			t.noteUsage(ev.Depth, total)
 		}
 	case domain.MessageEvent:
 		if ev.Depth != 0 {
@@ -306,10 +356,93 @@ func (t *eventTap) Emit(e domain.Event) {
 		t.mu.Lock()
 		t.final = ev.Text
 		t.mu.Unlock()
+	case domain.ToolCallEvent:
+		if ev.Call.Tool == tools.SubAgentToolName {
+			t.openSubAgentRun(ev.Depth+1, ev.Call)
+		}
+	case domain.ToolResultEvent:
+		// A tool result carries no tool NAME, so the call id is what identifies it as the
+		// delegation's: only the result closing the call that opened the bracket closes it.
+		t.closeSubAgentRun(ev.Depth+1, ev.Result.CallID)
 	}
 	if t.inner != nil {
 		t.inner.Emit(e)
 	}
+}
+
+// noteUsage files one Turn's token total under the agent that reported it: the Firing's own
+// at depth 0, else the sub-agent run open at that depth. The latest total wins — a Turn
+// restates the whole fill rather than adding to it — and a total with no run to belong to is
+// dropped.
+func (t *eventTap) noteUsage(depth, total int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if depth == 0 {
+		t.total = total
+		return
+	}
+	if run := t.open[depth]; run != nil {
+		run.used = total
+	}
+}
+
+// openSubAgentRun starts the bracket for the run call is delegating, which will report at
+// childDepth. An unfinished bracket already at that depth cannot happen while delegation is
+// serialized, and replacing it is the safe read of that contract having moved.
+func (t *eventTap) openSubAgentRun(childDepth int, call domain.ToolCall) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.open == nil {
+		t.open = make(map[int]*openSubAgent)
+	}
+	t.open[childDepth] = &openSubAgent{callID: call.ID, task: firstTaskLine(call.Arguments)}
+}
+
+// closeSubAgentRun finishes the run at childDepth when callID is the delegating call's,
+// appending its reading in finish order. A result for any OTHER call — a plain tool the same
+// Turn ran — leaves the bracket alone, and a run that reported no usage at all is dropped: a
+// zero fill is the absence of a reading, not a reading of zero.
+func (t *eventTap) closeSubAgentRun(childDepth int, callID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	run := t.open[childDepth]
+	if run == nil || run.callID != callID {
+		return
+	}
+	delete(t.open, childDepth)
+	if run.used <= 0 {
+		return
+	}
+	t.runs = append(t.runs, SubAgentUsage{Used: run.used, Limit: t.window, Task: run.task})
+}
+
+// firstTaskLine reads the sub_agent call's task argument and returns its first line, "" when
+// the arguments are malformed or name no task. It is the gist the TUI puts on a delegation's
+// branch row, derived here rather than shared because internal/tui sits above this package
+// and cannot be imported from it (ADR 0010) — the same reason promptTitle is duplicated.
+func firstTaskLine(args json.RawMessage) string {
+	var decoded struct {
+		Task string `json:"task"`
+	}
+	if err := json.Unmarshal(args, &decoded); err != nil {
+		return ""
+	}
+	line := decoded.Task
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	return strings.TrimSpace(line)
+}
+
+// subAgentRuns reports the runs that finished with a reading, in finish order; nil when the
+// Firing delegated nothing (or nothing it delegated reported usage).
+func (t *eventTap) subAgentRuns() []SubAgentUsage {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.runs) == 0 {
+		return nil
+	}
+	return append([]SubAgentUsage(nil), t.runs...)
 }
 
 // fill reports the last observed context fill, 0 when the Upstream reported no usage.

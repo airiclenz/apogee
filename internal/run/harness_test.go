@@ -172,6 +172,16 @@ func writeToolCallWithText(w http.ResponseWriter, text, id, name, args string) {
 	writeToolCall(w, id, name, args)
 }
 
+// writeUsage streams one usage-only chunk — the shape a server sends when the client asked
+// for stream_options.include_usage. The parser stashes it and attaches it to the stream's
+// terminal Done, so it may be written before the content chunks a reply is built from: a
+// script emits usage by calling this ahead of writeFinal or writeToolCall.
+func writeUsage(w io.Writer, prompt, completion, total int) {
+	sseData(w, sseChunk{Usage: &sseUsage{
+		PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total,
+	}})
+}
+
 // sseData writes v as one SSE data event. Writes are best-effort for the same
 // server-goroutine reason decodeRequest is; the fixed chunk structs never fail to marshal.
 func sseData(w io.Writer, v any) {
@@ -182,6 +192,13 @@ func sseData(w io.Writer, v any) {
 // The on-the-wire SSE chunk shape the provider parses — only the fields these fakes set.
 type sseChunk struct {
 	Choices []sseChoice `json:"choices"`
+	Usage   *sseUsage   `json:"usage,omitempty"`
+}
+
+type sseUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 type sseChoice struct {

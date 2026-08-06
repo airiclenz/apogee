@@ -85,9 +85,11 @@ Depends on item 1.
 
 **Commit:** `feat(tui): persist sub-agent context usage across resume`
 
-## 4. internal/run: Result carries per-sub-agent usage
+## 4. internal/run: Result carries per-sub-agent usage — ✅ DONE (2026-08-06)
 
 Independent of items 1–3 (shares only the event contract).
+
+NOTES (2026-08-06): the bracket is CLOSED by call id, not by tool name — `ToolResultEvent` carries `domain.ToolResult`, which has no tool field, so "where the tool is `sub_agent`" is only expressible on the call event; the bracket retains the delegating call's id and only the result closing that id closes it (which also makes a sibling tool's result in the same Turn a no-op, as the item wants). Latest-total semantics, the nested case and the defensive drops are pinned by direct `eventTap` tests (`TestEventTap*`) rather than scripted runs — a second sub-agent Turn cannot be scripted through the shared fake without a way to tell the child's tool-role request from the parent's; the scripted `TestOnceReportsEachSubAgentsContextFill` still covers the whole path end to end. Two consequential edits outside the item's named lines: `TestOnceRejectsModesThatNeedAHuman` moved from `res != (Result{})` to `reflect.DeepEqual` (adding a slice field makes `Result` non-comparable), and `harness_test.go` gained `writeUsage` plus the `usage` field on its `sseChunk` so a script can emit usage at all.
 
 **What:** Teach the headless driver's `eventTap` to bracket sub-agent runs and report each run's final reading.
 

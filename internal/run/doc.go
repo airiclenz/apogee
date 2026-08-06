@@ -46,4 +46,11 @@
 // ErrorEvent through that sink — Once does not translate it into a returned error, since
 // the Exchange did reach its boundary. A CANCELLED run does become Result.Err: it never
 // reached an answer, and an unattended caller has no other way to tell.
+//
+// Context fill IS reported, at two grains, because neither survives the run otherwise. The
+// Firing's own fill lands on the record's Meta.CtxUsed, and each SUB-AGENT run's final fill
+// lands per run on Result.SubAgents. The second is not a decomposition of the first: a
+// delegated run fills a window of its own (it inherits the parent's Config verbatim, so the
+// same limit, never the same fill), so its reading is neither the Firing's nor summable into
+// it, and a nested run's reading is its own rather than its spawner's.
 package run

@@ -2,8 +2,10 @@ package run
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -239,7 +241,8 @@ func TestOnceRejectsModesThatNeedAHuman(t *testing.T) {
 			if !errors.Is(err, ErrMode) {
 				t.Fatalf("Once err = %v, want ErrMode", err)
 			}
-			if res != (Result{}) {
+			// DeepEqual rather than ==: Result carries a slice since it gained SubAgents.
+			if !reflect.DeepEqual(res, Result{}) {
 				t.Errorf("Result = %+v, want the zero Result on a rejected spec", res)
 			}
 			if up.calls() != 0 {
@@ -408,6 +411,212 @@ func TestOnceIgnoresASubAgentsAnswer(t *testing.T) {
 	if res.FinalText != "" {
 		t.Errorf("Result.FinalText = %q, want empty — a sub-agent's answer is its parent's, "+
 			"never the Firing's", res.FinalText)
+	}
+}
+
+// TestOnceReportsEachSubAgentsContextFill is the headline of the per-run readout: a delegated
+// run fills a window of its OWN, and that fill reaches the Firing's caller on
+// Result.SubAgents — labelled by the first line of the task it was given, and without
+// disturbing the Firing's own reading, which stays the top-level one the record's gauge
+// relights from. The script gives the parent and the child deliberately different totals, so
+// a tap that confused the two would be caught by either assertion.
+func TestOnceReportsEachSubAgentsContextFill(t *testing.T) {
+	t.Parallel()
+
+	const (
+		taskArgs = `{"task":"audit every open issue\nthen summarise what you found"}`
+		taskLine = "audit every open issue"
+		window   = 32000
+	)
+
+	registry := domain.NewToolRegistry()
+	if err := registry.Register(tools.NewSubAgent()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	up := newUpstream(t, func(w http.ResponseWriter, req request) {
+		switch {
+		case req.lastRoleIs(domain.RoleTool):
+			// The parent is back with the delegated result and answers for itself.
+			writeUsage(w, 800, 100, 900)
+			writeFinal(w, "four issues are open")
+		case req.lastTextHas(taskLine):
+			// The sub-agent's own fresh conversation — and its own, far fuller window.
+			writeUsage(w, 11800, 200, 12000)
+			writeFinal(w, "the sub-agent found four open issues")
+		default:
+			writeUsage(w, 600, 100, 700)
+			writeToolCall(w, "call_1", tools.SubAgentToolName, taskArgs)
+		}
+	})
+
+	store := session.NewStore(t.TempDir())
+	spec := planSpec(up.url, "summarise the day")
+	spec.Config.Tools = registry
+	spec.Config.Context.MaxContextTokens = window
+	spec.Store = store
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	if len(res.SubAgents) != 1 {
+		t.Fatalf("Result.SubAgents = %+v, want exactly one finished run", res.SubAgents)
+	}
+	want := SubAgentUsage{Used: 12000, Limit: window, Task: taskLine}
+	if res.SubAgents[0] != want {
+		t.Errorf("Result.SubAgents[0] = %+v, want %+v", res.SubAgents[0], want)
+	}
+
+	metas, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("store holds %d records, want 1", len(metas))
+	}
+	if metas[0].CtxUsed != 900 {
+		t.Errorf("Meta.CtxUsed = %d, want 900 — the sub-agent's 12000 fills its own window, "+
+			"never the firing's", metas[0].CtxUsed)
+	}
+}
+
+// subAgentCall is the delegating tool-call event a parent at depth emits, opening the bracket
+// for its child.
+func subAgentCall(depth int, id, task string) domain.ToolCallEvent {
+	return domain.ToolCallEvent{
+		EventBase: domain.EventBase{Depth: depth},
+		Call: domain.ToolCall{
+			ID:        id,
+			Tool:      tools.SubAgentToolName,
+			Arguments: json.RawMessage(`{"task":"` + task + `"}`),
+		},
+	}
+}
+
+// toolResult is the result event that closes call id, emitted at the CALLER's depth.
+func toolResult(depth int, id string) domain.ToolResultEvent {
+	return domain.ToolResultEvent{
+		EventBase: domain.EventBase{Depth: depth},
+		Result:    domain.ToolResult{CallID: id, Content: "done"},
+	}
+}
+
+// usageAt is one Turn's token accounting at depth.
+func usageAt(depth, total int) domain.UsageEvent {
+	return domain.UsageEvent{EventBase: domain.EventBase{Depth: depth}, TotalTokens: total}
+}
+
+// TestEventTapKeepsTheFiringsFillFreeOfADelegatedRun pins the top-level filter the record's
+// CtxUsed depends on — a depth-1 usage event must never move the Firing's own reading — and,
+// on the same stream, the latest-wins semantics of the run's reading: a Turn restates the
+// whole fill, so the run reports what it ENDED at, not the sum of what it passed through.
+func TestEventTapKeepsTheFiringsFillFreeOfADelegatedRun(t *testing.T) {
+	t.Parallel()
+
+	const window = 32000
+	tap := &eventTap{window: window}
+
+	tap.Emit(usageAt(0, 900))
+	tap.Emit(subAgentCall(0, "call_1", "audit the issues"))
+	tap.Emit(usageAt(1, 5000))
+	tap.Emit(usageAt(1, 12000))
+
+	if got := tap.fill(); got != 900 {
+		t.Errorf("fill() = %d, want 900 — a delegated run's usage is not the firing's", got)
+	}
+	if runs := tap.subAgentRuns(); len(runs) != 0 {
+		t.Errorf("subAgentRuns() = %+v while the run is still open, want none", runs)
+	}
+
+	tap.Emit(toolResult(0, "call_1"))
+
+	runs := tap.subAgentRuns()
+	if len(runs) != 1 {
+		t.Fatalf("subAgentRuns() = %+v, want exactly one finished run", runs)
+	}
+	want := SubAgentUsage{Used: 12000, Limit: window, Task: "audit the issues"}
+	if runs[0] != want {
+		t.Errorf("subAgentRuns()[0] = %+v, want %+v", runs[0], want)
+	}
+	if got := tap.fill(); got != 900 {
+		t.Errorf("fill() = %d after the run closed, want 900", got)
+	}
+}
+
+// TestEventTapAttributesANestedRunToItsOwnDepth pins the non-transitivity: each agent fills
+// its own window, so a grandchild's reading belongs to the grandchild's entry alone and
+// nothing rolls up into the run that spawned it. The nested run also finishes FIRST, which is
+// the order Result.SubAgents reports.
+func TestEventTapAttributesANestedRunToItsOwnDepth(t *testing.T) {
+	t.Parallel()
+
+	const window = 32000
+	tap := &eventTap{window: window}
+
+	tap.Emit(subAgentCall(0, "call_1", "outer task"))
+	tap.Emit(usageAt(1, 4000))
+	tap.Emit(subAgentCall(1, "call_2", "nested task"))
+	tap.Emit(usageAt(2, 9000))
+	tap.Emit(toolResult(1, "call_2")) // the nested run closes first
+	tap.Emit(usageAt(1, 5000))        // the outer run keeps going, on its own window
+	tap.Emit(toolResult(0, "call_1"))
+
+	want := []SubAgentUsage{
+		{Used: 9000, Limit: window, Task: "nested task"},
+		{Used: 5000, Limit: window, Task: "outer task"},
+	}
+	runs := tap.subAgentRuns()
+	if len(runs) != len(want) {
+		t.Fatalf("subAgentRuns() = %+v, want %+v", runs, want)
+	}
+	for i := range want {
+		if runs[i] != want[i] {
+			t.Errorf("subAgentRuns()[%d] = %+v, want %+v", i, runs[i], want[i])
+		}
+	}
+}
+
+// TestEventTapDropsWhatItCannotAttribute covers the defensive edges: usage with no run to
+// belong to, a result that closes some OTHER call, a plain tool that is not a delegation at
+// all, and a run whose Upstream never reported usage — the last one is skipped rather than
+// reported as a fill of zero, which would read as an empty window.
+func TestEventTapDropsWhatItCannotAttribute(t *testing.T) {
+	t.Parallel()
+
+	tap := &eventTap{window: 32000}
+
+	// Nothing is open: a deep usage event has no owner and is dropped.
+	tap.Emit(usageAt(1, 7000))
+	tap.Emit(toolResult(0, "call_0"))
+	// A plain tool call opens no bracket, so the usage that follows it stays unattributed.
+	tap.Emit(domain.ToolCallEvent{
+		EventBase: domain.EventBase{},
+		Call:      domain.ToolCall{ID: "call_1", Tool: "read_file"},
+	})
+	tap.Emit(usageAt(1, 7000))
+	if runs := tap.subAgentRuns(); len(runs) != 0 {
+		t.Fatalf("subAgentRuns() = %+v, want none — nothing was ever delegated", runs)
+	}
+
+	// A real delegation, but the same Turn's OTHER tool result must not close it.
+	tap.Emit(subAgentCall(0, "call_2", "audit the issues"))
+	tap.Emit(usageAt(1, 6000))
+	tap.Emit(toolResult(0, "call_1"))
+	if runs := tap.subAgentRuns(); len(runs) != 0 {
+		t.Fatalf("subAgentRuns() = %+v, want none — call_1 is not the delegating call", runs)
+	}
+	tap.Emit(toolResult(0, "call_2"))
+	if runs := tap.subAgentRuns(); len(runs) != 1 || runs[0].Used != 6000 {
+		t.Fatalf("subAgentRuns() = %+v, want the one run at 6000", runs)
+	}
+
+	// A run whose server reported no usage at all reports nothing.
+	tap.Emit(subAgentCall(0, "call_3", "silent task"))
+	tap.Emit(toolResult(0, "call_3"))
+	if runs := tap.subAgentRuns(); len(runs) != 1 {
+		t.Errorf("subAgentRuns() = %+v, want the silent run absent", runs)
 	}
 }
 
