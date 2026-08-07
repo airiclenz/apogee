@@ -6,7 +6,9 @@
   measurements that separate four live hypotheses, fixes the cause, and pins the fix with a
   regression test that runs headless on Windows CI.
 - **Date:** 2026-08-06
-- **Status:** in progress — items 1-4 ✅ done 2026-08-06, item 5 ✅ done 2026-08-07; items 6-8 open
+- **Status:** in progress — items 1-4 ✅ done 2026-08-06, items 5-6 ✅ done 2026-08-07; items 7-8 open.
+  The cause is found, fixed and confirmed by the owner in Windows Terminal — see **"Item 6 — THE
+  ANSWER"** at the end of this file.
 - **Predecessor:** `docs/handoffs/2026-08-06 - 00 - windows-tui-ghosting-debug.md` — the symptom
   report and the first (unsuccessful) dependency-bump attempt. This plan supersedes its debug
   plan; the symptom description there is still ground truth.
@@ -104,6 +106,15 @@
 
 H2 is a severity amplifier and a plausible primary cause; it is worth fixing on its own merits
 regardless of which of H1/H3/H4 the measurements implicate.
+
+**ALL FOUR ARE RETIRED, and the cause was none of them (2026-08-07).** H1, H3 and H4 are falsified by
+direct measurement (findings 13, 14, 23, 28, 31) and H2 turned out to be an amplifier on the wrong
+axis (finding 23). A fifth candidate the plan added later — mode 2026's degenerate synchronized
+window — is falsified too (finding 39). The actual cause is an ordering defect in apogee's own
+start-up that no hypothesis here named: the alternate screen is claimed before bubbletea sets the
+console mode, so `DISABLE_NEWLINE_AUTO_RETURN` lands on the wrong screen buffer and the console
+rewrites the renderer's bare `LF` as `CR LF`. See findings 40-47 and **"Item 6 — THE ANSWER"** at the
+end of this file; the fix is in the tree.
 
 ## Standing requirements
 
@@ -458,7 +469,7 @@ same terminal — that is the anti-regression test, and it must compare profiles
 
 **Commit:** `fix(tui): give the painter a real TERM on Windows`
 
-## 6. DESIGN CALL — the root-cause fix
+## 6. DESIGN CALL — the root-cause fix — ✅ DONE (2026-08-07)
 
 NOTES (2026-08-07): the owner answered this item's design call with **"measure first, then ask
 again"** — re-run the item 4 evidence sheet against the post-item-5 build, land only the parts of
@@ -548,6 +559,55 @@ standing constraint; the two upstream write-ups this item's text mentions still 
 Item 8 owns the CHANGELOG line and the docs, the same call items 1-5 made.
 No layout change of any kind. **The item stays open** — the ghost is not explained, so the ranked
 next-step list is updated rather than retired.
+
+NOTES (2026-08-07, sixth pass): **the diagnosis is closed.** The owner ran the mode-2026 A/B and both
+arms ghosted, which eliminates mode 2026 as the cause (finding 39); the owner then funded the ranked
+list's entry (1), capturing what Windows Terminal's own `OpenConsole.exe` re-emits. That capture
+reproduced the ghost on the first attempt — the first reproducing capture this plan has ever had —
+and bisecting it gave a complete, measured mechanism: **a Windows console buffer without
+`DISABLE_NEWLINE_AUTO_RETURN` rewrites the renderer's bare `LF` as `CR LF`, which destroys the column
+the renderer was preserving**, and apogee puts the console in that state by claiming the alternate
+screen *before* bubbletea sets the mode (findings 40-46). The fix is layout-neutral, three lines of
+mechanism in a `_windows.go` / `_other.go` pair, and is landed under the dispatch's "any
+layout-neutral fix you can prove IS authorized to land". Deviations from the item's literal text,
+all because that text predates the closed diagnosis:
+(a) **None of the H1/H2/H3/H4 branches was taken.** All four were already falsified or retired
+(findings 13, 14, 23, 28, 31). The cause is none of them; it is an ordering defect in apogee's own
+start-up, which no hypothesis on the list named.
+(b) **Nothing is filed upstream and no upstream write-up is warranted.** The defect is apogee's, not
+`microsoft/terminal`'s and not `charmbracelet`'s — finding 47 says why, and why the two write-ups
+the fifth pass parked are now withdrawn rather than pending.
+(c) **The mitigation has no unit test of its own**, which the item's acceptance asks for. What it
+does is a two-call Win32 sequence on a real console handle; there is nothing in it a portable test
+can observe, and a test that asserted `SetConsoleMode` was called would pin the implementation
+rather than the behaviour. The mechanism is pinned by the measurements in findings 43-46 instead,
+each reproducible from the harness, and the acceptance's real gate — the owner's eye in Windows
+Terminal — is unchanged and still outstanding.
+(d) **The CHANGELOG and user-facing docs are untouched**, the same call items 1-5 made; item 8 owns
+them.
+**The item stays open on one thing only**: the owner confirming by eye that a build of this tree no
+longer ghosts. Everything else is done.
+
+NOTES (2026-08-07, seventh pass): **the item is complete.** Two things closed it, both recorded as
+findings continuing the sequence. (1) The owner ran a build of the sixth pass's fix in Windows
+Terminal and confirmed it — no corrupted streaming, no ghost in the activity spinner, scrolling
+correct (finding 48). That is this item's acceptance row, the one thing the sixth pass left open, and
+with it the diagnosis of findings 40-47 is confirmed rather than merely consistent. (2) Review of that
+fix found a real defect in it, new with the change: the console mode was never given back, and
+bubbletea's own save/restore cannot give it back because it samples the mode *after* `Run` has already
+changed it — so every Windows session would have handed the shell a console with newline-auto-return
+disabled, staircasing the next bare-LF writer. `prepareAltScreenConsole` now returns a restore closure
+and `Run` defers it immediately after the call, which puts it after the alt-screen exit write, after
+bubbletea's restore, and on every error and panic path (finding 49). Two deviations, both small:
+(a) the closure is `func()` rather than the probe's `(func(), error)` — this function deliberately
+cannot fail the run (a console that refuses the flag leaves apogee where it was), so an error return
+the caller must ignore would be a worse shape than none; (b) the item's acceptance asks for unit
+coverage of the mechanism and there is still no portable seam for the two Win32 calls, unchanged from
+the sixth pass's NOTES (c). What IS newly testable is the contract `Run` now depends on — the restore
+is never nil on any platform — and `altscreen_test.go` pins that on all six targets. The mechanism
+stays pinned by the measurements in findings 43-46. Still nothing filed upstream (finding 47),
+no layout change, no CHANGELOG and no user-facing docs — item 8 owns those, the same call items 1-6
+made.
 
 Depends on items 4 and 5.
 
@@ -1361,7 +1421,11 @@ Three consequences, in ascending order of importance:
   The window is always empty, so the frame is never presented atomically. bubbletea gave up
   `?25l`/`?25h` in exchange for atomicity it does not receive on this path. That is a defect worth
   writing down whatever causes the ghost.
-- **It supplies a candidate mechanism that fits finding 32's spinner.** What the emulator receives,
+- **It supplied a candidate mechanism that fit finding 32's spinner — and the candidate is now dead.**
+  **FALSIFIED (2026-08-07) by finding 39:** the owner's A/B ghosted in both arms, so the degenerate
+  synchronized window is not the ghost. The paragraph below is left as written because the *shape*
+  argument in it was sound and is what motivated the A/B; only its conclusion was wrong. The real
+  cause has the same per-frame shape and is finding 45. What the emulator receives,
   per frame, is `ESU` — a *present* — immediately **before** that frame's own cells, and nothing
   forcing a present after them. That is a per-frame property, carried by a two-cell spinner
   tick exactly as much as by a 1125-write streaming turn, which is the shape finding 32 says the
@@ -1372,7 +1436,9 @@ Three consequences, in ascending order of importance:
   rather than specific to one build, but that is reasoning, not a measurement).
 
 **Finding 35 — with mode 2026 genuinely negotiated, the headless harness still does not reproduce,
-and that is NOT an exoneration of mode 2026.** The DECRPM injection of finding 33 removes one of the
+and that is NOT an exoneration of mode 2026.** (Mode 2026 *was* exonerated, one pass later and by the
+owner's A/B rather than by this: see finding 39. The caution below stays correct about what a
+`tracereplay` screen can and cannot show.) The DECRPM injection of finding 33 removes one of the
 three gaps finding 27 listed between the harness and the ghosting path — caveat 2, "nothing
 negotiated modes 2026 or 2027" — at least for 2026. Rendering both arms' pseudoconsole output
 against the screen apogee intended (`bin2trace` → `tracereplay`, truncated at the alt-screen exit,
@@ -1468,7 +1534,13 @@ and `go test ./internal/tui/ ./cmd/apogee/ -count=1` all green apart from the Wi
 pre-existing environment failures, which were measured at `ebf955a` before the change and are
 unchanged by it.
 
-## Item 6 — WHERE IT STANDS (still open; the mode-2026 filter has landed, the ghost is not explained)
+## Item 6 — WHERE IT STOOD before the diagnosis closed (2026-08-07, SUPERSEDED)
+
+> **Superseded on 2026-08-07 by findings 39-47 and by "Item 6 — THE ANSWER" at the end of this
+> file.** Two claims below are now known to be wrong and are left in place only so the reasoning
+> that produced them is legible: mode 2026 is **not** a candidate cause (the owner's A/B ghosted in
+> both arms — finding 39), and the ranked list's entry (1) has been run and did not merely
+> "discriminate" — it reproduced the bug and identified it. Read the closing section, not this one.
 
 **The design call still cannot be answered, but the question has narrowed twice more.** The gate is
 no longer outstanding: the post-item-5 build ghosts, and the spinner ghosts with it (finding 32). The
@@ -1627,3 +1699,244 @@ separate the cursor-hiding half of the A/B, because finding 34 measures ConPTY r
 before any emulator sees it. The mode-2026 fix is no longer on this list — the owner's "land it
 either way" call put it in the tree on finding 34's evidence (findings 36-38), ahead of the A/B and
 without borrowing the A/B's conclusion.
+
+## Item 6 findings — the ghosting path is captured, and the cause is found (2026-08-07)
+
+**Finding 39 — THE OWNER'S A/B: mode 2026 is NOT the cause.** The owner ran item 4 row 1 in Windows
+Terminal against a build of `244b2c7` — the commit that declines synchronized output on Windows —
+and **the ghosting persists: both the default activity spinner and streaming output still ghost with
+synchronized output declined.** That is the "both ghost" branch the fifth pass wrote down in advance.
+Two consequences, exactly as that branch specified:
+
+- **Mode 2026 is eliminated.** The empty-window mechanism of finding 34 is real but it is not the
+  ghost. Every sentence in this plan that treated it as a candidate *cause* is withdrawn; the
+  superseded section above is retitled rather than rewritten so the reasoning stays legible.
+- **`244b2c7` stands and is not reverted.** Its justification was never the ghost — it is finding 34
+  alone: on Windows the synchronized window is forwarded empty, so apogee was paying bubbletea's
+  `CSI ?25l` / `CSI ?25h` flicker mitigation for an atomicity it never received. That measurement is
+  untouched by this result.
+
+**Finding 40 — the instrument: a pseudoconsole hosted by a console host of our choosing.**
+`kernel32!CreatePseudoConsole` always launches the *system* `conhost.exe --headless`, which is why
+every ConPTY byte in this plan up to now came from the one path that has never ghosted (finding 27,
+caveat 1). `ocrun` (**`C:\Users\airic\apogee-ghosting-debug\ocrun\`**, outside the repo) reimplements
+what `winconpty.cpp` does inside `CreatePseudoConsole` — `NtCreateFile` on `\Device\ConDrv\Server`,
+a signal pipe, `CreateProcess` of the host as `--headless --width W --height H --signal 0xS --server
+0xV`, `\Reference` relative to the server handle, then a hand-built `PseudoConsole` struct passed to
+the child as `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` — with the **host binary as a parameter**. Windows
+Terminal's and VS Code's own hosts were extracted to
+**`C:\Users\airic\apogee-ghosting-debug\hosts\`** as `OpenConsole-wt-1.24.exe` and
+`OpenConsole-vscode-1.25.exe`. A second scratch tool, `tracefeed\`, replays a recorded `--tui-trace`
+into such a pseudoconsole preserving the original write boundaries, so the *same bytes* can be put
+through different hosts and different console configurations — which is what turns every comparison
+below into a single-variable one.
+
+**Finding 41 — the first reproducing capture in this plan, on the first attempt.** apogee at
+`244b2c7`, 120x30, `--resume ...155434Z-b82d2800.json`, a typed line, run through each host and its
+re-emitted stream rendered against the screen apogee intended:
+
+| Host | re-emitted stream vs apogee's intended screen |
+|---|---|
+| system `conhost.exe` | **exact match** |
+| `OpenConsole-wt-1.24.exe` (Windows Terminal) | **row 10 differs** |
+| `OpenConsole-vscode-1.25.exe` (VS Code) | **row 10 differs — identically** |
+
+Row 10 should be blank. What the two OpenConsole hosts forward is 32 blank columns followed by a
+left-truncated tail of an earlier line:
+
+```
+intended: 10|                                                                                    |
+captured: 10|                                |irectly to the documented persistence in docs/design/.|
+```
+
+That is the handoff's symptom exactly, and finding 20's fingerprint exactly. It is **not** a timing
+flake: the two hosts were separate live runs whose byte streams differ, and both produced the same
+fragment on the same row. Captures are in
+`C:\Users\airic\apogee-ghosting-debug\item6c-evidence\`.
+
+**Finding 42 — the OpenConsole builds FORWARD apogee's stream; the system conhost RE-SERIALIZES it.**
+Feeding one fixed trace through each host with `tracefeed` (identical bytes in, so any difference is
+the host's): the two OpenConsole captures are apogee's own bytes plus a 39-byte host preamble, with
+`CSI ?2027$p`, `CSI ?5W` and `CSI 97C` all intact; the system conhost's capture contains none of
+them and is rebuilt from its buffer (split SGR, `CSI K` + CRLF runs, a title sequence). This is why
+every earlier capture was clean *by construction* — a re-serializing host cannot forward a defect in
+how the client's cursor moves, because it never forwards the client's cursor moves at all.
+
+**Finding 43 — the transformation, isolated to one byte: the renderer's bare `LF` arrives as
+`CR LF`.** Walking apogee's emitted stream against the Windows Terminal capture byte for byte, there
+is exactly one class of divergence and no other — the alignment consumes both streams to the end
+without an unexpected difference:
+
+```
+apogee : ... ESC[m  \n    ESC[38;2;74;74;74;48;2;0;0;0m  (box top)
+capture: ... ESC[m  \r\n  ESC[38;2;74;74;74;48;2;0;0;0m  (box top)
+```
+
+**10 of the 16 bare LFs apogee wrote were rewritten; the other 6 were forwarded untouched.** The
+distinction matters because the renderer *depends* on it: ultraviolet emits `\r\n` when it wants the
+next row at column 1 and a bare `\n` when it wants the next row at the **same column**, and both
+spellings are present in the same stream. `DISABLE_NEWLINE_AUTO_RETURN` is what makes the second
+spelling mean what it says — which is precisely why bubbletea sets it (`tty_windows.go:48-52`).
+
+The column arithmetic then produces the observed artifact exactly. The write that paints row 10 is:
+
+```
+...highly formalized agentic framework ESC[m . ESC[30X   \n   ESC[31C ESC[1K ...
+```
+
+Intended: erase 30 cells, drop one row **keeping column C**, move 31 right, then `EL1` erase
+everything from the line start up to there. Delivered with `CR LF`: the row is entered at **column
+1**, `CUF 31` reaches **column 32**, and the `EL1` erases columns 1-32 only — leaving column 33
+onward holding whatever the previous frame left there. The measured artifact is 32 blanks followed by
+stale cells. That is not a family resemblance; it is the same number.
+
+**Finding 44 — the transformation is sufficient on its own, proved by substitution.** Taking
+apogee's own trace and replacing every bare LF with CRLF — one transformation, nothing else — then
+replaying it: the resulting screen is **identical to the Windows Terminal capture's screen**, and it
+carries the row-10 ghost against the intended screen. Nothing about the host, the wrap model, mode
+2026, mode 2027, hard tabs, glyph widths or write volume is needed to produce the bug; that one
+substitution accounts for all of it. (`crlfify.py`, `lfmap.py` in the debug kit root.)
+
+**Finding 45 — THE TRIGGER, and it is apogee's: the alternate screen is claimed BEFORE the console
+mode is set.** A 2x2 through Windows Terminal's `OpenConsole`, identical input bytes in every cell,
+varying only what the child does to its console before writing: `dnar` = set
+`DISABLE_NEWLINE_AUTO_RETURN` as bubbletea does; `prealt` = write `CSI ?1049h` `CSI 3J` **before**
+setting the mode, as `internal/tui/tui.go` does at `Run`.
+
+| arm | LFs rewritten | rows differing from intended |
+|---|---|---|
+| `dnar=true, prealt=false` | **0** | **0 — clean** |
+| `dnar=true, prealt=true` | **10** | **1 — the ghost** |
+| `dnar=false, prealt=false` | 10 | 1 — the ghost |
+| `dnar=true, prealt=true, mode set first` | **0** | **0 — clean** |
+
+Row 2 is the finding. bubbletea *does* set the flag, and setting it is *still* ineffective, because
+the console mode word is **per screen buffer**: by the time `initTerminal` runs, apogee has already
+switched to the alternate buffer, so the flag lands on the buffer nobody writes to again and the live
+alternate buffer keeps the translating default. Row 4 is the fix — set the flag on the primary buffer
+*before* the switch and the alternate buffer inherits it.
+
+**Finding 46 — the fix, measured on the shipping binary through the host that ghosts.** apogee at
+`244b2c7` against a build of this tree, same scenario, same `OpenConsole-wt-1.24.exe`:
+
+| build | bare LFs apogee wrote | bare LFs the host forwarded | rewritten |
+|---|---|---|---|
+| `244b2c7` (before) | 6 | 4 | **2** |
+| this tree (after) | 6 | 7 (6 + the host preamble's own) | **0** |
+
+The change is `internal/tui/altscreen_windows.go`: a `GetConsoleMode` / `SetConsoleMode` pair that
+ORs `ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN` onto stdout's existing mode,
+called from `Run` immediately before `claimAltScreen`, with an `altscreen_other.go` no-op off
+Windows. It is additive (nothing not named is changed), it cannot fail the run (a console that
+refuses leaves apogee exactly where it was), and it is **layout-neutral by construction**: no glyph,
+no width, no column budget, no frame content and no emitted byte of apogee's own changes. The early
+claim itself is untouched, so the macOS Terminal.app scroll-bar behaviour `claimAltScreen` exists for
+is unaffected.
+
+**Finding 47 — what this retires, and why nothing goes upstream.** The cause satisfies every
+constraint the surviving hypothesis had to meet, which is the strongest check available on it:
+
+- **The spinner constraint (finding 32).** The defect rides every bare LF, so it rides every
+  differential repaint however small. A two-cell spinner tick moves rows with `\n` exactly as a
+  1125-write streaming turn does. No long line, no full-width row, no last column and no write volume
+  is required — which is what finding 32 said the cause must look like, and what nothing else on the
+  list managed.
+- **The conhost/Windows Terminal discriminator (finding 12).** Both hosts corrupt identically once
+  the flag is missing — the system conhost with `dnar=false` produces the *same* row-10 ghost — so
+  the host was never the discriminator. What differs in the field is whether apogee's early switch is
+  honoured at all: under a pseudoconsole VT processing is on from the start, so it is; in a classic
+  console window it is off until bubbletea turns it on, so the early switch does nothing and the
+  alternate buffer is entered later, by the renderer, after the mode is already set. **This last link
+  is the one step reasoned rather than measured** — it needs a real console window, which the harness
+  by definition is not — and the owner's confirmation run tests it directly.
+- **apogee's bytes were always correct (findings 19, 28).** They were. The corruption is applied to
+  them in transit by the console's own write path, which is exactly the "downstream of apogee's byte
+  stream" conclusion those two findings forced, and it is why re-reading the renderer never found it.
+- **H1-H4 are all irrelevant**, as findings 13, 14, 23, 28 and 31 had already concluded separately.
+
+**Nothing is filed upstream and nothing should be.** The two write-ups the fifth pass parked are
+**withdrawn, not pending**: `microsoft/terminal` has no defect here — a per-buffer console mode
+behaving per-buffer is not a bug, and the LF translation is `ENABLE_PROCESSED_OUTPUT` doing its
+documented job on a buffer nobody cleared it on — and `charmbracelet/bubbletea` sets the flag
+correctly for a program that lets it own the alternate screen. The ordering that broke it is
+apogee's, and apogee has fixed it. Finding 24's reading of `wrapCursor` remains a correct description
+of a latent fragility upstream and remains not a defect report.
+
+Evidence for this pass: `item6c-evidence\` (the reproducing capture, all three hosts),
+`item6d-evidence\` (the fixed-bytes host comparison), `item6f-evidence\` (a live replication),
+`item6g-evidence\` (the 2x2 and the fix arm), `item6h-evidence\` (before/after on real binaries), all
+under `C:\Users\airic\apogee-ghosting-debug\`.
+
+## Item 6 findings — the owner confirms, and the console mode is given back (2026-08-07)
+
+**Finding 48 — the acceptance row is satisfied: the owner sees no ghost.** The owner built this tree
+and ran it in **Windows Terminal**, the configuration item 4 row 1 recorded as ghosting and finding 32
+recorded as *still* ghosting after item 5. Verbatim: *"the latest build is NOT corrupting the
+streaming anymore. The spinner looks fine too! Scrolling is also working!"*
+
+That closes the one thing finding 47 left open. All three symptoms named across the plan are gone
+together — the streamed text (item 4 row 1), the **activity spinner** (finding 32's sharper symptom,
+the one no other candidate could explain) and scrolling. It is the first build in this plan's history
+to come back clean by eye, and it is the build carrying `prepareAltScreenConsole` and nothing else new.
+The diagnosis of findings 40-47 is therefore **confirmed, not merely consistent**: the mechanism was
+measured in the harness, and the fix it predicted works on the real terminal at full scale.
+
+**Finding 49 — the fix leaked the console mode into the shell, and now restores it.** Reviewing the
+change turned up a real defect in it, new with the change and independent of the ghosting:
+`prepareAltScreenConsole` OR'd `ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN`
+onto the primary buffer and never put it back. bubbletea cannot cover that. It saves the output
+console mode in `initInput` (`tty_windows.go:36-41`) and restores it in `restoreInput`
+(`tty.go:47-51`), but it samples the mode **after** `Run` has already changed it — verified in the
+pinned `charm.land/bubbletea/v2 v2.0.8` — so what it restores is apogee's mode, not the shell's. Its
+save/restore is defeated by the same ordering the fix depends on.
+
+The consequence is the mirror image of the bug just fixed: every Windows TUI session would hand the
+shell back a console with newline-auto-return **disabled**, so the next program to write a bare `LF`
+— any Go binary, apogee's own multi-line CLI output included — would staircase down the screen. The
+ghost would be gone and a new one would be left behind it.
+
+The remedy is the shape `cmd/apogee/probeterminal_windows.go:19-34` already uses for the identical
+flag pair: `prepareAltScreenConsole` now returns a restore closure holding the mode word as it was
+before apogee touched anything, and `Run` defers it **immediately after the call** — before
+`claimAltScreen`, and so before the exit-alt-screen defer. Three properties come out of that one
+placement, and all three are the point:
+
+- **It runs on every exit path.** Registered before `claimAltScreen`, it covers that call's error
+  return, the two later error returns, the normal return, and every panic, with one `defer`.
+- **It runs *last*.** Defers are LIFO, so the exit-alt-screen sequence is written while the VT
+  processing this enabled is still in force — restoring first could leave `CSI ?1049l` printed
+  literally on a console that did not have VT processing on to begin with — and the mode is put back
+  on the primary buffer the exit returned to, which is the buffer that was modified.
+- **It runs after bubbletea's own restore**, which happens inside `program.Run()`. bubbletea puts
+  back the mode it sampled; this then puts back the one it could not see.
+
+The `_other.go` twin keeps the same signature and returns a no-op closure, so the six-target
+cross-build is unaffected. The closure is never nil on any platform — `Run` defers it
+unconditionally, and that contract is the one part of this a portable test can reach
+(`TestPrepareAltScreenConsoleReturnsACallableRestore`). The console path itself still has no portable
+seam: it is a two-call Win32 sequence whose only effect is in the console's own mode word, and a
+`go test` run has no console handle to observe it on. It stays pinned by findings 43-46 instead.
+
+## Item 6 — THE ANSWER
+
+**The ghost is apogee's own start-up ordering, and the fix is in the tree.**
+
+`internal/tui/tui.go`'s `Run` claims the alternate screen before bubbletea initialises the terminal.
+On Windows the console mode word is per screen buffer, so bubbletea's `DISABLE_NEWLINE_AUTO_RETURN`
+then lands on the primary buffer while every frame is written to the alternate one — which, without
+that flag, rewrites the renderer's bare `LF` into `CR LF`. ultraviolet uses bare `LF` to mean *next
+row, same column* and `\r\n` when it means *next row, column 1*; collapsing the two paints every such
+row 1-based instead of column-relative, so the cells the renderer believes it has just overwritten
+are never touched and survive as fragments of an earlier frame. Under a pseudoconsole — Windows
+Terminal, VS Code — VT processing is on from the start, so the early switch is honoured and the bug
+fires; in a classic conhost window it is not, so it does not.
+
+The fix sets the flag on the primary buffer *before* the switch, so the alternate buffer inherits it:
+`prepareAltScreenConsole` in `internal/tui/altscreen_windows.go`, a no-op in `altscreen_other.go`,
+called from `Run` immediately before `claimAltScreen` and paired with a deferred restore that gives
+the shell its own console mode back (finding 49). Layout-neutral, `TERM`-independent, additive to the
+existing console mode, and it changes no byte apogee emits.
+
+**Confirmed by the owner in Windows Terminal (finding 48).** The acceptance run this section used to
+ask for has been performed on a build of this tree: no corruption in the streamed text, no ghost in
+the activity spinner, and scrolling correct. Nothing about the diagnosis is outstanding.

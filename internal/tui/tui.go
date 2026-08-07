@@ -973,6 +973,20 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	// Bubble Tea. Only on a real terminal: with stdout redirected there is no scroll bar to put
 	// out and the sequences would be noise in the file.
 	if stdoutIsTerminal() {
+		// On Windows the console mode has to be right BEFORE the switch, not after it: the mode
+		// word is per screen buffer, and a flag set once the alternate buffer is already live
+		// lands on the buffer nobody writes to any more. prepareAltScreenConsole is that
+		// ordering, and altscreen_windows.go carries why it is the fix for the ghosting bug.
+		// Everywhere else it is a no-op.
+		//
+		// Its restore is deferred HERE — before the claim, and so before the exit-alt-screen
+		// defer below — precisely because defers run last-in-first-out: the exit sequence is
+		// written while the mode this set is still in force (it is what makes the console
+		// interpret the sequence at all), and only then is the shell's own mode put back, on the
+		// primary buffer the exit returned to. Registering it before claimAltScreen also covers
+		// that call's error return, and every panic, with the one restore.
+		restoreConsole := prepareAltScreenConsole(os.Stdout)
+		defer restoreConsole()
 		if err := claimAltScreen(os.Stdout); err != nil {
 			return err
 		}
