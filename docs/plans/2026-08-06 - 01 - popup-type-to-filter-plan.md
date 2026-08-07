@@ -34,7 +34,7 @@
   - The `/` autocomplete dropdown (it already filters by the token being typed) and the ask/approval menus (decision surfaces, not searchable lists — `menuRows` panes are untouched).
   - Any change to the prompt editor / input box — the rejected stash-and-restore design must not creep back in.
 
-## 1. The picker's filtered view — one seam for rows, count and accept
+## 1. The picker's filtered view — one seam for rows, count and accept — ✅ DONE (2026-08-07)
 
 **What:** In `internal/tui/picker.go`: add `filter string` to the `picker` struct (plain value; every existing `picker{}` zeroing clears it — author binding C). Add the match helper implementing author binding A (lowercased filter substring of the row's cells joined with one space). Introduce one function that derives the filtered view for the open kind — the surviving `popupRow`s plus their indices into the kind's FULL offering (author binding D) — and rewire all three consumers through it: `pickerCount` returns the filtered count, `pickerRows`/`renderPicker` paint the filtered rows, and `acceptPicker` maps `m.picker.selected` through the index list before touching any underlying slice (`offeredModels()`, `m.opts.Servers`, `m.picker.profiles`, `scheduleCycles`, `scheduleModes`, and the `/schedule-stop` accept — refactor `acceptScheduleStop` too if it reads `selected` internally). An empty filter must be the identity view (indices `0..n-1`), so every existing behavior — clamping, wrapping, per-frame re-derivation (author binding F) — is unchanged when nothing has been typed. No key routing and no rendering change in this item: the filter can only be empty in the running TUI until item 2 lands, which is what keeps this item's diff behavior-neutral.
 

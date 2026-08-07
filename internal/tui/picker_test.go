@@ -5,11 +5,14 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/schedule"
 )
 
 // ----------------------------------------------------------------------------
@@ -1244,5 +1247,272 @@ func TestLoadIsNoLongerAVerb(t *testing.T) {
 	want := unknownSlashNote("/load")
 	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
 		t.Errorf("notes = %v, want the unknown-slash refusal %q", got, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The filtered view — one seam for rows, count and accept
+// ----------------------------------------------------------------------------
+
+// The matching rule is a case-insensitive substring test over the row's cells joined with a single
+// space: every cell participates, marker cells included, and a space is a filter character like any
+// other because the overlay is modal and space is no verb inside it.
+func TestPickerFilterMatchesTheJoinedRowCells(t *testing.T) {
+	row := popupRow{"Qwen3-Coder", "— 32k", "· running"}
+	tests := []struct {
+		name   string
+		filter string
+		want   bool
+	}{
+		{"an empty filter keeps every row", "", true},
+		{"the filter is case-insensitive", "QWEN3", true},
+		{"and so is the row", "coder", true},
+		{"a marker cell is as filterable as any other", "running", true},
+		{"a filter may span the join between two cells", "coder — 32k", true},
+		{"space is a filter character, not a verb", "32k · running", true},
+		{"a substring no cell carries prunes the row", "gemma", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rowMatchesFilter(row, tc.filter); got != tc.want {
+				t.Errorf("rowMatchesFilter(%v, %q) = %v, want %v", row, tc.filter, got, tc.want)
+			}
+		})
+	}
+}
+
+// pickerKindCase is one open picker of one kind, the filter that narrows it to a single row, and the
+// assertion that ⏎ took the thing THAT row named — the regression the whole seam exists for, since a
+// filtered highlight and an index into the unfiltered offering name different things.
+type pickerKindCase struct {
+	name   string
+	open   func(t *testing.T) (Model, func(*testing.T, Model))
+	filter string
+	want   string // the first cell of the one row the filter leaves standing
+}
+
+// pickerKindCases covers every kind the overlay lists, because the filter is one uniform mechanism
+// rather than a /model feature: each case narrows a multi-row offering to a row that is NOT the
+// first, so an accept that ignored the mapping would take the wrong one and say so.
+func pickerKindCases() []pickerKindCase {
+	return []pickerKindCase{
+		{
+			name:   "advertised models",
+			filter: "third",
+			want:   "third-model",
+			open: func(t *testing.T) (Model, func(*testing.T, Model)) {
+				t.Helper()
+				m, rb := seededPicker(t, testOpts)
+				m = foldBeatMsg(t, m, threeModelBeat())
+				rb.calls = nil
+				m, _ = typeCommand(t, m, "/model")
+				return m, func(t *testing.T, _ Model) {
+					t.Helper()
+					if len(rb.calls) != 1 || rb.calls[0].model != "third-model" {
+						t.Errorf("rebind calls = %+v, want the one model the filter left", rb.calls)
+					}
+				}
+			},
+		},
+		{
+			name:   "configured servers",
+			filter: "remote",
+			want:   "remote",
+			open: func(t *testing.T) (Model, func(*testing.T, Model)) {
+				t.Helper()
+				sw := &fakeSwitch{}
+				m, _ := seededServers(t, sw)
+				m, _ = typeCommand(t, m, "/server")
+				return m, func(t *testing.T, _ Model) {
+					t.Helper()
+					if want := []string{"remote"}; !reflect.DeepEqual(sw.calls, want) {
+						t.Errorf("switch calls = %v, want %v — row 0 of the FILTERED view is row 1 of the list",
+							sw.calls, want)
+					}
+				}
+			},
+		},
+		{
+			name:   "launch profiles",
+			filter: "ollama",
+			want:   "beta",
+			open: func(t *testing.T) (Model, func(*testing.T, Model)) {
+				t.Helper()
+				m := seededLoad(t, newLauncher())
+				m, _ = typeCommand(t, m, "/model")
+				return m, func(t *testing.T, m Model) {
+					t.Helper()
+					if !m.actuation.inFlight || m.actuation.profile != "beta" {
+						t.Errorf("actuation = %+v, want the latch held for the filtered profile", m.actuation)
+					}
+				}
+			},
+		},
+		{
+			name:   "schedule cycles",
+			filter: "4h",
+			want:   "4h",
+			open: func(t *testing.T) (Model, func(*testing.T, Model)) {
+				t.Helper()
+				m := scheduleModel(t, &fakeScheduler{}, "")
+				m, _ = typeCommand(t, m, "/schedule tidy the logs")
+				return m, func(t *testing.T, m Model) {
+					t.Helper()
+					if m.picker.draft.cycle != 4*time.Hour {
+						t.Errorf("draft cycle = %v, want the filtered row's 4h", m.picker.draft.cycle)
+					}
+				}
+			},
+		},
+		{
+			name:   "schedule modes",
+			filter: "auto",
+			want:   "auto",
+			open: func(t *testing.T) (Model, func(*testing.T, Model)) {
+				t.Helper()
+				sch := &fakeScheduler{}
+				m := scheduleModel(t, sch, "")
+				m, _ = typeCommand(t, m, "/schedule tidy the logs")
+				m = step(t, m, keyEnter()) // the cycle question is answered; the mode question is up
+				return m, func(t *testing.T, _ Model) {
+					t.Helper()
+					if len(sch.added) != 1 || sch.added[0].Mode != domain.ModeAuto {
+						t.Errorf("added = %+v, want one schedule in the filtered row's mode", sch.added)
+					}
+				}
+			},
+		},
+		{
+			name:   "live schedules",
+			filter: "log watch",
+			want:   "log watch",
+			open: func(t *testing.T) (Model, func(*testing.T, Model)) {
+				t.Helper()
+				sch := &fakeScheduler{live: []schedule.Status{
+					liveStatus("sch-1", "nightly tidy", time.Hour, domain.ModePlan),
+					liveStatus("sch-2", "log watch", 15*time.Minute, domain.ModeAuto),
+				}}
+				m := scheduleModel(t, sch, "")
+				m, _ = typeCommand(t, m, "/schedule-stop")
+				return m, func(t *testing.T, _ Model) {
+					t.Helper()
+					if want := []string{"sch-2"}; !reflect.DeepEqual(sch.stopped, want) {
+						t.Errorf("stopped = %v, want %v — the row the filter left, not row 0 of the live set",
+							sch.stopped, want)
+					}
+				}
+			},
+		},
+	}
+}
+
+// Under a non-empty filter the three consumers of the view agree: the pane paints the surviving rows,
+// the count is their count, and ⏎ takes the offering entry the highlighted row stands for. Every kind
+// is checked, because nothing is opt-out of the filter.
+func TestPickerFilteredViewAgreesOnRowsCountAndAccept(t *testing.T) {
+	for _, tc := range pickerKindCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			m, assertAccept := tc.open(t)
+			if !m.picker.open {
+				t.Fatal("precondition: the picker is not open")
+			}
+			if got := len(m.pickerOfferingRows()); got < 2 {
+				t.Fatalf("precondition: the offering has %d rows, want a list the filter can prune", got)
+			}
+
+			m.picker.filter = tc.filter
+
+			rows := m.pickerRows()
+			if len(rows) != 1 || rows[0][0] != tc.want {
+				t.Fatalf("filtered rows = %v, want the one row naming %q", rows, tc.want)
+			}
+			if got := m.pickerCount(); got != len(rows) {
+				t.Errorf("count = %d, want %d — the count and the painted rows are one view", got, len(rows))
+			}
+			if got := plain(m.View()); !strings.Contains(got, tc.want) {
+				t.Errorf("the pane does not paint the surviving row %q:\n%s", tc.want, got)
+			}
+
+			m, _ = stepCmd(t, m, keyEnter())
+			assertAccept(t, m)
+		})
+	}
+}
+
+// An empty filter is the IDENTITY view — the whole offering, each row at its own index — which is
+// what keeps every unfiltered behaviour (the rows, the count, the accept target) exactly what it was
+// before a filter existed.
+func TestPickerEmptyFilterIsTheIdentityView(t *testing.T) {
+	m, rb := seededPicker(t, testOpts)
+	m = foldBeatMsg(t, m, threeModelBeat())
+	rb.calls = nil
+	m, _ = typeCommand(t, m, "/model")
+
+	offering := m.pickerOfferingRows()
+	view := m.pickerFilteredView()
+	if !reflect.DeepEqual(view.rows, offering) {
+		t.Errorf("filtered rows = %v, want the whole offering %v", view.rows, offering)
+	}
+	if want := []int{0, 1}; !reflect.DeepEqual(view.offering, want) {
+		t.Errorf("offering indices = %v, want %v — every row at its own place", view.offering, want)
+	}
+	if got := m.pickerCount(); got != len(offering) {
+		t.Errorf("count = %d, want the whole offering's %d", got, len(offering))
+	}
+
+	m = step(t, m, keyDown()) // the second offered row, as it always was
+	m, _ = stepCmd(t, m, keyEnter())
+	if len(rb.calls) != 1 || rb.calls[0].model != "third-model" {
+		t.Errorf("rebind calls = %+v, want the second row of the unfiltered offering", rb.calls)
+	}
+}
+
+// A filter that narrows the list under a highlight sitting past its new end clamps the selection the
+// way a shorter offering does — the same posture a beat carrying fewer models takes — so ⏎ can still
+// only take a row the pane painted.
+func TestPickerFilterNarrowingClampsTheSelection(t *testing.T) {
+	m, rb := seededPicker(t, testOpts)
+	m = foldBeatMsg(t, m, threeModelBeat())
+	rb.calls = nil
+	m, _ = typeCommand(t, m, "/model")
+	m = step(t, m, keyDown())
+	if m.picker.selected != 1 {
+		t.Fatalf("precondition: selected = %d, want the second row", m.picker.selected)
+	}
+
+	m.picker.filter = "other" // one surviving row, and the highlight is past it
+	m = step(t, m, keyDown())
+
+	if m.picker.selected != 0 {
+		t.Fatalf("selected = %d, want 0 — the highlight is clamped into the filtered list", m.picker.selected)
+	}
+	m, _ = stepCmd(t, m, keyEnter())
+	if len(rb.calls) != 1 || rb.calls[0].model != "other-model" {
+		t.Errorf("rebind calls = %+v, want the one row the filter left", rb.calls)
+	}
+}
+
+// A filter matching nothing keeps the pane open with no rows and no highlight, and ⏎ takes nothing —
+// a visible filter over an empty list already says why, and backspace is the way back.
+func TestPickerFilterWithNoMatchesTakesNothing(t *testing.T) {
+	m, rb := seededPicker(t, testOpts)
+	m = foldBeatMsg(t, m, threeModelBeat())
+	rb.calls = nil
+	m, _ = typeCommand(t, m, "/model")
+
+	m.picker.filter = "no-such-model"
+
+	if got := m.pickerCount(); got != 0 {
+		t.Errorf("count = %d, want 0", got)
+	}
+	if got := m.pickerRows(); len(got) != 0 {
+		t.Errorf("rows = %v, want none", got)
+	}
+	m, _ = stepCmd(t, m, keyEnter())
+	if !m.picker.open {
+		t.Error("⏎ over zero matches closed the pane; there was nothing to take")
+	}
+	if len(rb.calls) != 0 {
+		t.Errorf("rebind calls = %+v, want none", rb.calls)
 	}
 }

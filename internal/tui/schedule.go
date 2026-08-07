@@ -184,18 +184,21 @@ func (m Model) stopSchedule(st schedule.Status) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// acceptScheduleStop takes the stop picker's highlighted row. It RE-READS the live set instead of
-// trusting the index the clamp was computed against: unlike every other offering the overlay lists,
-// these rows come from a seam another goroutine owns, so the two reads of one keypress can honestly
-// differ. A row that is no longer there is answered rather than indexed — the Schedule the human
-// aimed at has already ended, which is what they were asking for.
-func (m Model) acceptScheduleStop() (tea.Model, tea.Cmd) {
+// acceptScheduleStop takes the stop picker's highlighted row, named by its index into the LIVE set
+// rather than by its position among the painted rows — the caller resolves the highlight through the
+// filtered view first (acceptPicker), so a filter cannot make ⏎ stop a Schedule the pane never
+// showed. It RE-READS the live set instead of trusting the index the clamp was computed against:
+// unlike every other offering the overlay lists, these rows come from a seam another goroutine owns,
+// so the two reads of one keypress can honestly differ. A row that is no longer there is answered
+// rather than indexed — the Schedule the human aimed at has already ended, which is what they were
+// asking for.
+func (m Model) acceptScheduleStop(offered int) (tea.Model, tea.Cmd) {
 	live := m.liveSchedules()
-	if m.picker.selected < 0 || m.picker.selected >= len(live) {
+	if offered < 0 || offered >= len(live) {
 		m.picker = picker{}
 		return m.pickerNote("that schedule is no longer running")
 	}
-	return m.stopSchedule(live[m.picker.selected])
+	return m.stopSchedule(live[offered])
 }
 
 // acceptCycle takes the cycle picker's row and asks the second question in the same overlay: the

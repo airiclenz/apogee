@@ -19,7 +19,7 @@ import (
 // The /sessions browser's simpler sibling: a modal list with one highlight, ⏎ to take the
 // highlighted row, esc to close, painted through the shared popup module (renderPopup) so it shares
 // the browser's chrome and right edge. It answers ONE question — which of the things the session
-// could be pointed at should it be pointed at now — so the state is three plain values and the
+// could be pointed at should it be pointed at now — so the state is four plain values and the
 // verbs differ only by a [pickerKind].
 //
 // Rows are DERIVED at render time from the state they describe, never captured at open. That is
@@ -86,6 +86,12 @@ type picker struct {
 	open     bool
 	kind     pickerKind
 	selected int
+	// filter is what the human has typed into the open overlay: the case-insensitive substring every
+	// row must carry to survive (pickerFilteredView). A plain string, so the value-copied Model stays
+	// copyable (ADR 0011) — no strings.Builder can ever live here — and part of the overlay's own
+	// state, so the whole-struct zeroing every close and accept already does (`m.picker = picker{}`)
+	// is what clears it: no path can carry a stale filter into the next open.
+	filter string
 	// profiles are the Launch-profile rows, and the one offering that is NOT derived at render time.
 	// The other two describe Model state (the advertised models, the configured servers) and so can be
 	// re-read every frame; a Launch profile lives in the launcher's config FILE, behind a seam that
@@ -585,30 +591,38 @@ func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil // any other key is swallowed by the modal
 }
 
-// acceptPicker resolves ⏎ on the highlighted row, by kind. The caller has already established that
-// there is a row to take (pickerKey), and the selection is clamped, so the index is safe.
+// acceptPicker resolves ⏎ on the highlighted row, by kind. The highlight indexes the FILTERED rows,
+// so it is mapped back to the offering it names (pickerView.offeringIndex) before any underlying
+// list is touched: with a filter set, "the third painted row" and "the third model advertised" are
+// different rows, and taking the second would move the session somewhere the human never saw. The
+// caller has already established that there is a row to take (pickerKey) and the selection is
+// clamped, so the mapping fails only on a list that emptied between the two reads.
 func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
+	offered, ok := m.pickerFilteredView().offeringIndex(m.picker.selected)
+	if !ok {
+		return m, nil
+	}
 	switch m.picker.kind {
 	case pickerModel:
-		picked := m.offeredModels()[m.picker.selected]
+		picked := m.offeredModels()[offered]
 		return m.bindPickedModel(picked.ID, picked.ContextWindow)
 	case pickerServer:
 		// The one kind whose list is a PROVIDER (Options.Servers): the rows are re-read here rather
 		// than trusted from the frame that drew them, so a `servers:` block that shrank under the
 		// open overlay costs the accept and not the process.
 		servers := m.servers()
-		if m.picker.selected >= len(servers) {
+		if offered >= len(servers) {
 			return m, nil
 		}
-		return m.switchToServer(servers[m.picker.selected])
+		return m.switchToServer(servers[offered])
 	case pickerLoad:
-		return m.startProfileLoad(m.picker.profiles[m.picker.selected].Name)
+		return m.startProfileLoad(m.picker.profiles[offered].Name)
 	case pickerCycle:
-		return m.acceptCycle(scheduleCycles[m.picker.selected])
+		return m.acceptCycle(scheduleCycles[offered])
 	case pickerScheduleMode:
-		return m.acceptScheduleMode(scheduleModes[m.picker.selected])
+		return m.acceptScheduleMode(scheduleModes[offered])
 	case pickerScheduleStop:
-		return m.acceptScheduleStop()
+		return m.acceptScheduleStop(offered)
 	}
 	return m, nil
 }
@@ -640,25 +654,12 @@ func (m Model) bindPickedModel(id string, window int) (tea.Model, tea.Cmd) {
 	return next, nil
 }
 
-// pickerCount is how many rows the open kind has RIGHT NOW, read off the state the rows are derived
-// from rather than off a captured list — the one number the selection is clamped and wrapped
-// against.
+// pickerCount is how many rows the open kind has RIGHT NOW — the count of the FILTERED view, read
+// off the state the rows are derived from rather than off a captured list, and the one number the
+// selection is clamped and wrapped against. Counting the painted rows rather than the offering
+// behind them is what keeps the highlight inside what the pane actually shows.
 func (m Model) pickerCount() int {
-	switch m.picker.kind {
-	case pickerModel:
-		return len(m.offeredModels())
-	case pickerServer:
-		return len(m.servers())
-	case pickerLoad:
-		return len(m.picker.profiles)
-	case pickerCycle:
-		return len(scheduleCycles)
-	case pickerScheduleMode:
-		return len(scheduleModes)
-	case pickerScheduleStop:
-		return len(m.liveSchedules())
-	}
-	return 0
+	return len(m.pickerFilteredView().rows)
 }
 
 // clampSelection keeps selected inside a row list that moved under the open overlay — a beat
@@ -673,6 +674,73 @@ func (p *picker) clampSelection(n int) {
 	case p.selected < 0:
 		p.selected = 0
 	}
+}
+
+// pickerView is the overlay's FILTERED view of the open kind's offering, and the ONE seam its three
+// consumers share: the rows the pane paints (pickerRows), how many there are (pickerCount), and
+// which row ⏎ takes (acceptPicker). Deriving them once is what makes it impossible for the accept to
+// take a row the pane did not paint — offering carries, for each surviving row, the index it holds
+// in the kind's FULL offering, and every accept resolves that index against its own list rather than
+// indexing it with a filtered position.
+type pickerView struct {
+	rows     []popupRow
+	offering []int // offering[i] is where rows[i] sits in the unfiltered offering
+}
+
+// offeringIndex maps the highlighted FILTERED row back to its place in the kind's full offering, and
+// reports false when there is nothing to take: a filter matching no row, or an offering that emptied
+// under the open pane. Callers whose list can move between the two reads of one keypress (the
+// Options.Servers provider, the live Schedules) still bounds-check what comes back against a fresh
+// read — this answers where the human aimed, not what is still there.
+func (v pickerView) offeringIndex(selected int) (int, bool) {
+	if selected < 0 || selected >= len(v.offering) {
+		return 0, false
+	}
+	return v.offering[selected], true
+}
+
+// pickerFilteredView derives the open kind's rows and prunes them by the overlay's filter. It is
+// derived PER FRAME like the rows themselves, so a beat landing under an open filtered picker
+// re-derives the offering, re-applies the filter and re-clamps the selection in one move — the
+// unfiltered posture, unchanged.
+func (m Model) pickerFilteredView() pickerView {
+	return filterPopupRows(m.pickerOfferingRows(), m.picker.filter)
+}
+
+// filterPopupRows is the filter itself: the rows that survive it, and where each of them sat in the
+// unfiltered list. An EMPTY filter is the IDENTITY view — every row, at its own index — which is
+// what keeps every unfiltered behaviour (the clamp, the wrap, the accept target) exactly what it was
+// before a filter existed.
+func filterPopupRows(rows []popupRow, filter string) pickerView {
+	if filter == "" {
+		offering := make([]int, len(rows))
+		for i := range offering {
+			offering[i] = i
+		}
+		return pickerView{rows: rows, offering: offering}
+	}
+	view := pickerView{rows: make([]popupRow, 0, len(rows)), offering: make([]int, 0, len(rows))}
+	for i, row := range rows {
+		if !rowMatchesFilter(row, filter) {
+			continue
+		}
+		view.rows = append(view.rows, row)
+		view.offering = append(view.offering, i)
+	}
+	return view
+}
+
+// rowMatchesFilter reports whether one row survives filter: a case-insensitive substring test over
+// the row's cells joined with a single space. EVERY cell participates, the marker cells included —
+// filtering on "running" to find the live profiles is a legitimate thing to ask of a profile list —
+// and space is a filter character like any other, because the overlay is modal and space is no verb
+// inside it. Substring rather than prefix, and no ranking of any kind: the filter PRUNES the
+// offering and never reorders it, so no row can jump out from under the highlight mid-keystroke.
+func rowMatchesFilter(row popupRow, filter string) bool {
+	if filter == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(strings.Join(row, " ")), strings.ToLower(filter))
 }
 
 // ----------------------------------------------------------------------------
@@ -729,12 +797,20 @@ func (m Model) pickerTitle() string {
 	return ""
 }
 
-// pickerRows composes the FULL row list the popup module paints, by kind. Each kind emits its own
-// fixed column schema and the module owns the alignment, along with the marker, the highlight, the
-// truncation and the scroll windowing; cells arrive plain and escape-stripped, as its contract
-// requires — a model id is the SERVER's text and a profile name the LAUNCHER's, so both are
-// sanitized here rather than trusted.
+// pickerRows is the row list the popup module PAINTS: the open kind's offering with the overlay's
+// filter applied (pickerFilteredView). It is the rows consumer of the one filtered view, so what the
+// pane shows, what pickerCount counts and what acceptPicker takes can never be three different
+// lists.
 func (m Model) pickerRows() []popupRow {
+	return m.pickerFilteredView().rows
+}
+
+// pickerOfferingRows composes the kind's FULL row list — the offering before the filter prunes it.
+// Each kind emits its own fixed column schema and the module owns the alignment, along with the
+// marker, the highlight, the truncation and the scroll windowing; cells arrive plain and
+// escape-stripped, as its contract requires — a model id is the SERVER's text and a profile name the
+// LAUNCHER's, so both are sanitized here rather than trusted.
+func (m Model) pickerOfferingRows() []popupRow {
 	switch m.picker.kind {
 	case pickerModel:
 		return m.modelRows()
