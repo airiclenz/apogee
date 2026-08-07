@@ -161,7 +161,9 @@ func TestDiagLogRecordsTheStartupEnvironment(t *testing.T) {
 		t.Fatalf("newDiagLog: %v", err)
 	}
 	env := map[string]string{"COLORTERM": "truecolor", "WT_SESSION": "a-guid"}
-	diag.start(func(key string) string { return env[key] }, ansi.WcWidth)
+	// A nil painter environment is bubbletea reading the process's own, which is every host but
+	// Windows: the two agree, so every line is the plain one.
+	diag.start(func(key string) string { return env[key] }, nil, ansi.WcWidth)
 	if err := diag.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -177,6 +179,64 @@ func TestDiagLogRecordsTheStartupEnvironment(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("diag log is missing %q; log was:\n%s", want, got)
 		}
+	}
+}
+
+// TestDiagLogRecordsTheEnvironmentThePainterSees is the fix for a diagnostic that misreported the
+// exact variable it exists to measure. The painter's environment is not always the process's — on
+// Windows apogee names the painter a TERM the process does not have (environ_windows.go) — so the
+// log reports the value the PAINTER reads, marks it as apogee's, and keeps the process's own
+// beside it, because "this machine named no terminal" is the half a bug report needs most.
+func TestDiagLogRecordsTheEnvironmentThePainterSees(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "diag.txt")
+	diag, err := newDiagLog(path)
+	if err != nil {
+		t.Fatalf("newDiagLog: %v", err)
+	}
+	process := map[string]string{"WT_SESSION": "a-guid"}
+	painter := []string{"WT_SESSION=a-guid", "TERM=xterm-256color", "COLORTERM=truecolor"}
+
+	diag.start(func(key string) string { return process[key] }, painter, ansi.WcWidth)
+	if err := diag.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	got := readFileString(t, path)
+	for _, want := range []string{
+		"TERM: xterm-256color (injected; process: (unset))",
+		"COLORTERM: truecolor (injected; process: (unset))",
+		"WT_SESSION: a-guid",    // the process's own, unchanged by the injection: the plain line
+		"TERM_PROGRAM: (unset)", // unset in both, and still spelled unambiguously
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("diag log is missing %q; log was:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "WT_SESSION: a-guid (injected") {
+		t.Errorf("a variable the process set was reported as injected; log was:\n%s", got)
+	}
+}
+
+// TestDiagLogReadsAPainterEnvironmentTheWayThePainterWill: a duplicated key resolves to the LAST
+// occurrence in bubbletea and in colorprofile alike, and the terminal-naming rule appends for
+// exactly that reason. A log that resolved it any other way would report a value nothing reads.
+func TestDiagLogReadsAPainterEnvironmentTheWayThePainterWill(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "diag.txt")
+	diag, err := newDiagLog(path)
+	if err != nil {
+		t.Fatalf("newDiagLog: %v", err)
+	}
+	painter := []string{"TERM=", "TERM=xterm-256color"}
+
+	diag.start(func(string) string { return "" }, painter, ansi.WcWidth)
+	if err := diag.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if got, want := readFileString(t, path), "TERM: xterm-256color (injected; process: (unset))"; !strings.Contains(got, want) {
+		t.Errorf("diag log is missing %q; log was:\n%s", want, got)
 	}
 }
 
@@ -242,7 +302,7 @@ func TestDiagLogSuppressesUnchangedValues(t *testing.T) {
 // unconditionally, so a nil log that panicked would take down every ordinary session.
 func TestDiagLogIsNilSafeWhenTheFlagIsUnset(t *testing.T) {
 	var diag *diagLog
-	diag.start(os.Getenv, ansi.WcWidth)
+	diag.start(os.Getenv, nil, ansi.WcWidth)
 	diag.observe(tea.WindowSizeMsg{Width: 80, Height: 24})
 	diag.observe(tea.ModeReportMsg{Mode: ansi.ModeUnicodeCore, Value: ansi.ModeSet})
 	diag.record(diagWidthMethod, "wcwidth")

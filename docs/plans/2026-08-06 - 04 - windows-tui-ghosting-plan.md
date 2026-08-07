@@ -208,6 +208,15 @@ not yet done. Same call item 1 made for `⌃l`.
 assertion the item asks for is only worth having against the real interface, which means importing
 it.
 
+NOTES (2026-08-07): follow-up fix landed after the item was done, at the owner's request — the item
+stays done and its scope is unchanged. `--tui-diag` read `TERM` and `COLORTERM` from the **process**
+environment, so once item 5 landed the log said `TERM: (unset)` on a Windows painter that was in
+fact running on `xterm-256color` — the diagnostic misreporting the one variable it exists to
+measure. `diagLog.start` now takes the painter's environment (`programEnviron`'s slice, nil off
+Windows) beside the process lookup and logs the effective value with the process's own kept in
+brackets: `TERM: xterm-256color (injected; process: (unset))`. Nothing about what the painter does
+changed. Item 8's equivalent limitation in `apogee probe terminal` is deliberate and untouched.
+
 **What:** Give apogee its own diagnostic seam so no future Windows rendering bug needs a patched
 bubbletea.
 

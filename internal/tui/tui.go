@@ -989,6 +989,12 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	// the Step that emitted it (worker.go, sink.go). It is wired HERE rather than through newModel
 	// because the sink is the Bridge's, and Run is where the two meet.
 	m.flushEvents = br.sink.flush
+	// The environment the painter will read: bubbletea's own default (the process's) everywhere
+	// but Windows, and on Windows the terminal-naming rule's slice (environ_windows.go). It is
+	// resolved HERE, above the diag log rather than at the programOptions call below, because the
+	// log has to report the environment the PAINTER sees — on Windows that is not the process's,
+	// and a diagnostic that read the process would misreport the one variable it exists to measure.
+	environ := programEnviron()
 	// The --tui-diag half of the diagnostic seam (diagnostics.go). It is opened HERE, between
 	// newModel and the program, because that is the only window in which both halves of its
 	// contract can be met: the Model exists, so the log can be put on it before any message
@@ -1003,14 +1009,14 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 		}
 		defer func() { _ = diag.Close() }()
 		m.diag = diag
-		diag.start(os.Getenv, m.th.measure.Method())
+		diag.start(os.Getenv, environ, m.th.measure.Method())
 	}
 	// The --tui-trace half. traced is nil unless a path was named, in which case it is the file
 	// this run owns and must close; the options are otherwise exactly what they have always been.
-	// Two platform rules can also add an option here, both no-ops off Windows: programEnviron is
-	// the terminal apogee names itself to the painter as (environ_windows.go), and
+	// Two platform rules can also add an option here, both no-ops off Windows: environ is the
+	// terminal apogee names itself to the painter as (environ_windows.go), and
 	// programDeclinesSyncOutput is the mode-2026 question it keeps to itself (syncoutput.go).
-	teaOpts, traced, err := programOptions(ctx, opts, programEnviron(), programDeclinesSyncOutput())
+	teaOpts, traced, err := programOptions(ctx, opts, environ, programDeclinesSyncOutput())
 	if err != nil {
 		return err
 	}

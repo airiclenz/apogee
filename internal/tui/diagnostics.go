@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 )
@@ -165,20 +166,59 @@ func (d *diagLog) record(key, value string) {
 
 // start records the facts that are already known before the program begins: the four environment
 // variables that decide how the renderer talks to this terminal, and the width method the painter
-// (and with it [widthAuthority]) starts on. lookupEnv is injected so a test needs no process
-// environment; Run passes os.Getenv.
-func (d *diagLog) start(lookupEnv func(string) string, method ansi.Method) {
+// (and with it [widthAuthority]) starts on.
+//
+// It is handed BOTH environments, because on Windows they differ by construction. environ is the
+// one the PAINTER reads — [programEnviron]'s slice, which names a TERM the process itself does not
+// have (environ_windows.go) — or nil when bubbletea is left on the process environment, which is
+// the case on every other host and on a redirected stdout. lookupEnv reads the PROCESS
+// environment; Run passes os.Getenv, and it is injected so a test needs no process environment of
+// its own.
+//
+// Logging the painter's value is the point of the flag: a log that read only the process would say
+// "TERM: (unset)" of a painter running on xterm-256color, which is this diagnostic misreporting
+// the single variable it exists to measure. The process value is kept beside it rather than
+// replaced by it, because "the process named no terminal and apogee supplied one" is itself the
+// fact the next Windows rendering bug is argued from.
+func (d *diagLog) start(lookupEnv func(string) string, environ []string, method ansi.Method) {
 	if d == nil {
 		return
 	}
+	// uv.Environ's lookup rather than a map of the slice: it resolves a duplicated key to the LAST
+	// occurrence, which is how the renderer and colorprofile resolve this very slice, and an
+	// injected value is appended precisely because that is the one that wins (environ_windows.go).
+	painter := uv.Environ(environ)
 	for _, key := range diagEnvKeys {
-		value := lookupEnv(key)
-		if value == "" {
-			value = diagUnset
+		process := lookupEnv(key)
+		effective := process
+		// nil environ means bubbletea reads the process's own, so there is nothing to compare and
+		// the line is the plain one it has always been.
+		if environ != nil {
+			effective = painter.Getenv(key)
 		}
-		d.record(key, value)
+		d.record(key, diagEnvValue(effective, process))
 	}
 	d.record(diagWidthMethod, widthMethodName(method))
+}
+
+// diagEnvValue spells one environment variable for the log: the value the PAINTER sees, followed —
+// only when apogee supplied it rather than the process — by what the process itself carried. The
+// annotated form is a suffix on the ordinary line rather than a second key, so the log keeps one
+// "key: value" line per variable and change suppression keeps working on it unchanged.
+func diagEnvValue(effective, process string) string {
+	if effective == process {
+		return diagEnvOrUnset(process)
+	}
+	return fmt.Sprintf("%s (injected; process: %s)", diagEnvOrUnset(effective), diagEnvOrUnset(process))
+}
+
+// diagEnvOrUnset spells an empty environment variable unambiguously. A blank after the colon is
+// indistinguishable from a variable set to the empty string, and those two are different facts.
+func diagEnvOrUnset(value string) string {
+	if value == "" {
+		return diagUnset
+	}
+	return value
 }
 
 // observe folds one message from the running program into the log. It is called at the TOP of

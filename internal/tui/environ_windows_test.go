@@ -4,10 +4,13 @@ package tui
 
 import (
 	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TestInjectTerminalEnvNamesTheTerminal is the rule itself, in the three shapes a Windows
@@ -95,6 +98,44 @@ func TestProgramEnvironInjectsNothingWhenStdoutIsNotATerminal(t *testing.T) {
 	}
 	if env := programEnviron(); env != nil {
 		t.Errorf("programEnviron() = %v with stdout redirected, want nil", env)
+	}
+}
+
+// TestDiagLogReportsTheInjectedTerminalOnWindows joins the two seams that were reporting different
+// machines. --tui-diag read the PROCESS environment, so on the very host this rule exists for it
+// wrote "TERM: (unset)" about a painter running on xterm-256color. What it reports now is the
+// slice [injectTerminalEnv] actually hands the painter — with the process's own value kept in
+// brackets, since a Windows shell naming no terminal is the fact the injection answers.
+func TestDiagLogReportsTheInjectedTerminalOnWindows(t *testing.T) {
+	t.Parallel()
+	// A Windows Terminal session: it names itself, but no TERM at all — the measured state this
+	// whole file is built on.
+	process := map[string]string{"WT_SESSION": "6d8b8f1e"}
+	base := []string{"WT_SESSION=" + process["WT_SESSION"]}
+	injected := injectTerminalEnv(base)
+	if injected == nil {
+		t.Fatalf("injectTerminalEnv(%v) = nil, want an injected environment", base)
+	}
+	path := filepath.Join(t.TempDir(), "diag.txt")
+	diag, err := newDiagLog(path)
+	if err != nil {
+		t.Fatalf("newDiagLog: %v", err)
+	}
+
+	diag.start(func(key string) string { return process[key] }, injected, ansi.WcWidth)
+	if err := diag.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	got := readFileString(t, path)
+	for _, want := range []string{
+		"TERM: " + injectedTerm + " (injected; process: (unset))",
+		"COLORTERM: " + injectedColorTerm + " (injected; process: (unset))",
+		"WT_SESSION: " + process["WT_SESSION"], // the process's own, reported as its own
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("diag log is missing %q; log was:\n%s", want, got)
+		}
 	}
 }
 
