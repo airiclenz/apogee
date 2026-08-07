@@ -489,9 +489,10 @@ func TestTranscriptCodecExcludesExpandedState(t *testing.T) {
 // TestTranscriptCodecReplaysAPromotedSummaryAsShown pins what a resume owes a card whose summary is
 // the tool's own output promoted onto the branch (a one-line `cat`): the stored line is finished
 // display text, and it comes back exactly as it was shown, absolute path included — beside a target
-// that was and stays workspace-relative. The wire carries no mark for whose words a summary is
-// (branchSummary is the presenter's side of the seam) and needs none, because decode escape-strips a
-// replayed card and respells nothing.
+// that was and stays workspace-relative. The mark for whose words a summary is rides the wire
+// (TestTranscriptCodecRoundTripsTheQuotedSummaryMark), but nothing here depends on it: decode
+// escape-strips a replayed card and respells nothing whatever the mark says, which is why a blob
+// written before the mark existed replays identically too.
 func TestTranscriptCodecReplaysAPromotedSummaryAsShown(t *testing.T) {
 	t.Parallel()
 	tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
@@ -517,6 +518,116 @@ func TestTranscriptCodecReplaysAPromotedSummaryAsShown(t *testing.T) {
 	if want := "cat paths.txt"; got[0].tool.Target != want {
 		t.Errorf("replayed target = %q, want %q", got[0].tool.Target, want)
 	}
+}
+
+// TestTranscriptCodecRoundTripsTheQuotedSummaryMark pins the mark beside the branch line: whose
+// words that line is (branchSummary.quoted) is a verdict the presenter reaches on the way IN, and
+// the record has to carry it rather than let it decode back as the presenter's own. Three cases,
+// because the member is additive: a PROMOTED line comes back quoted, a line the block worded itself
+// stays unquoted and writes nothing extra, and a blob predating the member decodes exactly as it
+// does today.
+//
+// Every case asserts the PAINT as well, and that is the point of the fix rather than a side note:
+// nothing reads the mark after decode — the replay path runs sanitize and never finishDisplay — so
+// carrying it must not move one row. What it buys is fidelity: a summary that comes back claiming
+// the wrong authorship is a record that lies to whatever seam reads it next (shortenPaths today).
+func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a promoted line comes back quoted", func(t *testing.T) {
+		// A one-line `cat`: the output is promoted onto the branch as it stands (promotedOutput), which
+		// is the shape whose summary is the tool's words and not the block's.
+		tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
+		tr.addToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
+			Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, 0)
+		tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, 0)
+		if len(tr.entries) != 1 || !tr.entries[0].tool.Summary.quoted {
+			t.Fatalf("fixture: the promoted output carries no quoted mark to travel (%+v)", tr.entries)
+		}
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		// The member is part of the record now, so pin its name and where it sits — inside the summary
+		// object, beside the text it is a statement about.
+		if want := `"text":"/home/me/proj/docs/plan.md","quoted":true`; !strings.Contains(string(data), want) {
+			t.Errorf("wire blob does not carry %s:\n%s", want, data)
+		}
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries; want the one tool call", len(got))
+		}
+		if !got[0].tool.Summary.quoted {
+			t.Error("the replayed summary claims the block's own words; it is the tool's output, promoted")
+		}
+		if replayed, live := renderPlain(&transcript{entries: got}, 80), renderPlain(tr, 80); replayed != live {
+			t.Errorf("the mark changed the paint:\n--- replayed ---\n%s\n--- live ---\n%s", replayed, live)
+		}
+	})
+
+	t.Run("a line the block worded stays unquoted and writes no member", func(t *testing.T) {
+		card := toolView{
+			Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
+			Summary: namedSummary(detailLine{Text: "1 - 100"}),
+		}
+		card.sanitize()
+		tr := &transcript{entries: []entry{{kind: entryToolCall, callID: "c1", done: true, tool: card}}}
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		if strings.Contains(string(data), "quoted") {
+			t.Errorf("a summary in the block's own words wrote the member anyway: %s", data)
+		}
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries; want the one tool call", len(got))
+		}
+		if got[0].tool.Summary.quoted {
+			t.Error("the replayed summary claims to quote the tool; the block worded that line itself")
+		}
+		if replayed, live := renderPlain(&transcript{entries: got}, 80), renderPlain(tr, 80); replayed != live {
+			t.Errorf("the mark changed the paint:\n--- replayed ---\n%s\n--- live ---\n%s", replayed, live)
+		}
+	})
+
+	t.Run("a blob written before the member decodes unquoted and paints the same", func(t *testing.T) {
+		// The same record twice, with and without the member, so the comparison isolates it: an old file
+		// must decode as it always did, and the fact it lacks must be worth nothing to the painter.
+		const head = `{"version":1,"entries":[{"kind":"toolCall","callID":"c1","done":true,"tool":{` +
+			`"label":"Terminal","verb":"running","target":"cat paths.txt","name":"terminal",` +
+			`"summary":{"text":"/home/me/proj/docs/plan.md"`
+		const tail = `}}}]}`
+		legacy, err := decodeTranscript([]byte(head + tail))
+		if err != nil {
+			t.Fatalf("decodeTranscript(legacy): %v", err)
+		}
+		marked, err := decodeTranscript([]byte(head + `,"quoted":true` + tail))
+		if err != nil {
+			t.Fatalf("decodeTranscript(marked): %v", err)
+		}
+		if len(legacy) != 1 || len(marked) != 1 {
+			t.Fatalf("decoded %d and %d entries; want the one tool call each", len(legacy), len(marked))
+		}
+		if legacy[0].tool.Summary.quoted {
+			t.Error("a record predating the member decoded as quoted; unquoted is what every such record meant")
+		}
+		if !marked[0].tool.Summary.quoted {
+			t.Error("the member did not reach the decoded card")
+		}
+		before, after := renderPlain(&transcript{entries: legacy}, 80), renderPlain(&transcript{entries: marked}, 80)
+		if before != after {
+			t.Errorf("the mark changed the paint:\n--- without ---\n%s\n--- with ---\n%s", before, after)
+		}
+	})
 }
 
 // TestTranscriptCodecEmptyIsLegacy pins the legacy case: an empty or nil blob (a record written

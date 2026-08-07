@@ -169,6 +169,16 @@ point is a **minor** bump, not a breaking change.
   A question that failed to reach anyone now replays grouped beside its neighbour exactly as it
   painted live, instead of splitting into a block of its own on the next reload.
 
+- **A saved transcript now records whose words a tool block's summary line is.** A summary is either
+  the block's own wording — a typed phrase, an `error: …` line — whose paths are spelled relative to
+  the workspace, or a line promoted onto the branch as it stands (a one-line command output, the
+  answer typed into an `ask_user` question), which is quoted content nothing may respell. The live
+  presenter decides that when the line is made, and the wire form had no member for it, so every
+  replayed block came back claiming the block's own words. Nothing reads the mark after a decode
+  today, so no painted row changes either way — this is the record keeping a verdict it was
+  silently dropping, so the next seam to consult it is not misled. Additive: a transcript written
+  before the member decodes exactly as it does now.
+
 ## [0.12.0] — 2026-08-07
 
 ### Added

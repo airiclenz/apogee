@@ -106,13 +106,13 @@ type wireSkillSpan struct {
 // from Name, the record's done bit and the Details only its answer hook writes — see
 // fromWireToolView.
 type wireToolView struct {
-	Label   string           `json:"label,omitempty"`
-	Verb    string           `json:"verb,omitempty"`
-	Target  string           `json:"target,omitempty"`
-	Name    string           `json:"name,omitempty"`
-	Solo    bool             `json:"solo,omitempty"`
-	Summary wireDetailLine   `json:"summary"`
-	Details []wireDetailLine `json:"details,omitempty"`
+	Label   string            `json:"label,omitempty"`
+	Verb    string            `json:"verb,omitempty"`
+	Target  string            `json:"target,omitempty"`
+	Name    string            `json:"name,omitempty"`
+	Solo    bool              `json:"solo,omitempty"`
+	Summary wireBranchSummary `json:"summary"`
+	Details []wireDetailLine  `json:"details,omitempty"`
 }
 
 // wireDetailLine is the serialized form of a [detailLine]. Kind is stored as its underlying
@@ -123,6 +123,29 @@ type wireToolView struct {
 type wireDetailLine struct {
 	Kind int    `json:"kind,omitempty"`
 	Text string `json:"text,omitempty"`
+}
+
+// wireBranchSummary is the serialized form of a [branchSummary]: the branch line's text together
+// with the one fact that is not IN that text — whose words it is. It embeds wireDetailLine rather
+// than restating its members, so the mark travels with the text on the wire exactly as it does in
+// the presenter, inside the one "summary" object ({"text":"…","quoted":true}).
+//
+// Quoted is a presenter's verdict reached on the way IN, and decode never re-runs a presenter, so a
+// verdict left off the wire could not be recovered on the way out: a line PROMOTED into the slot as
+// it stands (promotedOutput — a one-line tool output, the answer typed into an ask_user question) is
+// quoted content no seam may respell, while a line the block worded itself names paths that
+// shortenPaths spells relative to the workspace. Today's replay path reads neither — it runs
+// sanitize alone, never finishDisplay — so this changes no painted row; it carries the verdict
+// because a record whose summary comes back claiming the wrong authorship is a record that lies to
+// whatever seam reads it next.
+//
+// The member is ADDITIVE within transcriptVersion and needs no bump, on the wireEntry rule: it takes
+// omitempty, so a summary in the block's own words writes nothing new and an older build ignores
+// what it does not know, while a blob written before it decodes with Quoted false — the mark every
+// such record was written under.
+type wireBranchSummary struct {
+	wireDetailLine
+	Quoted bool `json:"quoted,omitempty"`
 }
 
 // wirePresented is the serialized form of a [presentedView]. Method is stored as its domain
@@ -265,12 +288,15 @@ func toWireSkillSpans(spans []skillSpan) []wireSkillSpan {
 // toWireToolView projects a toolView (its unexported name included) onto the wire.
 func toWireToolView(tv toolView) *wireToolView {
 	w := &wireToolView{
-		Label:   tv.Label,
-		Verb:    tv.Verb,
-		Target:  tv.Target,
-		Name:    tv.name,
-		Solo:    tv.solo,
-		Summary: wireDetailLine{Kind: int(tv.Summary.Kind), Text: tv.Summary.Text},
+		Label:  tv.Label,
+		Verb:   tv.Verb,
+		Target: tv.Target,
+		Name:   tv.name,
+		Solo:   tv.solo,
+		Summary: wireBranchSummary{
+			wireDetailLine: wireDetailLine{Kind: int(tv.Summary.Kind), Text: tv.Summary.Text},
+			Quoted:         tv.Summary.quoted,
+		},
 	}
 	if tv.Details.len() > 0 {
 		w.Details = make([]wireDetailLine, 0, tv.Details.len())
@@ -353,21 +379,27 @@ func fromWireSkillSpans(ws []wireSkillSpan) []skillSpan {
 // lookup. A body-less card stays body-less (never a non-nil empty line slice) so a not-yet-enriched
 // call round-trips exactly.
 //
-// The summary's MARK (branchSummary — whose words the line is) is deliberately not on the wire and
-// comes back unset: what a record keeps is FINISHED display text, spelled the way it was shown, and
-// the mark governs an act that happened on the way IN. This path runs sanitize alone and never
-// finishDisplay, so no
-// replayed line is respelled and none needs a mark to protect it; a resumed call still awaiting its
-// result carries no summary at all, and enrichWithResult words the slot afresh with a mark of its
-// own when the result lands (TestTranscriptCodecReplaysAPromotedSummaryAsShown).
+// The summary's MARK (branchSummary — whose words the line is) rides the wire beside the text
+// (wireBranchSummary) and is restored through the presenter's own two constructors, so a record
+// keeps the verdict the presenter reached rather than one guessed here from a line that could read
+// either way. Nothing on this path acts on it: what a record keeps is FINISHED display text, spelled
+// the way it was shown, and this path runs sanitize alone and never finishDisplay, so no replayed
+// line is respelled whatever the mark says (TestTranscriptCodecReplaysAPromotedSummaryAsShown). A
+// resumed call still awaiting its result carries no summary at all, and enrichWithResult words the
+// slot afresh with a mark of its own when the result lands.
 func fromWireToolView(w *wireToolView, done bool) toolView {
+	line := detailLine{Kind: detailKind(w.Summary.Kind), Text: w.Summary.Text}
+	summary := namedSummary(line)
+	if w.Summary.Quoted {
+		summary = quotedSummary(line)
+	}
 	tv := toolView{
 		Label:   w.Label,
 		Verb:    w.Verb,
 		Target:  w.Target,
 		name:    stripEscapes(w.Name),
 		solo:    w.Solo,
-		Summary: namedSummary(detailLine{Kind: detailKind(w.Summary.Kind), Text: w.Summary.Text}),
+		Summary: summary,
 	}
 	// Two verdicts are re-derived rather than trusted, and only in the direction that can ADD solo. A
 	// blob written before Solo rode the wire carries false for both, and replaying that folds records
