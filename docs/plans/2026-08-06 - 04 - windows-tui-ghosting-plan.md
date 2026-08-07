@@ -441,6 +441,18 @@ same terminal — that is the anti-regression test, and it must compare profiles
 
 ## 6. DESIGN CALL — the root-cause fix
 
+NOTES (2026-08-07): the owner answered this item's design call with **"measure first, then ask
+again"** — re-run the item 4 evidence sheet against the post-item-5 build, land only the parts of
+this item that change no visible layout (the upstream reproduction/report work and any purely
+internal fix), and stop with `BLOCKED` rather than write the one-column-short mitigation or any
+other user-visible layout change. The measurements are in "Item 6 findings" at the end of this
+file. They **do not close the design call either way**: the post-item-5 build paints correctly in
+every configuration that could be measured without a human, but none of those configurations is one
+of the three terminals the ghost was seen in, so the item's acceptance row ("the item 4 run sheet no
+longer ghosts in Windows Terminal, owner confirms") is untouched. Nothing was changed in
+`internal/`; the item is left open with a sharper question and a two-command run sheet for the
+owner.
+
 Depends on items 4 and 5.
 
 **Q:** After item 5, does the ghosting survive — and if so, does the fix belong upstream, in a
@@ -907,3 +919,185 @@ and possibly `microsoft/terminal`. The plan already flags that the local mitigat
 apogee's rows one column short of the terminal width) changes layout and needs the owner's
 agreement **before** it is written. Finding 19 is the artifact to attach to any upstream report: the
 same bytes, clean under one wrap model and corrupt under the other.
+
+## Item 6 findings — re-running the sheet against the post-item-5 build (2026-08-07)
+
+The owner's answer to the item 6 design call was *measure first, then ask again*. What follows is
+what could be measured **without a human at a screen**, and — stated as plainly as the rest of this
+file — what could not. No row of the item 4 sheet that needs an eye was performed, and none is
+reported here as though it had been.
+
+### The instrument: a headless pseudoconsole
+
+Everything below runs apogee inside a **real Windows pseudoconsole** created by the session with
+`CreatePseudoConsole`, which is what makes the child's stdout a character device — the precondition
+for item 5's `TERM` injection to fire at all (`stdoutIsTerminal()`, `tui.go:1092`). The harness lives
+at **`C:\Users\airic\apogee-ghosting-debug\conptyrun\`** (outside the repo, the same call item 4 made
+for `tracereplay`; item 7 still owns the in-repo version) and gives three things at once:
+
+- `--tui-trace` — exactly the bytes apogee emitted, in the format `tracereplay` already reads;
+- the pseudoconsole's **re-serialized output** — what a downstream emulator would receive, which
+  `bin2trace` converts into the same format so the same VT model renders both;
+- a scripted keyboard, so a run is deterministic and repeatable.
+
+Every run below: 120×30, `--resume 20260806T155434Z-b82d2800.json` (a real transcript, so the screen
+is full of the full-width rows this bug lives on), then typed keys and `PgUp`/`PgDn` scrolling —
+finding 21's repro, which needs no model call. Captures are kept in
+`C:\Users\airic\apogee-ghosting-debug\item6-evidence\`.
+
+**Finding 22 — item 5 does what it claimed, measured on emitted bytes.** One binary, one script, one
+variable: `TERM` unset (injection fires) against `TERM=vt100` + `COLORTERM=truecolor` (injection
+declines, per its own rule, and `xtermCaps("vt100")` is `noCaps` — the pre-item-5 capability set
+exactly). Both runs resolved `color-profile: TrueColor`, so colour is held equal.
+
+| Run | `TERM` seen by the painter | CHA | VPA | ECH | writes |
+|---|---|---|---|---|---|
+| control (pre-item-5 equivalent) | `vt100` → `noCaps` | 0 | 0 | 0 | 7 |
+| post-item-5 | injected `xterm-256color` | **38** | **2** | **40** | 7 |
+
+And the screens the two streams intend are **byte-identical**. Item 5 changed how the painter
+navigates and changed nothing about what it draws — which is the anti-regression claim, now measured
+on output rather than on a profile value.
+
+**Finding 23 — item 5 does not reduce the wrap sensitivity at all, and the reason is structural.**
+Replaying each trace under `tracereplay -wrap deferred` against `-wrap immediate`: **28 of 30 rows
+differ, before and after**, identically. The `immediate` screen reproduces finding 20's artifact in
+the post-item-5 trace too — left-truncated tails of earlier lines superimposed on the right of rows
+(`atures are defined as numbered tasks` landing across row 1).
+
+The reason absolute addressing does not help is worth writing down, because it corrects an
+expectation the plan carried into this item. An early wrap is a **row** error, not a column error:
+the cursor gains a line, not a column. `CHA` re-anchors a column and is the capability item 5 mostly
+bought (38 uses); `VPA` re-anchors a row and appears twice. So H2's amplifier is real but is the
+amplifier of the wrong axis — item 5 removes the mechanism that makes a *column* error permanent,
+and the trigger H1 names produces a *row* error. Item 5 remains right on its own merits
+(finding 22) and is not a fix for this.
+
+**Finding 24 — the upstream defect is now located in source, not inferred from a replay.** In
+`ultraviolet/terminal_renderer.go` at the pinned `v0.0.0-20260803092147-8b693049ce2a`:
+
+- `putCell` (L494-501) sends a cell to `putCellLR` **only** when the renderer is fullscreen *and* the
+  cursor is at `width-1, height-1` — the lower-right corner of the whole screen. `putCellLR`
+  (L552-563) writes `CSI ?7l` … cell … `CSI ?7h`, i.e. it disables autowrap for that one write. So
+  ultraviolet already knows the DECAWM technique for the last-column problem and applies it to
+  exactly one cell per screen. Both figures are visible in the traces: `?7l` appears **2 times** in
+  every capture taken for this plan, the item 4 ones included.
+- Every *other* last-column write takes `putAttrCell`, which sets `s.atPhantom = true` (L543-545) —
+  the renderer's belief that the terminal is holding a pending wrap.
+- `wrapCursor` (L505-514) then resolves that belief when the next cell arrives, and it
+  **emits no bytes at all**: `const autoRightMargin = true` with the literal comment *"Assume we
+  have auto wrap mode enabled"*, and a dead `else` branch. It updates `cur.X = 0; cur.Y++` and lets
+  the terminal's own autowrap perform the move.
+
+That is H1's mechanism in the renderer's own words. Against a terminal that takes the wrap when the
+last column is written rather than when the next printable arrives, the cursor is one row past where
+the renderer models it, for every full-width row, from the first frame on. `const autoRightMargin =
+true` is a hardcoded terminfo `am`, and the fix upstream is the technique `putCellLR` already
+carries, applied to every last-column write and not just the corner.
+
+**Finding 25 — the obvious local mitigation that changes no layout is ruled out by that same code.**
+Turning autowrap off for the whole session (`CSI ?7l` next to `claimAltScreen`) looks like a
+layout-free way to make both wrap models agree — with no autowrap there is no wrap to disagree
+about. It does not work, and finding 24 says why: `wrapCursor` emits nothing, so with autowrap off
+the row advance it models **never happens on the terminal**, and every subsequent cell piles into the
+last column. Recorded so nobody spends an afternoon on it.
+
+**Finding 26 — the last-column semantics are now measured directly, and on this path they are
+DEFERRED.** `apogee probe terminal` (item 3) was run inside the harness — row 6 of the item 4 sheet,
+which that sheet records as *not run*, executed headlessly against a pseudoconsole. Its section 4:
+
+| step | cursor (CPR) | console API | deferred wrap would be |
+|---|---|---|---|
+| wrote the final column | 6,120 | 6,120 | 6,120 (pending) |
+| wrote one more | 7,2 | 7,2 | 7,2 |
+
+`OK — the terminal holds a pending wrap at the last column`. DSR-CPR and
+`GetConsoleScreenBufferInfo` agree, which is exactly the number item 4's open question 1 said a
+maintainer would ask for. The other sections: capabilities `MISMATCH` (CHA, VPA, ECH, ICH and REP all
+present against `xtermCaps(unset) = noCaps` — the direct evidence for finding 3 that item 5's
+acceptance wanted, though note the probe reports the *process* environment, which item 5 correctly
+never touches); hard tabs `OK`; glyph advance `MISMATCH` on the two VS16 sequences only, precisely
+finding 6 and nothing more.
+
+**Finding 27 — and consistently with finding 26, the ghost did not reproduce headlessly, in either
+configuration.** Rendering the pseudoconsole's re-serialized output and diffing it against the screen
+apogee intended:
+
+| Run | writes | ConPTY re-serialization vs intended screen |
+|---|---|---|
+| post-item-5 | 7 | **exact match** |
+| control (`noCaps`, pre-item-5 equivalent) | 7 | **exact match** |
+| post-item-5, 36 keystrokes + 5 scrolls | 45 | **exact match** |
+
+The control matching is the load-bearing row. **A harness in which the pre-item-5 configuration
+paints correctly cannot be used to argue that the post-item-5 configuration is fixed** — it is not
+reproducing the bug, so it is not measuring the bug. Item 5's contribution is finding 22; the clean
+screens above are the harness's verdict on itself.
+
+### Why this harness is not the ghosting path
+
+Three differences from the two configurations that ghost, in the order they are worth attacking:
+
+1. **It is the system pseudoconsole.** `CreatePseudoConsole` starts `conhost.exe --headless`.
+   Windows Terminal ships and launches **its own `OpenConsole.exe`**, and VS Code drives ConPTY
+   through node-pty. "ConPTY" is not one implementation, and finding 26 measures the one the ghost
+   was never seen on. Note that this also means finding 26 does **not** answer item 4's open
+   question 1 for the terminals that matter.
+2. **Nothing negotiated modes 2026 or 2027.** The harness has no emulator downstream to answer
+   `DECRQM`, and the pseudoconsole answered `not recognized (0)` for both rather than forwarding the
+   query — so the painter stayed on `wcwidth` with no synchronized output. That is run C2's
+   configuration, which ghosted on the real machine (finding 16), so it is a *ghosting-capable*
+   configuration; but it was ghosting-capable there with WT's ConPTY, not this one.
+3. **It is 45 writes, not 1125.** No streaming turn, because that needs a model. Finding 20 puts the
+   first wrap divergence at write 2, so frame count should not matter — but it has not been shown not
+   to.
+
+The pseudoconsole's **re-emitted** stream is itself wrap-sensitive (23 of 30 rows differ between the
+two models), so the disagreement, wherever it is resolved, survives all the way to the downstream
+emulator. That keeps a second candidate alive that item 4 could not separate: the corruption may be
+in how Windows Terminal or xterm.js consumes ConPTY's re-emission, not in ConPTY's buffer at all.
+
+## Item 6 — WHERE IT STANDS (open)
+
+**The design call is not answered, and the honest reason is that the two branches the owner's
+decision named are both unproven.** Ghosting was not shown to survive item 5, and it was not shown to
+be gone; the only configurations that could be driven without a human are configurations in which the
+bug does not appear even *before* item 5.
+
+What did change:
+
+- Item 5 is measured working and measured layout-neutral (finding 22). It is not a fix (finding 23).
+- H1's mechanism is now a source citation rather than a replay inference (finding 24), which is most
+  of the "minimal repro" an upstream issue needs.
+- The cheapest layout-free mitigation is eliminated on mechanism (finding 25).
+- One direct wrap measurement exists, and it says *deferred* — on the wrong pseudoconsole
+  (findings 26-27).
+
+**Recommendation — two commands, then the decision is real.** Both are `apogee probe terminal`, which
+now exists; neither needs the debug kit or a patched bubbletea:
+
+1. Run `apogee probe terminal` in **Windows Terminal**, in **VS Code**, and in **conhost**, and read
+   the `last-column wrap` section in each. If it says *pending* in the two that ghost, **H1 is
+   falsified as stated** and item 4's ANSWER needs revisiting — finding 19/20's replay would then be
+   a property of the replay model rather than of the terminal, and no upstream issue should be filed
+   against `ultraviolet` on the strength of it. If it says the wrap was already taken, H1 is
+   confirmed on the paths that matter, finding 24 is the issue text, and the layout mitigation
+   becomes a real decision.
+2. Run the current `apogee` (post-item-5) in Windows Terminal for one streaming turn — item 4 row 1,
+   nothing more. Item 5 changed the emitted stream substantially (finding 22), so whether the symptom
+   is now *invisible* is a question only that run answers, independently of whether the trigger is
+   still there.
+
+Filing upstream before (1) would put a claim in front of a maintainer that this session's one direct
+measurement contradicts. That is the reason nothing was filed.
+
+**A warning item 7 should read before it is started.** Item 7 specifies exactly the harness built
+here — `CreatePseudoConsole`, a full-width repro, read the buffer back — and finding 27 says that
+harness **paints correctly on a pre-item-5 build**, which is the one thing item 7's own text forbids
+("add the failing case first and watch it fail … a regression test that was never seen red is not a
+regression test"). Whatever item 7 becomes, it cannot be written against the system pseudoconsole
+until something makes the bug appear there. `conptyrun` is reusable for the mechanics and saves the
+Win32 setup cost; it is the *premise* that needs re-checking, not the plumbing.
+
+**Not written, deliberately:** the one-column-short mitigation, and any other user-visible layout
+change — the owner's decision withholds authorization for both until the evidence above exists.
