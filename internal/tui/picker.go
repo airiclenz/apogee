@@ -788,16 +788,25 @@ const pickerFilterLead = "filter: "
 // measures (theme.go).
 const pickerFilterCursor = "▌"
 
-// pickerFilterLine is what the pane shows of the filter — "filter: qwen▌" — or nothing at all while
-// the filter is empty, which is what makes the line's presence the fact that filtering is happening.
-// The text is the human's own keystrokes rather than a foreign string, but it reaches the popup
-// module as BODY and that contract takes body escape-stripped (popup.go), so it is stripped here
-// like every other cell this file composes.
-func (m Model) pickerFilterLine() string {
-	if m.picker.filter == "" {
+// overlayFilterLine is what a filtering overlay shows of its filter — "filter: qwen▌" — or nothing
+// at all while the filter is empty, which is what makes the line's presence the fact that filtering
+// is happening. The text is the human's own keystrokes rather than a foreign string, but it reaches
+// the popup module as BODY and that contract takes body escape-stripped (popup.go), so it is
+// stripped here like every other cell this file composes.
+//
+// It is one composer for both overlays that filter — the picker and the /sessions browser — because
+// the line is one line: two panes spelling it themselves would be two places for the label, the
+// cursor and the stripping to drift apart.
+func overlayFilterLine(filter string) string {
+	if filter == "" {
 		return ""
 	}
-	return pickerFilterLead + stripEscapes(m.picker.filter) + pickerFilterCursor
+	return pickerFilterLead + stripEscapes(filter) + pickerFilterCursor
+}
+
+// pickerFilterLine is that line for the OPEN picker (overlayFilterLine over its own filter).
+func (m Model) pickerFilterLine() string {
+	return overlayFilterLine(m.picker.filter)
 }
 
 // renderPicker paints the open picker through the shared popup module (renderPopup): a titled,

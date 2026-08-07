@@ -26,9 +26,9 @@ import (
 // sessionBrowser is the overlay's inline state on the Model (its zero value is "closed", so it is
 // safe in the value-copied Model, like autocompleteState — ADR 0011). metas is the full list from
 // List() (newest first); the rendered rows are metas filtered to the current workspace unless
-// allWorkspaces is set. selected indexes the FILTERED rows. confirming arms a "delete? y/n"
-// confirm on the selected row; renaming arms an inline title edit whose in-progress text is
-// renameBuf.
+// allWorkspaces is set, and then pruned by what the human has typed. selected indexes the FILTERED
+// rows (browserView). confirming arms a "delete? y/n" confirm on the selected row; renaming arms an
+// inline title edit whose in-progress text is renameBuf.
 type sessionBrowser struct {
 	open          bool
 	metas         []session.Meta
@@ -37,6 +37,14 @@ type sessionBrowser struct {
 	confirming    bool
 	renaming      bool
 	renameBuf     string
+	// filter is what the human has typed into the open browser: the case-insensitive substring every
+	// row must carry to survive (browserView), composed after the workspace view rather than beside
+	// it. A plain string, so the value-copied Model stays copyable (ADR 0011) — no strings.Builder can
+	// ever live here — and part of the overlay's own state, so the whole-struct zeroing every close
+	// already does (`m.sessionBrowser = sessionBrowser{}`) is what clears it: no path can carry a
+	// stale filter into the next open. A re-LIST is deliberately not such a path — a delete or a
+	// rename refreshes the pane the human is still standing in, and it stays as they left it.
+	filter string
 }
 
 // maxSessionRows caps how many session rows the overlay shows at once; a longer list scrolls a
@@ -44,8 +52,12 @@ type sessionBrowser struct {
 // short terminal.
 const maxSessionRows = 8
 
-// sessionBrowserHint is the one-line key legend shown at the foot of the overlay.
-const sessionBrowserHint = "↑/↓ select · ⏎ resume · r rename · d delete · a this/all · esc close"
+// sessionBrowserHint is the one-line key legend shown at the foot of the overlay. It LEADS with
+// "type to filter" for the picker's own reason (pickerHint): there is no activation key to name, so
+// the letters announce themselves nowhere else the way "↑/↓" and "esc" do — and it is the legend
+// that has to say the three verbs are chords now, because the letters they used to be are what the
+// filter is typed with (ratified 2026-08-06).
+const sessionBrowserHint = "type to filter · ↑/↓ select · ⏎ resume · ^r rename · ^d delete · ^a this/all · esc close"
 
 // deleteConfirmCell is the inline "delete? y/n" an armed delete puts on the selected row (sessionRows)
 // — a CELL of its own past the message counts rather than a suffix glued to the last one, so arming
@@ -128,7 +140,7 @@ func (m *Model) foldSessionList(msg sessionListMsg) tea.Cmd {
 	}
 	m.sessionBrowser.metas = msg.metas
 	m.sessionBrowser.open = true
-	m.sessionBrowser.clampSelection(m.opts.Workspace)
+	m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
 	return nil
 }
 
@@ -149,10 +161,51 @@ func (b sessionBrowser) visible(workspace string) []session.Meta {
 	return out
 }
 
+// browserView is the overlay's FILTERED view of the sessions it lists, and the ONE seam its
+// consumers share: the rows the pane paints, how many of them there are, and which record ⏎, ^r and
+// ^d act on. Deriving them once is what makes it impossible for a verb to reach a record the pane
+// did not paint — metas[i] is the record rows[i] describes — so a highlight is resolved against the
+// same list the painter used rather than against the unfiltered store (the pickerView posture,
+// picker.go).
+type browserView struct {
+	rows  []popupRow     // the surviving rows, in the store's own newest-first order
+	metas []session.Meta // metas[i] is the record rows[i] states
+}
+
+// filteredView is the rows this browser shows RIGHT NOW: the workspace view (visible) pruned by the
+// overlay's own filter, composed in that order — the workspace scope decides which records exist for
+// this pane at all and the filter narrows what is left, so ^a widens the very list the typed text
+// narrows. The match is the picker's (rowMatchesFilter): a case-insensitive substring of the row's
+// display cells joined with one space, every cell participating.
+//
+// It is derived per frame and per keypress rather than captured at open, the picker's own posture:
+// the store can be re-listed under the open pane (a delete, a rename) and the relative times in the
+// cells move on their own.
+func (b sessionBrowser) filteredView(workspace string, now time.Time) browserView {
+	visible := b.visible(workspace)
+	rows := make([]popupRow, 0, len(visible))
+	for _, meta := range visible {
+		rows = append(rows, sessionRowCells(meta, workspace, b.allWorkspaces, now))
+	}
+	pruned := filterPopupRows(rows, b.filter)
+	view := browserView{rows: pruned.rows, metas: make([]session.Meta, 0, len(pruned.offering))}
+	for _, i := range pruned.offering {
+		view.metas = append(view.metas, visible[i])
+	}
+	return view
+}
+
+// sessionBrowserView is that view as of now — the one read every key route and the painter share, so
+// a verb and the pane can never disagree about which record the highlight names.
+func (m Model) sessionBrowserView() browserView {
+	return m.sessionBrowser.filteredView(m.opts.Workspace, time.Now())
+}
+
 // clampSelection keeps selected within the filtered row range after the list or the view changed
-// (a toggle, a delete). An empty view pins the selection at zero.
-func (b *sessionBrowser) clampSelection(workspace string) {
-	n := len(b.visible(workspace))
+// (a toggle, a delete, a keystroke that narrowed the filter). n is the count of the FILTERED view —
+// what the pane actually paints — so the highlight can never point past the last row on the screen.
+// An empty view pins the selection at zero.
+func (b *sessionBrowser) clampSelection(n int) {
 	switch {
 	case n == 0:
 		b.selected = 0
@@ -164,8 +217,20 @@ func (b *sessionBrowser) clampSelection(workspace string) {
 }
 
 // sessionBrowserKey routes a keypress while the overlay is open (idle only). A live rename edit or
-// delete confirm claims the keys first (they are modes within the modal); otherwise the keys are
-// the browse verbs. It always fully consumes the key — the browser is modal.
+// delete confirm claims the keys first (they are modes within the modal); otherwise ↑/↓ move the
+// highlight, ⏎ resumes, esc closes, the three browse verbs are CHORDS (^r rename, ^d delete, ^a
+// this/all), and everything PRINTABLE types — the key's runes extend the filter that prunes the rows
+// (browserView), with backspace as its undo. It always fully consumes the key — the browser is modal.
+//
+// The verbs are chords for the filter's sake (ratified 2026-08-06): a modal list where any letter
+// might be a verb is a list no letter can be typed into, and a session store is exactly the place a
+// human wants to type a name. `d` is the reason it had to be all three at once — a letter that
+// deletes is the one that must never be reachable by typing. The delete-confirm's y/n and the whole
+// rename edit are untouched: they are modal surfaces of their own, and no filter is typed inside them.
+//
+// The count is re-derived and the selection re-clamped on every key — the rows underneath can have
+// changed since the last one — and again after a key that MOVED the filter, because the rows it
+// leaves standing can be fewer than the highlight was pointing at.
 func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.sessionBrowser.renaming {
 		return m.sessionRenameKey(msg)
@@ -173,8 +238,9 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.sessionBrowser.confirming {
 		return m.sessionConfirmKey(msg)
 	}
-	visible := m.sessionBrowser.visible(m.opts.Workspace)
-	n := len(visible)
+	view := m.sessionBrowserView()
+	n := len(view.metas)
+	m.sessionBrowser.clampSelection(n)
 	switch msg.String() {
 	case "esc":
 		m.sessionBrowser = sessionBrowser{}
@@ -190,34 +256,51 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.sessionBrowser.selected = (m.sessionBrowser.selected + 1) % n
 		}
 		return m, nil
-	case "a":
+	case "ctrl+a":
 		// Toggle the current-workspace ⇄ all-workspaces view; the row set changes, so re-anchor
-		// the selection at the top rather than leave it pointing at a now-hidden row.
+		// the selection at the top rather than leave it pointing at a now-hidden row. The filter
+		// stands: it is what the human is looking FOR, and the toggle changes where they are looking.
 		m.sessionBrowser.allWorkspaces = !m.sessionBrowser.allWorkspaces
 		m.sessionBrowser.selected = 0
 		return m, nil
-	case "d":
+	case "ctrl+d":
 		if n > 0 {
 			m.sessionBrowser.confirming = true // arm the inline "delete? y/n" on the selected row
 		}
 		return m, nil
-	case "r":
+	case "ctrl+r":
 		if n > 0 {
 			m.sessionBrowser.renaming = true
 			// The seed is a stored title, so it is escape-stripped on the way INTO the buffer: the
 			// rename row paints the buffer verbatim, and the commit below strips anyway — seeding it
 			// clean keeps what is being edited equal to what will be saved.
-			m.sessionBrowser.renameBuf = stripEscapes(visible[m.sessionBrowser.selected].Title)
+			m.sessionBrowser.renameBuf = stripEscapes(view.metas[m.sessionBrowser.selected].Title)
 		}
 		return m, nil
 	case "enter":
 		if n == 0 {
 			return m, nil
 		}
-		id := visible[m.sessionBrowser.selected].ID
+		id := view.metas[m.sessionBrowser.selected].ID
 		m.sessionBrowser = sessionBrowser{} // close; the resume runs when the record loads (sessionLoadedMsg)
 		m.layout()
 		return m, m.loadSession(id)
+	case "backspace":
+		// By RUNE rather than by byte: the filter is the human's own text, and half a multi-byte
+		// character is not a state any list can be filtered by.
+		if runes := []rune(m.sessionBrowser.filter); len(runes) > 0 {
+			m.sessionBrowser.filter = string(runes[:len(runes)-1])
+			m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
+		}
+		return m, nil
+	}
+	// Text carries the key's rune(s) only for PRINTABLE input — a modifier chord carries none
+	// (bubbletea's own contract) — so a chord that is not one of the verbs above is still swallowed
+	// whole by the modal rather than typed into the filter.
+	if msg.Text != "" {
+		m.sessionBrowser.filter += msg.Text
+		m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
+		return m, nil
 	}
 	return m, nil // any other key is swallowed by the modal
 }
@@ -237,11 +320,14 @@ func (m Model) sessionConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y":
 		m.sessionBrowser.confirming = false
-		visible := m.sessionBrowser.visible(m.opts.Workspace)
-		if len(visible) == 0 {
+		// Through the FILTERED view, like every other verb: the highlight the confirm was armed on
+		// indexes the rows the pane painted, and resolving it against the unfiltered list would delete
+		// a session the human never saw (browserView).
+		view := m.sessionBrowserView()
+		if len(view.metas) == 0 {
 			return m, nil
 		}
-		id := visible[m.sessionBrowser.selected].ID
+		id := view.metas[m.sessionBrowser.selected].ID
 		if m.sessions != nil && m.sessions.ActiveID() == id {
 			// queueWrite, not scheduleWrite: the delete below pumps, so the two verbs leave this fold
 			// as ONE dispatched Cmd (a fold may never batch two record writes — model.go).
@@ -268,18 +354,20 @@ func (m Model) sessionRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.sessionBrowser.renameBuf = ""
 		return m, nil
 	case "enter":
-		visible := m.sessionBrowser.visible(m.opts.Workspace)
+		// The filtered view again (browserView): the edit was opened on a painted row, so the commit
+		// lands on the record that row named rather than on the same index into the whole store.
+		view := m.sessionBrowserView()
 		title := stripEscapes(strings.TrimSpace(m.sessionBrowser.renameBuf))
 		m.sessionBrowser.renaming = false
 		m.sessionBrowser.renameBuf = ""
-		if len(visible) == 0 || title == "" {
+		if len(view.metas) == 0 || title == "" {
 			return m, nil
 		}
 		// A human just named a session, so a naming call still in flight must not overwrite what
 		// they typed when it lands (autotitle.go, Ratified design 5). The flag is set on the
 		// COMMIT, not on arming the edit: an abandoned rename changed nothing.
 		m.titleTouched = true
-		id := visible[m.sessionBrowser.selected].ID
+		id := view.metas[m.sessionBrowser.selected].ID
 		// The browser renames ANY row, so only a rename of the live session renames the frame with
 		// it — naming a stored session from the browser must leave the frame naming this one.
 		if m.sessions != nil && m.sessions.ActiveID() == id {
@@ -428,6 +516,11 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 // column alignment, truncation, and scroll windowing. An empty view is a single unselectable note
 // row, which has nothing to align and so stays one cell. It returns "" when the browser is closed,
 // so View treats it like the approval-prompt slot.
+//
+// While a filter is being typed the pane grows one line for it, set off by a blank line at each end —
+// the picker's own line, budget and trade (renderPicker): the three lines are the module's BODY
+// block, both blanks are the body's own pads, and the whole claim comes off the top of the frame's
+// grant so a short window gives up ROWS before it gives up the line the human is typing.
 func (m Model) renderSessionBrowser() string {
 	b := m.sessionBrowser
 	if !b.open {
@@ -437,16 +530,31 @@ func (m Model) renderSessionBrowser() string {
 	if b.allWorkspaces {
 		scope = "all workspaces"
 	}
+	filter := overlayFilterLine(b.filter)
 	spec := popupSpec{
-		title: "saved sessions  (" + scope + ")",
-		hint:  sessionBrowserHint,
+		title:        "saved sessions  (" + scope + ")",
+		body:         filter,
+		bodyLead:     pickerFilterLead,
+		bodyPadAbove: filter != "",
+		bodyPadBelow: filter != "",
+		hint:         sessionBrowserHint,
+		selected:     -1, // no rows ⇒ no highlight (the popup module's own convention)
 	}
 	if len(b.visible(m.opts.Workspace)) == 0 {
-		spec.rows = singleCellRows([]string{"no sessions in this workspace — press a to see all"})
-		spec.selected = -1
+		// An empty WORKSPACE view is a fact about the store, and a row of prose is how the pane states
+		// it. A filter that matched nothing is not the same thing and gets no such row: the visible
+		// filter line over an empty list already says why the pane is empty, and backspace is the way
+		// back (the picker's zero-match pane).
+		spec.rows = singleCellRows([]string{"no sessions in this workspace — press ^a to see all"})
 	} else {
 		spec.rows = sessionRows(b, m.opts.Workspace, time.Now())
-		spec.selected = b.selected
+		if len(spec.rows) > 0 {
+			spec.selected = clampInt(b.selected, 0, len(spec.rows)-1)
+		}
+	}
+	claim := popupFloor{}
+	if filter != "" {
+		claim.body = popupBodyLineCount(m.th, filter, m.width) + popupBodyPadLines(true, true)
 	}
 	// The row window is the SCREEN's to grant, not the browser's to assume: maxSessionRows is this
 	// overlay's own taste, and popupBudget cuts it down to what the window can seat above the input
@@ -454,25 +562,29 @@ func (m Model) renderSessionBrowser() string {
 	// case the pane has to speak up about: the module counts the dropped entries onto the title row
 	// (popupTitleLine), because a browser showing no sessions at all would otherwise be
 	// indistinguishable from a workspace that has none.
-	_, maxRows, seated := m.popupBudget(paneBrowser, len(spec.rows), maxSessionRows, popupChrome, popupFloor{})
+	maxBody, maxRows, seated := m.popupBudget(paneBrowser, len(spec.rows), maxSessionRows, popupChrome, claim)
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
+	spec.maxBodyRows = maxBody
 	spec.maxRows = maxRows
 	return renderPopup(m.th, spec, m.width)
 }
 
-// sessionRows composes the FULL filtered row list the popup module paints: sessionRowCells for
-// every visible session, newest first. On the selected row an armed rename replaces the whole row
-// with a single cell holding the edit buffer — an edit is prose being typed, not a session being
-// described, so it has no columns to keep — and an armed delete adds the confirm as a fourth cell;
-// every other row is its plain cells. The module adds the marker, the highlight, the column
-// padding, and the truncation.
+// sessionRows composes the row list the popup module paints: the filtered view's rows (browserView
+// — the workspace scope narrowed by what the human has typed), newest first. On the selected row an
+// armed rename replaces the whole row with a single cell holding the edit buffer — an edit is prose
+// being typed, not a session being described, so it has no columns to keep — and an armed delete adds
+// the confirm as a fourth cell; every other row is its plain cells. The module adds the marker, the
+// highlight, the column padding, and the truncation.
+//
+// The decoration is applied AFTER the filter and so takes no part in it: "delete? y/n" is the pane
+// answering a keypress rather than a fact about the session, and a row must not survive a filter on
+// the strength of being armed.
 func sessionRows(b sessionBrowser, workspace string, now time.Time) []popupRow {
-	visible := b.visible(workspace)
-	rows := make([]popupRow, 0, len(visible))
-	for i, meta := range visible {
-		row := sessionRowCells(meta, workspace, b.allWorkspaces, now)
+	view := b.filteredView(workspace, now)
+	rows := make([]popupRow, 0, len(view.rows))
+	for i, row := range view.rows {
 		switch {
 		case i == b.selected && b.renaming:
 			row = popupRow{"rename: " + b.renameBuf + "▏"}

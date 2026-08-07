@@ -389,7 +389,7 @@ func TestAutoTitleDroppedAfterABrowserRename(t *testing.T) {
 	m := newTitlingModel(t, host, &titleSeam{}, true)
 	m = openBrowser(t, m)
 
-	m = step(t, m, keyRune('r'))
+	m = step(t, m, keyCtrl('r'))
 	m.sessionBrowser.renameBuf = "my own name"
 	m, cmd := stepCmd(t, m, keyEnter())
 	cmdMsg(cmd) // run the browser's rename+re-list off the loop
@@ -1034,7 +1034,7 @@ func TestAutoTitleStashDroppedWhenAHumanNamesFirst(t *testing.T) {
 
 	// The human names a session by hand while the generated one waits for an id.
 	m = openBrowser(t, m)
-	m = step(t, m, keyRune('r'))
+	m = step(t, m, keyCtrl('r'))
 	m.sessionBrowser.renameBuf = "my own name"
 	m, cmd = stepCmd(t, m, keyEnter())
 	cmdMsg(cmd)
@@ -1196,7 +1196,7 @@ func TestSessionNameGivesUpADroppedAutoTitle(t *testing.T) {
 	// The human renames a DIFFERENT, stored session in the browser: titleTouched is set, but nothing
 	// about this session was named.
 	m = openBrowser(t, m)
-	m = step(t, m, keyRune('r'))
+	m = step(t, m, keyCtrl('r'))
 	m.sessionBrowser.renameBuf = "some other session"
 	m, cmd = stepCmd(t, m, keyEnter())
 	m = runWrites(t, m, cmd)

@@ -94,9 +94,19 @@ and the rows themselves are never what gives way.
 
 **Commit:** `feat(tui): picker paints the live filter line`
 
-## 4. Sessions browser — letter verbs become chords, then type-to-filter
+## 4. Sessions browser — letter verbs become chords, then type-to-filter — ✅ DONE (2026-08-07)
 
 Depends on items 1 and 3 (reuses the matcher and the filter-line visual).
+
+NOTES (2026-08-07): three things beyond the item's literal text, each following from it. (1) Reusing
+item 3's filter-line visual meant TOUCHING `picker.go`: the composer is now one function
+(`overlayFilterLine`) that both panes call, rather than the browser spelling the label, the cursor
+and the escape-stripping a second time — `pickerFilterLine` delegates to it and paints exactly what
+it painted. (2) `clampSelection` takes the filtered COUNT (`n int`) instead of the workspace, the
+picker's and /settings' own signature: the count now depends on the filter and on the moment (the
+rows carry relative times), so the caller derives the view and the clamp stays a pure function of it.
+(3) The empty-workspace note row said "press a to see all" — the letter the rebinding took away — and
+now says "press ^a". It is a live UI string rather than a doc, so item 5's doc ownership is intact.
 
 **What:** In `internal/tui/sessions.go`, in this order inside the one item: (a) rebind the browse-fold letter verbs per ratified call 2 — rename `r`→`ctrl+r`, delete `d`→`ctrl+d`, this/all toggle `a`→`ctrl+a` (the delete-confirm fold's `y`/`n` and the whole rename fold are untouched); (b) add `filter string` to the browser's state struct (plain value, cleared by the existing close path — author binding C) with browse-fold key routing as in item 2: printable appends, backspace trims, esc closes as today; (c) filter the rows through item 1's matcher over the browser's display cells, composed AFTER the existing workspace-view filter, with count, painted rows, and every accept/verb target (resume, rename, delete) resolving through one shared index list (author binding D — `clampSelection` at `sessions.go:152` clamps against the filtered count); (d) paint the filter line with the same visual item 3 established; (e) set the hint per author binding E.
 

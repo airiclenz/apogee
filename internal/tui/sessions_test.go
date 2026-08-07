@@ -43,6 +43,21 @@ func openBrowser(t *testing.T, m Model) Model {
 	return step(t, m, cmdMsg(cmd))
 }
 
+// keyCtrl is a control chord on a letter — the shape the three browse verbs took when the letters
+// became the filter's (^r rename, ^d delete, ^a this/all). It carries no Text, exactly as bubbletea
+// reports a real chord, which is what keeps a verb out of the filter it sits beside.
+func keyCtrl(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl} }
+
+// typeIntoBrowser presses one printable key per rune, the way a human types into the open overlay —
+// through Update, so the routing under test is the real one.
+func typeIntoBrowser(t *testing.T, m Model, text string) Model {
+	t.Helper()
+	for _, r := range text {
+		m = step(t, m, keyRune(r))
+	}
+	return m
+}
+
 // foldResume folds a sessionLoadedMsg and drains the record writes behind it. The resume adopts the
 // loaded id through the write queue now (sessions.go), so a test that asserts on the host's active
 // session — or drives a save against it — has to let the queue settle first.
@@ -70,7 +85,7 @@ func storeMeta(h *fakeSessionHost, id, title, workspace string, updated time.Tim
 }
 
 // Opening /sessions lists the stored metas filtered to the current workspace, newest first; the
-// `a` toggle widens the view to every workspace.
+// ^a toggle widens the view to every workspace.
 func TestSessionBrowserListsAndTogglesWorkspace(t *testing.T) {
 	host := &fakeSessionHost{}
 	now := time.Now()
@@ -92,10 +107,10 @@ func TestSessionBrowserListsAndTogglesWorkspace(t *testing.T) {
 		t.Errorf("current-workspace order = [%s %s], want newest-first [a-new a-old]", vis[0].ID, vis[1].ID)
 	}
 
-	// `a` widens to all workspaces — the /ws/b session now appears too.
-	m = step(t, m, keyRune('a'))
+	// ^a widens to all workspaces — the /ws/b session now appears too.
+	m = step(t, m, keyCtrl('a'))
 	if !m.sessionBrowser.allWorkspaces {
-		t.Fatal("`a` did not toggle to the all-workspaces view")
+		t.Fatal("^a did not toggle to the all-workspaces view")
 	}
 	if got := len(m.sessionBrowser.visible(m.opts.Workspace)); got != 3 {
 		t.Errorf("all-workspaces view = %d rows, want 3", got)
@@ -347,9 +362,9 @@ func TestSessionBrowserDeleteActiveRotates(t *testing.T) {
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	m = openBrowser(t, m) // sess-1 is newest, so it is selected first
 
-	m = step(t, m, keyRune('d'))
+	m = step(t, m, keyCtrl('d'))
 	if !m.sessionBrowser.confirming {
-		t.Fatal("d did not arm the delete confirm")
+		t.Fatal("^d did not arm the delete confirm")
 	}
 	m, cmd := stepCmd(t, m, keyRune('y'))
 	if cmd == nil {
@@ -394,7 +409,7 @@ func TestSessionBrowserDeleteActiveQueuesTheRotate(t *testing.T) {
 		t.Fatal("the per-Turn snapshot scheduled no save")
 	}
 
-	m = step(t, m, keyRune('d'))
+	m = step(t, m, keyCtrl('d'))
 	m, cmd := stepCmd(t, m, keyRune('y'))
 	if cmd != nil {
 		t.Fatal("deleting the active session dispatched a record write beside the in-flight save")
@@ -492,7 +507,7 @@ func TestSessionBrowserResumeQueuesTheActivate(t *testing.T) {
 	}
 }
 
-// r opens an inline rename edit; typing then enter commits the new title through Sessions.Rename
+// ^r opens an inline rename edit; typing then enter commits the new title through Sessions.Rename
 // and the re-list repaints it.
 func TestSessionBrowserRenameCommits(t *testing.T) {
 	host := &fakeSessionHost{}
@@ -500,9 +515,9 @@ func TestSessionBrowserRenameCommits(t *testing.T) {
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	m = openBrowser(t, m)
 
-	m = step(t, m, keyRune('r'))
+	m = step(t, m, keyCtrl('r'))
 	if !m.sessionBrowser.renaming {
-		t.Fatal("r did not open the rename edit")
+		t.Fatal("^r did not open the rename edit")
 	}
 	// The edit pre-fills the current title so the human tweaks rather than retypes; append " v2".
 	if m.sessionBrowser.renameBuf != "old title" {
@@ -587,7 +602,7 @@ func TestSessionNameFollowsResume(t *testing.T) {
 	})
 }
 
-// The browser's `r` renames ANY row, and only one row is ever the session the frame is naming.
+// The browser's ^r renames ANY row, and only one row is ever the session the frame is naming.
 // Renaming a stored one is a change to the store and nothing more: the live conversation keeps its
 // own name, because the frame says which session THIS is, not which one was last edited.
 func TestBrowserRenameOfInactiveRowLeavesSessionName(t *testing.T) {
@@ -603,7 +618,7 @@ func TestBrowserRenameOfInactiveRowLeavesSessionName(t *testing.T) {
 	}
 
 	m = openBrowser(t, m)
-	m = step(t, m, keyRune('r'))
+	m = step(t, m, keyCtrl('r'))
 	m.sessionBrowser.renameBuf = "an older task, renamed"
 	m, cmd = stepCmd(t, m, keyEnter())
 	m = runWrites(t, m, cmd)
@@ -623,7 +638,7 @@ func TestSessionBrowserEscLayers(t *testing.T) {
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	m = openBrowser(t, m)
 
-	m = step(t, m, keyRune('r')) // into rename edit
+	m = step(t, m, keyCtrl('r')) // into rename edit
 	m = step(t, m, keyEsc())
 	if m.sessionBrowser.renaming {
 		t.Fatal("esc did not cancel the rename edit")
@@ -917,7 +932,7 @@ func TestSessionBrowserRenameSeedStripsEscapes(t *testing.T) {
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	m = openBrowser(t, m)
 
-	m = step(t, m, keyRune('r'))
+	m = step(t, m, keyCtrl('r'))
 	if got, want := m.sessionBrowser.renameBuf, "reset c me"; got != want {
 		t.Errorf("rename buffer = %q, want the seed escape-stripped (%q)", got, want)
 	}
@@ -996,6 +1011,296 @@ func TestSessionRowsRenameIsOneCell(t *testing.T) {
 	want := popupRow{"rename: new title▏"}
 	if len(rows) != 1 || !reflect.DeepEqual(rows[0], want) {
 		t.Errorf("renaming row = %v, want %v", rows, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Type-to-filter, and the chords the letter verbs became
+// ----------------------------------------------------------------------------
+
+// filterableBrowser is an open browser over four stored sessions — three in this workspace, one in
+// another — whose titles are distinct enough for a filter to isolate any of them.
+func filterableBrowser(t *testing.T) (Model, *fakeSessionHost) {
+	t.Helper()
+	host := &fakeSessionHost{}
+	now := time.Now()
+	storeMeta(host, "notes", "draft the release notes", "/ws/a", now, 0, nil)
+	storeMeta(host, "parser", "fix the parser", "/ws/a", now.Add(-time.Hour), 0, nil)
+	storeMeta(host, "audit", "audit the confinement", "/ws/a", now.Add(-2*time.Hour), 0, nil)
+	storeMeta(host, "elsewhere", "another project entirely", "/ws/b", now.Add(-3*time.Hour), 0, nil)
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	return openBrowser(t, m), host
+}
+
+// The regression this rebinding exists to make impossible: the letters that used to delete, rename
+// and widen now type, and a session store is exactly the place a human types. `d` is the one that
+// matters most — a letter that deletes must not be reachable from the keyboard the filter is typed
+// on — so a word carrying all three letters is typed and nothing at all happens but filtering.
+func TestSessionBrowserLettersTypeRatherThanAct(t *testing.T) {
+	m, host := filterableBrowser(t)
+
+	for _, r := range "draft" { // d, r and a, the three verbs that were letters
+		var cmd tea.Cmd
+		m, cmd = stepCmd(t, m, keyRune(r))
+		if cmd != nil {
+			t.Fatalf("typing %q dispatched a Cmd; the letters filter, they never act", r)
+		}
+	}
+
+	if m.sessionBrowser.filter != "draft" {
+		t.Errorf("filter = %q, want the keys typed", m.sessionBrowser.filter)
+	}
+	if b := m.sessionBrowser; b.confirming || b.renaming || b.allWorkspaces {
+		t.Errorf("browser = {confirming:%v renaming:%v all:%v}, want d/r/a to have typed rather than acted",
+			b.confirming, b.renaming, b.allWorkspaces)
+	}
+	if len(host.stored) != 4 {
+		t.Errorf("store holds %d records, want all four — typing may never delete a session", len(host.stored))
+	}
+	if got := len(m.sessionBrowserView().metas); got != 1 {
+		t.Fatalf("rows = %d, want the one session %q leaves standing", got, "draft")
+	}
+
+	// Backspace is the undo, one rune at a time, and the chords still fire while a filter is up.
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if m.sessionBrowser.filter != "draf" {
+		t.Errorf("filter = %q, want one rune trimmed", m.sessionBrowser.filter)
+	}
+	m = step(t, m, keyCtrl('d'))
+	if !m.sessionBrowser.confirming {
+		t.Error("^d did not arm the delete confirm while a filter was up")
+	}
+	if m.sessionBrowser.filter != "draf" {
+		t.Errorf("filter = %q, want the chord to leave the filter alone", m.sessionBrowser.filter)
+	}
+}
+
+// ⏎ resumes the session the pane SHOWED, not the same index into the unfiltered list — the whole
+// point of resolving every verb through one filtered view. Here the filter leaves the third-newest
+// record standing, so a highlight read against the store would have loaded the newest one.
+func TestSessionBrowserFilteredResumeOpensTheRowShown(t *testing.T) {
+	m, _ := filterableBrowser(t)
+
+	m = typeIntoBrowser(t, m, "confinement")
+	if got := len(m.sessionBrowserView().metas); got != 1 {
+		t.Fatalf("rows = %d, want the one session the filter leaves", got)
+	}
+	m, cmd := stepCmd(t, m, keyEnter())
+	if cmd == nil {
+		t.Fatal("⏎ on the filtered row dispatched no Load")
+	}
+	msg, ok := cmdMsg(cmd).(sessionLoadedMsg)
+	if !ok {
+		t.Fatalf("Cmd returned %T, want a sessionLoadedMsg", cmdMsg(cmd))
+	}
+	if msg.rec.Meta.ID != "audit" {
+		t.Errorf("resumed %q, want the filtered row's own record %q", msg.rec.Meta.ID, "audit")
+	}
+	if m.sessionBrowser.open || m.sessionBrowser.filter != "" {
+		t.Errorf("browser = {open:%v filter:%q}, want the close to carry no filter into the next open",
+			m.sessionBrowser.open, m.sessionBrowser.filter)
+	}
+}
+
+// Delete and rename act on the filtered selection for the same reason ⏎ does: the highlight names a
+// painted row, and resolving it against the whole store would act on a record the human never saw.
+func TestSessionBrowserFilteredVerbsActOnTheRowShown(t *testing.T) {
+	t.Run("^d deletes the filtered row", func(t *testing.T) {
+		m, host := filterableBrowser(t)
+		m = typeIntoBrowser(t, m, "parser")
+
+		m = step(t, m, keyCtrl('d'))
+		m, cmd := stepCmd(t, m, keyRune('y'))
+		if cmd == nil {
+			t.Fatal("y dispatched no record write")
+		}
+		m = runWrites(t, m, cmd)
+
+		if _, still := host.stored["parser"]; still {
+			t.Error("the filtered row's session survived the delete")
+		}
+		if _, gone := host.stored["notes"]; !gone {
+			t.Error("the delete took the newest session instead of the one the filter showed")
+		}
+	})
+
+	t.Run("^r renames the filtered row", func(t *testing.T) {
+		m, host := filterableBrowser(t)
+		m = typeIntoBrowser(t, m, "parser")
+
+		m = step(t, m, keyCtrl('r'))
+		if m.sessionBrowser.renameBuf != "fix the parser" {
+			t.Fatalf("rename buffer = %q, want the filtered row's own title", m.sessionBrowser.renameBuf)
+		}
+		m.sessionBrowser.renameBuf = "fix the parser, properly"
+		m, cmd := stepCmd(t, m, keyEnter())
+		m = runWrites(t, m, cmd)
+
+		if got := host.stored["parser"].Meta.Title; got != "fix the parser, properly" {
+			t.Errorf("renamed title = %q, want the filtered row's record renamed", got)
+		}
+		if got := host.stored["notes"].Meta.Title; got != "draft the release notes" {
+			t.Errorf("the newest session was renamed to %q; the rename took the wrong row", got)
+		}
+	})
+}
+
+// A filter matching nothing keeps the pane open over no rows: ⏎ takes nothing, no verb has a target,
+// and backspace is the way back. The visible filter over an empty list is the whole message.
+func TestSessionBrowserZeroMatchesTakeNothing(t *testing.T) {
+	m, host := filterableBrowser(t)
+
+	m = typeIntoBrowser(t, m, "no-such-session")
+	if got := len(m.sessionBrowserView().metas); got != 0 {
+		t.Fatalf("rows = %d, want a filter that matches nothing", got)
+	}
+
+	m, cmd := stepCmd(t, m, keyEnter())
+	if cmd != nil {
+		t.Error("⏎ over zero rows dispatched a Load")
+	}
+	m = step(t, m, keyCtrl('d'))
+	if m.sessionBrowser.confirming {
+		t.Error("^d armed a delete confirm over zero rows")
+	}
+	if !m.sessionBrowser.open {
+		t.Fatal("a filter matching nothing closed the pane")
+	}
+	if len(host.stored) != 4 {
+		t.Errorf("store holds %d records, want all four untouched", len(host.stored))
+	}
+
+	for range "no-such-session" {
+		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	}
+	if got := len(m.sessionBrowserView().metas); got != 3 {
+		t.Errorf("rows after backspacing the filter away = %d, want the three /ws/a sessions back", got)
+	}
+}
+
+// The toggle re-derives the FILTERED view over the other scope rather than the raw one: a filter
+// matching only a foreign session shows nothing here and that session there, and ⏎ then resumes it.
+func TestSessionBrowserToggleRederivesTheFilteredView(t *testing.T) {
+	m, _ := filterableBrowser(t)
+
+	m = typeIntoBrowser(t, m, "another project")
+	if got := len(m.sessionBrowserView().metas); got != 0 {
+		t.Fatalf("rows = %d, want nothing: the match lives in another workspace", got)
+	}
+
+	m = step(t, m, keyCtrl('a'))
+	view := m.sessionBrowserView()
+	if len(view.metas) != 1 || view.metas[0].ID != "elsewhere" {
+		t.Fatalf("all-workspaces rows = %+v, want the one foreign session the filter matches", view.metas)
+	}
+	if m.sessionBrowser.filter != "another project" {
+		t.Errorf("filter = %q, want the toggle to widen the search rather than end it", m.sessionBrowser.filter)
+	}
+	m, cmd := stepCmd(t, m, keyEnter())
+	if msg, ok := cmdMsg(cmd).(sessionLoadedMsg); !ok || msg.rec.Meta.ID != "elsewhere" {
+		t.Errorf("resumed %+v, want the foreign session the widened filter showed", msg.rec.Meta)
+	}
+}
+
+// browserPaneLines is the open browser's pane as a human reads it: the box's own two border lines
+// dropped and every line between them stripped of its styling and its border/padding chrome — so a
+// spacer line arrives as "" and a content line as its own text (the picker's pickerPaneLines).
+func browserPaneLines(t *testing.T, m Model) []string {
+	t.Helper()
+	pane := m.renderSessionBrowser()
+	if pane == "" {
+		t.Fatal("the open browser painted nothing")
+	}
+	lines := popupLines(pane)
+	if len(lines) < 2 {
+		t.Fatalf("the pane is %d lines, want at least its two borders: %q", len(lines), lines)
+	}
+	out := make([]string, 0, len(lines)-2)
+	for _, ln := range lines[1 : len(lines)-1] {
+		out = append(out, popupInterior(ln))
+	}
+	return out
+}
+
+// The browser paints the picker's own filter line: under the title, one blank line above and one
+// below, and nothing at all while the filter is empty. The legend says the verbs are chords now.
+func TestSessionBrowserPaintsTheFilterLine(t *testing.T) {
+	m, _ := filterableBrowser(t)
+
+	for i, ln := range browserPaneLines(t, m) {
+		if ln == "" {
+			t.Errorf("line %d is blank: an unfiltered pane spends no spacer on a line it has not got", i)
+		}
+		if strings.HasPrefix(ln, pickerFilterLead) {
+			t.Errorf("line %d painted a filter line over an empty filter: %q", i, ln)
+		}
+	}
+
+	m = typeIntoBrowser(t, m, "parser")
+
+	lines := browserPaneLines(t, m)
+	at := -1
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, pickerFilterLead) {
+			at = i
+		}
+	}
+	if at < 0 {
+		t.Fatalf("no filter line in the pane: %q", lines)
+	}
+	if got, want := lines[at], pickerFilterLead+"parser"+pickerFilterCursor; got != want {
+		t.Errorf("filter line = %q, want %q — the label, the typed text and the cursor", got, want)
+	}
+	if at < 2 || lines[at-1] != "" || !strings.Contains(lines[at-2], "saved sessions") {
+		t.Errorf("the filter line at %d wants a blank line above it and the title above that: %q", at, lines)
+	}
+	if at+1 >= len(lines) || lines[at+1] != "" {
+		t.Errorf("the filter line at %d wants a blank line below it: %q", at, lines)
+	}
+	if at+2 >= len(lines) || !strings.Contains(lines[at+2], "fix the parser") {
+		t.Errorf("the surviving row does not follow the filter line's spacer: %q", lines)
+	}
+	for _, ln := range lines {
+		if strings.Contains(ln, "release notes") {
+			t.Errorf("the pane still paints a row the filter pruned: %q", ln)
+		}
+	}
+	if got := lines[len(lines)-1]; got != sessionBrowserHint {
+		t.Errorf("hint line = %q, want %q", got, sessionBrowserHint)
+	}
+}
+
+// The zero-match pane keeps saying what is being filtered — title, filter line, no rows and no
+// highlight — rather than falling back on the "no sessions in this workspace" note, which is a fact
+// about the STORE and would be a lie about a list the filter emptied.
+func TestSessionBrowserZeroMatchPaintsTheFilterOverNoRows(t *testing.T) {
+	m, _ := filterableBrowser(t)
+
+	m = typeIntoBrowser(t, m, "zzz")
+
+	lines := browserPaneLines(t, m)
+	filtered := false
+	for _, ln := range lines {
+		if strings.HasPrefix(ln, pickerFilterLead) {
+			filtered = true
+		}
+		if strings.Contains(ln, "press ^a to see all") {
+			t.Errorf("the zero-match pane fell back on the empty-workspace note: %q", ln)
+		}
+		for _, title := range []string{"release notes", "the parser", "confinement"} {
+			if strings.Contains(ln, title) {
+				t.Errorf("a row survived a filter matching nothing: %q", ln)
+			}
+		}
+	}
+	if !filtered {
+		t.Errorf("the zero-match pane dropped the filter line: %q", lines)
+	}
+	if !strings.Contains(lines[0], "saved sessions") {
+		t.Errorf("title line = %q, want the pane still naming itself", lines[0])
+	}
+	if strings.Contains(m.renderSessionBrowser(), glyphUser) {
+		t.Error("a pane with no rows drew a selection marker; there is nothing to highlight")
 	}
 }
 
