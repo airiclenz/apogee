@@ -6,7 +6,7 @@
   measurements that separate four live hypotheses, fixes the cause, and pins the fix with a
   regression test that runs headless on Windows CI.
 - **Date:** 2026-08-06
-- **Status:** in progress — items 1-4 ✅ done 2026-08-06, items 5-6 ✅ done 2026-08-07; items 7-8 open.
+- **Status:** in progress — items 1-4 ✅ done 2026-08-06, items 5-7 ✅ done 2026-08-07; item 8 open.
   The cause is found, fixed and confirmed by the owner in Windows Terminal — see **"Item 6 — THE
   ANSWER"** at the end of this file.
 - **Predecessor:** `docs/handoffs/2026-08-06 - 00 - windows-tui-ghosting-debug.md` — the symptom
@@ -644,9 +644,43 @@ mitigation has unit coverage for its mechanism, and `makeWin.bat check` / `make 
 
 **Commit:** decided when the branch is known; conventional-commit form, `fix(tui):` scope.
 
-## 7. A headless ConPTY regression test
+## 7. A headless ConPTY regression test — ✅ DONE (2026-08-07)
 
 Depends on item 6.
+
+NOTES (2026-08-07): three deviations, all forced by finding 27/41 — the item was written before the
+diagnosis, and the pseudoconsole a test can create is the one host on which the ghost does not
+reproduce. Measured this pass on the repo host (Windows 11 26200, arm64), and reported as evidence
+rather than asserted:
+
+1. **The rendered-buffer assertion is built and passes, but on the system pseudoconsole it does not
+   discriminate.** The harness paints 12 frames of full-width rows through `CreatePseudoConsole`,
+   reads the console's own buffer back with `ReadConsoleOutputCharacterW` and compares all 24 rows
+   against the frame the model intended — the item's check, on the buffer and not on the stream.
+   Run against a pre-fix build it comes back **clean**: bubbletea's late `SetConsoleMode` does reach
+   the live buffer under a re-serializing headless conhost, so the frame never ghosts there. It is
+   kept because it is the assertion that fires on a forwarding host (finding 41), but on this host
+   it corroborates rather than discriminates, and the item's "watch it fail first" rule cannot be
+   met with it.
+2. **What discriminates instead is a direct measurement of the mechanism**, taken in the same
+   pseudoconsole at the moment that matters: with apogee's prologue done and before a frame is
+   painted, the child parks the cursor at column 10, writes one bare LF and asks the console API
+   where it went. Fixed tree ⇒ column 10. Pre-fix tree ⇒ **column 1** — the console rewriting LF as
+   CR LF on the buffer about to be painted, which is findings 43-45's mechanism itself. Watched red
+   then green: with `prepareAltScreenConsole` removed from the prologue the test fails on exactly
+   that number, and passes with it restored.
+3. **The ordering half needed a guard of its own, and it is a source-level one.** Moving the console
+   call back *after* `claimAltScreen` (finding 45's row 2, the original defect) is invisible on this
+   host — the mode word is not split per buffer there, so both the LF measurement and the frame stay
+   green. Since no console a test may assume exists can see it, the ordering is asserted directly:
+   `TestClaimTerminalScreenPreparesTheConsoleBeforeTheSwitch` parses `tui.go` and pins that the two
+   calls appear in that order. It was watched red against the reordered tree.
+
+Two smaller notes. `Run`'s terminal prologue was extracted into `claimTerminalScreen` (same
+semantics, same defer order) so the test drives the production ordering rather than a copy of it —
+without that the test would guard its own duplicate. And the harness asserts its own precondition:
+it counts the bare LFs in the renderer's stream through `--tui-trace` (242 per run today) and fails
+if a future renderer stops emitting the byte the whole test is about.
 
 **What:** A Windows-only test (`//go:build windows`) that opens a real pseudoconsole
 (`CreatePseudoConsole`), runs a small in-repo bubbletea program through it — a status line with

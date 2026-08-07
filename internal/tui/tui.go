@@ -973,30 +973,11 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	// Bubble Tea. Only on a real terminal: with stdout redirected there is no scroll bar to put
 	// out and the sequences would be noise in the file.
 	if stdoutIsTerminal() {
-		// On Windows the console mode has to be right BEFORE the switch, not after it: the mode
-		// word is per screen buffer, and a flag set once the alternate buffer is already live
-		// lands on the buffer nobody writes to any more. prepareAltScreenConsole is that
-		// ordering, and altscreen_windows.go carries why it is the fix for the ghosting bug.
-		// Everywhere else it is a no-op.
-		//
-		// Its restore is deferred HERE — before the claim, and so before the exit-alt-screen
-		// defer below — precisely because defers run last-in-first-out: the exit sequence is
-		// written while the mode this set is still in force (it is what makes the console
-		// interpret the sequence at all), and only then is the shell's own mode put back, on the
-		// primary buffer the exit returned to. Registering it before claimAltScreen also covers
-		// that call's error return, and every panic, with the one restore.
-		restoreConsole := prepareAltScreenConsole(os.Stdout)
-		defer restoreConsole()
-		if err := claimAltScreen(os.Stdout); err != nil {
+		release, err := claimTerminalScreen(os.Stdout)
+		if err != nil {
 			return err
 		}
-		// What this claims, it gives back. The renderer restores the primary screen on every
-		// shutdown it reaches, but a program that dies before it ever paints never entered the
-		// alternate screen by its own bookkeeping and so never leaves it either — the shell would
-		// come back to a screen apogee took and kept. Pairing the claim unconditionally covers
-		// that case; when the renderer did restore, this second one lands on a primary screen
-		// already restored, where it is a cursor restore to the position it just returned to.
-		defer func() { _, _ = io.WriteString(os.Stdout, ansiExitAltScreen) }()
+		defer release()
 	}
 	// The per-Turn snapshot notify: the worker sends turnSnapshotMsg through the Bridge's
 	// late-bound program sender (the same programRef the Sink pushes Events through), so the
@@ -1110,6 +1091,43 @@ const (
 	ansiExitAltScreen   = "\x1b[?1049l" // switch back, restoring the primary screen
 	ansiEraseScrollback = "\x1b[3J"     // drop the terminal's saved lines (xterm E3)
 )
+
+// claimTerminalScreen is apogee's terminal prologue: everything [Run] does to the terminal before
+// the program starts, and the one release that undoes all of it. It is a function of its own — and
+// not four lines inside [Run] — because the ORDER of what it does is the fix for the Windows
+// ghosting bug, and an ordering nothing can test is an ordering the next refactor can quietly
+// reverse (conpty_windows_test.go drives this function for exactly that reason).
+//
+// The order, and why it is that order:
+//
+//   - The console mode comes FIRST, before the alternate-screen switch. On Windows the mode word is
+//     per screen buffer, so a flag set once the alternate buffer is already live lands on the buffer
+//     nobody writes to any more — which is how bubbletea's own DISABLE_NEWLINE_AUTO_RETURN was being
+//     defeated, and with it every bare LF the renderer emits. altscreen_windows.go carries the full
+//     mechanism. Everywhere else prepareAltScreenConsole is a no-op.
+//   - The release then runs in the mirror order: the exit sequence is written while the mode this
+//     set is still in force (it is what makes the console interpret the sequence at all), and only
+//     then is the shell's own console mode put back, on the primary buffer the exit returned to.
+//     A caller that defers the release therefore covers every later error return and every panic
+//     with one defer, and the console mode is the last thing to go back either way.
+//
+// The exit sequence is written unconditionally on release, not only when the renderer failed to
+// restore. The renderer restores the primary screen on every shutdown it reaches, but a program
+// that dies before it ever paints never entered the alternate screen by its own bookkeeping and so
+// never leaves it either — the shell would come back to a screen apogee took and kept. When the
+// renderer did restore, this second one lands on a primary screen already restored, where it is a
+// cursor restore to the position it just returned to.
+func claimTerminalScreen(f *os.File) (func(), error) {
+	restoreConsole := prepareAltScreenConsole(f)
+	if err := claimAltScreen(f); err != nil {
+		restoreConsole()
+		return nil, err
+	}
+	return func() {
+		_, _ = io.WriteString(f, ansiExitAltScreen)
+		restoreConsole()
+	}, nil
+}
 
 // claimAltScreen switches w to the alternate screen and then erases the terminal's saved lines,
 // in that order and in one write.
