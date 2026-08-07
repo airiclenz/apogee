@@ -22,17 +22,16 @@
 ✦ Read File
   ┕ main.go 1 - 154
 
-✦ Read File
+✦ Read File (3)
   ┝ README.md 1 - 154
   ┝ TODO.md   1 - 408
   ┕ ISSUES.md 1 - 8
 
-✦ Run ▸
+✦ Run ▶
   ┕ go test ./...
-    ok      github.com/airiclenz/apogee/internal/tui   0.412s
-    … +2 more lines
+    +3 more lines
 
-✦ View Diff ▾
+✦ View Diff ▼
   ┕ main.go +2 -2
       a context line
     - a code line that has been removed
@@ -40,7 +39,7 @@
     + a new code line
     + another new code line
 
-✦ Sub Agent ▾
+✦ Sub Agent ▼
   ┕ 3 Sub Agents
     Sub Agent 1: Agent Name (= brief one line summary)
     Sub Agent 2: Agent Name (= brief one line summary)
@@ -427,24 +426,28 @@ so the shell returns to the screen it had.
 
 ## The rules behind the tool-call sketch
 
-**The label.** A tool header is `✦ ` plus the tool's label, plus — exactly where the header is a
-toggle target — the trailing `▸`/`▾` state indicator below, **and nothing else — never a
-target**. That holds for every block alike: a grouped run, a lone call, a call still in flight,
-and the stray-result `result` header. The target always leads the first branch line instead, so
-a block does not visually reshape the moment a second call joins it. The label carries no
-brackets and is rendered **bold in orange `#f0883e`** — the tone inline code and the auto-mode
-marker already use. The styling is uniform too: a known friendly label ("Read File"), an unknown
-tool's raw name, and `result` all look the same. The bare-name-means-unregistered signal was the
-brackets' job and dies with them.
+**The label.** A tool header is `✦ ` plus the tool's label, plus — on a grouped block — the member
+count `(N)`, plus — exactly where the header is a toggle target — the trailing `▶`/`▼` state
+indicator below, **and nothing else — never a target**. That holds for every block alike: a grouped
+run, a lone call, a call still in flight, and the stray-result `result` header. The target always
+leads the first branch line instead, so the **target column does not move** when a second call joins
+the block. The label carries no brackets and is rendered **bold in orange `#f0883e`** — the tone
+inline code and the auto-mode marker already use. The styling is uniform too: a known friendly
+label ("Read File"), an unknown tool's raw name, and `result` all look the same. The
+bare-name-means-unregistered signal was the brackets' job and dies with them. The count is **not**
+part of the name and is painted in the faint indicator tone rather than the orange: it is the
+block's own arithmetic, and a reader scanning the orange down the left edge should not read a
+number as part of a tool's name.
 
 **What groups.** Consecutive tool calls at the same nesting depth carrying the same label fold
-into one block. Any entry between them — narration, a note, an approval, an error — breaks the
-run. Two different tools that share a label (a single and a multi find-and-replace are both
-"Edit File" — the one label the registry gives to more than one tool) do group: the user groups by
-what they read, not by tool id. Grouping still asks the next question of each call, though, and an
-edit carrying its changed lines answers it the way any body-carrying call does — so that pair in
-fact groups only where neither call's arguments say anything about a change. See *What stays
-standalone* below.
+into one block, **whatever they are carrying**. A run of `Run`s with their output, a run of edits
+with the lines they change and a run of bare reads all group alike, because a member row holds one
+clipped line and keeps its body behind an indicator of its own (*The block's shape — a run of
+them*, below): what a scrollback of ten same-label calls needs most is to read as ten lines. Any
+entry between them — narration, a note, an approval, an error — breaks the run. Two different tools
+that share a label (a single and a multi find-and-replace are both "Edit File" — the one label the
+registry gives to more than one tool) do group: the user groups by what they read, not by tool id.
+See *What stays standalone* below for the two things that do keep a call out.
 
 **The outcome, in two halves.** What a finished call has to say is split in two, and everything
 below follows from that split — never from counting lines. The **summary** is the single line that
@@ -454,8 +457,8 @@ a write's written ones.
 A call may have either,
 both, or — while it is still in flight — neither. Anything that fits on one line is a summary,
 whatever produced it: a command whose whole output is one line rides the branch like a read does
-(`┕ git rev-parse --short HEAD  9f2c1ab`), and only output that needs the `… +N more lines`
-remainder becomes a body.
+(`┕ git rev-parse --short HEAD  9f2c1ab`), and only output that needs a second line becomes a body —
+the thing the `+N more lines` remainder counts.
 
 **An edit shows the lines it changes, a write the lines it writes, and the block derives them
 itself.** The three edit tools — a single and a multi find-and-replace, and `edit_existing_file` —
@@ -468,8 +471,8 @@ says what. Those lines
 are read off the **call's own arguments** at presentation time, never off its result: the tool
 reports nothing new, no result grows, nothing extra crosses the wire, and the model's own view of
 the call is byte for byte what it always was. The body is therefore there before the result lands;
-it is quoted text like every other body, so it is never respelled; and it collapses to the same one
-budget as every other block, a click showing the rest. A call whose arguments say nothing about a
+it is quoted text like every other body, so it is never respelled; and the collapse hides it exactly
+as it hides every other body, a click showing the rest. A call whose arguments say nothing about a
 change — absent, malformed, or of the wrong shape, and an empty write, which puts no line anywhere
 — carries no body at all and renders as it always did.
 
@@ -521,35 +524,70 @@ decides this by looking at a line, because a content line can look exactly like 
 respelled only where the presenter that put it there says it is the block's own words — a path it
 names, or a summary it wrote itself (`1 - 154`, `replaced text in docs/plan.md`, `(no output)`).
 
-**What stays standalone.** A call is groupable when it has a target, an empty body, and a plain
-(non-diff) summary — which includes an `error: …` line, and an in-flight call whose result has not
-landed yet. A call carrying a body (the `Run` above, with its `… +N more lines` remainder; the
-`View Diff` above, with its diff beneath the `+2 -2`; an edit, with the lines it changes beneath
-its report — which is why consecutive edits now stand alone; a write, with the lines it writes
-beneath its `+N bytes`) or no target at all breaks the run and
-renders as its own block. It renders in the *same shape* it would have had inside a group, though:
-a block of one is byte-identical in shape to a block of many, which is the whole point of the
-header carrying no target.
+**What stays standalone.** A call is groupable when it has a **target** and its presenter did not
+mark it **solo** — nothing else, and in particular nothing about what it is carrying. A call with no
+target has nothing for the aligned column to align, since there the detail lines *are* the branches,
+so it keeps its own block. And a presenter may state outright that its record must never be a row in
+a list: the answered `Ask User` block, which is the permanent record of an exchange and reads as a
+card, and the `Sub-Agent` call, which heads a whole delegation. That flag is the one deliberate
+never-group switch — it replaces an older rule that kept those two out by accident, through the
+bodies they happen to carry, and so also covers the sub-agent head that got no span at all because
+the delegation was refused at the depth bound. A Firing is not this session's tool call and never
+joins a run either (*The firing block*, below).
 
-**The block's shape.** One header line carrying no target — the label, and its state indicator
-where the block has something to toggle — then one branch line per call —
-`┝`, and `┕` for the last. Two shapes, and they are the whole grammar:
+A lone groupable call renders as a single block, with no count. The two shapes are genuinely
+different and it is worth saying so: a block of one carries its body beneath its branch and toggles
+as a whole, a block of many is a list whose members each hold one row and open alone. What the
+header carrying no target still buys is that the **target column does not move** when a second call
+joins — the block reshapes around the targets rather than under them.
+
+**The block's shape — one call.** One header line carrying no target — the label, and its state
+indicator where the block has something to toggle — then the call's own branch line, led by the `┕`
+that closes a list of one. Two shapes, and they are the whole grammar:
 
 - **A call with a target** — the branch is the target, and where the call has a summary, one space
   and that summary (`┕ main.go 1 - 154`, `┕ main.go +2 -2`); an in-flight call has no summary yet
   and shows the bare target, the whole block repainting when its result lands. Its body, if it has
-  one, lays out beneath the branch, indented to the branch marker's own width — the `Run`'s output,
-  the diff's lines under their `+2 -2`. Those are not `┝`/`┕` branches of their own; only calls
-  are. A body of one line lays out exactly like a body of ten.
+  one, lays out beneath the branch **once the block is open**, indented to the branch marker's own
+  width — the `Run`'s output, the diff's lines under their `+2 -2`. Those are not `┝`/`┕` branches
+  of their own; only calls are. A body of one line lays out exactly like a body of ten.
 - **A call with no target** — the one shape with no target line: the header stands alone and the
   lines are themselves the `┝`/`┕` branches, the summary closing the list since it has no branch
   line to ride (an unregistered tool's labelled arguments, then the `error: …` it earned; a
   stray `result`). Collapsed, that branch list is what the cap falls on — the block has no body to
   cap instead — and the remainder marker hangs beneath it at the branch marker's own width.
 
+**The block's shape — a run of them.** A grouped block is a **list**, and everything about it
+follows from that. Its header reads `✦ Label (N)` and wears no state indicator: a group has no one
+state to flip, so its header toggles nothing and a click on it means what a click on ordinary text
+means. Each call is one `┝`/`┕` member — `┕` closing the list — and a collapsed member is exactly
+**one screen row** whatever the call is carrying: the target, cut to the block's column and ending
+in `" …"` where it did not fit, the pad that keeps the summary column, the summary, and — where that
+member hides something — a `▶` right-aligned at the block's edge. The row is spent **summary
+first**: the outcome (`1 - 154`, `+2 -2`, `error: …`) is the half worth keeping, so a long path is
+what gives ground. The indicator field is held clear on *every* member, hidden one or not, so the
+indicators line up down the right edge and no member gains three columns by having nothing to
+reveal. A member still in flight has neither summary nor indicator and spends the whole row on its
+target — nothing has to line up beside a call that has not finished.
+
+An **expanded member** opens in place. Its first row keeps the branch marker, the whole branch line
+— target *and* summary, because opening a member must not take the outcome away — and a `▼` in the
+column the `▶` vacated. Every continuation row and every body line beneath it carries a `│` gutter
+under that marker, painted in the detail gray and deliberately **not** the sub-agent rail's orange,
+so an open member inside a nested run cannot be read as a frame of the run. A right-aligned
+`see less…` closes it — the prompt block's own word for the same act, one vocabulary for "close
+this". Nothing inside an open member is clipped and it grows no remainder marker: there is nothing
+left over to count. The indicator field keeps its width across the toggle, so the row never moves
+out from under the click that opened it.
+
 Within a block, every target is padded with spaces to the widest target so the summary column lines
-up; a block of one pads to itself, which is no padding. Anything too long soft-wraps under its
-marker like any other detail line — nothing is clipped for alignment's sake.
+up; a block of one pads to itself, which is no padding. In a **group** that column is additionally
+capped, block-wide, at what leaves the widest summary its room on a one-row member: cap each member
+against its own summary instead and two outcomes in one list open two columns apart, which reads as
+a mistake rather than as a list. What such a cap cuts is a click away. Nothing is clipped for
+alignment's sake where a block is **expanded** — there overlong text soft-wraps under its marker
+like any other detail line; clipping is the collapsed paint's, and it is the row budget's doing
+rather than the column's (*Collapsed and expanded blocks*, below).
 
 **Blank lines.** Exactly one empty line between blocks, never more. Assistant text is trimmed
 of its leading and trailing blank lines, and interior runs of two or more blank lines collapse
@@ -565,25 +603,48 @@ is what keeps them from reading as one run.
 
 ## Collapsed and expanded blocks
 
-**Two states, and the block is the unit.** Every block is either **collapsed** or **expanded** —
-never "folded": the fold is the Update loop's event act (ADR 0011) and the emergency fold is the
-overflow recovery (ADR 0018); neither word belongs to presentation. Collapsed *is* the compact
-shape specced above — nothing about that shape changes; expanded differs in exactly one way: the
-body renders in full. The sub-agent run is the one block whose collapsed paint goes further,
-eliding its report body along with the whole span behind it (below). Truncation is thereby a
-**render-time act on retained facts**: the entry keeps every body line, and the collapsed cap —
-**one budget, and every body kind spends it** — applies at paint, not at build. The budget is a
-single line plus the `… +N more lines` remainder counting what is behind it, which is what holds a
-collapsed block to four rows at most: header, branch, that line, the marker. A diff is no
-exception and has none — its `+2 -2` on the branch already says how big the change is, so the
-hunks are worth a click rather than twenty permanent rows. Expanded shows everything, uncapped;
-the remainder markers exist only in the collapsed paint. A group is the degenerate case: its calls carry no
-bodies (that is what made them groupable), so both states paint identically and the rule never
-mentions groups. A call with **no target** collapses like every other block, and only *what* is
-capped differs: its lines are the block's own `┝`/`┕` branches rather than a body — an unregistered
-tool's labelled arguments, a registered call that arrived without its target, a stray `result` — so
-the cap falls on that branch list, with the remainder marker beneath it. Hiding them costs nothing,
-because the **approval popup** is the surface a human approves an action on and it shows every
+**Two states, and the block is the unit — except in a group, where the member is.** Every block is
+either **collapsed** or **expanded** — never "folded": the fold is the Update loop's event act
+(ADR 0011) and the emergency fold is the overflow recovery (ADR 0018); neither word belongs to
+presentation. Collapsed *is* the compact shape specced above; expanded shows everything the entry
+kept, uncapped, and the remainder markers exist only in the collapsed paint. A **grouped** block is
+the one place the unit is smaller than the block: it has no state of its own, each member carries
+its own, and one member of ten opens while the other nine hold still. The sub-agent run is the one
+block whose collapsed paint goes further, eliding its report body along with the whole span behind
+it (below). Truncation is thereby a **render-time act on retained facts**: the entry keeps every
+line, and the cap applies at paint, not at build.
+
+**One budget, and every tool-shaped block spends it: the header, and at most three content rows.**
+So a collapsed block stands no taller than four screen rows, whatever tool filled it and however
+long its target is — which is the point, because a scrollback of tool calls should read as a list
+and not as a wall. Where the three rows go is the only thing the shape decides:
+
+- **A call with a target** spends up to **two** of them on its branch line, clipped there and ending
+  in a trailing `" …"` that states its own continuation, and the third on the `+N more lines`
+  marker. **No line of the body is shown collapsed.** One preview line out of a hundred said very
+  little and cost every block in the scrollback a row; the marker counts the body **whole** — five
+  hidden lines over a five-line output — and says that much in a row the block was going to spend
+  anyway.
+- **A call with no target** has no body to hide, so the cap falls on its branch list instead: the
+  first **two** branch lines, each clipped to a single row, then the marker counting every line
+  behind them. Clipping each line is what holds this shape to the budget at all — unclipped, one
+  MCP call's argument blob soft-wraps a block as tall as the terminal is narrow.
+- **A member of a group** gets **one** row and no marker, because a list's rows are one line each
+  and what a member hides is reached by opening that member.
+
+A diff is no exception and has none — its `+2 -2` on the branch already says how big the change is,
+so the hunks are worth a click rather than twenty permanent rows.
+
+Whether a block hides anything is measured **at paint time, against the width being painted** — the
+same render-time act on retained facts every truncation here is — so a block that hides nothing at
+200 columns hides a clipped tail at 60, and narrowing the window alone can grow an indicator with
+nothing about the entry changing. A **clipped target on its own** is enough: a bodiless call whose
+path the row cut has a second state worth showing, and it is a click target and wears an indicator
+exactly as a body-carrying one does.
+
+Hiding a targetless call's branches — an unregistered tool's labelled arguments, a registered call
+that arrived without its target, a stray `result` —
+costs nothing, because the **approval popup** is the surface a human approves an action on and it shows every
 argument at decision time, each one under its own `name:` label (above); the transcript block is the
 *record*, and a record may collapse. The two surfaces spell one call ONE way: an unrecognised call's
 block labels its arguments exactly as the approval prompt does — one `name:` line per argument in
@@ -594,47 +655,69 @@ between the two is how many of those lines each surface seats, not what they say
 them whole because a decision is being made on them, the block collapses them to the one budget
 because a record may collapse.
 
-**Collapsed is the default, always** — including a call still in flight and a sub-agent run still
-working. Only a click changes a block's state, so nothing ever expands or collapses by itself: a
-block opened mid-flight streams its body live and stays open when the result lands. The state is
-the view's alone — it is never encoded with the transcript, a resumed session paints everything
-collapsed, and `/clear` forgets it with everything else.
+**Collapsed is the default, always** — including a call still in flight, a member of a group and a
+sub-agent run still working. Only a click changes a block's state, so nothing ever expands or
+collapses by itself: a block opened mid-flight streams its body live and stays open when the result
+lands. The state is the view's alone — it is never encoded with the transcript, a resumed session
+paints everything collapsed, and `/clear` forgets it with everything else.
 
-**What a click means.** A motionless click — press and release in the same cell — on a block's
-**header line** toggles that block; on a `… +N more lines` marker it expands the block the body
-belongs to. A header toggles only where its block has something to reveal — a capped body, or a
-sub-agent run's elided span — so a block that hides nothing in either state (a body-less group, or
-any block whose lines already fit the collapsed budget) has no state worth flipping and its header
-is not a target. Everywhere else in the transcript a click keeps its selection meaning, and any drag is a
-drag-select wherever it starts, header lines included: motion is what arbitrates, exactly as it
-already separates click-to-position from drag in the prompt. Keyboard toggling is deliberately
-absent, on the same precedent that keeps transcript selection mouse-only; a block-cursor mode is
-its own future feature. After a toggle the clicked header keeps its screen row — content grows or
-shrinks *below* it, and the line under the cursor never moves.
+**What a click means.** A motionless click — press and release in the same cell — **anywhere on a
+block that hides something** toggles it: its header, the clipped target rows beneath it and, once it
+is open, the full target and every body line. The whole block is the surface, exactly as the whole
+of a collapsed prompt is, because a reader who wants the rest of a `Run`'s output puts the pointer
+on the output rather than hunting for the one row that happens to be the header. Inside a **group**
+the surface is the member: every row of a member — its one collapsed row, and, open, its target
+rows, its body and the `see less…` closing it — flips that member alone, while the group's own
+header flips nothing at all. The one line with a meaning of its own is the `+N more lines` marker:
+it is a line of the collapsed paint, so a click there can only ever **open**. A block that hides
+nothing in either state marks no rows, and a click on it keeps its selection meaning — as a click
+does everywhere else in the transcript. Any drag is a drag-select wherever it starts, marked rows
+included: motion is what arbitrates, exactly as it already separates click-to-position from drag in
+the prompt. Keyboard toggling is deliberately absent, on the same precedent that keeps transcript
+selection mouse-only; a block-cursor mode is its own future feature. After a toggle the clicked row
+keeps its screen position — content grows or shrinks around it, and the line under the cursor never
+moves.
 
-**The header wears the state.** A toggleable header trails its label with one glyph, a single space
-off it: `▸` while the block is collapsed — a click opens it — and `▾` while it is expanded. It is
-painted in the faint detail tone rather than the label's orange, so it reads as chrome beside the
-tool's name instead of as the last letter of it. Its presence *is* the clickability hint, because
-the affordance and the click-target rule are **one predicate**: a header wears the indicator exactly
-where a click there toggles something, so a body-less group and a block that hides nothing wear
-none, and a sub-agent run's head wears one however short its own report is. The
-`… +N more lines` marker is apogee's line too and is painted as one — light gray-blue `#8db4e6`, no
+**The block wears its state where the click is.** A toggleable single block trails its header label
+with one glyph, a single space off it: `▶` while the block is collapsed — a click opens it — and `▼`
+while it is expanded. A group **member** wears the same pair right-aligned at the block's edge
+instead, since there it is the member and not the header that opens. Both are painted in the faint
+detail tone rather than the label's orange, so they read as chrome beside the tool's name instead of
+as the last letter of it. Their presence *is* the clickability hint, because the affordance and the
+click-target rule are **one predicate**: an indicator appears exactly where a click toggles
+something, so a block that hides nothing wears none, a group's header — which toggles nothing —
+never wears one at all, and a sub-agent run's head wears one however short its own report is. The
+`+N more lines` marker is apogee's line too and is painted as one — light gray-blue `#8db4e6`, no
 background and no bold weight, the quieter sibling of the prompt block's `see more` — so a body line
-that happens to open with `…` can never be mistaken for the affordance beneath it. The sketch at the
-top of this file shows both states side by side: a collapsed `Run ▸` over its remainder marker, and
-a `View Diff ▾` and a `Sub Agent ▾` deliberately drawn open so the shape of a full body appears
-too — the run among them, because collapsed it would stand alone and show nothing of what it holds.
+that happens to open with `+` can never be mistaken for the affordance beneath it. The sketch at the
+top of this file shows both states side by side: a collapsed `Run ▶` over its remainder marker, and
+a `View Diff ▼` and a `Sub Agent ▼` deliberately drawn open so the shape of a full body appears
+too — the run among them, because collapsed it would show nothing of what it holds.
+`docs/layout/tool-layout.md` is the owner's own sketch of these shapes, the one this section and the
+one above it were written from.
+
+**An open block reads a step brighter.** The plain detail gray a block paints its target, its
+summary and its body in has two tones: the dim `#8a8a8a` while the block is collapsed, and
+`#b2b2b2` once it — or, inside a group, the member — is open, so what a reader opened stands out
+from the collapsed blocks around it without being another colour. It reaches the block's **text**
+alone. The chrome keeps one tone in both states — the `▶`/`▼`, the `+N more lines` marker, an open
+member's `│` gutter — because those are apogee's marks on the block rather than what the block has
+to say, and brightening them alongside the content would make the affordances shout exactly where
+the content was meant to. Diff-coloured lines keep their red and green in both states too: the
+colour already says which way a line went, and an emphasis step layered onto it would be a second
+thing the same colour means.
 
 **An answered question is an ordinary block, and that is the whole rule.** Once the human has
 answered, the `Ask User` block carries the record of the exchange as its body (above), so
-everything in this section falls on it with nothing added: its header wears the `▸`/`▾` indicator
-and is a toggle target, collapsed it spends the one-line budget over its `… +N more lines`
-remainder and expanded it paints the whole record, and it no longer folds into a group with the
-question before it — a call carrying a body never does. None of that is true while the question is
-still on the screen, because the block has no body yet: it groups, it hides nothing, and its header
-is no target. The popup is the surface a question is answered on, exactly as the approval popup is
-the surface an action is approved on; the block is the *record*, and a record may collapse.
+everything in this section falls on it with nothing added: its header wears the `▶`/`▼` indicator,
+every row it paints is a toggle target, collapsed it shows its clipped branch over the
+`+N more lines` remainder and expanded it paints the whole record. It never folds into a group with
+the question before it either — and that is now *said*, by the never-group flag its presenter sets
+on the record, rather than falling out of the body it happens to carry. None of that is true while
+the question is still on the screen, because the block has no body yet: it groups like any other
+call, and unless the width clips its target it hides nothing and is no toggle target. The popup is
+the surface a question is answered on, exactly as the approval popup is the surface an action is
+approved on; the block is the *record*, and a record may collapse.
 
 **A huge prompt collapses to three rows.** A send whose body soft-wraps to *more than three* rows —
 a submitted `❯` prompt and a delivered `⧖` interjection alike, they are one shape — paints three:
@@ -690,7 +773,7 @@ count it is **not transitive**: each agent fills a window of its own, so a neste
 rides that nested block and never accrues to the run above it. A collapsed run is thereby the one
 block that reads as a single summarised line: its own **report body is elided along with the
 span**, because the summary slot already says that report's first line and no block prints the
-same text twice in two adjacent rows. It grows no `… +N more lines` marker either — the transitive
+same text twice in two adjacent rows. It grows no `+N more lines` marker either — the transitive
 count is what says there is work behind the header, and the header is a toggle target however
 short the report is, so nothing is unreachable. **A run's live text is inside the run from its
 first token**: while the delegate is generating, the streamed preview paints at the depth that
@@ -716,8 +799,9 @@ branch. The block appears when the Firing starts, carrying `firing now` beside t
 prompt as its body, and the *same* block is enriched in place when the run returns: it stays where
 it was announced rather than moving to where it finished. The payoff is the run's **answer**, split
 by the ordinary two-halves rule — an answer that comes to one line rides the branch, quoted; a
-longer one leads the body with the summary slot left empty — so the collapsed paint shows the
-answer's first line either way, over the usual `… +N more lines`. Beneath it the body carries the
+longer one leads the body with the summary slot left empty, so the collapsed block shows the
+Schedule's name over a `+N more lines` counting the answer with everything else behind it, and a
+click is what shows the answer itself. Beneath the branch the body carries the
 prompt (its first line led by `prompt: `, the one word that tells the two quoted voices apart), one
 stats line (`2 turns · 4s`, and a `· N denied` cell only when a gated action was actually refused),
 and the record pointer (`saved as "…" — find it in /sessions`), dropped when nothing was persisted.

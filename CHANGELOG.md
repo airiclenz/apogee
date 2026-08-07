@@ -102,6 +102,10 @@ point is a **minor** bump, not a breaking change.
     one of a batch — including the run that came to nothing, so two refused delegations in a row
     stay two blocks.
 
+  The row budget, the grouping scope, the per-member state and the click surface are specified in
+  `layout.md` (§"The rules behind the tool-call sketch" and §"Collapsed and expanded blocks"),
+  rewritten from the sketch in `docs/layout/tool-layout.md`.
+
 ### Fixed
 
 - **An upstream failure can no longer arrive as a silent empty reply.** OpenAI-compatible

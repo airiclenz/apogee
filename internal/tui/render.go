@@ -314,10 +314,11 @@ func (t *transcript) renderLines(th theme, width int) []string {
 // reads as a framed sub-section.
 //
 // Four kinds carry a click surface, for the one reason: they have two states to toggle between. A
-// tool call, a scheduled Firing and a stray result mark their header line and the remainder marker
-// beneath it — one block painter, so one click surface; a prompt tall enough to collapse marks
-// EVERY row it paints,
-// because there the whole block is the toggle (layout.md, "Collapsed and expanded blocks"). Every other kind comes back as plainPaint: a note or an answer paints one way
+// tool call, a scheduled Firing and a stray result share ONE block painter and so one click
+// surface: every row of a block that hides something, with the remainder marker keeping its
+// open-only meaning and, inside a folded run, each member's rows marked for that member. A prompt
+// tall enough to collapse marks every row it paints too, and always has — the whole block is the
+// toggle in both shapes (layout.md, "Collapsed and expanded blocks"). Every other kind comes back as plainPaint: a note or an answer paints one way
 // whatever is asked of it, and a click there keeps its selection meaning. blink narrows further
 // still — a tool call is the only entry that can still be WAITING for something, so it is the only
 // header with a star to blink (layout.md, "The live star").
@@ -963,8 +964,9 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // one uniform shape layout.md sketches: a ✦ header carrying the **label alone — never a target**
 // (plus the ▶/▼ state indicator, below, where the header is one), then one ┝/┕
 // branch per call whose first column is that call's target. The target never sits on the header,
-// so a block does not visually reshape the moment a second call joins it: a block of one is
-// byte-identical in shape to a block of many. The caller frames the block for depth (renderView
+// so the target COLUMN does not move the moment a second call joins the block — what changes around
+// it is the block's shape, never the place a reader's eye is already resting (layout.md, "What stays
+// standalone"). The caller frames the block for depth (renderView
 // and renderEntryLines apply the rail) — width is already the railed inner column.
 //
 // The label is styled (bold orange) before the header is wrapped — the markdown.go posture:
