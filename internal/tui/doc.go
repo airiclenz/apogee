@@ -263,8 +263,9 @@
 // choice rather than a deprecated fallback — while the ten-second Oklch colour loop is a FLAG
 // beside the style, never a property of one, so all six style × colour combinations render and
 // [spinnerAnim.view] is the single place the two compose. cmd/apogee's file-only `ui:` block
-// selects both ([Options.Spinner], [Options.SpinnerColor]); theme.go keeps only the field the
-// glyph is painted on (spinnerBase), not the frames.
+// selects both ([Options.Spinner], [Options.SpinnerColor]); theme.go keeps the field the glyph is
+// painted on (spinnerBase) and the loop's colour stops ([theme.spinnerStops], so a scheme switch
+// moves the loop with it), never the frames.
 //
 // Every frame is a pure function of a frame counter, and that is ADR 0011 rather than taste: the
 // Model is copied on every Update, so the animation state may hold no RNG handle — a *rand.Rand

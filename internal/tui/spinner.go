@@ -259,24 +259,24 @@ var spinnerSpecs = map[SpinnerStyle]spinnerSpec{
 // rather than a shorter lap.
 const spinnerColorPeriod = 10 * time.Second
 
-// spinnerStops are the loop's waypoints: the four spinner tones, violet → green → amber → pink and
-// back to violet. They are read off the palette variables rather than re-typed as hex literals, so a
-// palette edit moves the loop with it. Named stops rather than a raw hue circle is the point: the
-// footer's autonomy-mode markers and the orange code accent are already on screen, and a full hue
-// sweep would collide with them.
-var spinnerStops = buildSpinnerStops(colSpinner1, colSpinner2, colSpinner3, colSpinner4)
+// The loop's waypoints are the scheme's four `spinner-*` roles, visited in order — violet → green →
+// amber → pink and back to violet under the dark scheme. They live on the theme ([theme.spinnerStops],
+// built in newTheme) rather than in a package var of this file, because a package var is fixed at init
+// and the active scheme is not: a runtime scheme switch has to move the loop with it (ADR 0039). Named
+// stops rather than a raw hue circle is the point: the footer's autonomy-mode markers and the orange
+// code accent are already on screen, and a full hue sweep would collide with them.
 
-// buildSpinnerStops converts palette colours into the space the blend works in, once, at package
-// init.
+// buildSpinnerStops converts a scheme's spinner colours into the space the blend works in, once per
+// theme.
 func buildSpinnerStops(palette ...color.Color) []colorful.Color {
 	stops := make([]colorful.Color, 0, len(palette))
 	for _, c := range palette {
 		stop, ok := colorful.MakeColor(c)
 		if !ok {
-			// Unreachable: MakeColor refuses only a fully transparent colour, and every stop is an
-			// opaque hex literal in this package. It degrades to black instead of panicking because
-			// a spinner in the wrong tone is a cosmetic fault, while a panic in a package
-			// initialiser would take the binary down before it draws anything.
+			// Unreachable: MakeColor refuses only a fully transparent colour, and every stop arrives
+			// as an opaque "#rrggbb" the scheme package has already validated. It degrades to black
+			// instead of panicking because a spinner in the wrong tone is a cosmetic fault, while a
+			// panic while building the theme would take the binary down before it draws anything.
 			stop = colorful.Color{}
 		}
 		stops = append(stops, stop)
@@ -284,7 +284,7 @@ func buildSpinnerStops(palette ...color.Color) []colorful.Color {
 	return stops
 }
 
-// spinnerColor is the frame's foreground: the closed loop through spinnerStops, blended in Oklch.
+// spinnerColor is the frame's foreground: the closed loop through the theme's stops, blended in Oklch.
 // BlendOkLch keeps chroma up across the arcs where an sRGB lerp desaturates the midpoints into mud.
 // The loop closes — the last stop blends back into the first — so there is no seam at the wrap.
 //
@@ -295,13 +295,14 @@ func buildSpinnerStops(palette ...color.Color) []colorful.Color {
 // downstream in colorprofile — so on a 256-colour terminal the gradient steps visibly and on a
 // 16-colour one it collapses to a couple of tones. Turning the loop off is the answer for those
 // terminals, not a narrower gradient here.
-func spinnerColor(frame, framesPerLoop int) color.Color {
+func (th theme) spinnerColor(frame, framesPerLoop int) color.Color {
 	// Where this frame sits on the loop, measured in arcs: 0 at the first stop, 1 at the second,
-	// len(spinnerStops) back at the first. Taking the frame modulo the lap keeps pos below the stop
-	// count, so arc indexes a real stop and the remainder is the fraction along the arc leaving it.
-	pos := float64(frame%framesPerLoop) / float64(framesPerLoop) * float64(len(spinnerStops))
+	// len(stops) back at the first. Taking the frame modulo the lap keeps pos below the stop count,
+	// so arc indexes a real stop and the remainder is the fraction along the arc leaving it.
+	stops := th.spinnerStops
+	pos := float64(frame%framesPerLoop) / float64(framesPerLoop) * float64(len(stops))
 	arc := int(pos)
-	from, to := spinnerStops[arc], spinnerStops[(arc+1)%len(spinnerStops)]
+	from, to := stops[arc], stops[(arc+1)%len(stops)]
 	return lipgloss.Color(from.BlendOkLch(to, pos-float64(arc)).Hex())
 }
 
@@ -379,7 +380,7 @@ func (s spinnerAnim) view(th theme) string {
 	if !s.color {
 		return th.spinnerBase.Render(s.glyph())
 	}
-	return th.spinnerBase.Foreground(spinnerColor(s.frame, s.framesPerColorLoop())).Render(s.glyph())
+	return th.spinnerBase.Foreground(th.spinnerColor(s.frame, s.framesPerColorLoop())).Render(s.glyph())
 }
 
 // arm opens a fresh tick chain: a new generation, back at frame 0, with the first tick

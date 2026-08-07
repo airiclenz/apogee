@@ -431,19 +431,20 @@ const (
 func TestSpinnerColorLoops(t *testing.T) {
 	t.Parallel()
 
+	th := newTheme(scheme.Default())
 	for _, style := range spinnerStyleNames {
 		t.Run(string(style), func(t *testing.T) {
 			t.Parallel()
 
 			loop := newSpinnerAnim(style, true).framesPerColorLoop()
-			if got, want := spinnerColor(loop, loop), spinnerColor(0, loop); got != want {
+			if got, want := th.spinnerColor(loop, loop), th.spinnerColor(0, loop); got != want {
 				t.Errorf("frame %d is %v, want frame 0's %v — the loop must close on itself", loop, got, want)
 			}
 
-			for i, stop := range spinnerStops {
+			for i, stop := range th.spinnerStops {
 				closest := math.MaxFloat64
 				for frame := 0; frame < loop; frame++ {
-					if d := oklabDistance(t, spinnerColor(frame, loop), stop); d < closest {
+					if d := oklabDistance(t, th.spinnerColor(frame, loop), stop); d < closest {
 						closest = d
 					}
 				}
@@ -462,13 +463,14 @@ func TestSpinnerColorLoops(t *testing.T) {
 func TestSpinnerColorIsSoft(t *testing.T) {
 	t.Parallel()
 
+	th := newTheme(scheme.Default())
 	for _, style := range spinnerStyleNames {
 		t.Run(string(style), func(t *testing.T) {
 			t.Parallel()
 
 			loop := newSpinnerAnim(style, true).framesPerColorLoop()
 			for frame := 0; frame < loop; frame++ {
-				step := oklabDistance(t, spinnerColor(frame, loop), spinnerColor(frame+1, loop))
+				step := oklabDistance(t, th.spinnerColor(frame, loop), th.spinnerColor(frame+1, loop))
 				if step > spinnerSoftStep {
 					t.Errorf("frames %d→%d jump %.4f in Oklab, want at most %.4f — the drift must be too slow to read as a step",
 						frame, frame+1, step, spinnerSoftStep)
@@ -554,7 +556,7 @@ func TestSpinnerColorIsOrthogonalToStyle(t *testing.T) {
 				// further from the others than a single soft step.
 				for i := 0; i < len(frames); i++ {
 					for j := i + 1; j < len(frames); j++ {
-						apart := oklabDistance(t, spinnerColor(frames[i], loop), spinnerColor(frames[j], loop))
+						apart := oklabDistance(t, th.spinnerColor(frames[i], loop), th.spinnerColor(frames[j], loop))
 						if apart <= spinnerSoftStep {
 							t.Errorf("frames %d and %d are only %.4f apart in Oklab — a third of a lap apart the loop must have moved",
 								frames[i], frames[j], apart)

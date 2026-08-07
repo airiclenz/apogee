@@ -4,6 +4,7 @@ import (
 	"image/color"
 
 	lipgloss "charm.land/lipgloss/v2"
+	colorful "github.com/lucasb-eyer/go-colorful"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
@@ -26,13 +27,6 @@ import (
 // so lipgloss maps them to the terminal's profile, and the two "dark gray" roles of the shipped dark
 // scheme (the user block's background and the chrome's borders) still share one tone — `chrome` —
 // matching the layout sketch (layout.md).
-
-var (
-	colSpinner1 = lipgloss.Color("#8668ff")
-	colSpinner2 = lipgloss.Color("#19a946")
-	colSpinner3 = lipgloss.Color("#ffbf00")
-	colSpinner4 = lipgloss.Color("#ff4a81")
-)
 
 // The marker glyphs. The assistant and tool headers lead with ✦; tool detail hangs off a
 // tree branch (┝ for an interior line, ┕ for the last); the user prompt leads with ❯, and a
@@ -196,6 +190,16 @@ type theme struct {
 	gaugeFill  lipgloss.Style // the gauge's filled portion (periwinkle)
 	gaugeTrack lipgloss.Style // the gauge's empty track (dark-gray background)
 
+	// spinnerStops are the status-line colour loop's waypoints — the scheme's four `spinner-*`
+	// roles, converted into the space the blend works in (buildSpinnerStops, spinner.go). They ride
+	// on the theme rather than in a package var because a package var is built once at init and a
+	// scheme switch happens at runtime: the loop has to follow the switch like every other colour.
+	// The slice is built inside newTheme and never mutated afterwards, so the copies the value-copied
+	// Model makes of the theme all share one backing array and none of them can disagree about it —
+	// the same sharing discipline theme.measure carries (ADR 0030), and no no-copy type in sight
+	// (ADR 0011).
+	spinnerStops []colorful.Color
+
 	// The raw colours, for the handful of places that paint with a COLOUR rather than with a whole
 	// style: a widget the theme does not own (the textarea's four background slots, fillInput), a
 	// field laid under someone else's style (popup.go's blackFill, the gauge's partial cell), and a
@@ -358,6 +362,16 @@ func newTheme(s scheme.Scheme) theme {
 		scrollTrack: lipgloss.NewStyle().Foreground(chrome),
 		gaugeFill:   lipgloss.NewStyle().Foreground(gauge),
 		gaugeTrack:  lipgloss.NewStyle().Background(chrome),
+
+		// The colour loop's waypoints, in the order it visits them: violet → green → amber → pink
+		// and back to violet under the dark scheme. Converting them here is what makes the loop a
+		// property of the ACTIVE scheme instead of of the binary.
+		spinnerStops: buildSpinnerStops(
+			lipgloss.Color(s.Spinner1),
+			lipgloss.Color(s.Spinner2),
+			lipgloss.Color(s.Spinner3),
+			lipgloss.Color(s.Spinner4),
+		),
 
 		// The raw colours the call sites that paint without a style reach for.
 		surface:        surface,

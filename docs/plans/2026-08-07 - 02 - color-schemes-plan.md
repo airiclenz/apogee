@@ -275,9 +275,20 @@ returns nothing; `make check` passes.
 
 **Commit:** `refactor(tui): newTheme takes a color scheme; close palette-var leaks`
 
-## 5. Spinner stops move into the theme
+## 5. Spinner stops move into the theme — ✅ DONE (2026-08-07)
 
 Depends on item 4.
+
+NOTES (2026-08-07): three notes on how the item's text landed. (a) `spinnerColor` became a METHOD on
+`theme` (`th.spinnerColor(frame, framesPerLoop)`) rather than a free function taking the stops — that
+is what lets "every other consumer read `th`'s stops" without threading a slice through
+`spinnerAnim.view`. (b) `internal/tui/doc.go:266` said theme.go "keeps only the field the glyph is
+painted on (spinnerBase), not the frames", which this item falsifies; the sentence now names the
+stops too. (c) the item-4 guard was extended in BOTH of its tests — one stop against a distinct-value
+scheme in `TestNewThemeTakesItsColoursFromTheScheme` (with a stop-count assertion, so a short slice
+fails rather than panics) and the dark violet `#8668ff` pinned in
+`TestDefaultThemeKeepsTheDarkPalette`, which is now the only place inside `internal/tui` that pins a
+spinner tone.
 
 **What:** the init-time package var `spinnerStops = buildSpinnerStops(...)`
 (`internal/tui/spinner.go:267`) cannot follow a runtime scheme switch. Move the stops

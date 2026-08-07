@@ -45,6 +45,13 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 	}
 	th := newTheme(s)
 
+	// The colour loop's stops arrive in a SHAPE of their own — a slice built from four roles at once
+	// (buildSpinnerStops), not a style — so the count is asserted before the table indexes into it: a
+	// loop wired from three roles would otherwise crash the run instead of failing it.
+	if len(th.spinnerStops) != 4 {
+		t.Fatalf("the theme carries %d spinner stops; want the scheme's four", len(th.spinnerStops))
+	}
+
 	for _, tc := range []struct {
 		name string
 		got  color.Color
@@ -83,6 +90,9 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 		{"modeColor allow-edits", th.modeColor(domain.ModeAllowEdits), s.ModeAllowEdits},
 		{"modeColor auto", th.modeColor(domain.ModeAuto), s.ModeAuto},
 		{"modeColor off-ladder", th.modeColor(domain.Mode("nonesuch")), s.Muted},
+		// The loop's first waypoint: the one role that has to survive a conversion into the blend's
+		// own colour space on its way onto the theme, and the ORDER the loop visits its stops in.
+		{"first spinner stop", th.spinnerStops[0], s.Spinner1},
 	} {
 		if got := hexOf(tc.got); got != tc.want {
 			t.Errorf("%s = %s; want the scheme's %s", tc.name, got, tc.want)
@@ -127,5 +137,15 @@ func TestDefaultThemeKeepsTheDarkPalette(t *testing.T) {
 	}
 	if hexOf(th.toolDetail.GetForeground()) == hexOf(th.toolDetailBright.GetForeground()) {
 		t.Error("the collapsed and open detail tones resolve to the same colour; the contrast step is gone")
+	}
+
+	// The spinner's loop is the scheme's too, now that the last four palette vars are gone: pin the
+	// violet the lap has always opened on, so the tones the animation was designed around cannot
+	// drift out of the dark scheme unnoticed.
+	if len(th.spinnerStops) == 0 {
+		t.Fatal("the theme carries no spinner stops; the colour loop would have nothing to blend")
+	}
+	if got := hexOf(th.spinnerStops[0]); got != "#8668ff" {
+		t.Errorf("first spinner stop = %s; want the dark scheme's #8668ff", got)
 	}
 }
