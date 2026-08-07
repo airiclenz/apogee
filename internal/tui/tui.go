@@ -7,6 +7,7 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/term"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
@@ -1011,9 +1012,10 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	}
 	// The --tui-trace half. traced is nil unless a path was named, in which case it is the file
 	// this run owns and must close; the options are otherwise exactly what they have always been.
-	// programEnviron is the OTHER thing that can add an option here — the terminal apogee names
-	// itself to the painter as on Windows, and nil everywhere else (environ_windows.go).
-	teaOpts, traced, err := programOptions(ctx, opts, programEnviron())
+	// Two platform rules can also add an option here, both no-ops off Windows: programEnviron is
+	// the terminal apogee names itself to the painter as (environ_windows.go), and
+	// programDeclinesSyncOutput is the mode-2026 question it keeps to itself (syncoutput.go).
+	teaOpts, traced, err := programOptions(ctx, opts, programEnviron(), programDeclinesSyncOutput())
 	if err != nil {
 		return err
 	}
@@ -1033,27 +1035,58 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 // output IS an option and is also a file the caller has to close.
 //
 // environ is the environment the painter should read, or nil to leave bubbletea on os.Environ()
-// — the Windows terminal-naming rule, and nothing at all anywhere else (environ_windows.go). It
-// arrives as a parameter rather than being read in here so both of its branches are testable
-// without a real terminal underneath the test.
+// — the Windows terminal-naming rule, and nothing at all anywhere else (environ_windows.go).
+// declineSyncOutput asks for the mode-2026 filter over the output — the other Windows-only rule
+// (syncoutput.go). Both arrive as parameters rather than being read in here so both of their
+// branches are testable without a real terminal underneath the test.
 //
-// It is a function of its own so a test can pin the thing this seam most needs pinning: with no
-// trace path, the program is constructed with EXACTLY the option it has always had and no
+// It is a function of its own so a test can pin the thing this seam most needs pinning: with
+// nothing switched on, the program is constructed with EXACTLY the option it has always had and no
 // wrapper at all. An always-on wrapper would be invisible in every other test while quietly
 // changing what the renderer believes about its terminal on every run — see tracedOutput.
-func programOptions(ctx context.Context, opts Options, environ []string) ([]tea.ProgramOption, *tracedOutput, error) {
+func programOptions(ctx context.Context, opts Options, environ []string, declineSyncOutput bool) ([]tea.ProgramOption, *tracedOutput, error) {
 	teaOpts := []tea.ProgramOption{tea.WithContext(ctx)}
 	if environ != nil {
 		teaOpts = append(teaOpts, tea.WithEnvironment(environ))
 	}
-	if opts.TracePath == "" {
+	out, traced, err := programOutput(opts.TracePath, declineSyncOutput)
+	if err != nil {
+		return nil, nil, err
+	}
+	if out == nil {
 		return teaOpts, nil, nil
 	}
-	traced, err := newTracedOutput(os.Stdout, opts.TracePath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("--tui-trace: %w", err)
+	return append(teaOpts, tea.WithOutput(out)), traced, nil
+}
+
+// programOutput builds the terminal bubbletea paints into, and returns it beside the traced output
+// the caller has to close — nil for the second when --tui-trace named no path, and nil for BOTH
+// when neither wrapper is wanted, which is the signal to leave tea.NewProgram on its own default
+// output (os.Stdout, tea.go:620).
+//
+// The stacking order is the decision this function exists to hold: bubbletea → stripper → tracer →
+// os.Stdout. The stripper is nearest bubbletea so the trace records the bytes that actually reach
+// the terminal rather than the ones bubbletea offered, because a trace is evidence only while it
+// agrees with the wire — the 2026-08 investigation diffs traces against pseudoconsole captures
+// byte for byte. Every layer is a term.File answering Fd() with os.Stdout's descriptor, so however
+// many are stacked the renderer sees the terminal it has always seen.
+func programOutput(tracePath string, declineSyncOutput bool) (term.File, *tracedOutput, error) {
+	if tracePath == "" && !declineSyncOutput {
+		return nil, nil, nil
 	}
-	return append(teaOpts, tea.WithOutput(traced)), traced, nil
+	var out term.File = os.Stdout
+	var traced *tracedOutput
+	if tracePath != "" {
+		t, err := newTracedOutput(os.Stdout, tracePath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("--tui-trace: %w", err)
+		}
+		traced, out = t, t
+	}
+	if declineSyncOutput {
+		out = newSyncQueryStripper(out)
+	}
+	return out, traced, nil
 }
 
 // The three screen-control sequences apogee sends on its own behalf. Everything else on the wire

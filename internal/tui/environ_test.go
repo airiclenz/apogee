@@ -12,7 +12,7 @@ import (
 // reason.
 func TestProgramOptionsInstallTheEnvironmentWhenOneIsBuilt(t *testing.T) {
 	t.Parallel()
-	opts, traced, err := programOptions(context.Background(), Options{}, []string{"TERM=xterm-256color"})
+	opts, traced, err := programOptions(context.Background(), Options{}, []string{"TERM=xterm-256color"}, false)
 	if err != nil {
 		t.Fatalf("programOptions: %v", err)
 	}

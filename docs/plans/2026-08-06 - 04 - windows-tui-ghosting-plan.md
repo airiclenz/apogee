@@ -6,7 +6,7 @@
   measurements that separate four live hypotheses, fixes the cause, and pins the fix with a
   regression test that runs headless on Windows CI.
 - **Date:** 2026-08-06
-- **Status:** in progress — items 1-4 ✅ done 2026-08-06; items 5-8 open
+- **Status:** in progress — items 1-4 ✅ done 2026-08-06, item 5 ✅ done 2026-08-07; items 6-8 open
 - **Predecessor:** `docs/handoffs/2026-08-06 - 00 - windows-tui-ghosting-debug.md` — the symptom
   report and the first (unsuccessful) dependency-bump attempt. This plan supersedes its debug
   plan; the symptom description there is still ground truth.
@@ -518,6 +518,36 @@ away before it reaches any emulator, so the extra flag would have bought nothing
 written down instead of the code.
 No layout change, nothing filed upstream, `internal/` untouched, and finding 28's stale
 "left untracked in the repo root" is corrected in passing. **The item stays open.**
+
+NOTES (2026-08-07, fifth pass): the owner answered the reopened design call with **"Land it either
+way"** — land the mode-2026 filter now, on the strength of finding 34 alone, without waiting for the
+visual A/B. It is landed (findings 36-38): a Windows-only `tea.WithOutput` wrapper that removes
+`CSI ?2026$p` from bubbletea's single DECRQM write and leaves `CSI ?2027$p` on the wire, installed
+through item 2's existing `programOptions` seam. **The justification is the measured one and only
+that** — synchronized output is dead weight on Windows because ConPTY forwards the window empty
+(finding 34), and apogee pays for it with bubbletea's cursor-hide flicker mitigation (finding 33).
+**It is NOT claimed to fix the ghosting**, which stays unexplained; the owner runs the visual A/B
+separately and nothing here waits on it or predicts it. Four departures from the item's literal
+text, all of them because that text predates the reopened diagnosis:
+(a) **No H1/H2/H3/H4 branch was taken**, because all four are falsified or retired (findings 13, 14,
+23, 28, 31). What landed is the layout-neutral fix this item's own "If arm B is clean" paragraph
+sketches, landed ahead of arm B on the owner's instruction rather than after it.
+(b) **The byte filter itself is in a portable file** (`internal/tui/syncoutput.go`); only the
+decision to install it is in the `_windows.go` / `_other.go` pair the standing requirements ask for.
+Stripping a fixed substring out of a write is platform-independent, so putting the mechanism behind
+`//go:build windows` would have hidden its tests from five of the six cross targets while adding
+nothing. The behaviour is Windows-only exactly as specified: `programDeclinesSyncOutput()` returns
+`stdoutIsTerminal()` on Windows and `false` everywhere else.
+(c) **`programOptions` gained a fourth parameter and `programOutput` was factored out of it** — the
+same seam, not a new one, and the same reasoning item 5's NOTES (b) recorded: read in place, the
+decision would take its "not a terminal" branch in every test and the installing branch would be
+unreachable from a unit test. `programOutput` exists so the *stacking order* of the two wrappers is
+a value a test can inspect rather than a fact buried inside a `tea.ProgramOption` closure.
+(d) **No upstream text, no CHANGELOG, no user-facing docs.** Nothing is filed anywhere, per the
+standing constraint; the two upstream write-ups this item's text mentions still wait on the A/B.
+Item 8 owns the CHANGELOG line and the docs, the same call items 1-5 made.
+No layout change of any kind. **The item stays open** — the ghost is not explained, so the ranked
+next-step list is updated rather than retired.
 
 Depends on items 4 and 5.
 
@@ -1365,7 +1395,80 @@ now measured rather than asserted, with the empty-window mechanism of finding 34
 Captures for both arms are in `C:\Users\airic\apogee-ghosting-debug\item6b-evidence\`
 (`sync{on,off}-{trace.txt,conpty.bin,dbg.log,diag.txt}` plus the rendered `*-screen.txt`).
 
-## Item 6 — WHERE IT STANDS (still open; the gate is answered and one candidate is loaded)
+## Item 6 findings — the mode-2026 filter lands (2026-08-07)
+
+**Finding 36 — apogee no longer asks Windows terminals about synchronized output, and the reason is
+finding 34, not the ghost.** `internal/tui/syncoutput.go` adds `syncQueryStripper`, a `term.File`
+that removes every occurrence of `CSI ?2026$p` from what bubbletea writes and passes everything else
+through byte for byte. It is installed by `programDeclinesSyncOutput()` —
+`stdoutIsTerminal()` on Windows (`syncoutput_windows.go`), `false` everywhere else
+(`syncoutput_other.go`) — through the `programOptions` seam item 2 built.
+
+The mechanism is a byte filter because bubbletea offers nothing else: `options.go` has no
+`WithSynchronizedOutput`, `setSyncdUpdates` is unexported, `shouldQuerySynchronizedOutput` is
+private, and this plan does not carry a fork. Remove the question and the answer never comes, so
+`tea.go`'s `case ansi.ModeSynchronizedOutput:` is never reached and `setSyncdUpdates(true)` is never
+called. Three properties make that safe rather than clever, and each is pinned by a test:
+
+- **The mode-2027 question survives.** bubbletea emits both DECRQM requests as one string through a
+  single `execute` (`tea.go:1109-1114`) that a single `flush` writes (`tea.go:1221-1237`), so the two
+  can only be separated at the byte level. 2027 must live: `widthAuthority` exists to mirror
+  bubbletea's reaction to that report (`width.go:73`), and silencing one side alone would desync the
+  layout's measure from the painter's.
+- **`CSI ?2026h` / `CSI ?2026l` are not touched.** The BSU/ESU frame wrappers differ from the request
+  by their last byte. With the mode never enabled the renderer never emits them anyway, but a filter
+  that ate them would corrupt any frame that carried them.
+- **A probe split across two writes is still removed.** bubbletea cannot split it today — one
+  `execute`, one `flush`, one `Write` — so this is belt and braces, and it is implemented as a carry
+  of the trailing bytes that form a *proper prefix* of the request. Holding those back can lose
+  nothing: every proper prefix of `ESC [ ? 2 0 2 6 $` is an incomplete escape sequence, so a write
+  ending in one is by construction a write that stopped mid-sequence and the remainder must follow.
+  `TestSyncQueryStripperReleasesAHeldPrefixTheNextWriteRefutes` pins the release path with
+  `CSI ?25l` arriving in two pieces, which is the sharpest near-miss in the stream.
+
+**What the change is claimed to buy, and it is finding 34 verbatim.** On Windows the synchronized
+window is forwarded EMPTY — ConPTY closes it before re-serializing the frame's cells — so apogee has
+been trading bubbletea's per-frame `CSI ?25l` / `CSI ?25h` flicker mitigation (finding 33) for an
+atomicity it never receives. Declining the question puts the renderer in the same configuration
+conhost already runs in, which is the one measured Windows path that has never ghosted (finding 12).
+**No claim is made that this fixes the ghosting.** The ghost is unexplained, the visual A/B has not
+been run, and this finding does not anticipate it.
+
+**Finding 37 — the composition with items 2 and 5 is verified, not assumed.** Three seams now meet in
+`programOptions`, and the interactions were the risk:
+
+- **Stacking order (item 2).** `programOutput` builds bubbletea → stripper → tracer → `os.Stdout`,
+  with the stripper NEAREST bubbletea, so `--tui-trace` records the bytes that actually reach the
+  terminal rather than the ones bubbletea offered. That direction is load-bearing for this
+  investigation specifically: findings 33-34 are diffs of a trace against a pseudoconsole capture,
+  and a trace that disagreed with the wire would make every such comparison lie.
+  `TestSyncQueryStripperOverTracedOutputTracesTheStrippedStream` asserts the trace and the terminal
+  receive the same stripped bytes.
+- **`term.File` in full, again.** Item 2's NOTES record that a plain `io.Writer` here silently
+  disables raw mode, VT processing, size detection and the cursor optimizations. The same applies to
+  a second wrapper stacked above the first, so `syncQueryStripper` carries the same
+  `var _ term.File = ...` assertion and answers `Fd()` with the wrapped terminal's descriptor —
+  `os.Stdout`'s however many layers are stacked. `TestSyncQueryStripperIsATermFileOverStdout` is the
+  pin, and it is item 2's test repeated deliberately.
+- **Independence from item 5 (`programEnviron`).** The two rules are separate `tea.ProgramOption`s
+  that share only the function that appends them. A Windows terminal run switches both on:
+  `TestProgramOptionsComposeTheEnvironmentWithTheStripper` asserts three options where item 2's guard
+  test still asserts one with everything off.
+- **Off-switch preserved.** `TestProgramOptionsInstallNoTraceWhenTheFlagIsUnset` — item 2's guard
+  against an always-on wrapper — still asserts exactly one option, now with the new parameter false.
+
+**Finding 38 — the change is layout-neutral by construction, and its blast radius is one substring.**
+Nothing in apogee reads a mode-2026 report: `widthAuthority.observe` returns unchanged for any mode
+other than 2027 (`width.go:74`), and the only other reader is the `--tui-diag` log, which will simply
+have no 2026 line to record on Windows. No glyph, no width, no column budget and no frame content is
+touched — the only bytes that change are the nine removed from one startup write, plus the
+`CSI ?25l` / `CSI ?25h` pairs bubbletea's own renderer resumes emitting as a consequence. Verified on
+this tree: `go build ./...`, `go vet` under `GOOS=windows|linux|darwin`, the six-target cross-build,
+and `go test ./internal/tui/ ./cmd/apogee/ -count=1` all green apart from the Windows host's
+pre-existing environment failures, which were measured at `ebf955a` before the change and are
+unchanged by it.
+
+## Item 6 — WHERE IT STANDS (still open; the mode-2026 filter has landed, the ghost is not explained)
 
 **The design call still cannot be answered, but the question has narrowed twice more.** The gate is
 no longer outstanding: the post-item-5 build ghosts, and the spinner ghosts with it (finding 32). The
@@ -1373,9 +1476,11 @@ branch item 4 selected stays *disproven* — the wrap is deferred on the paths t
 so neither an `ultraviolet` issue nor the one-column-short mitigation has a measured defect to point
 at. What is new is that finding 32's spinner rules out every remaining "long lines / full-width rows /
 heavy streaming" story, and findings 33-34 have loaded the one candidate that has the right shape
-into a switch the owner can flip in one command.
+into a switch the owner can flip in one command. On the fourth pass the owner chose to **land that
+switch permanently either way** — see findings 36-38 — so what the A/B now decides is not whether
+apogee keeps mode 2026 on Windows (it does not) but whether losing it explains the ghost.
 
-What is established, after three passes:
+What is established, after four passes:
 
 - Item 5 is measured working and measured layout-neutral (finding 22). It is not a fix (finding 23).
 - The cheapest layout-free mitigation is eliminated on mechanism (finding 25).
@@ -1396,6 +1501,10 @@ What is established, after three passes:
 - **Synchronized output is measured to be a pure loss on Windows** (finding 34), independent of
   whether it is the ghost: ConPTY collapses the window to an empty pair, so apogee trades
   bubbletea's cursor-hide flicker mitigation for an atomicity it never receives.
+- **That loss is now fixed in the shipping build** (findings 36-38): apogee strips the mode-2026
+  DECRQM request on Windows, so bubbletea never enables the mode and the renderer keeps its
+  `CSI ?25l` / `CSI ?25h` flicker mitigation. Layout-neutral, `TERM`-independent, and justified by
+  finding 34 alone. **It is not a claim about the ghost.**
 
 **The one thing left to run, and it is one command.** Everything an agent can do for the mode-2026
 A/B is done: the flag exists, `apogee-dbg.exe` is rebuilt from this commit, the mechanics are
@@ -1416,30 +1525,46 @@ verified in both arms (finding 33), and the confound the A/B seemed to carry is 
 > Remove-Item Env:\APOGEE_DBG_NO_SYNC
 > ```
 >
-> **If arm B is clean and arm A ghosts, the diagnosis is closed** and the fix is stated below.
-> If both ghost, mode 2026 is eliminated and the ranked list drops to its first entry. If both are
-> clean, the debug binary is not reproducing and that is its own (unwelcome) finding — re-run arm A
-> until it ghosts before trusting arm B. Add `APOGEE_DBG_LOG=<path>` to either arm to confirm which
-> way the mode-2026 report was handled; both arms should log a report, and only arm B should log
-> `IGNORED`.
+> **Use the kit binary, not a fresh build.** `apogee-dbg.exe` was built from `efec920`, which
+> predates the mode-2026 filter, so arm A still enables the mode and the A/B still has two arms. A
+> stock build from `HEAD` is now permanently in arm B's configuration on Windows and cannot serve as
+> arm A. If `apogee-dbg.exe` is ever rebuilt from a later commit, `APOGEE_DBG_NO_SYNC` becomes a
+> no-op and the experiment silently loses its control.
+>
+> **What each outcome would tell us**, now that the fix is landed either way (findings 36-38):
+>
+> - **arm A ghosts and arm B is clean** — the diagnosis is closed. The empty synchronized window is
+>   the ghost; the change already in the tree is the fix as well as the correctness cleanup it was
+>   landed as, and item 7's regression test finally has a case that can be seen red (run arm A).
+> - **both ghost** — mode 2026 is eliminated as the cause. The landed change keeps its own
+>   justification (finding 34) and loses nothing, and the ranked list below drops to its first entry.
+> - **both are clean** — the debug binary is not reproducing, which is its own (unwelcome) finding.
+>   Re-run arm A until it ghosts before trusting arm B: a negative A/B against a binary that cannot
+>   reproduce says nothing at all.
+>
+> Add `APOGEE_DBG_LOG=<path>` to either arm to confirm which way the mode-2026 report was handled;
+> both arms should log a report, and only arm B should log `IGNORED`.
 
-**If arm B is clean — exactly what the fix is, and it is layout-neutral.** apogee must stop letting
-bubbletea enable synchronized output on Windows. bubbletea has no option for it (`options.go` has no
-`WithSynchronizedOutput`; `setSyncdUpdates` is unexported; `shouldQuerySynchronizedOutput` is
-private), and this plan does not carry a fork, so the seam is the one item 2 already built: the
-`term.File`-preserving `tea.WithOutput` wrapper. bubbletea emits the two `DECRQM` probes in a single
-write (`tea.go:1109-1114` at the pinned v2.0.8, `RequestModeSynchronizedOutput +
-RequestModeUnicodeCore`); a Windows-only wrapper that drops the `CSI ?2026$p` substring from that
-write leaves the 2027 negotiation intact, never produces a `ModeReportMsg` for 2026, and lands the
-renderer in exactly the `?25l`/`?25h` configuration conhost already runs in and does not ghost. No
-layout changes, no glyph changes, no column budget touched, and it is unit-testable on the byte
-stream. Two upstream write-ups follow it — a `charmbracelet/bubbletea` request for a public option
-so the wrapper can be retired, and a `microsoft/terminal` report of the empty-window
-re-serialization with finding 34's capture as its whole content — both as documents in this repo, not
-filed (see below).
+**The fix is landed, ahead of the A/B and on the owner's instruction (findings 36-38).** apogee no
+longer lets bubbletea enable synchronized output on Windows. bubbletea has no option for it
+(`options.go` has no `WithSynchronizedOutput`; `setSyncdUpdates` is unexported;
+`shouldQuerySynchronizedOutput` is private), and this plan does not carry a fork, so the seam is the
+one item 2 already built: the `term.File`-preserving `tea.WithOutput` wrapper. bubbletea emits the
+two `DECRQM` probes in a single write (`tea.go:1109-1114` at the pinned v2.0.8,
+`RequestModeSynchronizedOutput + RequestModeUnicodeCore`); the wrapper
+(`internal/tui/syncoutput.go`) drops the `CSI ?2026$p` substring from that write, leaves the 2027
+negotiation intact, never produces a `ModeReportMsg` for 2026, and lands the renderer in exactly the
+`?25l`/`?25h` configuration conhost already runs in and does not ghost. No layout changes, no glyph
+changes, no column budget touched. **Its justification is finding 34 — dead weight paid for with a
+real mitigation — and not a claim about the ghost.** Two upstream write-ups would follow a positive
+A/B — a `charmbracelet/bubbletea` request for a public option so the wrapper can be retired, and a
+`microsoft/terminal` report of the empty-window re-serialization with finding 34's capture as its
+whole content — both as documents in this repo, not filed (see below).
 
 **If arm B still ghosts, the ranked next measurements.** These are the candidates that survive
-findings 28-35, in the order their cost/discrimination ratio favours:
+findings 28-38, in the order their cost/discrimination ratio favours. **None of them is funded**; (1)
+in particular is the one the last three passes have kept pointing at and the one nobody has paid for
+yet:
 
 1. **ConPTY's re-serialization, measured on the ConPTY that actually ghosts.** Finding 19 plus
    finding 28 put the fault downstream of apogee's bytes, and finding 27 has already cleared the
@@ -1455,11 +1580,19 @@ findings 28-35, in the order their cost/discrimination ratio favours:
    pairs, the `CSI <n> X` (ECH) erases item 5 introduced (40 of them — new since the pre-item-5
    stream, and the ghost predates item 5, so this is a weak candidate but a cheap one: run the gate
    against `TERM=vt100`, which declines item 5's injection, and see whether the ghost changes shape),
-   and the relative cursor moves bubbletea's hard tabs and backspaces produce (already A/B'd clean,
-   findings 15-16, but never with the spinner as the thing being watched).
+   the relative cursor moves bubbletea's hard tabs and backspaces produce (already A/B'd clean,
+   findings 15-16, but never with the spinner as the thing being watched), and — new since finding 36
+   — the `CSI ?25l` / `CSI ?25h` pair the renderer resumed emitting around every frame once the mode
+   was declined. That last one is only a candidate if arm A and arm B *both* ghost, since arm B is
+   already running it.
 3. **The downstream emulator's consumption of that re-emission.** If (1) shows ConPTY re-emits a
    correct stream, what remains is Windows Terminal and xterm.js both mishandling it — two
    independent codebases, so the shared input is the suspect.
+
+1 is the plan's standing option (b) and it is where the evidence points hardest: findings 19, 28 and
+32 together say the fault enters downstream of apogee's bytes, is per-frame rather than per-content,
+and has never once been observed in a capture of a ghosting path — because no such capture exists.
+Every ConPTY byte in this plan came from the *system* pseudoconsole, which does not ghost.
 
 **Nothing has been filed upstream, against anyone, and nothing should be until arm B is run.**
 Against `ultraviolet`, the one direct measurement contradicts the claim (finding 28). Against
@@ -1489,6 +1622,8 @@ the smaller case is the sharper one.
 **Not written, deliberately:** the one-column-short mitigation, and any other user-visible layout
 change — the owner's decision withholds authorization for both, and finding 28 has now removed the
 defect they were meant to work around, so they are unmotivated as well as unauthorized. Also not
-written: any upstream issue text, for the reason two paragraphs up; the mode-2026 fix sketched above,
-because arm B has not been run; and a seventh kit flag to separate the cursor-hiding half of the A/B,
-because finding 34 measures ConPTY removing that half before any emulator sees it.
+written: any upstream issue text, for the reason two paragraphs up; and a seventh kit flag to
+separate the cursor-hiding half of the A/B, because finding 34 measures ConPTY removing that half
+before any emulator sees it. The mode-2026 fix is no longer on this list — the owner's "land it
+either way" call put it in the tree on finding 34's evidence (findings 36-38), ahead of the A/B and
+without borrowing the A/B's conclusion.
