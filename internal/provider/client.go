@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,16 @@ const (
 
 	defaultMaxRetries     = 2
 	defaultRetryBaseDelay = 200 * time.Millisecond
+
+	// retry429BaseDelay is the backoff base for a rate-limited (429) attempt that carried no
+	// Retry-After header. A rate limit is a "come back later", not a transport blip, so retrying
+	// it at the 200ms transport base only burns the budget before the window reopens.
+	retry429BaseDelay = 1 * time.Second
+
+	// maxRetryAfter caps how long a server-supplied Retry-After is honoured. Beyond it the
+	// upstream is telling us we are banned for longer than any turn should sit blocked, so the
+	// reply is surfaced as an error immediately instead of being waited out.
+	maxRetryAfter = 30 * time.Second
 )
 
 // ErrContextOverflow is returned (wrapped) when the Upstream rejects a request because
@@ -56,7 +67,15 @@ func (e *StatusError) Error() string {
 // into the wire JSON, calls the Upstream over net/http, and assembles the reply. It adds
 // bounded retries (transient transport faults, 429, and 5xx) and an optional per-attempt
 // timeout on top of the bare TS oracle, which the embeddable core needs and the VS Code
-// extension got from the editor. One Client is safe for concurrent Respond/Stream calls
+// extension got from the editor.
+//
+// Retry policy: a retryable reply carrying a Retry-After header is waited out for exactly
+// that long, up to maxRetryAfter — a longer one is surfaced as an error at once rather than
+// blocking the turn on a long ban. Without the header the wait is exponential, base·2ⁿ, off
+// the Client's configured base for transport faults and 5xx and off the slower
+// retry429BaseDelay for a 429. Every wait is cancellable by the caller's context.
+//
+// One Client is safe for concurrent Respond/Stream calls
 // (it holds no per-request state) and for a concurrent SetModel; cancellation is via the
 // caller's context.
 type Client struct {
@@ -97,7 +116,9 @@ func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.httpClie
 // 3 attempts). Zero disables retries.
 func WithMaxRetries(n int) Option { return func(c *Client) { c.maxRetries = n } }
 
-// WithRetryBaseDelay sets the base backoff; attempt n waits base·2ⁿ (default 200ms).
+// WithRetryBaseDelay sets the base backoff for transport faults and 5xx replies; attempt n
+// waits base·2ⁿ (default 200ms). It does not govern a 429, which has its own slower base, nor
+// a reply that supplied a Retry-After header — that duration is honoured verbatim.
 func WithRetryBaseDelay(d time.Duration) Option { return func(c *Client) { c.retryBaseDelay = d } }
 
 // WithRequestTimeout bounds a single non-streaming Respond attempt (default 0 ⇒ unbounded,
@@ -190,6 +211,9 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 // a cancel func the caller MUST invoke once the body is read (it releases the
 // per-attempt timeout context). The body is the caller's to Close. Retries cover
 // transport faults, 429, and 5xx; a caller-cancelled context aborts without retrying.
+// A retryable reply's Retry-After header sets the wait when it is at most maxRetryAfter,
+// and ends the retries outright when it is longer — the response is handed back so the
+// caller surfaces it as the final error instead of the turn hanging on a long ban.
 // attemptTimeout > 0 bounds each attempt so a stuck attempt becomes retryable without
 // touching the caller's context — but it must outlive the body read, so it rides the
 // returned cancel rather than a local defer.
@@ -197,9 +221,10 @@ func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Dura
 	url := c.baseURL + c.chatPath
 
 	var lastErr error
+	var wait time.Duration // how long to hold off before the next attempt, set by the failed one
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
-			if err := c.backoff(ctx, attempt); err != nil {
+			if err := sleepCtx(ctx, wait); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -212,11 +237,23 @@ func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Dura
 				return nil, nil, ctx.Err() // caller cancelled — not a transient fault
 			}
 			lastErr = err
+			wait = c.retryDelay(0, attempt+1)
 			continue // transport/timeout fault — retry if budget remains
 		}
 		if isRetryableStatus(resp.StatusCode) && attempt < c.maxRetries {
+			after, ok := parseRetryAfter(resp.Header.Get("Retry-After"))
+			if ok && after > maxRetryAfter {
+				// The upstream named a wait longer than we are willing to sit blocked for.
+				// Give up now and let this response become the surfaced error.
+				return resp, cancel, nil
+			}
 			drain(resp) // free the connection for reuse before retrying
 			cancel()
+			if ok {
+				wait = after
+			} else {
+				wait = c.retryDelay(resp.StatusCode, attempt+1)
+			}
 			lastErr = fmt.Errorf("apogee: upstream HTTP %d", resp.StatusCode)
 			continue
 		}
@@ -245,10 +282,22 @@ func (c *Client) do(ctx context.Context, url string, body []byte) (*http.Respons
 	return c.httpClient.Do(httpReq)
 }
 
-// backoff sleeps base·2ⁿ before attempt n, returning early if the context is cancelled.
-func (c *Client) backoff(ctx context.Context, attempt int) error {
-	delay := c.retryBaseDelay << (attempt - 1)
-	timer := time.NewTimer(delay)
+// retryDelay is the exponential backoff to observe before attempt n (1-based) after a failure
+// that carried the given status — 0 for a transport fault: base·2ⁿ⁻¹. A 429 backs off from the
+// slower retry429BaseDelay; transport faults and 5xx use the Client's configured base.
+func (c *Client) retryDelay(status, attempt int) time.Duration {
+	base := c.retryBaseDelay
+	if status == http.StatusTooManyRequests {
+		base = retry429BaseDelay
+	}
+	return base << (attempt - 1)
+}
+
+// sleepCtx waits for d, returning early with ctx.Err() if the context is cancelled first. A
+// non-positive d still yields to the scheduler rather than special-casing zero — a Retry-After
+// of 0 means "retry now", which the caller's very next request already honours.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -256,6 +305,31 @@ func (c *Client) backoff(ctx context.Context, attempt int) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+// parseRetryAfter reads a Retry-After header in either RFC 9110 form — delta-seconds ("120")
+// or an HTTP-date ("Fri, 31 Dec 1999 23:59:59 GMT") — and reports how long to hold off. A
+// value already in the past yields zero: the ban has lapsed, so retry at once. An absent or
+// malformed value reports false, leaving the caller on its own backoff.
+func parseRetryAfter(h string) (time.Duration, bool) {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(h); err == nil {
+		if secs <= 0 {
+			return 0, true
+		}
+		return time.Duration(secs) * time.Second, true
+	}
+	when, err := http.ParseTime(h)
+	if err != nil {
+		return 0, false
+	}
+	if d := time.Until(when); d > 0 {
+		return d, true
+	}
+	return 0, true
 }
 
 // statusError reads a non-2xx body and classifies it: a 400 overflow → ErrContextOverflow,

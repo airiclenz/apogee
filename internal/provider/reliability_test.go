@@ -124,6 +124,169 @@ func TestRespond_CallerCancellationDoesNotRetry(t *testing.T) {
 	}
 }
 
+func TestParseRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	// The HTTP-date cases are relative to now, so this table's subtests stay sequential —
+	// a parallel subtest would not run until the clock had moved on.
+	soon := time.Now().Add(2 * time.Second).UTC().Format(http.TimeFormat)
+	past := time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat)
+
+	for _, tc := range []struct {
+		name    string
+		header  string
+		wantOK  bool
+		wantMin time.Duration
+		wantMax time.Duration
+	}{
+		{name: "delta seconds", header: "2", wantOK: true, wantMin: 2 * time.Second, wantMax: 2 * time.Second},
+		{name: "zero seconds", header: "0", wantOK: true},
+		{name: "negative seconds", header: "-5", wantOK: true},
+		// HTTP-dates carry second granularity, so the remaining wait is somewhere below 2s.
+		{name: "http date ahead", header: soon, wantOK: true, wantMin: 500 * time.Millisecond, wantMax: 2 * time.Second},
+		{name: "http date in the past", header: past, wantOK: true},
+		{name: "garbage", header: "soonish"},
+		{name: "empty", header: ""},
+		{name: "whitespace only", header: "  "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseRetryAfter(tc.header)
+			if ok != tc.wantOK {
+				t.Fatalf("parseRetryAfter(%q) ok = %v, want %v", tc.header, ok, tc.wantOK)
+			}
+			if got < tc.wantMin || got > tc.wantMax {
+				t.Errorf("parseRetryAfter(%q) = %v, want within [%v, %v]", tc.header, got, tc.wantMin, tc.wantMax)
+			}
+		})
+	}
+}
+
+// A Retry-After the client is willing to honour replaces the exponential backoff entirely —
+// proven here by a wait that finishes far inside the 1s a header-less 429 would have cost.
+func TestRespond_HonorsRetryAfterHeader(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		_, _ = io.WriteString(w, okJSON)
+	}))
+	defer srv.Close()
+
+	start := time.Now()
+	got, err := NewClient(srv.URL, "m", WithMaxRetries(2)).Respond(context.Background(), Request{})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+	if got.Content != "recovered" {
+		t.Errorf("Content = %q, want recovered", got.Content)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Errorf("server calls = %d, want 2 (429 then success)", n)
+	}
+	if elapsed >= retry429BaseDelay {
+		t.Errorf("elapsed = %v, want well under the %v header-less 429 base", elapsed, retry429BaseDelay)
+	}
+}
+
+// A ban longer than maxRetryAfter is not waited out: the 429 becomes the answer at once, with
+// the retry budget untouched.
+func TestRespond_LongRetryAfterGivesUpImmediately(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Retry-After", "3600")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":{"message":"temporarily rate-limited upstream"}}`)
+	}))
+	defer srv.Close()
+
+	start := time.Now()
+	_, err := NewClient(srv.URL, "m", WithMaxRetries(2)).Respond(context.Background(), Request{})
+	elapsed := time.Since(start)
+
+	var statusErr *StatusError
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("error = %v (%T), want *StatusError", err, err)
+	}
+	if statusErr.Code != http.StatusTooManyRequests {
+		t.Errorf("Code = %d, want 429", statusErr.Code)
+	}
+	if !strings.Contains(statusErr.Body, "rate-limited upstream") {
+		t.Errorf("Body = %q, want the server's message", statusErr.Body)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("server calls = %d, want 1 (a long ban consumes no further attempts)", n)
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("elapsed = %v, want an immediate give-up", elapsed)
+	}
+}
+
+func TestRespond_RetryAfterWaitIsCancellable(t *testing.T) {
+	t.Parallel()
+
+	var served sync.Once
+	servedCh := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30") // at the cap: honoured, so the client settles in to wait
+		w.WriteHeader(http.StatusTooManyRequests)
+		served.Do(func() { close(servedCh) })
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-servedCh
+		cancel()
+	}()
+
+	start := time.Now()
+	_, err := NewClient(srv.URL, "m", WithMaxRetries(2)).Respond(ctx, Request{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("elapsed = %v, want the wait to abort promptly on cancellation", elapsed)
+	}
+}
+
+// Sleep-free proof of the delay selection: a header-less 429 backs off from the slow base
+// while transport faults and 5xx keep the configured one.
+func TestClient_RetryDelayBaseBySpec(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient("http://example.invalid", "m")
+	for _, tc := range []struct {
+		name    string
+		status  int
+		attempt int
+		want    time.Duration
+	}{
+		{name: "429 first retry", status: http.StatusTooManyRequests, attempt: 1, want: time.Second},
+		{name: "429 second retry", status: http.StatusTooManyRequests, attempt: 2, want: 2 * time.Second},
+		{name: "500 first retry", status: http.StatusInternalServerError, attempt: 1, want: defaultRetryBaseDelay},
+		{name: "500 second retry", status: http.StatusInternalServerError, attempt: 2, want: 2 * defaultRetryBaseDelay},
+		{name: "transport fault", status: 0, attempt: 1, want: defaultRetryBaseDelay},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := client.retryDelay(tc.status, tc.attempt); got != tc.want {
+				t.Errorf("retryDelay(%d, %d) = %v, want %v", tc.status, tc.attempt, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRespond_ContextOverflow(t *testing.T) {
 	t.Parallel()
 

@@ -110,7 +110,12 @@ The Body is the error member re-rendered (message plus metadata when present), p
 
 **Commit:** `fix(provider): surface in-band upstream errors in non-streaming replies`
 
-## 3. Retry-After-aware backoff and a 1s base for 429
+## 3. Retry-After-aware backoff and a 1s base for 429 — ✅ DONE (2026-08-07)
+
+NOTES (2026-08-07): the delay is now chosen by the failed attempt, not by the attempt index, so
+`(*Client).backoff` was split into `sleepCtx(ctx, d)` (the same timer/select shape) and the pure
+`(*Client).retryDelay(status, attempt)` — the latter is the sleep-free seam the delay-selection
+test drives.
 
 **What:** In `internal/provider/client.go`: add a pure helper `parseRetryAfter(h string) (time.Duration, bool)`
 accepting delta-seconds and HTTP-date forms (per RFC 9110; invalid/absent → false). In `send`
