@@ -66,7 +66,7 @@ it wraps them with browsable `Meta` (title, timestamps, workspace, model, user-m
 last context fill).
 
 **3. Browsing is workspace-scoped.** `Meta.Workspace` records the resolved workspace root; the
-`/sessions` browser lists the **current workspace by default** with a toggle (`a`) to all
+`/sessions` browser lists the **current workspace by default** with a toggle (`^a`) to all
 workspaces. Resuming a foreign-workspace session is allowed and labelled. Legacy records (no
 recorded workspace) appear only under the all-workspaces view.
 
@@ -74,7 +74,7 @@ recorded workspace) appear only under the all-workspaces view.
 deletes. Each does a final Save of the outgoing session (with per-Turn saves it is already on
 disk; the final save just captures post-last-turn notes) → `Rotate` (the next Save mints a fresh
 id) → the existing reset body. The outgoing session remains in history; **discarding is the
-browser's `d`**, nothing else. The save runs *before* `ClearContext`, so the inherited
+browser's `^d`**, nothing else. The save runs *before* `ClearContext`, so the inherited
 snapshot-before-clear ordering falls out; on a `ClearContext` error the view is left untouched
 and the completed save is harmless (the session was closing anyway).
 
@@ -179,7 +179,7 @@ shortly after it is born.
 - **`Rename` is the only writer.** `Save` ignores its title argument after the first call, so a
   generated title lands through the existing `Rename` path; a result that arrives before the first
   Save has minted an id is **stashed and applied at the first save-complete**.
-- **A user's title always wins (never-clobber).** Any user-initiated rename (the browser's `r`,
+- **A user's title always wins (never-clobber).** Any user-initiated rename (the browser's `^r`,
   or `/rename <text>`) marks the title as touched, and a late-landing *automatic* title is then
   dropped. An explicitly requested regeneration (bare `/rename`) is the exception — the user
   asked for it, so it applies and leaves the mark set. Naming fires once per new Session record,
@@ -212,7 +212,7 @@ shortly after it is born.
   **`--resume <id-or-path>`**, **scrollback replay on resume**, and **interrupted-task
   `/continue`** — closing the P1 "Session management UI" parity gap.
 - **Retention/pruning and a cross-instance lock are recorded TODOs**, deliberately out of this
-  plan. There is no auto-pruning: manual `d` only.
+  plan. There is no auto-pruning: manual `^d` only.
 - **The bench is untouched.** `session.Store`'s new API stays embeddable and the bench keeps
   composing `Snapshot`/`Encode` directly (ADR 0001) — no bench code depends on the store.
 
@@ -281,8 +281,8 @@ this ADR moves — the record shape, the per-Turn cadence, and the per-layer ver
   prompting saves nothing. Nothing is lost — that record is already on disk; only a cosmetic
   context-fill/`UpdatedAt` refresh is missed.
 - **Records already written by earlier builds are left alone.** There is no retro-pruning of the
-  empty `Session <date>` records those builds filed; the browser's `d` deletes them, consistent
-  with "no auto-pruning, manual `d` only" in the Consequences above.
+  empty `Session <date>` records those builds filed; the browser's `^d` deletes them, consistent
+  with "no auto-pruning, manual `^d` only" in the Consequences above.
 
 ## Addendum (2026-08-02) — the single flight covers every record write, not only saves
 
