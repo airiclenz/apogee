@@ -1158,7 +1158,7 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 }
 
 // applyColorScheme puts a named colour scheme into effect on THIS screen — the live half of ADR
-// 0039's settings picker, and the one local apply that rebuilds the whole look rather than moving a
+// 0040's settings picker, and the one local apply that rebuilds the whole look rather than moving a
 // field.
 //
 // It re-RESOLVES rather than reading a palette off the Options, so a scheme file the human has just

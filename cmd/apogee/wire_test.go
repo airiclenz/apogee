@@ -423,7 +423,7 @@ func TestRunRootThreadsSpinnerOptions(t *testing.T) {
 // under and whatever the load cost. Reading files is the composition root's job — the renderer is
 // handed colours, never a path.
 //
-// The two cases are the two halves of the forgiving contract (ADR 0039 design call 8): a user file
+// The two cases are the two halves of the forgiving contract (ADR 0040 design call 8): a user file
 // SHADOWS the built-in it shares a name with, and a name nothing answers to costs a warning that
 // says which name rather than the session.
 func TestRunRootResolvesTheColorScheme(t *testing.T) {
@@ -493,7 +493,7 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 		}
 	})
 
-	// The live half (ADR 0039 design call 7): the settings picker's vocabulary and the resolve
+	// The live half (ADR 0040 design call 7): the settings picker's vocabulary and the resolve
 	// behind an answer to it. Both are asked AFTER launch, over a folder written after launch, which
 	// is the property that matters — a list or a palette captured at start-up would leave a human who
 	// has just written a scheme file unable to pick it without restarting.

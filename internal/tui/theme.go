@@ -18,13 +18,13 @@ import (
 // reusable lipgloss styles every renderer draws with — including spinnerBase, the field the
 // status-line spinner paints on (its frames and their timing live with the animation, in
 // spinner.go). It is built in newModel, stored as a Model value field, and rebuilt whole whenever the
-// colour scheme changes under it (ADR 0039 — settingsApplyLocal). A lipgloss.Style
+// colour scheme changes under it (ADR 0040 — settingsApplyLocal). A lipgloss.Style
 // holds no self-referential no-copy type (it is value-copy by design — its whole API returns new
 // Styles), so a theme of Styles is safe inside the value-copied Model (ADR 0011;
 // TestModelNoBuilderByValue guards the strings.Builder case structurally).
 
 // The palette is no longer written here: every colour a style takes comes from the active
-// [scheme.Scheme] handed to [newTheme], one hex value per semantic role (ADR 0039). Colours stay hex
+// [scheme.Scheme] handed to [newTheme], one hex value per semantic role (ADR 0040). Colours stay hex
 // so lipgloss maps them to the terminal's profile, and the two "dark gray" roles of the shipped dark
 // scheme (the user block's background and the chrome's borders) still share one tone — `chrome` —
 // matching the layout sketch (layout.md).
@@ -205,7 +205,7 @@ type theme struct {
 	// style: a widget the theme does not own (the textarea's four background slots, fillInput), a
 	// field laid under someone else's style (popup.go's blackFill, the gauge's partial cell), and a
 	// tone chosen per value rather than per role (the footer's mode marker, [theme.modeColor]).
-	// Before ADR 0039 those sites read the package-level palette vars directly, which is exactly what
+	// Before ADR 0040 those sites read the package-level palette vars directly, which is exactly what
 	// a runtime scheme switch cannot reach — so the theme carries them and the palette is gone. They
 	// are plain lipgloss.Color values (a string type), so the theme stays copy-safe (ADR 0011).
 	surface color.Color // the `surface` role: the input box's interior, the status field, a popup pane's fill
@@ -239,7 +239,7 @@ func (th theme) modeColor(m domain.Mode) color.Color {
 	}
 }
 
-// newTheme builds the styles from a colour scheme — the 24 semantic roles of ADR 0039, resolved
+// newTheme builds the styles from a colour scheme — the 24 semantic roles of ADR 0040, resolved
 // before it is called (the renderer never reads a scheme file itself). It is the ONE seam between a
 // scheme and the look: calling it again with another scheme rebuilds every style, which is what a
 // live scheme switch does (settingsApplyLocal).

@@ -14,7 +14,7 @@ import (
 // /color-scheme — routing the palette verb (command.go owns its grammar)
 // ----------------------------------------------------------------------------
 //
-// The command half of ADR 0039's colour schemes: the settings pane offers the same switch through a
+// The command half of ADR 0040's colour schemes: the settings pane offers the same switch through a
 // picker, and this verb is the one that can be typed, scripted into a habit, and — with `export` —
 // the only way to GET a scheme file to edit, since built-ins are embedded in the binary and never
 // written to disk.
@@ -171,7 +171,7 @@ func colorSchemeSwitchedNote(name, warnings string) string {
 // colorSchemeExportedNote confirms an export by naming the file it wrote and the command that loads
 // it, because the copy is inert until one of the two happens: the file is edited, or it is switched
 // to. Switching to it is spelled with the SAME name that was exported — a user file shadows the
-// built-in it was copied from (ADR 0039 design call 6), so the copy is what that name means from
+// built-in it was copied from (ADR 0040 design call 6), so the copy is what that name means from
 // here on.
 func colorSchemeExportedNote(name, path string) string {
 	return fmt.Sprintf("color-scheme %q written to %s", name, path) + "\n" +

@@ -2216,7 +2216,7 @@ func TestApplyConfigUI(t *testing.T) {
 }
 
 // A `color-scheme:` naming a scheme that does not exist is NOT a startup error — the one ui key
-// that is deliberately forgiving (ADR 0039 design call 8). The name travels through resolution as
+// that is deliberately forgiving (ADR 0040 design call 8). The name travels through resolution as
 // written and the palette is resolved later, where an unresolvable one costs a warning and the
 // default colours rather than the session. Pinned because the two keys beside it do the opposite:
 // an unknown spinner style fails startup loudly, and the temptation is to make this one match.

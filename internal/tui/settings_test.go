@@ -2448,7 +2448,7 @@ func TestSettingsPaneDoesNotReReadAfterAFailedEditor(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// The colour-scheme row: a dynamic vocabulary and a live apply (ADR 0039)
+// The colour-scheme row: a dynamic vocabulary and a live apply (ADR 0040)
 // ----------------------------------------------------------------------------
 
 // settingsSchemeRow is the `ui.color-scheme:` row as the registry describes it
@@ -2490,7 +2490,7 @@ func settingsSchemeModel(t *testing.T, log *settingsWriteLog, list []string,
 // ⏎ on the colour-scheme row opens the same sub-list an enum opens, over the schemes the SESSION
 // discovered rather than over a vocabulary the row carried: the built-ins plus every file in the
 // human's schemes folder, which is a list that changes while the program runs and therefore cannot
-// come from the registry (ADR 0039 design call 6). The scheme in force wears "(current)".
+// come from the registry (ADR 0040 design call 6). The scheme in force wears "(current)".
 func TestSettingsPaneOffersTheSchemesTheSessionDiscovers(t *testing.T) {
 	m := settingsSchemeModel(t, &settingsWriteLog{}, []string{"dark", "light", "mine"},
 		func(string) (scheme.Scheme, []string) { return scheme.Default(), nil })
@@ -2526,7 +2526,7 @@ func TestSettingsPaneSchemeRowOpensNothingWithoutADiscoverySeam(t *testing.T) {
 	}
 }
 
-// The live apply itself, and the whole of what ADR 0039's picker promises: the chosen scheme is
+// The live apply itself, and the whole of what ADR 0040's picker promises: the chosen scheme is
 // persisted, RESOLVED again from the seam (so an edited file lands without a restart), and every
 // style is rebuilt from what came back — with the memoised block paints thrown away, because each of
 // them is in the palette that just stopped being the one on screen (paintcache.go), and a
@@ -2574,7 +2574,7 @@ func TestSettingsPaneAppliesAColorSchemeLive(t *testing.T) {
 	}
 }
 
-// The forgiving load has a voice (ADR 0039 design call 11): a switch that resolved with complaints
+// The forgiving load has a voice (ADR 0040 design call 11): a switch that resolved with complaints
 // still lands — the palette that comes back is always usable — and each complaint becomes one
 // EPHEMERAL transcript note, while the row the human is looking at says how many there were. The
 // pane is drawn over that transcript, so without the row's own sentence they would answer the

@@ -322,7 +322,7 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		{"ui.color-scheme", "light"},
 		// A scheme nothing has written yet is accepted on purpose: the loader answers an unresolvable
 		// name with a warning and the default palette, so a pane that refused it would be stricter
-		// than the thing it configures (ADR 0039 design call 8).
+		// than the thing it configures (ADR 0040 design call 8).
 		{"ui.color-scheme", "solarized"},
 		// A RELATIVE prompt file is resolved against the apogee home, which this pure check does not
 		// hold, so it is accepted here and answered by the apply (validateSystemPromptFile).

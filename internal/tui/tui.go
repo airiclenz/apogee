@@ -275,13 +275,13 @@ type Options struct {
 
 	// ColorSchemeWarnings is what resolving that scheme cost, already rendered to lines: an unknown
 	// name, an unreadable file, a defective key. Each becomes one ephemeral transcript note at
-	// construction (ADR 0039 design call 11) — the load itself is forgiving, so a warning is the
+	// construction (ADR 0040 design call 11) — the load itself is forgiving, so a warning is the
 	// only thing standing between a silently-wrong palette and a human who can fix it. Nil on the
 	// ordinary run, where the scheme loaded cleanly.
 	ColorSchemeWarnings []string
 
 	// ListSchemes names every scheme that can be switched TO right now — the built-ins plus every
-	// `*.yaml` in the schemes folder, a user file shadowing a built-in of the same name (ADR 0039
+	// `*.yaml` in the schemes folder, a user file shadowing a built-in of the same name (ADR 0040
 	// design call 6). It is a closure rather than a slice for the reason [Servers] is: a folder the
 	// human drops a file into mid-session is offered by the settings picker the moment they open it,
 	// and a list snapshotted at launch would go stale the first time they wrote a scheme. Discovery
@@ -303,7 +303,7 @@ type Options struct {
 
 	// ExportScheme writes an editable copy of the named BUILT-IN scheme into the schemes folder and
 	// returns the path it wrote. It is the only way a scheme file comes into existence: the built-ins
-	// are embedded in the binary and never installed on disk (ADR 0039 design call 1), so without an
+	// are embedded in the binary and never installed on disk (ADR 0040 design call 1), so without an
 	// export there is nothing to open in an editor and the shadowing rule has nothing to shadow with.
 	//
 	// It never overwrites (design call 7): an existing file is an error naming it, so an export can

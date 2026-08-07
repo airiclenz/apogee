@@ -466,7 +466,7 @@ func validateSpinnerName(value string) error {
 
 // validateColorSchemeName refuses a name that could not be a scheme's file name — empty, or one
 // carrying a path separator. It deliberately does NOT check that the scheme EXISTS: the load is
-// forgiving by design (ADR 0039 design call 8 — an unresolvable name costs a warning and the
+// forgiving by design (ADR 0040 design call 8 — an unresolvable name costs a warning and the
 // default palette), and a pane that refused to write a name the loader would happily warn about
 // would be stricter than the thing it configures. What it does refuse is a name that is really a
 // path, because the resolver joins it onto the schemes folder and a `../` would reach out of it.

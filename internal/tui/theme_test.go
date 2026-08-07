@@ -177,7 +177,7 @@ func TestNewModelTakesItsThemeFromTheWiredScheme(t *testing.T) {
 }
 
 // What resolving the scheme cost reaches the human: each warning the binary rendered becomes one
-// transcript note at construction (ADR 0039 design call 11). The load is forgiving — an unknown
+// transcript note at construction (ADR 0040 design call 11). The load is forgiving — an unknown
 // name, an unreadable file and a bad hex all keep the session running on default colours — so the
 // note is the only thing that tells the human their scheme is not the one they are looking at.
 //

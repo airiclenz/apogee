@@ -79,7 +79,7 @@ func TestColorSchemeCommandListsWhatCanBeSwitchedTo(t *testing.T) {
 
 // A configured name nothing on disk or in the binary answers to is reported rather than left as an
 // unmarked list: the screen is drawn in the default while the file names something else, and that
-// gap is exactly what the listing is opened to explain (the forgiving load, ADR 0039 design call 8).
+// gap is exactly what the listing is opened to explain (the forgiving load, ADR 0040 design call 8).
 func TestColorSchemeCommandNamesAConfiguredSchemeThatIsNotOnOffer(t *testing.T) {
 	opts := colorSchemeOpts(nil, []string{"dark", "light"}, nil, nil)
 	opts.ColorSchemeName = "solarized"

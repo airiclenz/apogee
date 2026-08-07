@@ -396,7 +396,7 @@ type uiSettings struct {
 	// a built-in of the same name. It is carried as a NAME rather than a resolved palette because
 	// resolution reads a file, which the composition root does at wiring time (wire.go) — and,
 	// unlike spinner, an unknown name is deliberately NOT a startup error: a scheme is cosmetic, so
-	// a typo costs a warning and the default palette rather than the session (ADR 0039 design
+	// a typo costs a warning and the default palette rather than the session (ADR 0040 design
 	// call 8).
 	colorScheme string
 }
@@ -1116,7 +1116,7 @@ type uiConfig struct {
 	// ColorScheme names the palette the screen is drawn in — a built-in or a file in
 	// `<apogee-home>/schemes/`. Empty ⇒ the default scheme. A plain string with no pointer and no
 	// validation at this seam: every name is admissible on disk because an unresolvable one is
-	// answered with a warning and the default palette rather than a startup error (ADR 0039).
+	// answered with a warning and the default palette rather than a startup error (ADR 0040).
 	ColorScheme string `yaml:"color-scheme"`
 }
 

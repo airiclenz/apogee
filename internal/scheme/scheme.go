@@ -15,7 +15,7 @@ import (
 const DefaultName = "dark"
 
 // builtinFS carries the shipped schemes. They live in the binary, never on disk —
-// nothing installs them at boot and nothing fetches them from a network (ADR 0039).
+// nothing installs them at boot and nothing fetches them from a network (ADR 0040).
 //
 //go:embed schemes/*.yaml
 var builtinFS embed.FS

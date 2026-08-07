@@ -121,7 +121,7 @@ type commandSpec struct {
 // prompt form reads the raw tail of the line rather than its tokens (parsedInput.rest), because a
 // prompt is text the human wrote, not a token list to be re-spaced.
 //
-// /color-scheme is the palette verb (colorscheme.go, ADR 0039): bare it lists what this session can
+// /color-scheme is the palette verb (colorscheme.go, ADR 0040): bare it lists what this session can
 // switch to, with a name it switches — persisting the key and repainting on the same keypress, the
 // settings pane's own validate → persist → apply — and `export <name>` writes an editable copy of a
 // built-in into the human's schemes folder. Idle-only like every other verb that writes config, and
@@ -406,7 +406,7 @@ const colorSchemeUsage = "usage: /color-scheme | /color-scheme <name> | /color-s
 
 // parseColorScheme parses the argument tokens that followed a "/color-scheme" verb. No arguments
 // means the listing. One token is a scheme NAME to switch to — any name, because a scheme this
-// build cannot find is a forgiving load with a warning rather than a parse error (ADR 0039 design
+// build cannot find is a forgiving load with a warning rather than a parse error (ADR 0040 design
 // call 8), and refusing it here would put the parser in the business of knowing what is on disk.
 // "export" is the one reserved first token, and it takes exactly one name.
 //

@@ -253,7 +253,7 @@ type Model struct {
 	// string, so it rides the value-copied Model (ADR 0011); "" means there is nothing to name and
 	// the footer drops the segment.
 	workdir       string
-	th            theme // the palette and reusable styles; rebuilt whenever the colour scheme changes (ADR 0039)
+	th            theme // the palette and reusable styles; rebuilt whenever the colour scheme changes (ADR 0040)
 	width, height int
 	ready         bool // a WindowSizeMsg has sized the layout at least once
 	// detached says the human scrolled off the tail: refreshViewport holds the scroll position
@@ -338,7 +338,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// loaded are reported here — last, so the notice closes the opening frame rather than
 	// separating the box from the scrollback it belongs to.
 	m.noteContextFiles()
-	// What loading the colour scheme cost, if anything (ADR 0039 design call 11). It goes after the
+	// What loading the colour scheme cost, if anything (ADR 0040 design call 11). It goes after the
 	// notices above because it is about the SCREEN rather than about the session, so it reads as the
 	// last word on the frame the human is looking at — and because a scheme that loaded cleanly, the
 	// ordinary case, adds nothing here at all.
@@ -440,7 +440,7 @@ func (m *Model) noteContextFiles() {
 
 // noteColorSchemeWarnings surfaces what loading the configured colour scheme cost — an unknown
 // name, an unreadable file, a key whose value is not a colour. The load is forgiving by design (ADR
-// 0039 design call 8): every one of those keeps the default palette rather than failing the run, so
+// 0040 design call 8): every one of those keeps the default palette rather than failing the run, so
 // a warning is the only thing that tells the human their scheme is not the one on screen.
 //
 // The lines are rendered by the binary (Options.ColorSchemeWarnings), which is what read the file;
@@ -460,7 +460,7 @@ func (m *Model) noteColorSchemeWarnings(warnings []string) {
 // fillInput gives the textarea the solid interior the layout calls for: the base, text, cursor
 // line, and placeholder all sit on the scheme's `surface` tone so the box reads as one solid field
 // inside its chrome border, on any terminal theme. The colour is passed in rather than read off a
-// package-level palette because it is the active scheme's ([theme.surface], ADR 0039) — the widget
+// package-level palette because it is the active scheme's ([theme.surface], ADR 0040) — the widget
 // belongs to Bubble Tea, so this is the only way the theme reaches it.
 func fillInput(ta *textarea.Model, surface color.Color) {
 	s := ta.Styles()
@@ -1619,7 +1619,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		return m.runSettingsCommand()
 
 	case "color-scheme":
-		// List, switch or export a colour scheme (colorscheme.go, ADR 0039). Synchronous and
+		// List, switch or export a colour scheme (colorscheme.go, ADR 0040). Synchronous and
 		// idle-safe like /settings, whose write and apply seams the switch form reuses in full: no
 		// engine call and no worker, only one config key and — for the export — one file.
 		return m.runColorScheme(parsed.colorScheme)

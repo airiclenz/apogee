@@ -83,6 +83,24 @@ the glyph the pointer is on.
 
 ---
 
+## What "colour" means everywhere below
+
+**Every colour in this document is a role, and the hex beside it is one scheme's answer.** Colours
+come from the active **colour scheme**: one YAML file of 24 semantic roles, selected by
+`ui.color-scheme`, shipped as `dark` and `light` and overridable per user from
+`~/.apogee/schemes/` ([ADR 0040](docs/adr/0040-color-schemes-are-embedded-roles-with-user-shadowing.md),
+`CONTEXT.md` §Color scheme). Every hex quoted below is the built-in **`dark`** scheme's value — what
+apogee paints until someone picks another — and is named with the role key that carries it, so a
+scheme swap moves all of them at once, live, with the screen repainted from scratch.
+
+**What a scheme cannot do is change any shape in this document.** It recolours only what apogee
+already colours: no full-screen background is painted, so the terminal's own background stays the
+field everything below is drawn on, and no glyph, marker, width or row budget is themed. Two roles
+are load-bearing rather than decorative and every shipped scheme is tested for them: `skill` and
+`file-ref` must stay tellable apart (ADR 0027), as must the four `mode-*` tones.
+
+---
+
 ## What "height" means: one row budget, and the transcript pays it
 
 **Every pane above the input box takes its rows from the transcript.** The approval and ask
@@ -431,8 +449,9 @@ count `(N)`, plus — exactly where the header is a toggle target — the traili
 indicator below, **and nothing else — never a target**. That holds for every block alike: a grouped
 run, a lone call, a call still in flight, and the stray-result `result` header. The target always
 leads the first branch line instead, so the **target column does not move** when a second call joins
-the block. The label carries no brackets and is rendered **bold in orange `#f0883e`** — the tone
-inline code and the auto-mode marker already use. The styling is uniform too: a known friendly
+the block. The label carries no brackets and is rendered **bold in the scheme's `code` role**
+(`#f0883e` under `dark`) — the tone inline code already uses, and the one `mode-auto` carries in
+both shipped schemes. The styling is uniform too: a known friendly
 label ("Read File"), an unknown tool's raw name, and `result` all look the same. The
 bare-name-means-unregistered signal was the brackets' job and dies with them. The count is **not**
 part of the name and is painted in the faint indicator tone rather than the orange: it is the
@@ -687,8 +706,9 @@ as the last letter of it. Their presence *is* the clickability hint, because the
 click-target rule are **one predicate**: an indicator appears exactly where a click toggles
 something, so a block that hides nothing wears none, a group's header — which toggles nothing —
 never wears one at all, and a sub-agent run's head wears one however short its own report is. The
-`+N more lines` marker is apogee's line too and is painted as one — light gray-blue `#8db4e6`, no
-background and no bold weight, the quieter sibling of the prompt block's `see more` — so a body line
+`+N more lines` marker is apogee's line too and is painted as one — the `tool-marker` role, a light
+gray-blue `#8db4e6` under `dark`, no background and no bold weight, the quieter sibling of the
+prompt block's `see more` (the `prompt-toggle` role) — so a body line
 that happens to open with `+` can never be mistaken for the affordance beneath it. The sketch at the
 top of this file shows both states side by side: a collapsed `Run ▶` over its remainder marker, and
 a `View Diff ▼` and a `Sub Agent ▼` deliberately drawn open so the shape of a full body appears
@@ -697,9 +717,12 @@ too — the run among them, because collapsed it would show nothing of what it h
 one above it were written from.
 
 **An open block reads a step brighter.** The plain detail gray a block paints its target, its
-summary and its body in has two tones: the dim `#8a8a8a` while the block is collapsed, and
-`#b2b2b2` once it — or, inside a group, the member — is open, so what a reader opened stands out
-from the collapsed blocks around it without being another colour. It reaches the block's **text**
+summary and its body in has two tones, and they are two roles: the dim `muted` (`#8a8a8a` under
+`dark`) while the block is collapsed, and `muted-bright` (`#b2b2b2`) once it — or, inside a group,
+the member — is open, so what a reader opened stands out from the collapsed blocks around it
+without being another colour. The pair is a **step along one ramp**, which is what every scheme has
+to preserve rather than the direction of the step: under a light scheme "brighter" is the darker of
+the two. It reaches the block's **text**
 alone. The chrome keeps one tone in both states — the `▶`/`▼`, the `+N more lines` marker, an open
 member's `│` gutter — because those are apogee's marks on the block rather than what the block has
 to say, and brightening them alongside the content would make the affordances shout exactly where
@@ -733,9 +756,9 @@ never out of the marker. Expanded, the body paints in full — no content row is
 make room — and `see less…` closes the block on a trailing row of its own.
 
 **A skill a send invoked is painted where it stands.** The block carries no tag row naming it: the
-`/token` inside the block's own text is painted in the skill violet — the same colour the prompt box
-gives a token that resolves, drawn on the block's own field rather than the box's black, so the
-block still reads as one band — and the text of the send *is* the record of what the model was given.
+`/token` inside the block's own text is painted in the `skill` role, the violet — the same colour the
+prompt box gives a token that resolves, drawn on the block's own field (`chrome`) rather than the
+input box's interior (`surface`), so the block still reads as one band — and the text of the send *is* the record of what the model was given.
 The accent is painted onto the rows the block SHOWS, which makes it fall out of the collapse rather
 than argue with it — a token on a row the cap hid simply is not painted, a token straddling a
 soft-wrap is accented on every visible row it spans, and a token on the truncated third row is held
@@ -934,9 +957,11 @@ rotation apogee shipped before and still supports. Only `classic` is one column 
 two are two, which shifts the activity phrase one column right of the sketch's older single-cell
 `⣻`. The phrase and the elapsed clock beside it are the same for every style.
 
-**Which colour.** `ui.spinner-color` runs a soft ten-second loop through three palette tones
-(periwinkle → turquoise → blue → back) over whichever style is selected; with it off, the glyph
-keeps the terminal's own text colour on the status bar's black field. The two keys are
+**Which colour.** `ui.spinner-color` runs a soft ten-second loop through the active scheme's four
+`spinner-*` roles, visited in order and closing back on the first (violet → green → amber → pink
+under `dark`), over whichever style is selected; with it off, the glyph keeps the terminal's own
+text colour on the status bar's field. Picking another colour scheme moves the loop with it — the
+stops are the scheme's, not this file's. The two keys are
 independent — every style renders both coloured and plain — so picking `classic` does not turn
 the loop off, and `classic` with the loop off is exactly the status line apogee rendered before
 the styles existed. The loop is quantised downstream by the terminal, so on a 256-colour
@@ -1394,18 +1419,19 @@ in its own legend, in both states: `Send a message…  ⏎ send · ⇧⏎/⌥⏎
 at idle, `queue a message…  ⏎ queue · ↑ recall · esc stop` while the model works — a placeholder is
 only ever painted on an empty box, which is exactly the box where ↑ starts a walk.
 
-**Tokens light up when they resolve.** Inside the box a `/token` is painted in the skill violet
-only when it names a skill in the catalog, and an `@path` in the reference blue only when the path
+**Tokens light up when they resolve.** Inside the box a `/token` is painted in the `skill` role
+only when it names a skill in the catalog, and an `@path` in the `file-ref` role only when the path
 is in the workspace listing. Everything else stays plain prompt text, so the colour is a live
-verdict rather than decoration: a typo simply never lights. Both accents are drawn on the box's
-own black, so the field still reads as one band, and a token wrapped across rows is painted on
+verdict rather than decoration: a typo simply never lights. The two roles are the pair every scheme
+must keep tellable apart (ADR 0027), because this is the whole signal. Both accents are drawn on
+the box's own interior (`surface`), so the field still reads as one band, and a token wrapped across rows is painted on
 every row it spans. A drag-selection drawn over a token wins — selection is painted last.
 
 **What is not here any more.** There is no strip of attached-skill chips above the box, and no
 `✦ name` tag row under the sent block either. A skill is its `/token` in the text now, so the
 message says what it invokes without a second surface repeating it — and the transcript answers the
 same way: the sent user block, and a delivered `⧖` interjection block with it, paints the `/token`
-where it stands in the skill violet, mirroring "Tokens light up when they resolve." above. What the
+where it stands in the `skill` role, mirroring "Tokens light up when they resolve." above. What the
 colour answers to is what differs. In the box it is a live verdict, re-derived against the catalog
 on every keystroke. In the transcript it is a **persisted** one: the spans are captured at send
 time and stored on the entry, so a replayed session paints exactly what that send resolved to even

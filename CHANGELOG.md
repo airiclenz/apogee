@@ -34,6 +34,32 @@ point is a **minor** bump, not a breaking change.
 
   The type-to-filter grammar and the rebound verbs are documented in `layout.md` (§"One overlay for
   'which one?'" and the `/sessions` browser paragraph beside it).
+- **Color schemes — apogee's palette is now a file you can pick, and write.** Every colour on screen
+  comes from the active **colour scheme**: one YAML file of 24 semantic roles (`error`, `code`,
+  `skill`, `file-ref`, `muted`/`muted-bright`, the four autonomy modes, the four spinner stops, …),
+  named for what they mean rather than where they are drawn. Two schemes ship, compiled into the
+  binary: **`dark`**, which is exactly the palette apogee has always drawn with and stays the
+  default, and a new **`light`** for light terminals. Nothing is installed on disk and nothing is
+  ever downloaded.
+  - **`ui.color-scheme` in the `ui:` block** selects it, and **`~/.apogee/schemes/<name>.yaml`
+    shadows a built-in of the same name** — write `dark.yaml` there and you have adjusted `dark`
+    while still typing `dark`; delete the file and the shipped one is back.
+  - **`/color-scheme`** is the verb: bare, it lists what this session can switch to with the
+    current one marked; `/color-scheme <name>` switches the screen **and saves the choice** through
+    the same write the settings pane uses; `/color-scheme export <name>` writes an editable,
+    fully-commented copy of a built-in into `~/.apogee/schemes/` and refuses to overwrite a file
+    that is already there.
+  - **The `/settings` pane carries a picker row** for the key — built-ins and your own files in one
+    list — and it applies **live**: the whole screen is rebuilt and repainted on the ⏎ that saves,
+    no restart anywhere.
+  - **A defective scheme costs colour, never the session.** A bad hex, an unknown key, an unreadable
+    file or a name that resolves to nothing each fall back to the default and say so in a dim
+    transcript note naming the file and the key — at start-up and after a switch alike. Every key is
+    optional, so a two-line scheme file that changes two roles is a perfectly good scheme.
+  - Schemes recolour **only what apogee already colours** — no full-screen background is painted, and
+    no glyph, marker or layout is themed. Recorded in
+    [ADR 0040](docs/adr/0040-color-schemes-are-embedded-roles-with-user-shadowing.md), with the role
+    vocabulary in `CONTEXT.md` §Color scheme and the per-role prose in `layout.md`.
 
 ### Changed
 

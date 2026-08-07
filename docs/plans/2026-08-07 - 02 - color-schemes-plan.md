@@ -493,9 +493,30 @@ refuse-overwrite error surfaces.
 
 **Commit:** `feat(tui): /color-scheme command — list, switch, export`
 
-## 9. Docs: ADR 0039, CONTEXT.md term, layout.md, CHANGELOG
+## 9. Docs: ADR 0039, CONTEXT.md term, layout.md, CHANGELOG — ✅ DONE (2026-08-07)
 
 Depends on items 1–8 (content describes the landed behavior).
+
+NOTES (2026-08-07): two run-level FOLLOW-UP FIXES carried by this item (user-assigned, in scope
+here; the item's own text is otherwise unchanged).
+(a) ADR NUMBER — the record is **0040**, not this item's heading's 0039:
+`docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md`
+already exists (commit 37242ba), so 0039 was taken by the time items 1–8 ran. The file written is
+`docs/adr/0040-color-schemes-are-embedded-roles-with-user-shadowing.md`, and every colour-scheme
+citation items 1–8 planted was swept from 0039 to 0040 — 36 references across `cmd/apogee/` and
+`internal/` (`grep -rn "0039" cmd/apogee internal/` now returns nothing). The genuine ADR 0039
+references to the delegation fan-out (`CONTEXT.md`, `docs/adr/0013`, `docs/adr/0014`,
+`docs/plans/2026-08-07 - 03`) were left alone. This heading and the Acceptance line below still say
+0039 because the saved plan document is not renumbered mid-run.
+(b) ROLE COUNT — every doc written here says **24 roles**, not 23. Item 4's own follow-up fix added
+`muted-bright` after this plan was written (see its NOTES), so design call 3's and items 1/3's "23
+roles" wording is historical; the shipped `Scheme` declares 24.
+(c) One more deviation, unassigned: `layout.md`'s spinner passage said the colour loop ran through
+"three palette tones (periwinkle → turquoise → blue → back)", which the four `spinner-*` roles
+falsify — it now names the four stops. Naming the roles where fixed tones were stated is this
+item's own instruction, and leaving the count wrong would have been a new false claim about the
+scheme this record introduces. `README.md` gained one Key-capabilities line (the item's conditional
+bullet); its `/command` table row landed with item 8.
 
 **What:**
 

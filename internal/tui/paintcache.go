@@ -75,7 +75,7 @@ type paintKey struct {
 	// method.
 	//
 	// The COLOURS move too, and are deliberately not named here. A colour-scheme switch rebuilds
-	// every style at once (ADR 0039), which is the "theme changes" case this comment used to say did
+	// every style at once (ADR 0040), which is the "theme changes" case this comment used to say did
 	// not exist — and the alternative it named is the one taken: the switch CLEARS the cache outright
 	// (settingsApplyLocal's applyColorScheme) rather than growing this key into a full theme
 	// identity. That keeps a steady-state repaint comparing four scalars and a string, and it is

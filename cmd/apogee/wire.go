@@ -552,7 +552,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// composition root's job, so the TUI is handed a palette and never a path (ADR 0031's
 	// wire-silent engine has the same shape — the driver resolves, the component renders). Nothing
 	// it answers is fatal: an unknown name, an unreadable file and a defective key each cost a
-	// warning and keep the default palette (ADR 0039 design call 8), and those warnings travel with
+	// warning and keep the default palette (ADR 0040 design call 8), and those warnings travel with
 	// the palette so the transcript can say what went wrong.
 	// The live half of the same seam is a pair of closures over the SAME folder (ADR 0037's
 	// validate → persist → apply, with the apply landing entirely inside the renderer): the settings
@@ -2203,7 +2203,7 @@ type stateRoots struct {
 // forgiving fallbacks, the same sentences.
 //
 // It never fails: an unknown name, an unreadable file and a defective key each cost a warning and
-// keep the built-in default (ADR 0039 design call 8), so what comes back is always a usable palette.
+// keep the built-in default (ADR 0040 design call 8), so what comes back is always a usable palette.
 // Rendering the warnings here rather than passing [scheme.Warning] values on is what keeps the
 // renderer out of the scheme package: it is handed sentences it prints, not a type it formats.
 func resolveColorScheme(name, schemesDir string) (scheme.Scheme, []string) {
@@ -2270,7 +2270,7 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 		// a path only: internal/recall creates the directory on the first prompt it records, so a
 		// run that sends nothing leaves no trace.
 		prompts: filepath.Join(absHome, "prompts"),
-		// The user's own colour schemes (ADR 0039): one `<name>.yaml` per scheme, shadowing a
+		// The user's own colour schemes (ADR 0040): one `<name>.yaml` per scheme, shadowing a
 		// built-in of the same name. Like every root here it is a path only — nothing creates the
 		// folder until `/color-scheme export` writes into it, and a run whose scheme is a built-in
 		// never looks inside it beyond listing what is there.
