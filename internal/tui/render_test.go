@@ -696,8 +696,9 @@ func readCall(tr *transcript, id, path string, from, to, depth int) {
 	})
 }
 
-// A batch of reads folds into one block: a single ✦ Read File header, ┝ ┝ ┕ rails, and every
-// target padded to the widest one so the detail column lines up — the shape layout.md sketches.
+// A batch of reads folds into one block: a single ✦ Read File header carrying the member count,
+// ┝ ┝ ┕ rails, and every target padded to the widest one so the detail column lines up — the shape
+// docs/layout/tool-layout.md sketches.
 func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 	tr := &transcript{}
 	readCall(tr, "c1", "README.md", 1, 154, 0)
@@ -705,7 +706,7 @@ func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 	readCall(tr, "c3", "ISSUES.md", 1, 8, 0)
 
 	want := strings.Join([]string{
-		"✦ Read File",
+		"✦ Read File (3)",
 		"  ┝ README.md 1 - 154",
 		"  ┝ TODO.md   1 - 408",
 		"  ┕ ISSUES.md 1 - 8",
@@ -726,7 +727,7 @@ func TestRenderGroupsInsideSubAgent(t *testing.T) {
 	want := strings.Join([]string{
 		"│ ⤷ sub-agent",
 		"│",
-		"│ ✦ Read File",
+		"│ ✦ Read File (2)",
 		"│   ┝ a.go  1 - 5",
 		"│   ┕ bb.go 1 - 9",
 	}, "\n")
@@ -745,7 +746,7 @@ func TestRenderGroupsDifferentToolsSharingALabel(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "applied 2 replacements to bb.go"}})
 
 	want := strings.Join([]string{
-		"✦ Edit File",
+		"✦ Edit File (2)",
 		"  ┝ a.go  replaced text in a.go",
 		"  ┕ bb.go applied 2 replacements to bb.go",
 	}, "\n")
@@ -762,7 +763,7 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "read_file", Arguments: []byte(`{"path":"TODO.md"}`)}})
 
 	want := strings.Join([]string{
-		"✦ Read File",
+		"✦ Read File (2)",
 		"  ┝ README.md 1 - 154",
 		"  ┕ TODO.md",
 	}, "\n")
@@ -774,7 +775,7 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 		Content: "[File: TODO.md, 408 lines total, showing lines 1-408]\n…",
 		Summary: domain.ReadSpan{Start: 1, End: 408, Total: 408}}})
 	want = strings.Join([]string{
-		"✦ Read File",
+		"✦ Read File (2)",
 		"  ┝ README.md 1 - 154",
 		"  ┕ TODO.md   1 - 408",
 	}, "\n")
@@ -783,9 +784,10 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 	}
 }
 
-// A lone call renders in the very shape a group does — label-only header, target leading the
-// branch — so the block does not reshape when a second call joins it. That is the whole point of
-// the uniform layout, and the ┕-with-no-padding is what "a group of one pads to itself" means.
+// A lone call renders in the shape a group does — a label header, target leading the branch — and
+// counts nothing: the "(N)" is a group's arithmetic and a block of one has none to state. The
+// ┕-with-no-padding is what "a group of one pads to itself" means, and a second call joins by
+// adding a line rather than by moving the first one's target.
 func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	tr := &transcript{}
 	readCall(tr, "c1", "main.go", 1, 154, 0)
@@ -801,7 +803,7 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	// …and a second call joins it by adding a line, not by moving the first one's target.
 	readCall(tr, "c2", "a-much-longer-name.go", 1, 9, 0)
 	want = strings.Join([]string{
-		"✦ Read File",
+		"✦ Read File (2)",
 		"  ┝ main.go               1 - 154",
 		"  ┕ a-much-longer-name.go 1 - 9",
 	}, "\n")
@@ -1155,21 +1157,125 @@ func TestClippedTargetAloneMakesABlockAToggleTarget(t *testing.T) {
 	}
 }
 
-// A grouped run paints the same in both states, and no special case in the painter makes that
-// true: a groupable call carries no body by definition, so there is nothing for the expanded
-// paint to reveal (layout.md — the group is the degenerate case of the two-state rule).
-func TestExpandedGroupPaintsIdentically(t *testing.T) {
+// groupMemberLine composes a collapsed member row the way the painter lays it out: the row's own
+// text, then the ▶ flush against the block's right edge. A golden line then reads as the text it
+// carries rather than as a hand-counted run of spaces, and the count moves with the width.
+func groupMemberLine(t *testing.T, text string, width int) string {
+	t.Helper()
+	th := newTheme()
+	pad := width - th.measure.Width(text) - th.measure.Width(glyphCollapsed)
+	if pad < 0 {
+		t.Fatalf("member row %q does not fit width %d", text, width)
+	}
+	return text + strings.Repeat(" ", pad) + glyphCollapsed
+}
+
+// summaryColumn is the display CELL a row's summary opens in — the column the eye reads it in,
+// which a byte offset is not: a branch marker and a clip tail are three bytes each and one cell
+// each, so two rows carrying different glyphs land at different byte offsets in the same column.
+func summaryColumn(t *testing.T, row, summary string) int {
+	t.Helper()
+	at := strings.Index(row, summary)
+	if at < 0 {
+		t.Fatalf("row %q carries no summary %q", row, summary)
+	}
+	return newTheme().measure.Width(row[:at])
+}
+
+// TestRenderGroupsBodyCarryingCalls is the grouping scope's new half (design call 3): a call that
+// carries a body groups exactly as a bodiless one does, and pays for it with a member row held to
+// ONE line. Three Runs with output are the sketch's own case
+// (docs/layout/tool-layout.md): one header counting them, one row each, and every ▶ flush against
+// the block's right edge, whatever the commands beneath it are doing.
+func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
+	tr := &transcript{}
+	for _, c := range []struct{ id, command, output string }{
+		{"c1", "go build ./...", "ok\nbuilt"},
+		{"c2", "go vet ./...", "clean\nno findings\ndone"},
+		{"c3", "go test ./...", "ok\nPASS"},
+	} {
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: c.id, Tool: "terminal",
+			Arguments: []byte(`{"command":"` + c.command + `"}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: c.id, Content: c.output}})
+	}
+
+	want := strings.Join([]string{
+		"✦ Run (3)",
+		groupMemberLine(t, "  ┝ go build ./...", 80),
+		groupMemberLine(t, "  ┝ go vet ./...", 80),
+		groupMemberLine(t, "  ┕ go test ./...", 80),
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("body-carrying group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// The count is the group's own arithmetic and is painted as such: it rides the header in the faint
+// indicator tone rather than in the label's bold orange, so a reader scanning the orange down the
+// left edge does not read "(3)" as part of the tool's name (design call 6). The header wears no
+// state indicator and takes no click — the members own their state.
+func TestGroupHeaderCountIsFaintAndInert(t *testing.T) {
+	th := newTheme()
+	if !colorActive(th) {
+		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
+	}
 	tr := &transcript{}
 	readCall(tr, "c1", "main.go", 1, 154, 0)
 	readCall(tr, "c2", "util.go", 1, 42, 0)
 
-	collapsed := renderPlain(tr, 80)
-	if !tr.toggleExpanded(0) {
-		t.Fatal("toggleExpanded(0) = false; want the group's head entry toggled")
+	header := tr.renderLines(th, 80)[0]
+	if want := th.toolIndicator.Render("(2)"); !strings.Contains(header, want) {
+		t.Errorf("header %q does not carry the faint-styled count %q", header, want)
 	}
+	if styled := th.toolLabel.Render("Read File (2)"); strings.Contains(header, styled) {
+		t.Errorf("header %q paints the count in the label's own style", header)
+	}
+	if strings.ContainsAny(strip(header), glyphCollapsed+glyphExpanded) {
+		t.Errorf("group header %q wears a state indicator; the members own their state", strip(header))
+	}
+	if got := blockMarks(t, tr, 80); got != nil {
+		t.Errorf("group marks = %+v, want none — a group header is not a click target", got)
+	}
+}
 
-	if got := renderPlain(tr, 80); got != collapsed {
-		t.Errorf("expanded group repainted:\n--- got ---\n%s\n--- want (unchanged) ---\n%s", got, collapsed)
+// A member's summary is never traded away for more of its target: the outcome's cells are reserved
+// first and the target takes what is left, ending in the clip tail. The indicator field is reserved
+// on every member, so the ▶ of the member that has something to reveal lands in the same column the
+// bare rows leave empty.
+func TestGroupMemberKeepsItsSummaryAndClipsTheTarget(t *testing.T) {
+	const width = 60
+	long := "cd . && " + strings.Repeat("echo one-more-fragment && ", 6) + "true"
+
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal",
+		Arguments: []byte(`{"command":"` + long + `"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "abc1234"}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "terminal",
+		Arguments: []byte(`{"command":"pwd"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "/repo"}})
+
+	rows := strings.Split(renderPlain(tr, width), "\n")
+	if len(rows) != 3 {
+		t.Fatalf("group painted %d rows, want 3 — one header and one row per member:\n%s",
+			len(rows), strings.Join(rows, "\n"))
+	}
+	if !strings.HasSuffix(rows[1], glyphCollapsed) || !strings.Contains(rows[1], clipTail) {
+		t.Errorf("clipped member = %q; want the target cut with %q and the ▶ at the edge",
+			rows[1], clipTail)
+	}
+	if got := newTheme().measure.Width(rows[1]); got != width {
+		t.Errorf("clipped member measures %d cells, want the full %d", got, width)
+	}
+	if strings.HasSuffix(rows[2], glyphCollapsed) {
+		t.Errorf("short member = %q; it hides nothing and must wear no indicator", rows[2])
+	}
+	// The summaries open in the SAME column though one target was cut and the other padded: the
+	// column is the block's, capped once against its widest summary (groupTargetCells). Measured in
+	// display cells, not bytes — both rows carry multi-byte glyphs the other does not.
+	a, b := summaryColumn(t, rows[1], "abc1234"), summaryColumn(t, rows[2], "/repo")
+	if a != b {
+		t.Errorf("summaries open at columns %d and %d; want one shared column:\n%s\n%s",
+			a, b, rows[1], rows[2])
 	}
 }
 
@@ -1269,15 +1375,22 @@ func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 	})
 }
 
-// The record breaks the grouping a question used to fold into: a call carrying a body is not
-// groupable, so consecutive answered questions each keep a block of their own, each with the room
-// its own exchange needs. Pending ones still group — they carry no body yet — which is what makes
-// this the ordinary rule applying rather than a rule about Ask User.
+// The record breaks the grouping a question used to fold into, and now SAYS so: the presenter marks
+// an answered record solo (askUserAnswerRecord), so consecutive answered questions each keep a block
+// of their own with the room the exchange needs. It used to be kept apart by the body it carries,
+// back when grouping admitted bodiless calls only; a Run and its output group now, so the exclusion
+// had to become a statement rather than a side effect. Pending questions still group — nothing has
+// been answered, so there is no record to stand alone — which is what keeps this a rule about
+// records and not a rule about Ask User.
 func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 	t.Run("answered questions stand alone", func(t *testing.T) {
 		tr := &transcript{}
 		askUserCall(tr, "c1", `{"question":"Ship it?","choices":["Yes","No"]}`, "Yes")
 		askUserCall(tr, "c2", `{"question":"Tag it?","choices":["Yes","No"]}`, "No")
+
+		if !tr.entries[0].tool.solo {
+			t.Error("the answered record is not marked solo; the split would rest on its body again")
+		}
 
 		want := strings.Join([]string{
 			"✦ Ask User ▶",
@@ -1293,13 +1406,35 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 		}
 	})
 
+	// The mark is a verdict the presenter reached when the result landed, and decode never re-runs a
+	// presenter — so it rides the wire (wireToolView.Solo). Without it a resumed session would fold
+	// two records into one group, which is the scrollback changing shape across a restart.
+	t.Run("a replayed record still stands alone", func(t *testing.T) {
+		tr := &transcript{}
+		askUserCall(tr, "c1", `{"question":"Ship it?","choices":["Yes","No"]}`, "Yes")
+		askUserCall(tr, "c2", `{"question":"Tag it?","choices":["Yes","No"]}`, "No")
+		before := renderPlain(tr, 80)
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		entries, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if got := renderPlain(&transcript{entries: entries}, 80); got != before {
+			t.Errorf("replayed records mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, before)
+		}
+	})
+
 	t.Run("pending questions still group", func(t *testing.T) {
 		tr := &transcript{}
 		askUserCall(tr, "c1", `{"question":"Ship it?","choices":["Yes","No"]}`, "")
 		askUserCall(tr, "c2", `{"question":"Tag it?","choices":["Yes","No"]}`, "")
 
 		want := strings.Join([]string{
-			"✦ Ask User",
+			"✦ Ask User (2)",
 			"  ┝ Ship it?",
 			"  ┕ Tag it?",
 		}, "\n")
@@ -1307,6 +1442,44 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 			t.Errorf("pending questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
 	})
+}
+
+// A sub-agent call heads a run rather than joining one: what hangs beneath its block is a whole
+// delegation (renderSubAgentRun), so two delegations in a row are two blocks and never one
+// "✦ Sub-Agent (2)" counting them. The painter's span rule cannot carry that on its own — it fires
+// only for a head with nested entries behind it, and a delegation refused at the depth bound
+// (executeRefuse, internal/agent) leaves a head with NO span, which is a call of the right shape
+// sitting beside another. The presenter states the fact instead (presentToolCall marks the call
+// solo), so the rule holds for the empty run as well as the full one.
+func TestSpanlessSubAgentHeadsNeverGroup(t *testing.T) {
+	const refusal = "sub-agent depth limit reached (max 2): cannot spawn a deeper sub-agent"
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"first"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "s1", Content: refusal, IsError: true}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s2", Tool: "sub_agent", Arguments: []byte(`{"task":"second"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "s2", Content: refusal, IsError: true}})
+
+	for i := range tr.entries {
+		if span := subAgentSpan(tr.entries, i); span != 0 {
+			t.Fatalf("entry %d heads a span of %d; the premise here is a head with none", i, span)
+		}
+	}
+	if run := toolCallRun(tr.entries, 0); run != nil {
+		t.Fatalf("toolCallRun over the two refused delegations = %d views, want none — a solo call heads no run", len(run))
+	}
+
+	want := strings.Join([]string{
+		"✦ Sub-Agent",
+		"  ┕ first error: sub-agent depth limit reached (max 2): cannot spawn a deeper",
+		"    sub-agent",
+		"",
+		"✦ Sub-Agent",
+		"  ┕ second error: sub-agent depth limit reached (max 2): cannot spawn a deeper",
+		"    sub-agent",
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("refused delegations mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -1867,18 +2040,22 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 		},
 		{
 			// Two blocks of the same shape: each header and marker names its OWN head entry, which
-			// is the whole of what the index is for.
+			// is the whole of what the index is for. The approval note between them is what keeps
+			// them two blocks — two same-label calls are one group now, however much body they
+			// carry (groupable) — and it makes the second block's index 2, which a mark that
+			// counted blocks rather than entries would get wrong.
 			name:  "each block's marks carry its own entry index",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				run(tr, "c1", "go build ./...", "a\nb\nc", 0)
+				tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
 				run(tr, "c2", "go vet ./...", "x\ny", 0)
 			},
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run ▶"},
 				{line: 2, kind: targetMarker, entry: 0, text: "    +3 more lines"},
-				{line: 4, kind: targetHeader, entry: 1, text: "✦ Run ▶"},
-				{line: 6, kind: targetMarker, entry: 1, text: "    +2 more lines"},
+				{line: 6, kind: targetHeader, entry: 2, text: "✦ Run ▶"},
+				{line: 8, kind: targetMarker, entry: 2, text: "    +2 more lines"},
 			},
 		},
 		{
@@ -2232,7 +2409,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				openRead(tr, "c2", "util.go", 0)
 			},
-			settled: "✦ Read File", flipped: "  Read File",
+			settled: "✦ Read File (2)", flipped: "  Read File (2)",
 		},
 		{
 			name: "a group whose calls have all landed settles",
@@ -2240,7 +2417,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				readCall(tr, "c2", "util.go", 1, 42, 0)
 			},
-			settled: "✦ Read File", flipped: "✦ Read File",
+			settled: "✦ Read File (2)", flipped: "✦ Read File (2)",
 		},
 		{
 			// A run is live until its REPORT lands, whatever the span has already finished.
@@ -2474,7 +2651,7 @@ func TestRenderGroupsOneLineOutputCalls(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "/workspace/repos/apogee"}})
 
 	want := strings.Join([]string{
-		"✦ Run",
+		"✦ Run (2)",
 		"  ┝ git rev-parse HEAD abc1234",
 		"  ┕ pwd                /workspace/repos/apogee",
 	}, "\n")
@@ -2806,8 +2983,10 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 	}
 }
 
-// Anything between two same-label calls ends the run, and so does a call that cannot fit one
-// aligned branch line. Each case pins the whole scrollback, so a break shows as the separate
+// Anything between two same-label calls ends the run, and so does a call with no target to lead an
+// aligned member row. A BODY is no longer among the breakers — that is the flip this test carries,
+// asserted after the table — so the case that used to stand for it stands for what it actually
+// breaks on now: the label. Each case pins the whole scrollback, so a break shows as the separate
 // blocks it must produce.
 func TestRenderGroupBreakers(t *testing.T) {
 	cases := []struct {
@@ -2816,7 +2995,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 		want  []string
 	}{
 		{
-			name: "a multi-detail call between two reads",
+			name: "a differently-labelled call between two reads",
 			build: func(tr *transcript) {
 				readCall(tr, "c1", "a.go", 1, 5, 0)
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "terminal", Arguments: []byte(`{"command":"go test"}`)}})
@@ -2895,6 +3074,29 @@ func TestRenderGroupBreakers(t *testing.T) {
 			}
 		})
 	}
+
+	// The flip: a call carrying output used to end a run of its own label and now joins it, giving
+	// up nothing but the rows its body would have taken — which are a click away on the member
+	// itself (design call 3).
+	t.Run("a call with output joins the run", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go build"}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "done"}})
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "terminal", Arguments: []byte(`{"command":"go test"}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "ok\nPASS\ndone"}})
+
+		if run := toolCallRun(tr.entries, 0); len(run) != 2 {
+			t.Fatalf("toolCallRun over the two Runs = %d views, want 2 — a body no longer breaks a run", len(run))
+		}
+		want := strings.Join([]string{
+			"✦ Run (2)",
+			"  ┝ go build done",
+			groupMemberLine(t, "  ┕ go test", 80),
+		}, "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("joined group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
 }
 
 // ----------------------------------------------------------------------------
@@ -2911,14 +3113,16 @@ func TestRenderGroupBreakers(t *testing.T) {
 // backstop across the layout changes rather than a test of any one of them: the blank-line hygiene
 // shows as the single separator row between every block — empty at the top level, the │ rail
 // gutter inside the sub-agent run — the bracketless bold-orange label as the
-// header text, the grouping as the one aligned Read File block, and the uniform shape as the fact
+// header text, the grouping as the two counted blocks — three reads aligned under "Read File (3)",
+// and the two consecutive edits under "Edit File (2)", differently tooled and sharing a label, each
+// held to one member row with its diff behind its own indicator now that a body no longer breaks a
+// run — and the uniform shape as the fact
 // that every header here — grouped, standalone, railed — is a label and nothing else, with the
 // target always leading a branch and the outcome split into the summary beside it and the body
-// beneath. The two "Edit File" blocks are the counter-example that proves the grouping rule: they
-// are consecutive and share a label, and they still stand alone, because a call carrying a body
-// breaks the run. The ▶ on every header that hides something and its absence everywhere else
+// beneath. The ▶ on every header that hides something and its absence everywhere else
 // is the affordance rule in the same picture: exactly the blocks here that hide something say so,
-// the targetless one among them now that it collapses like every other. A regression in any of
+// the targetless one among them now that it collapses like every other — and in a group it is the
+// MEMBER that says it, the counted header wearing none. A regression in any of
 // them changes this golden, and the golden doubles as the living example of what layout.md
 // sketches.
 func TestTranscriptLayoutGolden(t *testing.T) {
@@ -2960,7 +3164,7 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"",
 		"✦ Reading the docs first.",
 		"",
-		"✦ Read File",
+		"✦ Read File (3)",
 		"  ┝ README.md 1 - 154",
 		"  ┝ TODO.md   1 - 408",
 		"  ┕ ISSUES.md 1 - 8",
@@ -2973,13 +3177,9 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"  ┕ main.go +2 -2",
 		"    +6 more lines",
 		"",
-		"✦ Edit File ▶",
-		"  ┕ main.go replaced text in main.go",
-		"    +2 more lines",
-		"",
-		"✦ Edit File ▶",
-		"  ┕ main.go applied 1 replacement to main.go",
-		"    +2 more lines",
+		"✦ Edit File (2)",
+		groupMemberLine(t, "  ┝ main.go replaced text in main.go", 80),
+		groupMemberLine(t, "  ┕ main.go applied 1 replacement to main.go", 80),
 		"",
 		"✦ Write File ▶",
 		"  ┕ notes.md +25 bytes",

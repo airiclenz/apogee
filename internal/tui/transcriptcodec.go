@@ -93,11 +93,18 @@ type wireSkillSpan struct {
 // wireToolView is the serialized form of a [toolView], including its unexported name — the raw
 // tool id enrichWithResult keys the result extractor on, so a replayed tool-call entry keeps
 // working exactly as a freshly-folded one.
+//
+// Solo travels for the same reason the name does: it is a presenter's verdict — reached when the
+// call was built, or when its result landed (toolView.solo) — and the decode path never re-runs a
+// presenter. A record that
+// stands alone in a live session and folds into its neighbours' group on resume would be the
+// scrollback changing shape across a restart, which is what the round trip exists to prevent.
 type wireToolView struct {
 	Label   string           `json:"label,omitempty"`
 	Verb    string           `json:"verb,omitempty"`
 	Target  string           `json:"target,omitempty"`
 	Name    string           `json:"name,omitempty"`
+	Solo    bool             `json:"solo,omitempty"`
 	Summary wireDetailLine   `json:"summary"`
 	Details []wireDetailLine `json:"details,omitempty"`
 }
@@ -256,6 +263,7 @@ func toWireToolView(tv toolView) *wireToolView {
 		Verb:    tv.Verb,
 		Target:  tv.Target,
 		Name:    tv.name,
+		Solo:    tv.solo,
 		Summary: wireDetailLine{Kind: int(tv.Summary.Kind), Text: tv.Summary.Text},
 	}
 	if tv.Details.len() > 0 {
@@ -349,6 +357,7 @@ func fromWireToolView(w *wireToolView) toolView {
 		Verb:    w.Verb,
 		Target:  w.Target,
 		name:    stripEscapes(w.Name),
+		solo:    w.Solo,
 		Summary: namedSummary(detailLine{Kind: detailKind(w.Summary.Kind), Text: w.Summary.Text}),
 	}
 	if len(w.Details) > 0 {

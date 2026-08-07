@@ -394,9 +394,13 @@
 // one empty line between blocks" holds; a tool header drops its square brackets for a bold-orange
 // label (the [theme] toolLabel role, styled before the wrap — the markdown.go posture); and
 // consecutive same-label calls at the same depth fold into one aligned block (toolCallRun /
-// groupable). Grouping is render-time only — the append-only entry list, the call/result pairing,
-// and transcript.hasOpenToolCall are untouched, so a call arriving mid-stream joins its group on
-// the next repaint.
+// groupable) headed by "✦ Label (N)". Grouping is render-time only — the append-only entry list, the
+// call/result pairing, and transcript.hasOpenToolCall are untouched, so a call arriving mid-stream
+// joins its group on the next repaint. What a call CARRIES has stopped mattering to it: a Run and
+// its output group like a batch of reads, each member held to one row with its body behind an
+// indicator of its own (renderGroupMember), and a presenter that needs its block left alone says so
+// outright (toolView.solo — the answered ask_user record, and the sub_agent call whose block heads
+// a whole run even when the run came to nothing).
 //
 // The shape a tool call takes is uniform, and one renderer draws it: [renderToolBlock] takes a
 // slice of [toolView] — a lone call is a slice of one — and emits a ✦ header carrying the **label
@@ -408,10 +412,12 @@
 // ([renderSubDetails]) rather than sprouting branches of its own — a Run's output, a diff's
 // coloured lines under their diffstat. A call with no target at all is the one shape with no
 // target line: its body, closed by its summary, is rendered as the branches themselves
-// ([renderDetails] — the stray-result and unregistered-tool fallbacks). So a block of one is
-// byte-identical in shape to a block of many and does not reshape when a second call joins it —
-// the reason the standalone and grouped paths were converged rather than kept in sync — and a
-// body of one line lays out exactly like a body of ten. A scheduled Firing borrows that whole shape
+// ([renderDetails] — the stray-result and unregistered-tool fallbacks). One grammar covers both
+// counts — the reason the standalone and grouped paths were converged rather than kept in sync —
+// and a body of one line lays out exactly like a body of ten. Where they part is the ROW BUDGET a
+// group imposes: a member is one line and wears its own ▶ at the block's right edge
+// ([renderToolGroup]), where a block of one spends up to four rows and toggles from its header.
+// A scheduled Firing borrows that whole shape
 // through the same painter under a leading glyph of its own — ⟳ rather than the star
 // ([blockState]'s glyph override, whose zero value is the star; schedule.go, layout.md's "The firing
 // block") — so the surface is one grammar while the MEANING stays a tool call's alone: the entry

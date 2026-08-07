@@ -186,7 +186,32 @@ content at width 60: collapsed paint ≤ 4 screen rows each.
 
 **Commit**: `feat(tui): uniform collapsed cap across all tool block shapes`
 
-## 4. Grouping: scope, (N) count, one-line members
+## 4. Grouping: scope, (N) count, one-line members — ✅ DONE (2026-08-07)
+
+NOTES (2026-08-07): five deviations. (a) The member's target column is capped BLOCK-WIDE
+(`groupTargetCells`) rather than per member: clipping each target against its own summary put two
+members' outcomes in different columns, so the cap is the widest summary in the block and every
+summary opens in one column — "the shared summary column survives" read as the stronger requirement.
+(b) `solo` also rides the wire (`wireToolView.Solo`, `transcriptcodec.go`): decode never re-runs a
+presenter, so without it a replayed answered question would fold into a group the live session kept
+apart — the regression the body-exclusion's removal would otherwise introduce. (c) The body-carrying
+case of `TestRenderGroupBreakers` could not be flipped in place: it breaks on the LABEL, not on the
+body, so it keeps its `want` under a name that says so and the flip lands as a new
+"a call with output joins the run" subtest after the table. (d) A member with no summary yet ignores
+the column and spends the whole row on its target — nothing has to line up beside a call in flight.
+(e) The `sub_agent` presentation is marked solo as well (owner-ratified): design call 3 keeps
+sub-agent head blocks ungrouped, but `renderView`'s `subAgentSpan` branch only guards a head that
+HAS a span — a delegation refused at the depth bound (`executeRefuse`, `internal/agent`) leaves a
+span-less head that satisfies `groupable`, so two refusals in a row folded into `✦ Sub-Agent (2)`.
+`presentToolCall` now sets `solo` for `subAgentToolName`, pinned by
+`TestSpanlessSubAgentHeadsNeverGroup`.
+Test collateral beyond the named list, all of it the same two blocks becoming one group:
+`TestTranscriptLayoutGolden` (its two Edit File calls), `TestRenderMarksHeaderAndMarkerLines`'s
+two-block case and `modelWithTwoToolBlocks` (mouse_test.go) each gain an approval note to stay two
+blocks, `TestLiveBlockHeaderStarBlinks`'s two group cases and every group golden gain the `(N)`, and
+the grouping paragraphs of `internal/tui/doc.go` lose the "a block of one is byte-identical to a
+block of many" claim, which item 4 ends — as does `TestTranscriptLayoutGolden`'s own docstring,
+which still called its Edit File pair the counter-example proving a body breaks a run.
 
 Depends on items 1 and 2.
 

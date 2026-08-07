@@ -57,6 +57,26 @@ point is a **minor** bump, not a breaking change.
     other. Scheduled Firings and a sub-agent run's collapsed head follow, so every shape wearing a
     tool block stands at most four rows collapsed, whatever filled it.
   - **The expand/collapse indicators are now `▶` and `▼`**, replacing the smaller `▸`/`▾`.
+- **Consecutive same-label tool calls now group even when they carry output.** Grouping used to
+  admit only calls with nothing hanging beneath them, so a batch of reads folded into one aligned
+  block while a batch of `Run`s or edits — the batches that fill the most screen — stayed a column
+  of separate four-row blocks. They fold now, and the block says how many: the header reads
+  `✦ Run (3)`, the count in the faint chrome tone rather than the label's orange.
+  - **A grouped member is exactly one row.** The target is clipped to a trailing `…` at the room
+    its outcome leaves it, and the outcome is never traded away — a member shows what happened to
+    the file even when the path had to be cut. Every summary in a block opens in the same column,
+    clipped targets included. A member with something to reveal wears a `▶` flush against the
+    block's right edge; the field is reserved on every row, so the indicators line up down the
+    edge. Ten grouped calls read as ten lines.
+  - **The group header itself is inert** — no indicator, no click — because expansion belongs to
+    the members, each with its own state. Wiring those clicks up is the next step; until then a
+    grouped member shows the affordance and nothing happens when you press it.
+  - **An answered question's record still stands alone**, and so does a delegation. The record was
+    kept out of a group by the body it carries, which is no longer a reason for anything; the block
+    now says outright that it must not fold into its neighbours, and says it across a save and
+    resume too. A `Sub-Agent` block says the same, because it heads a whole run rather than being
+    one of a batch — including the run that came to nothing, so two refused delegations in a row
+    stay two blocks.
 
 ### Fixed
 

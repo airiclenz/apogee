@@ -1044,12 +1044,21 @@ func expandedFlags(m Model) []bool {
 // modelWithTwoToolBlocks builds a ready idle model holding one user prompt and two finished tool
 // blocks, so a test can name a block the click did NOT land on. The start-up box is dropped for the
 // same reason modelWithToolBlock drops it: the blocks then sit high enough to be aimed at.
+//
+// An approval note stands between the two calls, and it is what keeps them TWO blocks: consecutive
+// same-label calls fold into one group however much body they carry (groupable, render.go), and a
+// group has no header to click. Anything that is not a tool call ends a run, so the note both
+// separates them and is the least eventful thing that can (TestRenderGroupBreakers).
 func modelWithTwoToolBlocks(t *testing.T) Model {
 	t.Helper()
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
 	m.transcript.addUser("run the tests", nil)
 	for i, output := range []string{"ok   a\nok   b\nok   c\nPASS", "ok   d\nok   e\nok   f\nPASS"} {
+		if i > 0 {
+			m.transcript.apply(domain.ApprovalEvent{
+				Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
+		}
 		id := fmt.Sprintf("c%d", i+1)
 		m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 			ID: id, Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})

@@ -178,6 +178,21 @@ type toolView struct {
 
 	name string
 
+	// solo marks a call that must never be folded into a grouped block, however well it matches its
+	// neighbours (groupable, render.go). Grouping's own rule is about the SHAPE of a call — a target
+	// to lead an aligned member row — and says nothing about what the block MEANS; solo is where a
+	// presenter states that meaning, for a record whose block is a thing in its own right rather than
+	// one of a batch. Two calls say it today: the answered ask_user question, whose block keeps the
+	// permanent record of an exchange (askUserAnswerRecord) and reads as a card, not as a row in a
+	// list of questions; and the sub_agent call, whose block heads a whole run and frames the work
+	// beneath it (presentToolCall) — a fact about the call, so it holds from the moment the call is
+	// built, including for a delegation that never produced a run to frame.
+	//
+	// It is the presenter's word and not the painter's guess, which is the point: the body a record
+	// carries used to keep it out of a group as a side effect of the old shape rule, and a side effect
+	// is exactly what a later change to that rule takes away.
+	solo bool
+
 	// args is the call's parsed arguments, kept for the one presenter shape that needs the REQUEST
 	// back when the result lands (toolPresenter.outcome). It is retained only for such a presenter
 	// and dropped at presentation time for every other, so a write_file's whole file content is not
@@ -204,9 +219,15 @@ type toolView struct {
 // The Summary is a branchSummary rather than a bare line because the extractor is the one thing
 // that knows whose words it just wrote — its own sentence, or the tool's output promoted onto the
 // branch — and the view it hands the outcome to inherits that fact with the text.
+//
+// Solo is the third thing an extractor may say, and it is about the BLOCK rather than about either
+// half: this record must stand on its own and never fold into a group (toolView.solo). It travels
+// with the outcome because the fact only becomes true when the result lands — an ask_user question
+// still on screen is an ordinary card and groups like one.
 type toolOutcome struct {
 	Summary branchSummary
 	Details []detailLine
+	Solo    bool
 }
 
 // summaryOnly is the outcome of a tool whose whole result is one plain line in the PRESENTER's
@@ -462,6 +483,14 @@ func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
 		return tv
 	}
 	tv := toolView{Label: p.label, Verb: p.verb, name: call.Tool}
+	// A sub-agent call is a block in its own right and never a row in a list: it HEADS a run, and
+	// what hangs beneath it is a whole delegation (renderSubAgentRun). The painter's own rule for
+	// that shape keys on the run's span, which is not the same question — a delegation refused at
+	// the depth bound (executeRefuse, internal/agent) leaves a head with no span at all, and the
+	// shape rule alone would read two refusals in a row as one "Sub-Agent (2)". So the fact is
+	// stated here, where the call is recognised, against the same constant the span rule matches on
+	// (subAgentToolName) so the two cannot drift apart.
+	tv.solo = call.Tool == subAgentToolName
 	args := parseArgs(call.Arguments)
 	if p.target != nil {
 		tv.Target = p.target(args)
@@ -593,6 +622,7 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 		out := p.outcome(tv.args, result.Content)
 		tv.Summary = out.Summary
 		tv.Details = tv.Details.with(out.Details)
+		tv.solo = tv.solo || out.Solo
 		return
 	}
 	if known && p.detail != nil {
@@ -759,9 +789,15 @@ func quotedFirstLineDetail(content string) toolOutcome {
 // AskAnswer.Text, and no token is spent on the record (ADR 0031). That is what earns the tool's
 // description the right to tell the model NOT to restate a question it asks: the transcript keeps
 // this instead.
+// The record is also what makes the block SOLO (toolOutcome.Solo): an answered question is a card
+// the reader comes back to, not one row of a batch, so it never folds into a group of its
+// neighbours. It used to be kept out of one by the body it carries — grouping admitted only bodiless
+// calls — and now that a Run and its output group like anything else, the exclusion has to be said
+// rather than inherited.
 func askUserAnswerRecord(args map[string]any, content string) toolOutcome {
 	out := quotedFirstLineDetail(content)
 	out.Details = askExchangeLines(args, content)
+	out.Solo = true
 	return out
 }
 

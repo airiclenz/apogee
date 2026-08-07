@@ -21,9 +21,9 @@ import (
 // the viewport and a click.
 //
 // The look mirrors layout.md: the last user prompt is a full-width white-on-dark-gray block;
-// the assistant and tool headers lead with ✦; a tool header carries its label alone and the
-// target leads a ┝/┕ tree branch beneath it, so a single call and a grouped run share one
-// shape; one blank line separates every block. Sub-agent depth (Phase 3) indents a whole block by two
+// the assistant and tool headers lead with ✦; a tool header carries its label — and, over a
+// grouped run, its member count — with the target leading a ┝/┕ tree branch beneath it, so a
+// single call and a grouped run share one grammar; one blank line separates every block. Sub-agent depth (Phase 3) indents a whole block by two
 // columns per level — the tree-branch and depth-indent primitives are built here now so the
 // P3.14 sub-agent renderer extends these seams rather than reworking them.
 
@@ -932,13 +932,17 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // which is no padding at all. An empty slice renders nothing — every caller passes at least one
 // view, and a renderer on the repaint path must not be the thing that panics if one ever does not.
 //
-// state is the block's view state, and its expanded half changes exactly one thing: an expanded
-// block paints its retained body whole while a collapsed one paints the compact shape, remainder
-// marker and all (renderToolBranch). A GROUPED run is the degenerate case — its members carry no
-// body by definition (groupable), so both states paint identically and the head entry's state is
-// passed only so the two callers share one call shape (layout.md, "Collapsed and expanded blocks").
-// Its live half reaches one glyph and no shape at all: the header's leading star (state.star), ✦
-// once the block has settled and blinking against a bare cell while it still holds an open call.
+// A block of MANY is a different shape from a block of one, and it hands off at the top
+// (renderToolGroup): its header carries the member count and no state of its own, and each member
+// is held to a single row with an indicator of its own at the block's right edge. The two shapes
+// share this entry point — and the aligned target column, settled below over every view — because
+// what a caller has is a slice of views and which shape that is, is this function's answer.
+//
+// state is the SINGLE block's view state, and its expanded half changes exactly one thing: an
+// expanded block paints its retained body whole while a collapsed one paints the compact shape,
+// remainder marker and all (renderToolBranch). Its live half reaches one glyph and no shape at all:
+// the header's leading star (state.star), ✦ once the block has settled and blinking against a bare
+// cell while it still holds an open call.
 //
 // It also marks the block's CLICK SURFACE as it emits it — every physical line of the header, and
 // any remainder marker a branch synthesized — because the lines and the marks have to be one act:
@@ -969,6 +973,9 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 	for _, tv := range views {
 		column = max(column, th.measure.Width(expandTabs(tv.Target)))
 	}
+	if len(views) > 1 {
+		return renderToolGroup(th, views, column, width, state)
+	}
 	header := targetNone
 	label := th.toolLabel.Render(views[0].Label)
 	if state.elides || blockHidesWhenCollapsed(th, views, column, width) {
@@ -981,6 +988,158 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 		out.join(renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width, state.expanded))
 	}
 	return out
+}
+
+// renderToolGroup paints a folded run of same-label calls — the sketch's "✦ Run (3)" block
+// (docs/layout/tool-layout.md). It is a list, and everything about the shape follows from that: the
+// header names the label and how many calls carry it, and every member gets exactly ONE row so ten
+// grouped calls read as ten lines rather than as ten blocks that happen to share a star.
+//
+// The header wears the count in the faint indicator tone rather than the label's bold orange
+// (design call 6): "(3)" is the block's own arithmetic, not part of the tool's name, and a reader
+// scanning the orange down the left edge should not read the number as one. It wears no state
+// indicator and is NOT a click target, because a group has no single state to toggle — expansion
+// belongs to the members, each of which owns its own (item 5 of the plan; until it lands the members
+// wear the affordance and no click resolves to them, which is the one place this block is knowingly
+// unfinished).
+//
+// state reaches only the star: a group is live while ANY member is (renderView passes the run's own
+// liveness), and no member's body is painted here whatever the head entry's expanded flag says.
+func renderToolGroup(th theme, views []toolView, column, width int, state blockState) blockPaint {
+	label := th.toolLabel.Render(views[0].Label) + " " +
+		th.toolIndicator.Render(fmt.Sprintf(groupCountFormat, len(views)))
+	var out blockPaint
+	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), targetNone)
+	room := max(1, width-groupIndicatorCells(th))
+	column = groupTargetCells(th, views, column, room)
+	for i, tv := range views {
+		out.add([]string{renderGroupMember(th, tv, column, branchMarker(i == len(views)-1), width, room)},
+			targetNone)
+	}
+	return out
+}
+
+// groupTargetCells is the column every member's target is held to — the block's widest target,
+// capped at what leaves the block's WIDEST summary room on the row. It is a block-wide number
+// rather than a per-member one for the only reason the column exists: the summaries have to open in
+// the same place. Cap each member against its own summary and a group of one long target and one
+// short one puts its two outcomes two columns apart, which reads as a mistake rather than as a list.
+//
+// Where every target fits inside that cap — the common case, a batch of file names — the cap does
+// nothing and the column is the widest target, exactly as the ungrouped painter measures it. Where
+// they do not, every target is cut to the same width and the summaries line up all the same, which
+// is the trade the one-row budget makes: what the row cannot show of a path is a click away, and
+// what happened to it is the half worth keeping.
+//
+// A group with no summary anywhere has nothing to align and returns the plain column: an in-flight
+// batch spends the whole row on its targets.
+func groupTargetCells(th theme, views []toolView, column, room int) int {
+	tail := 0
+	for _, tv := range views {
+		if tv.Summary.Text != "" {
+			tail = max(tail, th.measure.Width(" "+tv.Summary.Text))
+		}
+	}
+	if tail == 0 {
+		return column
+	}
+	return max(1, min(column, room-th.measure.Width(branchMarker(true))-tail))
+}
+
+// renderGroupMember paints one member of a grouped block: one screen row, whatever the call is
+// carrying. The row is the branch marker, the call's target clipped to what is left after the
+// summary and the indicator field, the pad that keeps the block's summary column, and the summary
+// itself; a ▶ then right-aligns at the block's edge when the member hides anything.
+//
+// The order the room is spent in is the rule: the SUMMARY is never dropped. It is the outcome — "1 -
+// 154", "+2 -2", "error: …" — and a member row that showed more of a long path at the cost of what
+// happened to it would be showing the less useful half. So the summary's cells are reserved first,
+// block-wide (groupTargetCells), and the target takes what remains, ending in " …" when that was not
+// enough (clipCells). Where the targets are short they all fit, the pad puts every summary in the
+// same column, and the row is byte-identical to the one the ungrouped painter drew before this shape
+// existed.
+//
+// The indicator field is reserved on every member, hidden one or not, so the ▶s line up down the
+// block's right edge and a member does not gain three columns of target by having nothing to reveal.
+// Whether the member WEARS one is the same question the single block's header asks — does the
+// collapsed paint hide anything (blockHidesWhenCollapsed) — asked here of one call: a body, or a
+// target the row's own width cut. A call still in flight has neither and paints a bare row.
+//
+// column is the block's own (groupTargetCells) and room is the row less the indicator field; both
+// are settled once for the whole block, so no member can lay itself out against a different one.
+func renderGroupMember(th theme, tv toolView, column int, marker string, width, room int) string {
+	text, style, clipped := groupMemberText(th, tv, column, marker, room)
+	rows, cut := clipWrap(th, style, marker, text, room, groupMemberRows)
+	row := rows[0]
+	if !clipped && !cut && tv.Details.len() == 0 {
+		return row
+	}
+	pad := strings.Repeat(" ", max(0, width-th.measure.Width(glyphCollapsed)-th.measure.Width(row)))
+	return row + pad + th.toolIndicator.Render(glyphCollapsed)
+}
+
+// groupMemberText composes a member row's text and the style it paints in — branchText under the
+// one-row budget. It returns TEXT rather than a painted line because the row is styled whole, the
+// way the ungrouped branch line is: the target and the summary beside it are one sentence about one
+// call, and splitting the render at the pad would put a style boundary in the middle of it.
+//
+// clipped says the target was cut, which is half of what makes the member wear an indicator. The
+// composed text always fits the row by construction — the target is cut to the block's column and
+// the column already leaves the widest summary its cells — so the clip the caller then applies is a
+// guard rather than the mechanism.
+//
+// A member with NO summary yet is the one that ignores the column: nothing has to line up beside a
+// call still in flight, so its target spends the whole row before the indicator field.
+func groupMemberText(th theme, tv toolView, column int, marker string, room int) (text string, style lipgloss.Style, clipped bool) {
+	target := expandTabs(tv.Target)
+	if tv.Summary.Text == "" {
+		text, clipped = clipCells(th, target, room-th.measure.Width(marker))
+		return text, th.toolDetail, clipped
+	}
+	text, clipped = clipCells(th, target, column)
+	pad := strings.Repeat(" ", max(0, column-th.measure.Width(text)))
+	return text + pad + " " + tv.Summary.Text, detailStyle(th, tv.Summary.Kind), clipped
+}
+
+// clipCells fits text into ONE row of at most cells columns, ending it in clipTail when it had to
+// cut, and reports the cut. It is clipWrap's arithmetic with no marker and no style — the same
+// hangingPrefixes wrap and the same fitted tail — for the caller that has to keep composing after
+// the clip instead of painting what comes back (groupMemberText).
+//
+// It goes through the wrap rather than truncating the string, so a target carrying a newline is cut
+// at its first line like any other overlong one: wrapText keeps the text's own line breaks, and a
+// second row is a cut however it arose.
+func clipCells(th theme, text string, cells int) (string, bool) {
+	rows := hangingPrefixes(th, "", text, cells)
+	if len(rows) <= 1 {
+		return rows[0], false
+	}
+	return fitClipTail(th, rows[0], cells), true
+}
+
+// The GROUPED block's own numbers (docs/layout/tool-layout.md).
+//
+// groupMemberRows is the whole of a member's budget: one row, always. A group is a list and a list's
+// rows are one line each — the body a member hides is reached by opening that member, not by letting
+// it grow down the block.
+//
+// groupIndicatorGap is the field held clear between a member's text and its ▶, and it is reserved on
+// every member so the indicators line up down the right edge whether or not each row wears one.
+//
+// groupCountFormat is the "(N)" the header carries beside the label for N ≥ 2 — a lone groupable
+// call is painted as a single block and counts nothing.
+const (
+	groupMemberRows   = 1
+	groupIndicatorGap = 3
+	groupCountFormat  = "(%d)"
+)
+
+// groupIndicatorCells is how many columns a member row gives up at its right edge to the indicator
+// field: the gap plus the widest of the two glyphs it may show. Both are measured because the field
+// must not change width when a member opens (▶ → ▼, item 5) — a member whose text re-wrapped on
+// being expanded would move under the very click that expanded it.
+func groupIndicatorCells(th theme) int {
+	return groupIndicatorGap + max(th.measure.Width(glyphCollapsed), th.measure.Width(glyphExpanded))
 }
 
 // blockState is what a tool block's painter is told beyond the views themselves: which of the two
@@ -1076,6 +1235,11 @@ func anyOpenCall(entries []entry) bool {
 // overflows its cap is a block that hides something, and so is a two-line one whose lines the width
 // cuts. One call in a block with something to reveal makes the whole block a target — the header
 // belongs to the block, not to a branch.
+//
+// It is the SINGLE block's rule: a group's header toggles nothing and asks nothing here, its members
+// each wearing an indicator of their own under this same question asked of one call
+// (renderGroupMember). The slice stays a slice because the question is about a block's views rather
+// than about one of them, and item 5's per-member state is where that distinction is spent.
 func blockHidesWhenCollapsed(th theme, views []toolView, column, width int) bool {
 	for i, tv := range views {
 		shown, _, truncated := collapsedCall(tv)
@@ -1405,16 +1569,24 @@ func toolCallRun(entries []entry, i int) []toolView {
 	return views
 }
 
-// groupable reports whether a tool call can be shown as one branch line of a grouped block: it
-// needs a Target to sit in the aligned column, an empty body so nothing hangs beneath that line,
-// and a plain-kind Summary to follow the target on it. That admits the common cases — a finished
-// read, an "error: …" outcome, and a call still in flight whose summary has not landed yet (the
-// zero detailLine is plain and empty) — while a call carrying a body (a Run and its output, a
-// diff body under its "+2 -2" diffstat) or no target at all keeps its own block, where it has the
-// room it needs. It never counts detail lines: the block's shape does not depend on how many
-// there are, and neither may this.
+// groupable reports whether a tool call can be shown as one member row of a grouped block: it
+// needs a Target to sit in the aligned column, and it must not be marked solo by the presenter that
+// built it (toolView.solo). Nothing else — a body no longer disqualifies a call, because a member
+// row no longer has to hold everything the call has to say: it shows one clipped line and keeps its
+// body behind its own indicator (renderGroupMember, design call 3). So a batch of Runs with output
+// and a batch of edits with their diffs group exactly as a batch of reads always has, which is what
+// a scrollback of ten same-label calls needed most.
+//
+// A call with NO target still keeps its own block: there the detail lines ARE the branches
+// (renderToolBranch), so there is nothing for the aligned column to align. And solo is the
+// never-group mechanism the body exclusion used to be by accident — an answered question's record
+// is a card in its own right (askUserAnswerRecord) and a sub-agent call heads a whole run
+// (subAgentToolName), and both now say so instead of relying on the shape rule to keep them out.
+//
+// It never counts detail lines: the block's shape does not depend on how many there are, and
+// neither may this.
 func groupable(tv toolView) bool {
-	return tv.Target != "" && tv.Details.len() == 0 && tv.Summary.Kind == detailPlain
+	return tv.Target != "" && !tv.solo
 }
 
 // renderOrphanResult renders a tool result that matched no pending call (a defensive
