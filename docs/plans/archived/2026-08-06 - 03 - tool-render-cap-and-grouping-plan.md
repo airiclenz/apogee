@@ -5,7 +5,7 @@
   extended to body-carrying calls with a group count, one-line member rows, and
   per-member expand/collapse — per the sketch in `docs/layout/tool-layout.md`.
 - **Date**: 2026-08-06
-- **Status**: not started
+- **Status**: complete — all 8 items done 2026-08-07, archived
 - **Authoritative sources**:
   - `docs/layout/tool-layout.md` — the owner's layout sketch (untracked at write time;
     item 1 commits it into the repo). This is the visual ground truth.
