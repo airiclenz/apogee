@@ -6,12 +6,12 @@
   measurements that separate four live hypotheses, fixes the cause, and pins the fix with a
   regression test that runs headless on Windows CI.
 - **Date:** 2026-08-06
-- **Status:** in progress — items 1-4 ✅ done 2026-08-06, items 5-7 ✅ done 2026-08-07; item 8 open.
+- **Status:** ✅ COMPLETE — items 1-4 ✅ done 2026-08-06, items 5-8 ✅ done 2026-08-07.
   The cause is found, fixed and confirmed by the owner in Windows Terminal — see **"Item 6 — THE
-  ANSWER"** at the end of this file.
-- **Predecessor:** `docs/handoffs/2026-08-06 - 00 - windows-tui-ghosting-debug.md` — the symptom
-  report and the first (unsuccessful) dependency-bump attempt. This plan supersedes its debug
-  plan; the symptom description there is still ground truth.
+  ANSWER"** at the end of this file; the decision is recorded in ADR 0038.
+- **Predecessor:** `docs/handoffs/archived/2026-08-06 - 00 - windows-tui-ghosting-debug.md` (archived
+  by item 8) — the symptom report and the first (unsuccessful) dependency-bump attempt. This plan
+  supersedes its debug plan; the symptom description there is still ground truth.
 
 ## Authoritative sources
 
@@ -333,9 +333,12 @@ test the interactive path itself.
 > all three terminals with `apogee probe terminal` and it is *deferred* everywhere, including in
 > both terminals that ghost — findings 28-29. This item's answer named a primary cause that the
 > direct measurement contradicts; the corrected verdict table is under "Item 4 — ANSWER" and the
-> measurements are under "Item 6 findings — the owner's real-terminal probe runs". **No cause is
-> named today.** The observations recorded in this section all stand; the causal reading built on
-> finding 20's replay does not.
+> measurements are under "Item 6 findings — the owner's real-terminal probe runs". **The cause was
+> found under item 6 and it is apogee's own: `Run` claimed the alternate screen before bubbletea
+> could set `DISABLE_NEWLINE_AUTO_RETURN`, so the flag landed on the primary buffer while the frames
+> were painted to the alternate one and the console rewrote the renderer's bare `LF` as `CR LF` —
+> see "Item 6 — THE ANSWER".** The observations recorded in this section all stand; the causal
+> reading built on finding 20's replay does not.
 
 **Runnable now — does NOT depend on items 1-3.** Items 2 and 3 turn these capabilities into
 supported repo features; the prebuilt kit at `C:\Users\airic\apogee-ghosting-debug\` already
@@ -427,6 +430,22 @@ The colour claim has a mechanical stand-in in the meantime:
 conhost row) with the `COLORTERM` clause disabled, so the clause is pinned by a test that has been
 seen red. Also: no CHANGELOG entry and no user-facing docs — item 8 owns both, the same call items
 1-3 made.
+
+NOTES (2026-08-07, recorded by item 8): **the acceptance row "`apogee probe terminal` reports the
+capability section as `OK`" is unsatisfiable as written on Windows, and it was never satisfied.**
+The probe reads the *process* `TERM` (`os.Getenv("TERM")`, `cmd/apogee/probeterminal.go:119`), and
+this item deliberately never sets it — the injected `TERM=xterm-256color` exists only in the slice
+handed to `tea.NewProgram`, because mutating the process environment was ruled out here. So the
+probe compares the terminal it measured against `xtermCaps("") = noCaps` and reports MISMATCH for
+capabilities the painter now has, on a build where the painter is configured correctly. That is a
+defect in the *acceptance row*, not in the fix: the row asks the probe a question about the
+renderer's environment while the probe is answering one about the shell's. It is recorded as a
+known limitation rather than repaired — the probe's own behaviour is deliberately untouched by item
+8 — and the honest replacement pin is the one this item already has: the environment builder's unit
+tests plus `TestInjectedEnvironmentResolvesTheSameColorProfile`, both of which have been seen red.
+A future change that gives the probe the same naming rule the painter uses (or an
+`--assume-term`/`TERM=` argument) would make the row answerable; that is not this plan's work.
+Recorded again in ADR 0038's consequences so it is not rediscovered from the plan alone.
 
 Depends on item 4 (evidence), but is justified independently by finding 3 and should land even
 if H2 turns out not to be the primary cause — a renderer that believes the terminal cannot
@@ -707,7 +726,33 @@ with it applied — record both results in the verifier's `VERIFIED:` line.
 
 **Commit:** `test(tui): ConPTY regression harness for Windows rendering`
 
-## 8. Close the record
+## 8. Close the record — ✅ DONE (2026-08-07)
+
+NOTES (2026-08-07): five departures from this item's literal text, four of them because the item was
+written before the cause was known.
+(a) **The ADR records the cause that was found, not the one this item guessed.**
+`docs/adr/0038-the-windows-console-is-prepared-before-the-alternate-screen.md` decides the console-mode
+ordering first (the real fix), with the `TERM`/`xtermCaps`/`noCaps` naming rule this item predicted as
+its decision 2 and the synchronized-output declination as decision 3. The `noCaps` mechanism is written
+down as the item asks, but as the AMPLIFIER it was measured to be. The record also keeps the falsified
+H1 and the withdrawn upstream issues, deliberately: a reader who sees only the answer would re-derive
+H1 from the symptom.
+(b) **Nothing has been filed against `charmbracelet/ultraviolet` or `microsoft/terminal`, and nothing
+should be** — the defect was apogee's own. Recorded in the ADR's context and considered-options.
+(c) **Three stale pointers in item 4 were repointed** (its superseded banner, the end of "Item 4 —
+ANSWER", and the "For item 6" line, which pointed at a heading renamed to "…WHERE IT STOOD…
+(SUPERSEDED)"): all three now point at "Item 6 — THE ANSWER" and none of them still says the diagnosis
+is open. Item 4's own observations and its verdict table are untouched.
+(d) **Item 5's unsatisfiable acceptance row is recorded rather than repaired** — see the dated NOTES
+under item 5 and ADR 0038's consequences. `apogee probe terminal`'s behaviour is deliberately
+unchanged by this item.
+(e) **Two out-of-item defects were fixed because they are one line each and this item's own gates
+depend on them**: `makeWin.bat`'s `cross` target could not run (`go build -o "%CROSS_OUT%\"` — cmd
+passes the trailing `\"` through and Go's argv parser reads it as an escaped quote, so the target
+became `…apogee-cross" ./`), and the `ctrl+l` prose in `README.md` and `internal/tui/model.go`
+overstated the key as changing nothing at all, when `handleKey`'s unconditional pre-switch clears drop
+a live drag-selection on ⌃l as on every other key. Behaviour is correct in both places; only the
+wording and the one quoting bug changed.
 
 Depends on items 1-7.
 
@@ -1104,8 +1149,13 @@ consequences, and they are not all bad news:
 - **H2's verdict is untouched.** It was never the trigger and finding 23 already showed it is the
   amplifier of the wrong axis.
 
-**No hypothesis on the H1-H4 list is now a live primary cause.** The diagnosis is reopened, and
-item 6 carries the reopened question.
+**No hypothesis on the H1-H4 list is a live primary cause.** The diagnosis was reopened here and
+item 6 carried it to a measured answer: the trigger is not on the H1-H4 list at all, because it is
+not in the terminal — it is apogee's own start-up ordering, which let bubbletea's
+`DISABLE_NEWLINE_AUTO_RETURN` land on the primary screen buffer while every frame was painted to
+the alternate one. The console then rewrote each bare `LF` the renderer emitted as `CR LF`, and a
+renderer that means *next row, same column* by `LF` paints those rows 1-based instead. The full
+mechanism, the measurement and the fix are under **"Item 6 — THE ANSWER"**.
 
 **Open, and honest about it:**
 
@@ -1132,7 +1182,9 @@ symptom invisible, but the trigger stays.
 `charmbracelet/ultraviolet` and possibly `microsoft/terminal`.~~ **Withdrawn 2026-08-07.** Open
 question 1 was answered against this instruction: the wrap is deferred on the paths that ghost, so
 neither the ultraviolet issue nor the one-column-short mitigation has a measured defect to point
-at. Both would have been filed and written on an inference. See "Item 6 — WHERE IT STANDS".
+at. Both would have been filed and written on an inference. See "Item 6 — THE ANSWER": the defect
+was apogee's own, so nothing was owed to `charmbracelet/ultraviolet` or `microsoft/terminal` and
+nothing has been filed against either.
 
 ## Item 6 findings — re-running the sheet against the post-item-5 build (2026-08-07)
 

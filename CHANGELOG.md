@@ -162,6 +162,35 @@ point is a **minor** bump, not a breaking change.
   `layout.md` ("A sub-agent run collapses to its call block") and defined in `CONTEXT.md`
   ("Sub-agent").
 
+- **`⌃l` forces a full repaint.** The readline meaning of the key, and here it is a repair tool: the
+  renderer paints each frame as a diff against its own model of the screen, so a terminal that has
+  smeared or eaten part of the frame keeps showing that damage until something marks the whole screen
+  dirty. `⌃l` is that something — the same resync a window resize performs, without resizing. It is
+  live in every state, it sends nothing to the model, and it changes nothing you can lose except a
+  drag-selection highlight (which every keypress drops, as it always has).
+
+- **`apogee probe terminal` measures the terminal instead of trusting it.** A third subject beside
+  `apogee probe host` and `apogee probe model`, and free like the first: it writes real escape
+  sequences to your terminal and reads the answers back, then prints what it found — what it says
+  about synchronized output and grapheme clustering (modes 2026 and 2027), how many cells it really
+  advances for an emoji or a combining sequence with that mode off and on, where its tab stops are
+  and whether a tab erases what it passes over, what the terminal does when a glyph lands in the last
+  column (a pending wrap or an immediate one), and the
+  capabilities it really has beside the ones the renderer assumes from `TERM`. Sections that
+  disagree are marked `MISMATCH` and set the exit status, so the command can be checked by a script
+  and not only read. It needs a real terminal on both stdin and stdout and says so when it does not
+  have one; no model is called and nothing is written.
+
+- **Two hidden diagnostic flags for arguing about a rendering bug: `--tui-trace` and `--tui-diag`.**
+  Each takes a file path, each is off unless named, and each costs nothing when unset. `--tui-trace`
+  records the exact bytes the renderer wrote, one quoted Go string per write, so a corrupted frame
+  can be replayed through a virtual terminal rather than only described; `--tui-diag` records what
+  the terminal told the program about itself — the environment the renderer read, the width method
+  it started on, the window size, the colour profile and every mode report, each written once and
+  again only when it changes. They are portable rather than Windows-only, because those
+  are the two artifacts any rendering bug is argued from on any OS. They stay out of `--help`: they
+  are for a bug report, not for a session.
+
 ### Changed
 
 - **An answered Ask User block keeps a record of the question, the choices and what was picked.**
@@ -285,6 +314,31 @@ point is a **minor** bump, not a breaking change.
   meant. The session-reset pair is now sent like any other command and recorded like none of them,
   in memory and on disk. Everything else you send stays recallable, `/version` and the other
   whole-line commands included.
+
+- **The Windows TUI no longer ghosts.** Under Windows Terminal and VS Code's integrated terminal,
+  fragments of an earlier frame survived every repaint: streamed text arrived corrupted, the
+  activity spinner left a trail behind it, scrolling smeared, and only resizing the window put the
+  screen back. The cause was apogee's own start-up ordering. A Windows console screen buffer rewrites
+  every bare line feed as carriage-return + line feed unless it is told not to, and the renderer
+  means two different things by the two: a bare line feed asks for the next row *at the same column*.
+  The flag that turns that rewriting off is set per screen buffer, and apogee switched to the
+  alternate screen before it was set — so the flag landed on the buffer nobody was painting to, every
+  such row was painted from column 1 instead, and the cells the renderer believed it had just
+  overwritten were never touched. apogee now prepares the console before it takes the alternate
+  screen, and hands the shell its own console mode back on the way out. A classic conhost window
+  never showed the bug and is unchanged; nothing changes on macOS or Linux. Recorded in ADR 0038.
+  - **The painter is told what terminal it is talking to.** Windows shells leave `TERM` empty, and
+    the renderer reads exactly that variable to decide what the terminal can do — so it believed it
+    could not address a column at all, which is what turned any single error into permanent
+    corruption instead of one bad frame. apogee now names `xterm-256color` (and `truecolor`) to the
+    renderer alone, only when nothing else has named one and only on a real terminal: the process
+    environment is untouched, so no tool call or child process inherits it, and a `TERM` you or your
+    WSL/MSYS shell set is never overridden. Colours are unchanged.
+  - **Synchronized output is declined on Windows.** Measured out of a real pseudoconsole, the
+    terminal forwards apogee's begin/end pair back to back as an empty window and re-serializes the
+    frame after it has closed — so the frame was never presented atomically, while asking for it cost
+    the cursor-hiding that keeps a repaint from flickering. apogee stops asking there, and keeps
+    asking everywhere else, where the answer is honoured.
 
 ## [0.11.0] — 2026-08-05
 

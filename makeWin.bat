@@ -303,7 +303,11 @@ for %%T in (%CROSS_TARGETS%) do (
         echo    -^> %%A/%%B
         set "GOOS=%%A"
         set "GOARCH=%%B"
-        go build -o "%CROSS_OUT%\" ./... || (
+        rem No trailing backslash inside the quotes: cmd passes "...\" through verbatim, and
+        rem Go's own argv parser then reads \" as an escaped quote and swallows the rest of the
+        rem line. The directory already exists (mkdir above), which is all -o needs to treat it
+        rem as a destination directory.
+        go build -o "%CROSS_OUT%" ./... || (
             rmdir /s /q "%CROSS_OUT%" 2>nul
             exit /b 1
         )

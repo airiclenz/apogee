@@ -260,7 +260,9 @@ prompts you have already sent in this workspace, `esc` stops a run, `⌃c` quits
 the box, `⇧⇥` cycles the autonomy mode — Plan → Ask-Before → Allow-Edits → Auto — at
 any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. `⌃l` is the
 readline redraw: it forces a full repaint, which is the way back from a terminal that
-has smeared or eaten part of the frame. It changes nothing but the pixels.
+has smeared or eaten part of the frame. It sends nothing, edits nothing and interrupts
+nothing — the only thing it takes with it is a mouse drag-selection's highlight, which
+every keypress drops.
 
 ### The settings screen — `/settings`
 
@@ -787,6 +789,45 @@ rises from *low* to *medium* confidence, which is what promotes a matching Valid
 set from offered to auto-applied on later runs. `--no-save` runs the whole battery and
 records nothing; the record's path is printed either way, so deleting that file undoes
 it.
+
+`apogee probe terminal` is the third subject, and it is free like the host report. It
+**measures** the terminal instead of trusting it: it writes real escape sequences to your
+terminal and reads the answers back, then prints what it found — how it answers about
+synchronized output and grapheme clustering (modes 2026 and 2027), how many cells it
+really advances for an emoji or a combining sequence with that mode off and on, where its
+tab stops are and whether a tab erases what it passes over, what happens when a glyph
+lands in the last column (a pending wrap or an immediate one), and the capabilities it
+actually has beside the ones apogee's renderer assumes from `TERM`. A section whose answer
+disagrees with what was assumed is marked `MISMATCH` and
+sets the exit status, so the report can be checked by a script and not only read. It needs
+a real terminal on both stdin and stdout — a redirect or a pipe leaves nobody to answer —
+and it calls no model and writes nothing.
+
+```console
+$ apogee probe terminal
+apogee probe terminal — measured, not assumed
+  (nothing is written; the screen is restored)
+
+  size:          120 columns × 30 rows
+  TERM:          (unset)
+  ...
+last-column wrap
+    step                    cursor (CPR)  console API  deferred wrap would be
+    wrote the final column  6,120         6,120        6,120 (pending)
+    wrote one more          7,2           7,2          7,2
+  OK — the terminal holds a pending wrap at the last column — the semantics the renderer emits against
+```
+
+**When a frame comes out wrong**, two hidden flags record the evidence a rendering bug is
+argued from — `--tui-trace <file>` writes the exact bytes the renderer emitted, one quoted
+string per write, so a corrupted frame can be replayed rather than only described, and
+`--tui-diag <file>` writes what the terminal told apogee about itself: the environment the
+renderer read, the width method it started on, the window size, the colour profile, and
+every mode report the terminal sent — each written once and again only when it changes, so
+the file stays short enough to paste into a bug report.
+Both default off and cost nothing unless you name a file, both work on every OS, and
+neither appears in `--help`: they are for a bug report, not for a session. `⌃l` is the
+in-session counterpart — it forces a full repaint and is usually all a smeared frame needs.
 
 ## Running one prompt — `apogee headless`
 

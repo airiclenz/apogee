@@ -479,8 +479,35 @@
 // the row carries, with the buffer still open to correct. `mode` is the one edit that also applies
 // live, through the Engine.SetMode seam Shift+Tab drives (ADR 0035); and
 // popup.go the one bordered pane every overlay — those three, the autocomplete dropdown, the ask
-// and approval prompts — is painted through; logo.go the embedded start-up wordmark; and doc.go
-// this narration.
+// and approval prompts — is painted through; logo.go the embedded start-up wordmark;
+// actuation.go the launcher-verb latch and the folds that close one out (ADR 0029) — at most one
+// world-changing call in flight per address, narrated while it blocks, with the next Beat rather
+// than the call's own return deciding what the world became; skills.go the browsing half of the
+// skill flow — the /skills report, and [Model.knownSkillID], the single predicate the parser, the
+// inline accents and the merged "/" menu all resolve a token through, so the three can never
+// disagree about what a skill is; workspacepath.go the presentation-only shortening of the
+// workspace root out of the paths a tool block NAMES (its target, and its own one-line summary)
+// and out of nothing it QUOTES; paintcache.go the per-block paint memo that makes a streaming
+// repaint cost the live tail instead of the whole scrollback — a VALIDATION cache nothing
+// invalidates, safe exactly as long as [paintKey] keeps naming every input;
+// diagnostics.go the two hidden rendering-diagnostic seams (`--tui-trace`, which tees the
+// renderer's exact bytes to a file as quoted strings a virtual terminal can replay, and
+// `--tui-diag`, the log of what the terminal told the program about itself) — portable rather than
+// Windows-only, off unless a path is named, and in the repo because the alternative was measuring a
+// build against a patched bubbletea (ADR 0038);
+// and the three Windows-only rules about the ground the painter stands on, each a `_windows.go`
+// carrying the reasoning beside an `_other.go` no-op twin the six-target cross-build pins:
+// environ_windows.go names the terminal (TERM=xterm-256color, COLORTERM=truecolor, into
+// bubbletea's own environment slice and never the process's) because a Windows shell leaves TERM
+// empty and an empty TERM hands ultraviolet noCaps; syncoutput.go with its two twins filters
+// bubbletea's mode-2026 question out of the stream on Windows, where ConPTY forwards the
+// synchronized-output window EMPTY and re-serializes the frame outside it while the ask costs the
+// cursor-hide flicker mitigation; and altscreen_windows.go sets DISABLE_NEWLINE_AUTO_RETURN on the
+// primary buffer before [Run] claims the alternate one — the ghosting fix, since the console mode
+// word is per screen buffer and a buffer without that flag rewrites the bare LF ultraviolet means
+// "next row, same column" by into CR LF — returning the restore closure that gives the shell back
+// the console mode it lent (ADR 0038);
+// and doc.go this narration.
 //
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
 // [Model] is a value type with value-receiver Bubble Tea methods (ADR 0011), so the whole

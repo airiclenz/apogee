@@ -972,8 +972,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// renderer's MoveTo(0,0) + Erase(), which marks the whole screen for a full repaint on the
 		// next frame — the same resync a terminal resize performs today, without resizing.
 		//
-		// It is a display command and nothing else: the Model is returned untouched, so the frame
-		// that lands is exactly the frame that would have landed anyway. Live in every state, and
+		// It is a display command and nothing else: this branch touches no state, so the frame that
+		// lands is the frame that would have landed anyway — with the one exception every branch of
+		// this switch inherits, the unconditional pre-switch clears above (m.sel, dropRecall). A
+		// live drag-selection therefore loses its highlight to ⌃l exactly as it loses it to any
+		// other keypress, which is the every-keypress contract those clears exist to keep, not a
+		// side effect of redrawing. Live in every state, and
 		// it steals nothing — the textarea binds no ctrl+l (its bindings are set in
 		// newPromptEditor / lineEditor.singleLine) — while the modal overlays above swallow it with
 		// every other key they do not claim, which is the contract they already keep.
