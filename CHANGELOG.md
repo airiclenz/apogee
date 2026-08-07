@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-08-07
+
 ### Added
 
 - **`apogee headless` — one prompt, one unattended run, printed to stdout.** Give it a prompt as a
