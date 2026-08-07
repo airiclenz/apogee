@@ -126,9 +126,18 @@ this test is the drift guard between `dark.yaml` and this plan).
 
 **Commit:** `feat(scheme): scheme type, forgiving YAML parse, embedded dark scheme`
 
-## 2. Discovery, shadowing resolution, and export writer
+## 2. Discovery, shadowing resolution, and export writer — ✅ DONE (2026-08-07)
 
 Depends on item 1.
+
+NOTES (2026-08-07): two deviations from the item text. (a) `Export` refuses an existing
+file with `os.OpenFile(O_CREATE|O_EXCL, 0o600)` rather than `seedConfig`'s stat-then-write
+— same `MkdirAll(0o700)` + `0o600` discipline, but the check and the create become one
+operation so the refusal cannot go stale; a failed write removes its own partial file.
+(b) the unknown-name warning reads `color-scheme "x": unknown — using the "dark" scheme`
+rather than the item's literal `unknown color-scheme %q — using dark`: `Warning.String()`
+(item 1, committed) already prefixes `color-scheme %q: `, so the literal wording would
+have said "color-scheme" twice.
 
 **What:** in `internal/scheme`:
 

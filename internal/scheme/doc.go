@@ -13,4 +13,11 @@
 // key by key, keeps every default it cannot replace, and reports what it skipped as
 // Warnings instead of an error. A broken scheme file costs a user some color, never a
 // crash and never a session.
+//
+// Schemes come from two places at once. Discover lists what there is to pick from — the
+// built-ins plus every *.yaml in the user's schemes directory — and Resolve loads one,
+// giving a user file precedence over a built-in of the same name, so a shipped scheme
+// can be overridden without being replaced. Export runs the other way: it copies a
+// built-in's commented YAML out to that directory as an editable starting point, and
+// refuses to overwrite whatever is already there.
 package scheme
