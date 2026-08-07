@@ -654,10 +654,12 @@ func renderSettingValue(k configKey, value string) (string, string, error) {
 		}
 		text, err := renderScalar(v)
 		return text, v, err
-	case kindString, kindServer:
+	case kindString, kindServer, kindScheme:
 		// A server NAME is a plain scalar like any other string; which names are admissible is the
 		// `servers:` block's question and is answered where that list is known — at selection, and by
-		// the switch seam itself — not by a vocabulary this table could hold (kindServer).
+		// the switch seam itself — not by a vocabulary this table could hold (kindServer). A colour
+		// scheme's name is the same shape for the same reason (kindScheme): the admissible set is
+		// the schemes folder's contents, and the loader answers an unresolvable one with a warning.
 		text, err := renderScalar(v)
 		return text, v, err
 	case kindStringList:

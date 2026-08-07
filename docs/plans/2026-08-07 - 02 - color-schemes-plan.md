@@ -308,9 +308,35 @@ stop.
 
 **Commit:** `refactor(tui): spinner color stops become per-theme state`
 
-## 6. Config key `ui.color-scheme` and boot-time resolution
+## 6. Config key `ui.color-scheme` and boot-time resolution — ✅ DONE (2026-08-07)
 
 Depends on items 2 and 4.
+
+NOTES (2026-08-07): five deviations from the item text.
+(a) The row is a NEW registry kind `kindScheme`, not `Kind: kindEnum, EnumValues: nil`. `kindEnum`
+with an empty vocabulary is unusable twice over: `TestRegistryRowInvariants` fails it outright
+("an enum with no values"), and `renderSettingValue`'s enum branch (`configwrite.go:651`) refuses
+every value outside `EnumValues` — which would refuse *every* scheme name and break the settings
+write path item 7 is built on ("persistence needs no new code"). `kindScheme` is the item's own
+named precedent made literal: kindServer's twin — a dynamic closed vocabulary, the writer's
+kindString, declared apart so a surface offers a picker. It projects to `tui.SettingEnum`
+(`settingKind`), so the pane's idiom is unchanged and item 7 supplies the vocabulary.
+(b) Consequently `TestRegistryEnumValuesMatchParseSites` needed no exemption at all — it names its
+keys explicitly, so the row is exempt by not being an enum, exactly "the same way `kindServer` is".
+The new kind instead touches three kind switches: `kindMatchesType` (registry_test.go),
+`renderSettingValue` (configwrite.go) and `plausibleValue` (configwrite_scalar_test.go).
+(c) `settingValues["ui.color-scheme"]` — item 7's "value reader" bullet — landed here, because
+`TestSettingValuesCoverEveryRegistryKey` forces a formatter for every registry row: the row cannot
+exist without it. Item 7's other settingsrows bullet (section placement) needs no code: the
+"Interface" section is opened by `ui.spinner` and runs to the next section, so registry order alone
+puts the row there.
+(d) `schemesDir` is a `stateRoots` field (`schemes`) set by `resolveRoots`, not a path computed at
+the options literal — it mirrors `prompts` exactly, and it is the same value item 7's `ListSchemes`
+and item 8's `ExportScheme` will close over.
+(e) `model.go` calls `newTheme(opts.colorScheme())`, not `newTheme(opts.ColorScheme)`: the zero
+`Options` that every renderer test builds carries the zero `Scheme`, which is not a palette (every
+role the empty string) and would paint a colourless screen. The new unexported `Options.colorScheme`
+answers the zero value with `scheme.Default()`.
 
 **What:**
 

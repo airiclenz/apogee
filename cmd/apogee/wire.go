@@ -23,6 +23,7 @@ import (
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/recall"
 	"github.com/airiclenz/apogee/internal/schedule"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
@@ -547,6 +548,18 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// answers an unknown name with the default anyway — a caret is drawn either way.
 	cursorShape, _ := tui.ParseCursorShape(opts.cursorShape)
 
+	// The colour scheme, resolved HERE rather than in the renderer: reading a file is the
+	// composition root's job, so the TUI is handed a palette and never a path (ADR 0031's
+	// wire-silent engine has the same shape — the driver resolves, the component renders). Nothing
+	// it answers is fatal: an unknown name, an unreadable file and a defective key each cost a
+	// warning and keep the default palette (ADR 0039 design call 8), and those warnings travel with
+	// the palette so the transcript can say what went wrong.
+	colorScheme, schemeWarnings := scheme.Resolve(opts.ui.colorScheme, roots.schemes)
+	colorSchemeWarnings := make([]string, 0, len(schemeWarnings))
+	for _, w := range schemeWarnings {
+		colorSchemeWarnings = append(colorSchemeWarnings, w.String())
+	}
+
 	err = launch(ctx, engine, bridge, tui.Options{
 		// Both upstream facts are now honestly launch-time-only: Model is the configured pin ("" on
 		// a cold start, where the footer says "connecting…" until the first beat binds one), and
@@ -616,6 +629,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Spinner:       opts.ui.spinner,
 		SpinnerColor:  opts.ui.spinnerColor,
 		HideScrollbar: !opts.ui.showScrollbar,
+		// The `ui.color-scheme:` key, already resolved to the palette itself (above): the name so the
+		// renderer can say which scheme is in force, and the warnings the resolve produced so it can
+		// tell the human why the screen is not the one they asked for.
+		ColorScheme:         colorScheme,
+		ColorSchemeName:     opts.ui.colorScheme,
+		ColorSchemeWarnings: colorSchemeWarnings,
 		// The `cursor-shape:` key: the shape the REAL terminal cursor takes at the prompt caret
 		// (steady always — there is no blink key). Selected here, like the two above, so the
 		// renderer never parses a config name.
@@ -2162,6 +2181,7 @@ type stateRoots struct {
 	validated string
 	probe     string
 	prompts   string
+	schemes   string
 	workspace string
 }
 
@@ -2219,7 +2239,12 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 		// what the human typed is theirs, not the repository's — and, like every root here, it is
 		// a path only: internal/recall creates the directory on the first prompt it records, so a
 		// run that sends nothing leaves no trace.
-		prompts:   filepath.Join(absHome, "prompts"),
+		prompts: filepath.Join(absHome, "prompts"),
+		// The user's own colour schemes (ADR 0039): one `<name>.yaml` per scheme, shadowing a
+		// built-in of the same name. Like every root here it is a path only — nothing creates the
+		// folder until `/color-scheme export` writes into it, and a run whose scheme is a built-in
+		// never looks inside it beyond listing what is there.
+		schemes:   filepath.Join(absHome, "schemes"),
 		workspace: absWorkspace,
 	}, nil
 }

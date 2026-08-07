@@ -83,7 +83,7 @@ func kindMatchesType(kind configKind, typ reflect.Type) bool {
 		return typ.Kind() == reflect.Bool
 	case kindInt:
 		return typ.Kind() == reflect.Int
-	case kindString, kindEnum, kindServer, kindText:
+	case kindString, kindEnum, kindServer, kindScheme, kindText:
 		return typ.Kind() == reflect.String
 	case kindStringList:
 		return typ.Kind() == reflect.Slice && derefType(typ.Elem()).Kind() == reflect.String
@@ -272,6 +272,8 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 		{"mode", "yolo", "invalid --mode"},
 		{"ui.spinner", "twirl", "invalid ui.spinner"},
 		{"cursor-shape", "sideways", "invalid cursor-shape"},
+		{"ui.color-scheme", "", "name a scheme"},
+		{"ui.color-scheme", "../../.ssh/config", "a scheme is named, not a path"},
 		{"system-prompt-file", "", "name a file to read the prompt from"},
 		{"system-prompt-text", "  ", "write the prompt inline"},
 		{"system-prompt-text", "You are apogee in {{ workspace }}.", "unknown placeholder"},
@@ -317,6 +319,11 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		{"mode", string(modeAuto)},
 		{"ui.spinner", "glitter"},
 		{"cursor-shape", "bar"},
+		{"ui.color-scheme", "light"},
+		// A scheme nothing has written yet is accepted on purpose: the loader answers an unresolvable
+		// name with a warning and the default palette, so a pane that refused it would be stricter
+		// than the thing it configures (ADR 0039 design call 8).
+		{"ui.color-scheme", "solarized"},
 		// A RELATIVE prompt file is resolved against the apogee home, which this pure check does not
 		// hold, so it is accepted here and answered by the apply (validateSystemPromptFile).
 		{"system-prompt-file", "prompts/apogee.md"},

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/prompt"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -59,6 +60,17 @@ const (
 	// respect — one name on one line — and it is declared apart from it so a surface can offer the
 	// choice as a picker rather than as a text field.
 	kindServer configKind = "server"
+	// kindScheme is a colour-scheme NAME, and kindServer's twin in every respect that matters here:
+	// a closed vocabulary no static table can hold, because it is the built-ins plus whatever
+	// `*.yaml` files the user has put in `<apogee-home>/schemes/` right now. So EnumValues stays
+	// empty and the surface asks the session for the list, it is the writer's kindString (one name
+	// on one line), and it is declared apart from kindString so a surface can offer the choice as a
+	// picker rather than as a text field.
+	//
+	// It is NOT kindEnum for the reason kindServer is not: the enum kind means a vocabulary this
+	// table lists, and the writer refuses anything outside it (renderSettingValue) — which would
+	// refuse every user scheme ever written.
+	kindScheme configKind = "scheme"
 )
 
 // configKey describes one key of the config schema: what it is, where it may be set from,
@@ -276,6 +288,15 @@ var keyRegistry = []configKey{
 		Desc:     "Paint the transcript's scroll bar and reserve the column it hangs in.",
 	},
 	{
+		// A dynamic vocabulary (kindScheme), so EnumValues is empty and the surface asks the session
+		// which schemes exist — the built-ins plus every `*.yaml` in <apogee-home>/schemes/, where a
+		// user file shadows a built-in of the same name.
+		Path: "ui.color-scheme", Kind: kindScheme, Default: scheme.DefaultName,
+		Editable: true,
+		Validate: validateColorSchemeName,
+		Desc:     "Palette the screen is drawn in; ~/.apogee/schemes/<name>.yaml shadows a built-in.",
+	},
+	{
 		Path: "cursor-shape", Kind: kindEnum, Default: "block", EnumValues: cursorShapeValues,
 		Editable: true,
 		Validate: validateCursorShapeName,
@@ -441,6 +462,23 @@ func validatePresentPort(value string) error {
 // vocabulary) and names the key the value was read from.
 func validateSpinnerName(value string) error {
 	return uiSettings{spinner: tui.SpinnerStyle(value)}.validate()
+}
+
+// validateColorSchemeName refuses a name that could not be a scheme's file name — empty, or one
+// carrying a path separator. It deliberately does NOT check that the scheme EXISTS: the load is
+// forgiving by design (ADR 0039 design call 8 — an unresolvable name costs a warning and the
+// default palette), and a pane that refused to write a name the loader would happily warn about
+// would be stricter than the thing it configures. What it does refuse is a name that is really a
+// path, because the resolver joins it onto the schemes folder and a `../` would reach out of it.
+func validateColorSchemeName(value string) error {
+	if value == "" {
+		return fmt.Errorf("apogee: invalid ui.color-scheme: name a scheme, e.g. %q", scheme.DefaultName)
+	}
+	if strings.ContainsAny(value, `/\`) || value == "." || value == ".." {
+		return fmt.Errorf("apogee: invalid ui.color-scheme %q: a scheme is named, not a path — "+
+			"put the file in the schemes folder and name it without its .yaml", value)
+	}
+	return nil
 }
 
 // validateCursorShapeName refuses a caret shape internal/tui cannot draw, wrapped exactly as

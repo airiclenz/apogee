@@ -124,6 +124,7 @@ var settingValues = map[string]func(options) string{
 	"ui.spinner":           func(o options) string { return string(o.ui.spinner) },
 	"ui.spinner-color":     func(o options) string { return boolValue(o.ui.spinnerColor) },
 	"ui.show-scrollbar":    func(o options) string { return boolValue(o.ui.showScrollbar) },
+	"ui.color-scheme":      func(o options) string { return o.ui.colorScheme },
 	"cursor-shape":         func(o options) string { return o.cursorShape },
 	"bypass":               func(o options) string { return boolValue(o.bypass) },
 	"mechanisms":           func(o options) string { return countSummary(enabledCount(o.mechanisms), "mechanism") },
@@ -220,6 +221,11 @@ func settingKind(kind configKind) tui.SettingKind {
 		return tui.SettingEnum
 	case kindServer:
 		return tui.SettingServer
+	case kindScheme:
+		// The pane picks a scheme from a list exactly as it picks an enum value, so it reaches the
+		// renderer as the enum idiom; what makes it kindScheme on this side is only that the LIST
+		// comes from the session rather than from the row (settingsVocabulary).
+		return tui.SettingEnum
 	default:
 		return tui.SettingStructured
 	}

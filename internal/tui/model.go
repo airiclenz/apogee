@@ -16,7 +16,6 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
-	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 )
 
@@ -281,7 +280,7 @@ type Model struct {
 // and returns only a Cmd, so the focus *state* has to be set on the stored widget. The caret it
 // is focused for is the real terminal cursor in Options.CursorShape (newPromptEditor).
 func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.Msg)) Model {
-	th := newTheme(scheme.Default())
+	th := newTheme(opts.colorScheme())
 
 	vp := viewport.New()
 	vp.SoftWrap = true // wrap long transcript lines to the viewport width
@@ -339,6 +338,11 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// loaded are reported here — last, so the notice closes the opening frame rather than
 	// separating the box from the scrollback it belongs to.
 	m.noteContextFiles()
+	// What loading the colour scheme cost, if anything (ADR 0039 design call 11). It goes after the
+	// notices above because it is about the SCREEN rather than about the session, so it reads as the
+	// last word on the frame the human is looking at — and because a scheme that loaded cleanly, the
+	// ordinary case, adds nothing here at all.
+	m.noteColorSchemeWarnings(opts.ColorSchemeWarnings)
 	// A session the binary could not resolve a server for opens ASKING (ADR 0036 decisions 3 and 7):
 	// the `/server` picker, or `/settings` when nothing is configured to pick. It goes last of all —
 	// after every notice above — because it is the one thing the human has to act on before the
@@ -431,6 +435,25 @@ func (m *Model) noteContextFiles() {
 		m.transcript.addEphemeralNote("standing system content ~" + formatTokensFine(report.StandingTokens) +
 			" tokens exceeds its Budget share (~" + formatTokensFine(report.SystemShare) +
 			") — trim context files or the system prompt")
+	}
+}
+
+// noteColorSchemeWarnings surfaces what loading the configured colour scheme cost — an unknown
+// name, an unreadable file, a key whose value is not a colour. The load is forgiving by design (ADR
+// 0039 design call 8): every one of those keeps the default palette rather than failing the run, so
+// a warning is the only thing that tells the human their scheme is not the one on screen.
+//
+// The lines are rendered by the binary (Options.ColorSchemeWarnings), which is what read the file;
+// this only places them. They are EPHEMERAL notes for the reason the context notices are: each is
+// re-derived from the config and the schemes folder at every startup, so persisting one would stack
+// a duplicate into the record on every resume while telling the next launch nothing it does not
+// re-discover.
+//
+// The text names a file and a key from the user's own schemes folder, so it is untrusted disk input
+// like a session title — addEphemeralNote escape-strips it at the seam.
+func (m *Model) noteColorSchemeWarnings(warnings []string) {
+	for _, w := range warnings {
+		m.transcript.addEphemeralNote(w)
 	}
 }
 

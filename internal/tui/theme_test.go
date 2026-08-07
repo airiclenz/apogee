@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"image/color"
 	"testing"
@@ -147,5 +148,59 @@ func TestDefaultThemeKeepsTheDarkPalette(t *testing.T) {
 	}
 	if got := hexOf(th.spinnerStops[0]); got != "#8668ff" {
 		t.Errorf("first spinner stop = %s; want the dark scheme's #8668ff", got)
+	}
+}
+
+// The boot seam: [newModel] builds its theme from the palette the binary RESOLVED and handed over
+// ([Options.ColorScheme]), rather than from the built-in default. Without this the whole
+// `ui.color-scheme` key would resolve correctly at the composition root and change nothing on
+// screen.
+//
+// The second half is the zero value's answer. Every hand-built Options in this package — and any
+// future Driver that does not care about colour — leaves the field zero, and the zero Scheme is not
+// a palette at all (every role the empty string), so it must resolve to the shipped default rather
+// than to a screen with no colours in it.
+func TestNewModelTakesItsThemeFromTheWiredScheme(t *testing.T) {
+	t.Parallel()
+
+	wired := scheme.Default()
+	wired.Error = "#010203"
+	m := newModel(context.Background(), &fakeEngine{}, Options{ColorScheme: wired}, nil)
+	if got := hexOf(m.th.errorFg); got != "#010203" {
+		t.Errorf("the model's error tone = %s; want the wired scheme's #010203", got)
+	}
+
+	bare := newModel(context.Background(), &fakeEngine{}, Options{}, nil)
+	if got, want := hexOf(bare.th.errorFg), hexOf(newTheme(scheme.Default()).errorFg); got != want {
+		t.Errorf("unwired Options gave the error tone %s; want the default scheme's %s", got, want)
+	}
+}
+
+// What resolving the scheme cost reaches the human: each warning the binary rendered becomes one
+// transcript note at construction (ADR 0039 design call 11). The load is forgiving — an unknown
+// name, an unreadable file and a bad hex all keep the session running on default colours — so the
+// note is the only thing that tells the human their scheme is not the one they are looking at.
+//
+// They are EPHEMERAL: re-derived from the config and the schemes folder at every launch, so a
+// resume must not replay a warning about a file it did not read.
+func TestNewModelNotesTheColorSchemeWarnings(t *testing.T) {
+	t.Parallel()
+
+	const warning = `color-scheme "mine.yaml": key "error": bad hex "#zz0000" — using default`
+	m := newModel(context.Background(), &fakeEngine{},
+		Options{ColorSchemeWarnings: []string{warning}}, nil)
+
+	if !hasEntry(m, entryNote, warning) {
+		t.Errorf("no note carries the colour-scheme warning; entries = %+v", m.transcript.entries)
+	}
+	for _, e := range m.transcript.entries {
+		if e.kind == entryNote && e.text == warning && !e.ephemeral {
+			t.Error("the colour-scheme warning is persisted; it is re-derived at every launch")
+		}
+	}
+
+	clean := newModel(context.Background(), &fakeEngine{}, Options{}, nil)
+	if hasEntry(clean, entryNote, warning) {
+		t.Error("a run with no warnings still noted one")
 	}
 }

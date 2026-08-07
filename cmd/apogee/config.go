@@ -18,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/prompt"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/tui"
 	"gopkg.in/yaml.v3"
 )
@@ -390,18 +391,32 @@ type uiSettings struct {
 	// bug — and the transcript body takes that width instead. It is process-constant, so the wrap
 	// width it decides never changes mid-run.
 	showScrollbar bool
+	// colorScheme names the palette every coloured thing on the screen takes its colour from: a
+	// built-in (dark, light) or a `<apogee-home>/schemes/<name>.yaml` the user wrote, which shadows
+	// a built-in of the same name. It is carried as a NAME rather than a resolved palette because
+	// resolution reads a file, which the composition root does at wiring time (wire.go) — and,
+	// unlike spinner, an unknown name is deliberately NOT a startup error: a scheme is cosmetic, so
+	// a typo costs a warning and the default palette rather than the session (ADR 0039 design
+	// call 8).
+	colorScheme string
 }
 
 // defaultUISettings is the resolved `ui:` block with nothing configured: the renderer's own default
-// style, with the colour loop on and the scroll bar shown. The style is ASKED of internal/tui
-// (ParseSpinnerStyle's documented "" ⇒ the default) rather than restated here, so the vocabulary and
-// its default stay in the one package that owns them — the same reason validate does not list the
-// valid names.
+// style, with the colour loop on, the scroll bar shown, and the default colour scheme. The style is
+// ASKED of internal/tui (ParseSpinnerStyle's documented "" ⇒ the default) rather than restated here,
+// so the vocabulary and its default stay in the one package that owns them — the same reason
+// validate does not list the valid names, and the same reason the scheme name comes from
+// internal/scheme.
 func defaultUISettings() uiSettings {
 	// ParseSpinnerStyle errors only on a style it does not know; "" is the request for the default,
 	// so this cannot fail.
 	style, _ := tui.ParseSpinnerStyle("")
-	return uiSettings{spinner: style, spinnerColor: true, showScrollbar: true}
+	return uiSettings{
+		spinner:       style,
+		spinnerColor:  true,
+		showScrollbar: true,
+		colorScheme:   scheme.DefaultName,
+	}
 }
 
 // validate rejects a ui block naming a spinner style this build has no animation for. Catching it
@@ -1098,6 +1113,11 @@ type uiConfig struct {
 	// explicit `show-scrollbar: false` is distinguishable from an absent key (which keeps the
 	// default true).
 	ShowScrollbar *bool `yaml:"show-scrollbar"`
+	// ColorScheme names the palette the screen is drawn in — a built-in or a file in
+	// `<apogee-home>/schemes/`. Empty ⇒ the default scheme. A plain string with no pointer and no
+	// validation at this seam: every name is admissible on disk because an unresolvable one is
+	// answered with a warning and the default palette rather than a startup error (ADR 0039).
+	ColorScheme string `yaml:"color-scheme"`
 }
 
 // toUISettings maps the on-disk ui block onto the resolved value, applying the defaults for the keys
@@ -1115,6 +1135,9 @@ func (u uiConfig) toUISettings() uiSettings {
 	}
 	if u.ShowScrollbar != nil {
 		s.showScrollbar = *u.ShowScrollbar
+	}
+	if u.ColorScheme != "" {
+		s.colorScheme = u.ColorScheme // resolved against the schemes folder by wire.go, not here
 	}
 	return s
 }

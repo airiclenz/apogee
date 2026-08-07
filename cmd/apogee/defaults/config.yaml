@@ -366,12 +366,13 @@ system-prompt-text: |
 
 # =============================================================================
 # How the terminal UI presents itself: the status-line spinner — the animation you watch while a
-# turn runs — and whether the transcript shows a scroll bar. Config-file only (no flag or env).
+# turn runs — whether the transcript shows a scroll bar, and the colour scheme the whole screen is
+# drawn in. Config-file only (no flag or env).
 #
 # The keys are INDEPENDENT: `spinner` picks the glyph animation, `spinner-color` says whether it
 # drifts through colour, and the colour loop applies to whichever style you name. `show-scrollbar`
-# says nothing about either. Setting one key leaves the others at their defaults. Defaults: snake,
-# with the colour loop on, and the scroll bar shown.
+# and `color-scheme` say nothing about either. Setting one key leaves the others at their defaults.
+# Defaults: snake, with the colour loop on, the scroll bar shown, and the dark colour scheme.
 #
 #   snake    — a six-dot snake runs the outer ring of a 4x4 dot grid (two braille cells side by
 #              side), one lap a second. Two columns wide.
@@ -397,10 +398,27 @@ system-prompt-text: |
 # AND the column it hangs in away together, so the transcript text takes that width instead — a
 # hidden bar does not leave an empty stripe behind. Default on.
 #
+# `color-scheme` names the palette every coloured thing on the screen takes its colour from. Two
+# schemes ship in the binary: `dark` (the default — the palette apogee has always drawn) and
+# `light`, for a terminal with a light background. apogee never paints the full-screen background;
+# a scheme recolours only what apogee already colours, so your terminal's own background stays.
+#
+# You can write your own. `/color-scheme export dark` writes a fully-commented copy to
+# ~/.apogee/schemes/dark.yaml for you to edit; a file there SHADOWS a built-in of the same name, so
+# exporting `dark` and editing it changes what `color-scheme: dark` loads. Any name works —
+# ~/.apogee/schemes/solarized.yaml is `color-scheme: solarized`. Every key in the file is optional
+# and anything you leave out keeps its default value.
+#
+# Loading is deliberately forgiving: an unknown scheme, an unreadable file or a key that is not a
+# `#rrggbb` colour costs you a note in the transcript naming what went wrong, and the default value
+# for that key — never a failed startup and never an unstyled screen. Switch schemes live from
+# /settings or with `/color-scheme <name>`.
+#
 # ui:
 #   spinner: snake         # snake | glitter | classic
 #   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
 #   show-scrollbar: true   # false = no scroll bar, and the transcript takes back its column
+#   color-scheme: dark     # dark | light | any *.yaml in ~/.apogee/schemes/
 
 # =============================================================================
 # The prompt cursor — apogee draws the real terminal cursor, always steady, in the shape named here:

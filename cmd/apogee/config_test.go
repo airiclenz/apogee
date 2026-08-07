@@ -106,7 +106,7 @@ func upstreamHome(t *testing.T, endpoint string, modelHint ...string) string {
 // default spinner style with its colour loop on, and the transcript's scroll bar shown. It is
 // spelled out rather than taken from defaultUISettings, so a change to any shipped default shows up
 // here as a failure instead of silently agreeing with itself.
-var wantUIDefault = uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true}
+var wantUIDefault = uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "dark"}
 
 // wantContextFilesDefault is the resolved `context-files:` block a config that configures none must
 // produce: the feature on, looking for the one default name in the workspace root. Spelled out
@@ -323,21 +323,21 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "the ui block is file-only (all three keys)",
 			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false)}}.layer(),
 			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
-				ui: uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false, showScrollbar: false}},
+				ui: uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false, showScrollbar: false, colorScheme: "dark"}},
 		},
 		{
 			// The keys are independent: naming a style says nothing about the colour loop.
 			name: "ui with only spinner: set → the colour loop stays at its default",
 			file: fileConfig{UI: &uiConfig{Spinner: "classic"}}.layer(),
 			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
-				ui: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true, showScrollbar: true}},
+				ui: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true, showScrollbar: true, colorScheme: "dark"}},
 		},
 		{
 			// …and the other way round: turning the loop off does not change which style paints.
 			name: "ui with only spinner-color: false → the style stays at its default",
 			file: fileConfig{UI: &uiConfig{SpinnerColor: boolptr(false)}}.layer(),
 			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
-				ui: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: false, showScrollbar: true}},
+				ui: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: false, showScrollbar: true, colorScheme: "dark"}},
 		},
 		{
 			// The scroll-bar switch is the third independent key: hiding the bar leaves both
@@ -345,7 +345,7 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "ui with only show-scrollbar: false → the spinner keys stay at their defaults",
 			file: fileConfig{UI: &uiConfig{ShowScrollbar: boolptr(false)}}.layer(),
 			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
-				ui: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: false}},
+				ui: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: false, colorScheme: "dark"}},
 		},
 		{
 			name: "ui is NOT settable by env or flag (file-only ⇒ the defaults hold)",
@@ -2192,8 +2192,8 @@ func TestApplyConfigContextFilesDoesNotRequireTheFilesToExist(t *testing.T) {
 }
 
 // The ui config block parses into opts.ui: every key, file-only like the blocks around it, so the
-// composition root can hand the renderer a style, a colour flag and a scroll-bar flag it never has
-// to parse.
+// composition root can hand the renderer a style, a colour flag, a scroll-bar flag and a colour
+// scheme it never has to parse.
 func TestApplyConfigUI(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
@@ -2201,6 +2201,7 @@ func TestApplyConfigUI(t *testing.T) {
   spinner: glitter
   spinner-color: false
   show-scrollbar: false
+  color-scheme: light
 `
 	writeConfigHome(t, home, configYAML)
 	opts := options{configDir: home}
@@ -2208,9 +2209,28 @@ func TestApplyConfigUI(t *testing.T) {
 		t.Fatalf("applyConfig: %v", err)
 	}
 
-	want := uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false, showScrollbar: false}
+	want := uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false, showScrollbar: false, colorScheme: "light"}
 	if opts.ui != want {
 		t.Errorf("opts.ui = %+v; want %+v", opts.ui, want)
+	}
+}
+
+// A `color-scheme:` naming a scheme that does not exist is NOT a startup error — the one ui key
+// that is deliberately forgiving (ADR 0039 design call 8). The name travels through resolution as
+// written and the palette is resolved later, where an unresolvable one costs a warning and the
+// default colours rather than the session. Pinned because the two keys beside it do the opposite:
+// an unknown spinner style fails startup loudly, and the temptation is to make this one match.
+func TestApplyConfigUnknownColorSchemeIsNotAStartupError(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "")
+	writeConfigHome(t, home, "ui:\n  color-scheme: no-such-scheme\n")
+	opts := options{configDir: home}
+	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("applyConfig refused an unknown colour scheme: %v", err)
+	}
+	if opts.ui.colorScheme != "no-such-scheme" {
+		t.Errorf("opts.ui.colorScheme = %q; want the name as written, for the resolver to warn about",
+			opts.ui.colorScheme)
 	}
 }
 
@@ -2229,24 +2249,29 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 		{
 			name: "only spinner: → the colour loop stays on and the bar stays shown",
 			yaml: "ui:\n  spinner: classic\n",
-			want: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true, showScrollbar: true},
+			want: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true, showScrollbar: true, colorScheme: "dark"},
 		},
 		{
 			name: "only spinner-color: false → the style stays the default and the bar stays shown",
 			yaml: "ui:\n  spinner-color: false\n",
-			want: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: false, showScrollbar: true},
+			want: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: false, showScrollbar: true, colorScheme: "dark"},
 		},
 		{
 			name: "only show-scrollbar: false → the bar goes, the spinner keys stay put",
 			yaml: "ui:\n  show-scrollbar: false\n",
-			want: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: false},
+			want: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: false, colorScheme: "dark"},
 		},
 		{
 			// The explicit `true` and the absent key resolve alike — pinned so the pointer's
 			// present-and-true branch is exercised, not just its nil one.
 			name: "only show-scrollbar: true → the shipped default, said out loud",
 			yaml: "ui:\n  show-scrollbar: true\n",
-			want: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true},
+			want: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "dark"},
+		},
+		{
+			name: "only color-scheme: → the spinner keys and the bar stay put",
+			yaml: "ui:\n  color-scheme: light\n",
+			want: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "light"},
 		},
 	}
 	for _, tt := range tests {

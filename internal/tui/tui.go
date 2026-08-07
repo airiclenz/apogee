@@ -12,6 +12,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/schedule"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -257,6 +258,27 @@ type Options struct {
 	// zero value is tea.CursorBlock — also the configured default — so hand-built test Options and
 	// an unset key agree.
 	CursorShape tea.CursorShape
+
+	// ColorScheme is the palette every style in the theme is built from — what the
+	// `ui.color-scheme` config key selected, already RESOLVED by the binary (cmd/apogee calls
+	// scheme.Resolve, which reads the user's schemes folder). Handing over the palette rather than
+	// the name is what keeps file reading out of the renderer at boot: the TUI selects, it never
+	// parses. The zero value is the empty Scheme, which is not a palette at all — hand-built test
+	// Options leave it so, and colorScheme() answers it with the built-in default.
+	ColorScheme scheme.Scheme
+
+	// ColorSchemeName is the name that palette was loaded under, so a report can SAY which scheme is
+	// in force (`/color-scheme` lists it as the current one) without the renderer having to
+	// recognize a palette it was handed. Empty ⇒ unwired, and the reports fall back to the default
+	// scheme's name.
+	ColorSchemeName string
+
+	// ColorSchemeWarnings is what resolving that scheme cost, already rendered to lines: an unknown
+	// name, an unreadable file, a defective key. Each becomes one ephemeral transcript note at
+	// construction (ADR 0039 design call 11) — the load itself is forgiving, so a warning is the
+	// only thing standing between a silently-wrong palette and a human who can fix it. Nil on the
+	// ordinary run, where the scheme loaded cleanly.
+	ColorSchemeWarnings []string
 
 	// Version is the resolved FULL build version (apogee.Version, read from the embedded VERSION
 	// file plus build provenance), read only by the /version command — it mirrors what --version
@@ -666,6 +688,18 @@ type Options struct {
 	// an honest note with the view otherwise fresh. The binary resolves the store record and
 	// projects it onto this small value, so the renderer never decodes the record itself.
 	Resumed *ResumedSession
+}
+
+// colorScheme is the palette to build the theme from: what the binary resolved, or the built-in
+// default when nothing was wired. The zero Scheme carries no colours at all — every role is the
+// empty string — so it cannot be handed to newTheme as if it were a palette; hand-built Options
+// (every renderer test, and any future Driver that does not care about colour) leave it zero and
+// mean "whatever apogee ships with", which is exactly Default().
+func (o Options) colorScheme() scheme.Scheme {
+	if o.ColorScheme == (scheme.Scheme{}) {
+		return scheme.Default()
+	}
+	return o.ColorScheme
 }
 
 // RebindResult is what the composition root actually bound in answer to an observed change: the

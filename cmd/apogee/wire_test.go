@@ -21,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -389,9 +390,9 @@ func TestRunRootThreadsSpinnerOptions(t *testing.T) {
 		name string
 		ui   uiSettings
 	}{
-		{name: "the resolved default: snake with the colour loop on", ui: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true}},
-		{name: "a named style with the loop off travels as both", ui: uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false, showScrollbar: true}},
-		{name: "classic with the loop on — the old glyphs, the new colours", ui: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true, showScrollbar: true}},
+		{name: "the resolved default: snake with the colour loop on", ui: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "dark"}},
+		{name: "a named style with the loop off travels as both", ui: uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false, showScrollbar: true, colorScheme: "dark"}},
+		{name: "classic with the loop on — the old glyphs, the new colours", ui: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true, showScrollbar: true, colorScheme: "dark"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -415,6 +416,82 @@ func TestRunRootThreadsSpinnerOptions(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The `ui.color-scheme:` key reaches the renderer RESOLVED: runRoot reads the schemes folder under
+// the apogee home this run uses and hands tui.Options the palette itself, plus the name it loaded
+// under and whatever the load cost. Reading files is the composition root's job — the renderer is
+// handed colours, never a path.
+//
+// The two cases are the two halves of the forgiving contract (ADR 0039 design call 8): a user file
+// SHADOWS the built-in it shares a name with, and a name nothing answers to costs a warning that
+// says which name rather than the session.
+func TestRunRootResolvesTheColorScheme(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a user file shadows the built-in of the same name", func(t *testing.T) {
+		t.Parallel()
+		home := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(home, "schemes"), 0o700); err != nil {
+			t.Fatalf("create schemes dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(home, "schemes", "dark.yaml"),
+			[]byte("error: \"#010203\"\n"), 0o600); err != nil {
+			t.Fatalf("write scheme: %v", err)
+		}
+
+		rec := &recordingLauncher{}
+		opts := options{
+			endpoint:  "http://127.0.0.1:1111",
+			model:     "fake",
+			mode:      "ask-before",
+			configDir: home,
+			workspace: t.TempDir(),
+			ui:        uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "dark"},
+		}
+		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+			t.Fatalf("runRoot: %v", err)
+		}
+		if got := rec.opts.ColorScheme.Error; got != "#010203" {
+			t.Errorf("tui.Options.ColorScheme.Error = %q; want the user file's %q", got, "#010203")
+		}
+		// The keys the file leaves out are the built-in's, which is what makes a two-line scheme a
+		// usable one.
+		if got := rec.opts.ColorScheme.Surface; got != scheme.Default().Surface {
+			t.Errorf("tui.Options.ColorScheme.Surface = %q; want the default %q", got, scheme.Default().Surface)
+		}
+		if rec.opts.ColorSchemeName != "dark" {
+			t.Errorf("tui.Options.ColorSchemeName = %q; want %q", rec.opts.ColorSchemeName, "dark")
+		}
+		if len(rec.opts.ColorSchemeWarnings) != 0 {
+			t.Errorf("a well-formed scheme warned: %v", rec.opts.ColorSchemeWarnings)
+		}
+	})
+
+	t.Run("an unknown name keeps the default palette and says so", func(t *testing.T) {
+		t.Parallel()
+		rec := &recordingLauncher{}
+		opts := options{
+			endpoint:  "http://127.0.0.1:1111",
+			model:     "fake",
+			mode:      "ask-before",
+			configDir: t.TempDir(),
+			workspace: t.TempDir(),
+			ui:        uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "no-such-scheme"},
+		}
+		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+			t.Fatalf("runRoot refused an unknown colour scheme: %v", err)
+		}
+		if rec.opts.ColorScheme != scheme.Default() {
+			t.Errorf("tui.Options.ColorScheme = %+v; want the default palette", rec.opts.ColorScheme)
+		}
+		if len(rec.opts.ColorSchemeWarnings) != 1 {
+			t.Fatalf("warnings = %v; want exactly one naming the scheme", rec.opts.ColorSchemeWarnings)
+		}
+		if !strings.Contains(rec.opts.ColorSchemeWarnings[0], "no-such-scheme") {
+			t.Errorf("warning = %q; want it to name the scheme that was asked for", rec.opts.ColorSchemeWarnings[0])
+		}
+	})
 }
 
 // The two Auto startup lines are mirror branches at the same site and never both fire:

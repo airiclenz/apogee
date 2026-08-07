@@ -38,7 +38,7 @@ func fabricatedSettings() options {
 		autoTitle:           false,
 		contextWindow:       32768,
 		present:             presentSettings{autoOpen: true, command: "zed {path}", port: 8080},
-		ui:                  uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: true, showScrollbar: false},
+		ui:                  uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: true, showScrollbar: false, colorScheme: "dark"},
 		bypass:              true,
 		mechanisms:          map[string]bool{"validate": true, "syntax": true, "autofix": false},
 		validatedSetsEnable: true,
@@ -247,6 +247,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.spinner":           "glitter",
 		"ui.spinner-color":     "true",
 		"ui.show-scrollbar":    "false",
+		"ui.color-scheme":      "dark",
 		"cursor-shape":         "block", // unset, so the declared default is what is in force
 		"bypass":               "true",
 		"mechanisms":           "2 mechanisms", // the explicit `false` entry is not an enabled one
