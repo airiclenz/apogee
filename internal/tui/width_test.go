@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -33,7 +35,7 @@ func TestWidthAuthorityStartsAtThePainterMeasure(t *testing.T) {
 	if got := newWidthAuthority().Method(); got != ansi.WcWidth {
 		t.Errorf("newWidthAuthority measures with %v, want the painter's ansi.WcWidth", got)
 	}
-	if got := newTheme().measure.Method(); got != ansi.WcWidth {
+	if got := newTheme(scheme.Default()).measure.Method(); got != ansi.WcWidth {
 		t.Errorf("a fresh theme measures with %v, want the painter's ansi.WcWidth", got)
 	}
 }

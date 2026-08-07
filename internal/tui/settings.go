@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"image/color"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -525,12 +526,12 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 		return m, nil
 	case SettingString, SettingInt:
 		m.settings.kind = settingsValueBuffer
-		m.settings.editor = newSettingsEditor(m.opts.CursorShape, m.settingsBufferSeed(row))
+		m.settings.editor = newSettingsEditor(m.opts.CursorShape, m.th.surface, m.settingsBufferSeed(row))
 		m.layout()
 		return m, nil
 	case SettingText:
 		m.settings.kind = settingsTextEditor
-		m.settings.editor = newSettingsTextEditor(m.opts.CursorShape, m.settingsTextValue(row))
+		m.settings.editor = newSettingsTextEditor(m.opts.CursorShape, m.th.surface, m.settingsTextValue(row))
 		m.layout()
 		return m, nil
 	case SettingStructured:
@@ -772,8 +773,8 @@ func (m Model) settingsBufferSeed(row SettingRow) string {
 // the widget, and a scalar config value has no second line to walk to. shape is the `cursor-shape`
 // key's selection, passed for the same reason the prompt takes it — the field is built the same way
 // wherever it is built.
-func newSettingsEditor(shape tea.CursorShape, seed string) lineEditor {
-	e := newLineEditor(shape)
+func newSettingsEditor(shape tea.CursorShape, surface color.Color, seed string) lineEditor {
+	e := newLineEditor(shape, surface)
 	e.singleLine()
 	e.setValue(seed)
 	return e
@@ -859,8 +860,8 @@ func (m Model) settingsTextValue(row SettingRow) string {
 // It is left at the widget's own width, which is what makes ↑/↓ walk the prompt's LOGICAL lines: the
 // pane paints one line per line and wraps what does not fit (renderSettingsText), so a caret walking
 // the widget's idea of visual rows would step through wraps the pane never drew.
-func newSettingsTextEditor(shape tea.CursorShape, seed string) lineEditor {
-	e := newLineEditor(shape)
+func newSettingsTextEditor(shape tea.CursorShape, surface color.Color, seed string) lineEditor {
+	e := newLineEditor(shape, surface)
 	e.setValue(seed)
 	return e
 }

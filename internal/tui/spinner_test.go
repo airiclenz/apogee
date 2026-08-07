@@ -11,6 +11,7 @@ import (
 
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/charmbracelet/x/ansi"
 	colorful "github.com/lucasb-eyer/go-colorful"
 )
@@ -57,8 +58,8 @@ func TestSpinnerClassicMatchesLegacyFrames(t *testing.T) {
 func TestSpinnerClassicUncolouredIsUnchanged(t *testing.T) {
 	t.Parallel()
 
-	th := newTheme()
-	legacy := lipgloss.NewStyle().Background(colBlack) // exactly how newModel styled the widget
+	th := newTheme(scheme.Default())
+	legacy := lipgloss.NewStyle().Background(th.surface) // exactly how newModel styled the widget
 	s := newSpinnerAnim(SpinnerClassic, false)
 	for frame, glyph := range legacyClassicFrames {
 		s.frame = frame
@@ -167,7 +168,7 @@ func litDots(t *testing.T, glyph string) [][2]int {
 func TestSnakeFrames(t *testing.T) {
 	t.Parallel()
 
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	s := newSpinnerAnim(SpinnerSnake, false)
 	if got, want := s.interval(), time.Second/12; got != want {
 		t.Errorf("snake interval = %v, want %v (twelve positions, one lap a second)", got, want)
@@ -484,7 +485,7 @@ func TestSpinnerColorIsSoft(t *testing.T) {
 func TestSpinnerColorOffPaintsNoForeground(t *testing.T) {
 	t.Parallel()
 
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	for _, style := range spinnerStyleNames {
 		t.Run(string(style), func(t *testing.T) {
 			t.Parallel()
@@ -510,7 +511,7 @@ func TestSpinnerColorOffPaintsNoForeground(t *testing.T) {
 func TestSpinnerColorIsOrthogonalToStyle(t *testing.T) {
 	t.Parallel()
 
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	for _, style := range spinnerStyleNames {
 		for _, colour := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/colour=%t", style, colour), func(t *testing.T) {

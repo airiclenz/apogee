@@ -50,9 +50,9 @@
 // reach, and two consecutive sub_agent calls are never joined, because the second call's own
 // tool-call block sits at the PARENT's depth — the join dips there, the spacer goes bare, and the
 // descent logic opens a fresh ⤷ label for the second run. The whole frame — rail and label alike —
-// is one style role (theme's subRail) in the tool-header orange (colCode), coherent with the orange
-// ✦ tool markers. That whole frame is what a COLLAPSED run elides: by default a sub_agent call
-// block and the span of deeper entries behind it are ONE block ([subAgentSpan],
+// is one style role (theme's subRail) in the tool-header orange (the scheme's `code` role),
+// coherent with the orange ✦ tool markers. That whole frame is what a COLLAPSED run elides: by
+// default a sub_agent call block and the span of deeper entries behind it are ONE block ([subAgentSpan],
 // [renderSubAgentRun]), its summary slot carrying the run's transitive tool-call count, the
 // delegate's own context fill where it has reported one ([subAgentFill] — not transitive, since each
 // agent fills a window of its own), and its gist
@@ -423,7 +423,7 @@
 // whole-surface rule the prompt block already followed. The `+N more lines` marker is the one row
 // that does not: it belongs to the collapsed paint, so a click there only ever opens. Whichever
 // shape it is, opening also lifts the block's TEXT a step out of the collapsed dim
-// ([detailTone], theme.go's colFaintBright) while the chrome around it — indicator, marker,
+// ([detailTone], theme.go's openDetailTone) while the chrome around it — indicator, marker,
 // gutter — and the diff colours stay where they were, so what brightens is exactly what the
 // reader opened the block to read.
 // A scheduled Firing borrows that whole shape

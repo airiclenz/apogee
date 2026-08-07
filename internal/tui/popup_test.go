@@ -9,6 +9,8 @@ import (
 
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // popupLines splits a rendered popup into its physical (newline-separated) lines. ANSI escapes
@@ -37,7 +39,7 @@ var elisionMarkerPattern = regexp.MustCompile(`… \(\+\d+ more lines\)|… \+\d
 // and without the optional title / hint rows, so the pane's right border always lands on the
 // same column (the lipgloss v2 total-width contract renderStartupBox relies on).
 func TestRenderPopupLinesAreExactWidth(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	base := popupSpec{
 		title:    "saved sessions  (this workspace)",
 		rows:     singleCellRows([]string{"first row", "second row", "third row"}),
@@ -73,7 +75,7 @@ func TestRenderPopupLinesAreExactWidth(t *testing.T) {
 // cell is ever left on the terminal's default background. This is the regression guard for the
 // "black-hole strip after short rows" bug: a bg-free line would surface as a bare cell here.
 func TestRenderPopupIsFullyBlackFilled(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupSpec{
 		title:    "saved sessions",                                                       // shorter than the box
 		rows:     singleCellRows([]string{"x", "a much wider row label goes here", "y"}), // mix of short + wide
@@ -149,7 +151,7 @@ func applySGRBackground(bgSet bool, params string) bool {
 // A row wider than the inner budget is truncated, never wrapped: the pane's physical line count
 // is exactly 2 (borders) + title + shown rows + hint, and the long row ends in an ellipsis.
 func TestRenderPopupLongRowDoesNotWrap(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupSpec{
 		title:    "commands",
 		rows:     singleCellRows([]string{"short", strings.Repeat("verylongtoken ", 12), "also short"}),
@@ -174,7 +176,7 @@ func TestRenderPopupLongRowDoesNotWrap(t *testing.T) {
 // SGR; the check is a loose contains on the un-stripped output, not a byte golden, so a lipgloss
 // renderer change cannot false-fail it.
 func TestRenderPopupSelectedRowHighlight(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupSpec{
 		title:    "files",
 		rows:     singleCellRows([]string{"one.go", "two.go", "three.go"}),
@@ -212,7 +214,7 @@ func popupLineWith(t *testing.T, out, want string) string {
 // instead of the selection's own bar — the /settings pane's two treatments, owned by the module so
 // every pane that ever divides or edits a list looks the same doing it.
 func TestRenderPopupRowKindsPaintHeadingsAndTheEditedRow(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupSpec{
 		title: "settings",
 		rows: []popupRow{
@@ -254,7 +256,7 @@ func TestRenderPopupRowKindsPaintHeadingsAndTheEditedRow(t *testing.T) {
 // only where the line it is drawing still opens with it: a pane too narrow to seat the label breaks
 // it across lines, and bolding what survived would be styling a word that is no longer the label.
 func TestRenderPopupBodyLeadIsAHeadingOnlyWhileItSurvives(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupSpec{
 		title:       "settings",
 		body:        "Description: which autonomy the session runs at",
@@ -288,7 +290,7 @@ func TestRenderPopupBodyLeadIsAHeadingOnlyWhileItSurvives(t *testing.T) {
 // A spec with selected = −1 paints no marker and no highlight: every row is faint, no ❯ appears,
 // and the userBlock SGR is absent from the output.
 func TestRenderPopupNoSelection(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupSpec{
 		title:    "skills",
 		rows:     singleCellRows([]string{"alpha", "beta", "gamma"}),
@@ -311,7 +313,7 @@ func TestRenderPopupNoSelection(t *testing.T) {
 // An empty title drops the title row and an empty hint drops the hint row — each is one fewer
 // physical line than the same spec with the field set, and the dropped text is absent.
 func TestRenderPopupEmptyTitleAndHintDropRows(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	full := popupSpec{
 		title:    "saved sessions",
 		rows:     singleCellRows([]string{"row one", "row two"}),
@@ -399,7 +401,7 @@ func TestPopupRowWindow(t *testing.T) {
 // width, none wider than the pane — rather than truncating like a row. The body is the module's
 // one wrapping content block.
 func TestRenderPopupBodyWraps(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 40
 	out := renderPopup(th, popupSpec{body: strings.Repeat("word ", 40), maxBodyRows: -1}, width)
 	lines := popupLines(out)
@@ -416,7 +418,7 @@ func TestRenderPopupBodyWraps(t *testing.T) {
 // Embedded newlines in the body are layout, not text to reflow: a body "a\n\nb" renders three body
 // rows with a blank middle row — the approval reason/args separator case.
 func TestRenderPopupBodyPreservesNewlines(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	lines := popupLines(renderPopup(th, popupSpec{body: "a\n\nb", maxBodyRows: -1}, 40))
 	if len(lines) != 2+3 { // 2 borders + 3 body rows
 		t.Fatalf("body \"a\\n\\nb\" produced %d physical lines, want 5:\n%s", len(lines), strip(strings.Join(lines, "\n")))
@@ -435,7 +437,7 @@ func TestRenderPopupBodyPreservesNewlines(t *testing.T) {
 // A single token wider than the inner budget hard-breaks across body rows (wrapText's guarantee),
 // so an unbroken blob can never blow past the pane's right edge.
 func TestRenderPopupBodyHardBreaksLongToken(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 20
 	out := renderPopup(th, popupSpec{body: strings.Repeat("x", 100), maxBodyRows: -1}, width)
 	lines := popupLines(out)
@@ -454,7 +456,7 @@ func TestRenderPopupBodyHardBreaksLongToken(t *testing.T) {
 // shows every line with no marker; a NEGATIVE cap shows everything. Zero is the separate case
 // below.
 func TestRenderPopupBodyMaxRows(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 40
 	tenLines := strings.Join([]string{"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9"}, "\n")
 
@@ -490,7 +492,7 @@ func TestRenderPopupBodyMaxRows(t *testing.T) {
 // prompt is a security surface, and a body that vanishes without a word is a decision taken against
 // text the human was never told existed.
 func TestRenderPopupBodyBudgetOfZeroShowsNoBodyButSaysSo(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 60 // wide enough to seat the title and the phrase in full; the narrow ladder is the test below
 
 	lines := popupLines(renderPopup(th, popupSpec{
@@ -546,7 +548,7 @@ func TestRenderPopupBodyBudgetOfZeroShowsNoBodyButSaysSo(t *testing.T) {
 // carries it: the phrase sheds its noun first ("… +3"), and only past that is the NAME clipped —
 // never the number.
 func TestRenderPopupNarrowTitleKeepsTheElisionCount(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const title = "approve write_file?"
 	spec := popupSpec{
 		title:       title,
@@ -608,7 +610,7 @@ func TestRenderPopupNarrowTitleKeepsTheElisionCount(t *testing.T) {
 // selection, so its off-window rows are one keypress away rather than hidden, and a marker counting
 // them would cost a row of the list it describes.
 func TestRenderPopupRowBudgetOfZeroShowsNoRowsButSaysSo(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 60 // wide enough to seat the title and the phrase in full; the narrow ladder is below
 	const title = "the assistant is asking:"
 	choices := []string{"yes, go ahead", "no", "ask me again later", "stop and let me drive"}
@@ -692,7 +694,7 @@ func TestRenderPopupRowBudgetOfZeroShowsNoRowsButSaysSo(t *testing.T) {
 // rows, the rows still truncate (never wrap) and keep their selected-row highlight, and an empty
 // body adds no rows.
 func TestRenderPopupBodyComposition(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupSpec{
 		title:       "the assistant is asking:",
 		body:        "one line of body",
@@ -734,7 +736,7 @@ func TestRenderPopupBodyComposition(t *testing.T) {
 // the hint line does, so the two read as distinct tiers of the hierarchy (title bold / body normal
 // / chrome faint).
 func TestRenderPopupBodyIsNotFaint(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	lines := popupLines(renderPopup(th, popupSpec{body: "body text here", maxBodyRows: -1, hint: "esc cancel"}, 50))
 	bodyLine, hintLine := lines[1], lines[2] // borders + body + hint
 
@@ -756,7 +758,7 @@ func TestRenderPopupBodyIsNotFaint(t *testing.T) {
 // renders nothing, and an inner width of 1 neither panics nor produces a line wider than the box
 // (the wrapped body and the overflow marker both clip to the single inner cell).
 func TestRenderPopupBodyDegenerateWidth(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	frame := th.popupBorder.GetHorizontalFrameSize()
 	spec := popupSpec{
 		title:       "approve run?",
@@ -779,7 +781,7 @@ func TestRenderPopupBodyDegenerateWidth(t *testing.T) {
 // neither panics nor overflows: renderPopup degrades to an empty pane rather than a box wider
 // than the window it was handed.
 func TestRenderPopupDegenerateWidth(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	frame := th.popupBorder.GetHorizontalFrameSize()
 	spec := popupSpec{
 		title:    "saved sessions",
@@ -823,7 +825,7 @@ func TestPopupColumnsShareOneOffset(t *testing.T) {
 		{"a-much-longer-profile", "— mlx"},
 		{"b", "— vllm"},
 	}
-	lines := layoutPopupRows(newTheme(), rows)
+	lines := layoutPopupRows(newTheme(scheme.Default()), rows)
 	want := ansi.StringWidth("a-much-longer-profile") + len(popupGutter)
 	for i, ln := range lines {
 		if got := popupCellOffset(t, ln, "—"); got != want {
@@ -836,7 +838,7 @@ func TestPopupColumnsShareOneOffset(t *testing.T) {
 // a wide row scrolled out of view still holds its column open, so the alignment cannot shift
 // sideways as the selection moves down a long list.
 func TestRenderPopupColumnWidthsSpanOffWindowRows(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const longest = "a-very-long-profile-name"
 	spec := popupSpec{
 		rows: []popupRow{
@@ -873,7 +875,7 @@ func TestPopupAbsentCellKeepsLaterColumnsAligned(t *testing.T) {
 		{"alpha", "— llamacpp", "· running"},
 		{"beta", "", "· running"}, // no backend tier on this row
 	}
-	lines := layoutPopupRows(newTheme(), rows)
+	lines := layoutPopupRows(newTheme(scheme.Default()), rows)
 	want := ansi.StringWidth("alpha") + len(popupGutter) + ansi.StringWidth("— llamacpp") + len(popupGutter)
 	for i, ln := range lines {
 		if got := popupCellOffset(t, ln, "· running"); got != want {
@@ -885,7 +887,7 @@ func TestPopupAbsentCellKeepsLaterColumnsAligned(t *testing.T) {
 // A column empty in EVERY row collapses: it contributes neither width nor gutter, so a schema tier
 // no row filled costs the pane nothing and lays out exactly as if the tier were not in the schema.
 func TestPopupEmptyColumnCollapses(t *testing.T) {
-	withTier := layoutPopupRows(newTheme(), []popupRow{
+	withTier := layoutPopupRows(newTheme(scheme.Default()), []popupRow{
 		{"a", "", "· x"},
 		{"bb", "", "· y"},
 	})
@@ -896,7 +898,7 @@ func TestPopupEmptyColumnCollapses(t *testing.T) {
 		}
 	}
 
-	withoutTier := layoutPopupRows(newTheme(), []popupRow{{"a", "· x"}, {"bb", "· y"}})
+	withoutTier := layoutPopupRows(newTheme(scheme.Default()), []popupRow{{"a", "· x"}, {"bb", "· y"}})
 	for i, ln := range withoutTier {
 		if ln != withTier[i] {
 			t.Errorf("row %d lays out as %q with the empty column and %q without it", i, withTier[i], ln)
@@ -912,7 +914,7 @@ func TestPopupColumnsMeasureDisplayWidth(t *testing.T) {
 		{"日本語", "· three wide glyphs"}, // 3 runes, 6 display cells
 		{"abcdef", "· six narrow runes"},
 	}
-	lines := layoutPopupRows(newTheme(), rows)
+	lines := layoutPopupRows(newTheme(scheme.Default()), rows)
 	want := 6 + len(popupGutter)
 	for i, ln := range lines {
 		if got := popupCellOffset(t, ln, "·"); got != want {
@@ -927,7 +929,7 @@ func TestPopupColumnsMeasureDisplayWidth(t *testing.T) {
 // clamp wrapped it onto extra lines — the same failure TestRenderPopupLongRowDoesNotWrap guards
 // for ASCII.
 func TestRenderPopupWideRuneRowFitsTheWidth(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupSpec{
 		title:    "モデル",
 		rows:     []popupRow{{strings.Repeat("日", 30), "· 32k"}, {"ascii-model", "· 8k"}},
@@ -965,7 +967,7 @@ const popupSingleCellGolden = `╭───────────────�
 // padding, no drift — the composed row is the label verbatim (contract 6), and the whole pane is
 // byte-for-byte the pre-column golden.
 func TestRenderPopupSingleCellRowsAreUnchanged(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	labels := []string{"/model", "/sessions", "/help"}
 	spec := popupSpec{
 		title:    "commands and skills",
@@ -1031,7 +1033,7 @@ func popupTitleSpec() popupSpec {
 // and the row it used to occupy goes back to the pane.
 func TestRenderPopupTitleInBorder(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 
 	off := strip(renderPopup(th, popupTitleSpec(), 40))
 	if off != popupTitleRowGolden {
@@ -1057,7 +1059,7 @@ func TestRenderPopupTitleInBorder(t *testing.T) {
 // as a hole punched in the frame.
 func TestRenderPopupTitleInBorderKeepsTheBoxContract(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupTitleSpec()
 	spec.titleInBorder = true
 	for _, width := range []int{24, 40, 61, 98} {
@@ -1077,7 +1079,7 @@ func TestRenderPopupTitleInBorderKeepsTheBoxContract(t *testing.T) {
 // surface whose body is its own heading asks for — and still spends no content row on a heading.
 func TestRenderPopupTitleInBorderEmptyTitleIsPlain(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupTitleSpec()
 	spec.titleInBorder = true
 	spec.title = ""
@@ -1097,7 +1099,7 @@ func TestRenderPopupTitleInBorderEmptyTitleIsPlain(t *testing.T) {
 // ellipsis rather than pushing the border past the terminal's last column.
 func TestRenderPopupTitleInBorderElidesOnANarrowPane(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupSpec{
 		title:         "a title far wider than this pane can ever seat",
 		titleInBorder: true,
@@ -1123,7 +1125,7 @@ func TestRenderPopupTitleInBorderElidesOnANarrowPane(t *testing.T) {
 // title sits.
 func TestRenderPopupTitleInBorderCarriesTheElisionCount(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupSpec{
 		title:         "Approve write_file?",
 		titleInBorder: true,
@@ -1146,7 +1148,7 @@ func TestRenderPopupTitleInBorderCarriesTheElisionCount(t *testing.T) {
 // asks for it (docs/layout/user-questions-layout.md).
 func TestRenderPopupTitleFromBody(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const (
 		width = 40
 		lead  = "which way should I take this refactor"
@@ -1251,7 +1253,7 @@ func TestPopupTitleInBorderChromeIsOneRowShorter(t *testing.T) {
 	if popupTitleBorderChrome != popupChrome-1 {
 		t.Errorf("popupTitleBorderChrome = %d, want %d (one row less than popupChrome)", popupTitleBorderChrome, popupChrome-1)
 	}
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupTitleSpec()
 	rowsOff := len(popupLines(renderPopup(th, spec, 40)))
 	spec.titleInBorder = true
@@ -1290,7 +1292,7 @@ const popupMenuRowsGolden = `╭────────────────
 // and not the text.
 func TestRenderPopupMenuRows(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 
 	off := strip(renderPopup(th, popupTitleSpec(), 40))
 	if off != popupTitleRowGolden {
@@ -1311,7 +1313,7 @@ func TestRenderPopupMenuRows(t *testing.T) {
 // the box; the accent says the same thing in the width of one glyph.
 func TestRenderPopupMenuRowsHaveNoBar(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupTitleSpec()
 	spec.menuRows = true
 	out := renderPopup(th, spec, 40)
@@ -1332,7 +1334,7 @@ func TestRenderPopupMenuRowsHaveNoBar(t *testing.T) {
 // of them.
 func TestRenderPopupMenuUnselectedRowsAreFaintDots(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupTitleSpec()
 	spec.menuRows = true
 	lines := popupLines(renderPopup(th, spec, 40))
@@ -1360,7 +1362,7 @@ func TestRenderPopupMenuUnselectedRowsAreFaintDots(t *testing.T) {
 // columns cannot shift as the selection moves.
 func TestRenderPopupMenuRowsKeepColumnsAligned(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	spec := popupSpec{
 		rows: []popupRow{
 			{"Allow", "[a]"},
@@ -1436,7 +1438,7 @@ func popupWrapSpec() popupSpec {
 // ellipsis, and every line is still exactly the width the box was drawn at.
 func TestRenderPopupWrappedRowsHangUnderTheirMarker(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 48
 	spec := popupWrapSpec()
 	lines := popupLines(renderPopup(th, spec, width))
@@ -1483,7 +1485,7 @@ func TestRenderPopupWrappedRowsHangUnderTheirMarker(t *testing.T) {
 // prompt put its boxes in a column instead of gluing them onto the labels.
 func TestRenderPopupWrappedColumnedRowsHangUnderTheirLastColumn(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 48
 	const long = "Implement the config redesign first, commit it, then do the TUI part in a separate commit."
 	spec := popupSpec{
@@ -1541,7 +1543,7 @@ func TestRenderPopupWrappedColumnedRowsHangUnderTheirLastColumn(t *testing.T) {
 // unbroken block it has always been.
 func TestRenderPopupRowGapSeparatesRowsOnly(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	base := popupSpec{
 		rows:     singleCellRows([]string{"one", "two", "three"}),
 		menuRows: true,
@@ -1578,7 +1580,7 @@ func TestRenderPopupRowGapSeparatesRowsOnly(t *testing.T) {
 // than tighten — instead of scrolling an option off the pane to make room for whitespace.
 func TestRenderPopupRowPadSurroundsTheBlock(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	base := popupSpec{
 		rows:     singleCellRows([]string{"one", "two", "three"}),
 		menuRows: true,
@@ -1634,7 +1636,7 @@ func TestRenderPopupRowPadSurroundsTheBlock(t *testing.T) {
 // lit on its first line and plain on its second reads as two rows, one of them somebody else's.
 func TestRenderPopupWrappedSelectionCoversEveryLine(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 48
 	selected := popupWrapSpec().rows[2][0]
 
@@ -1671,7 +1673,7 @@ func TestRenderPopupWrappedSelectionCoversEveryLine(t *testing.T) {
 // so on the title row — the same accounting a budget of zero has always had, one step earlier.
 func TestRenderPopupWrappedRowsSpendTheBudgetInLines(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 48
 	const title = "how to continue?"
 
@@ -1715,7 +1717,7 @@ func TestRenderPopupWrappedRowsSpendTheBudgetInLines(t *testing.T) {
 // its golden, and a long row still elides onto its ONE line rather than breaking.
 func TestRenderPopupWrapAndGapOffAreUnchanged(t *testing.T) {
 	t.Parallel()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 
 	spec := popupTitleSpec()
 	spec.wrapRows = false

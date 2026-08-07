@@ -12,6 +12,7 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/schedule"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -38,7 +39,7 @@ func TestRailedWidthFloors(t *testing.T) {
 // fixture's hyphen ("sub-agent") is the point — it is exactly the breakpoint run the wrapper used
 // to grow past the limit.
 func TestSubAgentReflowAtSmallWidths(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const depth = 2
 	floor := depth*railWidth + th.measure.Width(glyphAssistant+" ") + 1
 
@@ -95,7 +96,7 @@ func TestWrapTextHoldsTheWidthCap(t *testing.T) {
 			for limit := 1; limit <= 8; limit++ {
 				t.Run(pm.name+"/"+c.name+"/limit "+strconv.Itoa(limit), func(t *testing.T) {
 					t.Parallel()
-					th := newTheme()
+					th := newTheme(scheme.Default())
 					th.measure = widthAuthority{method: pm.method}
 
 					lines := wrapText(th, c.in, limit)
@@ -196,7 +197,7 @@ func TestWrapTextBreaksInThePaintersMeasure(t *testing.T) {
 		for _, c := range cases {
 			t.Run(pm.name+"/"+c.name, func(t *testing.T) {
 				t.Parallel()
-				th := newTheme()
+				th := newTheme(scheme.Default())
 				th.measure = widthAuthority{method: pm.method}
 
 				want := c.wc
@@ -242,7 +243,7 @@ func TestClipWrapLeavesFittingTextAlone(t *testing.T) {
 		for _, c := range cases {
 			t.Run(pm.name+"/"+c.name, func(t *testing.T) {
 				t.Parallel()
-				th := newTheme()
+				th := newTheme(scheme.Default())
 				th.measure = widthAuthority{method: pm.method}
 
 				want := hangingWrap(th, th.toolDetail, marker, c.text, width)
@@ -292,7 +293,7 @@ func TestClipWrapHoldsItsRowBudget(t *testing.T) {
 					name := pm.name + "/" + c.name + "/width " + strconv.Itoa(width) + "/rows " + strconv.Itoa(maxRows)
 					t.Run(name, func(t *testing.T) {
 						t.Parallel()
-						th := newTheme()
+						th := newTheme(scheme.Default())
 						th.measure = widthAuthority{method: pm.method}
 
 						full := hangingWrap(th, th.toolDetail, marker, c.text, width)
@@ -349,7 +350,7 @@ func TestClipWrapSurvivesNarrowWidths(t *testing.T) {
 	for _, pm := range paintMethods {
 		t.Run(pm.name, func(t *testing.T) {
 			t.Parallel()
-			th := newTheme()
+			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: pm.method}
 			floor := th.measure.Width(clipTail)
 
@@ -410,7 +411,7 @@ func TestWrappedSurfacesBreakInThePaintersMeasure(t *testing.T) {
 		for _, s := range surfaces {
 			t.Run(pm.name+"/"+s.name, func(t *testing.T) {
 				t.Parallel()
-				th := newTheme()
+				th := newTheme(scheme.Default())
 				th.measure = widthAuthority{method: pm.method}
 
 				want := 1
@@ -451,7 +452,7 @@ func TestUserBlockRowsAreOneSquareLineEach(t *testing.T) {
 	for _, pm := range paintMethods {
 		t.Run(pm.name, func(t *testing.T) {
 			t.Parallel()
-			th := newTheme()
+			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: pm.method}
 
 			paint := renderUserBlock(th, glyphUser+" ", text, nil, width, true)
@@ -608,7 +609,7 @@ func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
 // read as stray punctuation rather than as the frame continuing) and it ends on the glyph — the
 // gutter's trailing space is trimmed, so the row never leaves a styled blank hanging off its right.
 func TestRenderSpacerRailIsStyledAndUntrailed(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	tr := feed(
 		domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "one"},
 		domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "two"},
@@ -624,18 +625,18 @@ func TestRenderSpacerRailIsStyledAndUntrailed(t *testing.T) {
 	}
 }
 
-// The sub-agent frame — rail and ⤷ label alike, both the subRail role — is painted in colCode,
-// the same tool-header orange toolLabel carries, so a nested run reads as one coloured frame
+// The sub-agent frame — rail and ⤷ label alike, both the subRail role — is painted in the scheme's
+// `code` role, the same tool-header orange toolLabel carries, so a nested run reads as one coloured frame
 // rather than as dim chrome. The assertion compares against the palette's own render rather than
 // a lipgloss byte-golden; the guard below it catches the opposite failure, a subRail role that
 // paints nothing at all and would leave the rail unstyled.
 func TestSubRailPaintedInToolHeaderOrange(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 
 	rail := th.subRail.Render(glyphSubRail)
 
-	if want := lipgloss.NewStyle().Foreground(colCode).Render(glyphSubRail); rail != want {
-		t.Errorf("rail = %q; want the colCode orange %q the tool header carries", rail, want)
+	if want := lipgloss.NewStyle().Foreground(lipgloss.Color(scheme.Default().Code)).Render(glyphSubRail); rail != want {
+		t.Errorf("rail = %q; want the `code` role's orange %q the tool header carries", rail, want)
 	}
 	if rail == glyphSubRail {
 		t.Fatal("the subRail role renders no escape sequence; the rail and label would be unstyled")
@@ -652,7 +653,7 @@ func TestSubRailPaintedInToolHeaderOrange(t *testing.T) {
 // render rather than a byte-exact golden, so a lipgloss change cannot false-fail it; the guard
 // below it catches the opposite failure, a toolLabel role that paints nothing at all.
 func TestToolHeaderLabelStyled(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	block := renderToolBlock(th, []toolView{{Label: "Read File", Target: "main.go"}}, 80, blockState{}).lines
 	head := block[0]
 
@@ -860,7 +861,7 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 		t.Errorf("diff block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	lines := tr.renderLines(th, 80)
 	if got, want := lines[2], th.diffRemoved.Render("    - a removed line"); got != want {
 		t.Errorf("removed line = %q; want the diffRemoved style %q", got, want)
@@ -899,7 +900,7 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 		t.Errorf("diff sketch mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	if got, want := tr.renderLines(th, 80)[1], th.toolDetailBright.Render("  ┕ main.go +2 -2"); got != want {
 		t.Errorf("diffstat branch = %q; want the plain detail tone of an OPEN block %q", got, want)
 	}
@@ -1075,7 +1076,7 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 }
 
 // TestExpandedBlockLiftsItsDetailTone is design call 9 in the paint: a block's own text is dim while
-// it is collapsed and a step brighter once it is open (theme.go's colFaintBright), so the block a
+// it is collapsed and a step brighter once it is open (theme.go's openDetailTone), so the block a
 // reader opened stands out of the scrollback of closed ones around it. It holds for both shapes that
 // have a state — the single block and the group member, which are painted by different functions
 // (renderToolBranch, renderExpandedMember) and could drift apart.
@@ -1084,7 +1085,7 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 // subtests fails the day the two roles resolve to the same colour: a contrast step that quietly went
 // away would satisfy every equality beneath it.
 func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
 	}
@@ -1150,7 +1151,7 @@ func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
 // pair of painters must NOT agree there, or the diff assertion would hold by the tone step having
 // gone missing altogether.
 func TestDiffLinesKeepTheirColourInBothBlockStates(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
 	}
@@ -1213,7 +1214,7 @@ func TestCollapsedBlockStandsAtMostFourRows(t *testing.T) {
 	if want := "    +3 more lines"; lines[3] != want {
 		t.Errorf("marker row = %q, want %q", lines[3], want)
 	}
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	for i, ln := range lines {
 		if w := th.measure.Width(ln); w > width {
 			t.Errorf("row %d paints %d columns, past the %d-column block: %q", i, w, width, ln)
@@ -1290,7 +1291,7 @@ func groupMemberLine(t *testing.T, text string, width int) string {
 // moved fails everywhere at once instead of in one place.
 func memberEdgeRow(t *testing.T, text, mark string, width int) string {
 	t.Helper()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	pad := width - th.measure.Width(text) - th.measure.Width(mark)
 	if pad < 0 {
 		t.Fatalf("member row %q plus %q does not fit width %d", text, mark, width)
@@ -1324,7 +1325,7 @@ func summaryColumn(t *testing.T, row, summary string) int {
 	if at < 0 {
 		t.Fatalf("row %q carries no summary %q", row, summary)
 	}
-	return newTheme().measure.Width(row[:at])
+	return newTheme(scheme.Default()).measure.Width(row[:at])
 }
 
 // TestRenderGroupsBodyCarryingCalls is the grouping scope's new half (design call 3): a call that
@@ -1360,7 +1361,7 @@ func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 // left edge does not read "(3)" as part of the tool's name (design call 6). The header wears no
 // state indicator and takes no click — the members own their state.
 func TestGroupHeaderCountIsFaintAndInert(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
 	}
@@ -1408,7 +1409,7 @@ func TestGroupMemberKeepsItsSummaryAndClipsTheTarget(t *testing.T) {
 		t.Errorf("clipped member = %q; want the target cut with %q and the ▶ at the edge",
 			rows[1], clipTail)
 	}
-	if got := newTheme().measure.Width(rows[1]); got != width {
+	if got := newTheme(scheme.Default()).measure.Width(rows[1]); got != width {
 		t.Errorf("clipped member measures %d cells, want the full %d", got, width)
 	}
 	if strings.HasSuffix(rows[2], glyphCollapsed) {
@@ -1490,7 +1491,7 @@ func TestGroupMemberMarksNameTheirOwnCalls(t *testing.T) {
 // tone (design call 8). Painted in the same style, a member's body would look like a section of the
 // delegate's frame rather than the output of one call inside it.
 func TestExpandedMemberGutterIsNotTheSubAgentRail(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
 	}
@@ -1744,7 +1745,7 @@ func TestSpanlessSubAgentHeadsNeverGroup(t *testing.T) {
 // what these tests assert.
 func promptRows(t *testing.T, tr *transcript, width int) []string {
 	t.Helper()
-	lines := tr.renderLines(newTheme(), width)
+	lines := tr.renderLines(newTheme(scheme.Default()), width)
 	out := make([]string, len(lines))
 	for i, ln := range lines {
 		out[i] = strip(ln)
@@ -1758,7 +1759,7 @@ func promptRows(t *testing.T, tr *transcript, width int) []string {
 // trailing pad trimmed, for the caller to assert on.
 func splitMarker(t *testing.T, row, want string, width int) string {
 	t.Helper()
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	if got := th.measure.Width(row); got != width {
 		t.Errorf("row %q is %d columns wide; want the block's full %d", row, got, width)
 	}
@@ -2026,7 +2027,7 @@ func accentRuns(block, opener string) []string {
 // still reads as the sentence that was sent (ISSUES, "sent prompts with skills"; layout.md,
 // "Tokens light up when they resolve").
 func TestSentBlockAccentsItsSkillTokens(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 44
 	const text = "/review this diff"
 	tr := &transcript{}
@@ -2047,7 +2048,7 @@ func TestSentBlockAccentsItsSkillTokens(t *testing.T) {
 // A token invoked twice is painted twice: the SPANS drive the accent, not the de-duped name list,
 // so both occurrences light up.
 func TestSentBlockAccentsEveryOccurrence(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const text = "/review this diff and /review that one"
 	tr := &transcript{}
 	tr.addUser(text, []skillSpan{
@@ -2064,7 +2065,7 @@ func TestSentBlockAccentsEveryOccurrence(t *testing.T) {
 // A token the block had to break across a soft-wrap is accented on BOTH rows — the prompt box's
 // own rule for a wrapped token (TestAccentedTokenWrapsAcrossRows), against the transcript's wrap.
 func TestAccentedSkillTokenStraddlesASoftWrap(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 12 // the token is wider than the row left of the marker, so the block breaks it
 	const text = "/coding-standards"
 	tr := &transcript{}
@@ -2085,7 +2086,7 @@ func TestAccentedSkillTokenStraddlesASoftWrap(t *testing.T) {
 // the truncated row carrying the see-more marker stays inside that row's own content — the marker
 // is apogee talking, and an accent that reached it would recolour that voice.
 func TestCollapsedBlockAccentsOnlyWhatItShows(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 44
 
 	t.Run("a token on a hidden row paints nothing", func(t *testing.T) {
@@ -2124,7 +2125,7 @@ func TestCollapsedBlockAccentsOnlyWhatItShows(t *testing.T) {
 // two guards for the opposite failures — a role that paints nothing at all, and one that paints
 // exactly what the body does.
 func TestPromptMarkerCarriesTheHighlightStyle(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	tr := &transcript{}
 	tr.addUser("alpha\nbravo\ncharlie\ndelta", nil)
 
@@ -2163,7 +2164,7 @@ type blockMark struct {
 // safe to use as an index into the targets on the mouse path (model.go).
 func blockMarks(t *testing.T, tr *transcript, width int) []blockMark {
 	t.Helper()
-	rendered := tr.renderView(newTheme(), width, false)
+	rendered := tr.renderView(newTheme(scheme.Default()), width, false)
 	if len(rendered.targets) != len(rendered.lines) {
 		t.Fatalf("targets and lines out of lockstep: %d targets for %d lines",
 			len(rendered.targets), len(rendered.lines))
@@ -2470,7 +2471,7 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 // assertion is against the theme's own roles rather than a lipgloss byte-golden, and the second
 // guard catches the opposite failure — an indicator styled into the label's run.
 func TestHeaderIndicatorIsStyledApartFromTheLabel(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
@@ -2491,7 +2492,7 @@ func TestHeaderIndicatorIsStyledApartFromTheLabel(t *testing.T) {
 // look like one. The two roles are asserted to differ as well as to be applied, so a marker style
 // that quietly became detailStyle's twin fails here rather than passing silently.
 func TestRemainderMarkerCarriesItsOwnStyle(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
@@ -2562,7 +2563,7 @@ func TestPromptBlockIsOneClickSurface(t *testing.T) {
 			tr := &transcript{}
 			tc.build(t, tr)
 
-			rendered := tr.renderView(newTheme(), width, false)
+			rendered := tr.renderView(newTheme(scheme.Default()), width, false)
 			if len(rendered.targets) != len(rendered.lines) {
 				t.Fatalf("targets and lines out of lockstep: %d targets for %d lines",
 					len(rendered.targets), len(rendered.lines))
@@ -2685,7 +2686,7 @@ func TestBlockMarksAgreeWithTheMouseMapping(t *testing.T) {
 // anything the transcript holds, so a test names it outright instead of driving a clock.
 func headerStar(t *testing.T, tr *transcript, blink bool) string {
 	t.Helper()
-	lines := tr.renderView(newTheme(), 80, blink).lines
+	lines := tr.renderView(newTheme(scheme.Default()), 80, blink).lines
 	if len(lines) == 0 {
 		t.Fatal("the transcript rendered nothing at all")
 	}
@@ -3219,7 +3220,7 @@ func TestEveryToolShapeCollapsesInsideTheRowBudget(t *testing.T) {
 			},
 		},
 	}
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			lines := strings.Split(renderPlain(tc.build(), width), "\n")
@@ -3698,7 +3699,7 @@ func TestPromptEditorRowsClampsTheWidgetCount(t *testing.T) {
 		strings.Repeat("a", width) + "\n" + "b",     // an exact width fill plus a line
 	}
 	for _, value := range cases {
-		e := newPromptEditor(defaultCursorShape)
+		e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 		e.input.SetValue(value)
 		raw := inputContentRows(e.input.Value(), width) // what the editor holds, not what was handed to it
 		got := e.rows(width)
@@ -3739,7 +3740,7 @@ func lineWithLogoAnd(lines []string, sub string) bool {
 // carries none of the black-background SGR the input box emits, and (g) every line spans the full
 // content width, top and bottom closing on the rounded corner at that edge.
 func TestRenderStartupBox(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	v := startupView{
 		Logo:    strings.TrimRight(apogeeLogo, "\n"),
 		Host:    "test-host:1111", // the widest value → its row is the one flushed right
@@ -3778,10 +3779,10 @@ func TestRenderStartupBox(t *testing.T) {
 			t.Errorf("startup box missing rounded corner %q:\n%s", corner, plain)
 		}
 	}
-	// (f) none of the black-background SGR the input box paints. Extract it from a real
-	// Background(colBlack) render, so the check tracks whatever colour profile lipgloss uses rather
+	// (f) none of the surface-background SGR the input box paints. Extract it from a real
+	// Background(surface) render, so the check tracks whatever colour profile lipgloss uses rather
 	// than a hard-coded escape.
-	probe := lipgloss.NewStyle().Background(colBlack).Render("x")
+	probe := lipgloss.NewStyle().Background(lipgloss.Color(scheme.Default().Surface)).Render("x")
 	if !strings.Contains(probe, "\x1b") {
 		t.Fatal("the black-background probe rendered no escape; the colour profile hides the SGR this test relies on")
 	}
@@ -3812,7 +3813,7 @@ func TestRenderStartupBox(t *testing.T) {
 // and the facts are on SEPARATE rows (stacked, not side by side), (d) the card still spans the full
 // content width with rounded corners.
 func TestRenderStartupBoxStackedFallback(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	v := startupView{
 		Logo:    strings.TrimRight(apogeeLogo, "\n"),
 		Host:    "test-host:1111",

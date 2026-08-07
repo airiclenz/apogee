@@ -6,6 +6,8 @@ import (
 
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -26,7 +28,7 @@ func strip(s string) string { return ansi.Strip(s) }
 func colorActive(th theme) bool { return strings.Contains(th.mdCode.Render("x"), "\x1b") }
 
 func TestRenderInlineBold(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	got := renderInline(th, "a **bold** b")
 	if v := strip(got); v != "a bold b" {
 		t.Errorf("visible = %q; want %q (the ** markers consumed)", v, "a bold b")
@@ -40,7 +42,7 @@ func TestRenderInlineBold(t *testing.T) {
 }
 
 func TestRenderInlineCode(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	got := renderInline(th, "run `go test` now")
 	if v := strip(got); v != "run go test now" {
 		t.Errorf("visible = %q; want %q (the backticks consumed)", v, "run go test now")
@@ -52,7 +54,7 @@ func TestRenderInlineCode(t *testing.T) {
 
 // A code span wins over bold: ** inside `…` stays literal (CommonMark code-span precedence).
 func TestRenderInlineCodeBeatsBold(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	got := renderInline(th, "`**x**`")
 	if v := strip(got); v != "**x**" {
 		t.Errorf("visible = %q; want %q (bold not parsed inside a code span)", v, "**x**")
@@ -61,7 +63,7 @@ func TestRenderInlineCodeBeatsBold(t *testing.T) {
 
 // An unterminated marker (mid-stream) is left literal — never a leaked escape or eaten text.
 func TestRenderInlineUnterminated(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	for _, in := range []string{"a **bold start", "a `code start", "trailing *"} {
 		got := renderInline(th, in)
 		if v := strip(got); v != in {
@@ -74,7 +76,7 @@ func TestRenderInlineUnterminated(t *testing.T) {
 }
 
 func TestHeadingStripsMarkers(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	for _, lvl := range []string{"#", "##", "###", "####", "#####", "######"} {
 		out := renderMarkdownBody(th, lvl+" Title", 40)
 		if len(out) != 1 {
@@ -94,7 +96,7 @@ func TestHeadingStripsMarkers(t *testing.T) {
 
 // Seven #s (or a # with no following space) is not a heading; it renders as a plain paragraph.
 func TestNotAHeading(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	for _, in := range []string{"####### TooDeep", "#NoSpace"} {
 		out := renderMarkdownBody(th, in, 40)
 		if v := strip(out[0]); v != in {
@@ -104,7 +106,7 @@ func TestNotAHeading(t *testing.T) {
 }
 
 func TestBulletList(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	for _, b := range []string{"-", "*", "+"} {
 		out := renderMarkdownBody(th, b+" one\n"+b+" two", 40)
 		if len(out) != 2 {
@@ -120,7 +122,7 @@ func TestBulletList(t *testing.T) {
 }
 
 func TestNumberedList(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	out := renderMarkdownBody(th, "1. first\n2) second", 40)
 	if v := strip(out[0]); v != "1. first" {
 		t.Errorf("numbered line 0 visible = %q; want %q", v, "1. first")
@@ -132,7 +134,7 @@ func TestNumberedList(t *testing.T) {
 
 // A wrapped list item hangs under its text: the continuation line is indented to the marker width.
 func TestListHangingIndent(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	out := renderMarkdownBody(th, "- "+strings.Repeat("word ", 8), 20)
 	if len(out) < 2 {
 		t.Fatalf("expected the long item to wrap, got %d line(s)", len(out))
@@ -146,7 +148,7 @@ func TestListHangingIndent(t *testing.T) {
 }
 
 func TestFencedCodeBlock(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	out := renderMarkdownBody(th, "```go\nfmt.Println()\n```", 40)
 	if len(out) != 1 {
 		t.Fatalf("got %d lines, want 1 (fence lines dropped)", len(out))
@@ -166,7 +168,7 @@ func TestFencedCodeBlock(t *testing.T) {
 
 // An unterminated fence (still streaming) renders the body it has, with no leaked fence marker.
 func TestFencedCodeBlockUnterminated(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	out := renderMarkdownBody(th, "```\ncode line", 40)
 	if v := strip(out[0]); v != "  code line" {
 		t.Errorf("visible = %q; want %q", v, "  code line")
@@ -181,7 +183,7 @@ func TestFencedCodeBlockUnterminated(t *testing.T) {
 // A run of two or more blank lines collapses to a single blank row (the paragraph break stays,
 // the padding goes); one blank line is left exactly as it was.
 func TestCollapsesBlankRuns(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	cases := []struct {
 		name string
 		in   string
@@ -211,7 +213,7 @@ func TestCollapsesBlankRuns(t *testing.T) {
 // Blank lines inside a fenced code block are code, not padding: they survive verbatim, and a
 // blank line immediately after the closing fence is not swallowed by one inside it.
 func TestFencedCodeBlockKeepsBlankLines(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	out := renderMarkdownBody(th, "```go\na()\n\n\nb()\n```\n\ntail", 40)
 	want := []string{"  a()", "  ", "  ", "  b()", "", "tail"}
 	if len(out) != len(want) {
@@ -248,7 +250,7 @@ func visibleTrimmed(lines []string) []string {
 // existing assistant-text assertions green). A pipe that is not part of a table — no delimiter
 // row under it — is plain text like any other character.
 func TestPlainTextUnchanged(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	for _, in := range []string{
 		"just plain assistant text",
 		"run cat file | grep needle",
@@ -268,7 +270,7 @@ func TestPlainTextUnchanged(t *testing.T) {
 // boundary — the guarantee that baked-in ANSI never perturbs the wrap arithmetic. A table obeys
 // the same cap: its columns shrink and its cells truncate until the whole block fits.
 func TestWidthNeverExceeds(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const width = 20
 	bodies := []string{
 		"**" + strings.Repeat("alpha ", 10) + "**bold tail",
@@ -302,7 +304,7 @@ func TestTableWidthNeverExceedsAcrossWidths(t *testing.T) {
 	for _, pm := range paintMethods {
 		t.Run(pm.name, func(t *testing.T) {
 			t.Parallel()
-			th := newTheme()
+			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: pm.method}
 
 			for width := 1; width <= 120; width++ {
@@ -323,14 +325,14 @@ func TestTableWidthNeverExceedsAcrossWidths(t *testing.T) {
 }
 
 func TestEmptyMessageRendersOneLine(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	if out := renderMarkdownBody(th, "", 40); len(out) != 1 || strip(out[0]) != "" {
 		t.Errorf("empty message = %#v; want a single empty line (so its marker shows)", out)
 	}
 }
 
 func TestWithMarker(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	got := withMarker(th, glyphAssistant+" ", []string{"first", "second"})
 	if got[0] != glyphAssistant+" first" {
 		t.Errorf("line 0 = %q; want the marker prepended", got[0])

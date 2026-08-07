@@ -1,7 +1,12 @@
 package tui
 
 import (
+	"image/color"
+
 	lipgloss "charm.land/lipgloss/v2"
+
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -16,44 +21,25 @@ import (
 // Styles), so a theme of Styles is safe inside the value-copied Model (ADR 0011;
 // TestModelNoBuilderByValue guards the strings.Builder case structurally).
 
-// The palette. Colours are hex so lipgloss maps them to the terminal's profile; the two
-// "dark gray" roles (the user block's background and the chrome's borders) share one tone,
+// The palette is no longer written here: every colour a style takes comes from the active
+// [scheme.Scheme] handed to [newTheme], one hex value per semantic role (ADR 0039). Colours stay hex
+// so lipgloss maps them to the terminal's profile, and the two "dark gray" roles of the shipped dark
+// scheme (the user block's background and the chrome's borders) still share one tone — `chrome` —
 // matching the layout sketch (layout.md).
+
+// openDetailTone is the one colour this file still names itself: the muted tone's OPEN step, the
+// gray an expanded tool block paints its target, summary and body in (design call 9 of
+// docs/plans/"2026-08-06 - 03"). A block is opened to be read, and the dim a collapsed scrollback
+// wants — where the eye is skimming past the blocks rather than into one — is a step too quiet for
+// the output someone just asked to see. One step, deliberately: the two tones have to read as the
+// same voice at two volumes, so a block does not change what it IS by being opened.
+//
+// It has no scheme role of its own: the role table ADR 0039 ratifies is 23 keys and this tone is not
+// among them, so every scheme — dark or light — currently gets this same gray. Adding a
+// `muted-bright` role is the fix; until then the literal lives here rather than in a scheme file.
+const openDetailTone = "#b2b2b2"
+
 var (
-	colWhite    = lipgloss.Color("#ffffff") // user-prompt text
-	colDarkGray = lipgloss.Color("#4a4a4a") // user-block background + input/footer borders
-	colDimGray  = lipgloss.Color("#333333") // top-edge divider hairline — dimmer than the chrome border so it recedes
-	colBlack    = lipgloss.Color("#000000") // input-box interior
-	colFaint    = lipgloss.Color("#8a8a8a") // status/footer/tool-detail dim
-	// colFaintBright is colFaint's OPEN tone: the gray an expanded tool block paints its target,
-	// summary and body in (design call 9 of docs/plans/"2026-08-06 - 03"). A block is opened to be
-	// read, and the dim a collapsed scrollback wants — where the eye is skimming past the blocks
-	// rather than into one — is a step too quiet for the output someone just asked to see. One step,
-	// deliberately: the two tones have to read as the same voice at two volumes, so a block does not
-	// change what it IS by being opened.
-	colFaintBright = lipgloss.Color("#b2b2b2")
-	colDiffAdd     = lipgloss.Color("#3fb950") // diff "+" lines (reserved — no producer yet)
-	colDiffDel     = lipgloss.Color("#f85149") // diff "-" lines (reserved — no producer yet)
-	colError       = lipgloss.Color("#f85149") // recovered-fault notices
-	colCode        = lipgloss.Color("#f0883e") // inline `code` + fenced code blocks (orange)
-
-	// The autonomy-mode footer markers, warming up the privilege ladder (least → most
-	// autonomous): plan turquoise-green, ask-before green, allow-edits blue, auto orange.
-	colModePlan       = lipgloss.Color("#2afefa") // plan — turquoise green
-	colModeAskBefore  = lipgloss.Color("#3fb950") // ask-before — green
-	colModeAllowEdits = lipgloss.Color("#58a6ff") // allow-edits — blue
-	colModeAuto       = lipgloss.Color("#f0883e") // auto — orange
-
-	colSkill   = lipgloss.Color("#b1baff") // skills — violet: the prompt's inline /token accent (skillToken) and its twin inside a sent block (skillAccent)
-	colFileRef = lipgloss.Color("#cdffa4") // the prompt's inline @file token accent — blue, the tone a reference reads as
-
-	colPromptToggle = lipgloss.Color("#b0d2ff") // the collapsed prompt's see-more / see-less marker — light gray-blue: an apogee affordance that reads as chrome inside the block, not as more of what the human wrote
-	colToolMarker   = lipgloss.Color("#8db4e6") // a tool block's synthesized "+N more lines" remainder marker — colPromptToggle's cooler sibling: the same "apogee is talking" hue, kept its own role because the marker carries no background and no bold weight (it rides a body column, not a coloured field)
-
-	colGauge = lipgloss.Color("#c396ff") // context-fill gauge bar — periwinkle (llama-launcher look)
-
-	colSelection = lipgloss.Color("#3a5fcd") // mouse drag-selection highlight background — blue
-
 	colSpinner1 = lipgloss.Color("#8668ff")
 	colSpinner2 = lipgloss.Color("#19a946")
 	colSpinner3 = lipgloss.Color("#ffbf00")
@@ -158,11 +144,11 @@ type theme struct {
 	userBlock     lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
 	promptToggle  lipgloss.Style // the see-more / see-less marker a long prompt block carries near its right edge (renderUserBlock): bold light gray-blue on the block's OWN dark-gray field, held a promptMarkerMargin off the edge, so the toggle reads as an affordance sitting inside the block rather than as another row of what the human wrote
 	toolHeader    lipgloss.Style // the ✦ Label target header
-	toolLabel     lipgloss.Style // the tool label inside that header (bold, orange — the colCode tone inline code and the auto-mode marker already carry)
+	toolLabel     lipgloss.Style // the tool label inside that header (bold, orange — the `code` role's tone inline code and the auto-mode marker already carry)
 	toolIndicator lipgloss.Style // the ▶/▼ state indicator trailing that label where the header is a toggle target: the detail tone, deliberately NOT toolLabel's orange, so the affordance reads as chrome beside the label rather than as part of it
 	toolDetail    lipgloss.Style // the ┝/┕ branch detail lines of a COLLAPSED block (dim)
 	// toolDetailBright is toolDetail's open twin: the same lines once the block they belong to is
-	// expanded, a step brighter (colFaintBright), so what a reader opened stands out from the
+	// expanded, a step brighter ([openDetailTone]), so what a reader opened stands out from the
 	// collapsed blocks around it. It is the PLAIN detail tone alone — a diff line keeps diffAdded /
 	// diffRemoved in both states, since its colour carries meaning rather than emphasis — and the
 	// chrome a block wears (toolIndicator, toolMarker, the open member's gutter) stays dim in both,
@@ -202,7 +188,7 @@ type theme struct {
 	spinnerBase   lipgloss.Style // the status-line spinner's field: the status bar's black, with no foreground of its own so an uncoloured glyph keeps the terminal's text colour — the colour loop layers a per-frame foreground onto it (spinner.go)
 	statusError   lipgloss.Style // status-line "error" token: red bold on black
 	chromeRule    lipgloss.Style // the prompt box's own border hairline (dark gray on black): the rule runes and corners inputElisionEdge composes the box's top border row from
-	hairline      lipgloss.Style // both chrome hairlines — the ▔ above the status line and the ▁ under the footer — a dimmer rule (colDimGray) so they recede
+	hairline      lipgloss.Style // both chrome hairlines — the ▔ above the status line and the ▁ under the footer — a dimmer rule (the `divider` role) so they recede
 	footerText    lipgloss.Style // the footer's content (faint on black)
 	scrollThumb   lipgloss.Style // the transcript scroll-bar thumb (the position marker)
 	scrollTrack   lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
@@ -212,100 +198,178 @@ type theme struct {
 	// partial cell), gaugeTrack the dark-gray groove behind the empty remainder.
 	gaugeFill  lipgloss.Style // the gauge's filled portion (periwinkle)
 	gaugeTrack lipgloss.Style // the gauge's empty track (dark-gray background)
+
+	// The raw colours, for the handful of places that paint with a COLOUR rather than with a whole
+	// style: a widget the theme does not own (the textarea's four background slots, fillInput), a
+	// field laid under someone else's style (popup.go's blackFill, the gauge's partial cell), and a
+	// tone chosen per value rather than per role (the footer's mode marker, [theme.modeColor]).
+	// Before ADR 0039 those sites read the package-level palette vars directly, which is exactly what
+	// a runtime scheme switch cannot reach — so the theme carries them and the palette is gone. They
+	// are plain lipgloss.Color values (a string type), so the theme stays copy-safe (ADR 0011).
+	surface color.Color // the `surface` role: the input box's interior, the status field, a popup pane's fill
+	chrome  color.Color // the `chrome` role: the user block's field, the borders, the gauge's track
+	muted   color.Color // the `muted` role: the dim tone, and modeColor's off-ladder fallback
+	errorFg color.Color // the `error` role: the footer's offline segment, painted onto footerText
+
+	// The four autonomy-mode marker colours, warming up the privilege ladder (least → most
+	// autonomous): plan turquoise-green, ask-before green, allow-edits blue, auto orange.
+	// [theme.modeColor] is the only reader.
+	modePlan       color.Color
+	modeAskBefore  color.Color
+	modeAllowEdits color.Color
+	modeAuto       color.Color
 }
 
-// newTheme builds the styles from the palette. The input border is a CLOSED rounded frame: the
-// box owns its own ╰─╯ bottom edge, and the footer below it is a frameless line rather than the
-// shared bottom half of the box's chrome (layout.md). That is why nothing here has to compose
-// junction corners by hand any more — one lipgloss.Border draws the whole box.
-func newTheme() theme {
+// modeColor maps an autonomy mode to its footer-marker colour. An unknown mode falls back to the
+// muted tone, so an off-ladder value is never invisible.
+func (th theme) modeColor(m domain.Mode) color.Color {
+	switch m {
+	case domain.ModePlan:
+		return th.modePlan
+	case domain.ModeAskBefore:
+		return th.modeAskBefore
+	case domain.ModeAllowEdits:
+		return th.modeAllowEdits
+	case domain.ModeAuto:
+		return th.modeAuto
+	default:
+		return th.muted
+	}
+}
+
+// newTheme builds the styles from a colour scheme — the 23 semantic roles of ADR 0039, resolved
+// before it is called (the renderer never reads a scheme file itself). It is the ONE seam between a
+// scheme and the look: calling it again with another scheme rebuilds every style, which is what a
+// live scheme switch does (settingsApplyLocal).
+//
+// The input border is a CLOSED rounded frame: the box owns its own ╰─╯ bottom edge, and the footer
+// below it is a frameless line rather than the shared bottom half of the box's chrome (layout.md).
+// That is why nothing here has to compose junction corners by hand any more — one lipgloss.Border
+// draws the whole box.
+func newTheme(s scheme.Scheme) theme {
+	// The scheme's roles, bound once and read by everything below. A role is named here by what it
+	// MEANS, not by the tone the dark scheme happens to give it, so the styles keep reading as
+	// arguments about hierarchy under a scheme that inverts every value.
+	var (
+		userText       = lipgloss.Color(s.UserText)
+		chrome         = lipgloss.Color(s.Chrome)
+		divider        = lipgloss.Color(s.Divider)
+		surface        = lipgloss.Color(s.Surface)
+		muted          = lipgloss.Color(s.Muted)
+		openDetail     = lipgloss.Color(openDetailTone)
+		diffAdd        = lipgloss.Color(s.DiffAdd)
+		diffDel        = lipgloss.Color(s.DiffDel)
+		errFg          = lipgloss.Color(s.Error)
+		code           = lipgloss.Color(s.Code)
+		modePlan       = lipgloss.Color(s.ModePlan)
+		modeAskBefore  = lipgloss.Color(s.ModeAskBefore)
+		modeAllowEdits = lipgloss.Color(s.ModeAllowEdits)
+		modeAuto       = lipgloss.Color(s.ModeAuto)
+		skill          = lipgloss.Color(s.Skill)
+		fileRef        = lipgloss.Color(s.FileRef)
+		promptToggleFg = lipgloss.Color(s.PromptToggle)
+		toolMarkerFg   = lipgloss.Color(s.ToolMarker)
+		gauge          = lipgloss.Color(s.Gauge)
+		selectionFill  = lipgloss.Color(s.Selection)
+	)
+
 	return theme{
 		// The painter's own starting measure. It moves only when the terminal tells the program
 		// the painter moved (Update's tea.ModeReportMsg case).
 		measure:   newWidthAuthority(),
-		userBlock: lipgloss.NewStyle().Foreground(colWhite).Background(colDarkGray),
+		userBlock: lipgloss.NewStyle().Foreground(userText).Background(chrome),
 		// The collapse marker keeps the block's background and changes everything else: a light
 		// gray-blue, bolded, against the dark-gray field the prompt text is white on. It is the one
 		// run inside the block that is apogee talking rather than the human, and the hue says so by
 		// cooling away from the prompt's white rather than by competing with it — a marker that
 		// shouts is one you stop reading past.
-		promptToggle:     lipgloss.NewStyle().Bold(true).Foreground(colPromptToggle).Background(colDarkGray),
+		promptToggle:     lipgloss.NewStyle().Bold(true).Foreground(promptToggleFg).Background(chrome),
 		toolHeader:       lipgloss.NewStyle(),
-		toolLabel:        lipgloss.NewStyle().Bold(true).Foreground(colCode),
-		toolIndicator:    lipgloss.NewStyle().Foreground(colFaint),
-		toolDetail:       lipgloss.NewStyle().Foreground(colFaint),
-		toolDetailBright: lipgloss.NewStyle().Foreground(colFaintBright),
-		toolMarker:       lipgloss.NewStyle().Foreground(colToolMarker),
-		subRail:          lipgloss.NewStyle().Foreground(colCode),
+		toolLabel:        lipgloss.NewStyle().Bold(true).Foreground(code),
+		toolIndicator:    lipgloss.NewStyle().Foreground(muted),
+		toolDetail:       lipgloss.NewStyle().Foreground(muted),
+		toolDetailBright: lipgloss.NewStyle().Foreground(openDetail),
+		toolMarker:       lipgloss.NewStyle().Foreground(toolMarkerFg),
+		subRail:          lipgloss.NewStyle().Foreground(code),
 		// The inline token accents are one act on two fields: the skill's violet moves to the
 		// FOREGROUND and the background stays whatever the token is standing on — the prompt box's
 		// black while the message is being typed, the user block's dark gray once it is sent — so an
 		// accented token reads as one word of the sentence it stands in rather than as a badge pasted
 		// over the field. Carrying the field is not cosmetic: a style with the wrong background cuts a
 		// notch of the other colour through the block wherever a token lands.
-		skillAccent:  lipgloss.NewStyle().Foreground(colSkill).Background(colDarkGray),
-		skillToken:   lipgloss.NewStyle().Foreground(colSkill).Background(colBlack),
-		fileToken:    lipgloss.NewStyle().Foreground(colFileRef).Background(colBlack),
-		selection:    lipgloss.NewStyle().Foreground(colWhite).Background(colSelection),
-		diffAdded:    lipgloss.NewStyle().Foreground(colDiffAdd),
-		diffRemoved:  lipgloss.NewStyle().Foreground(colDiffDel),
-		errorText:    lipgloss.NewStyle().Foreground(colError).Bold(true),
-		noteText:     lipgloss.NewStyle().Foreground(colFaint),
-		queuedText:   lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
-		presentTitle: lipgloss.NewStyle().Bold(true).Foreground(colWhite),
+		skillAccent:  lipgloss.NewStyle().Foreground(skill).Background(chrome),
+		skillToken:   lipgloss.NewStyle().Foreground(skill).Background(surface),
+		fileToken:    lipgloss.NewStyle().Foreground(fileRef).Background(surface),
+		selection:    lipgloss.NewStyle().Foreground(userText).Background(selectionFill),
+		diffAdded:    lipgloss.NewStyle().Foreground(diffAdd),
+		diffRemoved:  lipgloss.NewStyle().Foreground(diffDel),
+		errorText:    lipgloss.NewStyle().Foreground(errFg).Bold(true),
+		noteText:     lipgloss.NewStyle().Foreground(muted),
+		queuedText:   lipgloss.NewStyle().Foreground(muted).Background(surface),
+		presentTitle: lipgloss.NewStyle().Bold(true).Foreground(userText),
 		mdBold:       lipgloss.NewStyle().Bold(true),
-		mdHeading:    lipgloss.NewStyle().Bold(true).Foreground(colWhite),
-		mdCode:       lipgloss.NewStyle().Foreground(colCode),
-		mdCodeBlock:  lipgloss.NewStyle().Foreground(colCode),
-		mdRule:       lipgloss.NewStyle().Foreground(colFaint),
+		mdHeading:    lipgloss.NewStyle().Bold(true).Foreground(userText),
+		mdCode:       lipgloss.NewStyle().Foreground(code),
+		mdCodeBlock:  lipgloss.NewStyle().Foreground(code),
+		mdRule:       lipgloss.NewStyle().Foreground(muted),
 		inputBorder: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()). // all four edges: ╭ ╮ ╰ ╯ — the box closes its own frame
-			BorderForeground(colDarkGray).
-			BorderBackground(colBlack).
-			Background(colBlack).
+			BorderForeground(chrome).
+			BorderBackground(surface).
+			Background(surface).
 			Padding(0, 1),
 		startupBorder: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()). // same glyphs as the prompt box: ╭ ╮ ╰ ╯ ─ │
-			BorderForeground(colDarkGray).    // same border tone
+			BorderForeground(chrome).         // same border tone
 			Padding(0, 1),                    // no Background / no BorderBackground → transparent, self-closing card
 		popupBorder: lipgloss.NewStyle(). // selector-popup chrome — startupBorder's shape, but filled solid black (renderPopup)
 							Border(lipgloss.RoundedBorder()).
-							BorderForeground(colDarkGray).
-							BorderBackground(colBlack).
-							Background(colBlack).
+							BorderForeground(chrome).
+							BorderBackground(surface).
+							Background(surface).
 							Padding(0, 1),
-		popupBody: lipgloss.NewStyle().Foreground(colWhite).Background(colBlack), // wrapped body prose: normal white, not bold (title) nor faint (chrome)
+		popupBody: lipgloss.NewStyle().Foreground(userText).Background(surface), // wrapped body prose: normal white, not bold (title) nor faint (chrome)
 		// The body's label and the row list's section headers are the same argument in two places:
 		// white where the prose around them is white and the chrome below them is faint, so a heading
 		// is told from what it heads by WEIGHT and by tone rather than by a rule or a badge. The label
 		// is bolded because it stands inside a line it shares with the text it introduces; a section
 		// header has a line of its own and needs no more than the tone to be found.
-		popupBodyLead: lipgloss.NewStyle().Bold(true).Foreground(colWhite).Background(colBlack),
-		popupHeading:  lipgloss.NewStyle().Foreground(colWhite).Background(colBlack),
+		popupBodyLead: lipgloss.NewStyle().Bold(true).Foreground(userText).Background(surface),
+		popupHeading:  lipgloss.NewStyle().Foreground(userText).Background(surface),
 		// An edited row keeps the selection's dark-gray field — it IS the selected row — and changes
 		// what is written on it: the accent tone the theme spends on "this is apogee's own", bolded
 		// against the white the same bar carries when the row is merely highlighted. Light rather than
 		// a second block of colour, popupAccent's argument on a field that is already there.
-		popupEdit: lipgloss.NewStyle().Bold(true).Foreground(colCode).Background(colDarkGray),
+		popupEdit: lipgloss.NewStyle().Bold(true).Foreground(code).Background(chrome),
 		// A menu's selected row is marked by LIGHT rather than by a block of colour: bold in the
-		// accent tone the theme already spends on "this is apogee's own" — colCode, the orange the
-		// tool label, the sub-agent rail and the auto-mode marker all carry — against the faint gray
+		// accent tone the theme already spends on "this is apogee's own" — the `code` role, the orange
+		// the tool label, the sub-agent rail and the auto-mode marker all carry — against the faint gray
 		// the other rows keep. The contrast between the two IS the cue, which is why the row needs no
 		// bar behind it: a full-width highlight on a four-row decision menu paints a quarter of the
 		// pane a second colour and reads as a banner, not as a pointer. The black is the pane's own
 		// field, carried the way skillAccent carries the field it stands on, so the lit run sits IN
 		// the pane instead of cutting a notch of another background through it.
-		popupAccent: lipgloss.NewStyle().Bold(true).Foreground(colCode).Background(colBlack),
-		statusFaint: lipgloss.NewStyle().Foreground(colFaint),
-		statusBar:   lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
-		spinnerBase: lipgloss.NewStyle().Background(colBlack), // match the status bar's black field
-		statusError: lipgloss.NewStyle().Foreground(colError).Bold(true).Background(colBlack),
-		chromeRule:  lipgloss.NewStyle().Foreground(colDarkGray).Background(colBlack),
-		hairline:    lipgloss.NewStyle().Foreground(colDimGray).Background(colBlack),
-		footerText:  lipgloss.NewStyle().Foreground(colFaint).Background(colBlack),
-		scrollThumb: lipgloss.NewStyle().Foreground(colFaint),
-		scrollTrack: lipgloss.NewStyle().Foreground(colDarkGray),
-		gaugeFill:   lipgloss.NewStyle().Foreground(colGauge),
-		gaugeTrack:  lipgloss.NewStyle().Background(colDarkGray),
+		popupAccent: lipgloss.NewStyle().Bold(true).Foreground(code).Background(surface),
+		statusFaint: lipgloss.NewStyle().Foreground(muted),
+		statusBar:   lipgloss.NewStyle().Foreground(muted).Background(surface),
+		spinnerBase: lipgloss.NewStyle().Background(surface), // match the status bar's black field
+		statusError: lipgloss.NewStyle().Foreground(errFg).Bold(true).Background(surface),
+		chromeRule:  lipgloss.NewStyle().Foreground(chrome).Background(surface),
+		hairline:    lipgloss.NewStyle().Foreground(divider).Background(surface),
+		footerText:  lipgloss.NewStyle().Foreground(muted).Background(surface),
+		scrollThumb: lipgloss.NewStyle().Foreground(muted),
+		scrollTrack: lipgloss.NewStyle().Foreground(chrome),
+		gaugeFill:   lipgloss.NewStyle().Foreground(gauge),
+		gaugeTrack:  lipgloss.NewStyle().Background(chrome),
+
+		// The raw colours the call sites that paint without a style reach for.
+		surface:        surface,
+		chrome:         chrome,
+		muted:          muted,
+		errorFg:        errFg,
+		modePlan:       modePlan,
+		modeAskBefore:  modeAskBefore,
+		modeAllowEdits: modeAllowEdits,
+		modeAuto:       modeAuto,
 	}
 }

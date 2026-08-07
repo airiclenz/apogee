@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	lipgloss "charm.land/lipgloss/v2"
+
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -249,7 +251,7 @@ func TestTableMatchBlockOutOfRange(t *testing.T) {
 // the table's width (TestTableRowsShareOneWidth pins that), and those blanks are invisible in
 // print. Everything a reader can see in the example is pinned here exactly.
 func TestTableRendersLayoutExample(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| Tool | Calls | Notes |",
 		"|:--|--:|:-:|",
@@ -283,7 +285,7 @@ func TestTableRendersLayoutExample(t *testing.T) {
 // its row count — the filler line under the shorter cells beside it is held to the width too, as are
 // the two rules between the three rows.
 func TestTableRowsShareOneWidth(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| File | Description of the change that was made | Status |",
 		"| --- | --- | --- |",
@@ -310,7 +312,7 @@ func TestTableRowsShareOneWidth(t *testing.T) {
 // The table's own syntax is consumed: no pipe and no delimiter hyphens survive into the rendered
 // block, and the header is styled where the profile emits colour.
 func TestTableConsumesItsSyntax(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := "| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 
 	got := renderMarkdownBody(th, source, 40)
@@ -347,7 +349,7 @@ func TestTableConsumesItsSyntax(t *testing.T) {
 // has to hold for the inter-row rules as much as for the header's, since they are the same stroke
 // continued down the block.
 func TestTableRuleIsContinuous(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| Tool | Calls | Notes |",
 		"|:--|--:|:-:|",
@@ -426,7 +428,7 @@ func tableRuleLines(lines []string) []int {
 // and not boxed — it has no bottom frame to close. Three body rows therefore draw three rules in
 // all, and the block's last line is a row rather than a stroke hanging under one.
 func TestTableRulesBetweenBodyRows(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| a | b |",
 		"| --- | --- |",
@@ -458,7 +460,7 @@ func TestTableRulesBetweenBodyRows(t *testing.T) {
 // One body row draws exactly one rule — the header's. A rule under the last row would be a bottom
 // frame, which the block does not have however many rows it holds.
 func TestTableLastRowHasNoRuleUnderIt(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := "| a | b |\n| --- | --- |\n| 1 | one |"
 
 	got := visible(renderMarkdownBody(th, source, 40))
@@ -473,7 +475,7 @@ func TestTableLastRowHasNoRuleUnderIt(t *testing.T) {
 // tall, which puts the only inter-row rule between the second line of the first row and the first
 // line of the second.
 func TestTableWrappedRowIsNotRuledInside(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| short | long |",
 		"| --- | --- |",
@@ -520,7 +522,7 @@ func glyphColumns(s, glyph string) []int {
 
 // Each column is padded on the side its delimiter cell names, header cells included.
 func TestTableAlignsColumns(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| left | right | mid |",
 		"| :--- | ----: | :-: |",
@@ -544,7 +546,7 @@ func TestTableAlignsColumns(t *testing.T) {
 
 // A centred cell with an odd remainder takes the extra space on its right (layout.md).
 func TestTableCentreOddRemainder(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := "| head |\n| :-: |\n| ab |"
 
 	got := visible(renderMarkdownBody(th, source, 20))
@@ -557,7 +559,7 @@ func TestTableCentreOddRemainder(t *testing.T) {
 // Inline markup inside a cell styles as it does in a paragraph, and it is the rendered width that
 // sets the column: the ** and ` markers must not push the column open.
 func TestTableInlineMarkupInCells(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| name | note |",
 		"| --- | --- |",
@@ -597,7 +599,7 @@ func TestTableInlineMarkupInCells(t *testing.T) {
 // the cell that no longer fits now wraps onto further lines inside its column instead of being cut
 // with a … tail, and every word of it survives in order.
 func TestTableWrapsToWidth(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const cell = "very long very long very long very long very long very long"
 	source := strings.Join([]string{
 		"| id | description |",
@@ -645,7 +647,7 @@ func TestTableWrapsToWidth(t *testing.T) {
 // Below its natural width the block is still a table — the squeezed columns wrap rather than fall
 // back — so its height grows with the wrapping instead of holding at one line per row.
 func TestTableShrinksToTheWidthItIsGiven(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := "| alpha | beta | gamma |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 
 	for _, width := range []int{18, 20, 24} {
@@ -669,7 +671,7 @@ func TestTableShrinksToTheWidthItIsGiven(t *testing.T) {
 // own column and every word of it is still on screen. This is the issue the wave closes — a cell
 // cut with a … lost information the model had put in the table.
 func TestTableWrapsInsteadOfTruncating(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const note = "the quick brown fox jumps over the lazy dog"
 	source := strings.Join([]string{
 		"| id | note |",
@@ -698,7 +700,7 @@ func TestTableWrapsInsteadOfTruncating(t *testing.T) {
 // first line rather than floating in its middle. The filler line is padded out like any other, so
 // the block's right edge stays straight through it.
 func TestTableRowHeightIsItsTallestCell(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| short | long |",
 		"| --- | --- |",
@@ -730,7 +732,7 @@ func TestTableRowHeightIsItsTallestCell(t *testing.T) {
 // the padding is applied per line, so a continuation line that fell back to the left would show as
 // a step in an otherwise straight column.
 func TestTableWrappedLinesKeepAlignment(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| right | mid |",
 		"| ----: | :-: |",
@@ -756,7 +758,7 @@ func TestTableWrappedLinesKeepAlignment(t *testing.T) {
 // wrapped row adds. That straight right edge is what the transcript's right-hand chrome is laid
 // out against (mouse.go, model.go).
 func TestTableEveryLineIsTheTableWidth(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| a header that is much too long for its column | b |",
 		"| --- | ---: |",
@@ -781,7 +783,7 @@ func TestTableEveryLineIsTheTableWidth(t *testing.T) {
 // its SGR run on the continuation line and resets at its end, so the second half of a **bold** cell
 // is bold too rather than the style bleeding out of the table (wrapText, render.go).
 func TestTableWrapKeepsInlineStyle(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("profile emits no colour, so there is no SGR run to carry across the break")
 	}
@@ -812,7 +814,7 @@ func TestTableWrapKeepsInlineStyle(t *testing.T) {
 // its content needs and nothing is dropped. A cap would only put the truncation back at a different
 // threshold, which is the thing this wave removes.
 func TestTableWrapIsUnbounded(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const words = 120
 	cell := strings.TrimSpace(strings.Repeat("word ", words))
 	source := strings.Join([]string{
@@ -844,7 +846,7 @@ func TestTableWrapIsUnbounded(t *testing.T) {
 // The markdown walk re-runs over the whole transcript on every token (model.go), so this render is
 // on the per-keystroke path and its allocation count is the number that matters.
 func BenchmarkRenderTable(b *testing.B) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	tbl, _, ok := matchTableBlock([]string{
 		"| Tool | Calls | Notes |",
 		"|:--|--:|:-:|",
@@ -872,7 +874,7 @@ func BenchmarkRenderTable(b *testing.B) {
 // breaks the wrapper makes rather than as one run (they are still all there, in order: wrapText
 // caps the line without dropping anything — TestWrapTextHoldsTheWidthCap).
 func TestTableUnfittableFallsBack(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := "| alpha | beta | gamma |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 
 	// Seventeen cells is the widest of these: three columns are not drawn until each has
@@ -900,7 +902,7 @@ func TestTableUnfittableFallsBack(t *testing.T) {
 // two dividers are paid for, renderMarkdownBody draws the block as plain paragraphs there — source
 // text visible, neither table glyph anywhere in it — and the very next cell up is a table again.
 func TestTableNarrowerThanTheFloorFallsBack(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	lines := []string{"| alpha | beta | gamma |", "| --- | --- | --- |", "| 1 | 2 | 3 |"}
 	tbl, _, ok := matchTableBlock(lines, 0)
 	if !ok {
@@ -932,7 +934,7 @@ func TestTableNarrowerThanTheFloorFallsBack(t *testing.T) {
 // dividers, eighteen — would have thrown the whole block down to paragraphs for want of a width
 // none of its columns would ever have used.
 func TestTableOfNarrowColumnsIsNotRejected(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := "| id | ab | xy |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 	const width = 3*2 + 2*tableDividerWidth // 12: the three natural widths and their dividers
 
@@ -953,7 +955,7 @@ func TestTableOfNarrowColumnsIsNotRejected(t *testing.T) {
 // While a table streams in, the header row that has no delimiter under it yet is an ordinary
 // paragraph — the same contract every other half-typed construct keeps.
 func TestTableStreamingDegradesToParagraphs(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	const header = "| Tool | Calls |"
 
 	got := renderMarkdownBody(th, header, 40)
@@ -966,7 +968,7 @@ func TestTableStreamingDegradesToParagraphs(t *testing.T) {
 // A table ends where its block ends: whatever follows renders as its own block, and the table is
 // not re-parsed line by line into it.
 func TestTableFollowedByOtherBlocks(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| a | b |",
 		"| --- | --- |",
@@ -990,7 +992,7 @@ func TestTableFollowedByOtherBlocks(t *testing.T) {
 
 // A table that opens partway down a message leaves the prose above and below it alone.
 func TestTableInsideProse(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	source := "Here it is:\n| a | b |\n| - | - |\n| 1 | 2 |\ndone"
 
 	got := visible(renderMarkdownBody(th, source, 40))

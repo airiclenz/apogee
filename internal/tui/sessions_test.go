@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 )
 
@@ -839,7 +840,7 @@ func TestSessionRowCellsScheduleTagStripsEscapes(t *testing.T) {
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("rows = %v, want the ESC bytes gone from the tag (%v)", rows, want)
 	}
-	for i, ln := range layoutPopupRows(newTheme(), rows) {
+	for i, ln := range layoutPopupRows(newTheme(scheme.Default()), rows) {
 		if strings.ContainsRune(ln, 0x1b) {
 			t.Errorf("rendered row %d = %q carries a raw ESC into the pane", i, ln)
 		}
@@ -916,7 +917,7 @@ func TestSessionRowCellsStripEscapes(t *testing.T) {
 	}
 	// The laid-out line is what the pane paints, before any styling of its own: no ESC survives into
 	// it from any cell.
-	for i, ln := range layoutPopupRows(newTheme(), rows) {
+	for i, ln := range layoutPopupRows(newTheme(scheme.Default()), rows) {
 		if strings.ContainsRune(ln, 0x1b) {
 			t.Errorf("rendered row %d = %q carries a raw ESC into the pane", i, ln)
 		}
@@ -956,7 +957,7 @@ func TestSessionRowsAlignTheColumns(t *testing.T) {
 		},
 	}
 
-	lines := layoutPopupRows(newTheme(), sessionRows(b, "/ws/a", now))
+	lines := layoutPopupRows(newTheme(scheme.Default()), sessionRows(b, "/ws/a", now))
 	if len(lines) != 2 {
 		t.Fatalf("rows = %v, want one per visible session", lines)
 	}

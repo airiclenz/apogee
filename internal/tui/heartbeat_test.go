@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -552,7 +553,7 @@ func TestFooterShowsOfflineAndConnecting(t *testing.T) {
 func TestGaugePercentClamped(t *testing.T) {
 	t.Parallel()
 
-	got := ansiPattern.ReplaceAllString(contextUsage{Used: 45000, Limit: 32768}.view(newTheme()), "")
+	got := ansiPattern.ReplaceAllString(contextUsage{Used: 45000, Limit: 32768}.view(newTheme(scheme.Default())), "")
 	if !strings.Contains(got, "100%") {
 		t.Errorf("gauge = %q, want the percentage clamped to 100%%", got)
 	}

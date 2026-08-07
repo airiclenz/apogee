@@ -200,9 +200,31 @@ present in its YAML text; `skill` != `file-ref` (ADR 0027, design call 9); the f
 
 **Commit:** `feat(scheme): built-in light scheme with cross-scheme guard tests`
 
-## 4. `newTheme` consumes a Scheme; close the non-spinner palette leaks
+## 4. `newTheme` consumes a Scheme; close the non-spinner palette leaks — ✅ DONE (2026-08-07)
 
 Depends on item 1.
+
+NOTES (2026-08-07): five deviations from the item text.
+(a) `colFaintBright` (`theme.go:34`, the expanded-block detail tone) sits inside the deleted
+`colWhite … colSelection` run but has **no scheme role** — the ratified table is 23 keys and this
+tone is not among them. It was landed after this plan's line pins were taken (the pinned
+`theme.go:22-54` palette is exactly this file minus that var). It could not stay, because the
+acceptance grep's `colFaint` matches it, so it became the package constant `openDetailTone` with its
+literal `#b2b2b2` unchanged — rendering is identical and the 23-role schema is untouched. See
+FOLLOW-UP: under the `light` scheme this tone is now wrong.
+(b) Leak sites beyond the item's five: `spinner.go:261-266` (a stale `spinnerStops` comment naming
+`colGauge`/`colModePlan`/`colModeAllowEdits` — rewritten to name the spinner stops it actually
+builds from), `doc.go:53,426`, `render.go:1869`, `theme.go`'s own struct comments, and the test
+references in `render_test.go`, `mouse_test.go`, `spinner_test.go`, `mode_test.go`. All are required
+by the item's own acceptance grep, which is repo-wide over `internal/tui/`.
+(c) The raw colour fields and `theme.modeColor` are typed `color.Color`, not `lipgloss.Color`: in
+lipgloss v2 `Color` is a **function** (`func(string) color.Color`), not a type.
+(d) `blackenInput` gained the colour as a parameter and, since it no longer blackens anything under
+a light scheme, was renamed `fillInput`. Threading it made `newLineEditor`, `newPromptEditor`,
+`newSettingsEditor` and `newSettingsTextEditor` take a `surface color.Color` too — the textarea is
+Bubble Tea's, so the theme cannot reach it any other way.
+(e) `newTheme` binds the scheme's roles to locals once at the top and the style literals read those,
+rather than repeating `lipgloss.Color(s.<Field>)` at each of ~60 use sites.
 
 **What:** in `internal/tui`:
 

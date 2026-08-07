@@ -1866,7 +1866,7 @@ func detailStyle(th theme, kind detailKind, expanded bool) lipgloss.Style {
 
 // detailTone is the plain-detail gray a tool block's text takes in each of its two states — the
 // collapsed dim, or the step brighter an open block reads in (design call 9, theme.go's
-// colFaintBright). It is the ONE place the state reaches the colour, so the target, the summary and
+// openDetailTone). It is the ONE place the state reaches the colour, so the target, the summary and
 // the body of one block cannot come to disagree about how loudly they are speaking.
 //
 // It answers for a block's TEXT alone. The chrome — the ▶/▼ indicator, the `+N more lines` marker,

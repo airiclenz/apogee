@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // keyShiftTab is the autonomy-mode cycle chord; its String() is "shift+tab", which handleKey
@@ -65,10 +66,11 @@ func TestModelShiftTabCyclesMode(t *testing.T) {
 // TestModeColorDistinct proves each autonomy mode maps to its own footer-marker colour, so the
 // four markers are visually distinguishable.
 func TestModeColorDistinct(t *testing.T) {
+	th := newTheme(scheme.Default())
 	modes := []domain.Mode{domain.ModePlan, domain.ModeAskBefore, domain.ModeAllowEdits, domain.ModeAuto}
 	seen := map[string]domain.Mode{}
 	for _, mode := range modes {
-		key := fmt.Sprintf("%v", modeColor(mode))
+		key := fmt.Sprintf("%v", th.modeColor(mode))
 		if prev, dup := seen[key]; dup {
 			t.Errorf("modeColor(%q) == modeColor(%q) == %s; want a distinct colour per mode", mode, prev, key)
 		}
@@ -104,7 +106,7 @@ func TestFooterModeMarkerLeadsWithTheModeSymbol(t *testing.T) {
 			if flat := ansiPattern.ReplaceAllString(footer, ""); !strings.HasSuffix(flat, want+bodyIndent) {
 				t.Errorf("footer = %q, want it to end %q", flat, want+bodyIndent)
 			}
-			if run := m.th.footerText.Foreground(modeColor(tc.mode)).Render(want); !strings.Contains(footer, run) {
+			if run := m.th.footerText.Foreground(m.th.modeColor(tc.mode)).Render(want); !strings.Contains(footer, run) {
 				t.Errorf("footer does not carry %q as ONE styled run in the mode's own colour: %q", want, footer)
 			}
 		})

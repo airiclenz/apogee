@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -63,7 +64,7 @@ func coldRender(tr *transcript, th theme, width int, blink bool) renderedTranscr
 // fixture: it is the one kind that may never be cached (refreshStartup rewrites it in place), so
 // its presence pins that "all hits" means "every block the cache is allowed to hold".
 func TestPaintCacheServesAnUnchangedTranscript(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	tr := warmed(feed(
 		domain.MessageEvent{Text: "the first answer, long enough to wrap somewhere in here"},
 		domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: json.RawMessage(`{"path":"a.go"}`)}},
@@ -92,7 +93,7 @@ func TestPaintCacheServesAnUnchangedTranscript(t *testing.T) {
 // width, and a blink flip over a LIVE block. This is the hit/miss case in both directions — the
 // changed block misses, and what it paints is still right.
 func TestPaintCacheRepaintsWhenTheKeyMoves(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	tr := warmed(feed(
 		domain.MessageEvent{Text: "an answer"},
 		domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: json.RawMessage(`{"path":"a.go"}`)}},
@@ -147,7 +148,7 @@ func TestPaintCacheRepaintsWhenTheKeyMoves(t *testing.T) {
 // the LAST member of a run is the case a head-only key would serve stale, since nothing else about
 // the block moved.
 func TestPaintCacheCoversEveryGroupMemberState(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	tr := warmed(&transcript{})
 	for i, c := range [][2]string{
 		{"go build ./...", "ok\nbuilt"},
@@ -181,7 +182,7 @@ func TestPaintCacheCoversEveryGroupMemberState(t *testing.T) {
 // keeps the cache from answering about the old one. Without the clear in transcript.reset this
 // test paints the FIRST session's message at index 1.
 func TestPaintCacheDoesNotSurviveAReset(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	tr := warmed(&transcript{})
 	tr.addStartup(startupView{Host: "localhost", Model: "test"})
 	tr.addUser("the first session's prompt", nil)
@@ -207,7 +208,7 @@ func TestPaintCacheDoesNotSurviveAReset(t *testing.T) {
 // on a cache that the previous ones have filled, which is the only way a stale row can be observed
 // at all. Several steps assert mid-way as well, at a state the loop would otherwise skip past.
 func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	tr := warmed(&transcript{})
 	tr.addStartup(startupView{Host: "localhost", Model: "connecting…", Version: "0.0.0"})
 	tr.addUser("read the two files, then survey the tests", nil)
@@ -350,7 +351,7 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 // changes on every token), so the number a token append must not move is the count of paints
 // performed over the COMMITTED entries — and that number is zero.
 func TestPaintCacheRepaintsOnlyTheStreamingTail(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	tr := warmed(&transcript{})
 	const exchanges = 25 // 25 prompts + 25 answers = 50 settled blocks
 	for i := range exchanges {
@@ -405,7 +406,7 @@ func TestPaintCacheRepaintsOnlyTheStreamingTail(t *testing.T) {
 // would make late iterations measure a longer transcript instead of the same repaint, and the cost
 // under test is the per-frame one, which the pending tail's own length does not change.
 func BenchmarkRenderViewStreaming(b *testing.B) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 	build := func() *transcript {
 		tr := &transcript{}
 		for i := range 25 {

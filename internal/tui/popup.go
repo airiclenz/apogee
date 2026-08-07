@@ -391,7 +391,7 @@ func renderPopupPlaced(th theme, spec popupSpec, width int) (string, popupPlacem
 	// wide can measure wider to lipgloss (any VARIATION SELECTOR-16 cluster does) and a Width style
 	// would fold that one pane row into two: the pane outgrows the row budget popupBudget granted it
 	// and neither half of the folded row reaches the pane's right border (ADR 0030 §5).
-	blackFill := lipgloss.NewStyle().Background(colBlack)
+	blackFill := lipgloss.NewStyle().Background(th.surface)
 
 	// BOTH content blocks are composed BEFORE the title row is written, because what they could not
 	// fit changes what that row says: a pane granted no body rows and no row window reports those

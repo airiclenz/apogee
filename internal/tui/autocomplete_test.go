@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -103,7 +104,7 @@ func TestSlashMenuSummariesShareOneColumn(t *testing.T) {
 	}
 
 	want := widest + len(popupGutter)
-	for i, ln := range layoutPopupRows(newTheme(), rows) {
+	for i, ln := range layoutPopupRows(newTheme(scheme.Default()), rows) {
 		if got := popupCellOffset(t, ln, items[i].cells[1]); got != want {
 			t.Errorf("row %q starts its description at column %d, want %d: %q", items[i].value, got, want, ln)
 		}

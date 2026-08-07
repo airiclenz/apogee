@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -349,7 +350,7 @@ func TestUsageThroughputClockResetsOnReStream(t *testing.T) {
 // cells, an eighth-block partial cell for sub-cell granularity, and a solid track for the
 // rest — with a min-sliver floor and a clamp at the window limit.
 func TestContextGaugeBarRendering(t *testing.T) {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 
 	// 50% of a 10-cell bar lands on a whole-cell boundary: 5 full blocks, no partial.
 	half := contextUsage{Used: 16384, Limit: 32768}.view(th)
@@ -3290,7 +3291,7 @@ func leadingColumns(t *testing.T, line string) int {
 // change to the marker or the hanging indent fails here rather than drifting silently.
 func TestStatusLineAlignsWithTranscriptText(t *testing.T) {
 	const wrapWidth = 8 // narrow enough that "alpha beta" wraps onto a continuation line
-	body := renderEntryLines(newTheme(), entry{kind: entryAssistant, text: "alpha beta"}, wrapWidth, false).lines
+	body := renderEntryLines(newTheme(scheme.Default()), entry{kind: entryAssistant, text: "alpha beta"}, wrapWidth, false).lines
 	if len(body) < 2 {
 		t.Fatalf("assistant block did not wrap at width %d: %q", wrapWidth, body)
 	}

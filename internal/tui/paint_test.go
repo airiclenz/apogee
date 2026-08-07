@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -229,7 +230,7 @@ func TestTableDividerHoldsOneColumn(t *testing.T) {
 				}
 			}
 
-			th := newTheme()
+			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
 			lines := renderMarkdownBody(th, source, 40)
@@ -327,7 +328,7 @@ func TestPaintedPopupColumnsHoldOneOffset(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
-			th := newTheme()
+			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
 			widest := 0
@@ -357,7 +358,7 @@ func TestPopupTruncationFollowsThePainter(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
-			th := newTheme()
+			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
 			const room = 8
@@ -457,7 +458,7 @@ func TestPaintedBoxRowsAreNotFolded(t *testing.T) {
 	} {
 		for _, tc := range paintMethods {
 			t.Run(box.name+"/"+tc.name, func(t *testing.T) {
-				th := newTheme()
+				th := newTheme(scheme.Default())
 				th.measure = widthAuthority{method: tc.method}
 
 				lines := box.draw(th, box.width)
@@ -500,7 +501,7 @@ func TestPaintedTabBearingUserBlockKeepsItsWidthAndItsAccent(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
-			th := newTheme()
+			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
 			tr := &transcript{}
@@ -564,7 +565,7 @@ func TestPaintedTabBearingCodeBlockKeepsItsWidth(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
-			th := newTheme()
+			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
 			tr := &transcript{}
@@ -690,7 +691,7 @@ func TestPaintedTabBearingPopupRowKeepsItsColumns(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
-			th := newTheme()
+			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
 			for i, composed := range layoutPopupRows(th, rows) {
@@ -858,7 +859,7 @@ func TestPaintedTabBearingToolTargetKeepsItsColumn(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
-			th := newTheme()
+			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
 			lines := renderToolBlock(th, views, width, blockState{}).lines
@@ -1105,7 +1106,7 @@ func TestPaintedStackedStartupCardFitsItsValues(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
-			th := newTheme()
+			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
 			for width := 10; width <= 48; width++ {

@@ -434,8 +434,8 @@ func TestHighlightInputPreservesGlyphs(t *testing.T) {
 	}
 }
 
-// selectionBg is the truecolor SGR for colSelection (#3a5fcd → 58,95,205), the marker that the
-// selection background actually reached the rendered output.
+// selectionBg is the truecolor SGR for the dark scheme's `selection` role (#3a5fcd → 58,95,205), the
+// marker that the selection background actually reached the rendered output.
 const selectionBg = "48;2;58;95;205"
 
 // TestViewRendersSelectionHighlight drives a full drag through Update and confirms the

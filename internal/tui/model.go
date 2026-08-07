@@ -16,6 +16,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 )
 
@@ -280,7 +281,7 @@ type Model struct {
 // and returns only a Cmd, so the focus *state* has to be set on the stored widget. The caret it
 // is focused for is the real terminal cursor in Options.CursorShape (newPromptEditor).
 func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.Msg)) Model {
-	th := newTheme()
+	th := newTheme(scheme.Default())
 
 	vp := viewport.New()
 	vp.SoftWrap = true // wrap long transcript lines to the viewport width
@@ -291,7 +292,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		opts:         opts,
 		sessions:     opts.Sessions,
 		notify:       notify,
-		promptEditor: newPromptEditor(opts.CursorShape),
+		promptEditor: newPromptEditor(opts.CursorShape, th.surface),
 		viewport:     vp,
 		spin:         newSpinnerAnim(opts.Spinner, opts.SpinnerColor),
 		th:           th,
@@ -433,17 +434,19 @@ func (m *Model) noteContextFiles() {
 	}
 }
 
-// blackenInput gives the textarea the black interior the layout calls for: the base, text,
-// cursor line, and placeholder all sit on a black background so the box reads as one solid
-// field inside its dark-gray border, on any terminal theme.
-func blackenInput(ta *textarea.Model) {
+// fillInput gives the textarea the solid interior the layout calls for: the base, text, cursor
+// line, and placeholder all sit on the scheme's `surface` tone so the box reads as one solid field
+// inside its chrome border, on any terminal theme. The colour is passed in rather than read off a
+// package-level palette because it is the active scheme's ([theme.surface], ADR 0039) — the widget
+// belongs to Bubble Tea, so this is the only way the theme reaches it.
+func fillInput(ta *textarea.Model, surface color.Color) {
 	s := ta.Styles()
 	for _, st := range []*textarea.StyleState{&s.Focused, &s.Blurred} {
-		st.Base = st.Base.Background(colBlack)
-		st.Text = st.Text.Background(colBlack)
-		st.CursorLine = st.CursorLine.Background(colBlack)
-		st.Placeholder = st.Placeholder.Background(colBlack)
-		st.EndOfBuffer = st.EndOfBuffer.Background(colBlack)
+		st.Base = st.Base.Background(surface)
+		st.Text = st.Text.Background(surface)
+		st.CursorLine = st.CursorLine.Background(surface)
+		st.Placeholder = st.Placeholder.Background(surface)
+		st.EndOfBuffer = st.EndOfBuffer.Background(surface)
 	}
 	ta.SetStyles(s)
 }
@@ -3609,7 +3612,7 @@ func (m Model) footerView() string {
 // takes the STATUS LINE's posture, one row below the box rather than one row above it — a
 // bodyIndent lead, the black field filled to the full window width, and the mode marker ending
 // bodyIndent short of the window edge, the very column the gauge above it ends in (layout.md,
-// "The status line's right slot"). The mode marker takes its own per-mode colour (modeColor), so
+// "The status line's right slot"). The mode marker takes its own per-mode colour (theme.modeColor), so
 // the segments are styled independently and laid out by hand — mirroring statusLine — rather than
 // rendered under one style, which would let the mode's colour reset bleed the black field. The host falls back to the endpoint when no alias is
 // configured, and every segment nothing has named is dropped with its separator (nonEmpty).
@@ -3632,7 +3635,7 @@ func (m Model) footerContent(w int) string {
 	// and word go through that ONE Render, so the glyph can never take a tone of its own. The
 	// trailing bodyIndent is the slot's own margin, not the marker's — the same seam statusLine
 	// appends its right slot's margin at.
-	mode := m.th.footerText.Foreground(modeColor(m.opts.Mode)).Render(modeMarker(m.opts.Mode)) +
+	mode := m.th.footerText.Foreground(m.th.modeColor(m.opts.Mode)).Render(modeMarker(m.opts.Mode)) +
 		m.th.footerText.Render(bodyIndent)
 
 	gap := w - m.th.measure.Width(bodyIndent) - m.th.measure.Width(info) -
@@ -3647,7 +3650,7 @@ func (m Model) footerContent(w int) string {
 	if offline != "" {
 		// Styled independently, like the mode marker: the segment carries the error tone on the
 		// footer's own black field, so the state reads at a glance without recolouring the line.
-		left += m.th.footerText.Foreground(colError).Render(offline)
+		left += m.th.footerText.Foreground(m.th.errorFg).Render(offline)
 	}
 	fill := m.th.footerText.Render(strings.Repeat(" ", gap))
 	return left + fill + mode
@@ -3791,23 +3794,6 @@ func modeMarker(m domain.Mode) string {
 		return sym + " " + modeLabel(m)
 	}
 	return modeLabel(m)
-}
-
-// modeColor maps an autonomy mode to its footer-marker colour (the palette in theme.go). An
-// unknown mode falls back to the footer's faint tone, so an off-ladder value is never invisible.
-func modeColor(m domain.Mode) color.Color {
-	switch m {
-	case domain.ModePlan:
-		return colModePlan
-	case domain.ModeAskBefore:
-		return colModeAskBefore
-	case domain.ModeAllowEdits:
-		return colModeAllowEdits
-	case domain.ModeAuto:
-		return colModeAuto
-	default:
-		return colFaint
-	}
 }
 
 // throughputSuffix is the status line's "· N tok/s" readout while a Turn generates, timed off
@@ -4027,7 +4013,7 @@ func renderGaugeBar(th theme, used, limit int) string {
 	}
 	if rem > 0 {
 		// The eighth glyph's ink is the fill colour, its paper the track colour.
-		b.WriteString(th.gaugeFill.Background(colDarkGray).Render(string(gaugeEighths[rem-1])))
+		b.WriteString(th.gaugeFill.Background(th.chrome).Render(string(gaugeEighths[rem-1])))
 	}
 	if empty > 0 {
 		b.WriteString(th.gaugeTrack.Render(strings.Repeat(" ", empty)))

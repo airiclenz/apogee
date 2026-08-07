@@ -12,6 +12,7 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -25,7 +26,7 @@ import (
 // text, not the styling (ansiPattern lives in model_test.go). plainRender is the width-80
 // default the substring assertions use.
 func renderPlain(tr *transcript, width int) string {
-	lines := tr.renderLines(newTheme(), width)
+	lines := tr.renderLines(newTheme(scheme.Default()), width)
 	for i, ln := range lines {
 		lines[i] = strings.TrimRight(ansiPattern.ReplaceAllString(ln, ""), " ")
 	}
@@ -317,7 +318,7 @@ func TestTranscriptTableFillsTheBodyColumn(t *testing.T) {
 		"| layout.md | spec the block | fail |",
 	}, "\n")})
 
-	lines := tr.renderLines(newTheme(), width)
+	lines := tr.renderLines(newTheme(scheme.Default()), width)
 
 	if len(lines) != 7 {
 		t.Fatalf("got %d lines, want 7 (a two-line header, the rule, a two-line row, the rule between the rows and a one-line row): %#v",
@@ -440,7 +441,7 @@ func assertTranscriptNoESC(t *testing.T, tr *transcript) {
 	for i, e := range tr.entries {
 		assertNoESCIn(t, fmt.Sprintf("entry %d", i), entryDisplayStrings(e)...)
 	}
-	for _, ln := range tr.renderLines(newTheme(), 80) {
+	for _, ln := range tr.renderLines(newTheme(scheme.Default()), 80) {
 		if strings.Contains(ln, "\x1b]") { // the OSC introducer never survives to a rendered line
 			t.Errorf("rendered line leaks an OSC escape introducer: %q", ln)
 		}

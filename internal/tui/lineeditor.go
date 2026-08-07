@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"image/color"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -39,7 +40,7 @@ import (
 // abandons it all belong to the caller. That is the whole boundary — this type turns keystrokes into
 // text and says where the caret stands.
 type lineEditor struct {
-	// input is the widget: the black-interior field whose simulated cursor is retired in favour of
+	// input is the widget: the solid-interior field whose simulated cursor is retired in favour of
 	// the terminal's own (steadyCursor).
 	input textarea.Model
 
@@ -50,19 +51,23 @@ type lineEditor struct {
 	oneLine bool
 }
 
-// newLineEditor builds the part every text field in this package shares: a focused, black-interior
+// newLineEditor builds the part every text field in this package shares: a focused, solid-interior
 // textarea with no prompt gutter, no line numbers, no character limit of its own, and the terminal's
 // real caret in the given shape. What the callers add differs — [newPromptEditor] adds the chat
 // placeholder and a newline binding, [lineEditor.singleLine] takes the vertical dimension away.
 //
+// surface is the active scheme's field tone ([theme.surface]) the widget's four background slots are
+// painted with (fillInput): the textarea is Bubble Tea's, so the colour has to be handed to it
+// rather than looked up.
+//
 // The Focus Cmd is discarded: the focus STATE is what matters at construction, and a retired virtual
 // cursor has no blink to schedule, so that Cmd is nil anyway.
-func newLineEditor(shape tea.CursorShape) lineEditor {
+func newLineEditor(shape tea.CursorShape, surface color.Color) lineEditor {
 	ta := textarea.New()
 	ta.Prompt = "" // the caller's own frame is the field's border; no inline prompt gutter (layout.md)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // no limit; what a value may hold is the caller's business, not the widget's
-	blackenInput(&ta)
+	fillInput(&ta, surface)
 	steadyCursor(&ta, shape)
 	ta.Focus()
 	return lineEditor{input: ta}

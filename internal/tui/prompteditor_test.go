@@ -4,6 +4,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	lipgloss "charm.land/lipgloss/v2"
+
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -18,7 +22,7 @@ import (
 
 // submitParse classifies a free-text line as a message and extracts its @file references.
 func TestPromptEditorSubmitParseMessage(t *testing.T) {
-	e := newPromptEditor(defaultCursorShape)
+	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 	e.input.SetValue("look at @main.go and @pkg/x.go please")
 	parsed := e.submitParse(nil)
 	if parsed.kind != kindMessage {
@@ -37,7 +41,7 @@ func TestPromptEditorSubmitParseMessage(t *testing.T) {
 
 // submitParse recognises a leading /command and reports the bare verb.
 func TestPromptEditorSubmitParseCommand(t *testing.T) {
-	e := newPromptEditor(defaultCursorShape)
+	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 	e.input.SetValue("/clear")
 	parsed := e.submitParse(nil)
 	if parsed.kind != kindCommand || parsed.command != "clear" {
@@ -48,7 +52,7 @@ func TestPromptEditorSubmitParseCommand(t *testing.T) {
 // submitParse resolves the inline /tokens through the predicate it is handed, so a message that
 // names a skill arrives with the id extracted and the token still in its text.
 func TestPromptEditorSubmitParseExtractsSkillTokens(t *testing.T) {
-	e := newPromptEditor(defaultCursorShape)
+	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 	e.input.SetValue("/go-testing tidy this up")
 	parsed := e.submitParse(knownSkills("go-testing", "git"))
 	if want := "/go-testing tidy this up"; parsed.text != want {
@@ -62,7 +66,7 @@ func TestPromptEditorSubmitParseExtractsSkillTokens(t *testing.T) {
 // reset empties every editable part of the editor: the textarea and the overlay. Emptying the text
 // is what drops the skills too — they live in it as /tokens, not beside it.
 func TestPromptEditorResetClearsEverything(t *testing.T) {
-	e := newPromptEditor(defaultCursorShape)
+	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 	e.input.SetValue("half-typed /go")
 	e.autocomplete = autocompleteState{active: true, kind: acCommand}
 	e.reset()
@@ -84,7 +88,7 @@ func TestPromptEditorResetClearsEverything(t *testing.T) {
 // on a geometry the widget never drew — including the phantom trailing sub-line bubbles appends to
 // a line that fills its last row exactly, which is the very geometry the caret seat has to survive.
 func wrappedRowsOf(line string, width int) int {
-	e := newPromptEditor(defaultCursorShape)
+	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 	e.input.SetWidth(width)
 	e.input.SetValue(line)
 	e.input.MoveToBegin()
@@ -126,7 +130,7 @@ func TestPromptEditorCaretToOffsetCrossesWrappedRows(t *testing.T) {
 			if !wrapped {
 				t.Fatal("no logical line wraps at this width; the walk is never asked to cross one")
 			}
-			e := newPromptEditor(defaultCursorShape)
+			e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 			e.input.SetWidth(tc.width)
 			e.input.SetHeight(3) // shorter than the draft, so the scroll re-clamp runs for real
 			e.input.SetValue(tc.value)
@@ -161,7 +165,7 @@ func TestPromptEditorCaretToOffsetCrossesWrappedRows(t *testing.T) {
 
 // rows grows one row per logical line and clamps at maxInputRows.
 func TestPromptEditorRowsGrowsAndClamps(t *testing.T) {
-	e := newPromptEditor(defaultCursorShape)
+	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 
 	e.input.SetValue("hello")
 	if got := e.rows(40); got != minInputRows {
