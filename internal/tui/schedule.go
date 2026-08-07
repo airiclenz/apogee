@@ -413,8 +413,10 @@ const scheduleInterruptedSummary = "never finished — schedules die with the TU
 
 // schedulePromptLead marks where the prompt starts in the block's body. The body is two quoted
 // voices in a row once the answer lands ahead of it (the model's, then the human's), and this is the
-// one word that tells them apart; it rides the prompt's FIRST line rather than taking a line of its
-// own so the collapsed paint's single body row still carries prompt text.
+// one word that tells them apart once the block is OPEN — a collapsed block paints no body line at
+// all. It rides the prompt's FIRST line rather than taking a line of its own so it costs the body
+// nothing: a lead on a line of its own would be one more retained line for the collapsed paint's
+// "+N more lines" to count, spending the count on a word that says nothing about the run.
 const schedulePromptLead = "prompt: "
 
 // addFiring appends the block one starting Firing gets, carrying the ScheduleID as its pairing key
@@ -484,9 +486,11 @@ func presentFiring(ev schedule.Event) toolView {
 // error quoting it.
 //
 // The answer takes the summary slot when it fits on one line and leads the body when it does not
-// (firingAnswer), which is what makes the answer's first line visible in the collapsed paint either
-// way. Everything the block already held — the prompt — keeps its place beneath, and the two facts a
-// human judges a Firing by close it: what it cost, and where the record is.
+// (firingAnswer). Which half it lands in is what a collapsed block can show of it: a one-line answer
+// rides the branch beside the Schedule's name and is read without a click, while a longer one sits
+// wholly behind the "+N more lines" marker until the block is opened. Everything the block already
+// held — the prompt — keeps its place beneath, and the two facts a human judges a Firing by close
+// it: what it cost, and where the record is.
 //
 // A failure words the summary itself and shows no answer: the error is what happened, and a partial
 // answer under an "error:" line would read as a result. The stats and any salvaged record pointer
@@ -512,7 +516,8 @@ func (tv *toolView) enrichWithFiring(ev schedule.Event) {
 // firingAnswer splits the Firing's answer into the two halves outputDetail's grammar dictates: an
 // answer that comes to one line is PROMOTED onto the branch as the quoted summary, and a longer one
 // becomes the body's leading lines with the summary slot left empty (the collapsed paint then shows
-// its first line plus the remainder marker). It is the same rule a command's output takes, for the
+// the bare branch — the Schedule's name and no summary — over a remainder marker counting the answer
+// along with everything else the body holds). It is the same rule a command's output takes, for the
 // same reason — the text is the model's and the block quotes it, so no seam respells it.
 //
 // An answer that is nothing at all is the one case outputDetail would word as a tool's "(no output)".

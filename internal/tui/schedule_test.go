@@ -657,8 +657,8 @@ func TestScheduleFiringCompletesInPlace(t *testing.T) {
 }
 
 // A multi-line answer cannot ride the branch, so it LEADS the body with the summary slot left empty —
-// the outputDetail grammar — which is what leaves the answer's first line visible in the collapsed
-// paint. The prompt keeps its place after it.
+// the outputDetail grammar — and a collapsed block previews no line of it, counting the answer
+// behind the "+N more lines" marker instead. The prompt keeps its place after it.
 func TestScheduleFiringMultiLineAnswerLeadsTheBody(t *testing.T) {
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
