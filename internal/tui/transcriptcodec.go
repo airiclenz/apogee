@@ -101,8 +101,9 @@ type wireSkillSpan struct {
 // scrollback changing shape across a restart, which is what the round trip exists to prevent.
 //
 // The member is ADDITIVE within transcriptVersion: a blob written before it decodes with Solo
-// false, which for every tool but one is the truth. The exception is the sub-agent head, whose
-// solo verdict decode RE-DERIVES from Name rather than trusts — see fromWireToolView.
+// false, which for most records is the truth. Two are exceptions decode RE-DERIVES rather than
+// trusts — the sub-agent head, knowable from Name alone, and the ANSWERED user question, knowable
+// from Name and the record's done bit together — see fromWireToolView.
 type wireToolView struct {
 	Label   string           `json:"label,omitempty"`
 	Verb    string           `json:"verb,omitempty"`
@@ -316,7 +317,10 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 	// what came back — a corrupt or shortened record paints plain rather than slicing out of range.
 	e.skillSpans = spansWithin(e.text, fromWireSkillSpans(w.SkillSpans))
 	if w.Tool != nil {
-		e.tool = fromWireToolView(w.Tool)
+		// done travels with the view because one solo verdict is not knowable from the view alone: an
+		// ask_user record becomes a card of its own only once its answer landed, which is the same fact
+		// this bit keeps (fromWireToolView).
+		e.tool = fromWireToolView(w.Tool, e.done)
 	}
 	if w.Presented != nil {
 		e.presented = fromWirePresented(w.Presented)
@@ -355,7 +359,7 @@ func fromWireSkillSpans(ws []wireSkillSpan) []skillSpan {
 // replayed line is respelled and none needs a mark to protect it; a resumed call still awaiting its
 // result carries no summary at all, and enrichWithResult words the slot afresh with a mark of its
 // own when the result lands (TestTranscriptCodecReplaysAPromotedSummaryAsShown).
-func fromWireToolView(w *wireToolView) toolView {
+func fromWireToolView(w *wireToolView, done bool) toolView {
 	tv := toolView{
 		Label:   w.Label,
 		Verb:    w.Verb,
@@ -364,14 +368,26 @@ func fromWireToolView(w *wireToolView) toolView {
 		solo:    w.Solo,
 		Summary: namedSummary(detailLine{Kind: detailKind(w.Summary.Kind), Text: w.Summary.Text}),
 	}
-	// One verdict is re-derived rather than trusted, and only in the direction that can add solo: a
-	// sub-agent head is a block in its own right by rule, not by circumstance (presentToolCall, the
-	// same subAgentToolName constant), so the answer is knowable from the name alone. A blob written
-	// before Solo rode the wire carries false for it, and replaying that would fold two span-less
-	// heads — two delegations refused at the depth bound — into one "✦ Sub-Agent (2)": the scrollback
-	// changing shape across a restart, which is the very thing the round trip exists to prevent.
+	// Two verdicts are re-derived rather than trusted, and only in the direction that can ADD solo. A
+	// blob written before Solo rode the wire carries false for both, and replaying that folds records
+	// the live presenter keeps apart into one counted block: the scrollback changing shape across a
+	// restart, which is the very thing the round trip exists to prevent.
+	//
+	// A sub-agent head is a block in its own right by rule, not by circumstance (presentToolCall, the
+	// same subAgentToolName constant), so the answer is knowable from the name alone — without this,
+	// two span-less heads (two delegations refused at the depth bound) replay as one "✦ Sub-Agent (2)".
+	//
+	// An ANSWERED user question is the other, and it is the one that needs more than a name: the
+	// record materialises with the answer (askUserAnswerRecord, reached from the RESULT hook), so a
+	// question still awaiting one is an ordinary pending call and groups like one. done is that same
+	// fact as the wire keeps it — a tool call is done once its result landed (transcript.go) — so the
+	// pair is what decode matches on, against the presenter's own askUserToolName constant. Where the
+	// two part is a question whose result came back an ERROR: live it never reaches the outcome hook
+	// and stays groupable, and here it reads as answered. Solo is the safe side of that split — an
+	// errored question keeping its own block, rather than a record folding away.
+	//
 	// Nothing else is re-derived here; every other Solo is a result-time verdict decode cannot reach.
-	if tv.name == subAgentToolName {
+	if tv.name == subAgentToolName || (tv.name == askUserToolName && done) {
 		tv.solo = true
 	}
 	if len(w.Details) > 0 {

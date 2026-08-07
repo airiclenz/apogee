@@ -297,6 +297,14 @@ type toolPresenter struct {
 	argBody func(args map[string]any) []detailLine
 }
 
+// askUserToolName is the raw tool id whose ANSWERED record stands alone: the block keeps the
+// permanent record of an exchange and never becomes a row in a list of questions
+// (askUserAnswerRecord, which marks it solo when the answer lands). The transcript codec re-derives
+// that verdict for a record written before it rode the wire and matches on this same constant
+// (fromWireToolView), so the presenter's rule and the decoder's cannot drift apart — the reason
+// subAgentToolName sits beside the span rule that reads it.
+const askUserToolName = "ask_user"
+
 // toolRegistry is the open, name-keyed catalogue. Each later tool adds one entry here; the
 // renderer and the transcript never grow a per-tool branch. It covers the full built-in set
 // (internal/tools DefaultToolsWithHost); only a dynamic tool (an MCP server's) falls to the
@@ -438,7 +446,7 @@ var toolRegistry = map[string]toolPresenter{
 		target: firstLineArg("task"),
 		detail: outputDetail, // the report's gist; the nested run already rendered railed
 	},
-	"ask_user": {
+	askUserToolName: {
 		label:   "Ask User",
 		verb:    "asking",
 		target:  firstLineArg("question"),

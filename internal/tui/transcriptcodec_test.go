@@ -239,6 +239,86 @@ func TestTranscriptCodecReDerivesSubAgentSolo(t *testing.T) {
 	}
 }
 
+// TestTranscriptCodecReDerivesAnsweredQuestionSolo proves the second verdict decode does not take
+// from the file — and the one no name settles. An ANSWERED ask_user record is a card the reader
+// comes back to (askUserAnswerRecord, design call 3), while a question still awaiting its answer is
+// an ordinary pending call that groups like any other; so decode reads the record's done bit beside
+// its name, which is the same pair the live presenter stands on (the record materialises with the
+// result). Hand-written bytes with no "solo" member, because the case IS an old file: a re-encode
+// would carry today's true and prove nothing.
+func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
+	t.Parallel()
+
+	t.Run("answered questions replay as two blocks", func(t *testing.T) {
+		data := []byte(`{"version":1,"entries":[` +
+			`{"kind":"toolCall","callID":"a1","done":true,"tool":{"label":"Ask User","verb":"asking",` +
+			`"target":"Ship it?","name":"ask_user","summary":{"text":"Yes"},` +
+			`"details":[{"text":"Ship it?"},{"text":"[x] Yes"},{"text":"[ ] No"}]}},` +
+			`{"kind":"toolCall","callID":"a2","done":true,"tool":{"label":"Ask User","verb":"asking",` +
+			`"target":"Tag it?","name":"ask_user","summary":{"text":"No"},` +
+			`"details":[{"text":"Tag it?"},{"text":"[ ] Yes"},{"text":"[x] No"}]}}` +
+			`]}`)
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("decoded %d entries; want the 2 answered questions", len(got))
+		}
+		for i, e := range got {
+			if !e.tool.solo {
+				t.Errorf("entry %d decoded with solo=false; an answered record is solo by rule, whatever the file says", i)
+			}
+			if groupable(e.tool) {
+				t.Errorf("entry %d is groupable after decode; it would fold into its neighbour's block", i)
+			}
+		}
+
+		want := strings.Join([]string{
+			"✦ Ask User ▶",
+			"  ┕ Ship it? Yes",
+			"    +3 more lines",
+			"",
+			"✦ Ask User ▶",
+			"  ┕ Tag it? No",
+			"    +3 more lines",
+		}, "\n")
+		if out := renderPlain(&transcript{entries: got}, 80); out != want {
+			t.Errorf("replayed questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
+		}
+	})
+
+	t.Run("a question awaiting its answer is not forced solo", func(t *testing.T) {
+		data := []byte(`{"version":1,"entries":[` +
+			`{"kind":"toolCall","callID":"a1","tool":{"label":"Ask User","verb":"asking",` +
+			`"target":"Ship it?","name":"ask_user"}},` +
+			`{"kind":"toolCall","callID":"a2","tool":{"label":"Ask User","verb":"asking",` +
+			`"target":"Tag it?","name":"ask_user"}}` +
+			`]}`)
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("decoded %d entries; want the 2 pending questions", len(got))
+		}
+		for i, e := range got {
+			if e.tool.solo {
+				t.Errorf("entry %d decoded solo; nothing has been answered, so there is no record to stand alone", i)
+			}
+		}
+
+		want := strings.Join([]string{
+			"✦ Ask User (2)",
+			"  ┝ Ship it?",
+			"  ┕ Tag it?",
+		}, "\n")
+		if out := renderPlain(&transcript{entries: got}, 80); out != want {
+			t.Errorf("replayed pending questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
+		}
+	})
+}
+
 // TestTranscriptCodecExcludesStartupAndPending proves the two things that must never persist: the
 // one-time start-up box (opening chrome, re-seeded on resume) and the in-progress pending buffer
 // (tokens never committed to an entry were never scrollback).

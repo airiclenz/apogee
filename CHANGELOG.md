@@ -157,6 +157,16 @@ point is a **minor** bump, not a breaking change.
   single counted header. The decoder re-derives the verdict from the record's tool name now, so an
   older blob replays exactly as a freshly presented one does: one block per delegation.
 
+- **…and no longer folds two answered questions into one `✦ Ask User (2)` block either.** The same
+  gap, one record over: an answered `ask_user` block keeps the permanent record of an exchange — the
+  question, the ticked choices, the answer — and reads as a card rather than a row in a list of
+  questions, so it never groups with its neighbour. A transcript saved before that verdict rode the
+  wire carried nothing for it, and replaying two answered questions in a row put both under a single
+  counted header, hiding each record behind the other. Unlike a sub-agent head, a name does not
+  settle this one — a question still awaiting its answer is an ordinary pending call and still groups
+  — so the decoder now reads the record's name and its answered state together, the same pair the
+  live presenter stands on.
+
 ## [0.12.0] — 2026-08-07
 
 ### Added
