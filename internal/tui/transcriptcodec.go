@@ -103,7 +103,8 @@ type wireSkillSpan struct {
 // The member is ADDITIVE within transcriptVersion: a blob written before it decodes with Solo
 // false, which for most records is the truth. Two are exceptions decode RE-DERIVES rather than
 // trusts — the sub-agent head, knowable from Name alone, and the ANSWERED user question, knowable
-// from Name and the record's done bit together — see fromWireToolView.
+// from Name, the record's done bit and the Details only its answer hook writes — see
+// fromWireToolView.
 type wireToolView struct {
 	Label   string           `json:"label,omitempty"`
 	Verb    string           `json:"verb,omitempty"`
@@ -377,17 +378,21 @@ func fromWireToolView(w *wireToolView, done bool) toolView {
 	// same subAgentToolName constant), so the answer is knowable from the name alone — without this,
 	// two span-less heads (two delegations refused at the depth bound) replay as one "✦ Sub-Agent (2)".
 	//
-	// An ANSWERED user question is the other, and it is the one that needs more than a name: the
-	// record materialises with the answer (askUserAnswerRecord, reached from the RESULT hook), so a
-	// question still awaiting one is an ordinary pending call and groups like one. done is that same
-	// fact as the wire keeps it — a tool call is done once its result landed (transcript.go) — so the
-	// pair is what decode matches on, against the presenter's own askUserToolName constant. Where the
-	// two part is a question whose result came back an ERROR: live it never reaches the outcome hook
-	// and stays groupable, and here it reads as answered. Solo is the safe side of that split — an
-	// errored question keeping its own block, rather than a record folding away.
+	// An ANSWERED user question is the other, and it is the one no name settles: the record
+	// materialises with the answer (askUserAnswerRecord, reached from the RESULT hook), so a question
+	// still awaiting one is an ordinary pending call and groups like one. What decode matches on is
+	// the RECORD's own footprint — done beside a non-empty body. done is the wire's copy of the same
+	// fact the hook waits for (a tool call is done once its result landed, transcript.go), and the
+	// body is what only that hook can have put there: ask_user's registry entry sets neither argBody
+	// nor body, so an ask_user record carries Details if and only if askUserAnswerRecord wrote them —
+	// which is exactly when it also set Solo. An ERRORED question is what the pair keeps out, and it
+	// has to be kept out: enrichWithResult returns on IsError before the outcome hook, so live it
+	// stays body-less and groupable, and forcing solo here would paint two failed questions as one
+	// "✦ Ask User (2)" while running and as two blocks after a reload. Both halves are read off the
+	// same name the presenter uses (askUserToolName), so the two rules cannot drift apart.
 	//
 	// Nothing else is re-derived here; every other Solo is a result-time verdict decode cannot reach.
-	if tv.name == subAgentToolName || (tv.name == askUserToolName && done) {
+	if tv.name == subAgentToolName || (tv.name == askUserToolName && done && len(w.Details) > 0) {
 		tv.solo = true
 	}
 	if len(w.Details) > 0 {

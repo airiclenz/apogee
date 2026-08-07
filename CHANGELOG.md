@@ -163,9 +163,11 @@ point is a **minor** bump, not a breaking change.
   questions, so it never groups with its neighbour. A transcript saved before that verdict rode the
   wire carried nothing for it, and replaying two answered questions in a row put both under a single
   counted header, hiding each record behind the other. Unlike a sub-agent head, a name does not
-  settle this one — a question still awaiting its answer is an ordinary pending call and still groups
-  — so the decoder now reads the record's name and its answered state together, the same pair the
-  live presenter stands on.
+  settle this one — a question still awaiting its answer is an ordinary pending call and still
+  groups, and so does one whose result came back an error, which never got to keep a record at all.
+  So the decoder reads the record's own footprint instead: answered, with the exchange beneath it.
+  A question that failed to reach anyone now replays grouped beside its neighbour exactly as it
+  painted live, instead of splitting into a block of its own on the next reload.
 
 ## [0.12.0] — 2026-08-07
 

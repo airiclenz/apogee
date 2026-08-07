@@ -242,10 +242,12 @@ func TestTranscriptCodecReDerivesSubAgentSolo(t *testing.T) {
 // TestTranscriptCodecReDerivesAnsweredQuestionSolo proves the second verdict decode does not take
 // from the file — and the one no name settles. An ANSWERED ask_user record is a card the reader
 // comes back to (askUserAnswerRecord, design call 3), while a question still awaiting its answer is
-// an ordinary pending call that groups like any other; so decode reads the record's done bit beside
-// its name, which is the same pair the live presenter stands on (the record materialises with the
-// result). Hand-written bytes with no "solo" member, because the case IS an old file: a re-encode
-// would carry today's true and prove nothing.
+// an ordinary pending call that groups like any other; so decode reads the record's footprint —
+// done beside the body only the answer hook writes — which is what the live presenter stands on
+// (ask_user's registry entry sets no argBody, so those Details can have come from nowhere else).
+// The third case is what the pair keeps out: an ERRORED question never reaches that hook, so it is
+// body-less and groupable live, and it must replay that way too. Hand-written bytes with no "solo"
+// member, because the case IS an old file: a re-encode would carry today's true and prove nothing.
 func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 	t.Parallel()
 
@@ -315,6 +317,57 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 		}, "\n")
 		if out := renderPlain(&transcript{entries: got}, 80); out != want {
 			t.Errorf("replayed pending questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
+		}
+	})
+
+	t.Run("errored questions stay groupable and replay as one group", func(t *testing.T) {
+		// A question the tool could not put to anyone (its Asker was gone): the result comes back an
+		// error, enrichWithResult words the branch and returns before the outcome hook, so the record is
+		// done with NO body and never becomes a card. Live it groups; the claim here is that the file
+		// says the same thing back.
+		const errLine = "error: could not ask the user: asker closed"
+		data := []byte(`{"version":1,"entries":[` +
+			`{"kind":"toolCall","callID":"a1","done":true,"tool":{"label":"Ask User","verb":"asking",` +
+			`"target":"Ship it?","name":"ask_user","summary":{"text":"` + errLine + `"}}},` +
+			`{"kind":"toolCall","callID":"a2","done":true,"tool":{"label":"Ask User","verb":"asking",` +
+			`"target":"Tag it?","name":"ask_user","summary":{"text":"` + errLine + `"}}}` +
+			`]}`)
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("decoded %d entries; want the 2 failed questions", len(got))
+		}
+		for i, e := range got {
+			if e.tool.solo {
+				t.Errorf("entry %d decoded solo; a failed question kept no record, so it groups like the live one", i)
+			}
+			if !groupable(e.tool) {
+				t.Errorf("entry %d is not groupable after decode; live it is, and the two paints must match", i)
+			}
+		}
+
+		want := strings.Join([]string{
+			"✦ Ask User (2)",
+			"  ┝ Ship it? " + errLine,
+			"  ┕ Tag it?  " + errLine,
+		}, "\n")
+		if out := renderPlain(&transcript{entries: got}, 80); out != want {
+			t.Errorf("replayed failed questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
+		}
+
+		// The other half of the claim, from the live side: the same two calls folded through the
+		// presenter paint the same group, so a reload does not reshape the scrollback.
+		live := &transcript{}
+		for _, q := range []struct{ id, question string }{{"a1", "Ship it?"}, {"a2", "Tag it?"}} {
+			live.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+				ID: q.id, Tool: "ask_user", Arguments: []byte(`{"question":"` + q.question + `"}`)}})
+			live.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+				CallID: q.id, Content: "could not ask the user: asker closed", IsError: true}})
+		}
+		if out := renderPlain(live, 80); out != want {
+			t.Errorf("live failed questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
 		}
 	})
 }
