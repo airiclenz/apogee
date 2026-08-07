@@ -99,6 +99,10 @@ type wireSkillSpan struct {
 // presenter. A record that
 // stands alone in a live session and folds into its neighbours' group on resume would be the
 // scrollback changing shape across a restart, which is what the round trip exists to prevent.
+//
+// The member is ADDITIVE within transcriptVersion: a blob written before it decodes with Solo
+// false, which for every tool but one is the truth. The exception is the sub-agent head, whose
+// solo verdict decode RE-DERIVES from Name rather than trusts — see fromWireToolView.
 type wireToolView struct {
 	Label   string           `json:"label,omitempty"`
 	Verb    string           `json:"verb,omitempty"`
@@ -359,6 +363,16 @@ func fromWireToolView(w *wireToolView) toolView {
 		name:    stripEscapes(w.Name),
 		solo:    w.Solo,
 		Summary: namedSummary(detailLine{Kind: detailKind(w.Summary.Kind), Text: w.Summary.Text}),
+	}
+	// One verdict is re-derived rather than trusted, and only in the direction that can add solo: a
+	// sub-agent head is a block in its own right by rule, not by circumstance (presentToolCall, the
+	// same subAgentToolName constant), so the answer is knowable from the name alone. A blob written
+	// before Solo rode the wire carries false for it, and replaying that would fold two span-less
+	// heads — two delegations refused at the depth bound — into one "✦ Sub-Agent (2)": the scrollback
+	// changing shape across a restart, which is the very thing the round trip exists to prevent.
+	// Nothing else is re-derived here; every other Solo is a result-time verdict decode cannot reach.
+	if tv.name == subAgentToolName {
+		tv.solo = true
 	}
 	if len(w.Details) > 0 {
 		lines := make([]detailLine, 0, len(w.Details))

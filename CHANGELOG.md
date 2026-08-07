@@ -149,6 +149,14 @@ point is a **minor** bump, not a breaking change.
   Without a header a 429 backs off from a 1-second base — 1s, then 2s — while transport faults and
   5xx keep the 200ms base they always had.
 
+- **A resumed session no longer folds two delegations into one `✦ Sub-Agent (2)` block.** A
+  sub-agent call heads a whole delegation and never becomes a row in someone's list, and the live
+  presenter says so. That verdict rides the wire, but a transcript saved before it existed carries
+  nothing for it, so replaying an older record put two span-less heads — two delegations refused at
+  the depth bound, with no nested entries to give the painter's span rule anything to see — under a
+  single counted header. The decoder re-derives the verdict from the record's tool name now, so an
+  older blob replays exactly as a freshly presented one does: one block per delegation.
+
 ## [0.12.0] — 2026-08-07
 
 ### Added

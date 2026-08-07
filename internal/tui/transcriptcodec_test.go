@@ -194,6 +194,51 @@ func TestTranscriptCodecDecodesALegacyBlobUnchanged(t *testing.T) {
 	}
 }
 
+// TestTranscriptCodecReDerivesSubAgentSolo proves the one verdict decode does not take from the
+// file: a sub-agent head is solo by rule (presentToolCall, design call 3 — a head blocks a whole
+// delegation and never becomes a row in someone's list), so a blob written before Solo rode the
+// wire must still replay as one block per delegation. Hand-written bytes with no "solo" member,
+// because the case IS an old file: a re-encode would carry today's true and prove nothing.
+//
+// Two records rather than one, and span-less ones — no nested entries behind either head — because
+// that is the shape the painter's own span rule cannot catch (a delegation refused at the depth
+// bound) and the shape a stale false would fold into "✦ Sub-Agent (2)".
+func TestTranscriptCodecReDerivesSubAgentSolo(t *testing.T) {
+	t.Parallel()
+	data := []byte(`{"version":1,"entries":[` +
+		`{"kind":"toolCall","callID":"s1","done":true,"tool":{"label":"Sub-Agent","verb":"delegating",` +
+		`"target":"survey the tests","name":"sub_agent","summary":{"text":"refused"}}},` +
+		`{"kind":"toolCall","callID":"s2","done":true,"tool":{"label":"Sub-Agent","verb":"delegating",` +
+		`"target":"survey the docs","name":"sub_agent","summary":{"text":"refused"}}}` +
+		`]}`)
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("decoded %d entries; want the 2 sub-agent heads", len(got))
+	}
+	for i, e := range got {
+		if !e.tool.solo {
+			t.Errorf("entry %d decoded with solo=false; a sub-agent head is solo by rule, whatever the file says", i)
+		}
+		if groupable(e.tool) {
+			t.Errorf("entry %d is groupable after decode; it would fold into its neighbour's block", i)
+		}
+	}
+
+	want := strings.Join([]string{
+		"✦ Sub-Agent",
+		"  ┕ survey the tests refused",
+		"",
+		"✦ Sub-Agent",
+		"  ┕ survey the docs refused",
+	}, "\n")
+	if out := renderPlain(&transcript{entries: got}, 80); out != want {
+		t.Errorf("replayed delegations mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
+	}
+}
+
 // TestTranscriptCodecExcludesStartupAndPending proves the two things that must never persist: the
 // one-time start-up box (opening chrome, re-seeded on resume) and the in-progress pending buffer
 // (tokens never committed to an entry were never scrollback).
