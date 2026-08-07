@@ -165,7 +165,7 @@ export, creates the dir when absent.
 
 **Commit:** `feat(scheme): user-dir discovery with shadowing, resolve, export writer`
 
-## 3. The built-in `light` scheme
+## 3. The built-in `light` scheme — ✅ DONE (2026-08-07)
 
 Depends on item 1.
 

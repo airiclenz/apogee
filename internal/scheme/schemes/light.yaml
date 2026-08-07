@@ -1,0 +1,51 @@
+# apogee color scheme — "light", for light terminals.
+#
+# A color scheme recolors only what apogee already colors: apogee does not paint the
+# full background, so this scheme assumes your terminal already supplies a light one —
+# it darkens apogee's own colors to carry against it. It never touches glyphs, markers
+# or layout either.
+#
+# Every key below is optional. A key you leave out keeps its default (dark) value, so
+# your own scheme can be as short as the handful of roles you want to change. Values
+# are quoted "#rrggbb" hex — the quotes matter, because an unquoted # starts a YAML
+# comment. A key apogee does not know, or a value that is not #rrggbb, costs you that
+# one role and a warning; it never costs you the scheme.
+
+# --- base tones --------------------------------------------------------------------
+user-text: "#1f2328" # user-prompt text
+chrome: "#d0d7de"    # user-block background + input/footer borders
+divider: "#eaeef2"   # top-edge divider hairline — paler than the chrome border so it recedes
+surface: "#ffffff"   # input-box interior
+muted: "#656d76"     # status/footer/tool-detail dim
+
+# --- semantic ----------------------------------------------------------------------
+diff-add: "#1a7f37" # diff "+" lines
+diff-del: "#cf222e" # diff "-" lines
+error: "#cf222e"    # recovered-fault notices
+code: "#bc4c00"     # inline `code` + fenced code blocks (orange)
+
+# --- autonomy modes ----------------------------------------------------------------
+# The footer's mode markers, warming up the privilege ladder (least → most autonomous).
+mode-plan: "#0f9b96"        # plan — teal
+mode-ask-before: "#1a7f37"  # ask-before — green
+mode-allow-edits: "#0969da" # allow-edits — blue
+mode-auto: "#bc4c00"        # auto — orange
+
+# --- prompt tokens -----------------------------------------------------------------
+skill: "#6639ba"    # skills — violet: the prompt's inline /token accent and its twin inside a sent block
+file-ref: "#4d7c0f" # the prompt's inline @file token accent — the tone a reference reads as, kept a clearly different hue from skill
+
+# --- chrome accents ----------------------------------------------------------------
+prompt-toggle: "#4a72b8" # the collapsed prompt's see-more / see-less marker — an apogee affordance that reads as chrome inside the block, not as more of what the human wrote
+tool-marker: "#3b6ea5"   # a tool block's synthesized "+N more lines" remainder marker — prompt-toggle's cooler sibling, the same "apogee is talking" hue on a body column
+
+# --- misc --------------------------------------------------------------------------
+gauge: "#8250df"     # context-fill gauge bar — purple
+selection: "#b3d1ff" # mouse drag-selection highlight background — pale blue
+
+# --- spinner -----------------------------------------------------------------------
+# The four stops the status-line spinner blends between.
+spinner-1: "#6f42c1"
+spinner-2: "#1a7f37"
+spinner-3: "#b08800"
+spinner-4: "#d1245d"
