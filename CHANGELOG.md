@@ -88,6 +88,13 @@ point is a **minor** bump, not a breaking change.
     rail's orange, so an opened member inside a delegate's run cannot be read as part of the run's
     frame. As everywhere else in the transcript, a drag still selects: only a motionless click
     toggles.
+  - **An open block reads a step brighter.** A tool block paints its target, its outcome and its
+    output in a lighter gray once it is expanded, so the one block a reader opened stands out of the
+    closed ones around it instead of being one more dim paragraph in the column. It is one step and
+    the same hue — an open block should be easier to read, not a different kind of thing — and it
+    reaches the block's text alone: the `▶`/`▼`, the `+N more lines` marker and an open member's
+    `│` gutter stay chrome, and a diff's red and green stay exactly as they were, since that colour
+    says which way a line went rather than how loudly to say it.
   - **An answered question's record still stands alone**, and so does a delegation. The record was
     kept out of a group by the body it carries, which is no longer a reason for anything; the block
     now says outright that it must not fold into its neighbours, and says it across a save and

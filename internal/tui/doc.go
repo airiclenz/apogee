@@ -421,7 +421,11 @@
 // ([renderToolGroup], [renderExpandedMember], [blockPaint.addFor]) — where a block of one spends up
 // to four rows collapsed and toggles from ANY of them, header, target rows and body alike, the
 // whole-surface rule the prompt block already followed. The `+N more lines` marker is the one row
-// that does not: it belongs to the collapsed paint, so a click there only ever opens.
+// that does not: it belongs to the collapsed paint, so a click there only ever opens. Whichever
+// shape it is, opening also lifts the block's TEXT a step out of the collapsed dim
+// ([detailTone], theme.go's colFaintBright) while the chrome around it — indicator, marker,
+// gutter — and the diff colours stay where they were, so what brightens is exactly what the
+// reader opened the block to read.
 // A scheduled Firing borrows that whole shape
 // through the same painter under a leading glyph of its own — ⟳ rather than the star
 // ([blockState]'s glyph override, whose zero value is the star; schedule.go, layout.md's "The firing

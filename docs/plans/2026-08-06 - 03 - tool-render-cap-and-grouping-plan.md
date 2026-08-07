@@ -346,7 +346,24 @@ nothing hidden marks no toggle rows.
 
 **Commit**: `feat(tui): whole-block click surface for tool blocks`
 
-## 7. Brighter detail gray for expanded blocks
+## 7. Brighter detail gray for expanded blocks — ✅ DONE (2026-08-07)
+
+NOTES (2026-08-07): three deviations. (a) The state is threaded into `detailStyle` (a third
+`expanded` parameter) and into `branchText`, but NOT into `renderSubDetails` — nor into its
+targetless twin `renderDetails`: both are the expanded paint's alone (a collapsed block paints no
+body line, `collapsedBodyRows`, and the collapsed targetless list is `clipDetails`), so they take
+the open tone outright rather than through a parameter that could only ever be `true`, each saying
+so in its doc. The tone itself is one new function, `detailTone`, so the state reaches the colour in
+exactly one place. (b) The chrome an OPEN member wears stays dim: `gutteredWrap` already paints its
+prefixes in the detail tone while the text keeps its own style ("so a diff line keeps its red or
+green while the gutter beside it stays chrome"), so the `┝` and `│` of an open member, its `▼` and
+its `see less…` are unchanged — the item brightens branch/target/body TEXT, and design call 8 asks
+the gutter be the detail gray. (c) `groupMemberText` composes in the collapsed tone in both states,
+since an open member's rows come from `renderExpandedMember` and what it returns then serves only
+the clipped/hides answer. Test collateral beyond the new SGR tests:
+`TestRenderDiffMatchesLayoutSketch` asserted its EXPANDED diffstat branch against `th.toolDetail`,
+which is now the open tone — the assertion moves to `th.toolDetailBright` and keeps its point (the
+diffstat line is the plain detail kind, not a diff-coloured one).
 
 Depends on items 2 and 5.
 

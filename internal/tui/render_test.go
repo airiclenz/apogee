@@ -900,8 +900,8 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	}
 
 	th := newTheme()
-	if got, want := tr.renderLines(th, 80)[1], th.toolDetail.Render("  ┕ main.go +2 -2"); got != want {
-		t.Errorf("diffstat branch = %q; want the plain toolDetail style %q", got, want)
+	if got, want := tr.renderLines(th, 80)[1], th.toolDetailBright.Render("  ┕ main.go +2 -2"); got != want {
+		t.Errorf("diffstat branch = %q; want the plain detail tone of an OPEN block %q", got, want)
 	}
 }
 
@@ -1069,6 +1069,114 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 			}
 			if got, want := body(), strings.Join(tc.wantCollapsed, "\n"); got != want {
 				t.Errorf("re-collapsed paint mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
+// TestExpandedBlockLiftsItsDetailTone is design call 9 in the paint: a block's own text is dim while
+// it is collapsed and a step brighter once it is open (theme.go's colFaintBright), so the block a
+// reader opened stands out of the scrollback of closed ones around it. It holds for both shapes that
+// have a state — the single block and the group member, which are painted by different functions
+// (renderToolBranch, renderExpandedMember) and could drift apart.
+//
+// The tones are asserted as the theme's own roles rather than as SGR bytes, and the guard above the
+// subtests fails the day the two roles resolve to the same colour: a contrast step that quietly went
+// away would satisfy every equality beneath it.
+func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
+	th := newTheme()
+	if !colorActive(th) {
+		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
+	}
+	if th.toolDetail.Render("x") == th.toolDetailBright.Render("x") {
+		t.Fatal("the collapsed and the open detail tone paint identically; there is no contrast step to assert")
+	}
+
+	t.Run("a single block", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal",
+			Arguments: []byte(`{"command":"go test ./..."}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nPASS"}})
+
+		// Row 0 is the header and row 2 the remainder marker — chrome with roles of their own — so
+		// row 1, the branch line, is the whole of what the collapsed paint says about the call.
+		collapsed := tr.renderLines(th, 80)
+		if want := th.toolDetail.Render(strip(collapsed[1])); collapsed[1] != want {
+			t.Errorf("collapsed branch = %q; want the dim tone %q", collapsed[1], want)
+		}
+
+		if !tr.setExpanded(0, true) {
+			t.Fatal("setExpanded(0, true) = false; want the block opened")
+		}
+		// Open, everything below the header is the call's own: the branch line and every body row.
+		for i, row := range tr.renderLines(th, 80)[1:] {
+			if want := th.toolDetailBright.Render(strip(row)); row != want {
+				t.Errorf("open row %d = %q; want the brighter tone %q", i+1, row, want)
+			}
+		}
+	})
+
+	t.Run("a group member", func(t *testing.T) {
+		// Both members carry a MULTI-line body: a one-line output rides the branch as the call's
+		// summary instead, which would leave the member with nothing to open.
+		tr := runGroup(0, [2]string{"go build ./...", "ok\nbuilt"}, [2]string{"go vet ./...", "clean\ndone"})
+		if !tr.setExpanded(1, true) {
+			t.Fatal("setExpanded(1, true) = false; want the second member opened")
+		}
+		rows := tr.renderLines(th, 80)
+
+		// A member row is not one style run — its ▶/▼ and, open, its gutter are chrome painted
+		// beside the text — so the tone is asserted on the text the member is carrying.
+		if want := th.toolDetail.Render("  ┝ go build ./..."); !strings.Contains(rows[1], want) {
+			t.Errorf("the closed member = %q; want its row in the dim tone %q", rows[1], want)
+		}
+		if want := th.toolDetailBright.Render("go vet ./..."); !strings.Contains(rows[2], want) {
+			t.Errorf("the open member's first row = %q; want its target in the brighter tone %q", rows[2], want)
+		}
+		if want := th.toolDetailBright.Render("clean"); !strings.Contains(rows[3], want) {
+			t.Errorf("the open member's body = %q; want it in the brighter tone %q", rows[3], want)
+		}
+		if want := th.toolDetail.Render(memberGutter); !strings.Contains(rows[3], want) {
+			t.Errorf("the open member's body = %q; want the gutter beside it still chrome %q", rows[3], want)
+		}
+	})
+}
+
+// …and the tone step is the PLAIN detail's alone: a diff line is red or green because of which way
+// it went, and layering an emphasis step onto that would give the same colour two meanings. The two
+// states are asked of the two painters that draw a targetless branch list — the collapsed one under
+// the row budget (clipDetails) and the open one (renderDetails) — over the same line, so the
+// comparison is of paint rather than of the style table. The plain case is the control: the same
+// pair of painters must NOT agree there, or the diff assertion would hold by the tone step having
+// gone missing altogether.
+func TestDiffLinesKeepTheirColourInBothBlockStates(t *testing.T) {
+	th := newTheme()
+	if !colorActive(th) {
+		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
+	}
+	cases := []struct {
+		name     string
+		kind     detailKind
+		wantSame bool
+		style    lipgloss.Style
+	}{
+		{name: "an added line keeps its green", kind: detailDiffAdded, wantSame: true, style: th.diffAdded},
+		{name: "a removed line keeps its red", kind: detailDiffRemoved, wantSame: true, style: th.diffRemoved},
+		{name: "a plain line takes the state's tone", kind: detailPlain, wantSame: false, style: th.toolDetail},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			line := []detailLine{{Kind: tc.kind, Text: "+ added"}}
+			closed, _ := clipDetails(th, line, 40)
+			open := renderDetails(th, line, 40)
+			if len(closed) != 1 || len(open) != 1 {
+				t.Fatalf("the painters spent %d and %d rows on one line; want one each", len(closed), len(open))
+			}
+			if same := closed[0] == open[0]; same != tc.wantSame {
+				t.Errorf("closed = %q, open = %q; want the two paints same=%v", closed[0], open[0], tc.wantSame)
+			}
+			if want := tc.style.Render(strip(closed[0])); closed[0] != want {
+				t.Errorf("closed paint = %q; want the kind's own style %q", closed[0], want)
 			}
 		})
 	}

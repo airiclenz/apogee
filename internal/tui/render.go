@@ -1177,11 +1177,11 @@ func renderGroupMember(th theme, tv toolView, column int, marker string, width, 
 // paint leaves nothing out. The see-less marker closes it instead, worded from the prompt block's
 // own constant so the transcript has one vocabulary for "close this" (design call 7).
 func renderExpandedMember(th theme, tv toolView, column int, marker string, width, room int) []string {
-	text, style := branchText(th, tv, column)
+	text, style := branchText(th, tv, column, true)
 	out := gutteredWrap(th, style, marker, memberGutter, text, room)
 	out[0] = indicatorRow(th, out[0], width, glyphExpanded)
 	for _, d := range tv.Details.all() {
-		out = append(out, gutteredWrap(th, detailStyle(th, d.Kind), memberGutter, memberGutter, d.Text, room)...)
+		out = append(out, gutteredWrap(th, detailStyle(th, d.Kind, true), memberGutter, memberGutter, d.Text, room)...)
 	}
 	return append(out, seeLessRow(th, width))
 }
@@ -1246,15 +1246,19 @@ const memberGutter = "  " + glyphMemberGutter + " "
 //
 // A member with NO summary yet is the one that ignores the column: nothing has to line up beside a
 // call still in flight, so its target spends the whole row before the indicator field.
+//
+// It composes in the COLLAPSED tone whichever state the member is in, because that is the only
+// state its rows are painted in: an open member's rows are renderExpandedMember's, and what this
+// returns then serves the clipped answer alone (renderGroupMember).
 func groupMemberText(th theme, tv toolView, column int, marker string, room int) (text string, style lipgloss.Style, clipped bool) {
 	target := expandTabs(tv.Target)
 	if tv.Summary.Text == "" {
 		text, clipped = clipCells(th, target, room-th.measure.Width(marker))
-		return text, th.toolDetail, clipped
+		return text, detailTone(th, false), clipped
 	}
 	text, clipped = clipCells(th, target, column)
 	pad := strings.Repeat(" ", max(0, column-th.measure.Width(text)))
-	return text + pad + " " + tv.Summary.Text, detailStyle(th, tv.Summary.Kind), clipped
+	return text + pad + " " + tv.Summary.Text, detailStyle(th, tv.Summary.Kind, false), clipped
 }
 
 // clipCells fits text into ONE row of at most cells columns, ending it in clipTail when it had to
@@ -1502,7 +1506,7 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 	indent := th.measure.Width(marker)
 	var out blockPaint
 	if expanded {
-		text, style := branchText(th, tv, column)
+		text, style := branchText(th, tv, column, true)
 		out.add(hangingWrap(th, style, marker, text, width), toggle)
 		out.add(renderSubDetails(th, tv.Details.all(), indent, width), toggle)
 		return out
@@ -1530,13 +1534,18 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 // wrapText then spent four cells per tab on it, and the summary opened that far right of the column
 // its siblings opened theirs in — the column being the only thing that lines a block's summaries up,
 // since nothing is drawn between them.
-func branchText(th theme, tv toolView, column int) (text string, style lipgloss.Style) {
+//
+// expanded is the state of the block the line belongs to, and it reaches the STYLE alone: the line
+// is one sentence about one call, so the target and the summary beside it take one tone, and it is
+// the open one wherever the block is open (detailTone). A diff-kinded summary keeps its colour
+// either way (detailStyle).
+func branchText(th theme, tv toolView, column int, expanded bool) (text string, style lipgloss.Style) {
 	target := expandTabs(tv.Target)
-	text, style = target, th.toolDetail
+	text, style = target, detailTone(th, expanded)
 	if tv.Summary.Text != "" {
 		pad := strings.Repeat(" ", max(0, column-th.measure.Width(target)))
 		text += pad + " " + tv.Summary.Text
-		style = detailStyle(th, tv.Summary.Kind)
+		style = detailStyle(th, tv.Summary.Kind, expanded)
 	}
 	return text, style
 }
@@ -1546,7 +1555,7 @@ func branchText(th theme, tv toolView, column int) (text string, style lipgloss.
 // one place the cut is taken, asked by the painter and by the toggle-target rule alike
 // (blockHidesWhenCollapsed), so a target the paint clips is a target the indicator knows about.
 func collapsedBranch(th theme, tv toolView, column int, marker string, width int) (lines []string, clipped bool) {
-	text, style := branchText(th, tv, column)
+	text, style := branchText(th, tv, column, false)
 	return clipWrap(th, style, marker, text, width, collapsedTargetRows)
 }
 
@@ -1726,11 +1735,15 @@ func branchMarker(last bool) string {
 // renderSubDetails lays a call's detail lines out beneath its branch line, indented to the
 // branch marker's width and styled by kind, so they read as that branch's content rather than
 // as siblings of it.
+//
+// It is the EXPANDED paint's alone — a collapsed block paints no body line at all
+// (collapsedBodyRows) — so its lines take the open tone outright rather than through a parameter
+// that could only ever be true (detailStyle).
 func renderSubDetails(th theme, details []detailLine, indent, width int) []string {
 	pad := strings.Repeat(" ", indent)
 	out := make([]string, 0, len(details))
 	for _, d := range details {
-		out = append(out, hangingWrap(th, detailStyle(th, d.Kind), pad, d.Text, width)...)
+		out = append(out, hangingWrap(th, detailStyle(th, d.Kind, true), pad, d.Text, width)...)
 	}
 	return out
 }
@@ -1799,13 +1812,16 @@ func renderOrphanResult(th theme, text string, width int, expanded bool) blockPa
 }
 
 // renderDetails renders tool-detail lines as ┝/┕ tree branches (the last line gets ┕),
-// styled by their kind (plain dim, or red/green for the diff kinds). This is the targetless
-// shape only: where a call has a target, the target owns the branch and its details lay out
-// beneath it (renderToolBranch).
+// styled by their kind (the open detail tone, or red/green for the diff kinds). This is the
+// targetless shape only: where a call has a target, the target owns the branch and its details lay
+// out beneath it (renderToolBranch).
+//
+// Like renderSubDetails it is the EXPANDED paint — the collapsed twin of this shape is clipDetails,
+// under the row budget and in the dim tone — so its lines take the open tone outright.
 func renderDetails(th theme, details []detailLine, width int) []string {
 	var out []string
 	for i, d := range details {
-		out = append(out, hangingWrap(th, detailStyle(th, d.Kind), branchMarker(i == len(details)-1), d.Text, width)...)
+		out = append(out, hangingWrap(th, detailStyle(th, d.Kind, true), branchMarker(i == len(details)-1), d.Text, width)...)
 	}
 	return out
 }
@@ -1823,7 +1839,7 @@ func renderDetails(th theme, details []detailLine, width int) []string {
 func clipDetails(th theme, details []detailLine, width int) (lines []string, clipped bool) {
 	out := make([]string, 0, len(details))
 	for i, d := range details {
-		rows, cut := clipWrap(th, detailStyle(th, d.Kind), branchMarker(i == len(details)-1), d.Text,
+		rows, cut := clipWrap(th, detailStyle(th, d.Kind, false), branchMarker(i == len(details)-1), d.Text,
 			width, collapsedBranchRows)
 		out = append(out, rows...)
 		clipped = clipped || cut
@@ -1831,17 +1847,35 @@ func clipDetails(th theme, details []detailLine, width int) (lines []string, cli
 	return out, clipped
 }
 
-// detailStyle maps a detail kind to its style: plain detail is dim; the diff kinds are
-// red/green (view_diff's body is their producer — diffBody).
-func detailStyle(th theme, kind detailKind) lipgloss.Style {
+// detailStyle maps a detail kind and its block's STATE to a style: plain detail takes the tone of
+// the state (detailTone); the diff kinds are red/green in both, because their colour says which way
+// a line went and an emphasis step layered onto that would be a second thing the same colour means
+// (view_diff's body is their producer — diffBody).
+func detailStyle(th theme, kind detailKind, expanded bool) lipgloss.Style {
 	switch kind {
 	case detailDiffAdded:
 		return th.diffAdded
 	case detailDiffRemoved:
 		return th.diffRemoved
 	default:
-		return th.toolDetail
+		return detailTone(th, expanded)
 	}
+}
+
+// detailTone is the plain-detail gray a tool block's text takes in each of its two states — the
+// collapsed dim, or the step brighter an open block reads in (design call 9, theme.go's
+// colFaintBright). It is the ONE place the state reaches the colour, so the target, the summary and
+// the body of one block cannot come to disagree about how loudly they are speaking.
+//
+// It answers for a block's TEXT alone. The chrome — the ▶/▼ indicator, the `+N more lines` marker,
+// an open member's │ gutter — keeps its own role in both states: those are apogee's marks on the
+// block rather than what the block has to say, and brightening them with the content would make the
+// affordances shout exactly where the content was meant to.
+func detailTone(th theme, expanded bool) lipgloss.Style {
+	if expanded {
+		return th.toolDetailBright
+	}
+	return th.toolDetail
 }
 
 // ----------------------------------------------------------------------------

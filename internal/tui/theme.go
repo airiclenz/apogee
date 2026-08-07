@@ -25,10 +25,17 @@ var (
 	colDimGray  = lipgloss.Color("#333333") // top-edge divider hairline — dimmer than the chrome border so it recedes
 	colBlack    = lipgloss.Color("#000000") // input-box interior
 	colFaint    = lipgloss.Color("#8a8a8a") // status/footer/tool-detail dim
-	colDiffAdd  = lipgloss.Color("#3fb950") // diff "+" lines (reserved — no producer yet)
-	colDiffDel  = lipgloss.Color("#f85149") // diff "-" lines (reserved — no producer yet)
-	colError    = lipgloss.Color("#f85149") // recovered-fault notices
-	colCode     = lipgloss.Color("#f0883e") // inline `code` + fenced code blocks (orange)
+	// colFaintBright is colFaint's OPEN tone: the gray an expanded tool block paints its target,
+	// summary and body in (design call 9 of docs/plans/"2026-08-06 - 03"). A block is opened to be
+	// read, and the dim a collapsed scrollback wants — where the eye is skimming past the blocks
+	// rather than into one — is a step too quiet for the output someone just asked to see. One step,
+	// deliberately: the two tones have to read as the same voice at two volumes, so a block does not
+	// change what it IS by being opened.
+	colFaintBright = lipgloss.Color("#b2b2b2")
+	colDiffAdd     = lipgloss.Color("#3fb950") // diff "+" lines (reserved — no producer yet)
+	colDiffDel     = lipgloss.Color("#f85149") // diff "-" lines (reserved — no producer yet)
+	colError       = lipgloss.Color("#f85149") // recovered-fault notices
+	colCode        = lipgloss.Color("#f0883e") // inline `code` + fenced code blocks (orange)
 
 	// The autonomy-mode footer markers, warming up the privilege ladder (least → most
 	// autonomous): plan turquoise-green, ask-before green, allow-edits blue, auto orange.
@@ -153,19 +160,26 @@ type theme struct {
 	toolHeader    lipgloss.Style // the ✦ Label target header
 	toolLabel     lipgloss.Style // the tool label inside that header (bold, orange — the colCode tone inline code and the auto-mode marker already carry)
 	toolIndicator lipgloss.Style // the ▶/▼ state indicator trailing that label where the header is a toggle target: the detail tone, deliberately NOT toolLabel's orange, so the affordance reads as chrome beside the label rather than as part of it
-	toolDetail    lipgloss.Style // the ┝/┕ branch detail lines (dim)
-	toolMarker    lipgloss.Style // the synthesized "+N more lines" remainder marker beneath a hidden body: light gray-blue, no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "+" — the prompt block's see-more keeps the heavier promptToggle treatment
-	subRail       lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (the toolLabel orange — one tone for the whole sub-agent frame)
-	skillAccent   lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
-	skillToken    lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)
-	fileToken     lipgloss.Style // a RESOLVING inline "@path" token in the prompt box (blue on the box's black)
-	selection     lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
-	diffAdded     lipgloss.Style // a "+" diff detail line (reserved)
-	diffRemoved   lipgloss.Style // a "-" diff detail line (reserved)
-	errorText     lipgloss.Style // a recovered-fault notice
-	noteText      lipgloss.Style // a neutral note (cancelled, approval record) + a presentation's status line
-	queuedText    lipgloss.Style // a staged-interjection strip row: faint on black, painted edge to edge so the strip reads as one band (its own role, deliberately not statusBar's)
-	presentTitle  lipgloss.Style // the ▤ marker and title of a presented document (bold white — a deliverable reads as a heading, not as plumbing; its path and URL stay unstyled so the terminal linkifies plain text)
+	toolDetail    lipgloss.Style // the ┝/┕ branch detail lines of a COLLAPSED block (dim)
+	// toolDetailBright is toolDetail's open twin: the same lines once the block they belong to is
+	// expanded, a step brighter (colFaintBright), so what a reader opened stands out from the
+	// collapsed blocks around it. It is the PLAIN detail tone alone — a diff line keeps diffAdded /
+	// diffRemoved in both states, since its colour carries meaning rather than emphasis — and the
+	// chrome a block wears (toolIndicator, toolMarker, the open member's gutter) stays dim in both,
+	// because the affordances are not what the reader opened the block for (detailStyle).
+	toolDetailBright lipgloss.Style
+	toolMarker       lipgloss.Style // the synthesized "+N more lines" remainder marker beneath a hidden body: light gray-blue, no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "+" — the prompt block's see-more keeps the heavier promptToggle treatment
+	subRail          lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (the toolLabel orange — one tone for the whole sub-agent frame)
+	skillAccent      lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
+	skillToken       lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)
+	fileToken        lipgloss.Style // a RESOLVING inline "@path" token in the prompt box (blue on the box's black)
+	selection        lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
+	diffAdded        lipgloss.Style // a "+" diff detail line (reserved)
+	diffRemoved      lipgloss.Style // a "-" diff detail line (reserved)
+	errorText        lipgloss.Style // a recovered-fault notice
+	noteText         lipgloss.Style // a neutral note (cancelled, approval record) + a presentation's status line
+	queuedText       lipgloss.Style // a staged-interjection strip row: faint on black, painted edge to edge so the strip reads as one band (its own role, deliberately not statusBar's)
+	presentTitle     lipgloss.Style // the ▤ marker and title of a presented document (bold white — a deliverable reads as a heading, not as plumbing; its path and URL stay unstyled so the terminal linkifies plain text)
 
 	// Markdown styles for assistant chat text (markdown.go): **bold** weight, ## headings
 	// as bold white, `inline code` and ``` fenced blocks ``` in orange, and the dim frame a
@@ -215,13 +229,14 @@ func newTheme() theme {
 		// run inside the block that is apogee talking rather than the human, and the hue says so by
 		// cooling away from the prompt's white rather than by competing with it — a marker that
 		// shouts is one you stop reading past.
-		promptToggle:  lipgloss.NewStyle().Bold(true).Foreground(colPromptToggle).Background(colDarkGray),
-		toolHeader:    lipgloss.NewStyle(),
-		toolLabel:     lipgloss.NewStyle().Bold(true).Foreground(colCode),
-		toolIndicator: lipgloss.NewStyle().Foreground(colFaint),
-		toolDetail:    lipgloss.NewStyle().Foreground(colFaint),
-		toolMarker:    lipgloss.NewStyle().Foreground(colToolMarker),
-		subRail:       lipgloss.NewStyle().Foreground(colCode),
+		promptToggle:     lipgloss.NewStyle().Bold(true).Foreground(colPromptToggle).Background(colDarkGray),
+		toolHeader:       lipgloss.NewStyle(),
+		toolLabel:        lipgloss.NewStyle().Bold(true).Foreground(colCode),
+		toolIndicator:    lipgloss.NewStyle().Foreground(colFaint),
+		toolDetail:       lipgloss.NewStyle().Foreground(colFaint),
+		toolDetailBright: lipgloss.NewStyle().Foreground(colFaintBright),
+		toolMarker:       lipgloss.NewStyle().Foreground(colToolMarker),
+		subRail:          lipgloss.NewStyle().Foreground(colCode),
 		// The inline token accents are one act on two fields: the skill's violet moves to the
 		// FOREGROUND and the background stays whatever the token is standing on — the prompt box's
 		// black while the message is being typed, the user block's dark gray once it is sent — so an
