@@ -65,7 +65,7 @@
   future home; switching schemes re-reads the file, which covers the edit loop).
 - Any VERSION/tag/release change.
 
-## 1. `internal/scheme` package: types, YAML decode, forgiving validation, embedded `dark`
+## 1. `internal/scheme` package: types, YAML decode, forgiving validation, embedded `dark` — ✅ DONE (2026-08-07)
 
 **What:** New package `internal/scheme` (no lipgloss or tui imports — plain data):
 

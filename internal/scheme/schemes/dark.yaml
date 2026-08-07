@@ -1,0 +1,50 @@
+# apogee color scheme — "dark" (the built-in default).
+#
+# A color scheme recolors only what apogee already colors: it never paints the full
+# terminal background, and it never touches glyphs, markers or layout. This scheme is
+# the palette apogee has always drawn with, tuned for dark terminals.
+#
+# Every key below is optional. A key you leave out keeps its default (dark) value, so
+# your own scheme can be as short as the handful of roles you want to change. Values
+# are quoted "#rrggbb" hex — the quotes matter, because an unquoted # starts a YAML
+# comment. A key apogee does not know, or a value that is not #rrggbb, costs you that
+# one role and a warning; it never costs you the scheme.
+
+# --- base tones --------------------------------------------------------------------
+user-text: "#ffffff" # user-prompt text
+chrome: "#4a4a4a"    # user-block background + input/footer borders
+divider: "#333333"   # top-edge divider hairline — dimmer than the chrome border so it recedes
+surface: "#000000"   # input-box interior
+muted: "#8a8a8a"     # status/footer/tool-detail dim
+
+# --- semantic ----------------------------------------------------------------------
+diff-add: "#3fb950" # diff "+" lines
+diff-del: "#f85149" # diff "-" lines
+error: "#f85149"    # recovered-fault notices
+code: "#f0883e"     # inline `code` + fenced code blocks (orange)
+
+# --- autonomy modes ----------------------------------------------------------------
+# The footer's mode markers, warming up the privilege ladder (least → most autonomous).
+mode-plan: "#2afefa"        # plan — turquoise green
+mode-ask-before: "#3fb950"  # ask-before — green
+mode-allow-edits: "#58a6ff" # allow-edits — blue
+mode-auto: "#f0883e"        # auto — orange
+
+# --- prompt tokens -----------------------------------------------------------------
+skill: "#b1baff"    # skills — violet: the prompt's inline /token accent and its twin inside a sent block
+file-ref: "#cdffa4" # the prompt's inline @file token accent — the tone a reference reads as
+
+# --- chrome accents ----------------------------------------------------------------
+prompt-toggle: "#b0d2ff" # the collapsed prompt's see-more / see-less marker — an apogee affordance that reads as chrome inside the block, not as more of what the human wrote
+tool-marker: "#8db4e6"   # a tool block's synthesized "+N more lines" remainder marker — prompt-toggle's cooler sibling, the same "apogee is talking" hue on a body column
+
+# --- misc --------------------------------------------------------------------------
+gauge: "#c396ff"     # context-fill gauge bar — periwinkle
+selection: "#3a5fcd" # mouse drag-selection highlight background — blue
+
+# --- spinner -----------------------------------------------------------------------
+# The four stops the status-line spinner blends between.
+spinner-1: "#8668ff"
+spinner-2: "#19a946"
+spinner-3: "#ffbf00"
+spinner-4: "#ff4a81"
