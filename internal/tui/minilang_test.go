@@ -532,7 +532,7 @@ func TestUnknownSlashWithMoreWordsStillSends(t *testing.T) {
 
 func TestComputeAutocompleteCommands(t *testing.T) {
 	m := newTestModel(t)
-	m.input.SetValue("/c") // clear, compact, confine, continue all start with "c"
+	m.input.SetValue("/c") // clear, color-scheme, compact, confine, continue all start with "c"
 	ac := m.computeAutocomplete(m.caretByteOffset())
 	if !ac.active || ac.kind != acCommand {
 		t.Fatalf("overlay = {active:%v kind:%v}, want active command", ac.active, ac.kind)
@@ -541,7 +541,7 @@ func TestComputeAutocompleteCommands(t *testing.T) {
 	for _, it := range ac.items {
 		got = append(got, it.value)
 	}
-	if !reflect.DeepEqual(got, []string{"clear", "compact", "confine", "continue"}) {
+	if !reflect.DeepEqual(got, []string{"clear", "color-scheme", "compact", "confine", "continue"}) {
 		t.Errorf("suggestions = %v, want every c-command in menu (alphabetical) order", got)
 	}
 }
@@ -628,12 +628,13 @@ func TestAutocompleteNavigateThenAccept(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/c")
-	m.autocomplete = m.computeAutocomplete(m.caretByteOffset()) // [clear, compact, continue, confine], selected 0
-	m = step(t, m, keyDown())                                   // → compact
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset()) // [clear, color-scheme, compact, confine, continue], selected 0
+	m = step(t, m, keyDown())                                   // → color-scheme
 	if m.autocomplete.selected != 1 {
 		t.Fatalf("after down selected = %d, want 1", m.autocomplete.selected)
 	}
 	m = step(t, m, keyUp())   // → clear
+	m = step(t, m, keyDown()) // → color-scheme
 	m = step(t, m, keyDown()) // → compact
 	m, cmd := stepCmd(t, m, keyTab())
 	if m.state != stateRunning || cmd == nil {

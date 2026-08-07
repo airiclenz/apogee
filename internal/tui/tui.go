@@ -301,6 +301,20 @@ type Options struct {
 	// half is independent) and the new scheme takes effect at the next start.
 	ResolveScheme func(name string) (scheme.Scheme, []string)
 
+	// ExportScheme writes an editable copy of the named BUILT-IN scheme into the schemes folder and
+	// returns the path it wrote. It is the only way a scheme file comes into existence: the built-ins
+	// are embedded in the binary and never installed on disk (ADR 0039 design call 1), so without an
+	// export there is nothing to open in an editor and the shadowing rule has nothing to shadow with.
+	//
+	// It never overwrites (design call 7): an existing file is an error naming it, so an export can
+	// never destroy the scheme somebody has been working on. Every error — unknown name, file
+	// present, unwritable folder — is REPORTED, the SaveHostAcknowledgement contract, because a
+	// silent export is indistinguishable from one that worked.
+	//
+	// nil ⇒ `/color-scheme export` says so and writes nothing, the nil-seam degrade every provider
+	// here takes.
+	ExportScheme func(name string) (path string, err error)
+
 	// Version is the resolved FULL build version (apogee.Version, read from the embedded VERSION
 	// file plus build provenance), read only by the /version command — it mirrors what --version
 	// prints. The start-up box reads BaseVersion instead, so the TUI never imports the source.

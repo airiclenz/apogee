@@ -643,6 +643,9 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		ResolveScheme: func(name string) (scheme.Scheme, []string) {
 			return resolveColorScheme(name, roots.schemes)
 		},
+		// And the one seam that CREATES a scheme file: `/color-scheme export` copies a built-in into
+		// the same folder, which is what makes an embedded palette editable at all.
+		ExportScheme: func(name string) (string, error) { return scheme.Export(name, roots.schemes) },
 		// The `cursor-shape:` key: the shape the REAL terminal cursor takes at the prompt caret
 		// (steady always — there is no blink key). Selected here, like the two above, so the
 		// renderer never parses a config name.

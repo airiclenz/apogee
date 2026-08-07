@@ -247,6 +247,7 @@ blue for a file your workspace has — so a typo is visible before you send.
 | `/server` | Move this session to another server you configured — picker, or `/server <name>` | — |
 | `/unload-model` | Free the model of the server this session is on — see [below](#local-servers--llama-launcher) | — |
 | `/stop-server` | Stop the server this session is on — see [below](#local-servers--llama-launcher) | — |
+| `/color-scheme` | Recolour the screen — bare lists what you can switch to, `/color-scheme <name>` switches and saves, `/color-scheme export <name>` writes an editable copy of a built-in to `~/.apogee/schemes/` | — |
 | `/settings` | Browse and change every setting, live — see [below](#the-settings-screen--settings) | — |
 
 A lone `/word` that names neither a command nor a skill is **not** sent to the model:

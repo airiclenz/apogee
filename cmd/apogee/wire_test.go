@@ -541,6 +541,45 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 			t.Errorf("warnings = %v; want one rendered line naming the unknown key", warnings)
 		}
 	})
+
+	// The third seam of the same folder: `/color-scheme export` is the only way a scheme file comes
+	// into existence, since the built-ins are embedded and never installed. It must write into the
+	// folder the OTHER two read, or an exported scheme would be invisible to the picker that is
+	// supposed to offer it.
+	t.Run("export writes into the folder the picker reads", func(t *testing.T) {
+		t.Parallel()
+		home := t.TempDir()
+		rec := &recordingLauncher{}
+		opts := options{
+			endpoint:  "http://127.0.0.1:1111",
+			model:     "fake",
+			mode:      "ask-before",
+			configDir: home,
+			workspace: t.TempDir(),
+			ui:        uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "dark"},
+		}
+		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+			t.Fatalf("runRoot: %v", err)
+		}
+		if rec.opts.ExportScheme == nil {
+			t.Fatal("the colour-scheme export seam is unwired; no scheme file could ever be edited")
+		}
+
+		path, err := rec.opts.ExportScheme("dark")
+		if err != nil {
+			t.Fatalf("ExportScheme(\"dark\"): %v", err)
+		}
+		if want := filepath.Join(home, "schemes", "dark.yaml"); path != want {
+			t.Errorf("ExportScheme wrote %q, want %q — the picker reads that folder", path, want)
+		}
+		if names := rec.opts.ListSchemes(); !slices.Contains(names, "dark") {
+			t.Errorf("ListSchemes = %v after the export; want the written copy to be offered", names)
+		}
+		// Never twice: an export that overwrote a scheme somebody had been editing would destroy it.
+		if _, err := rec.opts.ExportScheme("dark"); err == nil {
+			t.Error("a second export overwrote the file; it must be refused")
+		}
+	})
 }
 
 // The two Auto startup lines are mirror branches at the same site and never both fire:

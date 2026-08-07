@@ -56,9 +56,9 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		parsed = append(parsed, spec.name)
 	}
 	wantParsed := []string{
-		"clear", "compact", "confine", "continue", "model", "new", "rename", "schedule",
-		"schedule-stop", "server", "sessions", "settings", "skills", "stop-server", "unload-model",
-		"version"}
+		"clear", "color-scheme", "compact", "confine", "continue", "model", "new", "rename",
+		"schedule", "schedule-stop", "server", "sessions", "settings", "skills", "stop-server",
+		"unload-model", "version"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
 		t.Errorf("parser verbs = %v, want %v", parsed, wantParsed)
 	}
@@ -497,6 +497,72 @@ func TestParseInputConfineArgumentErrors(t *testing.T) {
 			}
 			if got.confine != (confineArgs{}) {
 				t.Errorf("parseInput(%q).confine = %+v, want the zero value on an error", c.in, got.confine)
+			}
+		})
+	}
+}
+
+// The /color-scheme grammar has three accepting branches and one refusing one, and the split
+// between the last two is the whole of what the parser decides: one token is a NAME (any name — a
+// scheme this build cannot find is a forgiving load, not a parse error), two tokens are only ever
+// "export <name>".
+func TestParseInputColorSchemeArguments(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want colorSchemeArgs
+	}{
+		{"bare lists", "/color-scheme", colorSchemeArgs{action: colorSchemeList}},
+		{"a name switches", "/color-scheme light", colorSchemeArgs{action: colorSchemeSwitch, name: "light"}},
+		{"an unknown name still parses", "/color-scheme solarized",
+			colorSchemeArgs{action: colorSchemeSwitch, name: "solarized"}},
+		{"export takes a name", "/color-scheme export dark",
+			colorSchemeArgs{action: colorSchemeExport, name: "dark"}},
+		{"whitespace tolerated", "  /color-scheme   export   dark  ",
+			colorSchemeArgs{action: colorSchemeExport, name: "dark"}},
+		{"tab separated", "/color-scheme\tlight", colorSchemeArgs{action: colorSchemeSwitch, name: "light"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := parseInput(c.in, nil)
+			if got.kind != kindCommand || got.command != "color-scheme" {
+				t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the color-scheme command", c.in, got.kind, got.command)
+			}
+			if got.err != nil {
+				t.Fatalf("parseInput(%q).err = %v, want nil", c.in, got.err)
+			}
+			if got.colorScheme != c.want {
+				t.Errorf("parseInput(%q).colorScheme = %+v, want %+v", c.in, got.colorScheme, c.want)
+			}
+		})
+	}
+}
+
+func TestParseInputColorSchemeArgumentErrors(t *testing.T) {
+	// The refusing branch, and the reason it exists: a line the parser cannot read must never be
+	// guessed into a switch, because a wrong guess repaints the screen and writes the config.
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"export with no name", "/color-scheme export"},
+		{"export with two names", "/color-scheme export dark light"},
+		{"a name with a stray token", "/color-scheme light please"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := parseInput(c.in, nil)
+			if got.kind != kindCommand || got.command != "color-scheme" {
+				t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the color-scheme command", c.in, got.kind, got.command)
+			}
+			if got.err == nil {
+				t.Fatalf("parseInput(%q).err = nil, want an argument error", c.in)
+			}
+			if !strings.Contains(got.err.Error(), colorSchemeUsage) {
+				t.Errorf("parseInput(%q).err = %q, want it to carry %q", c.in, got.err, colorSchemeUsage)
+			}
+			if got.colorScheme != (colorSchemeArgs{}) {
+				t.Errorf("parseInput(%q).colorScheme = %+v, want the zero value on an error", c.in, got.colorScheme)
 			}
 		})
 	}

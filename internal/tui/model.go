@@ -1518,7 +1518,8 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 // resets the session view and reprints the start-up box synchronously and stays idle
 // (startNewSession), /settings opens the configuration pane the same synchronous way
 // (settings.go), /version records the build version as a note the same synchronous way,
-// /skills records the discovered skill catalog the same synchronous way (skills.go), and /confine
+// /skills records the discovered skill catalog the same synchronous way (skills.go), /color-scheme
+// lists, switches or exports a palette the same synchronous way (colorscheme.go), and /confine
 // reports or swaps Auto's blast radius the same synchronous way (confine.go).
 //
 // It is reached at stateIdle — where the engine is quiescent and ClearContext/Compact are safe to
@@ -1616,6 +1617,12 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// idle-safe like /sessions: it reads one display seam ([Options.SettingsRows]) and drives no
 		// worker, no engine call and no file I/O of its own.
 		return m.runSettingsCommand()
+
+	case "color-scheme":
+		// List, switch or export a colour scheme (colorscheme.go, ADR 0039). Synchronous and
+		// idle-safe like /settings, whose write and apply seams the switch form reuses in full: no
+		// engine call and no worker, only one config key and — for the export — one file.
+		return m.runColorScheme(parsed.colorScheme)
 
 	case "rename":
 		// Name THIS session: take the argument as the title, or — bare — ask the model for one

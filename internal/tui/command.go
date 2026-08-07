@@ -30,7 +30,8 @@ const (
 // have); rest carries the SAME arguments unsplit — the line's raw tail, for the one verb whose
 // argument is prose rather than tokens (/schedule's prompt, which must reach the model spaced and
 // lined as it was typed); confine carries the dedicated argument parse of a /confine line (zero value — a status
-// report — for every other verb) and err is set when a
+// report — for every other verb); colorScheme carries the same for a /color-scheme line (zero value — a
+// listing — for every other verb); and err is set when a
 // recognised verb was given arguments it does not understand. An arguments error stays a
 // kindCommand: the router reports the usage line rather than sending the line to the agent or
 // silently doing nothing. For kindMessage, text is the line (trimmed, with @tokens and "/id"
@@ -41,16 +42,17 @@ const (
 // text is the lone token as typed (leading slash included) — the refusal note names it back
 // (unknownSlashNote) and nothing else on the value is set.
 type parsedInput struct {
-	kind       inputKind
-	command    string
-	args       []string
-	rest       string
-	confine    confineArgs
-	err        error
-	text       string
-	fileRefs   []string
-	skillIDs   []string
-	skillSpans []skillSpan
+	kind        inputKind
+	command     string
+	args        []string
+	rest        string
+	confine     confineArgs
+	colorScheme colorSchemeArgs
+	err         error
+	text        string
+	fileRefs    []string
+	skillIDs    []string
+	skillSpans  []skillSpan
 }
 
 // commandSpec is one verb of the "/" namespace: what the parser does with it and what the
@@ -119,6 +121,12 @@ type commandSpec struct {
 // prompt form reads the raw tail of the line rather than its tokens (parsedInput.rest), because a
 // prompt is text the human wrote, not a token list to be re-spaced.
 //
+// /color-scheme is the palette verb (colorscheme.go, ADR 0039): bare it lists what this session can
+// switch to, with a name it switches — persisting the key and repainting on the same keypress, the
+// settings pane's own validate → persist → apply — and `export <name>` writes an editable copy of a
+// built-in into the human's schemes folder. Idle-only like every other verb that writes config, and
+// argument-taking like /confine, whose grammar it follows down to the usage line.
+//
 // /settings opens the configuration pane (settings.go): every config key with the value this run
 // resolved for it, over the binary's declarative key registry (ADR 0035). Idle-only and modal like
 // /sessions, and noRecall like the reset pair — it opens a surface rather than saying anything to the
@@ -132,6 +140,7 @@ type commandSpec struct {
 // quietly un-sorting the menu.
 var commandSpecs = []commandSpec{
 	{name: "clear", summary: "reset the model's memory of this session", noRecall: true},
+	{name: "color-scheme", summary: "list, switch or export the screen's colour schemes", takesArgs: true},
 	{name: "compact", summary: "summarise the conversation to reclaim context"},
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
 	{name: "continue", summary: "ask the model to keep going"},
@@ -167,8 +176,11 @@ func parseInput(raw string, known func(string) bool) parsedInput {
 			// A verb that does not read its arguments carries neither form (commandSpec).
 			parsed.args, parsed.rest = args, rest
 		}
-		if cmd == "confine" {
+		switch cmd {
+		case "confine":
 			parsed.confine, parsed.err = parseConfine(args)
+		case "color-scheme":
+			parsed.colorScheme, parsed.err = parseColorScheme(args)
 		}
 		return parsed
 	}
@@ -363,6 +375,58 @@ func parseConfine(args []string) (confineArgs, error) {
 			parsed.action, confineUsage)
 	}
 	return parsed, nil
+}
+
+// ----------------------------------------------------------------------------
+// /color-scheme — the palette command's argument grammar
+// ----------------------------------------------------------------------------
+
+// colorSchemeAction is the subcommand of a parsed /color-scheme line. The zero value is
+// colorSchemeList, so a bare "/color-scheme" reports what there is to choose from rather than
+// changing the screen — the /confine posture, and for the same reason: the verb that changes
+// something must be the one the human spelled out.
+type colorSchemeAction int
+
+const (
+	colorSchemeList   colorSchemeAction = iota // name every scheme this session can switch to
+	colorSchemeSwitch                          // load a scheme by name, persisting the choice
+	colorSchemeExport                          // write an editable copy of a built-in to the schemes folder
+)
+
+// colorSchemeArgs is the parsed argument list of a /color-scheme line: what was asked for, and the
+// scheme name it was asked of (empty for the bare listing, which names nothing).
+type colorSchemeArgs struct {
+	action colorSchemeAction
+	name   string
+}
+
+// colorSchemeUsage is the one-line grammar every /color-scheme argument error carries, so a
+// mistyped line teaches the syntax instead of switching to a scheme nobody asked for.
+const colorSchemeUsage = "usage: /color-scheme | /color-scheme <name> | /color-scheme export <name>"
+
+// parseColorScheme parses the argument tokens that followed a "/color-scheme" verb. No arguments
+// means the listing. One token is a scheme NAME to switch to — any name, because a scheme this
+// build cannot find is a forgiving load with a warning rather than a parse error (ADR 0039 design
+// call 8), and refusing it here would put the parser in the business of knowing what is on disk.
+// "export" is the one reserved first token, and it takes exactly one name.
+//
+// Everything else — a bare "export", a name with tokens after it — is an error carrying
+// colorSchemeUsage rather than a guess: two tokens are as likely a mistyped subcommand as a scheme
+// whose name has a space in it (schemes are file basenames, so it is neither).
+func parseColorScheme(args []string) (colorSchemeArgs, error) {
+	switch {
+	case len(args) == 0:
+		return colorSchemeArgs{action: colorSchemeList}, nil
+	case args[0] == "export":
+		if len(args) != 2 {
+			return colorSchemeArgs{}, fmt.Errorf("/color-scheme export takes exactly one scheme name. %s", colorSchemeUsage)
+		}
+		return colorSchemeArgs{action: colorSchemeExport, name: args[1]}, nil
+	case len(args) == 1:
+		return colorSchemeArgs{action: colorSchemeSwitch, name: args[0]}, nil
+	default:
+		return colorSchemeArgs{}, fmt.Errorf("unknown /color-scheme subcommand %q. %s", args[0], colorSchemeUsage)
+	}
 }
 
 // refSpan is one resolving token of the mini-language, LOCATED in the text: the byte range

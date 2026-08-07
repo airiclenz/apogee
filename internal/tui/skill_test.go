@@ -57,14 +57,15 @@ func skillOpts() Options {
 // write.
 func TestSlashMenuMergesCommandsAndSkills(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	m.input.SetValue("/c") // four c-commands, and "clean-code" matches as a substring
+	m.input.SetValue("/c") // five c-commands, and "clean-code" matches as a substring
 	ac := m.computeAutocomplete(m.caretByteOffset())
 
 	var got []string
 	for _, it := range ac.items {
 		got = append(got, it.value)
 	}
-	want := []string{"clear", "compact", "confine", "continue", "clean-code"} // the verbs alphabetically, then the skill
+	// The verbs alphabetically, then the skill.
+	want := []string{"clear", "color-scheme", "compact", "confine", "continue", "clean-code"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("merged rows = %v, want the commands before the skills %v", got, want)
 	}

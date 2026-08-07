@@ -443,9 +443,29 @@ passes.
 
 **Commit:** `feat(tui): color-scheme settings picker with live apply`
 
-## 8. `/color-scheme` command with export subcommand
+## 8. `/color-scheme` command with export subcommand — ✅ DONE (2026-08-07)
 
 Depends on item 7.
+
+NOTES (2026-08-07): four deviations from the item text.
+(a) `export` is a RESERVED first token, so a lone `/color-scheme export` is a usage error rather than
+a switch to a scheme named "export". The item's grammar lists `<name>` and `export <name>` without
+saying which one owns a bare `export`, and the literal one-token reading would repaint the screen
+and write `ui.color-scheme: export` on an obvious typo. Its message is `/color-scheme export takes
+exactly one scheme name. <usage>`, not the item's `unknown /color-scheme subcommand %q` — that
+wording is reserved for the two-plus-token case it is true of (`export` IS a known subcommand).
+(b) The switch also records the pane's `settingEdit` journal entry (`recordSettingEdit`), one line
+beyond "persist through the same write path": without it a key changed from the transcript would
+lack the `/settings` row's "changed this session" marker, which is the same divergence between the
+two surfaces the item's own text exists to prevent.
+(c) Four existing tests needed the new verb (`TestCommandTableDrivesParserAndMenu`,
+`TestComputeAutocompleteCommands`, `TestAutocompleteNavigateThenAccept`,
+`TestSlashMenuMergesCommandsAndSkills`) — mechanical: `/color-scheme` sorts between `/clear` and
+`/compact`, so every "c-command" list and the accept test's row index moved by one.
+(d) README's `/command` table gained a row. The item names no docs and item 9 owns the ADR /
+CONTEXT / layout / CHANGELOG (and the README FEATURE line); this is the command REFERENCE, which a
+new verb makes wrong the moment it lands. `cmd/apogee/wire_test.go` also gained an export sub-test —
+`ExportScheme` must write into the folder `ListSchemes` reads, and nothing else covers that.
 
 **What:** in `internal/tui`:
 
