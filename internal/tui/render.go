@@ -52,9 +52,11 @@ type renderedTranscript struct {
 // the entry the mark names; a click on a marker expands the block whose body the marker is counting
 // for, and never collapses it.
 //
-// targetHeader is named for the line it started on and no longer only that line: a grouped block's
-// MEMBER rows wear it too, each naming its own call rather than the block's head, which is how a
-// group of ten opens one of them (renderToolGroup).
+// targetHeader is named for the line it started on and is no longer only that line: a single tool
+// block wears it on EVERY row it paints — its header, its target rows, its body — and a grouped
+// block's MEMBER rows wear it too, each naming its own call rather than the block's head, which is
+// how a group of ten opens one of them (renderToolBlock, renderToolGroup). What the kind means has
+// not moved: it is the toggle, whatever line it lands on.
 type targetKind int
 
 const (
@@ -64,9 +66,10 @@ const (
 )
 
 // lineTarget is one rendered line's click surface: what the line is, and the index into
-// transcript.entries of the block's HEAD entry — the entry whose expanded state a click there
-// flips (transcript.toggleExpanded). The zero value is "no target", which is what every line
-// outside a toggleable block's header and marker carries, so a lookup needs no second sentinel.
+// transcript.entries of the entry whose expanded state a click there flips
+// (transcript.toggleExpanded) — the block's head for every shape but a grouped run, where it is the
+// member the row belongs to. The zero value is "no target", which is what every line outside a
+// toggleable block carries, so a lookup needs no second sentinel.
 type lineTarget struct {
 	kind  targetKind
 	entry int
@@ -985,19 +988,25 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // the header's leading star (state.star), ✦ once the block has settled and blinking against a bare
 // cell while it still holds an open call.
 //
-// It also marks the block's CLICK SURFACE as it emits it — every physical line of the header, and
-// any remainder marker a branch synthesized — because the lines and the marks have to be one act:
-// a second pass over the finished lines would be a second derivation of the same accounting, and
-// the two would drift the first time the shape changed (ADR 0030's rule). The header is marked
-// when the collapsed paint HIDES something — either inside the views (blockHidesWhenCollapsed) or
-// outside them (state.elides, the sub-agent run's span) — because a block with nothing to reveal
-// has nothing to toggle, so a body-less group's header keeps a click's selection meaning. The mark
-// is state-independent by design: an expanded block still marks its header, which is what lets the
-// same click collapse it again.
+// It also marks the block's CLICK SURFACE as it emits it, because the lines and the marks have to
+// be one act: a second pass over the finished lines would be a second derivation of the same
+// accounting, and the two would drift the first time the shape changed (ADR 0030's rule). That
+// surface is the block WHOLE — its header, the clipped target rows beneath it, and, open, the full
+// target and every body line — the shape the prompt block has always had (renderUserBlock): a
+// reader who wants the rest of a Run's output clicks the output, not the one row of the block that
+// happens to be its header. The one exception is the synthesized `+N more lines` marker, which
+// keeps its OPEN-ONLY meaning (targetMarker): it is a line of the collapsed paint alone, so a click
+// there can only mean "show me the rest".
+//
+// The surface exists when the collapsed paint HIDES something — either inside the views
+// (blockHidesWhenCollapsed) or outside them (state.elides, the sub-agent run's span) — because a
+// block with nothing to reveal has nothing to toggle, so a short bodiless call keeps a click's
+// selection meaning down every row it paints. The mark is state-independent by design: an expanded
+// block still marks its rows, which is what lets the same click collapse it again.
 //
 // The header WEARS that same answer: the ▶/▼ state indicator is appended to the label under the
-// very predicate that marks the line, so the affordance and the click-target rule cannot come to
-// disagree — a header that wears an indicator is clickable and a header that does not is not, with
+// very predicate that marks the lines, so the affordance and the click-target rule cannot come to
+// disagree — a block that wears an indicator is clickable and a block that does not is not, with
 // one condition behind both. Unlike the mark, the glyph is state-DEPENDENT: it is what says which
 // way the click will go (stateIndicator). It is styled apart from the label (th.toolIndicator, the
 // detail tone) so it reads as chrome beside the orange rather than as the last letter of it.
@@ -1017,16 +1026,20 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 	if len(views) > 1 {
 		return renderToolGroup(th, views, column, width, state)
 	}
-	header := targetNone
+	// toggle is the block's whole click surface in one value — targetHeader when there is something
+	// behind the block and targetNone when there is not — settled once and spent on every row the
+	// block emits, so the header, the branches and the body cannot come to disagree about whether
+	// this block is clickable.
+	toggle := targetNone
 	label := th.toolLabel.Render(views[0].Label)
 	if state.elides || blockHidesWhenCollapsed(th, views, column, width) {
-		header = targetHeader
+		toggle = targetHeader
 		label += " " + th.toolIndicator.Render(stateIndicator(state.expanded))
 	}
 	var out blockPaint
-	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), header)
+	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), toggle)
 	for i, tv := range views {
-		out.join(renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width, state.expanded))
+		out.join(renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width, state.expanded, toggle))
 	}
 	return out
 }
@@ -1459,19 +1472,25 @@ func blockHidesWhenCollapsed(th theme, views []toolView, column, width int) bool
 // collapsed targetless call caps its branch list instead, since there the lines ARE the branches —
 // collapsedBodyCap of them, one clipped row each — and lands on the same four rows.
 //
-// The synthesized remainder marker is marked as a click target as it is laid out, and it is laid
-// out on its own so the mark lands on exactly the marker's physical lines (all of them, should it
-// ever wrap) and on nothing else. Neither the branch line nor a body line is a target: a click on
-// what is already shown keeps its selection meaning.
-func renderToolBranch(th theme, tv toolView, column int, marker string, width int, expanded bool) blockPaint {
+// toggle is the block's own click surface, settled once by renderToolBlock and spent on every row
+// a branch emits: the branch line, the body under it, the targetless shape's branch list. A click
+// anywhere on a block that hides something flips it, which is the prompt block's rule read over the
+// other collapsible shape in the transcript — a body a reader is looking at is the likeliest place
+// for the pointer to be when they want it gone. The synthesized remainder marker is the exception
+// and is laid out on its own so the mark lands on exactly the marker's physical lines (all of them,
+// should it ever wrap) and on nothing else: it belongs to the collapsed paint, so it OPENS and
+// never closes (targetMarker).
+func renderToolBranch(th theme, tv toolView, column int, marker string, width int, expanded bool, toggle targetKind) blockPaint {
 	if tv.Target == "" {
 		if expanded {
-			return plainPaint(renderDetails(th, branchDetails(tv), width))
+			var out blockPaint
+			out.add(renderDetails(th, branchDetails(tv), width), toggle)
+			return out
 		}
 		shown, remainder, truncated := collapsedCall(tv)
 		var out blockPaint
 		rows, _ := clipDetails(th, shown, width)
-		out.add(rows, targetNone)
+		out.add(rows, toggle)
 		if truncated {
 			// The marker rides the branch marker's own width, the indent a targeted block's body
 			// already sits at, so the affordance sits under the lines it counts either way.
@@ -1484,12 +1503,12 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 	var out blockPaint
 	if expanded {
 		text, style := branchText(th, tv, column)
-		out.add(hangingWrap(th, style, marker, text, width), targetNone)
-		out.add(renderSubDetails(th, tv.Details.all(), indent, width), targetNone)
+		out.add(hangingWrap(th, style, marker, text, width), toggle)
+		out.add(renderSubDetails(th, tv.Details.all(), indent, width), toggle)
 		return out
 	}
 	rows, _ := collapsedBranch(th, tv, column, marker, width)
-	out.add(rows, targetNone)
+	out.add(rows, toggle)
 	if _, remainder, truncated := collapsedDetails(tv.Details); truncated {
 		// The marker is painted in its OWN style role rather than through the body's detailStyle:
 		// it is a paint artefact, not a line the tool wrote, and a body line that happens to open

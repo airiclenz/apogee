@@ -847,9 +847,9 @@ func clickCell(t *testing.T, m Model, x, y int) Model {
 	return step(t, m, leftRelease(x, y))
 }
 
-// TestTranscriptClickTogglesTheBlock is the rule itself: a motionless click on a header line
-// toggles that block in both directions, a click on the remainder marker opens it, and a click on
-// a body line — a line the painter marked as nothing — leaves the state alone.
+// TestTranscriptClickTogglesTheBlock is the rule itself: a motionless click anywhere on a block that
+// hides something toggles it — its header, its target row, its body once the body is on the screen —
+// and a click on the remainder marker opens it and only ever opens it.
 func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 	const output = "ok   a\nok   b\nok   c\nPASS"
 
@@ -892,9 +892,10 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 		}
 	})
 
-	// A collapsed block paints no body line at all, so the case is asked of the EXPANDED one —
-	// where the body is on the screen and is still not a click surface.
-	t.Run("a body line is no target", func(t *testing.T) {
+	// A collapsed block paints no body line at all, so the case is asked of the EXPANDED one: the
+	// output is where the pointer already is when a reader has finished with it, and the whole
+	// block is the click surface (render.go, renderToolBlock).
+	t.Run("a body line closes the block", func(t *testing.T) {
 		m := modelWithToolBlock(t, output)
 		header := markedLine(t, m, targetHeader)
 		m = clickCell(t, m, 2, screenRow(t, m, header))
@@ -902,20 +903,76 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 			t.Fatal("setup: the click on the header did not expand the block")
 		}
 		body := header + 2 // header, branch line, then the body's first line
-		if m.lineTargets[body].kind != targetNone {
-			t.Fatalf("setup: line %d is marked %v, not the body line this case needs",
-				body, m.lineTargets[body].kind)
+		if got := m.lineTargets[body]; got.kind != targetHeader || got.entry != m.lineTargets[header].entry {
+			t.Fatalf("setup: line %d is marked %+v, not a body row of the block under test", body, got)
+		}
+		if !strings.Contains(strip(m.lines[body]), "ok   a") {
+			t.Fatalf("setup: line %d is %q, not the body's first line", body, strip(m.lines[body]))
 		}
 
-		before := strings.Join(m.lines, "\n")
 		m = clickCell(t, m, 6, screenRow(t, m, body))
-		if !blockExpanded(t, m, header) {
-			t.Fatal("a click on a body line collapsed the block")
+		if blockExpanded(t, m, header) {
+			t.Fatal("a click on a body line did not collapse the block")
 		}
-		if got := strings.Join(m.lines, "\n"); got != before {
-			t.Fatalf("a click on a body line repainted the transcript:\n--- got ---\n%s\n--- want ---\n%s", got, before)
+		if painted := strings.Join(m.lines, "\n"); !strings.Contains(painted, "more line") {
+			t.Fatalf("the re-collapsed paint kept no remainder marker:\n%s", painted)
 		}
 	})
+
+	// A collapsed block's TARGET row is the same surface from the other side: the row a reader is
+	// looking at when they want the rest is the clipped path itself, not the label above it.
+	t.Run("a clipped target row expands the block", func(t *testing.T) {
+		m := modelWithClippedToolBlock(t)
+		rows := markedRows(t, m, targetHeader)
+		if len(rows) != 3 {
+			t.Fatalf("the collapsed block marks %d rows, want a header and two clipped target rows:\n%s",
+				len(rows), strings.Join(m.lines, "\n"))
+		}
+		target := rows[2] // the second clipped row, the furthest from the header
+		if !strings.HasSuffix(strip(m.lines[target]), clipTail) {
+			t.Fatalf("setup: line %d is %q, not a clipped target row", target, strip(m.lines[target]))
+		}
+
+		m = clickCell(t, m, 6, screenRow(t, m, target))
+		if !blockExpanded(t, m, rows[0]) {
+			t.Fatal("a click on a clipped target row did not expand the block")
+		}
+		if painted := strings.Join(m.lines, "\n"); strings.Contains(painted, clipTail) {
+			t.Fatalf("the expanded paint still clips its target:\n%s", painted)
+		}
+	})
+}
+
+// modelWithClippedToolBlock builds a ready idle model whose one tool block carries a command far too
+// long for the width — the block whose collapsed paint spends its two content rows on a clipped
+// target, so the rows a click has to reach are the target's rather than the header
+// (TestClippedTargetAloneMakesABlockAToggleTarget is the paint's own side of the same rule).
+func modelWithClippedToolBlock(t *testing.T) Model {
+	t.Helper()
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	command := "cd . && " + strings.Repeat("echo one-more-fragment && ", 12) + "true"
+	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"` + command + `"}`)}})
+	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "done"}})
+	m.refreshViewport()
+	return m
+}
+
+// markedRows returns every rendered line the painter marked with kind, in paint order — markedLine's
+// plural, for the cases that aim at a row other than the first of a block's surface.
+func markedRows(t *testing.T, m Model, kind targetKind) []int {
+	t.Helper()
+	var rows []int
+	for i, target := range m.lineTargets {
+		if target.kind == kind {
+			rows = append(rows, i)
+		}
+	}
+	if len(rows) == 0 {
+		t.Fatalf("no rendered line is marked %v", kind)
+	}
+	return rows
 }
 
 // TestTranscriptDragFromHeaderStillSelects is the arbitration: MOTION decides. A drag that starts
@@ -1017,6 +1074,77 @@ func TestTranscriptToggleKeepsTheClickedHeaderRow(t *testing.T) {
 				t.Errorf("collapsing moved the clicked header from screen row %d to %d", row, got)
 			}
 		})
+	}
+}
+
+// TestTranscriptBodyClickKeepsTheAnchorRow is that same invariant asked of the rows the whole-block
+// surface added: a reader who closes a block from the bottom of its output must not have the view
+// yanked out from under them. The clicked line goes back on the screen row the pointer is resting on
+// (refreshViewportAnchored), and because a block shrinks BELOW its header, everything above the
+// pointer holds still with it — so the header is on the row it was on before the click.
+func TestTranscriptBodyClickKeepsTheAnchorRow(t *testing.T) {
+	m := newTestModel(t)
+	m.transcript.reset()
+	m.transcript.addUser("run the tests", nil)
+	for i := range 20 { // scrollback above the block, so the view is parked at a real offset
+		m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), 0)
+	}
+	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+		CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
+	for i := range 40 { // depth below it, so a collapse cannot run the parked offset off the end
+		m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), 0)
+	}
+	m.refreshViewport()
+	m.detached = true
+	m.viewport.SetYOffset(markedLine(t, m, targetHeader) - 5) // park the header five rows down
+
+	header := markedLine(t, m, targetHeader)
+	headerRow := screenRow(t, m, header)
+	m = clickCell(t, m, 2, headerRow)
+	if !blockExpanded(t, m, header) {
+		t.Fatal("setup: the click on the header did not expand the block")
+	}
+	body := header + 5 // header, branch line, then the body's four rows: PASS is the last
+	if got := strip(m.lines[body]); !strings.Contains(got, "PASS") {
+		t.Fatalf("setup: line %d is %q, not the body's last row", body, got)
+	}
+
+	m = clickCell(t, m, 6, screenRow(t, m, body))
+	if blockExpanded(t, m, header) {
+		t.Fatal("a click on the body's last row did not collapse the block")
+	}
+	if got := screenRow(t, m, markedLine(t, m, targetHeader)); got != headerRow {
+		t.Errorf("collapsing from a body row moved the header from screen row %d to %d", headerRow, got)
+	}
+}
+
+// TestTranscriptDragAcrossBodyRowsStillSelects is the arbitration read over the surface the
+// whole-block rule widened: the body toggles now, and MOTION still decides. A drag down an expanded
+// block's output copies the rows it ran over and leaves the block open, exactly as a drag across the
+// header always has (TestTranscriptDragFromHeaderStillSelects) — a toggle is a click that never
+// moved, whichever row it started on.
+func TestTranscriptDragAcrossBodyRowsStillSelects(t *testing.T) {
+	m := modelWithToolBlock(t, "ok   a\nok   b\nok   c\nPASS")
+	header := markedLine(t, m, targetHeader)
+	m = clickCell(t, m, 2, screenRow(t, m, header))
+	if !blockExpanded(t, m, header) {
+		t.Fatal("setup: the click on the header did not expand the block")
+	}
+	first, last := screenRow(t, m, header+2), screenRow(t, m, header+5) // the body's four rows
+
+	m = step(t, m, leftClick(0, first))
+	m = step(t, m, leftDrag(m.viewport.Width(), last))
+	m, cmd := stepCmd(t, m, leftRelease(m.viewport.Width(), last))
+	if cmd == nil {
+		t.Fatal("a drag down the body returned no copy Cmd")
+	}
+	if !strings.Contains(m.flash, "copied") {
+		t.Fatalf("flash = %q, want a copy confirmation", m.flash)
+	}
+	if !blockExpanded(t, m, header) {
+		t.Fatal("a drag across the body toggled the block; motion must win")
 	}
 }
 

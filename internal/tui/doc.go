@@ -419,7 +419,9 @@
 // block's right edge, and a member opens ALONE — the group header toggles nothing, each member is
 // painted by its own entry's expanded flag and every row it paints is marked back to that entry
 // ([renderToolGroup], [renderExpandedMember], [blockPaint.addFor]) — where a block of one spends up
-// to four rows and toggles from its header.
+// to four rows collapsed and toggles from ANY of them, header, target rows and body alike, the
+// whole-surface rule the prompt block already followed. The `+N more lines` marker is the one row
+// that does not: it belongs to the collapsed paint, so a click there only ever opens.
 // A scheduled Firing borrows that whole shape
 // through the same painter under a leading glyph of its own — ⟳ rather than the star
 // ([blockState]'s glyph override, whose zero value is the star; schedule.go, layout.md's "The firing

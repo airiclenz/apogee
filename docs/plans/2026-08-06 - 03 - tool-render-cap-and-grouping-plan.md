@@ -309,7 +309,21 @@ distinct from the orange rail. Cache — toggling one member changes the painted
 
 **Commit**: `feat(tui): per-member expand state and click targets in tool groups`
 
-## 6. Whole-block click surface for single blocks
+## 6. Whole-block click surface for single blocks — ✅ DONE (2026-08-07)
+
+NOTES (2026-08-07): three deviations. (a) `mouse.go` gains NO code, only doc — item 5's deviation (a)
+holding for the same reason: the item's rule ("`toggleBlockAt` routes body-row clicks to
+`toggleExpanded` on the block's head entry") falls out of the marks alone, since the `targetHeader`
+case already flips `target.entry` and a single block's painter now stamps its head there on every row.
+A body case in `toggleBlockAt` would be a second accounting of what the painter states. (b) The local
+`header` in `renderToolBlock` is now `toggle`: it is the whole block's surface rather than one line's,
+and it is passed down to `renderToolBranch` as a new last parameter so the header, the branches and
+the body spend ONE predicate. (c) `TestRenderMarksHeaderAndMarkerLines` is renamed
+`TestRenderMarksTheWholeBlockAndItsMarker` — its name stated the retired invariant.
+Test collateral beyond the named list, all of it the same complete-mark-set assertions gaining the
+rows that just became clickable: `TestClippedTargetAloneMakesABlockAToggleTarget` (now asserts every
+collapsed row is marked, by count rather than by pinned wrapped text) and
+`TestAnsweredAskUserBlockIsAToggleTarget` (both its collapsed and its expanded mark sets).
 
 Depends on items 2 and 5 (5 reshapes `lineTarget`; sequencing avoids rework).
 

@@ -56,6 +56,15 @@ point is a **minor** bump, not a breaking change.
     and now cannot; a block whose lines the width alone cuts wears the expand indicator like any
     other. Scheduled Firings and a sub-agent run's collapsed head follow, so every shape wearing a
     tool block stands at most four rows collapsed, whatever filled it.
+  - **The whole block takes the click now, not just its header row.** Every row a tool block paints
+    folds it and unfolds it — the header, the clipped target rows beneath it, and, once it is open,
+    the full target and every line of output — so a reader who has finished with a `Run`'s output
+    closes it by clicking the output rather than travelling back up to the header. The prompt block
+    has always worked this way; the tool block now does too, at every depth and under every glyph
+    that borrows its shape. The `+N more lines` marker is the one row that keeps its own meaning: it
+    exists only in the collapsed paint, so a click there can only ever open. A block with nothing
+    behind it is a target on none of its rows, and as everywhere else in the transcript a drag still
+    selects — only a motionless click toggles.
   - **The expand/collapse indicators are now `▶` and `▼`**, replacing the smaller `▸`/`▾`.
 - **Consecutive same-label tool calls now group even when they carry output.** Grouping used to
   admit only calls with nothing hanging beneath them, so a batch of reads folded into one aligned

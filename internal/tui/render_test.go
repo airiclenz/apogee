@@ -1129,14 +1129,25 @@ func TestClippedTargetAloneMakesABlockAToggleTarget(t *testing.T) {
 		t.Fatalf("the fixture's call carries %d body lines, want the bodiless case", got)
 	}
 
-	want := []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Read File " + glyphCollapsed}}
-	if got := blockMarks(t, tr, width); !reflect.DeepEqual(got, want) {
-		t.Errorf("collapsed marks mismatch:\n--- got ---\n%+v\n--- want ---\n%+v", got, want)
-	}
 	collapsed := strings.Split(renderPlain(tr, width), "\n")
 	if len(collapsed) != 3 || !strings.HasSuffix(collapsed[2], clipTail) {
 		t.Errorf("collapsed paint = %d rows ending %q, want 3 rows ending in the clip tail:\n%s",
 			len(collapsed), collapsed[len(collapsed)-1], strings.Join(collapsed, "\n"))
+	}
+	// And it is a target WHOLE: the header and both clipped target rows are one click surface, so
+	// the reader opens the path by clicking the path (renderToolBlock).
+	marks := blockMarks(t, tr, width)
+	if len(marks) != len(collapsed) {
+		t.Fatalf("collapsed block marked %d of its %d rows, want every one:\n%+v",
+			len(marks), len(collapsed), marks)
+	}
+	if marks[0].text != "✦ Read File "+glyphCollapsed {
+		t.Errorf("header = %q, want the label wearing the collapsed indicator", marks[0].text)
+	}
+	for i, mark := range marks {
+		if mark.line != i || mark.kind != targetHeader || mark.entry != 0 {
+			t.Errorf("mark %d = %+v; want line %d, a toggle naming entry 0", i, mark, i)
+		}
 	}
 
 	if !tr.setExpanded(0, true) {
@@ -1460,19 +1471,21 @@ func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
 }
 
 // …and because the collapsed paint now hides something, the block becomes a toggle target by the
-// one predicate that decides both the affordance and the click (blockHidesWhenCollapsed): the
-// header is marked and wears its ▶/▼ indicator, the remainder marker is marked for the entry it
-// belongs to, and expanding takes the marker away while the header keeps the click that closes the
-// block again. A question still on the screen hides nothing and is no target at all.
+// one predicate that decides both the affordance and the click (blockHidesWhenCollapsed): every row
+// it paints is marked, the header wearing the ▶/▼ indicator, the remainder marker keeping its own
+// open-only kind, and expanding takes the marker away while the block — the answers it now shows
+// included — keeps the click that closes it again. A question still on the screen hides nothing and
+// is no target at all.
 func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 	const question = `{"question":"Which mode?","choices":["Plan","Ask before","Auto"]}`
 
-	t.Run("an answered question marks its header and its marker", func(t *testing.T) {
+	t.Run("an answered question marks its rows and its marker", func(t *testing.T) {
 		tr := &transcript{}
 		askUserCall(tr, "c1", question, "Ask before")
 
 		want := []blockMark{
 			{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User ▶"},
+			{line: 1, kind: targetHeader, entry: 0, text: "  ┕ Which mode? Ask before"},
 			{line: 2, kind: targetMarker, entry: 0, text: "    +4 more lines"},
 		}
 		if got := blockMarks(t, tr, 80); !reflect.DeepEqual(got, want) {
@@ -1482,7 +1495,14 @@ func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 		if !tr.toggleExpanded(0) {
 			t.Fatal("toggleExpanded(0) = false; want the answered question expanded")
 		}
-		want = []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User ▼"}}
+		want = []blockMark{
+			{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User ▼"},
+			{line: 1, kind: targetHeader, entry: 0, text: "  ┕ Which mode? Ask before"},
+			{line: 2, kind: targetHeader, entry: 0, text: "    Which mode?"},
+			{line: 3, kind: targetHeader, entry: 0, text: "    [ ] Plan"},
+			{line: 4, kind: targetHeader, entry: 0, text: "    [x] Ask before"},
+			{line: 5, kind: targetHeader, entry: 0, text: "    [ ] Auto"},
+		}
 		if got := blockMarks(t, tr, 80); !reflect.DeepEqual(got, want) {
 			t.Errorf("expanded marks mismatch:\n--- got ---\n%+v\n--- want ---\n%+v", got, want)
 		}
@@ -2055,16 +2075,18 @@ func blockMarks(t *testing.T, tr *transcript, width int) []blockMark {
 	return marks
 }
 
-// TestRenderMarksHeaderAndMarkerLines pins the whole target rule in one table: the painter marks a
-// block's header lines and its synthesized remainder marker, each carrying the index of the entry
-// a click there toggles, and it marks NOTHING when the collapsed paint hides nothing. Every case
-// asserts the complete set of marks, so a line that quietly became clickable fails here.
+// TestRenderMarksTheWholeBlockAndItsMarker pins the whole target rule in one table: a single tool
+// block that hides something is a click surface WHOLE — every row it paints, its header, its target
+// rows and (open) its body, each carrying the index of the entry a click there toggles — its
+// synthesized remainder marker apart, which keeps its own open-only kind. A block that hides nothing
+// marks no row at all. Every case asserts the complete set of marks, so a line that quietly became
+// clickable, or quietly stopped being, fails here.
 //
 // It pins the AFFORDANCE against the same rule, because each mark carries its line's text: a marked
-// header wears the ▶/▼ state indicator and an unmarked one wears none, so the visible hint and the
-// click target cannot drift apart — a header that grew an indicator without becoming clickable, or
-// became clickable without growing one, fails here too.
-func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
+// block wears the ▶/▼ state indicator on its header and an unmarked one wears none, so the visible
+// hint and the click target cannot drift apart — a block that grew an indicator without becoming
+// clickable, or became clickable without growing one, fails here too.
+func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 	// run folds a terminal call and its multi-line output — the block with a body, and therefore
 	// the block with something to reveal.
 	run := func(tr *transcript, id, command, output string, depth int) {
@@ -2081,8 +2103,9 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 		want  []blockMark
 	}{
 		{
-			// ❯ run the tests | (spacer) | ✦ Run | ┕ go test ./... | +4 more lines
-			name:  "a hidden body marks its header and its remainder marker",
+			// ❯ run the tests | (spacer) | ✦ Run | ┕ go test ./... | +4 more lines — the header and
+			// the branch line beneath it are one surface, the marker its own open-only kind.
+			name:  "a hidden body marks the block's rows and its remainder marker",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				tr.addUser("run the tests", nil)
@@ -2090,13 +2113,15 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run ▶"},
+				{line: 3, kind: targetHeader, entry: 1, text: "  ┕ go test ./..."},
 				{line: 4, kind: targetMarker, entry: 1, text: "    +4 more lines"},
 			},
 		},
 		{
-			// The state does not decide the target: an expanded block keeps its header marked —
-			// that is the click that collapses it again — and has no marker left to mark.
-			name:  "an expanded block keeps its header and loses its marker",
+			// The state does not decide the target: an expanded block keeps every row marked — that
+			// is the click that collapses it again, wherever in the output the pointer happens to be
+			// — and has no marker left to mark.
+			name:  "an expanded block marks its body too and loses its marker",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				tr.addUser("run the tests", nil)
@@ -2105,7 +2130,25 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 					t.Fatal("toggleExpanded(1) = false; want the tool-call entry expanded")
 				}
 			},
-			want: []blockMark{{line: 2, kind: targetHeader, entry: 1, text: "✦ Run ▼"}},
+			want: []blockMark{
+				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run ▼"},
+				{line: 3, kind: targetHeader, entry: 1, text: "  ┕ go test ./..."},
+				{line: 4, kind: targetHeader, entry: 1, text: "    ok   a"},
+				{line: 5, kind: targetHeader, entry: 1, text: "    ok   b"},
+				{line: 6, kind: targetHeader, entry: 1, text: "    ok   c"},
+				{line: 7, kind: targetHeader, entry: 1, text: "    PASS"},
+			},
+		},
+		{
+			// The other half of the rule, on the shape that has a body row to offer: a short call
+			// with no body hides nothing at this width, so not one of its rows is a click target and
+			// a click anywhere on it keeps its selection meaning.
+			name:  "a block that hides nothing marks no row at all",
+			width: 80,
+			build: func(t *testing.T, tr *transcript) {
+				readCall(tr, "c1", "main.go", 1, 154, 0)
+			},
+			want: nil,
 		},
 		{
 			// A group's calls carry no bodies (that is what made them groupable), so the block
@@ -2130,6 +2173,8 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ weird_tool ▶"},
+				{line: 1, kind: targetHeader, entry: 0, text: "  ┝ a:"},
+				{line: 2, kind: targetHeader, entry: 0, text: "  ┕   1"},
 				{line: 3, kind: targetMarker, entry: 0, text: "    +4 more lines"},
 			},
 		},
@@ -2157,6 +2202,8 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run"},
 				{line: 1, kind: targetHeader, entry: 0, text: "  Python ▶"},
+				{line: 2, kind: targetHeader, entry: 0, text: "  ┕ print(1"},
+				{line: 3, kind: targetHeader, entry: 0, text: "    )"},
 				{line: 4, kind: targetMarker, entry: 0, text: "    +3 more"},
 				{line: 5, kind: targetMarker, entry: 0, text: "    lines"},
 			},
@@ -2176,8 +2223,10 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run ▶"},
+				{line: 1, kind: targetHeader, entry: 0, text: "  ┕ go build ./..."},
 				{line: 2, kind: targetMarker, entry: 0, text: "    +3 more lines"},
 				{line: 6, kind: targetHeader, entry: 2, text: "✦ Run ▶"},
+				{line: 7, kind: targetHeader, entry: 2, text: "  ┕ go vet ./..."},
 				{line: 8, kind: targetMarker, entry: 2, text: "    +2 more lines"},
 			},
 		},
@@ -2191,7 +2240,10 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
-			want: []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent ▶"}},
+			want: []blockMark{
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent ▶"},
+				{line: 1, kind: targetHeader, entry: 0, text: "  ┕ survey the tests 1 tool call"},
+			},
 		},
 		{
 			// Expanded, the run's head keeps its mark — that is the click that closes it again —
@@ -2207,7 +2259,10 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 					t.Fatal("setExpanded(0, true) = false; want the run's head expanded")
 				}
 			},
-			want: []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent ▼"}},
+			want: []blockMark{
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent ▼"},
+				{line: 1, kind: targetHeader, entry: 0, text: "  ┕ survey the tests survey complete"},
+			},
 		},
 		{
 			// A railed sub-agent block is marked exactly like a flat one — the rail prefixes lines
@@ -2219,6 +2274,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 2, kind: targetHeader, entry: 0, text: "│ ✦ Run ▶"},
+				{line: 3, kind: targetHeader, entry: 0, text: "│   ┕ go test"},
 				{line: 4, kind: targetMarker, entry: 0, text: "│     +3 more lines"},
 			},
 		},
