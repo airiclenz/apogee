@@ -59,6 +59,22 @@ func TestBuiltinSchemesKeepSkillAndFileRefDistinct(t *testing.T) {
 	}
 }
 
+func TestBuiltinSchemesKeepBothMutedStepsDistinct(t *testing.T) {
+	t.Parallel()
+	for _, name := range builtinNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := builtinScheme(t, name)
+			// The two steps are how an EXPANDED tool block reads out of the scrollback of
+			// collapsed ones around it (internal/tui, theme.toolDetail vs toolDetailBright).
+			// One value for both is a scheme in which opening a block changes nothing.
+			if got.Muted == got.MutedBright {
+				t.Errorf("muted and muted-bright are both %q — an open block must read a step out of the collapsed dim", got.Muted)
+			}
+		})
+	}
+}
+
 func TestBuiltinSchemesKeepModeColorsDistinct(t *testing.T) {
 	t.Parallel()
 	for _, name := range builtinNames() {

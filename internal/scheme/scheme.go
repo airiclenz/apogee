@@ -24,11 +24,12 @@ var builtinFS embed.FS
 // Values are "#rrggbb" hex strings; the yaml tags are the file's keys, and this
 // declaration is the single definition of both (roleKeys derives from it).
 type Scheme struct {
-	UserText string `yaml:"user-text"` // user-prompt text
-	Chrome   string `yaml:"chrome"`    // user-block background + input/footer borders
-	Divider  string `yaml:"divider"`   // top-edge divider hairline
-	Surface  string `yaml:"surface"`   // input-box interior
-	Muted    string `yaml:"muted"`     // status/footer/tool-detail dim
+	UserText    string `yaml:"user-text"`    // user-prompt text
+	Chrome      string `yaml:"chrome"`       // user-block background + input/footer borders
+	Divider     string `yaml:"divider"`      // top-edge divider hairline
+	Surface     string `yaml:"surface"`      // input-box interior
+	Muted       string `yaml:"muted"`        // status/footer/tool-detail dim
+	MutedBright string `yaml:"muted-bright"` // the muted tone's open step: an EXPANDED tool block's text
 
 	DiffAdd string `yaml:"diff-add"` // diff "+" lines
 	DiffDel string `yaml:"diff-del"` // diff "-" lines

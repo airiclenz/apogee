@@ -1076,7 +1076,7 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 }
 
 // TestExpandedBlockLiftsItsDetailTone is design call 9 in the paint: a block's own text is dim while
-// it is collapsed and a step brighter once it is open (theme.go's openDetailTone), so the block a
+// it is collapsed and a step brighter once it is open (the scheme's `muted-bright` role), so the block a
 // reader opened stands out of the scrollback of closed ones around it. It holds for both shapes that
 // have a state — the single block and the group member, which are painted by different functions
 // (renderToolBranch, renderExpandedMember) and could drift apart.

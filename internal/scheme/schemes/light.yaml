@@ -12,11 +12,12 @@
 # one role and a warning; it never costs you the scheme.
 
 # --- base tones --------------------------------------------------------------------
-user-text: "#1f2328" # user-prompt text
-chrome: "#d0d7de"    # user-block background + input/footer borders
-divider: "#eaeef2"   # top-edge divider hairline — paler than the chrome border so it recedes
-surface: "#ffffff"   # input-box interior
-muted: "#656d76"     # status/footer/tool-detail dim
+user-text: "#1f2328"    # user-prompt text
+chrome: "#d0d7de"       # user-block background + input/footer borders
+divider: "#eaeef2"      # top-edge divider hairline — paler than the chrome border so it recedes
+surface: "#ffffff"      # input-box interior
+muted: "#656d76"        # status/footer/tool-detail dim
+muted-bright: "#424a53" # the muted tone one step up: the text of an EXPANDED tool block, so what a reader opened stands out from the collapsed blocks around it — on a light terminal "up" is DARKER, one rung down the same neutral ramp
 
 # --- semantic ----------------------------------------------------------------------
 diff-add: "#1a7f37" # diff "+" lines

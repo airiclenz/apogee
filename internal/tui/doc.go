@@ -423,7 +423,7 @@
 // whole-surface rule the prompt block already followed. The `+N more lines` marker is the one row
 // that does not: it belongs to the collapsed paint, so a click there only ever opens. Whichever
 // shape it is, opening also lifts the block's TEXT a step out of the collapsed dim
-// ([detailTone], theme.go's openDetailTone) while the chrome around it — indicator, marker,
+// ([detailTone], the scheme's `muted-bright` role) while the chrome around it — indicator, marker,
 // gutter — and the diff colours stay where they were, so what brightens is exactly what the
 // reader opened the block to read.
 // A scheduled Firing borrows that whole shape

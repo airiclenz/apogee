@@ -37,7 +37,7 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 	// Every role a distinct value, so no assertion below can pass by borrowing another role's tone.
 	s := scheme.Scheme{
 		UserText: "#010101", Chrome: "#020202", Divider: "#030303", Surface: "#040404",
-		Muted: "#050505", DiffAdd: "#060606", DiffDel: "#070707", Error: "#080808",
+		Muted: "#050505", MutedBright: "#181818", DiffAdd: "#060606", DiffDel: "#070707", Error: "#080808",
 		Code: "#090909", ModePlan: "#0a0a0a", ModeAskBefore: "#0b0b0b", ModeAllowEdits: "#0c0c0c",
 		ModeAuto: "#0d0d0d", Skill: "#0e0e0e", FileRef: "#0f0f0f", PromptToggle: "#101010",
 		ToolMarker: "#111111", Gauge: "#121212", Selection: "#131313",
@@ -66,6 +66,10 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 		{"gaugeFill fg", th.gaugeFill.GetForeground(), s.Gauge},
 		{"hairline fg", th.hairline.GetForeground(), s.Divider},
 		{"toolMarker fg", th.toolMarker.GetForeground(), s.ToolMarker},
+		// The two steps of one ramp: a collapsed block's text and an open one's. Crossing these
+		// would cost the open block the only cue that says it is open.
+		{"toolDetail fg", th.toolDetail.GetForeground(), s.Muted},
+		{"toolDetailBright fg", th.toolDetailBright.GetForeground(), s.MutedBright},
 		{"promptToggle fg", th.promptToggle.GetForeground(), s.PromptToggle},
 		{"userBlock fg", th.userBlock.GetForeground(), s.UserText},
 		// The raw fields the call sites that paint without a style reach for.
@@ -115,10 +119,11 @@ func TestDefaultThemeKeepsTheDarkPalette(t *testing.T) {
 		}
 	}
 
-	// The open-detail tone has no scheme role yet (theme.go's openDetailTone): assert it is still
-	// the step brighter the collapsed dim is read against, so the contrast cannot vanish silently.
-	if got := hexOf(th.toolDetailBright.GetForeground()); got != openDetailTone {
-		t.Errorf("toolDetailBright fg = %s; want %s", got, openDetailTone)
+	// The open-detail tone now travels as the `muted-bright` role, and the dark scheme must keep
+	// paying it the same hex the literal used to: assert it is still the step brighter the collapsed
+	// dim is read against, so the contrast cannot vanish silently.
+	if got := hexOf(th.toolDetailBright.GetForeground()); got != "#b2b2b2" {
+		t.Errorf("toolDetailBright fg = %s; want the dark scheme's #b2b2b2", got)
 	}
 	if hexOf(th.toolDetail.GetForeground()) == hexOf(th.toolDetailBright.GetForeground()) {
 		t.Error("the collapsed and open detail tones resolve to the same colour; the contrast step is gone")

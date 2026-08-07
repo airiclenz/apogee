@@ -27,18 +27,6 @@ import (
 // scheme (the user block's background and the chrome's borders) still share one tone — `chrome` —
 // matching the layout sketch (layout.md).
 
-// openDetailTone is the one colour this file still names itself: the muted tone's OPEN step, the
-// gray an expanded tool block paints its target, summary and body in (design call 9 of
-// docs/plans/"2026-08-06 - 03"). A block is opened to be read, and the dim a collapsed scrollback
-// wants — where the eye is skimming past the blocks rather than into one — is a step too quiet for
-// the output someone just asked to see. One step, deliberately: the two tones have to read as the
-// same voice at two volumes, so a block does not change what it IS by being opened.
-//
-// It has no scheme role of its own: the role table ADR 0039 ratifies is 23 keys and this tone is not
-// among them, so every scheme — dark or light — currently gets this same gray. Adding a
-// `muted-bright` role is the fix; until then the literal lives here rather than in a scheme file.
-const openDetailTone = "#b2b2b2"
-
 var (
 	colSpinner1 = lipgloss.Color("#8668ff")
 	colSpinner2 = lipgloss.Color("#19a946")
@@ -148,11 +136,20 @@ type theme struct {
 	toolIndicator lipgloss.Style // the ▶/▼ state indicator trailing that label where the header is a toggle target: the detail tone, deliberately NOT toolLabel's orange, so the affordance reads as chrome beside the label rather than as part of it
 	toolDetail    lipgloss.Style // the ┝/┕ branch detail lines of a COLLAPSED block (dim)
 	// toolDetailBright is toolDetail's open twin: the same lines once the block they belong to is
-	// expanded, a step brighter ([openDetailTone]), so what a reader opened stands out from the
-	// collapsed blocks around it. It is the PLAIN detail tone alone — a diff line keeps diffAdded /
-	// diffRemoved in both states, since its colour carries meaning rather than emphasis — and the
-	// chrome a block wears (toolIndicator, toolMarker, the open member's gutter) stays dim in both,
-	// because the affordances are not what the reader opened the block for (detailStyle).
+	// expanded, a step out of the collapsed dim (the scheme's `muted-bright` role against
+	// toolDetail's `muted`), so what a reader opened stands out from the collapsed blocks around it.
+	// A block is opened to be read, and the dim a scrollback of closed blocks wants — where the eye
+	// is skimming past the blocks rather than into one — is a step too quiet for the output someone
+	// just asked to see. ONE step, deliberately: the two tones have to read as the same voice at two
+	// volumes, so a block does not change what it IS by being opened. That is why the pair is two
+	// roles of one ramp rather than two free colours, and why the shipped schemes are guarded to keep
+	// them apart in each direction their terminal calls "brighter" (design call 9 of
+	// docs/plans/"2026-08-06 - 03"; TestBuiltinSchemesKeepBothMutedStepsDistinct).
+	//
+	// It is the PLAIN detail tone alone — a diff line keeps diffAdded / diffRemoved in both states,
+	// since its colour carries meaning rather than emphasis — and the chrome a block wears
+	// (toolIndicator, toolMarker, the open member's gutter) stays dim in both, because the
+	// affordances are not what the reader opened the block for (detailStyle).
 	toolDetailBright lipgloss.Style
 	toolMarker       lipgloss.Style // the synthesized "+N more lines" remainder marker beneath a hidden body: light gray-blue, no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "+" — the prompt block's see-more keeps the heavier promptToggle treatment
 	subRail          lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (the toolLabel orange — one tone for the whole sub-agent frame)
@@ -237,7 +234,7 @@ func (th theme) modeColor(m domain.Mode) color.Color {
 	}
 }
 
-// newTheme builds the styles from a colour scheme — the 23 semantic roles of ADR 0039, resolved
+// newTheme builds the styles from a colour scheme — the 24 semantic roles of ADR 0039, resolved
 // before it is called (the renderer never reads a scheme file itself). It is the ONE seam between a
 // scheme and the look: calling it again with another scheme rebuilds every style, which is what a
 // live scheme switch does (settingsApplyLocal).
@@ -256,7 +253,7 @@ func newTheme(s scheme.Scheme) theme {
 		divider        = lipgloss.Color(s.Divider)
 		surface        = lipgloss.Color(s.Surface)
 		muted          = lipgloss.Color(s.Muted)
-		openDetail     = lipgloss.Color(openDetailTone)
+		openDetail     = lipgloss.Color(s.MutedBright)
 		diffAdd        = lipgloss.Color(s.DiffAdd)
 		diffDel        = lipgloss.Color(s.DiffDel)
 		errFg          = lipgloss.Color(s.Error)

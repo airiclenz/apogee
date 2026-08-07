@@ -226,6 +226,19 @@ Bubble Tea's, so the theme cannot reach it any other way.
 (e) `newTheme` binds the scheme's roles to locals once at the top and the style literals read those,
 rather than repeating `lipgloss.Color(s.<Field>)` at each of ~60 use sites.
 
+NOTES (2026-08-07): FOLLOW-UP FIX (run-level, user-authorized — not a deviation from this item and
+not a new plan item; the item's own scope is unchanged and stays done). Deviation (a) above left the
+expanded-block detail tone as the hard-coded literal `openDetailTone = "#b2b2b2"`, which under the
+`light` scheme painted light gray on white. Fixed by giving it a scheme role: the `Scheme` type is
+now **24 roles**, the new `muted-bright` sitting beside `muted` in the base-tones section
+(`#b2b2b2` in `dark.yaml`, `#424a53` in `light.yaml` — one rung down the same GitHub-light neutral
+ramp `muted`'s `#656d76` comes from, because on a light terminal "brighter" means darker).
+`internal/tui/theme.go` derives the tone from `s.MutedBright` and the constant is gone; `roleTable`
+and `darkPalette` grew the key, a new `TestBuiltinSchemesKeepBothMutedStepsDistinct` guards the
+contrast step across every shipped scheme, and the theme tests wire and pin it. The dark scheme is
+pixel-identical to before. The "23 roles" wording in the design calls and in items 1/3 above is
+therefore historical — the shipped count is 24, which is what item 9's ADR must document.
+
 **What:** in `internal/tui`:
 
 - `newTheme()` becomes `newTheme(s scheme.Scheme)` (`theme.go:206`); every style in it

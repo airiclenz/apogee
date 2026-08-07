@@ -11,11 +11,12 @@
 # one role and a warning; it never costs you the scheme.
 
 # --- base tones --------------------------------------------------------------------
-user-text: "#ffffff" # user-prompt text
-chrome: "#4a4a4a"    # user-block background + input/footer borders
-divider: "#333333"   # top-edge divider hairline — dimmer than the chrome border so it recedes
-surface: "#000000"   # input-box interior
-muted: "#8a8a8a"     # status/footer/tool-detail dim
+user-text: "#ffffff"    # user-prompt text
+chrome: "#4a4a4a"       # user-block background + input/footer borders
+divider: "#333333"      # top-edge divider hairline — dimmer than the chrome border so it recedes
+surface: "#000000"      # input-box interior
+muted: "#8a8a8a"        # status/footer/tool-detail dim
+muted-bright: "#b2b2b2" # the muted tone one step up: the text of an EXPANDED tool block, so what a reader opened stands out from the collapsed blocks around it — the same voice at a higher volume, so keep it a step from `muted`, not a different hue
 
 # --- semantic ----------------------------------------------------------------------
 diff-add: "#3fb950" # diff "+" lines
