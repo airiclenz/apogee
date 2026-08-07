@@ -699,7 +699,7 @@ func hasBlockState(kind entryKind) bool {
 //
 // It is stated as a SET rather than only a flip because the two click surfaces mean different
 // things (layout.md, "Collapsed and expanded blocks"): a header toggles its block, while a
-// `… +N more lines` marker asks to see the rest and can only ever open one.
+// `+N more lines` marker asks to see the rest and can only ever open one.
 //
 // Holding the state is not the same as showing it. What an expanded block actually paints is the
 // painter's business (render.go), and a block with nothing to hide — a prompt that fits inside the

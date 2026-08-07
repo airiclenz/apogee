@@ -1033,6 +1033,11 @@ type paintedDetail struct {
 // A row belongs to the detail when it holds nothing but fill and the clip marker, which is why the
 // fixture's body is a single repeated glyph — it names its own rows on the painted grid, with no
 // arithmetic about indents or wrap points standing between the assertion and what the screen shows.
+//
+// The block is EXPANDED, because the retained line is what this probes: a collapsed block spends
+// two rows on its branch and clips the rest whatever the line holds (collapsedTargetRows,
+// render.go), so it would measure the row budget rather than the per-line rune cap. Expanded, every
+// rune the entry kept reaches the grid and the cap is the only thing bounding the flood.
 func paintedDetailRows(t *testing.T, method ansi.Method, fill string) paintedDetail {
 	t.Helper()
 	out := paintedDetail{lastDetail: -1, after: -1}
@@ -1046,6 +1051,9 @@ func paintedDetailRows(t *testing.T, method ansi.Method, fill string) paintedDet
 	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 		ID: "c2", Tool: "read_file", Arguments: []byte(`{"path":"neighbour.go"}`)}})
 	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "one line"}})
+	if !m.transcript.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the wide detail's block expanded")
+	}
 	m.refreshViewport()
 
 	rows := transcriptPaintRows(t, m, method)

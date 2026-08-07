@@ -104,7 +104,7 @@ func quotedSummary(line detailLine) branchSummary {
 // Nothing stands above those lines: a body is what it holds, every line carrying its own Kind and
 // so its own colour, and no summary of the set is kept beside them. There was one — a DIFF flag —
 // and it sized the collapsed paint until one house budget replaced the per-kind caps
-// (collapsedBodyCap, render.go); with no painter left to ask, a fact carried only to be re-derived
+// (collapsedBodyRows, render.go); with no painter left to ask, a fact carried only to be re-derived
 // in tests was machinery, and it is gone.
 //
 // The body is a type rather than a bare []detailLine so the acts that belong to a body travel with
@@ -874,9 +874,9 @@ func answerLines(content string) []string {
 // calls grouping; output with more to say is a body and lays out beneath the target instead,
 // because two lines cannot share a branch (layout.md's Run sketch).
 //
-// It truncates NOTHING. The collapsed paint's "first line plus … +N more lines" is a render-time
-// act on this retained body (collapsedDetails, render.go), so expanding the block can show what
-// the compact shape hides. Only the per-line clip stays here — a 160-rune cap on one line, which
+// It truncates NOTHING. The collapsed paint's "+N more lines" marker is a render-time act on this
+// retained body (collapsedDetails, render.go) — it counts the body whole and paints none of it, so
+// expanding the block is what shows anything the compact shape hides. Only the per-line clip stays here — a 160-rune cap on one line, which
 // keeps a minified blob from flooding a row in either state and is not a truncation of the body.
 //
 // It respells nothing either, and the one-line half is where that has to be SAID rather than
@@ -910,7 +910,7 @@ func outputDetail(content string) toolOutcome {
 // leading "+"/"-" is exact here because internal/tools' unifiedLineDiff tags every line "  ",
 // "- " or "+ " and emits no "+++ b/…" / "--- a/…" file header, so a content line that itself
 // starts with "+" always arrives behind a tag. It returns every line: the collapsed paint's cap
-// and its remainder marker are the painter's (collapsedBodyCap, collapsedDetails, render.go).
+// and its remainder marker are the painter's (collapsedBodyRows, collapsedDetails, render.go).
 //
 // It counts NOTHING. The "+A -R" diffstat riding the branch above it comes from the tool's
 // domain.DiffStat, counted from the diff operations themselves — which is why the stat still
@@ -954,7 +954,7 @@ func replacedText(removed, inserted string) editPair {
 // is no such thing as removing the empty string — and a single trailing newline is the last line's
 // TERMINATOR rather than a line of its own, so a replacement written "a\nb\n" changes two lines and
 // not two and a blank. Nothing else is dropped: what a body retains is every line it was given, and
-// the compact shape is the painter's business (collapsedBodyCap, render.go).
+// the compact shape is the painter's business (collapsedBodyRows, render.go).
 func editLines(text string) []string {
 	if text == "" {
 		return nil
@@ -969,7 +969,7 @@ func editLines(text string) []string {
 //
 // The two tags are the ones diffBody emits, so the lines paint through the very red/green styles
 // view_diff's hunks do; the house collapsed cap then holds an
-// edit block to the same four rows as every other block (collapsedBodyCap, render.go). It
+// edit block to the same four rows as every other block (collapsedTargetRows, render.go). It
 // truncates nothing — the entry keeps every line — and the per-line clip is the same 160-rune
 // guard against a minified blob every other detail line carries.
 //

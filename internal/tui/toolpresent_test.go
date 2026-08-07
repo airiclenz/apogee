@@ -35,7 +35,7 @@ func detailsText(tv toolView) string {
 // line instead of to a raw dump. Every wantDetail here is unchanged from when the view parsed
 // the prose — that the two agree, character for character, is this card's acceptance oracle —
 // except on the three free-form-output rows, whose outcome now RETAINS every line it was given:
-// the "… +N more lines" remainder those rows used to assert is the collapsed paint's, and it is
+// the "+N more lines" remainder those rows used to assert is the collapsed paint's, and it is
 // asserted where it is now composed (TestCollapsedPaintTruncatesRetainedBodies, render_test.go).
 func TestPresentToolCall(t *testing.T) {
 	tests := []struct {

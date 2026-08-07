@@ -801,7 +801,7 @@ func TestTranscriptBareClickCopiesNothing(t *testing.T) {
 
 // modelWithToolBlock builds a ready idle model holding one user prompt and one tool block whose
 // result is output. A multi-line body is what gives the block something to reveal, and therefore
-// what makes its header and its `… +N more lines` marker click targets at all (render.go's target
+// what makes its header and its `+N more lines` marker click targets at all (render.go's target
 // rule). The seeded start-up box is dropped so the block sits high enough to be on screen at any
 // scroll position the tests park at.
 func modelWithToolBlock(t *testing.T, output string) Model {
@@ -883,7 +883,7 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 
 		m = clickCell(t, m, 6, screenRow(t, m, marker))
 		if !blockExpanded(t, m, markedLine(t, m, targetHeader)) {
-			t.Fatal("a click on the `… +N more lines` marker did not expand the block")
+			t.Fatal("a click on the `+N more lines` marker did not expand the block")
 		}
 		for _, target := range m.lineTargets {
 			if target.kind == targetMarker {
@@ -892,9 +892,15 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 		}
 	})
 
+	// A collapsed block paints no body line at all, so the case is asked of the EXPANDED one —
+	// where the body is on the screen and is still not a click surface.
 	t.Run("a body line is no target", func(t *testing.T) {
 		m := modelWithToolBlock(t, output)
 		header := markedLine(t, m, targetHeader)
+		m = clickCell(t, m, 2, screenRow(t, m, header))
+		if !blockExpanded(t, m, header) {
+			t.Fatal("setup: the click on the header did not expand the block")
+		}
 		body := header + 2 // header, branch line, then the body's first line
 		if m.lineTargets[body].kind != targetNone {
 			t.Fatalf("setup: line %d is marked %v, not the body line this case needs",
@@ -903,8 +909,8 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 
 		before := strings.Join(m.lines, "\n")
 		m = clickCell(t, m, 6, screenRow(t, m, body))
-		if blockExpanded(t, m, header) {
-			t.Fatal("a click on a body line expanded the block")
+		if !blockExpanded(t, m, header) {
+			t.Fatal("a click on a body line collapsed the block")
 		}
 		if got := strings.Join(m.lines, "\n"); got != before {
 			t.Fatalf("a click on a body line repainted the transcript:\n--- got ---\n%s\n--- want ---\n%s", got, before)

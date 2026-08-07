@@ -403,7 +403,7 @@ func insideCollapsedRun(entries []entry, depth int) bool {
 // because the summary slot already carries that report's first line and no block says the same
 // thing twice in two adjacent rows (layout.md, "A sub-agent run collapses to its call block"). The
 // count in that line is what says work is hidden behind the header, so the run needs no
-// "… +N more lines" marker to say it too — and the header is a target however short the report is
+// "+N more lines" marker to say it too — and the header is a target however short the report is
 // (blockState.elides), so nothing is unreachable.
 //
 // The head's view is COPIED before its summary is replaced and its body dropped, so both are
@@ -917,7 +917,7 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 
 // renderToolBlock renders one tool-call block — a single call or a whole grouped run — in the
 // one uniform shape layout.md sketches: a ✦ header carrying the **label alone — never a target**
-// (plus the ▸/▾ state indicator, below, where the header is one), then one ┝/┕
+// (plus the ▶/▼ state indicator, below, where the header is one), then one ┝/┕
 // branch per call whose first column is that call's target. The target never sits on the header,
 // so a block does not visually reshape the moment a second call joins it: a block of one is
 // byte-identical in shape to a block of many. The caller frames the block for depth (renderView
@@ -950,7 +950,7 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // is state-independent by design: an expanded block still marks its header, which is what lets the
 // same click collapse it again.
 //
-// The header WEARS that same answer: the ▸/▾ state indicator is appended to the label under the
+// The header WEARS that same answer: the ▶/▼ state indicator is appended to the label under the
 // very predicate that marks the line, so the affordance and the click-target rule cannot come to
 // disagree — a header that wears an indicator is clickable and a header that does not is not, with
 // one condition behind both. Unlike the mark, the glyph is state-DEPENDENT: it is what says which
@@ -960,22 +960,23 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 	if len(views) == 0 {
 		return blockPaint{}
 	}
+	// The column is measured over EXPANDED targets, for the reason expandTabs gives: a tab weighs
+	// nothing here while the wrap downstream spends four cells on it, so a column set from raw
+	// targets is a column the branch lines cannot land on (renderToolBranch pads to the same
+	// expanded measure). It is settled BEFORE the header, because the toggle-target rule now asks
+	// how the branch lines wrap and they pad to this column before they are wrapped.
+	column := 0
+	for _, tv := range views {
+		column = max(column, th.measure.Width(expandTabs(tv.Target)))
+	}
 	header := targetNone
 	label := th.toolLabel.Render(views[0].Label)
-	if state.elides || blockHidesWhenCollapsed(views) {
+	if state.elides || blockHidesWhenCollapsed(th, views, column, width) {
 		header = targetHeader
 		label += " " + th.toolIndicator.Render(stateIndicator(state.expanded))
 	}
 	var out blockPaint
 	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), header)
-	// The column is measured over EXPANDED targets, for the reason expandTabs gives: a tab weighs
-	// nothing here while the wrap downstream spends four cells on it, so a column set from raw
-	// targets is a column the branch lines cannot land on (renderToolBranch pads to the same
-	// expanded measure).
-	column := 0
-	for _, tv := range views {
-		column = max(column, th.measure.Width(expandTabs(tv.Target)))
-	}
 	for i, tv := range views {
 		out.join(renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width, state.expanded))
 	}
@@ -1031,8 +1032,8 @@ func (s blockState) star() string {
 	return glyphAssistant
 }
 
-// stateIndicator is the glyph a TOGGLEABLE header trails its label with: ▾ for an expanded block,
-// ▸ for a collapsed one (layout.md, "Collapsed and expanded blocks"). It answers for the state
+// stateIndicator is the glyph a TOGGLEABLE header trails its label with: ▼ for an expanded block,
+// ▶ for a collapsed one (layout.md, "Collapsed and expanded blocks"). It answers for the state
 // alone — whether a header wears one at all is the toggle-target rule's, asked once in
 // renderToolBlock — so the two questions stay one condition and one glyph apart.
 func stateIndicator(expanded bool) string {
@@ -1058,18 +1059,32 @@ func anyOpenCall(entries []entry) bool {
 
 // blockHidesWhenCollapsed reports whether a block's collapsed paint leaves anything unshown — the
 // whole of the toggle-target rule: a header is a click target exactly when there is something
-// behind it. It asks collapsedCall, the function that does the hiding, rather than re-deriving the
-// caps or the shape, so the rule cannot answer differently from the paint.
+// behind it. It asks the very functions that do the hiding — collapsedCall for the lines a cap
+// drops, collapsedBranch for a target the row budget cuts — rather than re-deriving either, so the
+// rule cannot answer differently from the paint.
+//
+// A targeted call hides on EITHER count, and the second is why this takes a width: the collapsed
+// branch spends at most collapsedTargetRows rows on its target, so whether a long target is cut
+// depends on how wide the block is being painted this frame (clipWrap). A block that hides nothing
+// at 200 columns hides its target's tail at 60, and the indicator, the click target and the paint
+// all have to say so together — which is what makes the width an argument here rather than a fact
+// the caller keeps.
 //
 // BOTH shapes answer through it, the targetless one included: an unregistered tool's verbatim
-// arguments, a registered call that arrived without its target, a stray result — all are capped
-// like any other block's body (layout.md, "Collapsed and expanded blocks"), so a call whose
-// argument blob overflows the cap is a block that hides something and a two-line one is not. One
-// call in a block with something to reveal makes the whole block a target — the header belongs to
-// the block, not to a branch.
-func blockHidesWhenCollapsed(views []toolView) bool {
-	for _, tv := range views {
+// arguments, a registered call that arrived without its target, a stray result — all spend the same
+// collapsed budget (layout.md, "Collapsed and expanded blocks"), so a call whose argument blob
+// overflows its cap is a block that hides something and a one-line one is not. One call in a block
+// with something to reveal makes the whole block a target — the header belongs to the block, not to
+// a branch.
+func blockHidesWhenCollapsed(th theme, views []toolView, column, width int) bool {
+	for i, tv := range views {
 		if _, _, truncated := collapsedCall(tv); truncated {
+			return true
+		}
+		if tv.Target == "" {
+			continue
+		}
+		if _, clipped := collapsedBranch(th, tv, column, branchMarker(i == len(views)-1), width); clipped {
 			return true
 		}
 	}
@@ -1085,8 +1100,7 @@ func blockHidesWhenCollapsed(views []toolView) bool {
 //     the block repaints whole once the result folds in. Its Details, if any, are the block's
 //     body and lay out beneath the branch at the branch marker's own width — not as ┝/┕ branches
 //     of their own, because only calls are (a Run's output, a diff body under its diffstat) —
-//     truncated to what the collapsed shape shows when the block is collapsed, which is the one
-//     place that truncation happens (collapsedDetails), and painted whole when it is expanded.
+//     painted whole when the block is expanded and not at all when it is collapsed.
 //   - a call with NO target — the only shape with no target line: the header stands alone and
 //     the detail lines are themselves the ┝/┕ branches, the summary last since it has no branch
 //     line to ride (an unregistered tool's labelled arguments then its "error: …"
@@ -1094,13 +1108,16 @@ func blockHidesWhenCollapsed(views []toolView) bool {
 //     block has no body to cap instead — and the remainder marker hangs beneath it.
 //
 // The shape follows from which halves of the outcome are filled and never from how many Details
-// there are: a body of one line and a body of ten lay out the same way. Anything overlong
-// soft-wraps under its marker like any other detail line — nothing is clipped for alignment's
-// sake.
-// The block's state reaches BOTH shapes: an expanded call lays out every line the entry retained
-// and grows no remainder marker, a collapsed one paints what collapsedCall keeps of it. Which
-// lines those are is the only thing the shape changes — a targeted call caps its body beneath the
-// branch, a targetless one caps the branch list itself, since there the lines ARE the branches.
+// there are: a body of one line and a body of ten lay out the same way.
+//
+// The block's state reaches BOTH shapes. An expanded call lays out every line the entry retained,
+// soft-wrapping whatever is overlong, and grows no remainder marker. A COLLAPSED targeted call is
+// the row budget's (layout.md, "Collapsed and expanded blocks"): its branch is clipped to
+// collapsedTargetRows rows (collapsedBranch), no body line is painted at all, and the marker
+// counts the body WHOLE — the sketch's "+5 more lines" over a five-line output. So a collapsed
+// block stands at most four rows tall whatever tool filled it and however long its target is,
+// which is the point: a scrollback of tool calls reads as a list rather than as a wall. A
+// collapsed targetless call caps its branch list instead, since there the lines ARE the branches.
 //
 // The synthesized remainder marker is marked as a click target as it is laid out, and it is laid
 // out on its own so the mark lands on exactly the marker's physical lines (all of them, should it
@@ -1122,49 +1139,76 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 		}
 		return out
 	}
-	// The target is expanded before it is measured AND before it is padded, so the pad is computed
-	// over the very string the wrap goes on to hand the style (expandTabs). Measured raw it read as
-	// nothing, wrapText then spent four cells per tab on it, and the summary opened that far right of
-	// the column its siblings opened theirs in — the column being the only thing that lines a block's
-	// summaries up, since nothing is drawn between them.
-	target := expandTabs(tv.Target)
-	text, style := target, th.toolDetail
-	if tv.Summary.Text != "" {
-		pad := strings.Repeat(" ", max(0, column-th.measure.Width(target)))
-		text += pad + " " + tv.Summary.Text
-		style = detailStyle(th, tv.Summary.Kind)
-	}
 	indent := th.measure.Width(marker)
-
 	var out blockPaint
-	out.add(hangingWrap(th, style, marker, text, width), targetNone)
 	if expanded {
+		text, style := branchText(th, tv, column)
+		out.add(hangingWrap(th, style, marker, text, width), targetNone)
 		out.add(renderSubDetails(th, tv.Details.all(), indent, width), targetNone)
 		return out
 	}
-	shown, remainder, truncated := collapsedDetails(tv.Details)
-	out.add(renderSubDetails(th, shown, indent, width), targetNone)
-	if truncated {
+	rows, _ := collapsedBranch(th, tv, column, marker, width)
+	out.add(rows, targetNone)
+	if _, remainder, truncated := collapsedDetails(tv.Details); truncated {
 		// The marker is painted in its OWN style role rather than through the body's detailStyle:
 		// it is a paint artefact, not a line the tool wrote, and a body line that happens to open
-		// with "…" must not be able to look like one. It rides the body's indent all the same, so
+		// with "+" must not be able to look like one. It rides the body's indent all the same, so
 		// the affordance sits under the lines it counts.
 		out.add(hangingWrap(th, th.toolMarker, strings.Repeat(" ", indent), remainder.Text, width), targetMarker)
 	}
 	return out
 }
 
-// collapsedBodyCap is how many lines a COLLAPSED block paints of what it hides — the house
-// budget, and the one number behind "a collapsed block stands at most four rows tall": its
-// header, its branch, this many lines, and the remainder marker counting the rest. EVERY body
-// kind spends it, the diff included — the `+2 -2` riding the branch already says how big the
-// change is, so its hunks are worth a click rather than twenty permanent rows, and a block's
-// height in the scrollback no longer depends on which tool filled it (layout.md, "Collapsed and
-// expanded blocks").
+// branchText composes one call's branch line and the style it paints in: the target alone, or —
+// where the call has a summary — the target padded to the block's column, one space, then that
+// summary. It is the line's TEXT and nothing about its rows, so the collapsed paint, the expanded
+// paint and the toggle-target rule all wrap the same string and cannot come to disagree about where
+// it breaks.
 //
-// It is a paint-time cap on a body the entry keeps in full, which is why it lives beside the
+// The target is expanded before it is measured AND before it is padded, so the pad is computed over
+// the very string the wrap goes on to hand the style (expandTabs). Measured raw it read as nothing,
+// wrapText then spent four cells per tab on it, and the summary opened that far right of the column
+// its siblings opened theirs in — the column being the only thing that lines a block's summaries up,
+// since nothing is drawn between them.
+func branchText(th theme, tv toolView, column int) (text string, style lipgloss.Style) {
+	target := expandTabs(tv.Target)
+	text, style = target, th.toolDetail
+	if tv.Summary.Text != "" {
+		pad := strings.Repeat(" ", max(0, column-th.measure.Width(target)))
+		text += pad + " " + tv.Summary.Text
+		style = detailStyle(th, tv.Summary.Kind)
+	}
+	return text, style
+}
+
+// collapsedBranch is the collapsed paint of one targeted call's branch line: the branch text under
+// the row budget, and whether the budget cut it (clipWrap, which ends a cut row in " …"). It is the
+// one place the cut is taken, asked by the painter and by the toggle-target rule alike
+// (blockHidesWhenCollapsed), so a target the paint clips is a target the indicator knows about.
+func collapsedBranch(th theme, tv toolView, column int, marker string, width int) (lines []string, clipped bool) {
+	text, style := branchText(th, tv, column)
+	return clipWrap(th, style, marker, text, width, collapsedTargetRows)
+}
+
+// The COLLAPSED block's row budget — the house numbers behind "a collapsed block stands at most
+// four rows tall": its header, then at most three content rows, whatever tool filled it and however
+// long its target is (layout.md, "Collapsed and expanded blocks"; docs/layout/tool-layout.md).
+//
+// collapsedTargetRows is what a targeted call may spend on its branch line before the clip takes
+// the rest (collapsedBranch); the third content row is the remainder marker, which counts the body
+// WHOLE because a collapsed block paints no body line at all. Nothing of the output is previewed:
+// one preview line of a hundred said little and cost every block a row, while the marker's count
+// says the same thing in the row the block was going to spend anyway.
+//
+// collapsedBodyCap is the TARGETLESS shape's cap — how many of its branch lines survive the
+// collapse (collapsedCall), the block having no body to cap instead.
+//
+// Both are paint-time caps on content the entry keeps in full, which is why they live beside the
 // painter and not beside diffBody, the producer that used to apply the diff's own.
-const collapsedBodyCap = 1
+const (
+	collapsedTargetRows = 2
+	collapsedBodyCap    = 1
+)
 
 // The collapsed prompt's numbers and wording (layout.md, "Collapsed and expanded blocks"). A
 // prompt whose body soft-wraps to MORE than promptCollapsedRows rows paints that many rows and
@@ -1187,7 +1231,7 @@ const (
 
 // promptSeeMore words the marker a collapsed prompt carries on its last row for the hidden rows
 // behind it: "see more (+1 line)…", "see more (+7 lines)…". It is the prompt's sentence about the
-// same number a tool block words as "… +N more lines" — one count, two voices (splitAtCap).
+// same number a tool block words as "+N more lines" — one count, two voices (splitAtCap).
 func promptSeeMore(hidden int) string {
 	return fmt.Sprintf(promptSeeMoreFormat, plural(hidden, promptSeeMoreNoun))
 }
@@ -1198,7 +1242,7 @@ func promptSeeMore(hidden int) string {
 // wording so the collapsed paints that need it — a tool call's detail body, a long prompt's wrapped
 // rows — cannot come to disagree about where the seam falls or how much sits behind it.
 //
-// What counts a remainder out loud stays the caller's: a tool block's `… +N more lines` and a
+// What counts a remainder out loud stays the caller's: a tool block's `+N more lines` and a
 // prompt's see-more marker are different sentences about the same number.
 //
 // A negative cap is clamped rather than left to panic on the slice: this runs on the repaint path,
@@ -1213,40 +1257,53 @@ func splitAtCap[T any](lines []T, limit int) (shown []T, hidden int) {
 	return lines[:limit], len(lines) - limit
 }
 
-// collapsedDetails is the collapsed paint of a retained body, split at the seam a click cares
-// about: the lines the compact shape SHOWS, and the synthesized "… +N more lines" marker counting
-// what it hides (truncated says whether it hides anything at all; the marker is meaningless when
-// it does not). Truncation is a render-time act on facts the entry keeps whole (layout.md), so the
-// marker is composed on every repaint and never stored — which is what makes it identifiable
-// as a paint artefact rather than a body line, and lets the painter mark it as its own click
-// target instead of sniffing the finished lines for the wording.
+// collapsedDetails is the collapsed paint of a retained body: NO line of it, and the synthesized
+// "+N more lines" marker counting all of it (truncated says whether there is a body at all; the
+// marker is meaningless when there is not). The rows a collapsed block has to spend go to its
+// target (collapsedTargetRows), so a body is a thing a click reveals rather than a thing the
+// scrollback previews — which is why the shown slice it still returns is always empty, kept only so
+// the two collapsed shapes answer in one signature.
 //
-// The split is also the toggle-target rule's oracle: truncated is exactly "the collapsed paint
-// hides something", which is what makes a header clickable (blockHidesWhenCollapsed, through
-// collapsedCall).
+// Truncation is a render-time act on facts the entry keeps whole (layout.md), so the marker is
+// composed on every repaint and never stored — which is what makes it identifiable as a paint
+// artefact rather than a body line, and lets the painter mark it as its own click target instead of
+// sniffing the finished lines for the wording.
 //
-// ONE budget answers for every body: a command's output and a diff both keep collapsedBodyCap
-// lines, so nothing about the lines is examined at this seam. That is worth having — this runs on
-// every repaint and twice per call, since the toggle-target rule asks it as well as the branch
-// does, over a body the entry now retains whole; a cap read off the lines here would walk a
-// command's whole output once a frame.
+// The split is also half the toggle-target rule's oracle: truncated is "the collapsed paint hides
+// body", which — with a clipped target, the other half — is what makes a header clickable
+// (blockHidesWhenCollapsed, through collapsedCall).
+//
+// Nothing about the lines is examined at this seam, which is worth having: this runs on every
+// repaint and twice per call, since the toggle-target rule asks it as well as the branch does, over
+// a body the entry retains whole; a cap read off the lines here would walk a command's whole output
+// once a frame.
 //
 // It is the BODY's collapsed paint; the targetless shape has no body and caps its branch list
-// instead, through the same cap and the same wording (collapsedCall).
+// instead, through the same wording (collapsedCall).
 func collapsedDetails(body toolBody) (shown []detailLine, remainder detailLine, truncated bool) {
-	return collapseAtCap(body.all(), collapsedBodyCap)
+	return collapseAtCap(body.all(), collapsedBodyRows)
 }
+
+// collapsedBodyRows is how many body lines a collapsed targeted block paints: none. It is a named
+// zero rather than a bare literal because it is a DECISION — the collapsed block's three content
+// rows go to the target and the marker — and a reader meeting the number in collapsedDetails is
+// owed the reason (docs/layout/tool-layout.md).
+const collapsedBodyRows = 0
 
 // collapsedCall is the collapsed paint of ONE call, whichever of the two shapes it takes — the
 // single authority both the painter and the toggle-target rule ask (renderToolBranch,
 // blockHidesWhenCollapsed), so the shape question is answered in one place and the two cannot come
 // to disagree about what a collapsed block hides.
 //
-// A call WITH a target caps its body, which is what lays out beneath the branch line. A call with
-// NO target caps its BRANCH list — body plus the summary closing it (branchDetails) — because
-// there the lines are the branches themselves and a block with no body still has rows to spend.
-// Which lines are cut is the only thing the shape decides; how many survive is collapsedBodyCap
-// either way, so neither shape can grow taller than the other.
+// A call WITH a target hides its body whole, which is what would otherwise lay out beneath the
+// branch line. A call with NO target caps its BRANCH list — body plus the summary closing it
+// (branchDetails) — because there the lines are the branches themselves and a block with no target
+// line has rows to spend on them. Which lines are cut is the only thing the shape decides; neither
+// can grow taller than the block's own budget.
+//
+// It answers for the lines alone. A targeted call also hides when the row budget CLIPS its branch,
+// which is a fact about the width rather than about the entry, and lives with the clip that takes
+// it (collapsedBranch).
 func collapsedCall(tv toolView) (shown []detailLine, remainder detailLine, truncated bool) {
 	if tv.Target == "" {
 		return collapseAtCap(branchDetails(tv), collapsedBodyCap)
@@ -1258,12 +1315,17 @@ func collapsedCall(tv toolView) (shown []detailLine, remainder detailLine, trunc
 // and the sentence, held in one place so every collapsed shape counts its remainder the same way.
 // Lines already inside the cap come back whole and grow no marker. Where the cut falls is
 // splitAtCap's, shared with the other collapsed paints.
+//
+// The marker says "+N more lines" and nothing else. It used to open with an ellipsis, back when it
+// followed a body line the paint had cut in the middle; now a clipped row says its own continuation
+// with the " …" the clip fits onto it (clipTail) and the marker counts only what never got a row at
+// all, so the two marks stay one fact each (docs/layout/tool-layout.md).
 func collapseAtCap(lines []detailLine, limit int) (shown []detailLine, remainder detailLine, truncated bool) {
 	shown, hidden := splitAtCap(lines, limit)
 	if hidden == 0 {
 		return shown, detailLine{}, false
 	}
-	return shown, detailLine{Text: "… +" + plural(hidden, "more line")}, true
+	return shown, detailLine{Text: "+" + plural(hidden, "more line")}, true
 }
 
 // branchDetails is what a targetless call hangs off its header: the body, plus the summary as

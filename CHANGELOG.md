@@ -35,6 +35,22 @@ point is a **minor** bump, not a breaking change.
   The type-to-filter grammar and the rebound verbs are documented in `layout.md` (§"One overlay for
   'which one?'" and the `/sessions` browser paragraph beside it).
 
+### Changed
+
+- **A collapsed tool block now stands at most four rows: its header, two rows of target, and the
+  count of what it hides.** A long command used to soft-wrap over as many rows as it needed and then
+  spend one more previewing the first line of its output, so a scrollback of tool calls read as a
+  wall of text whose height depended on which tool filled it. The target is clipped to two rows now,
+  ending in a `…` that says it goes on, and no line of the body is painted at all — the marker
+  beneath counts the body whole, so `+5 more lines` over a five-line output means exactly that. The
+  marker's wording lost its leading ellipsis for the same reason: a cut row says its own
+  continuation, and the marker counts only what never got a row.
+  - Everything the collapsed shape withholds is still one click away, and a block whose TARGET alone
+    is cut now wears the expand indicator too — a long path with no output at all is something to
+    open. Because the cut depends on how wide the block is being painted, so does the indicator: the
+    same call in a wider window shows its target whole and offers no toggle.
+  - **The expand/collapse indicators are now `▶` and `▼`**, replacing the smaller `▸`/`▾`.
+
 ### Fixed
 
 - **An upstream failure can no longer arrive as a silent empty reply.** OpenAI-compatible

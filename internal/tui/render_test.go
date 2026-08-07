@@ -585,14 +585,14 @@ func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ Sub-Agent ▾", // a run's head is always a toggle target (its span), so it always wears the state
+		"✦ Sub-Agent ▼", // a run's head is always a toggle target (its span), so it always wears the state
 		"  ┕ first",
 		"",
 		"│ ⤷ sub-agent",
 		"│",
 		"│ ✦ first child",
 		"", // the first run closes here…
-		"✦ Sub-Agent ▾",
+		"✦ Sub-Agent ▼",
 		"  ┕ second",
 		"", // …and the second call is fenced off from it on both sides
 		"│ ⤷ sub-agent",
@@ -812,7 +812,9 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 
 // A body-only call keeps the same header and branch: nothing rides beside the target, and the
 // body lays out beneath it at the branch marker's width — those lines are not ┝/┕ branches of
-// their own, because only calls are (layout.md's Run sketch).
+// their own, because only calls are (layout.md's Run sketch). COLLAPSED, none of them lays out at
+// all: the collapsed block's rows go to its target and the marker counts the body whole
+// (collapsedBodyRows), which is the shape the sketch draws.
 func TestRenderMultiDetailStandalone(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
@@ -822,10 +824,9 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 	}})
 
 	want := strings.Join([]string{
-		"✦ Run ▸", // a capped body is something to reveal, and the header says so
+		"✦ Run ▶", // a hidden body is something to reveal, and the header says so
 		"  ┕ go test ./...",
-		"    ok   apogee/internal/tui   0.412s",
-		"    … +2 more lines",
+		"    +3 more lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("multi-detail block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -835,8 +836,8 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 // A diff call is the summary-and-body shape layout.md sketches: the diffstat rides the branch
 // beside the path and the coloured body hangs beneath it. The body keeps its red/green
 // colouring, which — together with having a body at all — is why it can never fold into a group.
-// Asserted expanded, because a diff collapses to the same one-line house budget as every other
-// body (collapsedBodyCap) and a red line alone would not show both colours.
+// Asserted expanded, because a collapsed diff paints no body line at all (collapsedBodyRows) and
+// there would be no colour to see.
 func TestRenderDiffDetailStandalone(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
@@ -848,7 +849,7 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ View Diff ▾",
+		"✦ View Diff ▼",
 		"  ┕ main.go +1 -1",
 		"    - a removed line",
 		"    + an added line",
@@ -870,8 +871,8 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 // The layout.md sketch, rendered: a two-line change shows "+2 -2" on the branch beside the path
 // with the diff body beneath it, and the diffstat line itself stays plain — only the body is
 // coloured, so the branch reads like every other tool's summary. The sketch is the EXPANDED
-// shape: a diff spends the same one-line house budget as every other body when it is collapsed
-// (collapsedBodyCap), so its hunks are what a click reveals.
+// shape: a collapsed diff hides its body whole like every other block (collapsedBodyRows), so its
+// hunks are what a click reveals.
 func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
@@ -885,7 +886,7 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ View Diff ▾",
+		"✦ View Diff ▼",
 		"  ┕ main.go +2 -2",
 		"    - a code line that has been removed",
 		"    - a second removed line",
@@ -902,8 +903,8 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	}
 }
 
-// A diff whose body is capped still names the whole change on its branch: the diffstat counts
-// every line, the body stops at the house budget with its remainder count.
+// A diff whose body is hidden still names the whole change on its branch: the diffstat counts
+// every line, and the marker beneath counts every line the collapsed paint withheld.
 func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
 	const longDiff = 25 // well past the collapsed budget, so the stat and the paint cannot agree by luck
 	tr := &transcript{}
@@ -918,17 +919,18 @@ func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
 	if got, want := lines[1], "  ┕ main.go +"+strconv.Itoa(longDiff)+" -0"; got != want {
 		t.Errorf("capped diff branch = %q, want %q (the stat spans the whole diff)", got, want)
 	}
-	if got, want := lines[len(lines)-1], "    … +"+strconv.Itoa(longDiff-collapsedBodyCap)+" more lines"; got != want {
+	if got, want := lines[len(lines)-1], "    +"+strconv.Itoa(longDiff)+" more lines"; got != want {
 		t.Errorf("capped diff body ends %q, want %q", got, want)
 	}
 }
 
 // TestCollapsedPaintTruncatesRetainedBodies pins the relocation itself: the entry KEEPS every
-// body line it was given and the collapsed paint is the only thing that truncates, synthesizing
-// the "… +N more lines" remainder the outcome builders used to bake in (layout.md, "Collapsed
-// and expanded blocks" — truncation is a render-time act on retained facts). One budget answers
-// for every body kind: a command's output and a diff alike paint collapsedBodyCap lines and count
-// the rest, and a body already inside the budget paints whole with no marker at all.
+// body line it was given and the collapsed paint is the only thing that withholds them,
+// synthesizing the "+N more lines" remainder the outcome builders used to bake in (layout.md,
+// "Collapsed and expanded blocks" — truncation is a render-time act on retained facts). One budget
+// answers for every body kind: a command's output and a diff alike paint NO body line collapsed
+// (collapsedBodyRows) and the marker counts the body whole, down to a body of one line — there is
+// no length at which a collapsed block starts previewing its output.
 func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 	diffLines := func(n int) string {
 		return strings.TrimSuffix(strings.Repeat("+ added\n", n), "\n")
@@ -940,33 +942,33 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 		wantPaint []string // the body the collapsed block paints, marker included
 	}{
 		{
-			name: "free-form output paints its first line and counts the rest",
+			name: "free-form output paints no line and counts them all",
 			build: func(tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
 			},
 			wantKept:  4,
-			wantPaint: []string{"    ok   a", "    … +3 more lines"},
+			wantPaint: []string{"    +4 more lines"},
 		},
 		{
-			name: "a diff body spends the same budget and counts the rest",
+			name: "a diff body spends the same budget and is counted the same way",
 			build: func(tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
 					Content: diffLines(4), Summary: domain.DiffStat{Added: 4}}})
 			},
 			wantKept:  4,
-			wantPaint: []string{"    + added", "    … +3 more lines"},
+			wantPaint: []string{"    +4 more lines"},
 		},
 		{
-			name: "a body inside the budget paints whole, with no marker",
+			name: "a body of one line is hidden and counted like any other",
 			build: func(tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
 					Content: "+ new line", Summary: domain.DiffStat{Added: 1}}})
 			},
 			wantKept:  1,
-			wantPaint: []string{"    + new line"},
+			wantPaint: []string{"    +1 more line"},
 		},
 	}
 	for _, tc := range cases {
@@ -1007,33 +1009,33 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 		wantExpanded  []string
 	}{
 		{
-			name: "free-form output expands from its first line to all of them",
+			name: "free-form output expands from nothing to all of it",
 			build: func(tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
 			},
-			wantCollapsed: []string{"    ok   a", "    … +3 more lines"},
+			wantCollapsed: []string{"    +4 more lines"},
 			wantExpanded:  []string{"    ok   a", "    ok   b", "    ok   c", "    PASS"},
 		},
 		{
-			name: "a diff body expands past the house budget",
+			name: "a diff body expands from its marker to its hunks",
 			build: func(tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
-					Content: diffContent(collapsedBodyCap + 3), Summary: domain.DiffStat{Added: collapsedBodyCap + 3}}})
+					Content: diffContent(4), Summary: domain.DiffStat{Added: 4}}})
 			},
-			wantCollapsed: append(paintedDiff(collapsedBodyCap), "    … +3 more lines"),
-			wantExpanded:  paintedDiff(collapsedBodyCap + 3),
+			wantCollapsed: []string{"    +4 more lines"},
+			wantExpanded:  paintedDiff(4),
 		},
 		{
 			// The written lines are the body from the moment the call is announced, so this one
 			// spends and expands past the budget with no result involved at all.
-			name: "a write's own lines collapse to the budget and expand whole",
+			name: "a write's own lines are hidden collapsed and expand whole",
 			build: func(tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "write_file",
 					Arguments: []byte(`{"path":"notes.txt","content":"alpha\nbeta\ngamma\ndelta"}`)}})
 			},
-			wantCollapsed: []string{"    + alpha", "    … +3 more lines"},
+			wantCollapsed: []string{"    +4 more lines"},
 			wantExpanded:  []string{"    + alpha", "    + beta", "    + gamma", "    + delta"},
 		},
 	}
@@ -1067,6 +1069,89 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 				t.Errorf("re-collapsed paint mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 			}
 		})
+	}
+}
+
+// TestCollapsedBlockStandsAtMostFourRows is the cap itself, asked of the case that used to break
+// it: a 400-character command soft-wrapped over five rows before the row budget existed, and the
+// block it led stood seven rows tall in a scrollback of them. Now the block is its header, two rows
+// of target with the clip's " …" saying the target goes on, and the marker counting the body — four
+// rows, whatever the target's length and whatever the body's (docs/layout/tool-layout.md).
+//
+// The width bound is asserted on every row rather than assumed from the wrap: the clip re-cuts the
+// row it ends, and a tail appended past the column would fold that row in two and spend a fifth row
+// the budget does not have (clipWrap).
+func TestCollapsedBlockStandsAtMostFourRows(t *testing.T) {
+	const width = 80
+	command := strings.Repeat("cd . && head -3 go.mod && ", 16)[:400]
+
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"` + command + `"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok\nPASS\ndone"}})
+
+	lines := strings.Split(renderPlain(tr, width), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("the collapsed block stands %d rows tall, want the budget's 4:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	if want := "✦ Run " + glyphCollapsed; lines[0] != want {
+		t.Errorf("header = %q, want %q", lines[0], want)
+	}
+	if !strings.HasSuffix(lines[2], clipTail) {
+		t.Errorf("the last target row = %q, want it cut short with %q", lines[2], clipTail)
+	}
+	if want := "    +3 more lines"; lines[3] != want {
+		t.Errorf("marker row = %q, want %q", lines[3], want)
+	}
+	th := newTheme()
+	for i, ln := range lines {
+		if w := th.measure.Width(ln); w > width {
+			t.Errorf("row %d paints %d columns, past the %d-column block: %q", i, w, width, ln)
+		}
+	}
+}
+
+// …and the target's own clip is enough to make a block a toggle target: a call with NO body at all
+// still hides something once its target is cut, so it wears the indicator, is marked for the click,
+// and expands to the target whole. That is what makes the toggle-target rule WIDTH-dependent — the
+// same call at a wide enough block hides nothing and is no target — and why the indicator and the
+// mark are one predicate asked with the width the frame is painted at
+// (blockHidesWhenCollapsed).
+func TestClippedTargetAloneMakesABlockAToggleTarget(t *testing.T) {
+	const width = 60
+	path := "internal/" + strings.Repeat("deeply-nested-package/", 6) + "main.go"
+
+	tr := &transcript{}
+	readCall(tr, "c1", path, 1, 154, 0)
+	if got := tr.entries[0].tool.Details.len(); got != 0 {
+		t.Fatalf("the fixture's call carries %d body lines, want the bodiless case", got)
+	}
+
+	want := []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Read File " + glyphCollapsed}}
+	if got := blockMarks(t, tr, width); !reflect.DeepEqual(got, want) {
+		t.Errorf("collapsed marks mismatch:\n--- got ---\n%+v\n--- want ---\n%+v", got, want)
+	}
+	collapsed := strings.Split(renderPlain(tr, width), "\n")
+	if len(collapsed) != 3 || !strings.HasSuffix(collapsed[2], clipTail) {
+		t.Errorf("collapsed paint = %d rows ending %q, want 3 rows ending in the clip tail:\n%s",
+			len(collapsed), collapsed[len(collapsed)-1], strings.Join(collapsed, "\n"))
+	}
+
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the clipped block expanded")
+	}
+	expanded := renderPlain(tr, width)
+	if strings.Contains(expanded, clipTail) {
+		t.Errorf("the expanded paint still carries a clip tail:\n%s", expanded)
+	}
+	if flat := strings.Join(strings.Fields(expanded), ""); !strings.Contains(flat, strings.ReplaceAll(path, " ", "")) {
+		t.Errorf("the expanded paint does not carry the whole target:\n%s", expanded)
+	}
+
+	// The same call in a block wide enough to seat its target hides nothing and is no target at
+	// all — the predicate follows the width, which is the half a fixed-width test cannot show.
+	if got := blockMarks(t, tr, 200); got != nil {
+		t.Errorf("marks at a width the target fits = %+v, want none", got)
 	}
 }
 
@@ -1105,8 +1190,8 @@ func askUserCall(tr *transcript, id, args, answer string) {
 }
 
 // TestAnsweredAskUserBlockPaintsTheRecord walks the answered question through both block states:
-// the record is a body like any other, so it spends the same one-line budget with its remainder
-// marker collapsed and paints whole expanded, with the answer riding the branch throughout. No
+// the record is a body like any other, so the collapsed block withholds it whole behind the
+// remainder marker and the expanded one paints it, with the answer riding the branch throughout. No
 // painter rule is new here — that is the claim. Once the presenter hands the block a body, the
 // machinery already in place gives the exchange its permanent shape.
 func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
@@ -1114,10 +1199,9 @@ func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
 	askUserCall(tr, "c1", `{"question":"Which mode?","choices":["Plan","Ask before","Auto"]}`, "Ask before")
 
 	collapsed := strings.Join([]string{
-		"✦ Ask User ▸",
+		"✦ Ask User ▶",
 		"  ┕ Which mode? Ask before",
-		"    Which mode?",
-		"    … +3 more lines",
+		"    +4 more lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != collapsed {
 		t.Errorf("collapsed record mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
@@ -1127,7 +1211,7 @@ func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
 		t.Fatal("toggleExpanded(0) = false; want the answered question expanded")
 	}
 	expanded := strings.Join([]string{
-		"✦ Ask User ▾",
+		"✦ Ask User ▼",
 		"  ┕ Which mode? Ask before",
 		"    Which mode?",
 		"    [ ] Plan",
@@ -1148,7 +1232,7 @@ func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
 
 // …and because the collapsed paint now hides something, the block becomes a toggle target by the
 // one predicate that decides both the affordance and the click (blockHidesWhenCollapsed): the
-// header is marked and wears its ▸/▾ indicator, the remainder marker is marked for the entry it
+// header is marked and wears its ▶/▼ indicator, the remainder marker is marked for the entry it
 // belongs to, and expanding takes the marker away while the header keeps the click that closes the
 // block again. A question still on the screen hides nothing and is no target at all.
 func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
@@ -1159,8 +1243,8 @@ func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 		askUserCall(tr, "c1", question, "Ask before")
 
 		want := []blockMark{
-			{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User ▸"},
-			{line: 3, kind: targetMarker, entry: 0, text: "    … +3 more lines"},
+			{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User ▶"},
+			{line: 2, kind: targetMarker, entry: 0, text: "    +4 more lines"},
 		}
 		if got := blockMarks(t, tr, 80); !reflect.DeepEqual(got, want) {
 			t.Errorf("collapsed marks mismatch:\n--- got ---\n%+v\n--- want ---\n%+v", got, want)
@@ -1169,7 +1253,7 @@ func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 		if !tr.toggleExpanded(0) {
 			t.Fatal("toggleExpanded(0) = false; want the answered question expanded")
 		}
-		want = []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User ▾"}}
+		want = []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User ▼"}}
 		if got := blockMarks(t, tr, 80); !reflect.DeepEqual(got, want) {
 			t.Errorf("expanded marks mismatch:\n--- got ---\n%+v\n--- want ---\n%+v", got, want)
 		}
@@ -1196,15 +1280,13 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 		askUserCall(tr, "c2", `{"question":"Tag it?","choices":["Yes","No"]}`, "No")
 
 		want := strings.Join([]string{
-			"✦ Ask User ▸",
+			"✦ Ask User ▶",
 			"  ┕ Ship it? Yes",
-			"    Ship it?",
-			"    … +2 more lines",
+			"    +3 more lines",
 			"",
-			"✦ Ask User ▸",
+			"✦ Ask User ▶",
 			"  ┕ Tag it? No",
-			"    Tag it?",
-			"    … +2 more lines",
+			"    +3 more lines",
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("answered questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -1683,7 +1765,7 @@ func blockMarks(t *testing.T, tr *transcript, width int) []blockMark {
 // asserts the complete set of marks, so a line that quietly became clickable fails here.
 //
 // It pins the AFFORDANCE against the same rule, because each mark carries its line's text: a marked
-// header wears the ▸/▾ state indicator and an unmarked one wears none, so the visible hint and the
+// header wears the ▶/▼ state indicator and an unmarked one wears none, so the visible hint and the
 // click target cannot drift apart — a header that grew an indicator without becoming clickable, or
 // became clickable without growing one, fails here too.
 func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
@@ -1703,16 +1785,16 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 		want  []blockMark
 	}{
 		{
-			// ❯ run the tests | (spacer) | ✦ Run | ┕ go test ./... | ok   a | … +3 more lines
-			name:  "a truncated body marks its header and its remainder marker",
+			// ❯ run the tests | (spacer) | ✦ Run | ┕ go test ./... | +4 more lines
+			name:  "a hidden body marks its header and its remainder marker",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				tr.addUser("run the tests", nil)
 				run(tr, "c1", "go test ./...", "ok   a\nok   b\nok   c\nPASS", 0)
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run ▸"},
-				{line: 5, kind: targetMarker, entry: 1, text: "    … +3 more lines"},
+				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run ▶"},
+				{line: 4, kind: targetMarker, entry: 1, text: "    +4 more lines"},
 			},
 		},
 		{
@@ -1727,7 +1809,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 					t.Fatal("toggleExpanded(1) = false; want the tool-call entry expanded")
 				}
 			},
-			want: []blockMark{{line: 2, kind: targetHeader, entry: 1, text: "✦ Run ▾"}},
+			want: []blockMark{{line: 2, kind: targetHeader, entry: 1, text: "✦ Run ▼"}},
 		},
 		{
 			// A group's calls carry no bodies (that is what made them groupable), so the block
@@ -1751,8 +1833,8 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 					ID: "c1", Tool: "weird_tool", Arguments: []byte(`{"a":1,"b":2,"c":3}`)}})
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ weird_tool ▸"},
-				{line: 2, kind: targetMarker, entry: 0, text: "    … +5 more lines"},
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ weird_tool ▶"},
+				{line: 2, kind: targetMarker, entry: 0, text: "    +5 more lines"},
 			},
 		},
 		{
@@ -1778,10 +1860,9 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run"},
-				{line: 1, kind: targetHeader, entry: 0, text: "  Python ▸"},
-				{line: 5, kind: targetMarker, entry: 0, text: "    … +2"},
-				{line: 6, kind: targetMarker, entry: 0, text: "    more"},
-				{line: 7, kind: targetMarker, entry: 0, text: "    lines"},
+				{line: 1, kind: targetHeader, entry: 0, text: "  Python ▶"},
+				{line: 4, kind: targetMarker, entry: 0, text: "    +3 more"},
+				{line: 5, kind: targetMarker, entry: 0, text: "    lines"},
 			},
 		},
 		{
@@ -1794,10 +1875,10 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 				run(tr, "c2", "go vet ./...", "x\ny", 0)
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run ▸"},
-				{line: 3, kind: targetMarker, entry: 0, text: "    … +2 more lines"},
-				{line: 5, kind: targetHeader, entry: 1, text: "✦ Run ▸"},
-				{line: 8, kind: targetMarker, entry: 1, text: "    … +1 more line"},
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run ▶"},
+				{line: 2, kind: targetMarker, entry: 0, text: "    +3 more lines"},
+				{line: 4, kind: targetHeader, entry: 1, text: "✦ Run ▶"},
+				{line: 6, kind: targetMarker, entry: 1, text: "    +2 more lines"},
 			},
 		},
 		{
@@ -1810,7 +1891,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
-			want: []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent ▸"}},
+			want: []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent ▶"}},
 		},
 		{
 			// Expanded, the run's head keeps its mark — that is the click that closes it again —
@@ -1826,7 +1907,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 					t.Fatal("setExpanded(0, true) = false; want the run's head expanded")
 				}
 			},
-			want: []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent ▾"}},
+			want: []blockMark{{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent ▼"}},
 		},
 		{
 			// A railed sub-agent block is marked exactly like a flat one — the rail prefixes lines
@@ -1837,8 +1918,8 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 				run(tr, "c1", "go test", "a\nb\nc", 1)
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 0, text: "│ ✦ Run ▸"},
-				{line: 5, kind: targetMarker, entry: 0, text: "│     … +2 more lines"},
+				{line: 2, kind: targetHeader, entry: 0, text: "│ ✦ Run ▶"},
+				{line: 4, kind: targetMarker, entry: 0, text: "│     +3 more lines"},
 			},
 		},
 	}
@@ -1855,12 +1936,14 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 }
 
 // TestHeaderIndicatorFollowsTheBlockState pins the indicator's OTHER half: unlike the click mark,
-// which is state-independent by design, the glyph says which way the click will go — ▸ while the
-// block is collapsed, ▾ while it is expanded — and it follows the state back and forth on one
+// which is state-independent by design, the glyph says which way the click will go — ▶ while the
+// block is collapsed, ▼ while it is expanded — and it follows the state back and forth on one
 // transcript rather than across two fixtures, because that is the claim: nothing about the entry
 // changes but the flag the painter reads. The block kinds that reach the indicator by three
-// different routes are each here: a capped body (blockHidesWhenCollapsed), a sub-agent run's elided
-// span (blockState.elides) and a Firing wearing the borrowed shape under its own glyph.
+// different routes are each here: a hidden body (blockHidesWhenCollapsed), a sub-agent run's elided
+// span (blockState.elides) and a Firing wearing the borrowed shape under its own glyph. A CLIPPED
+// TARGET is the fourth route into the same predicate and has a test of its own, the width being
+// what it turns on (TestClippedTargetAloneMakesABlockAToggleTarget).
 func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 	cases := []struct {
 		name                        string
@@ -1868,7 +1951,7 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 		wantCollapsed, wantExpanded string
 	}{
 		{
-			name: "a capped body",
+			name: "a hidden body",
 			build: func() *transcript {
 				tr := &transcript{}
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
@@ -1876,7 +1959,7 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok\na\nb"}})
 				return tr
 			},
-			wantCollapsed: "✦ Run ▸", wantExpanded: "✦ Run ▾",
+			wantCollapsed: "✦ Run ▶", wantExpanded: "✦ Run ▼",
 		},
 		{
 			name: "a sub-agent run's elided span",
@@ -1887,12 +1970,12 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 				subAgentReport(tr, "s1", "survey complete", 0)
 				return tr
 			},
-			wantCollapsed: "✦ Sub-Agent ▸", wantExpanded: "✦ Sub-Agent ▾",
+			wantCollapsed: "✦ Sub-Agent ▶", wantExpanded: "✦ Sub-Agent ▼",
 		},
 		{
 			name:          "a Firing under its own glyph",
 			build:         func() *transcript { return firingBlock("found 3 stale entries\nremoved them") },
-			wantCollapsed: "⟳ Schedule ▸", wantExpanded: "⟳ Schedule ▾",
+			wantCollapsed: "⟳ Schedule ▶", wantExpanded: "⟳ Schedule ▼",
 		},
 	}
 	for _, tc := range cases {
@@ -1939,7 +2022,7 @@ func TestHeaderIndicatorIsStyledApartFromTheLabel(t *testing.T) {
 	}
 }
 
-// The synthesized "… +N more lines" marker carries its OWN style role rather than the body's: it is
+// The synthesized "+N more lines" marker carries its OWN style role rather than the body's: it is
 // apogee's line, not the tool's, and a body line that happens to open with "…" must not be able to
 // look like one. The two roles are asserted to differ as well as to be applied, so a marker style
 // that quietly became detailStyle's twin fails here rather than passing silently.
@@ -2166,7 +2249,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
-			settled: "✦ Sub-Agent ▸", flipped: "  Sub-Agent ▸",
+			settled: "✦ Sub-Agent ▶", flipped: "  Sub-Agent ▶",
 		},
 		{
 			// The mirror case, and the reason the rule asks the span as well as the head: the report
@@ -2178,7 +2261,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				openRead(tr, "c1", "a.go", 1)
 				subAgentReport(tr, "s1", "survey complete", 0)
 			},
-			settled: "✦ Sub-Agent ▸", flipped: "  Sub-Agent ▸",
+			settled: "✦ Sub-Agent ▶", flipped: "  Sub-Agent ▶",
 		},
 		{
 			name: "a finished run settles",
@@ -2187,7 +2270,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				subAgentReport(tr, "s1", "survey complete", 0)
 			},
-			settled: "✦ Sub-Agent ▸", flipped: "✦ Sub-Agent ▸",
+			settled: "✦ Sub-Agent ▶", flipped: "✦ Sub-Agent ▶",
 		},
 	}
 	for _, tc := range cases {
@@ -2229,12 +2312,12 @@ func firingBlock(answer string) *transcript {
 }
 
 // The two states a Firing's reader cares about, in the shape layout.md gives them: collapsed, the
-// answer's first line is visible over the `… +N more lines` remainder — whether the answer rode the
-// branch or leads the body, which is the whole point of following the outcome's two-halves grammar —
-// and expanded, the block shows the answer whole with the prompt, the stats and the record pointer
-// beneath it. It is one transcript toggled rather than two fixtures, because that is the claim:
-// nothing about the entry changes but the flag the painter reads.
-func TestFiringBlockCollapsesToTheAnswersFirstLine(t *testing.T) {
+// block is its header, its branch and the `+N more lines` remainder counting everything beneath —
+// what rode the BRANCH still shows, which is the whole point of following the outcome's two-halves
+// grammar — and expanded, the block shows the answer whole with the prompt, the stats and the record
+// pointer beneath it. It is one transcript toggled rather than two fixtures, because that is the
+// claim: nothing about the entry changes but the flag the painter reads.
+func TestFiringBlockCollapsesToItsRemainderMarker(t *testing.T) {
 	cases := []struct {
 		name                        string
 		answer                      string
@@ -2244,13 +2327,12 @@ func TestFiringBlockCollapsesToTheAnswersFirstLine(t *testing.T) {
 			name:   "a multi-line answer leads the body",
 			answer: "found 3 stale entries\nremoved them",
 			wantCollapsed: []string{
-				"⟳ Schedule ▸",
+				"⟳ Schedule ▶",
 				"  ┕ nightly tidy",
-				"    found 3 stale entries",
-				"    … +4 more lines",
+				"    +5 more lines",
 			},
 			wantExpanded: []string{
-				"⟳ Schedule ▾",
+				"⟳ Schedule ▼",
 				"  ┕ nightly tidy",
 				"    found 3 stale entries",
 				"    removed them",
@@ -2263,13 +2345,12 @@ func TestFiringBlockCollapsesToTheAnswersFirstLine(t *testing.T) {
 			name:   "a one-line answer rides the branch beside the Schedule's name",
 			answer: "the log is clean",
 			wantCollapsed: []string{
-				"⟳ Schedule ▸",
+				"⟳ Schedule ▶",
 				"  ┕ nightly tidy the log is clean",
-				"    prompt: check the log",
-				"    … +2 more lines",
+				"    +3 more lines",
 			},
 			wantExpanded: []string{
-				"⟳ Schedule ▾",
+				"⟳ Schedule ▼",
 				"  ┕ nightly tidy the log is clean",
 				"    prompt: check the log",
 				"    2 turns · 4s",
@@ -2309,10 +2390,11 @@ func TestFiringBlockHeaderNeverBlinks(t *testing.T) {
 		want string
 	}{
 		// The state indicator is orthogonal to the star and follows the ordinary toggle-target
-		// rule: the running Firing's body is the one-line prompt and hides nothing, the returned
-		// one's overflows the cap and wears the ▸ a click acts on.
-		{"a Firing still running", open, "⟳ Schedule"},
-		{"a Firing that returned", firingBlock("the log is clean"), "⟳ Schedule ▸"},
+		// rule: a collapsed block paints no body line at all, so the running Firing's one-line
+		// prompt is as much hidden as the returned one's whole record and both wear the ▶ a click
+		// acts on.
+		{"a Firing still running", open, "⟳ Schedule ▶"},
+		{"a Firing that returned", firingBlock("the log is clean"), "⟳ Schedule ▶"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := headerStar(t, tc.tr, false); got != tc.want {
@@ -2428,9 +2510,9 @@ func TestRenderNoTargetStandalone(t *testing.T) {
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "mcp_thing", Arguments: []byte(`{"a":1}`)}})
 
 	want := strings.Join([]string{
-		"✦ mcp_thing ▸",
+		"✦ mcp_thing ▶",
 		"  ┕ a:",
-		"    … +1 more line",
+		"    +1 more line",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("collapsed targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -2440,7 +2522,7 @@ func TestRenderNoTargetStandalone(t *testing.T) {
 		t.Fatal("toggleExpanded(0) = false; want the targetless block to expand")
 	}
 	want = strings.Join([]string{
-		"✦ mcp_thing ▾",
+		"✦ mcp_thing ▼",
 		"  ┝ a:",
 		"  ┕   1",
 	}, "\n")
@@ -2461,7 +2543,7 @@ func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ mcp_thing ▾",
+		"✦ mcp_thing ▼",
 		"  ┝ a:",
 		"  ┝   1",
 		"  ┕ error: no such server",
@@ -2474,7 +2556,7 @@ func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 // TestTargetlessBlocksCollapseToTheBudget pins the reversal of layout.md's old never-hide rule
 // across all three targetless shapes: the unregistered/MCP argument dump, a registered call whose
 // target argument never arrived, and a stray result. Each collapses to the house budget with a
-// remainder marker and a ▸ header — three rows, whatever it is hiding, which is the whole of the
+// remainder marker and a ▶ header — three rows, whatever it is hiding, which is the whole of the
 // ask — and each expands to every line it retained. The 60-line blob is the case the old rule made
 // 61 permanent rows.
 func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
@@ -2497,7 +2579,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 					ID: "c1", Tool: "mcp_search", Arguments: blob(58)}})
 			},
-			wantCollapsed: []string{"✦ mcp_search ▸", "  ┕ [", "    … +59 more lines"},
+			wantCollapsed: []string{"✦ mcp_search ▶", "  ┕ [", "    +59 more lines"},
 			wantExpanded:  61,
 		},
 		{
@@ -2508,7 +2590,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 					CallID: "c1", Content: "one\ntwo\nthree\nfour"}})
 			},
-			wantCollapsed: []string{"✦ Run ▸", "  ┕ one", "    … +3 more lines"},
+			wantCollapsed: []string{"✦ Run ▶", "  ┕ one", "    +3 more lines"},
 			wantExpanded:  5,
 		},
 		{
@@ -2517,7 +2599,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 					CallID: "gone", Content: "one\ntwo\nthree"}})
 			},
-			wantCollapsed: []string{"✦ result ▸", "  ┕ one", "    … +2 more lines"},
+			wantCollapsed: []string{"✦ result ▶", "  ┕ one", "    +2 more lines"},
 			wantExpanded:  4,
 		},
 	}
@@ -2566,12 +2648,12 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 			name: "a multi-key argument object",
 			args: `{"query":"collapse","server":"docs","limit":20}`,
 			wantCollapsed: []string{
-				"✦ mcp_search ▸",
+				"✦ mcp_search ▶",
 				"  ┕ query:",
-				"    … +5 more lines",
+				"    +5 more lines",
 			},
 			wantExpanded: []string{
-				"✦ mcp_search ▾",
+				"✦ mcp_search ▼",
 				"  ┝ query:",
 				"  ┝   collapse",
 				"  ┝ server:",
@@ -2584,12 +2666,12 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 			name: "a multi-line value keeps its own lines",
 			args: `{"script":"cd /ws\ngit status\ngit diff"}`,
 			wantCollapsed: []string{
-				"✦ mcp_search ▸",
+				"✦ mcp_search ▶",
 				"  ┕ script:",
-				"    … +3 more lines",
+				"    +3 more lines",
 			},
 			wantExpanded: []string{
-				"✦ mcp_search ▾",
+				"✦ mcp_search ▼",
 				"  ┝ script:",
 				"  ┝   cd /ws",
 				"  ┝   git status",
@@ -2648,10 +2730,9 @@ func TestRenderGroupBreakers(t *testing.T) {
 				"✦ Read File",
 				"  ┕ a.go 1 - 5",
 				"",
-				"✦ Run ▸",
+				"✦ Run ▶",
 				"  ┕ go test",
-				"    ok",
-				"    … +2 more lines",
+				"    +3 more lines",
 				"",
 				"✦ Read File",
 				"  ┕ b.go 1 - 9",
@@ -2738,7 +2819,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 // target always leading a branch and the outcome split into the summary beside it and the body
 // beneath. The two "Edit File" blocks are the counter-example that proves the grouping rule: they
 // are consecutive and share a label, and they still stand alone, because a call carrying a body
-// breaks the run. The ▸ on every header that hides something and its absence everywhere else
+// breaks the run. The ▶ on every header that hides something and its absence everywhere else
 // is the affordance rule in the same picture: exactly the blocks here that hide something say so,
 // the targetless one among them now that it collapses like every other. A regression in any of
 // them changes this golden, and the golden doubles as the living example of what layout.md
@@ -2787,34 +2868,29 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"  ┝ TODO.md   1 - 408",
 		"  ┕ ISSUES.md 1 - 8",
 		"",
-		"✦ Run ▸",
+		"✦ Run ▶",
 		"  ┕ go test ./...",
-		"    ok   apogee/internal/tui     0.412s",
-		"    … +2 more lines",
+		"    +3 more lines",
 		"",
-		"✦ View Diff ▸",
+		"✦ View Diff ▶",
 		"  ┕ main.go +2 -2",
-		"      func main() {",
-		"    … +5 more lines",
+		"    +6 more lines",
 		"",
-		"✦ Edit File ▸",
+		"✦ Edit File ▶",
 		"  ┕ main.go replaced text in main.go",
-		"    - fmt.Println(\"old\")",
-		"    … +1 more line",
+		"    +2 more lines",
 		"",
-		"✦ Edit File ▸",
+		"✦ Edit File ▶",
 		"  ┕ main.go applied 1 replacement to main.go",
-		"    - return",
-		"    … +1 more line",
+		"    +2 more lines",
 		"",
-		"✦ Write File ▸",
+		"✦ Write File ▶",
 		"  ┕ notes.md +25 bytes",
-		"    + # Notes",
-		"    … +2 more lines",
+		"    +3 more lines",
 		"",
-		"✦ mcp_search ▸",
+		"✦ mcp_search ▶",
 		"  ┕ query:",
-		"    … +3 more lines",
+		"    +3 more lines",
 		"",
 		"· approval allow: terminal",
 		"",

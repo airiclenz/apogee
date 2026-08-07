@@ -41,7 +41,7 @@ var (
 	colFileRef = lipgloss.Color("#cdffa4") // the prompt's inline @file token accent — blue, the tone a reference reads as
 
 	colPromptToggle = lipgloss.Color("#b0d2ff") // the collapsed prompt's see-more / see-less marker — light gray-blue: an apogee affordance that reads as chrome inside the block, not as more of what the human wrote
-	colToolMarker   = lipgloss.Color("#8db4e6") // a tool block's synthesized "… +N more lines" remainder marker — colPromptToggle's cooler sibling: the same "apogee is talking" hue, kept its own role because the marker carries no background and no bold weight (it rides a body column, not a coloured field)
+	colToolMarker   = lipgloss.Color("#8db4e6") // a tool block's synthesized "+N more lines" remainder marker — colPromptToggle's cooler sibling: the same "apogee is talking" hue, kept its own role because the marker carries no background and no bold weight (it rides a body column, not a coloured field)
 
 	colGauge = lipgloss.Color("#c396ff") // context-fill gauge bar — periwinkle (llama-launcher look)
 
@@ -75,14 +75,16 @@ const (
 	glyphTableCross     = "┼" // U+253C LIGHT VERTICAL AND HORIZONTAL — where a horizontal rule crosses a column divider (mdtable.go); one cell wide in either method, like the divider it crosses
 )
 
-// The state indicator a tool header wears after its label, and its one purpose: saying which of
-// the two states the block is in — and, by being there at all, that the header is a click target
-// (layout.md, "Collapsed and expanded blocks"). A header with nothing to reveal wears neither.
-// The shape is the ▸/▾ pair the issue asked for; glyphModeAuto's doubled "▸▸" is a different
-// element in a different place and the two are deliberately not shared.
+// The state indicator a tool block wears — after the label on a header, at the block edge on a
+// group member — and its one purpose: saying which of the two states the block is in, and, by being
+// there at all, that the block is a click target (layout.md, "Collapsed and expanded blocks"). A
+// block with nothing to reveal wears neither. The shape is the ▶/▼ pair of the owner's sketch
+// (docs/layout/tool-layout.md), full-size rather than the small ▸/▾ these used to be: the indicator
+// is the transcript's one affordance and it reads at a glance. glyphModeAuto's doubled "▸▸" is a
+// different element in a different place and the two are deliberately not shared.
 const (
-	glyphCollapsed = "▸" // U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE — this block is collapsed: a click opens it
-	glyphExpanded  = "▾" // U+25BE BLACK DOWN-POINTING SMALL TRIANGLE — this block is expanded: a click closes it
+	glyphCollapsed = "▶" // U+25B6 BLACK RIGHT-POINTING TRIANGLE — this block is collapsed: a click opens it
+	glyphExpanded  = "▼" // U+25BC BLACK DOWN-POINTING TRIANGLE — this block is expanded: a click closes it
 )
 
 // The transcript scroll bar's two glyphs (renderScrollbar). They are one axis drawn in two
@@ -149,9 +151,9 @@ type theme struct {
 	promptToggle  lipgloss.Style // the see-more / see-less marker a long prompt block carries near its right edge (renderUserBlock): bold light gray-blue on the block's OWN dark-gray field, held a promptMarkerMargin off the edge, so the toggle reads as an affordance sitting inside the block rather than as another row of what the human wrote
 	toolHeader    lipgloss.Style // the ✦ Label target header
 	toolLabel     lipgloss.Style // the tool label inside that header (bold, orange — the colCode tone inline code and the auto-mode marker already carry)
-	toolIndicator lipgloss.Style // the ▸/▾ state indicator trailing that label where the header is a toggle target: the detail tone, deliberately NOT toolLabel's orange, so the affordance reads as chrome beside the label rather than as part of it
+	toolIndicator lipgloss.Style // the ▶/▼ state indicator trailing that label where the header is a toggle target: the detail tone, deliberately NOT toolLabel's orange, so the affordance reads as chrome beside the label rather than as part of it
 	toolDetail    lipgloss.Style // the ┝/┕ branch detail lines (dim)
-	toolMarker    lipgloss.Style // the synthesized "… +N more lines" remainder marker beneath a capped body: light gray-blue, no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "…" — the prompt block's see-more keeps the heavier promptToggle treatment
+	toolMarker    lipgloss.Style // the synthesized "+N more lines" remainder marker beneath a hidden body: light gray-blue, no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "+" — the prompt block's see-more keeps the heavier promptToggle treatment
 	subRail       lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (the toolLabel orange — one tone for the whole sub-agent frame)
 	skillAccent   lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
 	skillToken    lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)

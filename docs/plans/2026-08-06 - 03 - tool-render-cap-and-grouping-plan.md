@@ -111,7 +111,16 @@ tab-bearing text stay within width (mirror the probes in `paint_test.go`
 
 **Commit**: `feat(tui): add row-capped clip primitive for tool layout`
 
-## 2. Collapsed cap on targeted single blocks; ▶/▼; marker wording
+## 2. Collapsed cap on targeted single blocks; ▶/▼; marker wording — ✅ DONE (2026-08-07)
+
+NOTES (2026-08-07): `collapsedBodyCap` is retired from the TARGETED path only — the targetless
+branch list still spends it, that shape being item 3's to rebind ("up to 2 branch rows"); retiring it
+outright here would have meant doing item 3's work. The targeted body's own budget is the new named
+zero `collapsedBodyRows`. Test collateral beyond the named list: `TestFiringBlockCollapsesToThe
+AnswersFirstLine` is renamed `TestFiringBlockCollapsesToItsRemainderMarker` (its name stated the
+retired invariant), the running Firing now wears an indicator (a one-line body is hidden like any
+other), and `paintedDetailRows` (paint_test.go) expands its block so the per-line rune cap it probes
+still reaches the grid instead of measuring the new row budget.
 
 Depends on item 1.
 
