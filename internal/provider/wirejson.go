@@ -1,6 +1,9 @@
 package provider
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // This file holds the on-the-wire JSON structs — the literal OpenAI chat-completions
 // request/response schema — kept separate from the loop-facing seam types in wire.go.
@@ -74,6 +77,10 @@ type chatCompletionResponse struct {
 		FinishReason string        `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *usageJSON `json:"usage"`
+	// Error is the in-band failure member: present only when the server framed an upstream
+	// failure as an HTTP 200 (see wireError). Respond checks it before mapping choices,
+	// because a body carrying an error carries no usable choices either.
+	Error *wireError `json:"error"`
 }
 
 // logProbsJSON is the subset of OpenAI's per-choice logprobs payload the probe reads: for
@@ -116,6 +123,17 @@ func (e wireError) intCode() int {
 		return 0
 	}
 	return code
+}
+
+// render flattens the error member into one human-readable line: the message, plus the raw
+// metadata when the server sent any. The metadata is kept verbatim rather than picked apart
+// because its shape is provider-specific and it is often the only concrete detail in the
+// reply (OpenRouter's metadata.raw holds the originating provider's own error text).
+func (e wireError) render() string {
+	if len(e.Metadata) == 0 || string(e.Metadata) == "null" {
+		return e.Message
+	}
+	return fmt.Sprintf("%s (metadata: %s)", e.Message, e.Metadata)
 }
 
 // toRawResponse assembles the seam RawResponse from the first choice (the loop drives a

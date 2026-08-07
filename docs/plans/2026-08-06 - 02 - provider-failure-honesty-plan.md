@@ -84,7 +84,7 @@ existing SSE tests):
 
 **Commit:** `fix(provider): surface in-band upstream errors on streamed 200 replies`
 
-## 2. Parse in-band errors on the non-streaming path
+## 2. Parse in-band errors on the non-streaming path — ✅ DONE (2026-08-07)
 
 Depends on item 1 (reuses `wireError`).
 

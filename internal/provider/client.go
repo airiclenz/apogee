@@ -153,7 +153,8 @@ func (c *Client) activeModel() string {
 // Respond performs one non-streaming round-trip and assembles the reply. A non-2xx
 // status becomes an error (ErrContextOverflow for a 400 overflow, otherwise an
 // HTTP-status error with the body sanitised); transient faults are retried per the
-// Client's policy before the final error escapes.
+// Client's policy before the final error escapes. An HTTP 200 whose body carries an
+// in-band error member becomes the same kind of error, never an empty reply.
 func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) {
 	req.Stream = false
 	body, err := json.Marshal(c.buildBody(req))
@@ -175,6 +176,12 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 	var decoded chatCompletionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		return RawResponse{}, fmt.Errorf("apogee: decode response: %w", err)
+	}
+	if decoded.Error != nil {
+		// An aggregator can answer HTTP 200 and put the provider's failure in the body. It must
+		// not fall through to toRawResponse, which maps such a reply's zero choices to a silent
+		// zero RawResponse — the empty-reply masquerade this guard exists to stop.
+		return RawResponse{}, c.inBandError(*decoded.Error)
 	}
 	return decoded.toRawResponse(), nil
 }
@@ -261,6 +268,19 @@ func (c *Client) statusError(resp *http.Response) error {
 		return fmt.Errorf("%w: %s", ErrContextOverflow, text)
 	}
 	return &StatusError{Code: resp.StatusCode, Body: text}
+}
+
+// inBandError classifies an error member the server wrapped in an HTTP 200, mirroring
+// statusError so both framings of the same failure reach callers as the same error types:
+// a 400 overflow → ErrContextOverflow, anything else → a *StatusError. A non-numeric code
+// yields Code 0 — the sanitised body carries the truth in that case.
+func (c *Client) inBandError(werr wireError) error {
+	code := werr.intCode()
+	text := c.sanitize(werr.render())
+	if code == http.StatusBadRequest && isContextOverflow(werr.Message) {
+		return fmt.Errorf("%w: %s", ErrContextOverflow, text)
+	}
+	return &StatusError{Code: code, Body: text}
 }
 
 // buildBody projects a Request onto the OpenAI chat-completions JSON body, faithfully to

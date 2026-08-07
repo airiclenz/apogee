@@ -3,9 +3,11 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -110,6 +112,106 @@ func TestRespond_NoChoicesIsZeroValue(t *testing.T) {
 	}
 	if got.Content != "" || got.FinishReason != "" || len(got.ToolCalls) != 0 || got.Usage != (Usage{}) {
 		t.Errorf("RawResponse = %+v, want zero value", got)
+	}
+}
+
+// TestRespond_InBandErrorSurfaces covers the aggregator failure mode this guard exists for:
+// an HTTP 200 whose body carries an error member and no usable choices. Without it the reply
+// decodes to a zero RawResponse and the failure masquerades as a successful empty turn.
+func TestRespond_InBandErrorSurfaces(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		body         string
+		wantOverflow bool
+		wantCode     int
+		wantContains []string
+	}{
+		{
+			name:         "rate limited with provider metadata",
+			body:         `{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"temporarily rate-limited upstream"}}}`,
+			wantCode:     429,
+			wantContains: []string{"Provider returned error", "rate-limited upstream"},
+		},
+		{
+			name:         "context overflow",
+			body:         `{"error":{"message":"This model's maximum context length is 8192 tokens","code":400}}`,
+			wantOverflow: true,
+			wantContains: []string{"maximum context length"},
+		},
+		{
+			name:         "non-numeric code still surfaces",
+			body:         `{"error":{"message":"rate limited","code":"rate_limit_exceeded"}}`,
+			wantCode:     0,
+			wantContains: []string{"rate limited"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+
+			got, err := NewClient(srv.URL, "m").Respond(context.Background(), Request{})
+			if err == nil {
+				t.Fatalf("Respond returned no error; RawResponse = %+v", got)
+			}
+			if got.Content != "" || got.FinishReason != "" || len(got.ToolCalls) != 0 {
+				t.Errorf("RawResponse = %+v, want the zero value alongside the error", got)
+			}
+
+			if tc.wantOverflow {
+				if !errors.Is(err, ErrContextOverflow) {
+					t.Errorf("error = %v, want it to wrap ErrContextOverflow", err)
+				}
+			} else {
+				var statusErr *StatusError
+				if !errors.As(err, &statusErr) {
+					t.Fatalf("error = %v (%T), want a *StatusError", err, err)
+				}
+				if statusErr.Code != tc.wantCode {
+					t.Errorf("StatusError.Code = %d, want %d", statusErr.Code, tc.wantCode)
+				}
+				for _, want := range tc.wantContains {
+					if !strings.Contains(statusErr.Body, want) {
+						t.Errorf("StatusError.Body = %q, want it to contain %q", statusErr.Body, want)
+					}
+				}
+			}
+			for _, want := range tc.wantContains {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q, want it to contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// TestRespond_InBandErrorRedactsAPIKey proves the surfaced body goes through the same
+// sanitiser as the non-2xx path — a server that echoes the key must not leak it into an error.
+func TestRespond_InBandErrorRedactsAPIKey(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"error":{"message":"bad key sk-secret-123","code":401}}`)
+	}))
+	defer srv.Close()
+
+	_, err := NewClient(srv.URL, "m", WithAPIKey("sk-secret-123")).Respond(context.Background(), Request{})
+	if err == nil {
+		t.Fatal("Respond returned no error, want a *StatusError")
+	}
+	if strings.Contains(err.Error(), "sk-secret-123") {
+		t.Errorf("error = %q leaks the API key", err)
+	}
+	if !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Errorf("error = %q, want the key redacted", err)
 	}
 }
 
