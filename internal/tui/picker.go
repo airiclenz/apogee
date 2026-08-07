@@ -776,10 +776,51 @@ func rowMatchesFilter(row popupRow, filter string) bool {
 // Rendering
 // ----------------------------------------------------------------------------
 
+// pickerFilterLead labels the line the overlay's filter is typed on. It is a LABEL rather than
+// prose, so the pane paints it as one (popupSpec.bodyLead, the /settings header's own idiom): the
+// eye finds the live line by its label and reads the human's own text after it.
+const pickerFilterLead = "filter: "
+
+// pickerFilterCursor closes that line. A block where the next keystroke will land, because the real
+// caret is in the prompt box below and stays there (the filter lives in the overlay's own state, not
+// in the editor): without it the line reads as a finished caption rather than as something being
+// typed. U+258C LEFT HALF BLOCK — one cell in either width method, like every other glyph the frame
+// measures (theme.go).
+const pickerFilterCursor = "▌"
+
+// pickerFilterLine is what the pane shows of the filter — "filter: qwen▌" — or nothing at all while
+// the filter is empty, which is what makes the line's presence the fact that filtering is happening.
+// The text is the human's own keystrokes rather than a foreign string, but it reaches the popup
+// module as BODY and that contract takes body escape-stripped (popup.go), so it is stripped here
+// like every other cell this file composes.
+func (m Model) pickerFilterLine() string {
+	if m.picker.filter == "" {
+		return ""
+	}
+	return pickerFilterLead + stripEscapes(m.picker.filter) + pickerFilterCursor
+}
+
 // renderPicker paints the open picker through the shared popup module (renderPopup): a titled,
 // bordered pane spanning the full window width (m.width, flush with the input box below) holding the
 // rows and a key legend, the selected row highlighted. It returns "" when the picker is closed, so
 // View treats it exactly like the /sessions browser's slot.
+//
+// While a filter is being typed the pane grows one line for it, set off by a blank line at each end
+// (ratified 2026-08-06 — "not all bunched up"). All three lines are the module's BODY block, which
+// sits between the title and the rows and drops away entirely when the filter is empty: the text is
+// the body, and BOTH blanks are the body's own pads (popupSpec.bodyPadAbove, bodyPadBelow) rather
+// than one pad per neighbouring block. The lower blank has to belong to the body because the row
+// block's pads are spent out of the ROW window — and an offering longer than maxPickerRows fills that
+// window by definition, so a pad owned by the rows would be dropped exactly on the roomy terminals
+// where the pane has lines to spare, and dropped by taking a NINTH row past the pane's own taste.
+//
+// All three lines are BUDGETED and not merely drawn: the claim stated here is the wrapped filter line
+// plus its two blanks (popupFloor.body), so the pane paints what it asked the frame for. The claim is
+// also what decides the trade on a window too short for everything — it comes off the top of the
+// grant, so the ROWS shrink and the filter line stays. That is the right way round for the one line
+// the human is actively typing: a list you cannot see all of is still being narrowed, while a filter
+// you cannot see is a pane that has stopped explaining itself. The row demand and the row cap are
+// untouched by any of it — maxPickerRows rows is the taste with a filter open exactly as without.
 func (m Model) renderPicker() string {
 	if !m.picker.open {
 		return ""
@@ -789,18 +830,28 @@ func (m Model) renderPicker() string {
 	if len(rows) > 0 {
 		selected = clampInt(m.picker.selected, 0, len(rows)-1)
 	}
+	filter := m.pickerFilterLine()
+	claim := popupFloor{}
+	if filter != "" {
+		claim.body = popupBodyLineCount(m.th, filter, m.width) + popupBodyPadLines(true, true)
+	}
 	// maxPickerRows is the taste; popupBudget is the screen's answer to it, so a long offering on a
 	// short terminal shrinks the pane instead of pushing the input box off the frame (D2).
-	_, shown, seated := m.popupBudget(panePicker, len(rows), maxPickerRows, popupChrome, popupFloor{})
+	maxBody, shown, seated := m.popupBudget(panePicker, len(rows), maxPickerRows, popupChrome, claim)
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
 	return renderPopup(m.th, popupSpec{
-		title:    m.pickerTitle(),
-		rows:     rows,
-		selected: selected,
-		hint:     pickerHintFor(m.picker.kind),
-		maxRows:  shown,
+		title:        m.pickerTitle(),
+		body:         filter,
+		bodyLead:     pickerFilterLead,
+		maxBodyRows:  maxBody,
+		bodyPadAbove: filter != "",
+		bodyPadBelow: filter != "",
+		rows:         rows,
+		selected:     selected,
+		hint:         pickerHintFor(m.picker.kind),
+		maxRows:      shown,
 	}, m.width)
 }
 

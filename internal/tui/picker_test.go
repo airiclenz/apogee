@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -1707,5 +1708,228 @@ func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
 		if got := pickerHintFor(kind); !strings.HasPrefix(got, "type to filter · ") {
 			t.Errorf("pickerHintFor(%v) = %q, want the leading filter segment", kind, got)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Painting the filter — the line and its breathing room
+// ----------------------------------------------------------------------------
+
+// pickerPaneLines is the open picker's pane as a human reads it: the box's own two border lines
+// dropped and every line between them stripped of its styling and its border/padding chrome — so a
+// spacer line arrives as "" and a content line as its own text.
+func pickerPaneLines(t *testing.T, m Model) []string {
+	t.Helper()
+	pane := m.renderPicker()
+	if pane == "" {
+		t.Fatal("the open picker painted nothing")
+	}
+	lines := popupLines(pane)
+	if len(lines) < 2 {
+		t.Fatalf("the pane is %d lines, want at least its two borders: %q", len(lines), lines)
+	}
+	out := make([]string, 0, len(lines)-2)
+	for _, ln := range lines[1 : len(lines)-1] {
+		out = append(out, popupInterior(ln))
+	}
+	return out
+}
+
+// pickerFilterRow is where the filter line sits among a pane's interior lines, or −1 when the pane
+// is painting none.
+func pickerFilterRow(lines []string) int {
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, pickerFilterLead) {
+			return i
+		}
+	}
+	return -1
+}
+
+// The filter line appears only while there IS a filter, and when it appears it is a line of its own:
+// under the title, one blank line above it and one below, with the surviving rows after that. An
+// unfiltered pane spends nothing on any of it — no line, no spacers — so the rows sit exactly where
+// they always did.
+func TestPickerPaintsTheFilterLineWithBreathingRoom(t *testing.T) {
+	m, _ := seededPicker(t, testOpts)
+	m = foldBeatMsg(t, m, threeModelBeat())
+	m, _ = typeCommand(t, m, "/model")
+
+	unfiltered := pickerPaneLines(t, m)
+	if at := pickerFilterRow(unfiltered); at >= 0 {
+		t.Errorf("an empty filter still painted a line at %d: %q", at, unfiltered)
+	}
+	for i, ln := range unfiltered {
+		if ln == "" {
+			t.Errorf("line %d is blank: an unfiltered pane spends no spacer on a line it has not got: %q",
+				i, unfiltered)
+		}
+	}
+
+	m = typeFilter(t, m, "third")
+
+	lines := pickerPaneLines(t, m)
+	at := pickerFilterRow(lines)
+	if at < 0 {
+		t.Fatalf("no filter line in the pane: %q", lines)
+	}
+	if got, want := lines[at], pickerFilterLead+"third"+pickerFilterCursor; got != want {
+		t.Errorf("filter line = %q, want %q — the label, the typed text and the cursor", got, want)
+	}
+	if at < 2 || lines[at-1] != "" || !strings.Contains(lines[at-2], m.pickerTitle()) {
+		t.Errorf("the filter line at %d wants a blank line above it and the title above that: %q", at, lines)
+	}
+	if at+1 >= len(lines) || lines[at+1] != "" {
+		t.Errorf("the filter line at %d wants a blank line below it: %q", at, lines)
+	}
+	if at+2 >= len(lines) || !strings.Contains(lines[at+2], "third-model") {
+		t.Errorf("the surviving row does not follow the filter line's spacer: %q", lines)
+	}
+}
+
+// A filter matching nothing keeps the pane OPEN and keeps saying what is being filtered: title,
+// filter line, no rows and no highlight. The visible filter over an empty list is the whole message —
+// there is no "no matches" prose row, and backspace is the way back.
+func TestPickerZeroMatchesPaintsTheFilterOverNoRows(t *testing.T) {
+	m, _ := seededPicker(t, testOpts)
+	m = foldBeatMsg(t, m, threeModelBeat())
+	m, _ = typeCommand(t, m, "/model")
+
+	m = typeFilter(t, m, "zzz")
+
+	if got := m.pickerCount(); got != 0 {
+		t.Fatalf("precondition: count = %d, want a filter that matches nothing", got)
+	}
+	lines := pickerPaneLines(t, m)
+	if at := pickerFilterRow(lines); at < 0 {
+		t.Errorf("the zero-match pane dropped the filter line: %q", lines)
+	}
+	if !strings.Contains(lines[0], m.pickerTitle()) {
+		t.Errorf("title line = %q, want the pane still naming itself", lines[0])
+	}
+	if got := lines[len(lines)-1]; got != pickerHint {
+		t.Errorf("hint line = %q, want %q", got, pickerHint)
+	}
+	for _, ln := range lines {
+		if strings.Contains(ln, "-model") {
+			t.Errorf("a row survived a filter matching nothing: %q", ln)
+		}
+	}
+	if strings.Contains(m.renderPicker(), glyphUser) {
+		t.Error("a pane with no rows drew a selection marker; there is nothing to highlight")
+	}
+}
+
+// manyModelBeat is a server advertising more models than a short window can seat: eight rows once
+// the bound model is excluded, every one of them on the same stem so a filter that keeps ALL of them
+// isolates the only other thing that can shrink the list — the frame's own row budget.
+func manyModelBeat() heartbeat.Beat {
+	return offerBeat("test-model", 32768,
+		heartbeat.ModelSummary{ID: "test-model", ContextWindow: 32768},
+		heartbeat.ModelSummary{ID: "alpha-01", ContextWindow: 8192},
+		heartbeat.ModelSummary{ID: "alpha-02", ContextWindow: 8192},
+		heartbeat.ModelSummary{ID: "alpha-03", ContextWindow: 8192},
+		heartbeat.ModelSummary{ID: "alpha-04", ContextWindow: 8192},
+		heartbeat.ModelSummary{ID: "alpha-05", ContextWindow: 8192},
+		heartbeat.ModelSummary{ID: "alpha-06", ContextWindow: 8192},
+		heartbeat.ModelSummary{ID: "alpha-07", ContextWindow: 8192},
+		heartbeat.ModelSummary{ID: "alpha-08", ContextWindow: 8192},
+	)
+}
+
+// On a window too short for everything, the ROWS give way and the filter line stays: the list is
+// still being narrowed while you cannot see all of it, but a filter you cannot see is a pane that has
+// stopped explaining itself. The pane still fits the rows the frame granted it — the two blank lines
+// are budgeted, not merely drawn.
+func TestPickerShortWindowGivesUpRowsBeforeTheFilterLine(t *testing.T) {
+	m, _ := seededPicker(t, testOpts)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = foldBeatMsg(t, m, manyModelBeat())
+	m, _ = typeCommand(t, m, "/model")
+
+	painted := func(m Model) int {
+		t.Helper()
+		rows := 0
+		for _, ln := range pickerPaneLines(t, m) {
+			if strings.Contains(ln, "alpha-0") {
+				rows++
+			}
+		}
+		return rows
+	}
+	before := painted(m)
+	if before == 0 || before >= m.pickerCount() {
+		t.Fatalf("precondition: the window seats %d of %d rows, want one that already crops the offering",
+			before, m.pickerCount())
+	}
+
+	m = typeFilter(t, m, "alpha")
+
+	if got := m.pickerCount(); got != 8 {
+		t.Fatalf("count = %d, want the filter to have pruned nothing — only the budget may shrink the list", got)
+	}
+	lines := pickerPaneLines(t, m)
+	if at := pickerFilterRow(lines); at < 0 {
+		t.Fatalf("the short window dropped the filter line rather than a row: %q", lines)
+	}
+	if after := painted(m); after >= before {
+		t.Errorf("rows painted = %d, want fewer than the %d an unfiltered pane showed here", after, before)
+	}
+	granted := m.frameRowPlan(m.openPanes().with(panePicker)).panes[panePicker]
+	if got := len(popupLines(m.renderPicker())); got > granted {
+		t.Errorf("the pane is %d rows tall, want no more than the %d the frame granted it", got, granted)
+	}
+}
+
+// longOfferingBeat is a server advertising n models on one stem beside the bound one — the offering
+// this feature exists for, longer than the pane's own taste however roomy the terminal is.
+func longOfferingBeat(n int) heartbeat.Beat {
+	models := []heartbeat.ModelSummary{{ID: "test-model", ContextWindow: 32768}}
+	for i := 1; i <= n; i++ {
+		models = append(models, heartbeat.ModelSummary{ID: fmt.Sprintf("alpha-%02d", i), ContextWindow: 8192})
+	}
+	return offerBeat("test-model", 32768, models...)
+}
+
+// The spacers come out of the FILTER LINE's own budget and never out of the rows', which is the case
+// a roomy window puts the question to: forty models, a filter every one of them survives, and lines
+// to spare. A pane that paid for its lower blank in rows would have nothing left over to pay with —
+// an offering longer than the taste fills its window by definition — so it would take a ninth row and
+// drop the blank exactly where the pane could most afford it. maxPickerRows rows, both spacers.
+func TestPickerRoomyWindowKeepsTheRowTasteAndBothSpacers(t *testing.T) {
+	m, _ := seededPicker(t, testOpts)
+	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 50})
+	m = foldBeatMsg(t, m, longOfferingBeat(40))
+	m, _ = typeCommand(t, m, "/model")
+
+	m = typeFilter(t, m, "alpha")
+
+	if got := m.pickerCount(); got != 40 {
+		t.Fatalf("count = %d, want a filter every one of the forty rows survives", got)
+	}
+	lines := pickerPaneLines(t, m)
+	painted := 0
+	for _, ln := range lines {
+		if strings.Contains(ln, "alpha-") {
+			painted++
+		}
+	}
+	if painted != maxPickerRows {
+		t.Errorf("rows painted = %d, want the taste of %d — the filter line may not buy itself a row",
+			painted, maxPickerRows)
+	}
+	at := pickerFilterRow(lines)
+	if at < 0 {
+		t.Fatalf("no filter line in the pane: %q", lines)
+	}
+	if at < 2 || lines[at-1] != "" {
+		t.Errorf("the filter line at %d wants a blank line above it: %q", at, lines)
+	}
+	if at+1 >= len(lines) || lines[at+1] != "" {
+		t.Errorf("the filter line at %d wants a blank line below it: %q", at, lines)
+	}
+	granted := m.frameRowPlan(m.openPanes().with(panePicker)).panes[panePicker]
+	if got := len(popupLines(m.renderPicker())); got > granted {
+		t.Errorf("the pane is %d rows tall, want no more than the %d the frame granted it", got, granted)
 	}
 }

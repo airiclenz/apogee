@@ -68,9 +68,21 @@ them, covered by `TestPickerCycleAcceptClearsTheFilter`. No other partial reset 
 
 **Commit:** `feat(tui): type-to-filter in the picker overlay`
 
-## 3. Picker rendering — the filter line with breathing room
+## 3. Picker rendering — the filter line with breathing room — ✅ DONE (2026-08-07)
 
 Depends on item 1.
+
+NOTES (2026-08-07): BOTH spacers are the body block's own, which is the popup extension the item
+allowed: `popupSpec.bodyPadAbove` plus a `bodyPadBelow` counterpart, drawn out of what the body's own
+budget left over (`popupBodyPad`/`popupBodyPadLines`, documented in the contract header). The lower
+one could not be the row block's existing `rowPadAbove`: a row pad is spent out of the ROW window, and
+an offering longer than `maxPickerRows` fills that window by definition, so the pad would be dropped
+exactly on the roomy terminals with lines to spare — and dropped by painting a NINTH row past the
+pane's taste. Owned by the body, the pair costs the filter line's own claim three lines instead of
+one, the picker's row demand and row cap stay `maxPickerRows` untouched, and the blanks survive
+wherever the filter line does, the zero-match pane included. They give way — as a pair, the row
+block's rule — only on a window whose grant cannot pay for the line and both blanks; the filter line
+and the rows themselves are never what gives way.
 
 **What:** `renderPicker` (`internal/tui/picker.go`) composes a `filter: <text>▌` line, shown only while the filter is non-empty, under the title and set off by one blank line above and one below (ratified call 4). Prefer the popup module's existing slots — the `body` field (drops when empty) plus the padding flags — and extend `popupSpec` minimally in `internal/tui/popup.go` (e.g. one additional pad flag) only if the exact visual cannot be met with the existing ones; any extension follows the popup contract header's style and is documented there. Budget honestly: the filter line and its spacers count toward the pane's height in the `popupBudget` call so a short window never overflows, and on windows too short for everything the pane gives up ROWS before it gives up the filter line — the filter is the thing being typed and must stay visible (use the `popupFloor` mechanics). Zero-match renders per author binding B: pane open, filter line visible, zero rows, no highlight.
 

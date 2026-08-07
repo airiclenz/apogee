@@ -68,7 +68,10 @@ import (
 //     shape — a `name:` line with its value's own lines indented beneath it — and the blank
 //     separators survive), each segment is word-wrapped to the inner budget,
 //     and the flattened block is capped at spec.maxBodyRows — negative = uncapped, ZERO = no body
-//     rows at all, the same sense maxRows carries. Its first line may open with a LABEL
+//     rows at all, the same sense maxRows carries. popupSpec.bodyPadAbove/bodyPadBelow set one blank
+//     line above the block and one below it, drawn — like the pad around the row block — out of the
+//     lines the block's OWN budget left over, so the blanks give way before a line of prose does.
+//     Its first line may open with a LABEL
 //     (popupSpec.bodyLead) the module paints as a heading, which is the one styled run inside a
 //     block that is otherwise prose. Past a positive cap the last row becomes an explicit faint
 //     "… (+N more lines)" marker counting the hidden lines, so the body never
@@ -263,6 +266,22 @@ const (
 // Either pad is drawn only out of the lines the seated rows LEFT OVER (popupRowLines), so it never
 // pushes an option out of the window: a short pane loses its breathing room rather than a decision.
 //
+// bodyPadAbove and bodyPadBelow are those same blank lines one block up: they set the BODY off what
+// stands above and below it, for a pane whose body is neither a caption nor the thing being decided
+// about but a live line of its own — the picker's filter, the text the human is typing while the rows
+// move under it (picker.go). A line being typed reads as part of the heading when it sits flush
+// against it and as the first row of the list when the rows sit flush under it, so the two blanks
+// together are what make it a line rather than a second title.
+//
+// BOTH ends belong to the body and not one to each neighbour, which is the difference that matters
+// for the budget: the row block's pads are spent out of the ROW window, so a lower blank owned by the
+// rows would be paid for in rows — an offering longer than the pane's taste always fills its window,
+// leaving nothing over, and the pad would vanish exactly where the pane has the most room. Owned
+// here, the pair is drawn out of what the BODY's budget left over (popupBodyPad) — the one line of
+// filter text costs three, and the rows keep their taste — and it is dropped whole rather than by
+// halves, the row block's rule (popupRowLines): a body that keeps one blank and loses the other has
+// moved rather than tightened. The pane still gives up the breathing room before it gives up the text.
+//
 // rowKinds says what each row IS where that changes how it is painted (popupRowKind) — a section
 // header, a row being edited — parallel to rows, and short or nil for a pane whose rows are all
 // content, which is every pane but /settings. It is a list rather than a flag pair because the fact
@@ -284,6 +303,8 @@ type popupSpec struct {
 	body          string
 	bodyLead      string
 	maxBodyRows   int
+	bodyPadAbove  bool
+	bodyPadBelow  bool
 	rows          []popupRow
 	rowKinds      []popupRowKind
 	menuRows      bool
@@ -389,6 +410,11 @@ func renderPopupPlaced(th theme, spec popupSpec, width int) (string, popupPlacem
 	}
 
 	title := popupTitleLine(th, popupHeading(spec, body, hiddenBody), hidden, inner)
+
+	// The pad the body asks for is added AFTER the two reads above, because both of them are about the
+	// body's own LINES — what it could not show, and whether it is still showing enough of itself to
+	// name the pane — and a blank line is neither prose shown nor prose hidden.
+	body = popupBodyPad(body, spec.bodyPadAbove, spec.bodyPadBelow, spec.maxBodyRows)
 
 	lines := make([]string, 0, len(body)+len(block.lines)+2) //nolint:mnd // +2: the optional title and hint rows
 	if title != "" && !spec.titleInBorder {
@@ -992,6 +1018,47 @@ func popupBodyLines(th theme, body, lead string, maxBodyRows, inner int, blackFi
 		out = append(out, blackFill.Render(th.statusFaint.Render(truncateToWidth(th, marker, inner))))
 	}
 	return out, hidden
+}
+
+// popupBodyPad sets the composed body block one blank line off what stands above and below it, at
+// whichever ends the spec asks for (popupSpec.bodyPadAbove, bodyPadBelow). The blanks are spent LAST
+// and out of what the block's own budget LEFT OVER — the row block's rule (popupRowLines) one block
+// up — so a pane whose body filled its whole grant keeps the text and loses the breathing room: a
+// blank line may never cost a line of the very thing it was drawn to set off. A spec asking for both
+// gets both or neither, for the reason the row block drops its pair together: half a pad moves the
+// block instead of tightening it. An empty block gets no pad at all, for the reason an empty row list
+// gets none (popupRowBlockLines): there is nothing for a blank line to stand around.
+func popupBodyPad(body []string, padAbove, padBelow bool, maxBodyRows int) []string {
+	pad := popupBodyPadLines(padAbove, padBelow)
+	if pad == 0 || len(body) == 0 || (maxBodyRows >= 0 && len(body)+pad > maxBodyRows) {
+		return body
+	}
+	out := make([]string, 0, len(body)+pad)
+	if padAbove {
+		out = append(out, "")
+	}
+	out = append(out, body...)
+	if padBelow {
+		out = append(out, "")
+	}
+	return out
+}
+
+// popupBodyPadLines is what popupSpec.bodyPadAbove/bodyPadBelow cost the BODY budget: one line per
+// padded END of the block. It is popupRowPadLines' counterpart on the body side and exists for the
+// same reason — the painter draws the pads and the CALLER has to claim room for them
+// (popupFloor.body, [Model.popupBudget]), and a pane claiming one figure and painting another is the
+// overflow the line accounting exists to prevent. Callers state the same two flags here that they set
+// on their popupSpec.
+func popupBodyPadLines(above, below bool) int {
+	lines := 0
+	if above {
+		lines++
+	}
+	if below {
+		lines++
+	}
+	return lines
 }
 
 // popupBodyLeadLine styles a body line whose front is a LABEL (popupSpec.bodyLead): the label as a
