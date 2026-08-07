@@ -501,6 +501,24 @@ every 8, so DECST8C is a no-op on all three terminals. No layout mitigation was 
 filed upstream, and `internal/tui/` was not touched. **The item stays open**, still gated on command
 2 of the run sheet.
 
+NOTES (2026-08-07, fourth pass): the owner ran command 2 — the gate — and **the post-item-5 build
+still ghosts in Windows Terminal, the default activity spinner included** (finding 32). On that
+result the owner funded the ranked list's top entry, the mode-2026 A/B, and authorized the sixth
+`APOGEE_DBG_*` kit flag it needs. `APOGEE_DBG_NO_SYNC` was added to `bubbletea-dbg/` and documented
+alongside the other five, `apogee-dbg.exe` was rebuilt from this commit, and the A/B's *mechanics*
+were measured end to end in the headless pseudoconsole (findings 33-34). Two deviations from the
+item's literal text, both recorded here because that text predates the reopened diagnosis:
+(a) **nothing was landed in `internal/`.** The A/B's visual half is an owner run by definition, so the
+diagnosis is not closed and the fix finding 34 points at is not written. That fix *is* layout-neutral,
+so if the owner's A/B comes back positive it can be landed without revisiting the layout
+authorization.
+(b) **no seventh flag.** Finding 33 shows the A/B varies two things at apogee's layer, which would
+normally need a second flag to separate them, but finding 34 measures ConPTY collapsing the second one
+away before it reaches any emulator, so the extra flag would have bought nothing. The reasoning is
+written down instead of the code.
+No layout change, nothing filed upstream, `internal/` untouched, and finding 28's stale
+"left untracked in the repo root" is corrected in passing. **The item stays open.**
+
 Depends on items 4 and 5.
 
 **Q:** After item 5, does the ghosting survive — and if so, does the fix belong upstream, in a
@@ -855,10 +873,14 @@ are directly comparable. Both runs streamed the same prompt. Geometry 120 column
 **Finding 18 — a third, previously unnoticed divergence: synchronized output.** In Windows Terminal
 1123 of 1125 writes are wrapped in `CSI ?2026h` … `CSI ?2026l`. In conhost the count is **zero** —
 it falls back to `CSI ?25l` / `CSI ?25h` around each frame instead. Like mode 2027, this is
-negotiated by `DECRQM` and differs per path, and unlike the other knobs the kit has no flag for it.
+negotiated by `DECRQM` and differs per path, and unlike the other knobs the kit had no flag for it
+(**one was added 2026-08-07 — `APOGEE_DBG_NO_SYNC`, findings 33-35**).
 It is recorded because it was invisible to the whole hypothesis list, **but the replay below shows
 it is not the cause**: mode 2026 is a batching hint that changes when cells are presented, not which
-cells are written, and the stream is correct with or without it.
+cells are written, and the stream is correct with or without it. **Read that dismissal narrowly.**
+Finding 35 confirms the cells are unchanged, and finding 34 explains why; what neither the replay
+here nor the one there can see is *presentation*, which is the only thing mode 2026 controls. The
+hypothesis is live again and it is the one the owner's A/B tests.
 
 **The decisive test — replay apogee's own bytes through a virtual terminal.** The trace holds
 exactly what the renderer emitted, so the question "is the emitted stream right?" can be answered
@@ -1129,9 +1151,10 @@ in how Windows Terminal or xterm.js consumes ConPTY's re-emission, not in ConPTY
 
 The previous pass ended by asking for one thing: `apogee probe terminal`, run by the owner in the
 three terminals of item 4 row 1, with the `last-column wrap` section as the discriminator. The owner
-ran it. The raw captures are `windows-terminal-proble-results.md` (Windows Terminal and VS Code, as
-text) and `windows-terminal-probe-conhost.png` (conhost, a screenshot), left untracked in the repo
-root; everything load-bearing in them is transcribed below.
+ran it. The raw captures were `windows-terminal-proble-results.md` (Windows Terminal and VS Code, as
+text) and `windows-terminal-probe-conhost.png` (conhost, a screenshot), dropped untracked in the repo
+root and **deleted by the owner on 2026-08-07 once they had been transcribed**. Everything
+load-bearing in them is transcribed below; no agent lost them and nothing is missing.
 
 Two properties of the instrument have to be read before the numbers are:
 
@@ -1224,15 +1247,135 @@ environment, and it is evidence *for* item 5 rather than against it.** All three
 discriminate and it has come back with no discriminating row at all — which is itself the finding,
 because it retires the last hypothesis on the H1-H4 list that was still standing as a cause.
 
-## Item 6 — WHERE IT STANDS (still open, and the diagnosis is reopened)
+## Item 6 findings — the gate, and the mode-2026 A/B (2026-08-07)
 
-**The design call still cannot be answered, but for a different and better reason than last pass.**
-Last pass the branches were unproven. This pass the branch item 4 selected is *disproven*: the wrap
-is deferred on the paths that ghost (finding 28), so the primary cause item 4 named is not the cause,
-and the two actions item 6's H1 bullet prescribes — an `ultraviolet` issue and the one-column-short
-mitigation — both address a defect that has now been measured absent.
+**Finding 32 — THE GATE, run by the owner: the post-item-5 build STILL GHOSTS in Windows Terminal,
+and the default activity spinner ghosts with it.** Item 4 row 1, stock binary, no debug kit, no
+flags — the run the previous pass named as the condition on everything else. Two things come out of
+it, and the second was not previously on record anywhere in this plan:
 
-What is established, after two passes:
+- **Item 5 is not the fix.** Finding 23 predicted this on mechanism (item 5 removes the amplifier of
+  a *column* error; the artifact needs a *row* error) and the gate confirms it by eye. Item 5 keeps
+  its own justification (finding 22) and loses nothing else.
+- **The spinner ghosts, and that is a hard constraint on every surviving hypothesis.** The default
+  activity spinner is a **small, localised, low-content repaint**: a couple of cells inside the
+  status line, no long lines, no wrapped rows, no scroll, no streaming volume. Any explanation that
+  needs long lines, full-width writes, the last column, or a heavy write count **cannot be right**,
+  because the ghost appears without any of them. Read together with findings 19 and 28 — apogee's
+  bytes are correct for the deferred semantics the ghosting terminals were measured to have — what
+  survives is a fault that is **per-frame rather than per-content**, and that is triggered
+  downstream of apogee's byte stream. The remaining candidates have to be properties every frame
+  carries, however small the frame is.
+
+**Finding 33 — the sixth kit flag exists and works, and the A/B varies exactly two things at
+apogee's layer.** `APOGEE_DBG_NO_SYNC=1` was added to `bubbletea-dbg/` in the shape of the other
+five: one line in the `zz_apogee_debug.go` header table, one guard in `tea.go`'s
+`case ansi.ModeSynchronizedOutput:` that logs and `break`s before `setSyncdUpdates(true)`, mirroring
+`APOGEE_DBG_NO_GRAPHEME`'s guard in the sibling `case`. `apogee-dbg.exe` was rebuilt from this
+commit (post-item-5), not from `25ea817`. Both arms ran in `conptyrun` at 120×30 against
+`--resume …155434Z-b82d2800.json` with an identical scripted keyboard. The system pseudoconsole
+answers `not recognized (0)` to `DECRQM 2026` (finding 27), so the harness **injects the reply**
+`CSI ?2026;2$y` on the child's input three seconds in; the `APOGEE_DBG_LOG` confirms bubbletea
+received it as `value=2` in both arms, and honoured it in one:
+
+| Run | mode-2026 report | writes | `?2026h` | `?2026l` | `?25l` | `?25h` |
+|---|---|---|---|---|---|---|
+| A — flag unset | `value=2` → `setSyncdUpdates(true)` | 6 | 2 | 2 | 1 | 2 |
+| B — `APOGEE_DBG_NO_SYNC=1` | `value=2` → `IGNORED` | 6 | **0** | **0** | 3 | 4 |
+
+Diffing the two traces write-for-write, the entire difference is one substitution on the two
+steady-state frames, with the frame bytes between the wrappers **byte-identical**:
+
+```
+A: "\x1b[?2026h\x1b[48;2;0;0;0mhi\x1b[58X\x1b[m\x1b[?2026l"
+B: "\x1b[?25l\x1b[48;2;0;0;0mhi\x1b[58X\x1b[m\x1b[?25h"
+```
+
+So the A/B is not a one-variable test at apogee's layer. It swaps an atomic-frame hint for cursor
+hiding, because `cursed_renderer.go:526-556` treats the two as alternatives: with synchronized
+updates on, `shouldUpdateCursorVis` is false in steady state and **the cursor is never hidden while
+the renderer repositions it and writes cells**; with them off, every frame that has updates and a
+visible cursor is wrapped in `CSI ?25l` … `CSI ?25h`. That second half is a per-path divergence in
+its own right — **Windows Terminal paints with the cursor live and conhost does not** — which
+finding 18 recorded as a one-clause aside ("it falls back to `CSI ?25l` / `CSI ?25h` instead")
+without drawing out that it is a second behavioural difference riding the same switch. Finding 34 is
+what stops it from spoiling the experiment.
+
+**Finding 34 — ConPTY does not preserve the synchronized window. It forwards `BSU`/`ESU` as an
+immediately-closed EMPTY pair and re-serializes the frame's cells outside it.** Both arms' captures
+are the pseudoconsole's re-serialized output — what a downstream emulator actually receives. They
+are **9260 and 9228 bytes**, and deleting the literal string `ESC[?2026h ESC[?2026l` from the first
+makes the two **byte-identical**: 2 pairs, 16 bytes each, 32 bytes, nothing else. The order is
+visible in the bytes (spaces added between the sequences for readability; there are none in the
+capture):
+
+```
+… \x1b[27;3H \x1b[?25h \x1b[?2026h \x1b[?2026l \x1b[m\x1b[48;2;0;0;0mhi\x1b[58X\x1b[m \x1b[?2026h \x1b[?2026l \x1b[?25l …
+      (1)        (2)        (3)         (4)                    (5)                        (6)         (7)        (8)
+```
+
+(3) and (4) are apogee's `BSU`/`ESU` for the frame whose cells are (5) — forwarded back to back with
+nothing between them, and closed **before** the content they were meant to enclose is re-serialized.
+(6) and (7) are the same thing for the next frame, whose cells follow (8). ConPTY passes the mode
+changes through as it parses them and defers the buffer diff to its own render pass, so the window
+is *always* empty; this is not a timing accident of one run but the same shape in both pairs and
+both arms.
+
+Three consequences, in ascending order of importance:
+
+- **The A/B is single-variable downstream after all.** ConPTY emits its own `?25l`/`?25h` around its
+  own re-serialized frames, **identically in both arms** (7 and 7). apogee's cursor-hiding difference
+  never reaches the emulator; ConPTY normalises it away. So the seventh flag that finding 33 seemed
+  to demand is unnecessary, and the owner's A/B tests one thing: the empty pairs.
+- **Synchronized output does nothing for apogee on Windows except cost it the flicker mitigation.**
+  The window is always empty, so the frame is never presented atomically. bubbletea gave up
+  `?25l`/`?25h` in exchange for atomicity it does not receive on this path. That is a defect worth
+  writing down whatever causes the ghost.
+- **It supplies a candidate mechanism that fits finding 32's spinner.** What the emulator receives,
+  per frame, is `ESU` — a *present* — immediately **before** that frame's own cells, and nothing
+  forcing a present after them. That is a per-frame property, carried by a two-cell spinner
+  tick exactly as much as by a 1125-write streaming turn, which is the shape finding 32 says the
+  cause must have. It is a **candidate, not a conclusion**: whether Windows Terminal mishandles a
+  degenerate window is exactly what the owner's A/B measures, and this capture is from the *system*
+  pseudoconsole, not from the `OpenConsole.exe` Windows Terminal ships (finding 27's caveat 1 still
+  stands, and the collapse-to-empty-pair behaviour is structural to ConPTY's re-serializing design
+  rather than specific to one build, but that is reasoning, not a measurement).
+
+**Finding 35 — with mode 2026 genuinely negotiated, the headless harness still does not reproduce,
+and that is NOT an exoneration of mode 2026.** The DECRPM injection of finding 33 removes one of the
+three gaps finding 27 listed between the harness and the ghosting path — caveat 2, "nothing
+negotiated modes 2026 or 2027" — at least for 2026. Rendering both arms' pseudoconsole output
+against the screen apogee intended (`bin2trace` → `tracereplay`, truncated at the alt-screen exit,
+120×30, `-wrap deferred`) gives **four identical screens**: arm A intended, arm A re-serialized, arm
+B intended, arm B re-serialized, differing only in the header line naming the file.
+
+Two reasons that does not clear the hypothesis, and both matter:
+
+- **`tracereplay`'s VT model ignores mode 2026 entirely**, which finding 18 already said. A candidate
+  whose mechanism is "the emulator presents at the wrong moment" is invisible to a model that has no
+  notion of presentation. The four identical screens say the *cells* agree; the ghost is about which
+  cells are *shown*.
+- It is still the system pseudoconsole, not `OpenConsole.exe` (finding 27, caveat 1).
+
+What finding 35 does establish is narrower and still useful: enabling synchronized output changes
+neither apogee's intended screen nor ConPTY's re-serialized buffer. Whatever mode 2026 does on the
+ghosting path, it does not do it by changing which cells get written — exactly as finding 18 argued,
+now measured rather than asserted, with the empty-window mechanism of finding 34 as the reason.
+
+Captures for both arms are in `C:\Users\airic\apogee-ghosting-debug\item6b-evidence\`
+(`sync{on,off}-{trace.txt,conpty.bin,dbg.log,diag.txt}` plus the rendered `*-screen.txt`).
+
+## Item 6 — WHERE IT STANDS (still open; the gate is answered and one candidate is loaded)
+
+**The design call still cannot be answered, but the question has narrowed twice more.** The gate is
+no longer outstanding: the post-item-5 build ghosts, and the spinner ghosts with it (finding 32). The
+branch item 4 selected stays *disproven* — the wrap is deferred on the paths that ghost (finding 28),
+so neither an `ultraviolet` issue nor the one-column-short mitigation has a measured defect to point
+at. What is new is that finding 32's spinner rules out every remaining "long lines / full-width rows /
+heavy streaming" story, and findings 33-34 have loaded the one candidate that has the right shape
+into a switch the owner can flip in one command.
+
+What is established, after three passes:
 
 - Item 5 is measured working and measured layout-neutral (finding 22). It is not a fix (finding 23).
 - The cheapest layout-free mitigation is eliminated on mechanism (finding 25).
@@ -1247,46 +1390,85 @@ What is established, after two passes:
 - Finding 20's `immediate` replay keeps its value as the *fingerprint* of the fault class — a
   one-row cursor error produces exactly the observed artifact — and loses its value as an
   identification of the cause. Something downstream is producing that row error by another route.
+- **The gate is answered and the fault is per-frame, not per-content** (finding 32). A two-cell
+  spinner tick ghosts. That retires, permanently, every candidate whose mechanism needs a long line,
+  a full-width row, the last column, or write volume.
+- **Synchronized output is measured to be a pure loss on Windows** (finding 34), independent of
+  whether it is the ghost: ConPTY collapses the window to an empty pair, so apogee trades
+  bubbletea's cursor-hide flicker mitigation for an atomicity it never receives.
 
-**The previous pass's two-command recommendation, updated.** Command 1 — `apogee probe terminal` in
-all three terminals — is **done**, and it is findings 28-31. Command 2 is **not**, and it has become
-the gate:
+**The one thing left to run, and it is one command.** Everything an agent can do for the mode-2026
+A/B is done: the flag exists, `apogee-dbg.exe` is rebuilt from this commit, the mechanics are
+verified in both arms (finding 33), and the confound the A/B seemed to carry is measured away
+(finding 34). What remains is the half that needs an eye:
 
-> **Run the current `apogee` (post-item-5) in Windows Terminal for one streaming turn.** Item 4
-> row 1, nothing more, no debug kit, no flags. Item 5 changed the emitted stream substantially
-> (finding 22: 38 `CHA`, 2 `VPA` and 40 `ECH` where the pre-item-5 stream had none), so whether the
-> symptom is still *visible* is a question only that run answers. **If it no longer ghosts, item 6
-> is "confirm and record" and the plan can close.** Every further measurement below is conditional
-> on it still ghosting.
+> **Reproduce item 4 row 1 in Windows Terminal twice with
+> `C:\Users\airic\apogee-ghosting-debug\apogee-dbg.exe`** (rebuilt 2026-08-07 from commit `efec920`,
+> i.e. post-item-5) — one streaming turn each, watching the **activity spinner** as much as the text,
+> since finding 32 makes the spinner the sharper symptom:
+>
+> ```powershell
+> # arm A — stock behaviour, expected to ghost
+> C:\Users\airic\apogee-ghosting-debug\apogee-dbg.exe
+>
+> # arm B — same binary, synchronized output declined
+> $env:APOGEE_DBG_NO_SYNC = '1'; C:\Users\airic\apogee-ghosting-debug\apogee-dbg.exe
+> Remove-Item Env:\APOGEE_DBG_NO_SYNC
+> ```
+>
+> **If arm B is clean and arm A ghosts, the diagnosis is closed** and the fix is stated below.
+> If both ghost, mode 2026 is eliminated and the ranked list drops to its first entry. If both are
+> clean, the debug binary is not reproducing and that is its own (unwelcome) finding — re-run arm A
+> until it ghosts before trusting arm B. Add `APOGEE_DBG_LOG=<path>` to either arm to confirm which
+> way the mode-2026 report was handled; both arms should log a report, and only arm B should log
+> `IGNORED`.
 
-**If it still ghosts, the ranked next measurements.** These are the candidates that survive
-findings 28-31, in the order their cost/discrimination ratio favours:
+**If arm B is clean — exactly what the fix is, and it is layout-neutral.** apogee must stop letting
+bubbletea enable synchronized output on Windows. bubbletea has no option for it (`options.go` has no
+`WithSynchronizedOutput`; `setSyncdUpdates` is unexported; `shouldQuerySynchronizedOutput` is
+private), and this plan does not carry a fork, so the seam is the one item 2 already built: the
+`term.File`-preserving `tea.WithOutput` wrapper. bubbletea emits the two `DECRQM` probes in a single
+write (`tea.go:1109-1114` at the pinned v2.0.8, `RequestModeSynchronizedOutput +
+RequestModeUnicodeCore`); a Windows-only wrapper that drops the `CSI ?2026$p` substring from that
+write leaves the 2027 negotiation intact, never produces a `ModeReportMsg` for 2026, and lands the
+renderer in exactly the `?25l`/`?25h` configuration conhost already runs in and does not ghost. No
+layout changes, no glyph changes, no column budget touched, and it is unit-testable on the byte
+stream. Two upstream write-ups follow it — a `charmbracelet/bubbletea` request for a public option
+so the wrapper can be retired, and a `microsoft/terminal` report of the empty-window
+re-serialization with finding 34's capture as its whole content — both as documents in this repo, not
+filed (see below).
 
-1. **Synchronized output — mode 2026 (finding 18).** Now the *only* measured per-path divergence
-   that lines up with the ghost and has never been A/B tested: 1123 of 1125 Windows Terminal writes
-   are wrapped in `CSI ?2026h` … `CSI ?2026l`, and zero conhost writes are. Finding 18 dismissed it
-   by argument — "a batching hint changes when cells are presented, not which cells are written" —
-   and that argument is untested, because `tracereplay`'s VT model ignores mode 2026 entirely, so
-   every replay in this plan has been blind to it. bubbletea exposes no public option
-   (`tea.go:972 shouldQuerySynchronizedOutput`), so the A/B needs a sixth kit flag alongside the
-   five `APOGEE_DBG_*` hooks. That is the cheapest remaining single-variable test.
-2. **ConPTY's re-serialization, measured on the ConPTY that actually ghosts.** Finding 19 plus
+**If arm B still ghosts, the ranked next measurements.** These are the candidates that survive
+findings 28-35, in the order their cost/discrimination ratio favours:
+
+1. **ConPTY's re-serialization, measured on the ConPTY that actually ghosts.** Finding 19 plus
    finding 28 put the fault downstream of apogee's bytes, and finding 27 has already cleared the
    *system* pseudoconsole — but Windows Terminal ships its own `OpenConsole.exe` and VS Code drives
    node-pty, so neither of the ghosting paths has ever had its re-emitted stream captured. That
    capture is both the discriminator and, if it shows corruption, the entire content of a
    `microsoft/terminal` issue. `conptyrun` supplies the mechanics; pointing it at WT's
-   `OpenConsole.exe` is the work.
-3. **The downstream emulator's consumption of that re-emission.** If (2) shows ConPTY re-emits a
+   `OpenConsole.exe` is the work. Finding 34 sharpens what to look for: does OpenConsole collapse
+   the synchronized window the same way the system pseudoconsole does, and does its re-serialized
+   diff for a *spinner-sized* frame differ from apogee's intended one?
+2. **The remaining per-frame properties of a small repaint.** Finding 32 says the cause rides on
+   every frame. After mode 2026, the per-frame constants left in the stream are the SGR reset/re-set
+   pairs, the `CSI <n> X` (ECH) erases item 5 introduced (40 of them — new since the pre-item-5
+   stream, and the ghost predates item 5, so this is a weak candidate but a cheap one: run the gate
+   against `TERM=vt100`, which declines item 5's injection, and see whether the ghost changes shape),
+   and the relative cursor moves bubbletea's hard tabs and backspaces produce (already A/B'd clean,
+   findings 15-16, but never with the spinner as the thing being watched).
+3. **The downstream emulator's consumption of that re-emission.** If (1) shows ConPTY re-emits a
    correct stream, what remains is Windows Terminal and xterm.js both mishandling it — two
-   independent codebases, so the shared input is the suspect, and (1) is a strong candidate for what
-   in that input is unusual.
+   independent codebases, so the shared input is the suspect.
 
-**Nothing is to be filed upstream on the current evidence, against anyone.** Against `ultraviolet`,
-the one direct measurement contradicts the claim (finding 28). Against `microsoft/terminal`, there is
-no capture from the pseudoconsole that ghosts, and finding 27 is a capture from one that does not.
-Both issues would have been written from inference, which is the mistake this pass exists to have
-caught.
+**Nothing has been filed upstream, against anyone, and nothing should be until arm B is run.**
+Against `ultraviolet`, the one direct measurement contradicts the claim (finding 28). Against
+`microsoft/terminal`, finding 34 is now a real, reproducible, byte-level observation — the
+synchronized-output window is forwarded empty and the frame is re-serialized outside it — so unlike
+last pass there *is* something honest to write. But it is measured on the system pseudoconsole and
+its consequence is still unproven, so the report waits for arm B and, ideally, for next-step (1). If
+one is written, it lands as a document in this repo first; this plan does not file to external
+services on its own authority.
 
 **A warning item 7 should read before it is started.** Item 7 specifies exactly the harness built
 here — `CreatePseudoConsole`, a full-width repro, read the buffer back — and finding 27 says that
@@ -1297,9 +1479,16 @@ until something makes the bug appear there. `conptyrun` is reusable for the mech
 Win32 setup cost; it is the *premise* that needs re-checking, not the plumbing. Finding 28 sharpens
 this rather than softening it: the system pseudoconsole's wrap behaviour is now known to match the
 real terminals', so the gap between the harness and the ghosting path is *not* the wrap — the
-premise gap is still there and still unlocated.
+premise gap is still there and still unlocated. Finding 35 closes one more of finding 27's three
+gaps (mode 2026 can now be negotiated in the harness, by injecting the `DECRPM` reply on the child's
+input) and the harness *still* paints clean, so the premise gap is narrower and no closer to being
+found. Note also finding 32: whatever item 7 eventually asserts on, a **spinner-sized** repaint is
+now known to ghost, so the harness does not need the full-width streaming repro its text specifies —
+the smaller case is the sharper one.
 
 **Not written, deliberately:** the one-column-short mitigation, and any other user-visible layout
 change — the owner's decision withholds authorization for both, and finding 28 has now removed the
 defect they were meant to work around, so they are unmotivated as well as unauthorized. Also not
-written: any upstream issue text, for the reason two paragraphs up.
+written: any upstream issue text, for the reason two paragraphs up; the mode-2026 fix sketched above,
+because arm B has not been run; and a seventh kit flag to separate the cursor-hiding half of the A/B,
+because finding 34 measures ConPTY removing that half before any emulator sees it.
