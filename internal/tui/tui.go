@@ -280,6 +280,27 @@ type Options struct {
 	// ordinary run, where the scheme loaded cleanly.
 	ColorSchemeWarnings []string
 
+	// ListSchemes names every scheme that can be switched TO right now — the built-ins plus every
+	// `*.yaml` in the schemes folder, a user file shadowing a built-in of the same name (ADR 0039
+	// design call 6). It is a closure rather than a slice for the reason [Servers] is: a folder the
+	// human drops a file into mid-session is offered by the settings picker the moment they open it,
+	// and a list snapshotted at launch would go stale the first time they wrote a scheme. Discovery
+	// itself stays in the binary — the renderer never walks a directory (ADR 0011's thin renderer).
+	//
+	// nil ⇒ the picker has no vocabulary and the row opens nothing, the nil-seam degrade every
+	// provider here takes.
+	ListSchemes func() []string
+
+	// ResolveScheme turns one of those names back into a palette, warnings already rendered to
+	// lines — the same call the binary made at boot ([ColorScheme]), re-run so a switch re-READS the
+	// file and an edited scheme lands on the next switch without a restart. Warnings are the
+	// forgiving load's only voice (design call 8): the palette that comes back is always usable, so a
+	// defective key is a sentence in the transcript rather than a failure.
+	//
+	// nil ⇒ no live switch is possible; the settings row still persists the key (the pane's write
+	// half is independent) and the new scheme takes effect at the next start.
+	ResolveScheme func(name string) (scheme.Scheme, []string)
+
 	// Version is the resolved FULL build version (apogee.Version, read from the embedded VERSION
 	// file plus build provenance), read only by the /version command — it mirrors what --version
 	// prints. The start-up box reads BaseVersion instead, so the TUI never imports the source.

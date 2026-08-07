@@ -492,6 +492,55 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 			t.Errorf("warning = %q; want it to name the scheme that was asked for", rec.opts.ColorSchemeWarnings[0])
 		}
 	})
+
+	// The live half (ADR 0039 design call 7): the settings picker's vocabulary and the resolve
+	// behind an answer to it. Both are asked AFTER launch, over a folder written after launch, which
+	// is the property that matters — a list or a palette captured at start-up would leave a human who
+	// has just written a scheme file unable to pick it without restarting.
+	t.Run("the picker seams read the schemes folder on every ask", func(t *testing.T) {
+		t.Parallel()
+		home := t.TempDir()
+		rec := &recordingLauncher{}
+		opts := options{
+			endpoint:  "http://127.0.0.1:1111",
+			model:     "fake",
+			mode:      "ask-before",
+			configDir: home,
+			workspace: t.TempDir(),
+			ui:        uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "dark"},
+		}
+		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+			t.Fatalf("runRoot: %v", err)
+		}
+		if rec.opts.ListSchemes == nil || rec.opts.ResolveScheme == nil {
+			t.Fatal("the colour-scheme picker seams are unwired; the settings row could not switch anything")
+		}
+
+		// The folder does not even exist yet at launch: the built-ins are still offered.
+		if names := rec.opts.ListSchemes(); len(names) == 0 {
+			t.Fatal("ListSchemes offered nothing; the built-ins are always available")
+		}
+		if err := os.MkdirAll(filepath.Join(home, "schemes"), 0o700); err != nil {
+			t.Fatalf("create schemes dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(home, "schemes", "mine.yaml"),
+			[]byte("error: \"#010203\"\nbackdrop: \"#ffffff\"\n"), 0o600); err != nil {
+			t.Fatalf("write scheme: %v", err)
+		}
+		if names := rec.opts.ListSchemes(); !slices.Contains(names, "mine") {
+			t.Errorf("ListSchemes = %v after the file was written; want it to name \"mine\"", names)
+		}
+
+		// And resolving it reads that same file — with its unknown key rendered to a line the
+		// renderer prints rather than a scheme.Warning it would have to format.
+		s, warnings := rec.opts.ResolveScheme("mine")
+		if s.Error != "#010203" {
+			t.Errorf("ResolveScheme(\"mine\").Error = %q; want the file's %q", s.Error, "#010203")
+		}
+		if len(warnings) != 1 || !strings.Contains(warnings[0], "backdrop") {
+			t.Errorf("warnings = %v; want one rendered line naming the unknown key", warnings)
+		}
+	})
 }
 
 // The two Auto startup lines are mirror branches at the same site and never both fire:

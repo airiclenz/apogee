@@ -11,6 +11,7 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // keyBackspace is the rune-pop of an edit buffer and the arming key of a reset — the one keypress the
@@ -2443,5 +2444,187 @@ func TestSettingsPaneDoesNotReReadAfterAFailedEditor(t *testing.T) {
 	}
 	if got := m.settingsNote(rows[0]); !strings.Contains(got, "exit status 1") {
 		t.Errorf("note = %q, want the editor's own failure", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The colour-scheme row: a dynamic vocabulary and a live apply (ADR 0039)
+// ----------------------------------------------------------------------------
+
+// settingsSchemeRow is the `ui.color-scheme:` row as the registry describes it
+// (cmd/apogee/registry.go): an enum to the pane, because picking a scheme is picking a value from a
+// list — but with EnumValues deliberately empty, because what may be picked is whatever the schemes
+// folder holds right now and no static table can name it (settingsVocabulary).
+func settingsSchemeRow() SettingRow {
+	return SettingRow{
+		Path: "ui.color-scheme", Section: "Interface", Kind: SettingEnum, Value: "dark", Default: "dark",
+		Editable: true,
+		Desc:     "Palette the screen is drawn in; ~/.apogee/schemes/<name>.yaml shadows a built-in.",
+	}
+}
+
+// stubScheme is a palette whose every role carries value, so a theme built from it is recognisable
+// by sampling any one of them — the fixture a live switch is proved BY (a scheme that shared a tone
+// with the default could not tell an applied switch from an ignored one).
+func stubScheme(value string) scheme.Scheme {
+	s := scheme.Default()
+	s.Error, s.Surface, s.UserText = value, value, value
+	return s
+}
+
+// settingsSchemeModel is the pane OPEN over that one row with both colour-scheme seams wired: the
+// list the picker offers and the resolve behind an answer to it. The three settings seams are wired
+// too, so a test can watch the write and the apply on the same keypress.
+func settingsSchemeModel(t *testing.T, log *settingsWriteLog, list []string,
+	resolve func(string) (scheme.Scheme, []string)) Model {
+	t.Helper()
+	rows := []SettingRow{settingsSchemeRow()}
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.WriteSetting, opts.ResetSetting, opts.ApplySetting = log.write, log.reset, log.apply
+	opts.ListSchemes = func() []string { return list }
+	opts.ResolveScheme = resolve
+	return openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+}
+
+// ⏎ on the colour-scheme row opens the same sub-list an enum opens, over the schemes the SESSION
+// discovered rather than over a vocabulary the row carried: the built-ins plus every file in the
+// human's schemes folder, which is a list that changes while the program runs and therefore cannot
+// come from the registry (ADR 0039 design call 6). The scheme in force wears "(current)".
+func TestSettingsPaneOffersTheSchemesTheSessionDiscovers(t *testing.T) {
+	m := settingsSchemeModel(t, &settingsWriteLog{}, []string{"dark", "light", "mine"},
+		func(string) (scheme.Scheme, []string) { return scheme.Default(), nil })
+
+	opened := step(t, m, keyEnter())
+
+	if opened.settings.kind != settingsEnumList {
+		t.Fatalf("pane = %+v, want the value sub-list open", opened.settings)
+	}
+	pane := strip(opened.renderSettings())
+	for _, want := range []string{"ui.color-scheme", "dark", "light", "mine", "(current)"} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("the sub-list does not show %q:\n%s", want, pane)
+		}
+	}
+	// The sub-list opens ON the scheme the key holds, which is what makes ⏎⏎ a confirmation.
+	if opened.settings.sub != 0 {
+		t.Errorf("sub = %d, want 0 — the highlight opens on the current scheme", opened.settings.sub)
+	}
+}
+
+// An unwired [Options.ListSchemes] leaves the row with nothing to offer, and a sub-list over an
+// empty vocabulary is a pane asking a question with no answers: ⏎ opens nothing at all, the same
+// degrade a `servers:` block that names nothing takes.
+func TestSettingsPaneSchemeRowOpensNothingWithoutADiscoverySeam(t *testing.T) {
+	rows := []SettingRow{settingsSchemeRow()}
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+
+	if opened := step(t, m, keyEnter()); opened.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v, want the key list still — an empty vocabulary opens no question", opened.settings)
+	}
+}
+
+// The live apply itself, and the whole of what ADR 0039's picker promises: the chosen scheme is
+// persisted, RESOLVED again from the seam (so an edited file lands without a restart), and every
+// style is rebuilt from what came back — with the memoised block paints thrown away, because each of
+// them is in the palette that just stopped being the one on screen (paintcache.go), and a
+// tea.ClearScreen asked for, because the terminal still holds the old one outside the frame.
+func TestSettingsPaneAppliesAColorSchemeLive(t *testing.T) {
+	log := &settingsWriteLog{}
+	var asked []string
+	m := settingsSchemeModel(t, log, []string{"dark", "light"}, func(name string) (scheme.Scheme, []string) {
+		asked = append(asked, name)
+		return stubScheme("#123456"), nil
+	})
+	if m.transcript.paints == nil {
+		t.Fatal("the test model has no paint cache; the invalidation below would prove nothing")
+	}
+	m.transcript.paints.store(0, paintKey{width: 40}, blockPaint{})
+
+	// Open the sub-list, walk to the second scheme, commit it.
+	switched, cmd := stepCmd(t, step(t, step(t, m, keyEnter()), keyDown()), keyEnter())
+
+	if want := []settingEdit{{path: "ui.color-scheme", value: "light"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if !reflect.DeepEqual(asked, []string{"light"}) {
+		t.Fatalf("the resolver was asked for %v, want exactly the chosen scheme", asked)
+	}
+	if got := hexOf(switched.th.errorFg); got != "#123456" {
+		t.Errorf("the model's error tone = %s; want the switched scheme's #123456 — the theme did not move", got)
+	}
+	if got := hexOf(switched.th.errorText.GetForeground()); got != "#123456" {
+		t.Errorf("errorText fg = %s; want #123456 — the STYLES were not rebuilt", got)
+	}
+	if n := len(switched.transcript.paints.rows); n != 0 {
+		t.Errorf("the paint cache still holds %d block(s) painted in the previous palette", n)
+	}
+	if got, want := cmdMsg(cmd), tea.ClearScreen(); !reflect.DeepEqual(got, want) {
+		t.Errorf("the switch produced %#v, want tea.ClearScreen's Msg %#v", got, want)
+	}
+	// A renderer-owned key never leaves the renderer, colour scheme included.
+	if len(log.applies) != 0 {
+		t.Errorf("applies = %+v, want none — the scheme is applied inside the pane", log.applies)
+	}
+	// And the Options carry the scheme now in force, so a report can name it.
+	if switched.opts.ColorSchemeName != "light" {
+		t.Errorf("ColorSchemeName = %q, want %q", switched.opts.ColorSchemeName, "light")
+	}
+}
+
+// The forgiving load has a voice (ADR 0039 design call 11): a switch that resolved with complaints
+// still lands — the palette that comes back is always usable — and each complaint becomes one
+// EPHEMERAL transcript note, while the row the human is looking at says how many there were. The
+// pane is drawn over that transcript, so without the row's own sentence they would answer the
+// picker and see nothing at all.
+func TestSettingsPaneNotesWhatALiveSchemeSwitchWarnedAbout(t *testing.T) {
+	const first = `color-scheme "mine.yaml": key "error": bad hex "#zz0000" — using default`
+	const second = `color-scheme "mine.yaml": unknown key "backdrop" — ignored`
+	rows := []SettingRow{settingsSchemeRow()}
+	m := settingsSchemeModel(t, &settingsWriteLog{}, []string{"dark", "mine"},
+		func(string) (scheme.Scheme, []string) { return stubScheme("#654321"), []string{first, second} })
+
+	switched := step(t, step(t, step(t, m, keyEnter()), keyDown()), keyEnter())
+
+	for _, want := range []string{first, second} {
+		if !hasEntry(switched, entryNote, want) {
+			t.Errorf("no note carries %q; entries = %+v", want, switched.transcript.entries)
+		}
+	}
+	for _, e := range switched.transcript.entries {
+		if e.kind == entryNote && e.text == first && !e.ephemeral {
+			t.Error("the switch's warning is persisted; it is re-derived at every resolve")
+		}
+	}
+	if got := switched.settingsNote(rows[0]); !strings.Contains(got, "applied with 2 warnings") {
+		t.Errorf("row note = %q, want it to count the warnings the switch collected", got)
+	}
+	// The switch still LANDED: a warning is not a refusal.
+	if got := hexOf(switched.th.errorFg); got != "#654321" {
+		t.Errorf("the model's error tone = %s; want the switched scheme's #654321", got)
+	}
+}
+
+// Without a resolver there is nothing to switch WITH, and the honest sentence is the one the row
+// gives every apply that could not happen: the key is in the file, so the next start is drawn in it.
+// The write is not unwound (ADR 0037 decision 1).
+func TestSettingsPaneSaysASchemeSwitchNeedsAResolver(t *testing.T) {
+	rows := []SettingRow{settingsSchemeRow()}
+	log := &settingsWriteLog{}
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.WriteSetting, opts.ResetSetting, opts.ApplySetting = log.write, log.reset, log.apply
+	opts.ListSchemes = func() []string { return []string{"dark", "light"} }
+	m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+
+	switched := step(t, step(t, step(t, m, keyEnter()), keyDown()), keyEnter())
+
+	if want := []settingEdit{{path: "ui.color-scheme", value: "light"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v — a failed apply does not unwind the write", log.writes, want)
+	}
+	if got := switched.settingsNote(rows[0]); !strings.Contains(got, settingsApplyFailedNote) {
+		t.Errorf("note = %q, want the saved-but-not-applied sentence", got)
 	}
 }

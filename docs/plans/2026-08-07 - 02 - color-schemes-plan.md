@@ -375,9 +375,34 @@ unknown configured name yields Default + a warning string mentioning the name.
 
 **Commit:** `feat(config): ui.color-scheme key with boot-time scheme resolution`
 
-## 7. Settings picker row and live apply
+## 7. Settings picker row and live apply — ✅ DONE (2026-08-07)
 
 Depends on item 6 (and 5).
+
+NOTES (2026-08-07): six deviations from the item text.
+(a) The `tea.Cmd` is threaded through the WHOLE apply chain, not just "the one call site": `settingsApplied`
+returns it too, so `settingsPersist`, `settingsWrite`, `settingsReset`, `settingsCommitBuffer` and
+`settingsCommitText` each carry it on, and `foldSettingsEdit` — one external-edit round trip can apply
+several keys — collects them into a `tea.Batch`. The item's `settings.go:1040-1050` is `settingsApplied`,
+which is `settingsApplyLive`'s only caller but not the end of the thread.
+(b) The row's `"applied with N warnings"` rides the EXISTING `settingEdit.note` slot (the one
+"applies at next clear" uses), not the failure/answer slot the item names: `recordSettingEdit` clears
+`settings.answer` and `settings.failure` immediately after the apply, so a sentence written there would be
+wiped in the same breath. That made `settingsApplyLocal` grow a note return alongside the Cmd.
+(c) The live apply also re-fills the prompt textarea (`fillInput`). Its four background slots belong to
+Bubble Tea's widget and no style reaches them (item 4 deviation (d)), so without this the input box keeps the
+previous scheme's `surface` — the same reason the `cursor-shape` key calls `steadyCursor`.
+(d) `cmd/apogee/settingsrows.go` needed NO change: item 6's NOTES (c) already landed
+`settingValues["ui.color-scheme"]` (its `TestSettingValuesCoverEveryRegistryKey` forced it), and the
+"Interface" section placement follows from registry order alone, as that note predicted.
+(e) `wire.go`'s boot resolve and the new `ResolveScheme` closure share one new helper,
+`resolveColorScheme(name, dir)`, rather than each spelling the `Warning.String()` loop — so a scheme picked at
+start-up and the same scheme picked from the pane cannot answer differently.
+(f) An unwired `Options.ResolveScheme` is an apply ERROR (`errNoSchemeResolver`), so the row reads
+"saved — live apply failed: …" and the write stands (ADR 0037 decision 1). The item names no nil-seam
+behavior for this seam, and silence would leave a human staring at an unchanged screen.
+Comment updates the item implies: `paintcache.go:71-79` as instructed, plus the two other places that
+asserted no runtime theme switch exists (`model.go`'s `th` field comment, `theme.go`'s package header).
 
 **What:**
 

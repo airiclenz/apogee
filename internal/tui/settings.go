@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"image/color"
 	"os/exec"
 	"strconv"
@@ -730,15 +731,23 @@ func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
 	if err != nil {
 		return m.settingsFailed(launched, stripEscapes(err.Error()))
 	}
+	// One round trip can apply several keys, so what the applies ask for is BATCHED rather than
+	// kept one at a time: an edit that changed the colour scheme and the scroll bar in the same
+	// session of the editor has to leave with the scheme's repaint still asked for.
+	var cmds []tea.Cmd
 	for _, a := range applied {
 		row, ok := settingRowOf(rows, a.Path)
 		if !ok {
 			continue // a key the pane does not list has no row to journal it on
 		}
-		m = m.settingsApplied(row, settingEdit{path: a.Path, value: a.Value})
+		next, cmd := m.settingsApplied(row, settingEdit{path: a.Path, value: a.Value})
+		m = next
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 	m.layout()
-	return m, nil
+	return m, tea.Batch(cmds...)
 }
 
 // settingRowOf finds the row for a registry path in the list as it stands — the lookup both halves
@@ -828,13 +837,13 @@ func (m Model) settingsCommitBuffer(row SettingRow) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 	}
-	next, landed := m.settingsPersist(row, value)
+	next, cmd, landed := m.settingsPersist(row, value)
 	m = next
 	if landed {
 		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
 	}
 	m.layout()
-	return m, nil
+	return m, cmd
 }
 
 // settingsTextValue is the prose a text row holds: what this pane last wrote for the key, else the
@@ -927,13 +936,13 @@ func (m Model) settingsCommitText(row SettingRow) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 	}
-	next, landed := m.settingsPersist(row, value)
+	next, cmd, landed := m.settingsPersist(row, value)
 	m = next
 	if landed {
 		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
 	}
 	m.layout()
-	return m, nil
+	return m, cmd
 }
 
 // settingsArmReset arms the selected row's reset-to-default — backspace on a row that HAS something to
@@ -989,9 +998,9 @@ func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 	}
-	m = m.settingsApplied(row, settingEdit{path: row.Path, value: row.Default, reset: true})
+	m, cmd := m.settingsApplied(row, settingEdit{path: row.Path, value: row.Default, reset: true})
 	m.layout()
-	return m, nil
+	return m, cmd
 }
 
 // settingsWrite persists one key through [Options.WriteSetting] and records what became of it. It is
@@ -1006,9 +1015,9 @@ func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
 //   - landed — the edit is recorded for the row's marker AND applied to the running session on the
 //     same keypress (settingsApplied), so the session and the file agree the same instant.
 func (m Model) settingsWrite(row SettingRow, value string) (tea.Model, tea.Cmd) {
-	m, _ = m.settingsPersist(row, value)
+	m, cmd, _ := m.settingsPersist(row, value)
 	m.layout()
-	return m, nil
+	return m, cmd
 }
 
 // settingsPersist is settingsWrite's body and its outcome: the model after the attempt, and whether the
@@ -1016,16 +1025,17 @@ func (m Model) settingsWrite(row SettingRow, value string) (tea.Model, tea.Cmd) 
 // it — a refused value keeps its buffer open so it can be corrected (settingsCommitBuffer), where a
 // refused toggle has nothing to keep. It does not lay out: the caller does, once, after it has finished
 // deciding what the pane is now doing.
-func (m Model) settingsPersist(row SettingRow, value string) (Model, bool) {
+func (m Model) settingsPersist(row SettingRow, value string) (Model, tea.Cmd, bool) {
 	if m.opts.WriteSetting == nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: noSettingsWriterNote}
-		return m, false
+		return m, nil, false
 	}
 	if err := m.opts.WriteSetting(row.Path, value); err != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: err.Error()}
-		return m, false
+		return m, nil, false
 	}
-	return m.settingsApplied(row, settingEdit{path: row.Path, value: value}), true
+	m, cmd := m.settingsApplied(row, settingEdit{path: row.Path, value: value})
+	return m, cmd, true
 }
 
 // settingsApplied records an edit that LANDED and puts it into effect — the one place both halves of
@@ -1040,16 +1050,22 @@ func (m Model) settingsPersist(row SettingRow, value string) (Model, bool) {
 // The apply is guarded on a non-empty value as well as on the key: a reset records the key's
 // DEFAULT, and a key whose default is unset would otherwise hand the seam an empty string to
 // resolve — which is a question about a key the file no longer sets, not a value it now holds.
-func (m Model) settingsApplied(row SettingRow, edit settingEdit) Model {
+//
+// The Cmd it hands back is the apply's own, and today exactly one key produces one: a colour-scheme
+// switch rebuilds every style under a screen already painted in the previous palette, so the frame
+// has to be cleared rather than redrawn over (settingsApplyLocal). Every other key returns nil and
+// every caller passes whatever comes back on unchanged.
+func (m Model) settingsApplied(row SettingRow, edit settingEdit) (Model, tea.Cmd) {
 	var applyErr error
+	var cmd tea.Cmd
 	if edit.value != "" {
-		m, edit.note, applyErr = m.settingsApplyLive(row.Path, edit.value)
+		m, edit.note, cmd, applyErr = m.settingsApplyLive(row.Path, edit.value)
 	}
 	m = m.recordSettingEdit(edit)
 	if applyErr != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: settingsApplyFailedNote + applyErr.Error()}
 	}
-	return m
+	return m, cmd
 }
 
 // settingsApplyLive puts one persisted key into effect and reports what the row has to say about it:
@@ -1065,21 +1081,26 @@ func (m Model) settingsApplied(row SettingRow, edit settingEdit) Model {
 // `mode` is the one key with a foot in both: the seam moves the Agent, and the footer renders the
 // mode from opts.Mode — so the mirror Shift+Tab keeps in step is updated here too, but only once the
 // apply has LANDED, or the footer would report an autonomy the engine is not running.
-func (m Model) settingsApplyLive(path, value string) (Model, string, error) {
-	if applied, ok, err := m.settingsApplyLocal(path, value); ok {
-		return applied, "", err
+// A local apply may also hand back a Cmd and a note of its own, which is why the local branch no
+// longer returns an empty note: a colour-scheme switch that loaded with warnings says so on the row
+// (settingsApplyLocal) through the same slot "applies at next clear" uses, and asks for the repaint
+// its new palette needs. The seam's own keys are unchanged — [Options.ApplySetting] returns a note
+// and never a Cmd, because what it moves is on the far side of the renderer.
+func (m Model) settingsApplyLive(path, value string) (Model, string, tea.Cmd, error) {
+	if applied, note, cmd, ok, err := m.settingsApplyLocal(path, value); ok {
+		return applied, note, cmd, err
 	}
 	if m.opts.ApplySetting == nil {
-		return m, "", nil // no live apply wired: the write stands on its own (ADR 0031's nil-seam degrade)
+		return m, "", nil, nil // no live apply wired: the write stands on its own (ADR 0031's nil-seam degrade)
 	}
 	note, err := m.opts.ApplySetting(path, value)
 	if err != nil {
-		return m, "", err
+		return m, "", nil, err
 	}
 	if path == settingKeyMode {
 		m.opts.Mode = domain.Mode(value) // the footer renders the mode from opts.Mode (footerContent)
 	}
-	return m, note, nil
+	return m, note, nil, nil
 }
 
 // settingsApplyLocal applies the keys the RENDERER itself owns — the ones whose entire effect is a
@@ -1092,7 +1113,11 @@ func (m Model) settingsApplyLive(path, value string) (Model, string, error) {
 // silently ignored. The binary validates before it writes, so this cannot happen through the pane —
 // but the pane is not the only thing that can put a value in the file, and a spinner style this
 // build has no animation for is worth a sentence on the row.
-func (m Model) settingsApplyLocal(path, value string) (Model, bool, error) {
+//
+// Two of these keys have more to say than "done": the note is the row's own sentence about the apply
+// (empty for a key that simply took effect), and the Cmd is what the apply needs the program to do
+// next. Only the colour scheme uses either.
+func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, bool, error) {
 	switch path {
 	case settingKeyAutoTitle:
 		m.opts.AutoTitle = value == settingTrue
@@ -1105,7 +1130,7 @@ func (m Model) settingsApplyLocal(path, value string) (Model, bool, error) {
 	case settingKeySpinner:
 		style, err := ParseSpinnerStyle(value)
 		if err != nil {
-			return m, true, err
+			return m, "", nil, true, err
 		}
 		// Both halves: the option is the record of what is selected, m.spin is what paints. The
 		// frame counter is left where it is — every style's glyph indexes it modulo its own frame
@@ -1114,19 +1139,82 @@ func (m Model) settingsApplyLocal(path, value string) (Model, bool, error) {
 	case settingKeySpinnerColor:
 		on := value == settingTrue
 		m.opts.SpinnerColor, m.spin.color = on, on
+	case settingKeyColorScheme:
+		note, cmd, err := m.applyColorScheme(value)
+		return m, note, cmd, true, err
 	case settingKeyCursorShape:
 		shape, err := ParseCursorShape(value)
 		if err != nil {
-			return m, true, err
+			return m, "", nil, true, err
 		}
 		// steadyCursor is idempotent: it restates the retired virtual cursor and the styles the real
 		// terminal cursor is drawn from, which is the whole of what the shape changes.
 		m.opts.CursorShape = shape
 		steadyCursor(&m.input, shape)
 	default:
-		return m, false, nil
+		return m, "", nil, false, nil
 	}
-	return m, true, nil
+	return m, "", nil, true, nil
+}
+
+// applyColorScheme puts a named colour scheme into effect on THIS screen — the live half of ADR
+// 0039's settings picker, and the one local apply that rebuilds the whole look rather than moving a
+// field.
+//
+// It re-RESOLVES rather than reading a palette off the Options, so a scheme file the human has just
+// edited lands on the next switch: the seam reads the folder every time it is asked
+// ([Options.ResolveScheme]), which is the whole of what apogee offers instead of watching the file.
+// The load is forgiving, so a resolve that warned still produces a usable palette — the warnings
+// become transcript notes (design call 11) and the row says how many, through the same slot a
+// boundary note uses.
+//
+// Four things move, and each for its own reason:
+//
+//   - the theme is rebuilt, which is what a scheme IS ([newTheme]);
+//   - the prompt textarea is re-filled, because its four background slots belong to a Bubble Tea
+//     widget the theme cannot reach from a style (fillInput) — the same posture steadyCursor takes
+//     for the caret;
+//   - the block paint cache is cleared, because every memoised paint in it is in the previous
+//     palette and its key does not name the theme (paintcache.go);
+//   - the Options' own record of the scheme is updated, so a report that names the scheme in force
+//     names this one.
+//
+// The Cmd is tea.ClearScreen: the terminal still holds the previous palette's scrollback and
+// backgrounds outside the frame apogee repaints, so the screen is cleared and drawn again whole.
+func (m *Model) applyColorScheme(name string) (string, tea.Cmd, error) {
+	if m.opts.ResolveScheme == nil {
+		return "", nil, errNoSchemeResolver
+	}
+	s, warnings := m.opts.ResolveScheme(name)
+	m.th = newTheme(s)
+	fillInput(&m.input, m.th.surface)
+	m.transcript.paints.clear()
+	m.opts.ColorScheme, m.opts.ColorSchemeName = s, name
+	for _, w := range warnings {
+		m.transcript.addEphemeralNote(w)
+	}
+	m.layout()
+	return colorSchemeWarningNote(len(warnings)), tea.ClearScreen, nil
+}
+
+// errNoSchemeResolver is what an unwired [Options.ResolveScheme] costs: the key is persisted and the
+// row says the switch could not happen now, which is the honest sentence — the scheme IS in the file
+// and the next start will be drawn in it.
+var errNoSchemeResolver = errors.New("no colour-scheme resolver is wired; the new scheme applies at the next start")
+
+// colorSchemeWarningNote is the row's sentence for a switch that loaded with complaints, and "" for
+// the ordinary one that did not. The warnings themselves are in the transcript — this only says how
+// many, because the pane is drawn OVER that transcript and a human answering the picker would
+// otherwise see nothing at all.
+func colorSchemeWarningNote(n int) string {
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return "applied with 1 warning"
+	default:
+		return "applied with " + strconv.Itoa(n) + " warnings"
+	}
 }
 
 // The registry paths this package names. settingKeyMode is the one key the pane MIRRORS after the
@@ -1139,6 +1227,7 @@ const (
 	settingKeyShowScrollbar = "ui.show-scrollbar"
 	settingKeySpinner       = "ui.spinner"
 	settingKeySpinnerColor  = "ui.spinner-color"
+	settingKeyColorScheme   = "ui.color-scheme"
 	settingKeyCursorShape   = "cursor-shape"
 )
 
@@ -1246,10 +1335,22 @@ func settingsPickable(row SettingRow) bool {
 // row, whose vocabulary is what THIS config's `servers:` block names and therefore cannot live in a
 // static table ([SettingServer]).
 //
+// The colour-scheme row is the `server` row's twin here and diverges the same way: its values are the
+// built-ins plus whatever `*.yaml` files the human's schemes folder holds right now ([Options.ListSchemes]),
+// which no static table can name either. It reaches the pane as an ordinary enum (cmd/apogee's
+// settingKind) because picking one is picking a value from a list — only where the list COMES from
+// differs — so it is matched on its path rather than on a kind of its own.
+//
 // Every step of the sub-list asks this — the open, the walk, the accept, the paint — so a list that
 // changed under an open question is one list wherever it is read, and the accept can only ever take a
 // value the frame the human answered was showing.
 func (m Model) settingsVocabulary(row SettingRow) []string {
+	if row.Path == settingKeyColorScheme {
+		if m.opts.ListSchemes == nil {
+			return nil // unwired: the row opens nothing rather than offering an empty list
+		}
+		return m.opts.ListSchemes()
+	}
 	if row.Kind != SettingServer {
 		return row.EnumValues
 	}

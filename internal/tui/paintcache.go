@@ -69,14 +69,18 @@ type paintKey struct {
 	width int        // the width the block was wrapped to
 
 	// measure is the display-width authority the paint was laid out with (width.go). It is the one
-	// part of [theme] that MOVES while the program runs: the terminal's mode-2027 answer switches it
-	// from WcWidth to GraphemeWidth mid-session (model.go, tea.ModeReportMsg), which re-wraps
-	// everything. The rest of the theme is built once in newModel and never reassigned — apogee has
-	// no runtime theme switch of any kind (no /theme command, no key binding, no config key;
-	// newTheme is called from newModel and from tests, and Model.th is never written after) — so the
-	// authority is the whole of the theme's identity here. Should a theme switch ever be added, this
-	// is the field that has to grow into a full theme identity, or the cache has to be cleared when
-	// the theme changes; a cache that returns a paint in the previous theme is worse than no cache.
+	// part of [theme] this key NAMES, and the only one that has to be named: the terminal's mode-2027
+	// answer switches it from WcWidth to GraphemeWidth mid-session (model.go, tea.ModeReportMsg),
+	// which re-wraps everything, and the key would otherwise serve paints wrapped by the other
+	// method.
+	//
+	// The COLOURS move too, and are deliberately not named here. A colour-scheme switch rebuilds
+	// every style at once (ADR 0039), which is the "theme changes" case this comment used to say did
+	// not exist — and the alternative it named is the one taken: the switch CLEARS the cache outright
+	// (settingsApplyLocal's applyColorScheme) rather than growing this key into a full theme
+	// identity. That keeps a steady-state repaint comparing four scalars and a string, and it is
+	// sound for the same reason transcript.reset's clear is: after it, nothing memoised in the
+	// previous palette remains to be found.
 	measure widthAuthority
 
 	span  int    // how many entries the paint covers — a run that grew a member is a different block

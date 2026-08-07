@@ -17,7 +17,8 @@ import (
 // theme is the single place the look-and-feel lives: the palette, the marker glyphs, and the
 // reusable lipgloss styles every renderer draws with — including spinnerBase, the field the
 // status-line spinner paints on (its frames and their timing live with the animation, in
-// spinner.go). It is built once in newModel and stored as a Model value field. A lipgloss.Style
+// spinner.go). It is built in newModel, stored as a Model value field, and rebuilt whole whenever the
+// colour scheme changes under it (ADR 0039 — settingsApplyLocal). A lipgloss.Style
 // holds no self-referential no-copy type (it is value-copy by design — its whole API returns new
 // Styles), so a theme of Styles is safe inside the value-copied Model (ADR 0011;
 // TestModelNoBuilderByValue guards the strings.Builder case structurally).

@@ -554,11 +554,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// it answers is fatal: an unknown name, an unreadable file and a defective key each cost a
 	// warning and keep the default palette (ADR 0039 design call 8), and those warnings travel with
 	// the palette so the transcript can say what went wrong.
-	colorScheme, schemeWarnings := scheme.Resolve(opts.ui.colorScheme, roots.schemes)
-	colorSchemeWarnings := make([]string, 0, len(schemeWarnings))
-	for _, w := range schemeWarnings {
-		colorSchemeWarnings = append(colorSchemeWarnings, w.String())
-	}
+	// The live half of the same seam is a pair of closures over the SAME folder (ADR 0037's
+	// validate → persist → apply, with the apply landing entirely inside the renderer): the settings
+	// picker asks what schemes exist when the human opens it, and the switch resolves the chosen one
+	// again from disk — which is what makes an edited scheme file land on the next switch without a
+	// restart, and why neither is a value captured here.
+	colorScheme, colorSchemeWarnings := resolveColorScheme(opts.ui.colorScheme, roots.schemes)
 
 	err = launch(ctx, engine, bridge, tui.Options{
 		// Both upstream facts are now honestly launch-time-only: Model is the configured pin ("" on
@@ -635,6 +636,13 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		ColorScheme:         colorScheme,
 		ColorSchemeName:     opts.ui.colorScheme,
 		ColorSchemeWarnings: colorSchemeWarnings,
+		// And the two that keep the scheme switchable from inside the program: what the picker
+		// offers, and the resolve behind an answer to it. Both read the folder on every ask, so a
+		// scheme file written or edited mid-session is offered and loaded without a restart.
+		ListSchemes: func() []string { return scheme.Discover(roots.schemes) },
+		ResolveScheme: func(name string) (scheme.Scheme, []string) {
+			return resolveColorScheme(name, roots.schemes)
+		},
 		// The `cursor-shape:` key: the shape the REAL terminal cursor takes at the prompt caret
 		// (steady always — there is no blink key). Selected here, like the two above, so the
 		// renderer never parses a config name.
@@ -2183,6 +2191,25 @@ type stateRoots struct {
 	prompts   string
 	schemes   string
 	workspace string
+}
+
+// resolveColorScheme loads one colour scheme by name and renders whatever the load complained about
+// to plain lines. It is the single spelling of that pair for both the boot resolution and the live
+// switch seam ([tui.Options.ResolveScheme]), so a scheme picked at start-up and the same scheme
+// picked from the settings pane cannot answer differently — the same shadowing rule, the same
+// forgiving fallbacks, the same sentences.
+//
+// It never fails: an unknown name, an unreadable file and a defective key each cost a warning and
+// keep the built-in default (ADR 0039 design call 8), so what comes back is always a usable palette.
+// Rendering the warnings here rather than passing [scheme.Warning] values on is what keeps the
+// renderer out of the scheme package: it is handed sentences it prints, not a type it formats.
+func resolveColorScheme(name, schemesDir string) (scheme.Scheme, []string) {
+	s, warnings := scheme.Resolve(name, schemesDir)
+	lines := make([]string, 0, len(warnings))
+	for _, w := range warnings {
+		lines = append(lines, w.String())
+	}
+	return s, lines
 }
 
 // apogeeHome resolves the absolute apogee home directory: the configDir override when

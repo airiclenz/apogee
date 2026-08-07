@@ -253,7 +253,7 @@ type Model struct {
 	// string, so it rides the value-copied Model (ADR 0011); "" means there is nothing to name and
 	// the footer drops the segment.
 	workdir       string
-	th            theme // the palette and reusable styles, built once at construction
+	th            theme // the palette and reusable styles; rebuilt whenever the colour scheme changes (ADR 0039)
 	width, height int
 	ready         bool // a WindowSizeMsg has sized the layout at least once
 	// detached says the human scrolled off the tail: refreshViewport holds the scroll position
