@@ -119,8 +119,28 @@ disposition one level down), the orchestrator threads mode/approver/confiner/too
 verbatim-or-stricter, the sub-agent's **live guard state is isolated** (a fresh
 circuit-breaker + audit log — `Guards.ForSubAgent`) over a **shared, read-only
 dangerous-action floor** (unloosenable one level down), and recursion is depth-bounded.
+When one reply carries several `sub_agent` calls, the **top-level** agent runs them
+**concurrently** up to the server's **Parallel agents** cap (depth-0 only — a sub-agent's
+own delegations run serially inline); every event a sub-agent emits carries the **call-ID**
+of the `sub_agent` call that spawned it, so interleaved streams stay attributable
+([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)).
 Bare "agent" means the **top-level** agent unless qualified as "sub-agent".
 _Avoid_: "child agent" (says nothing about the privilege bound), "worker".
+
+**Parallel agents**:
+The per-server cap on how many sub-agents the top-level agent may run **concurrently**.
+Resolved per `servers:` entry, pin-else-discover-else-1: an explicit `parallel-agents: N`
+is a **pin** discovery never overrides (the `context-window` idiom); absent, the cap is
+discovered from the live server (`/props` `total_slots`); no signal means **1** — strictly
+serial, today's behavior. It is **structural, not a Mechanism** — it only executes calls
+the model already made, so it is on under Bypass — but it is also the width of a guided
+decomposition **batch** (`min(cap, remaining)` delegations per Turn). More parallel agents
+means a **smaller window each**: a llama.cpp `--parallel N` server splits its context into
+N slots, and the reported window is the per-slot share. See
+[ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md).
+_Avoid_: "slots" (the server's own term for its side of the trade), "concurrency limit"
+(names the bound, not the thing bounded), "fan-out width" (fan-out is the act; this is the
+cap).
 
 **Session** / **Session record**:
 A **Session** is one conversation the engine holds — the versioned `domain.Session` envelope
@@ -796,8 +816,9 @@ The Mechanism (`guided_decomposition`) that **avoids** context growth rather tha
 it: when measured Budget signals show the task cannot fit — resolved file context exceeding
 its allocation at the first Turn, or history exceeding its allocation mid-Exchange — it
 steers the model's **own primary call** to enumerate the remaining subtasks, then converts
-that enumeration into `sub_agent` delegations, **one per Turn**, carrying the
-not-yet-delegated items as a Deferred Response Action. The work happens in child Sessions;
+that enumeration into `sub_agent` delegations, **one batch of up to the Parallel agents cap
+per Turn** (cap 1 = one per Turn, the serialized floor), carrying the not-yet-delegated
+items as a Deferred Response Action. The work happens in child Sessions;
 only their bounded reports come home. It is a proactive-nudge (off under Bypass), requires
 `tool_result_cap` (the only reducer that *shapes* a request mid-Exchange — the emergency fold
 also acts there, but reactively, lossily, and once per Turn), fires at top level only

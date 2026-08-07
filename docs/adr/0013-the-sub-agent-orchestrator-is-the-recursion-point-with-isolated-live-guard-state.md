@@ -224,3 +224,32 @@ Neither the Decision nor the realisation's rule changes — only which accessor 
 agent to Plan mid-run refuses the grandchild's next write and its `effectiveMode()` reads Plan;
 a grandchild spawned in Plan stays refusing after the top-level agent cycles up to Auto; the
 depth-2 read is race-free under `-race` (`internal/agent/setmode_test.go`).
+
+## Amendment (2026-08-07) — children in one Turn may execute CONCURRENTLY at depth 0
+
+§5 was written when dispatch ran a reply's tool calls strictly in order, so "the driver runs
+the nested `Agent` to its Exchange boundary in one shot" implicitly meant *one child at a
+time*. [ADR 0039](0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)
+relaxes exactly that implicit serialization and nothing else: at **depth 0 only**, the
+`sub_agent` calls of one reply fan out concurrently, bounded by the server's
+`parallel-agents` cap.
+
+Every rule of this ADR survives verbatim, now read per-child:
+
+- **Atomicity is per child.** Each child still runs to its Exchange boundary in one shot on
+  its own goroutine; no snapshot lands while any child is in flight (the parent is still
+  mid-tool-dispatch, not at a quiescent boundary).
+- **Cancel still rolls back the whole parent Turn.** A cancel now propagates to *every*
+  in-flight child; the orchestrator waits for all of them to reach a boundary and returns
+  `dispatchCancelled` as before. This is no coarser than the serial reading: a reply with N
+  `sub_agent` calls was already one Turn, and a cancel during child 2 already discarded
+  child 1.
+- **Guard isolation was already concurrency-shaped.** Fresh breaker + audit per child (§3),
+  the shared floor read-only, and the live-mode chain a walk of `modeMu`-guarded accessors —
+  none of it assumed siblings don't overlap.
+- **A child's own delegations stay serial inline** (ADR 0039 decision 3), so the depth bound
+  of §4 also bounds total concurrent streams at the cap.
+
+New alongside, from ADR 0039: `EventBase` carries the spawning call-ID so interleaved child
+event streams stay attributable, and sink emission is serialized at the parent's single
+`EventSink` boundary.

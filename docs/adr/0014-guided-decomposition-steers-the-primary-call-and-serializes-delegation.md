@@ -249,3 +249,31 @@ reading the Decision already assumed actually hold across a full Exchange.
   fan-out mid-flight. The one-sided declaration on the `guided_decomposition` descriptor suffices
   (`detectIncompatibility` is symmetric in effect), so co-enabling the two is refused at startup with
   `ErrIncompatibleMechanisms`.
+
+## Amendment (2026-08-07) — §3 dispatches one BATCH of up to the parallel-agents cap per Turn
+
+[ADR 0039](0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)
+gives the engine concurrent depth-0 fan-out bounded by the server's `parallel-agents` cap.
+§3's "one delegation per Turn" becomes **`min(cap, remaining)` delegations per Turn**: the
+intercept synthesizes the first batch (not just the first item), the deferred directive
+carries the rest, and each following Turn dispatches the next batch. There is no separate
+mechanism knob — the server's cap is the single width everywhere, and **cap 1 is exactly
+the ratified §3 behavior**, so the serialized floor this ADR argued for still exists and
+remains the small-model default wherever no server advertises slots.
+
+What §3 bought is kept, one level coarser:
+
+- **A quiescent boundary still separates batches** — snapshots land between batches, and
+  the model still gets a per-batch decision point to rescope, retry, or skip.
+- **A cancel loses at most the in-flight batch**, never the queue (the remainder re-derives
+  from honest history as before). Granularity coarsens from one child to ≤ cap children —
+  recorded, accepted (ADR 0039 consequences).
+- **The "All N children in one Turn" rejection stands.** N was *unbounded* and destroyed
+  the quiescent boundary entirely; a batch is bounded by the server's real capacity and
+  keeps the boundary between batches.
+- **The `Requires: [tool_result_cap]` coupling is unchanged** — a batch's reports pile into
+  the protected most-recent Turn faster, making the reducer *more* necessary, not less.
+
+The changed stack (`guided_decomposition` + `tool_result_cap`, now batch-shaped) must
+**re-pass the ADR 0009 non-inferiority gate** before it can default on; until then it stays
+default-off as ever.
