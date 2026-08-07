@@ -65,6 +65,7 @@ const (
 	glyphUser           = "❯"
 	glyphMenuUnselected = "·" // U+00B7 MIDDLE DOT — an unselected row of a menu-style popup (popupSpec.menuRows): glyphUser's counterpart, deliberately NOT glyphBullet's "•", because a menu row is an option waiting to be pointed at rather than an item of a list
 	glyphSubRail        = "│"
+	glyphMemberGutter   = "│" // U+2502 LIGHT VERTICAL — the gutter continuing an EXPANDED group member's rows under its ┝ (memberGutter, render.go). Its shape is glyphSubRail's and deliberately NOT shared with it: the member gutter is painted in the detail tone and the sub-agent rail in the label orange (design call 8), so an open member nested inside a run cannot be read as a frame of the run.
 	glyphSubLabel       = "⤷"
 	glyphBullet         = "•" // a markdown bullet-list item (- / * / +)
 	glyphSkill          = "✦" // marks a skill: the "/" menu's skill rows (the sent block marks its own by colouring the token, not by badging it)

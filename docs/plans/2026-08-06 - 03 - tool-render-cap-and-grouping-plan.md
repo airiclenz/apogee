@@ -249,7 +249,28 @@ members and right-aligned `▶`.
 
 **Commit**: `feat(tui): group body-carrying calls with count and one-line members`
 
-## 5. Per-member expand state, expanded-member paint, member click targets
+## 5. Per-member expand state, expanded-member paint, member click targets — ✅ DONE (2026-08-07)
+
+NOTES (2026-08-07): four deviations. (a) `mouse.go` gains NO code, only doc: the item's rule —
+"a click on any row of a collapsed member expands that member, any row of an expanded one collapses
+it" — falls out of the marks alone, since `targetHeader` already routes to
+`toggleExpanded(target.entry)` and the painter now stamps the MEMBER's entry there. Adding a member
+case to `toggleBlockAt` would have been a second accounting of the same fact. The representation
+chosen is a member-bearing mark: `blockPaint.targets` becomes `[]lineMark` (kind + offset from the
+block's head) and `renderView` resolves `head + member`. (b) An expanded member's first row carries
+`branchText` — target AND summary — not the bare target the item's text names: the collapsed rule is
+"the summary is never dropped", and opening a member must not take the outcome away. (c) The open
+member's target and body are laid out to `room` (the row less the indicator field) rather than the
+full width, so the field the ▶/▼ sits in is held clear down the whole member — `groupIndicatorCells`
+already required that the field not change width when a member opens, or the row would move out from
+under the click that opened it. The `see less…` row still right-aligns at the block edge, like the
+collapsed ▶. (d) The paint cache needed no extension: `blockKey(shapeToolRun, …)` already spans the
+whole run and `spanFlags` packs `expanded` per covered entry — the item's "extend if not" branch did
+not fire, and `TestPaintCacheCoversEveryGroupMemberState` pins it.
+Test collateral beyond the named list: `groupMemberLine` is re-expressed through a new
+`memberEdgeRow` helper so "flush against the block's right edge" has one definition for the ▶, the ▼
+and the see-less marker; `TestBlockMarksAgreeWithTheMouseMapping` becomes two subtests (the single
+block's header/marker, and the group's member rows) rather than growing a second fixture inline.
 
 Depends on item 4.
 

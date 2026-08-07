@@ -69,8 +69,16 @@ point is a **minor** bump, not a breaking change.
     block's right edge; the field is reserved on every row, so the indicators line up down the
     edge. Ten grouped calls read as ten lines.
   - **The group header itself is inert** — no indicator, no click — because expansion belongs to
-    the members, each with its own state. Wiring those clicks up is the next step; until then a
-    grouped member shows the affordance and nothing happens when you press it.
+    the members, each with its own state.
+  - **A grouped member opens on its own.** Click anywhere on a member's row and that member alone
+    unfolds: its target in full, its output verbatim beneath a `│` gutter, and a right-aligned
+    `see less…` closing it, while its siblings stay one row each and the block keeps its single
+    header. Its `▶` becomes a `▼` in the same column, and every row the open member paints — the
+    target rows, the body, the `see less…` — closes it again, so the pointer never has to travel
+    back to where it started. The gutter is painted in the detail gray and never in the sub-agent
+    rail's orange, so an opened member inside a delegate's run cannot be read as part of the run's
+    frame. As everywhere else in the transcript, a drag still selects: only a motionless click
+    toggles.
   - **An answered question's record still stands alone**, and so does a delegation. The record was
     kept out of a group by the body it carries, which is no longer a reason for anything; the block
     now says outright that it must not fold into its neighbours, and says it across a save and

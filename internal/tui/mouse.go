@@ -496,12 +496,18 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 }
 
 // toggleBlockAt changes the state of the block whose click surface a MOTIONLESS click landed on
-// (layout.md, "Collapsed and expanded blocks"): a header line toggles its block, and a
+// (layout.md, "Collapsed and expanded blocks"): a toggle line flips what it names, and a
 // `+N more lines` marker expands the block whose body it is counting for — never collapses it,
 // because the marker is a line of the collapsed paint alone, so a click there can only mean "show
 // me the rest". A line that is neither is left exactly as it was: everywhere else in the transcript
 // a click keeps its selection meaning, which is the overwhelmingly common case and the one this
 // returns on first.
+//
+// WHAT a toggle line names is the paint's business and not this function's, which is why one case
+// covers a block header and a group member alike: inside a folded run every row of a member — its
+// one collapsed row, and, open, its target rows, its body and the see-less row closing it — is
+// marked for that member's OWN entry, so this same flip opens the third of ten reads and leaves the
+// other nine exactly where they were (render.go, lineMark).
 //
 // line is the PRESS's own content line, not the release point's, and THAT is what makes the toggle
 // land while a reply streams. The press already stored the scroll-immune answer: transcriptSel.

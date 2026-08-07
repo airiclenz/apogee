@@ -141,6 +141,42 @@ func TestPaintCacheRepaintsWhenTheKeyMoves(t *testing.T) {
 	}
 }
 
+// A grouped run is ONE cached paint over MANY entries, and each of those entries owns a state the
+// paint depends on — so the key has to cover every member's expanded bit, not just the head's. It
+// does, through spanFlags over the whole span (blockKey), and this is the test that says so: opening
+// the LAST member of a run is the case a head-only key would serve stale, since nothing else about
+// the block moved.
+func TestPaintCacheCoversEveryGroupMemberState(t *testing.T) {
+	th := newTheme()
+	tr := warmed(&transcript{})
+	for i, c := range [][2]string{
+		{"go build ./...", "ok\nbuilt"},
+		{"go vet ./...", "clean\nno findings"},
+		{"go test ./...", "ok\nPASS"},
+	} {
+		id := fmt.Sprintf("c%d", i+1)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: id, Tool: "terminal",
+			Arguments: []byte(`{"command":"` + c[0] + `"}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id, Content: c[1]}})
+	}
+	collapsed := tr.renderView(th, 80, false) // warm
+
+	for member := range 3 {
+		if !tr.setExpanded(member, true) {
+			t.Fatalf("entries[%d] is not a toggleable block — fixture is wrong", member)
+		}
+		opened := tr.renderView(th, 80, false)
+		sameRender(t, fmt.Sprintf("member %d open", member), opened, coldRender(tr, th, 80, false))
+		if equalLines(opened.lines, collapsed.lines) {
+			t.Errorf("opening member %d served the collapsed paint; the key does not cover its state", member)
+		}
+		if !tr.setExpanded(member, false) {
+			t.Fatalf("entries[%d] would not close again", member)
+		}
+	}
+	sameRender(t, "closed again", tr.renderView(th, 80, false), collapsed)
+}
+
 // A session switch re-uses head indices for a different conversation's entries, and reset is what
 // keeps the cache from answering about the old one. Without the clear in transcript.reset this
 // test paints the FIRST session's message at index 1.

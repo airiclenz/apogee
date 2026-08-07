@@ -1162,12 +1162,38 @@ func TestClippedTargetAloneMakesABlockAToggleTarget(t *testing.T) {
 // carries rather than as a hand-counted run of spaces, and the count moves with the width.
 func groupMemberLine(t *testing.T, text string, width int) string {
 	t.Helper()
+	return memberEdgeRow(t, text, glyphCollapsed, width)
+}
+
+// memberEdgeRow is that arithmetic for any right-aligned mark a member row carries — the ▶ of a
+// collapsed one, the ▼ an open one wears on its first row, the see-less marker closing it. One
+// definition of "flush against the block's right edge", so a golden that moves because the edge
+// moved fails everywhere at once instead of in one place.
+func memberEdgeRow(t *testing.T, text, mark string, width int) string {
+	t.Helper()
 	th := newTheme()
-	pad := width - th.measure.Width(text) - th.measure.Width(glyphCollapsed)
+	pad := width - th.measure.Width(text) - th.measure.Width(mark)
 	if pad < 0 {
-		t.Fatalf("member row %q does not fit width %d", text, width)
+		t.Fatalf("member row %q plus %q does not fit width %d", text, mark, width)
 	}
-	return text + strings.Repeat(" ", pad) + glyphCollapsed
+	return text + strings.Repeat(" ", pad) + mark
+}
+
+// runGroup folds a batch of same-label terminal calls, each with its output, into a fresh
+// transcript at depth — the sketch's "✦ Run (3)" fixture (docs/layout/tool-layout.md). Each call is
+// a {command, output} pair. They carry bodies deliberately: that is what gives every member
+// something to reveal and so a state of its own to be opened.
+func runGroup(depth int, calls ...[2]string) *transcript {
+	tr := &transcript{}
+	base := domain.EventBase{Depth: depth}
+	for i, c := range calls {
+		id := "c" + strconv.Itoa(i+1)
+		tr.apply(domain.ToolCallEvent{EventBase: base, Call: domain.ToolCall{ID: id, Tool: "terminal",
+			Arguments: []byte(`{"command":"` + c[0] + `"}`)}})
+		tr.apply(domain.ToolResultEvent{EventBase: base,
+			Result: domain.ToolResult{CallID: id, Content: c[1]}})
+	}
+	return tr
 }
 
 // summaryColumn is the display CELL a row's summary opens in — the column the eye reads it in,
@@ -1276,6 +1302,103 @@ func TestGroupMemberKeepsItsSummaryAndClipsTheTarget(t *testing.T) {
 	if a != b {
 		t.Errorf("summaries open at columns %d and %d; want one shared column:\n%s\n%s",
 			a, b, rows[1], rows[2])
+	}
+}
+
+// TestExpandedGroupMemberPaintsTheSketchShape is the open member, whole, against the sketch's
+// "middle one expanded" (docs/layout/tool-layout.md): the branch marker and the full target with ▼
+// where the ▶ was, the body under a │ gutter, and a right-aligned see-less row closing it — with
+// the siblings still one row each, untouched. It is one golden because the shape is the point: a
+// gutter that lost its space or a see-less row that drifted off the edge is the failure this catches.
+func TestExpandedGroupMemberPaintsTheSketchShape(t *testing.T) {
+	const width = 80
+	tr := runGroup(0,
+		[2]string{"go build ./...", "ok\nbuilt"},
+		[2]string{"go vet ./...", "clean\nno findings\ndone"},
+		[2]string{"go test ./...", "ok\nPASS"})
+	if !tr.setExpanded(1, true) {
+		t.Fatal("setup: entries[1] is not a toggleable block")
+	}
+
+	want := strings.Join([]string{
+		"✦ Run (3)",
+		groupMemberLine(t, "  ┝ go build ./...", width),
+		memberEdgeRow(t, "  ┝ go vet ./...", glyphExpanded, width),
+		"  │ clean",
+		"  │ no findings",
+		"  │ done",
+		memberEdgeRow(t, "  │ ", promptSeeLess, width),
+		groupMemberLine(t, "  ┕ go test ./...", width),
+	}, "\n")
+	got := renderPlain(tr, width)
+	if got != want {
+		t.Errorf("open-member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if strings.Contains(got, "more line") {
+		t.Errorf("the open member grew a remainder marker; it hides nothing:\n%s", got)
+	}
+}
+
+// Every row an open member paints belongs to that member and says so: the marks name entry 1 down
+// the whole of it — first row, body and see-less row alike — while the siblings' single rows name
+// entries 0 and 2 and the group header names nothing at all. This is the click surface the mouse
+// then resolves against (mouse.go, toggleBlockAt).
+func TestGroupMemberMarksNameTheirOwnCalls(t *testing.T) {
+	tr := runGroup(0,
+		[2]string{"go build ./...", "ok\nbuilt"},
+		[2]string{"go vet ./...", "clean\nno findings\ndone"},
+		[2]string{"go test ./...", "ok\nPASS"})
+	if !tr.setExpanded(1, true) {
+		t.Fatal("setup: entries[1] is not a toggleable block")
+	}
+
+	// Line 0 is the header and carries no mark, so the marks start on line 1 and run to the end:
+	// one row for the first member, six for the open one, one for the last.
+	marks := blockMarks(t, tr, 80)
+	want := []int{0, 1, 1, 1, 1, 1, 2} // the entry each marked line names, in paint order
+	if len(marks) != len(want) {
+		t.Fatalf("group painted %d marked rows, want %d:\n%+v", len(marks), len(want), marks)
+	}
+	for i, mark := range marks {
+		if mark.line != i+1 || mark.kind != targetHeader || mark.entry != want[i] {
+			t.Errorf("mark %d = %+v; want line %d, a toggle naming entry %d", i, mark, i+1, want[i])
+		}
+	}
+}
+
+// An open member nested inside a sub-agent run wears TWO vertical bars on the same row, and they
+// must not read as one: the run's rail is the label orange and the member's gutter is the detail
+// tone (design call 8). Painted in the same style, a member's body would look like a section of the
+// delegate's frame rather than the output of one call inside it.
+func TestExpandedMemberGutterIsNotTheSubAgentRail(t *testing.T) {
+	th := newTheme()
+	if !colorActive(th) {
+		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
+	}
+	tr := runGroup(1,
+		[2]string{"go build ./...", "ok\nbuilt"},
+		[2]string{"go vet ./...", "clean\nno findings\ndone"})
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setup: entries[0] is not a toggleable block")
+	}
+
+	var row string
+	for _, ln := range tr.renderLines(th, 80) {
+		if strings.Contains(strip(ln), "│ built") {
+			row = ln
+		}
+	}
+	if row == "" {
+		t.Fatalf("no body row under the member gutter in:\n%s", strings.Join(tr.renderLines(th, 80), "\n"))
+	}
+	if !strings.Contains(row, th.toolDetail.Render(memberGutter)) {
+		t.Errorf("row %q does not carry the gutter in the detail tone", row)
+	}
+	if strings.Contains(row, th.subRail.Render(memberGutter)) {
+		t.Errorf("row %q paints the member gutter in the sub-agent rail's style", row)
+	}
+	if !strings.HasPrefix(row, th.subRail.Render(glyphSubRail+" ")) {
+		t.Errorf("row %q lost the run's own rail; the fixture no longer nests the group", row)
 	}
 }
 
@@ -2295,47 +2418,98 @@ func TestPromptBlockIsOneClickSurface(t *testing.T) {
 	}
 }
 
-// TestBlockMarksAgreeWithTheMouseMapping walks the seam the toggle will use: the row a header is
-// PAINTED on is the row the mouse resolves to that header's content line, and the mark stashed
-// beside those lines names a tool-call entry. One accounting, so a click can never toggle a block
-// other than the one under the cursor — the map's whole reason for being built by the painter.
+// TestBlockMarksAgreeWithTheMouseMapping walks the seam the toggle uses: the row a mark is PAINTED
+// on is the row the mouse resolves to that mark's content line, and the entry it names is the one
+// whose state a click there flips. One accounting, so a click can never toggle a block other than
+// the one under the cursor — the map's whole reason for being built by the painter.
+//
+// A grouped block is the case where "the one under the cursor" stops being the block: its members
+// each own a state, so the marks have to name the MEMBER's entry rather than the run's head, and a
+// mapping that quietly fell back to the head would open the wrong call.
 func TestBlockMarksAgreeWithTheMouseMapping(t *testing.T) {
-	m := newTestModel(t)
-	m.transcript.reset() // drop the seeded start-up box: the block under test opens at line 0
-	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
-		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
-	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{
-		CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
-	m.refreshViewport()
-
-	if len(m.lineTargets) != len(m.lines) {
-		t.Fatalf("stashed targets and lines out of lockstep: %d targets for %d lines",
-			len(m.lineTargets), len(m.lines))
+	// lockstep is the map's standing invariant, asserted before any index into it is used.
+	lockstep := func(t *testing.T, m Model) {
+		t.Helper()
+		if len(m.lineTargets) != len(m.lines) {
+			t.Fatalf("stashed targets and lines out of lockstep: %d targets for %d lines",
+				len(m.lineTargets), len(m.lines))
+		}
 	}
-	for _, want := range []targetKind{targetHeader, targetMarker} {
-		marked := -1
-		for i, target := range m.lineTargets {
-			if target.kind == want {
-				marked = i
-				break
+	// resolves asserts that the mouse maps the row line is painted on back to line itself.
+	resolves := func(t *testing.T, m Model, line int) {
+		t.Helper()
+		got, _, ok := m.pointTranscriptRow(2, screenRow(t, m, line))
+		if !ok {
+			t.Fatalf("the mouse maps nothing to the row line %d is painted on", line)
+		}
+		if got != line {
+			t.Errorf("a click on line %d's row resolved to content line %d", line, got)
+		}
+	}
+
+	t.Run("a single block's header and marker", func(t *testing.T) {
+		m := newTestModel(t)
+		m.transcript.reset() // drop the seeded start-up box: the block under test opens at line 0
+		m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+			ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+		m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+			CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
+		m.refreshViewport()
+		lockstep(t, m)
+
+		for _, want := range []targetKind{targetHeader, targetMarker} {
+			marked := -1
+			for i, target := range m.lineTargets {
+				if target.kind == want {
+					marked = i
+					break
+				}
+			}
+			if marked < 0 {
+				t.Fatalf("no line marked %v in the stashed map", want)
+			}
+			resolves(t, m, marked)
+			if entry := m.lineTargets[marked].entry; m.transcript.entries[entry].kind != entryToolCall {
+				t.Errorf("line %d is marked %v but names entry %d, a %v", marked, want, entry,
+					m.transcript.entries[entry].kind)
 			}
 		}
-		if marked < 0 {
-			t.Fatalf("no line marked %v in the stashed map", want)
-		}
+	})
 
-		line, _, ok := m.pointTranscriptRow(2, screenRow(t, m, marked))
-		if !ok {
-			t.Fatalf("the mouse maps nothing to the row line %d is painted on", marked)
+	t.Run("a group's member rows name their own calls", func(t *testing.T) {
+		m := newTestModel(t)
+		m.transcript.reset()
+		for i, c := range [][2]string{
+			{"go build ./...", "ok\nbuilt"},
+			{"go vet ./...", "clean\nno findings"},
+			{"go test ./...", "ok\nPASS"},
+		} {
+			id := "c" + strconv.Itoa(i+1)
+			m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: id, Tool: "terminal",
+				Arguments: []byte(`{"command":"` + c[0] + `"}`)}})
+			m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id, Content: c[1]}})
 		}
-		if line != marked {
-			t.Errorf("a click on line %d's row resolved to content line %d", marked, line)
+		m.refreshViewport()
+		lockstep(t, m)
+
+		// One header and one row per member: the marks are the three member rows, in order, each
+		// naming its own entry — and the entry the mouse's own lookup lands on is that same one.
+		var marked []int
+		for i, target := range m.lineTargets {
+			if target.kind != targetNone {
+				marked = append(marked, i)
+			}
 		}
-		if entry := m.lineTargets[line].entry; m.transcript.entries[entry].kind != entryToolCall {
-			t.Errorf("line %d is marked %v but names entry %d, a %v", line, want, entry,
-				m.transcript.entries[entry].kind)
+		if len(marked) != 3 {
+			t.Fatalf("group marked %d rows, want one per member:\n%s", len(marked), strings.Join(m.lines, "\n"))
 		}
-	}
+		for member, line := range marked {
+			resolves(t, m, line)
+			if got := m.lineTargets[line].entry; got != member {
+				t.Errorf("member %d's row (line %d) names entry %d, not its own call", member, line, got)
+			}
+		}
+	})
 }
 
 // ----------------------------------------------------------------------------

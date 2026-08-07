@@ -1129,6 +1129,132 @@ func TestTranscriptStreamingClickTogglesOnlyThePressedBlock(t *testing.T) {
 	}
 }
 
+// modelWithToolGroup builds a ready idle model holding one user prompt and three consecutive Runs,
+// each with output — one grouped block whose members every one has a body and so a state of its
+// own. The start-up box is dropped so the block sits high enough to be aimed at.
+func modelWithToolGroup(t *testing.T) Model {
+	t.Helper()
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	m.transcript.addUser("check the build", nil)
+	for i, c := range [][2]string{
+		{"go build ./...", "ok\nbuilt"},
+		{"go vet ./...", "clean\nno findings\ndone"},
+		{"go test ./...", "ok\nPASS"},
+	} {
+		id := fmt.Sprintf("c%d", i+1)
+		m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: id, Tool: "terminal",
+			Arguments: []byte(`{"command":"` + c[0] + `"}`)}})
+		m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id, Content: c[1]}})
+	}
+	m.refreshViewport()
+	return m
+}
+
+// memberRows returns the content lines the group's member'th call is painted on, read off the marks
+// the painter made — the same accounting the mouse resolves against, so a test aims where a human's
+// pointer would land rather than at a hand-counted offset.
+func memberRows(t *testing.T, m Model, member int) []int {
+	t.Helper()
+	var rows []int
+	for i, target := range m.lineTargets {
+		if target.kind == targetHeader && target.entry == member {
+			rows = append(rows, i)
+		}
+	}
+	if len(rows) == 0 {
+		t.Fatalf("no rendered row is marked for member %d:\n%s", member, strings.Join(m.lines, "\n"))
+	}
+	return rows
+}
+
+// TestGroupMemberClickTogglesOnlyThatMember is per-member expansion, whole: a group's members each
+// own a state, so a click opens the one under the pointer and leaves its siblings — and the group
+// itself, which has no state at all — exactly as they were. Every row of the open member closes it
+// again, the see-less row it grew included, because the whole member is its own click surface.
+func TestGroupMemberClickTogglesOnlyThatMember(t *testing.T) {
+	// entries[0] is the prompt, so the run's three calls are entries 1..3 and the sketch's "middle
+	// one expanded" (docs/layout/tool-layout.md) is entry 2.
+	const groupHead, middle = 1, 2
+
+	open := func(t *testing.T, m Model) Model {
+		t.Helper()
+		row := memberRows(t, m, middle)[0]
+		m = clickCell(t, m, 4, screenRow(t, m, row))
+		if !m.transcript.entries[middle].expanded {
+			t.Fatal("a click on the middle member's row did not open it")
+		}
+		for _, sibling := range []int{groupHead, groupHead + 2} {
+			if m.transcript.entries[sibling].expanded {
+				t.Fatalf("opening entry %d opened entry %d as well", middle, sibling)
+			}
+		}
+		return m
+	}
+
+	t.Run("a click opens the member it landed on, alone", func(t *testing.T) {
+		m := modelWithToolGroup(t)
+		before := strings.Join(m.lines, "\n")
+		m = open(t, m)
+		if body := strings.Join(m.lines, "\n"); !strings.Contains(body, "no findings") {
+			t.Fatalf("the open member's body never reached the viewport:\n%s", body)
+		}
+		if strings.Contains(strings.Join(m.lines, "\n"), "built") {
+			t.Fatalf("a sibling's body came with it:\n%s", strings.Join(m.lines, "\n"))
+		}
+		if len(m.lines) <= len(strings.Split(before, "\n")) {
+			t.Fatal("the group did not grow; the member painted no extra row")
+		}
+	})
+
+	// Every row of the open member — its first row, its body, and the see-less row closing it —
+	// is the same click surface, so the human closes it wherever the pointer happens to be.
+	t.Run("any row of the open member closes it", func(t *testing.T) {
+		rows := memberRows(t, open(t, modelWithToolGroup(t)), middle)
+		if len(rows) < 3 {
+			t.Fatalf("the open member paints %d rows; the case needs a first row, a body and a see-less row", len(rows))
+		}
+		last := rows[len(rows)-1]
+		for _, row := range []int{rows[0], rows[len(rows)/2], last} {
+			m := open(t, modelWithToolGroup(t)) // a fresh open member per row: each closes from the same state
+			if row == last && !strings.Contains(strip(m.lines[row]), promptSeeLess) {
+				t.Fatalf("setup: the member's last row is %q, not the see-less row", strip(m.lines[row]))
+			}
+			m = clickCell(t, m, 4, screenRow(t, m, row))
+			if m.transcript.entries[middle].expanded {
+				t.Errorf("a click on the open member's row %d did not close it", row)
+			}
+		}
+	})
+
+	t.Run("the siblings and the header stay put", func(t *testing.T) {
+		m := modelWithToolGroup(t)
+		before := expandedFlags(m)
+		m = open(t, m)
+		for i, was := range expandedFlags(m) {
+			want := before[i]
+			if i == middle {
+				want = !before[i]
+			}
+			if was != want {
+				t.Errorf("entry %d expanded = %v, want %v (only the clicked member may flip)", i, was, want)
+			}
+		}
+		// The header itself is no click target: a click there keeps its selection meaning.
+		header := memberRows(t, m, groupHead)[0] - 1
+		if m.lineTargets[header].kind != targetNone {
+			t.Fatalf("setup: line %d is marked %v, not the inert group header this case needs",
+				header, m.lineTargets[header].kind)
+		}
+		painted := strings.Join(m.lines, "\n")
+		m = clickCell(t, m, 2, screenRow(t, m, header))
+		if got := strings.Join(m.lines, "\n"); got != painted {
+			t.Errorf("a click on the group header repainted the transcript:\n--- got ---\n%s\n--- want ---\n%s",
+				got, painted)
+		}
+	})
+}
+
 // modelWithLiveToolBlock builds a RUNNING model whose transcript holds a sub-agent run still doing
 // its work: the head call has no report yet and a child call is open inside its span, so the block
 // is LIVE and its star alternates with the spinner phase — every tick rewrites the very header line

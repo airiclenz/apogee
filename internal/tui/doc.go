@@ -415,8 +415,11 @@
 // ([renderDetails] — the stray-result and unregistered-tool fallbacks). One grammar covers both
 // counts — the reason the standalone and grouped paths were converged rather than kept in sync —
 // and a body of one line lays out exactly like a body of ten. Where they part is the ROW BUDGET a
-// group imposes: a member is one line and wears its own ▶ at the block's right edge
-// ([renderToolGroup]), where a block of one spends up to four rows and toggles from its header.
+// group imposes and the STATE it hands out: a collapsed member is one line wearing its own ▶ at the
+// block's right edge, and a member opens ALONE — the group header toggles nothing, each member is
+// painted by its own entry's expanded flag and every row it paints is marked back to that entry
+// ([renderToolGroup], [renderExpandedMember], [blockPaint.addFor]) — where a block of one spends up
+// to four rows and toggles from its header.
 // A scheduled Firing borrows that whole shape
 // through the same painter under a leading glyph of its own — ⟳ rather than the star
 // ([blockState]'s glyph override, whose zero value is the star; schedule.go, layout.md's "The firing

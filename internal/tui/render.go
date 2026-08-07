@@ -48,8 +48,13 @@ type renderedTranscript struct {
 
 // targetKind says what one rendered line is to a motionless click (layout.md, "Collapsed and
 // expanded blocks"): nothing at all — the overwhelmingly common case, and the zero value — a
-// block HEADER line, or a synthesized remainder MARKER line. A click on a header toggles its
-// block; a click on a marker expands the block whose body the marker is counting for.
+// TOGGLE line, or a synthesized remainder MARKER line. A click on a toggle line flips the state of
+// the entry the mark names; a click on a marker expands the block whose body the marker is counting
+// for, and never collapses it.
+//
+// targetHeader is named for the line it started on and no longer only that line: a grouped block's
+// MEMBER rows wear it too, each naming its own call rather than the block's head, which is how a
+// group of ten opens one of them (renderToolGroup).
 type targetKind int
 
 const (
@@ -67,16 +72,32 @@ type lineTarget struct {
 	entry int
 }
 
-// blockPaint is one painted block: its physical lines and, parallel to them, what each line is to
-// a click. A block painter says WHAT each of its lines is; [transcript.renderView] alone says
-// WHOSE, stamping the head entry's index as it lays the block into the transcript — which is why
-// the kinds here carry no entry index and no painter needs to know where in the entry list it sits.
+// lineMark is what one painted line is to a click as the block's OWN painter states it: the kind,
+// and which of the block's entries a click there flips, said as an OFFSET from the block's head. A
+// single block marks everything 0 — it has one entry and the head is it — and a grouped block marks
+// each member row with the member's index, which is that call's offset by construction
+// (toolCallRun walks adjacent entries forward, so views[n] is entries[head+n]).
 //
-// The two slices are grown only through [blockPaint.add] and [blockPaint.join], so they cannot
-// drift out of lockstep: every line that is appended is marked in the same call that appends it.
+// The offset is relative for the reason the kinds carry no entry index at all: a painter knows the
+// shape it is drawing and not where in the scrollback it sits, and [transcript.renderView] alone
+// turns the pair into an absolute entry. The zero value is "the head, no target", which is what
+// every line outside a click surface carries.
+type lineMark struct {
+	kind   targetKind
+	member int
+}
+
+// blockPaint is one painted block: its physical lines and, parallel to them, what each line is to
+// a click. A block painter says WHAT each of its lines is and WHICH of its own entries owns it;
+// [transcript.renderView] alone resolves that to an entry index as it lays the block into the
+// transcript — which is why no painter needs to know where in the entry list it sits.
+//
+// The two slices are grown only through [blockPaint.add], [blockPaint.addFor] and
+// [blockPaint.join], so they cannot drift out of lockstep: every line that is appended is marked in
+// the same call that appends it.
 type blockPaint struct {
 	lines   []string
-	targets []targetKind
+	targets []lineMark
 }
 
 // plainPaint is the paint of a block that carries no click surface at all — an assistant answer, a
@@ -85,17 +106,27 @@ type blockPaint struct {
 // producer. The two kinds that CAN be toggled — a tool block, and a prompt tall enough to collapse —
 // mark their own lines as they emit them.
 func plainPaint(lines []string) blockPaint {
-	return blockPaint{lines: lines, targets: make([]targetKind, len(lines))}
+	return blockPaint{lines: lines, targets: make([]lineMark, len(lines))}
 }
 
-// add appends lines that all carry the same target kind. A WRAPPED header is the reason it takes a
-// slice rather than a line: every physical line a header occupies is part of the same click
-// surface (layout.md — the click lands on the header, not on its first row), and the same holds
-// for a remainder marker narrow enough to wrap.
+// add appends lines that all carry the same target kind and belong to the block's HEAD — the shape
+// every painter but the grouped one draws. A WRAPPED header is the reason it takes a slice rather
+// than a line: every physical line a header occupies is part of the same click surface (layout.md —
+// the click lands on the header, not on its first row), and the same holds for a remainder marker
+// narrow enough to wrap.
 func (p *blockPaint) add(lines []string, kind targetKind) {
+	p.addFor(0, lines, kind)
+}
+
+// addFor appends lines belonging to the block's member'th entry — [blockPaint.add] with the offset
+// said out loud, for the one painter whose lines do not all belong to its head (renderToolGroup).
+// It exists rather than a stamping pass over finished lines because the lines and their marks have
+// to be one act (ADR 0030): a second walk deriving whose row is whose would be a second accounting,
+// and the two would part company the first time the member shape changed.
+func (p *blockPaint) addFor(member int, lines []string, kind targetKind) {
 	p.lines = append(p.lines, lines...)
 	for range lines {
-		p.targets = append(p.targets, kind)
+		p.targets = append(p.targets, lineMark{kind: kind, member: member})
 	}
 }
 
@@ -142,9 +173,11 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	// prevDepth below): the ⤷ label blocks the descent loop emits carry depths of their own,
 	// and a spacer's rail follows the blocks it actually sits between.
 	prevBlockDepth := 0
-	// head is the index into t.entries of the entry whose block state a click on this block
-	// toggles. It is stamped only onto the lines the block itself marked as a click surface, so a
-	// block that marks none — every kind but a tool block — may pass whatever index it sits at.
+	// head is the index into t.entries of the block's FIRST entry — the one a click on the block
+	// toggles wherever the block has a single state, and the base the painter's per-line member
+	// offsets are added to where it does not (a grouped run, whose members each own their state).
+	// It is spent only on the lines the block itself marked as a click surface, so a block that
+	// marks none — every kind but a tool block — may pass whatever index it sits at.
 	appendBlock := func(isUser bool, depth, head int, block blockPaint) {
 		if len(lines) > 0 {
 			lines = append(lines, railSpacer(th, min(prevBlockDepth, depth)))
@@ -160,8 +193,9 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		for i, ln := range block.lines {
 			lines = append(lines, ln)
 			target := lineTarget{}
-			if i < len(block.targets) && block.targets[i] != targetNone {
-				target = lineTarget{kind: block.targets[i], entry: head}
+			if i < len(block.targets) && block.targets[i].kind != targetNone {
+				mark := block.targets[i]
+				target = lineTarget{kind: mark.kind, entry: head + mark.member}
 			}
 			targets = append(targets, target)
 		}
@@ -211,7 +245,13 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			// The group's liveness is the group's, not its head's: a batch of reads whose first call
 			// has landed and whose last has not is still working, and the one star over them all says
 			// so. The run is entries[i:i+len(run)] by construction (toolCallRun walks adjacent
-			// entries forward), so the views' own entries are what the rule reads.
+			// entries forward), so the views' own entries are what the rule reads — and the same
+			// construction is what lets the members' EXPANDED flags be read off the run in view order
+			// and their rows be marked back by offset (blockPaint.addFor).
+			//
+			// Every one of those flags is in the paint key already: blockKey spans the whole run and
+			// spanFlags packs expanded at bit 0 of each covered entry, so opening the tenth member of a
+			// group is a different key and a fresh paint (paintcache.go).
 			key := t.blockKey(shapeToolRun, i, len(run), th, width, blink,
 				anyOpenCall(t.entries[i:i+len(run)]))
 			block := t.paintBlock(i, key, func() blockPaint {
@@ -219,6 +259,7 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 					expanded: e.expanded,
 					live:     key.live,
 					blink:    blink,
+					members:  memberFlags(t.entries[i : i+len(run)]),
 				}).railed(th, e.depth)
 			})
 			appendBlock(false, e.depth, i, block)
@@ -992,19 +1033,26 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 
 // renderToolGroup paints a folded run of same-label calls — the sketch's "✦ Run (3)" block
 // (docs/layout/tool-layout.md). It is a list, and everything about the shape follows from that: the
-// header names the label and how many calls carry it, and every member gets exactly ONE row so ten
-// grouped calls read as ten lines rather than as ten blocks that happen to share a star.
+// header names the label and how many calls carry it, and a COLLAPSED member gets exactly ONE row
+// so ten grouped calls read as ten lines rather than as ten blocks that happen to share a star.
 //
 // The header wears the count in the faint indicator tone rather than the label's bold orange
 // (design call 6): "(3)" is the block's own arithmetic, not part of the tool's name, and a reader
 // scanning the orange down the left edge should not read the number as one. It wears no state
 // indicator and is NOT a click target, because a group has no single state to toggle — expansion
-// belongs to the members, each of which owns its own (item 5 of the plan; until it lands the members
-// wear the affordance and no click resolves to them, which is the one place this block is knowingly
-// unfinished).
+// belongs to the members, each of which owns its own.
 //
-// state reaches only the star: a group is live while ANY member is (renderView passes the run's own
-// liveness), and no member's body is painted here whatever the head entry's expanded flag says.
+// That ownership is the whole of what this function does with state beyond the star: each member is
+// painted by ITS OWN entry's flag (state.memberExpanded, filled by renderView from the run's
+// entries), and each member's rows are marked for its OWN entry (blockPaint.addFor, whose offset is
+// the member index because views[n] is entries[head+n]). So one member opens inside a group of ten
+// and the other nine hold still, in the paint and under the mouse alike.
+//
+// A member that hides nothing — a short target, no body — is marked targetNone and keeps a click's
+// selection meaning, the same rule the single block's header answers to (blockHidesWhenCollapsed).
+//
+// state's own expanded flag reaches nothing here: it is the head entry's, and inside a group the
+// head is just the first member.
 func renderToolGroup(th theme, views []toolView, column, width int, state blockState) blockPaint {
 	label := th.toolLabel.Render(views[0].Label) + " " +
 		th.toolIndicator.Render(fmt.Sprintf(groupCountFormat, len(views)))
@@ -1013,8 +1061,13 @@ func renderToolGroup(th theme, views []toolView, column, width int, state blockS
 	room := max(1, width-groupIndicatorCells(th))
 	column = groupTargetCells(th, views, column, room)
 	for i, tv := range views {
-		out.add([]string{renderGroupMember(th, tv, column, branchMarker(i == len(views)-1), width, room)},
-			targetNone)
+		rows, hides := renderGroupMember(th, tv, column, branchMarker(i == len(views)-1), width, room,
+			state.memberExpanded(i))
+		kind := targetNone
+		if hides {
+			kind = targetHeader
+		}
+		out.addFor(i, rows, kind)
 	}
 	return out
 }
@@ -1046,10 +1099,14 @@ func groupTargetCells(th theme, views []toolView, column, room int) int {
 	return max(1, min(column, room-th.measure.Width(branchMarker(true))-tail))
 }
 
-// renderGroupMember paints one member of a grouped block: one screen row, whatever the call is
-// carrying. The row is the branch marker, the call's target clipped to what is left after the
-// summary and the indicator field, the pad that keeps the block's summary column, and the summary
-// itself; a ▶ then right-aligns at the block's edge when the member hides anything.
+// renderGroupMember paints one member of a grouped block, in whichever of its two states the
+// member's own entry is in, and reports whether the COLLAPSED paint hides anything — which is both
+// what makes the member wear an indicator and what makes its rows a click target (renderToolGroup).
+//
+// Collapsed, it is one screen row whatever the call is carrying: the branch marker, the call's
+// target clipped to what is left after the summary and the indicator field, the pad that keeps the
+// block's summary column, and the summary itself; a ▶ then right-aligns at the block's edge when the
+// member hides anything.
 //
 // The order the room is spent in is the rule: the SUMMARY is never dropped. It is the outcome — "1 -
 // 154", "+2 -2", "error: …" — and a member row that showed more of a long path at the cost of what
@@ -1065,18 +1122,104 @@ func groupTargetCells(th theme, views []toolView, column, room int) int {
 // collapsed paint hide anything (blockHidesWhenCollapsed) — asked here of one call: a body, or a
 // target the row's own width cut. A call still in flight has neither and paints a bare row.
 //
+// The hidden answer is taken from the COLLAPSED arithmetic in both states, which is why the clip is
+// composed even when the member is open: an expanded member is expanded precisely because its
+// collapsed paint hid something, and it has to stay a click target so the same click closes it —
+// the state-independence the single block's header mark has always had.
+//
 // column is the block's own (groupTargetCells) and room is the row less the indicator field; both
-// are settled once for the whole block, so no member can lay itself out against a different one.
-func renderGroupMember(th theme, tv toolView, column int, marker string, width, room int) string {
+// are settled once for the whole block, so no member can lay itself out against a different one,
+// and the field the ▶ sits in is held clear down an OPEN member too (renderExpandedMember) — a row
+// that re-wrapped on being opened would move out from under the very click that opened it.
+func renderGroupMember(th theme, tv toolView, column int, marker string, width, room int, expanded bool) (lines []string, hides bool) {
 	text, style, clipped := groupMemberText(th, tv, column, marker, room)
 	rows, cut := clipWrap(th, style, marker, text, room, groupMemberRows)
-	row := rows[0]
-	if !clipped && !cut && tv.Details.len() == 0 {
-		return row
+	if hides = clipped || cut || tv.Details.len() > 0; !hides {
+		return rows, false
 	}
-	pad := strings.Repeat(" ", max(0, width-th.measure.Width(glyphCollapsed)-th.measure.Width(row)))
-	return row + pad + th.toolIndicator.Render(glyphCollapsed)
+	if expanded {
+		return renderExpandedMember(th, tv, column, marker, width, room), true
+	}
+	return []string{indicatorRow(th, rows[0], width, glyphCollapsed)}, true
 }
+
+// renderExpandedMember paints an OPEN member of a grouped block — the sketch's "middle one
+// expanded" (docs/layout/tool-layout.md): the branch marker and the call's whole branch text, ▼
+// right-aligned on that first row, then every continuation row and every body line under a │ gutter
+// standing in for the blank hanging indent, closed by a right-aligned see-less marker.
+//
+// The gutter is what makes the open member read as one thing rather than as a member followed by
+// loose output, and it is painted in the DETAIL tone (design call 8): its shape is the sub-agent
+// rail's and its meaning is not, so an open member inside a nested run must not wear the rail's
+// orange — the two frames are read at a glance and confusing them would misattribute the body.
+//
+// The first row is the branch TEXT, not the bare target: the summary is the call's outcome and
+// opening a member must not take it away, and composing it through the same branchText the
+// collapsed row and the ungrouped block both use keeps the summary in the column it already
+// occupied. Nothing is clipped here — that is the whole of what opening a member buys — but the
+// wrap still stops at room, so the indicator field stays clear down the member and the ▼ lands in
+// the column the ▶ vacated.
+//
+// It grows no "+N more lines" marker: the marker counts what a collapsed paint left out, and this
+// paint leaves nothing out. The see-less marker closes it instead, worded from the prompt block's
+// own constant so the transcript has one vocabulary for "close this" (design call 7).
+func renderExpandedMember(th theme, tv toolView, column int, marker string, width, room int) []string {
+	text, style := branchText(th, tv, column)
+	out := gutteredWrap(th, style, marker, memberGutter, text, room)
+	out[0] = indicatorRow(th, out[0], width, glyphExpanded)
+	for _, d := range tv.Details.all() {
+		out = append(out, gutteredWrap(th, detailStyle(th, d.Kind), memberGutter, memberGutter, d.Text, room)...)
+	}
+	return append(out, seeLessRow(th, width))
+}
+
+// gutteredWrap is hangingWrap with a CONTINUATION prefix of its own: the first row leads with
+// marker and every row after it with gutter, where hangingWrap would indent them by the marker's
+// width in blanks. The prefixes are painted in the detail tone and the wrapped text in its own
+// style, so a diff line keeps its red or green while the gutter beside it stays chrome.
+//
+// Both prefixes are measured, and the text is wrapped to the room left by the FIRST of them, so a
+// gutter that is not the marker's width would still leave every row the same text column. Today
+// they are the same width by construction (memberGutter is branchMarker's shape), and stating it
+// this way is what keeps that a fact about the glyphs rather than an assumption in the arithmetic.
+func gutteredWrap(th theme, style lipgloss.Style, marker, gutter, text string, width int) []string {
+	rows := wrapText(th, text, max(1, width-th.measure.Width(marker)))
+	out := make([]string, len(rows))
+	for i, ln := range rows {
+		prefix := gutter
+		if i == 0 {
+			prefix = marker
+		}
+		out[i] = th.toolDetail.Render(prefix) + style.Render(ln)
+	}
+	return out
+}
+
+// indicatorRow right-aligns one state glyph at the block's edge on an already-painted row — the
+// member's ▶ or ▼, in the field groupIndicatorCells reserved for it. The pad is measured over the
+// styled row (th.measure strips ANSI, width.go), so a row carrying colour lands in the same column
+// as a plain one.
+func indicatorRow(th theme, row string, width int, glyph string) string {
+	pad := strings.Repeat(" ", max(0, width-th.measure.Width(glyph)-th.measure.Width(row)))
+	return row + pad + th.toolIndicator.Render(glyph)
+}
+
+// seeLessRow is the row that closes an open member: the gutter, then the see-less marker flush
+// against the block's right edge. It borrows the prompt block's WORDING and not its treatment —
+// promptSeeLess is the one vocabulary (design call 7), while the style is the tool block's own
+// marker tone, the same a "+N more lines" wears, because both are things apogee wrote onto a block
+// rather than lines the tool produced.
+func seeLessRow(th theme, width int) string {
+	pad := strings.Repeat(" ",
+		max(0, width-th.measure.Width(memberGutter)-th.measure.Width(promptSeeLess)))
+	return th.toolDetail.Render(memberGutter) + pad + th.toolMarker.Render(promptSeeLess)
+}
+
+// memberGutter is the continuation prefix an open member's rows carry where a hanging wrap would
+// put blanks: the branch marker's own two-column indent, then the gutter glyph and its space, so
+// the gutter stands exactly under the ┝ it continues. Being branchMarker's shape is what keeps an
+// open member's text in the column its collapsed row used.
+const memberGutter = "  " + glyphMemberGutter + " "
 
 // groupMemberText composes a member row's text and the style it paints in — branchText under the
 // one-row budget. It returns TEXT rather than a painted line because the row is styled whole, the
@@ -1162,12 +1305,27 @@ func groupIndicatorCells(th theme) int {
 // borrowing the star's meaning — today the scheduled Firing's ⟳ (renderEntryLines). Its ZERO VALUE
 // is the star, so every existing caller keeps the glyph it always painted without saying so, and a
 // block that names one has no live state to express: a Firing runs in a session of its own.
+//
+// members is the GROUPED shape's answer to the same question, one flag per view in the block's own
+// order. A group has no state of its own — its header toggles nothing — and each member opens and
+// closes alone (design call 6), so the flag a member is painted by is its own entry's rather than
+// the head's. It is nil for every single block, where expanded above is the whole of the state, and
+// read only through [blockState.memberExpanded] so a short slice is a collapsed member and never a
+// panic on the repaint path.
 type blockState struct {
 	expanded bool
 	elides   bool
 	live     bool
 	blink    bool
 	glyph    string
+	members  []bool
+}
+
+// memberExpanded is the n'th member's own view state — false wherever the caller named none, which
+// is every single block and every hand-built test transcript. It is a method rather than an index
+// because this runs on the repaint path, where the alternative to a bound is a panic mid-frame.
+func (s blockState) memberExpanded(n int) bool {
+	return n >= 0 && n < len(s.members) && s.members[n]
 }
 
 // star is the glyph the block's header leads with (layout.md, "The live star"): ✦ for a block that
@@ -1214,6 +1372,18 @@ func anyOpenCall(entries []entry) bool {
 		}
 	}
 	return false
+}
+
+// memberFlags is a grouped block's per-member view state, read off the run's own entries in view
+// order (blockState.members). It is a copy rather than the entries themselves because a painter is
+// handed what it needs to draw and nothing it could write through: the flag is owned by the shared
+// entries backing array and moved only by transcript.setExpanded (ADR 0011).
+func memberFlags(entries []entry) []bool {
+	flags := make([]bool, len(entries))
+	for i := range entries {
+		flags[i] = entries[i].expanded
+	}
+	return flags
 }
 
 // blockHidesWhenCollapsed reports whether a block's collapsed paint leaves anything unshown — the
