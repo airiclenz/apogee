@@ -84,7 +84,11 @@ Decided by the plan author from the sketch, 2026-08-06 (binding):
 
 ---
 
-## 1. Row-capped clip primitive
+## 1. Row-capped clip primitive — ✅ DONE (2026-08-07)
+
+NOTES (2026-08-07): `docs/layout/tool-layout.md` was already committed to the repo
+(`4a82dc3`) before this item ran, so the `git add` it asks for is a no-op — the plan's
+visual source is in the repo, just not via this item's commit.
 
 **What**: In `internal/tui/render.go` (near `hangingWrap`, ~line 1397), add a
 row-capped variant — suggested shape

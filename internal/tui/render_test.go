@@ -211,6 +211,168 @@ func TestWrapTextBreaksInThePaintersMeasure(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------------
+// The row-capped clip (clipWrap)
+// ----------------------------------------------------------------------------
+
+// clipWrap is hangingWrap with a row budget, and the budget is the only difference: text that fits
+// inside it comes back as hangingWrap's own lines — same breaks, same hanging indent, same styling —
+// and reports no clip. That is what lets a caller reach for it unconditionally instead of measuring
+// the text first and branching, which is how the collapsed and expanded paints of one block would
+// come to disagree about where a line breaks.
+func TestClipWrapLeavesFittingTextAlone(t *testing.T) {
+	t.Parallel()
+
+	const width = 40
+	marker := branchMarker(true)
+
+	cases := []struct {
+		name, text string
+		maxRows    int
+		rows       int // what the fixture wraps to — a budget it must stay under
+	}{
+		{name: "one row inside a two-row budget", text: "go build ./...", maxRows: 2, rows: 1},
+		{name: "empty text", text: "", maxRows: 2, rows: 1},
+		{name: "exactly the budget", text: strings.Repeat("ab ", 20), maxRows: 2, rows: 2},
+		{name: "cjk", text: "日本語のテキスト", maxRows: 2, rows: 1},
+		{name: "tab bearing", text: "a\tb\tc", maxRows: 1, rows: 1},
+	}
+
+	for _, pm := range paintMethods {
+		for _, c := range cases {
+			t.Run(pm.name+"/"+c.name, func(t *testing.T) {
+				t.Parallel()
+				th := newTheme()
+				th.measure = widthAuthority{method: pm.method}
+
+				want := hangingWrap(th, th.toolDetail, marker, c.text, width)
+				if len(want) != c.rows {
+					t.Fatalf("the fixture wraps to %d rows, not the %d the case assumes: %q",
+						len(want), c.rows, mapStrip(want))
+				}
+
+				got, clipped := clipWrap(th, th.toolDetail, marker, c.text, width, c.maxRows)
+				if clipped {
+					t.Errorf("reported a clip on %d rows inside a %d-row budget", len(want), c.maxRows)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("clipped output %q differs from hangingWrap's %q", mapStrip(got), mapStrip(want))
+				}
+			})
+		}
+	}
+}
+
+// Text past the budget comes back as exactly the budget's rows, the last of them ending in the
+// continuation tail, and every row inside the width it was given — layout.md's absolute cap, held
+// in the measure the frame is painted in (ADR 0030). Fitting the tail is the whole point: appending
+// it to a row the wrap had already filled would overrun the width and the viewport would fold the
+// row in two, spending the very row the budget was saving.
+//
+// The rows above the last are hangingWrap's own, untouched, so a clip only ever cuts at its seam.
+func TestClipWrapHoldsItsRowBudget(t *testing.T) {
+	t.Parallel()
+
+	longRun := "cd . && head -3 go.mod && echo \"---\" && wc -l $(find . -name '*.go' | grep -v dist) 2>/dev/null | tail -1"
+	marker := branchMarker(true)
+	indent := strings.Repeat(" ", len([]rune(marker))) // the marker is four one-cell runes
+
+	cases := []struct{ name, text string }{
+		{"long command", longRun + " && " + longRun},
+		{"breakpoint run", strings.Repeat("a-b-c-d ", 40)},
+		{"cjk", strings.Repeat("日本語のテキスト", 16)},
+		{"tab bearing", strings.Repeat("col\tvalue\t", 20)},
+		{"vs16", strings.Repeat(vs16Warning+" warning ", 24)},
+	}
+
+	for _, pm := range paintMethods {
+		for _, c := range cases {
+			for _, width := range []int{20, 40, 80} {
+				for maxRows := 1; maxRows <= 2; maxRows++ {
+					name := pm.name + "/" + c.name + "/width " + strconv.Itoa(width) + "/rows " + strconv.Itoa(maxRows)
+					t.Run(name, func(t *testing.T) {
+						t.Parallel()
+						th := newTheme()
+						th.measure = widthAuthority{method: pm.method}
+
+						full := hangingWrap(th, th.toolDetail, marker, c.text, width)
+						if len(full) <= maxRows {
+							t.Fatalf("the fixture wraps to %d rows and never reaches the %d-row budget", len(full), maxRows)
+						}
+
+						got, clipped := clipWrap(th, th.toolDetail, marker, c.text, width, maxRows)
+						if !clipped {
+							t.Errorf("reported no clip while dropping %d of %d rows", len(full)-maxRows, len(full))
+						}
+						if len(got) != maxRows {
+							t.Fatalf("kept %d rows, want the budget's %d: %q", len(got), maxRows, mapStrip(got))
+						}
+						last := strip(got[maxRows-1])
+						if !strings.HasSuffix(last, clipTail) {
+							t.Errorf("the last kept row %q does not end in the continuation tail %q", last, clipTail)
+						}
+						for i, ln := range got {
+							if w := th.measure.Width(ln); w > width {
+								t.Errorf("row %d %q is %d cells, over the %d cap", i, strip(ln), w, width)
+							}
+							if strings.Contains(strip(ln), "\t") {
+								t.Errorf("row %d still carries a tab for a style to rewrite: %q", i, strip(ln))
+							}
+							prefix := indent
+							if i == 0 {
+								prefix = marker
+							}
+							if !strings.HasPrefix(strip(ln), prefix) {
+								t.Errorf("row %d %q does not hang under %q", i, strip(ln), prefix)
+							}
+						}
+						// Only the seam row is re-cut; everything above it is the wrap's own.
+						for i := 0; i < maxRows-1; i++ {
+							if got[i] != full[i] {
+								t.Errorf("row %d %q is not hangingWrap's own %q", i, strip(got[i]), strip(full[i]))
+							}
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+// The degenerate widths, where the block is narrower than the mark it has to make. A clipped row
+// says "…" or it says nothing at all, so the tail is the one thing the cap yields to — and a budget
+// of no rows keeps nothing while still reporting the clip, rather than handing back a row the caller
+// has no room to paint.
+func TestClipWrapSurvivesNarrowWidths(t *testing.T) {
+	t.Parallel()
+
+	for _, pm := range paintMethods {
+		t.Run(pm.name, func(t *testing.T) {
+			t.Parallel()
+			th := newTheme()
+			th.measure = widthAuthority{method: pm.method}
+			floor := th.measure.Width(clipTail)
+
+			for width := 0; width <= 6; width++ {
+				got, clipped := clipWrap(th, th.toolDetail, branchMarker(true), "a long target that cannot fit", width, 1)
+				if !clipped {
+					t.Errorf("width %d: reported no clip", width)
+				}
+				if len(got) != 1 {
+					t.Fatalf("width %d: kept %d rows, want 1: %q", width, len(got), mapStrip(got))
+				}
+				if w := th.measure.Width(got[0]); w > max(width, floor) {
+					t.Errorf("width %d: row %q is %d cells, over the %d cap", width, strip(got[0]), w, max(width, floor))
+				}
+			}
+
+			if got, clipped := clipWrap(th, th.toolDetail, branchMarker(true), "anything", 40, 0); got != nil || !clipped {
+				t.Errorf("a zero-row budget returned %q (clipped %v), want no rows and a reported clip", mapStrip(got), clipped)
+			}
+		})
+	}
+}
+
 // wrapText is the one wrap in the package, so moving it moves every wrapped surface at once —
 // transcript prose and table cells among them. Each is asserted through its own production entry
 // point rather than through wrapText again, so a surface that grew a wrap of its own would show up

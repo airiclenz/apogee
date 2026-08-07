@@ -1422,6 +1422,55 @@ func hangingPrefixes(th theme, marker, text string, width int) []string {
 	return out
 }
 
+// clipTail is what a row cut short ends in: one space and one ellipsis, the sketch's own spelling
+// (docs/layout/tool-layout.md). It is a CONTINUATION mark, not a marker — it says "this line goes
+// on", where the "+N more lines" marker says how much never got a line at all.
+const clipTail = " …"
+
+// clipWrap is hangingWrap under a row budget. It wraps and styles exactly as hangingWrap does —
+// the same hangingPrefixes path, so the same wrapText, the same expandTabs and the same hanging
+// continuation indent — and then keeps at most maxRows physical rows, ending the last kept row in
+// clipTail when it dropped any. Handed text that fits, it returns hangingWrap's own lines and
+// clipped false, so a caller can reach for it unconditionally.
+//
+// It REPORTS the clip rather than leaving the caller to infer one. Whether a collapsed block hides
+// anything is width-dependent once a target can be cut, and the indicator, the click target and the
+// paint all have to agree about it; asking this once and passing the answer along is what keeps them
+// from each re-deriving it — and from drifting apart when only one of them is changed.
+//
+// The tail is FITTED, not appended: the kept row is re-cut so the row and its tail together measure
+// within width in the width authority's measure, which is the measure the frame is painted in
+// (ADR 0030). Appending to a row the wrap had already filled to the column would overrun the width
+// by the tail, and the viewport would fold the row into the very second row the budget was spending.
+func clipWrap(th theme, style lipgloss.Style, marker, text string, width, maxRows int) (lines []string, clipped bool) {
+	if maxRows < 1 {
+		return nil, true // no row to spend: everything is hidden, and nothing is left to say so
+	}
+	prefixed := hangingPrefixes(th, marker, text, width)
+	if clipped = len(prefixed) > maxRows; clipped {
+		prefixed = prefixed[:maxRows]
+		prefixed[maxRows-1] = fitClipTail(th, prefixed[maxRows-1], width)
+	}
+	out := make([]string, len(prefixed))
+	for i, ln := range prefixed {
+		out[i] = style.Render(ln)
+	}
+	return out, clipped
+}
+
+// fitClipTail re-cuts one wrapped row so the row plus clipTail measures within width. The row is
+// still unstyled here — the cut lands on the text the wrap produced, before any style has been past
+// it, which is the same order every other measurement in this package takes.
+//
+// It trims the trailing spaces the cut leaves behind: a break can hand back the space it fell on,
+// and "grep  …" reads as a slip where "grep …" reads as a sentence continuing. A width too narrow
+// to seat even the tail leaves the tail alone rather than half of it — a lone "…" one column short
+// of the edge is still the honest mark, and no row can be narrower than what it must say.
+func fitClipTail(th theme, row string, width int) string {
+	room := max(0, width-th.measure.Width(clipTail))
+	return strings.TrimRight(th.measure.Truncate(row, room, ""), " ") + clipTail
+}
+
 // wrapText word-wraps text to limit columns, hard-breaking any word longer than the limit
 // and preserving the text's own newlines. An empty string yields a single empty line so a
 // just-opened assistant buffer still renders its marker.
