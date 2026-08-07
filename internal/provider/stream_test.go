@@ -176,6 +176,117 @@ func TestStream_ErrorStatus(t *testing.T) {
 	}
 }
 
+// TestStream_InBandError covers the aggregator failure mode where an HTTP 200 stream
+// carries the provider's error as a data event: it must end in a terminal fault, never in
+// the Done that would commit a silent empty reply.
+func TestStream_InBandError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		apiKey       string
+		body         string
+		wantKind     DeltaKind
+		wantContent  string
+		wantContains []string
+		wantAbsent   string
+	}{
+		{
+			name: "error only stream",
+			body: `data: {"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"temporarily rate-limited upstream"}}}
+
+`,
+			wantKind:     DeltaError,
+			wantContains: []string{"429", "Provider returned error", "rate-limited upstream"},
+		},
+		{
+			name: "error after a content delta",
+			body: `data: {"choices":[{"delta":{"content":"partial"}}]}
+
+data: {"error":{"message":"upstream died","code":502}}
+
+data: [DONE]
+
+`,
+			wantKind:     DeltaError,
+			wantContent:  "partial",
+			wantContains: []string{"502", "upstream died"},
+		},
+		{
+			name: "context overflow",
+			body: `data: {"error":{"message":"This model's maximum context length is 8192 tokens","code":400}}
+
+`,
+			wantKind:     DeltaContextOverflow,
+			wantContains: []string{"maximum context length"},
+		},
+		{
+			name: "non-numeric code still surfaces",
+			body: `data: {"error":{"message":"rate limited","code":"rate_limit_exceeded"}}
+
+`,
+			wantKind:     DeltaError,
+			wantContains: []string{"rate limited"},
+		},
+		{
+			name:   "api key redacted",
+			apiKey: "sk-secret-123",
+			body: `data: {"error":{"message":"bad key sk-secret-123","code":401}}
+
+`,
+			wantKind:     DeltaError,
+			wantContains: []string{"[REDACTED]"},
+			wantAbsent:   "sk-secret-123",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := sseServer(tc.body)
+			defer srv.Close()
+
+			var opts []Option
+			if tc.apiKey != "" {
+				opts = append(opts, WithAPIKey(tc.apiKey))
+			}
+			deltas := collectStream(NewClient(srv.URL, "m", opts...), Request{})
+			if len(deltas) == 0 {
+				t.Fatal("no deltas, want a terminal fault")
+			}
+
+			var content string
+			for _, d := range deltas {
+				switch d.Kind {
+				case DeltaContent:
+					content += d.Content
+				case DeltaDone:
+					t.Errorf("got a Done delta after an in-band error: %+v", deltas)
+				case DeltaToolCall:
+					t.Errorf("got a partial tool call after an in-band error: %+v", deltas)
+				}
+			}
+			if content != tc.wantContent {
+				t.Errorf("content = %q, want %q", content, tc.wantContent)
+			}
+
+			last := deltas[len(deltas)-1]
+			if last.Kind != tc.wantKind {
+				t.Fatalf("terminal delta = %+v, want kind %s", last, tc.wantKind)
+			}
+			for _, want := range tc.wantContains {
+				if !strings.Contains(last.Err, want) {
+					t.Errorf("error = %q, want it to contain %q", last.Err, want)
+				}
+			}
+			if tc.wantAbsent != "" && strings.Contains(last.Err, tc.wantAbsent) {
+				t.Errorf("error = %q leaks %q", last.Err, tc.wantAbsent)
+			}
+		})
+	}
+}
+
 func TestStream_RequestShapeIncludesStreamOptions(t *testing.T) {
 	t.Parallel()
 

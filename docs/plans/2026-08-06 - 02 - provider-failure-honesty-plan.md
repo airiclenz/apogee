@@ -47,7 +47,7 @@ below the Mechanisms layer. The Bypass invariant (AGENTS.md) forbids correctness
 with a Mechanism enabled; after this plan the provider reports faults honestly in every mode, and
 `empty_response_recovery` remains purely a model-shepherding off-ramp.
 
-## 1. Parse in-band errors on the streaming path
+## 1. Parse in-band errors on the streaming path — ✅ DONE (2026-08-07)
 
 **What:** In `internal/provider/wirejson.go`, add a `wireError` struct for the OpenAI/OpenRouter
 in-band error member: `Message string \`json:"message"\``, `Code json.RawMessage \`json:"code"\``

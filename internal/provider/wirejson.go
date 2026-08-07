@@ -95,6 +95,29 @@ type usageJSON struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
+// wireError is the in-band error member OpenAI-compatible aggregators deliver on an HTTP
+// 200 — inside the JSON body on the non-streamed path, as an SSE data event on the
+// streamed one. Ignoring it is what lets an upstream failure masquerade as a successful
+// empty reply. Code is raw because servers send it either as a number (an HTTP status) or
+// as a string slug; Metadata is raw because its shape is provider-specific (OpenRouter
+// carries the originating provider's own error text in metadata.raw).
+type wireError struct {
+	Message  string          `json:"message"`
+	Code     json.RawMessage `json:"code"`
+	Metadata json.RawMessage `json:"metadata"`
+}
+
+// intCode returns the error code as an int, or 0 when the server sent a non-numeric one
+// (e.g. "rate_limit_exceeded") or none at all. Classification branches on it only where a
+// numeric HTTP status is meaningful; the message text carries the truth either way.
+func (e wireError) intCode() int {
+	var code int
+	if err := json.Unmarshal(e.Code, &code); err != nil {
+		return 0
+	}
+	return code
+}
+
 // toRawResponse assembles the seam RawResponse from the first choice (the loop drives a
 // single completion). A reply with no choices yields the zero RawResponse, not a panic.
 func (r chatCompletionResponse) toRawResponse() RawResponse {

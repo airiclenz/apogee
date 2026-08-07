@@ -90,6 +90,19 @@ func (c *Client) statusDelta(resp *http.Response) Delta {
 	return Delta{Kind: DeltaError, Err: fmt.Sprintf("apogee: upstream HTTP %d: %s", resp.StatusCode, text)}
 }
 
+// inBandErrorDelta classifies an in-band error member into a terminal Delta, mirroring
+// statusDelta but for a failure the server wrapped in an HTTP 200. The text is the whole raw
+// SSE payload (sanitised), so provider-specific metadata — OpenRouter's metadata.raw, say —
+// reaches the user verbatim instead of being flattened away.
+func (c *Client) inBandErrorDelta(werr wireError, raw string) Delta {
+	code := werr.intCode()
+	text := fmt.Sprintf("apogee: upstream in-band error %d: %s", code, c.sanitize(raw))
+	if code == http.StatusBadRequest && isContextOverflow(werr.Message) {
+		return Delta{Kind: DeltaContextOverflow, Err: text}
+	}
+	return Delta{Kind: DeltaError, Err: text}
+}
+
 // parseSSE reads the SSE body line by line and yields Deltas. It accumulates a tool call
 // across argument fragments (flushing on the next call's id or at end), drops a malformed
 // event rather than failing the stream, caps accumulated tool-call arguments, and emits a
@@ -125,6 +138,14 @@ func (c *Client) parseSSE(body io.Reader, yield func(Delta) bool) {
 		var chunk sseChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue // drop a malformed event, matching the oracle
+		}
+		if chunk.Error != nil {
+			// An aggregator can answer HTTP 200 and put the provider's failure in-band. It is
+			// terminal, and it must not fall through to the choice-less `continue` below — that
+			// path ends at the implicit Done and commits a silent empty reply. A flushed-but-
+			// unfinished tool call is dropped with it: the reply is faulted, not partly usable.
+			yield(c.inBandErrorDelta(*chunk.Error, data))
+			return
 		}
 		if chunk.Usage != nil {
 			usage := Usage(*chunk.Usage)
@@ -205,6 +226,10 @@ type sseChunk struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *usageJSON `json:"usage"`
+	// Error is the in-band failure member: present only when the server reported an error
+	// inside an otherwise-successful stream. Absent on every healthy chunk, so a server that
+	// never sends one keeps byte-identical behaviour.
+	Error *wireError `json:"error"`
 }
 
 // sseToolCall is a tool-call fragment within a streamed delta: the first fragment carries
