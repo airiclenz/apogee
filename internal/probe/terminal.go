@@ -594,11 +594,20 @@ func (s *termSession) measureGlyphs(unicodeCore bool) TerminalSection {
 // ----------------------------------------------------------------------------
 
 // measureTabs walks the row one tab at a time and records where the cursor lands, both before and
-// after DECST8C. bubbletea hardcodes hard-tab cursor movement on Windows (termios_windows.go, next
-// to its own "TODO: check if we can optimize cursor movements on Windows"), and ultraviolet moves
-// the cursor against an ASSUMED every-8 tab-stop model it enforces with DECST8C — so a terminal
-// whose stops are elsewhere, or which ignores DECST8C, is moved to a column the renderer is not
-// expecting.
+// after DECST8C. bubbletea hardcodes hard-tab cursor movement on Windows (termios_windows.go:9 sets
+// useHardTabs unconditionally, next to its own "TODO: check if we can optimize cursor movements on
+// Windows" at tty_windows.go:55), and ultraviolet then moves the cursor against an every-8 tab-stop
+// model. Enforcement of that model is split across the two layers, and only one of them still
+// emits: ultraviolet's renderer-level DECST8C is commented out upstream behind a TODO
+// (terminal_renderer.go:1200-1205), while bubbletea writes DECST8C once before the first frame
+// whenever hard tabs are on (cursed_renderer.go:282-284). So every session on Windows does ask the
+// terminal for stops every 8 — and one that ignores the request moves the cursor to a column the
+// renderer is not expecting.
+//
+// The probe sends DECST8C itself, which is why the stops are read twice: the "before" row is the
+// terminal's untouched state, the "after" row is the state a Windows session actually paints into,
+// and the pair separates "the stops were already every 8" from "the stops moved when this terminal
+// was asked".
 //
 // The second half asks the other tab question: whether the tab ERASED what it passed over. That
 // one cannot be answered from a cursor position — it needs the cells themselves — so it is
@@ -627,7 +636,12 @@ func (s *termSession) measureTabs() TerminalSection {
 	if !sameInts(before, after) {
 		effect = "moved the stops"
 	}
-	section.Rows = append(section.Rows, []string{"DECST8C (CSI ?5W)", effect, "resets the stops to every 8"})
+	// bubbletea sends DECST8C before the first frame whenever hard tabs are on, which on Windows is
+	// always (cursed_renderer.go:282-284, termios_windows.go:9), so the renderer really does assert
+	// the every-8 stops this row resets. Ultraviolet's own emission being commented out upstream
+	// changes WHICH layer sends it, not whether it is sent.
+	section.Rows = append(section.Rows,
+		[]string{"DECST8C (CSI ?5W)", effect, "every 8 — bubbletea sends DECST8C at start"})
 	section.Flagged = append(section.Flagged, false)
 
 	// Does a tab erase what it moves over? Write a known run, jump back to the start, tab across
@@ -687,8 +701,11 @@ func (s *termSession) tabStops() ([]int, bool) {
 }
 
 // everyEightStops is the renderer's own tab-stop model, rendered as the columns a cursor tabbing
-// from column 1 would land on: ultraviolet counts stops every 8 columns and emits DECST8C at start
-// to make the terminal agree.
+// from column 1 would land on: ultraviolet counts stops every 8 columns, and on Windows bubbletea
+// asserts that model on the terminal by writing DECST8C before the first frame
+// (cursed_renderer.go:282-284, termios_windows.go:9). Ultraviolet's own renderer-level emission is
+// commented out upstream (terminal_renderer.go:1200-1205), so off that Windows path the model is an
+// assumption rather than a negotiated setting.
 func everyEightStops(width, n int) []int {
 	stops := make([]int, 0, n)
 	for col := 9; col <= width && len(stops) < n; col += 8 {

@@ -77,6 +77,9 @@
   is set on the output handle (`tty_windows.go:48-52`). A pending-wrap disagreement puts the
   cursor a whole row off — which is exactly the handoff's "ghost spinner dots appear one row
   above".
+  **FALSIFIED (2026-08-07)** by finding 28: measured in all three terminals with
+  `apogee probe terminal`, the wrap is *deferred* — including in the two that ghost. The
+  disagreement this bullet supposes does not exist on any measured path.
 - **H2 — `noCaps` makes any column error permanent (finding 3).** With no `CHA`/`HPA`, the
   renderer cannot re-anchor a column within a row; it counts relative moves from its own model.
   One bad advance poisons `curbuf` for that line, the diff renderer then believes those cells are
@@ -84,9 +87,17 @@
   explains "only a resize fixes it" no matter which of H1/H3/H4 starts the error** — and on its
   own it is enough to turn a rare glitch into the constant ghosting seen.
 - **H3 — hard tabs (finding 4).** The renderer moves the cursor with `\t` against an assumed
-  every-8 tab-stop model and emits `DECST8C` (`CSI ?5W`) at start to enforce it. If conhost
-  ignores `DECST8C`, or fills tab-skipped cells rather than just moving over them, both eaten
-  text and stale cells follow.
+  every-8 tab-stop model. If the terminal's stops are elsewhere, or a tab fills the cells it skips
+  rather than just moving over them, both eaten text and stale cells follow.
+  **Correction (2026-08-07):** this bullet originally credited the `DECST8C` (`CSI ?5W`) emission to
+  ultraviolet. That is the wrong layer — ultraviolet's *renderer-level* emission is commented out
+  upstream behind a TODO (`terminal_renderer.go:1200-1205`) — but bubbletea still sends it, once
+  before the first frame whenever hard tabs are on (`cursed_renderer.go:282-284`), and hard tabs are
+  on unconditionally on Windows (`termios_windows.go:9`). So every apogee TUI run on Windows does
+  ask for every-8 stops before it paints, and the "after DECST8C" reading is the state the painter
+  faces there. Finding 30 measures the stops in all three terminals: they were already every 8 and
+  DECST8C moved nothing. The hypothesis stays falsified (finding 13), now with a direct measurement
+  behind it as well as the A/B.
 - **H4 — terminal-side width disagreement.** WT's `textMeasurement` and its font-fallback path
   may measure braille or ambiguous-width glyphs differently from the painter, even though the
   painter's own tables are self-consistent (finding 6).
@@ -306,6 +317,14 @@ test the interactive path itself.
 
 > **Answer: H1 (last-column / pending wrap), amplified by H2. H3 and H4 ruled out.** Full evidence
 > in "Item 4 findings" at the end of this file; the verdict table is under "Item 4 — ANSWER".
+>
+> **SUPERSEDED IN PART (2026-08-07): H1 is falsified.** The owner measured the last-column wrap in
+> all three terminals with `apogee probe terminal` and it is *deferred* everywhere, including in
+> both terminals that ghost — findings 28-29. This item's answer named a primary cause that the
+> direct measurement contradicts; the corrected verdict table is under "Item 4 — ANSWER" and the
+> measurements are under "Item 6 findings — the owner's real-terminal probe runs". **No cause is
+> named today.** The observations recorded in this section all stand; the causal reading built on
+> finding 20's replay does not.
 
 **Runnable now — does NOT depend on items 1-3.** Items 2 and 3 turn these capabilities into
 supported repo features; the prebuilt kit at `C:\Users\airic\apogee-ghosting-debug\` already
@@ -452,6 +471,35 @@ of the three terminals the ghost was seen in, so the item's acceptance row ("the
 longer ghosts in Windows Terminal, owner confirms") is untouched. Nothing was changed in
 `internal/`; the item is left open with a sharper question and a two-command run sheet for the
 owner.
+
+NOTES (2026-08-07, second pass): the owner ran command 1 of that run sheet — `apogee probe terminal`
+in conhost, Windows Terminal and VS Code — and **the answer falsifies H1**: the last-column wrap is
+deferred on every path, including both that ghost (findings 28-31). Per the owner's standing
+instruction that branch forbids the two things this item's H1 bullet calls for, so neither was done:
+no issue was written against `charmbracelet/ultraviolet`, because the one direct measurement
+contradicts the claim it would make, and no one-column-short mitigation, which was never authorized
+and is now also unmotivated. What landed instead is layout-neutral and documentary: item 4's ANSWER
+and the H1/H3 hypothesis text corrected against the measurements, the DECST8C claim corrected in
+`internal/probe/terminal.go` (that first correction was itself wrong — see the third-pass NOTES
+below), and the measurements transcribed. Nothing in `internal/tui/` changed. Command 2 of the run
+sheet — does the post-item-5 build still ghost in Windows Terminal — is **still not performed**, and
+it is now the gate. The item stays open.
+
+NOTES (2026-08-07, third pass): the second pass's DECST8C correction was itself wrong, and this pass
+fixes only that. It checked `charmbracelet/ultraviolet` and stopped there, concluding "the renderer
+never sends DECST8C" — but the emitter in this stack is bubbletea. `cursed_renderer.go:282-284`
+writes `ansi.SetTabEvery8Columns` when `s.starting && s.hardTabs`, `termios_windows.go:9` sets
+`useHardTabs = true` unconditionally on Windows, and apogee takes the default renderer
+(`internal/tui/tui.go:1023`, no `WithRenderer`), so **every apogee TUI run on Windows sends DECST8C
+before its first frame**. Only ultraviolet's *renderer-level* emission is commented out
+(`terminal_renderer.go:1200-1205`). All four sites that carried the false claim are reworded — the
+H3 bullet, finding 30, `measureTabs`/`everyEightStops`, and the DECST8C row's printed cell, which is
+restored to `every 8 — bubbletea sends DECST8C at start`. Every cited line was re-read in the
+versions pinned by `go.mod` (`charm.land/bubbletea/v2 v2.0.8`, `ultraviolet
+v0.0.0-20260803092147-8b693049ce2a`). The falsification of H3 is unaffected: the stops were already
+every 8, so DECST8C is a no-op on all three terminals. No layout mitigation was written, nothing was
+filed upstream, and `internal/tui/` was not touched. **The item stays open**, still gated on command
+2 of the run sheet.
 
 Depends on items 4 and 5.
 
@@ -888,10 +936,30 @@ column 0, and every subsequent relative move inherits the error.
 
 | Hypothesis | Verdict | Evidence |
 |---|---|---|
-| **H1 — last-column / pending wrap** | **CONFIRMED — primary cause** | findings 19-20: the same trace replays clean under `deferred` and ghosts under `immediate`; first divergence at write 2, the full-width box rule |
+| **H1 — last-column / pending wrap** | ~~**CONFIRMED — primary cause**~~ → **FALSIFIED (2026-08-07)** | findings 19-20 (replay) said confirmed; finding 28 measures the wrap directly in all three terminals and it is *deferred* in every one, the two that ghost included. See the correction below the table |
 | **H2 — `noCaps`** | **CONFIRMED as amplifier, ruled out as trigger** | finding 9 (same `noCaps` stream paints correctly in conhost); finding 20 (why it never recovers) |
 | **H3 — hard tabs** | **RULED OUT** | finding 13 (row 3), finding 15 (C1), finding 16 (C2) |
 | **H4 — width disagreement** | **RULED OUT** | finding 14 (row 4 + run B), finding 17 (row 5) |
+
+**Correction (2026-08-07) — what falsifying H1 does to the rest of this answer.** Open question 1
+below asked for exactly the measurement that has now been taken, and it came back the other way.
+The two paragraphs above are wrong where they say the wrap "is taken immediately" on the ConPTY
+path; findings 28-29 measure it as deferred in conhost, Windows Terminal *and* VS Code. Three
+consequences, and they are not all bad news:
+
+- **Finding 19 gets stronger, not weaker.** It said apogee's emitted bytes render a clean screen
+  under deferred semantics. The terminals are now measured to *have* deferred semantics, so the
+  stream apogee emits is correct for the terminals it is emitted to. The corruption therefore
+  enters after the bytes leave apogee.
+- **Finding 20 changes what it proves.** Replaying under `immediate` reproduces the symptom, so the
+  stream is *sensitive* to a one-row cursor error and that error's signature is the artifact seen.
+  That remains a useful fingerprint of the fault class. It is no longer evidence for where the row
+  error comes from, because the mechanism it proposed has been measured absent.
+- **H2's verdict is untouched.** It was never the trigger and finding 23 already showed it is the
+  amplifier of the wrong axis.
+
+**No hypothesis on the H1-H4 list is now a live primary cause.** The diagnosis is reopened, and
+item 6 carries the reopened question.
 
 **Open, and honest about it:**
 
@@ -914,11 +982,11 @@ painter a real `TERM` is worth landing on its own merits. Note it will **not** f
 own; it removes the mechanism that makes the error permanent, which may well be enough to make the
 symptom invisible, but the trigger stays.
 
-**For item 6:** take the H1 branch as written — repro and issue against `charmbracelet/ultraviolet`
-and possibly `microsoft/terminal`. The plan already flags that the local mitigation (keeping
-apogee's rows one column short of the terminal width) changes layout and needs the owner's
-agreement **before** it is written. Finding 19 is the artifact to attach to any upstream report: the
-same bytes, clean under one wrap model and corrupt under the other.
+**For item 6:** ~~take the H1 branch as written — repro and issue against
+`charmbracelet/ultraviolet` and possibly `microsoft/terminal`.~~ **Withdrawn 2026-08-07.** Open
+question 1 was answered against this instruction: the wrap is deferred on the paths that ghost, so
+neither the ultraviolet issue nor the one-column-short mitigation has a measured defect to point
+at. Both would have been filed and written on an inference. See "Item 6 — WHERE IT STANDS".
 
 ## Item 6 findings — re-running the sheet against the post-item-5 build (2026-08-07)
 
@@ -1057,39 +1125,168 @@ two models), so the disagreement, wherever it is resolved, survives all the way 
 emulator. That keeps a second candidate alive that item 4 could not separate: the corruption may be
 in how Windows Terminal or xterm.js consumes ConPTY's re-emission, not in ConPTY's buffer at all.
 
-## Item 6 — WHERE IT STANDS (open)
+## Item 6 findings — the owner's real-terminal probe runs (2026-08-07)
 
-**The design call is not answered, and the honest reason is that the two branches the owner's
-decision named are both unproven.** Ghosting was not shown to survive item 5, and it was not shown to
-be gone; the only configurations that could be driven without a human are configurations in which the
-bug does not appear even *before* item 5.
+The previous pass ended by asking for one thing: `apogee probe terminal`, run by the owner in the
+three terminals of item 4 row 1, with the `last-column wrap` section as the discriminator. The owner
+ran it. The raw captures are `windows-terminal-proble-results.md` (Windows Terminal and VS Code, as
+text) and `windows-terminal-probe-conhost.png` (conhost, a screenshot), left untracked in the repo
+root; everything load-bearing in them is transcribed below.
 
-What did change:
+Two properties of the instrument have to be read before the numbers are:
+
+- **The console mode is bubbletea's.** `prepareTerminalOutput` (`cmd/apogee/probeterminal_windows.go`)
+  sets `ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN`, matching
+  `tty_windows.go:36-53`. The second flag is precisely the one that adds the delayed end-of-line
+  wrap state — item 4's open question 2 named it as a suspect. So the wrap below was measured in the
+  console configuration a bubbletea session actually runs in, not in a default one.
+- **The probe reads the PROCESS `TERM`** (`cmd/apogee/probeterminal.go:119`), and item 5 injects
+  `TERM` into bubbletea's environment slice only, never into the process
+  (`internal/tui/environ_windows.go`, `tui.go:1016`). Finding 31 says what that does to the
+  capability section and why it is not a verdict on the post-item-5 painter.
+
+**Finding 28 — the last-column wrap is DEFERRED in all three terminals, the two that ghost included.
+H1 is falsified.** Each run was in its own window, hence the three different widths; the probe
+measures against whatever width `term.GetSize` reports.
+
+| Terminal | Ghosts? (row 1) | width | cursor after the final column (CPR) | console API | probe verdict |
+|---|---|---|---|---|---|
+| conhost | **NO** | 120 | 6,120 | 6,120 | `OK` — pending wrap held |
+| Windows Terminal | **YES** | 130 | 6,130 | 6,130 | `OK` — pending wrap held |
+| VS Code (xterm.js) | **YES** | 148 | 6,149 | 6,148 | `MISMATCH` — "neither a pending wrap nor an immediate one" |
+
+An immediate wrap has exactly one signature in this section, and the probe tests for it literally:
+`afterX.Row == wrapRow+1 && afterX.Col == 1`, i.e. **`7,1`**. Not one of the six readings above is
+`7,1`. Every one of them leaves the cursor on row 6. Item 4's ANSWER — "on the ConPTY path the wrap
+is taken immediately, putting the cursor a row down and at column 0" — describes behaviour that no
+measured terminal exhibits.
+
+The load-bearing comparison is not any single row but the *pair*: conhost, which does not ghost, and
+Windows Terminal, which does, return **byte-identical** wrap behaviour. A property that is the same
+in the clean path and the broken path cannot be what separates them.
+
+**Finding 29 — VS Code's `MISMATCH` is a reporting convention for the pending wrap, not a third
+semantics.** Three things pin it:
+
+- The width really is 148. `term.GetSize` said so, and the second row of the section confirms it
+  independently: writing one more character put the cursor at `7,2`, which requires that character
+  to have landed in row 7 column 1, which requires row 6 to have been full at column 148.
+- `GetConsoleScreenBufferInfo` reports `6,148` — the deferred model exactly, the same answer conhost
+  and Windows Terminal give.
+- `6,149` is that same state reported as *one past the last column*, which is how an emulator that
+  models a pending wrap as an `x == width` cursor reports its position. It is a different spelling
+  of "pending", not a different behaviour: an emulator that had already taken the wrap would say
+  `7,1`.
+
+What is genuinely new here is the **disagreement between the two readings**, which appears on the VS
+Code path and on neither of the others. CPR and the console buffer are not being answered by the same
+component there — the reply the application receives comes from somewhere that counts the phantom
+column, while the buffer behind it does not. It is a one-column, same-row difference and so cannot
+produce the row error the ghost's artifact needs, which is why it is recorded rather than pursued.
+It is also a caution for any future probe row that trusts CPR alone on a ConPTY path.
+
+**Finding 30 — tab stops are every 8 in all three terminals, DECST8C moves nothing, and a tab erases
+nothing.** All three `hard tabs` sections read `OK`, with identical observed stops
+`9 17 25 33 41 49 57 65` before and after DECST8C, `no change` from DECST8C itself, and
+`moved over the cells, left them intact` for the erase test. Folded in with this pass, a correction
+to how H3 was written down: the DECST8C emission had been credited to the wrong layer.
+**ultraviolet's renderer-level emission is commented out** upstream behind a TODO
+(`terminal_renderer.go:1200-1205`), but **bubbletea still sends DECST8C** — once before the first
+frame whenever hard tabs are on (`cursed_renderer.go:282-284`) — and hard tabs are on
+unconditionally on Windows (`termios_windows.go:9`). apogee takes bubbletea's default renderer
+(`internal/tui/tui.go:1023`, no `WithRenderer` anywhere in the tree), so every Windows run asks for
+every-8 stops before its first frame; the stops were already there, so the request changes nothing.
+H3 stays falsified (finding 13) and now has a direct measurement behind it as well as an A/B. The
+layer mix-up is corrected in the plan's H3 bullet and in `internal/probe/terminal.go`
+(`measureTabs`, `everyEightStops`, and the DECST8C row's "renderer assumes" cell, which printed it
+to the user).
+
+**Finding 31 — the capability `MISMATCH` in all three reports is the probe reading the process
+environment, and it is evidence *for* item 5 rather than against it.** All three terminals answer
+`yes` to CHA, VPA, ECH, ICH and REP, and all three reports print `xtermCaps(TERM=(unset))` saying
+`no` to each. Read carefully, that says two separate things:
+
+- **It is the direct real-terminal evidence finding 3 never had.** conhost, Windows Terminal and VS
+  Code all support the five sequences an empty `TERM` denies the painter. That is exactly the premise
+  item 5 was built on, now measured in the three terminals rather than argued from `xtermCaps`.
+- **It is not a measurement of the post-item-5 painter, and it cannot become one.** The probe is a
+  separate subcommand that never builds a tea program, so item 5's injection does not reach it, and
+  item 5 correctly refuses to mutate the process environment. Item 5's acceptance row *"`apogee probe
+  terminal` reports the capability section as `OK`"* is therefore **unsatisfiable as written** on
+  Windows: the probe will print `MISMATCH` there for as long as it names the terminal from
+  `os.Getenv("TERM")`. Making it agree with the painter means giving the probe the same naming rule
+  the painter got — a real change with a real design question in it (report what the process sees,
+  what the painter sees, or both), and it belongs to whoever revisits items 3 and 5, not here.
+
+**What none of the three sections does is separate the ghost from the clean path.** Tabs: identical
+`OK` in all three. Wrap: identical `OK` in conhost and Windows Terminal. Capabilities: identical
+`MISMATCH` in all three, for a reason that is the same in all three. The probe was built to
+discriminate and it has come back with no discriminating row at all — which is itself the finding,
+because it retires the last hypothesis on the H1-H4 list that was still standing as a cause.
+
+## Item 6 — WHERE IT STANDS (still open, and the diagnosis is reopened)
+
+**The design call still cannot be answered, but for a different and better reason than last pass.**
+Last pass the branches were unproven. This pass the branch item 4 selected is *disproven*: the wrap
+is deferred on the paths that ghost (finding 28), so the primary cause item 4 named is not the cause,
+and the two actions item 6's H1 bullet prescribes — an `ultraviolet` issue and the one-column-short
+mitigation — both address a defect that has now been measured absent.
+
+What is established, after two passes:
 
 - Item 5 is measured working and measured layout-neutral (finding 22). It is not a fix (finding 23).
-- H1's mechanism is now a source citation rather than a replay inference (finding 24), which is most
-  of the "minimal repro" an upstream issue needs.
 - The cheapest layout-free mitigation is eliminated on mechanism (finding 25).
-- One direct wrap measurement exists, and it says *deferred* — on the wrong pseudoconsole
-  (findings 26-27).
+- **apogee's emitted stream is correct for the semantics the ghosting terminals actually have.**
+  Finding 19 replayed the traces clean under `deferred`; finding 28 measures the terminals as
+  deferred. Those two together say the fault is introduced **downstream of apogee's byte stream** —
+  which is the single most useful thing this pass produced, because it moves the search out of the
+  renderer entirely.
+- Finding 24 stands as a correct reading of ultraviolet's source (`wrapCursor` emits nothing and
+  assumes `am`), and it is still the right description of a *latent* fragility. It is not a defect
+  report, because every terminal measured has `am` and honours it the way the renderer assumes.
+- Finding 20's `immediate` replay keeps its value as the *fingerprint* of the fault class — a
+  one-row cursor error produces exactly the observed artifact — and loses its value as an
+  identification of the cause. Something downstream is producing that row error by another route.
 
-**Recommendation — two commands, then the decision is real.** Both are `apogee probe terminal`, which
-now exists; neither needs the debug kit or a patched bubbletea:
+**The previous pass's two-command recommendation, updated.** Command 1 — `apogee probe terminal` in
+all three terminals — is **done**, and it is findings 28-31. Command 2 is **not**, and it has become
+the gate:
 
-1. Run `apogee probe terminal` in **Windows Terminal**, in **VS Code**, and in **conhost**, and read
-   the `last-column wrap` section in each. If it says *pending* in the two that ghost, **H1 is
-   falsified as stated** and item 4's ANSWER needs revisiting — finding 19/20's replay would then be
-   a property of the replay model rather than of the terminal, and no upstream issue should be filed
-   against `ultraviolet` on the strength of it. If it says the wrap was already taken, H1 is
-   confirmed on the paths that matter, finding 24 is the issue text, and the layout mitigation
-   becomes a real decision.
-2. Run the current `apogee` (post-item-5) in Windows Terminal for one streaming turn — item 4 row 1,
-   nothing more. Item 5 changed the emitted stream substantially (finding 22), so whether the symptom
-   is now *invisible* is a question only that run answers, independently of whether the trigger is
-   still there.
+> **Run the current `apogee` (post-item-5) in Windows Terminal for one streaming turn.** Item 4
+> row 1, nothing more, no debug kit, no flags. Item 5 changed the emitted stream substantially
+> (finding 22: 38 `CHA`, 2 `VPA` and 40 `ECH` where the pre-item-5 stream had none), so whether the
+> symptom is still *visible* is a question only that run answers. **If it no longer ghosts, item 6
+> is "confirm and record" and the plan can close.** Every further measurement below is conditional
+> on it still ghosting.
 
-Filing upstream before (1) would put a claim in front of a maintainer that this session's one direct
-measurement contradicts. That is the reason nothing was filed.
+**If it still ghosts, the ranked next measurements.** These are the candidates that survive
+findings 28-31, in the order their cost/discrimination ratio favours:
+
+1. **Synchronized output — mode 2026 (finding 18).** Now the *only* measured per-path divergence
+   that lines up with the ghost and has never been A/B tested: 1123 of 1125 Windows Terminal writes
+   are wrapped in `CSI ?2026h` … `CSI ?2026l`, and zero conhost writes are. Finding 18 dismissed it
+   by argument — "a batching hint changes when cells are presented, not which cells are written" —
+   and that argument is untested, because `tracereplay`'s VT model ignores mode 2026 entirely, so
+   every replay in this plan has been blind to it. bubbletea exposes no public option
+   (`tea.go:972 shouldQuerySynchronizedOutput`), so the A/B needs a sixth kit flag alongside the
+   five `APOGEE_DBG_*` hooks. That is the cheapest remaining single-variable test.
+2. **ConPTY's re-serialization, measured on the ConPTY that actually ghosts.** Finding 19 plus
+   finding 28 put the fault downstream of apogee's bytes, and finding 27 has already cleared the
+   *system* pseudoconsole — but Windows Terminal ships its own `OpenConsole.exe` and VS Code drives
+   node-pty, so neither of the ghosting paths has ever had its re-emitted stream captured. That
+   capture is both the discriminator and, if it shows corruption, the entire content of a
+   `microsoft/terminal` issue. `conptyrun` supplies the mechanics; pointing it at WT's
+   `OpenConsole.exe` is the work.
+3. **The downstream emulator's consumption of that re-emission.** If (2) shows ConPTY re-emits a
+   correct stream, what remains is Windows Terminal and xterm.js both mishandling it — two
+   independent codebases, so the shared input is the suspect, and (1) is a strong candidate for what
+   in that input is unusual.
+
+**Nothing is to be filed upstream on the current evidence, against anyone.** Against `ultraviolet`,
+the one direct measurement contradicts the claim (finding 28). Against `microsoft/terminal`, there is
+no capture from the pseudoconsole that ghosts, and finding 27 is a capture from one that does not.
+Both issues would have been written from inference, which is the mistake this pass exists to have
+caught.
 
 **A warning item 7 should read before it is started.** Item 7 specifies exactly the harness built
 here — `CreatePseudoConsole`, a full-width repro, read the buffer back — and finding 27 says that
@@ -1097,7 +1294,12 @@ harness **paints correctly on a pre-item-5 build**, which is the one thing item 
 ("add the failing case first and watch it fail … a regression test that was never seen red is not a
 regression test"). Whatever item 7 becomes, it cannot be written against the system pseudoconsole
 until something makes the bug appear there. `conptyrun` is reusable for the mechanics and saves the
-Win32 setup cost; it is the *premise* that needs re-checking, not the plumbing.
+Win32 setup cost; it is the *premise* that needs re-checking, not the plumbing. Finding 28 sharpens
+this rather than softening it: the system pseudoconsole's wrap behaviour is now known to match the
+real terminals', so the gap between the harness and the ghosting path is *not* the wrap — the
+premise gap is still there and still unlocated.
 
 **Not written, deliberately:** the one-column-short mitigation, and any other user-visible layout
-change — the owner's decision withholds authorization for both until the evidence above exists.
+change — the owner's decision withholds authorization for both, and finding 28 has now removed the
+defect they were meant to work around, so they are unmotivated as well as unauthorized. Also not
+written: any upstream issue text, for the reason two paragraphs up.
