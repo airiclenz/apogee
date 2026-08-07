@@ -47,9 +47,16 @@
 
 **Commit:** `feat(tui): picker derives one filtered view for rows, count and accept`
 
-## 2. Picker key routing — printable keys build the filter
+## 2. Picker key routing — printable keys build the filter — ✅ DONE (2026-08-07)
 
 Depends on item 1.
+
+NOTES (2026-08-07): beyond the item's literal text, on the owner's dispatch decision (item 1's
+verifier proved the defect): `acceptCycle` (`internal/tui/schedule.go`) is the overlay's ONE partial
+reset — it moved `kind` and `selected` on but left `filter` standing, so a filter typed at the cycle
+offering survived into the mode pane and could open it over zero rows. It now clears `filter` with
+them, covered by `TestPickerCycleAcceptClearsTheFilter`. No other partial reset of `picker` exists
+(the ↑/↓ cases only move the highlight within one kind; every other path zeroes the whole struct).
 
 **What:** In `pickerKey` (`internal/tui/picker.go`): keep `esc`, `up`/`ctrl+p`, `down`/`ctrl+n`, and `enter` exactly as they are (they already operate on the filtered count after item 1); after those cases, printable input — the key message's text runes, space included — appends to `m.picker.filter`, and `backspace` trims the last rune (no-op on an empty filter). Every other key stays swallowed (the modal contract). `esc` closes outright even with a filter set (ratified call 3). Update the hints per author binding E: `pickerHint` and both `pickerHintFor` variants gain the leading `type to filter · ` segment.
 

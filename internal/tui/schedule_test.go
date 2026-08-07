@@ -871,9 +871,9 @@ func TestCycleRowsGlossEveryPreset(t *testing.T) {
 func TestPickerHintFollowsTheKind(t *testing.T) {
 	for kind, want := range map[pickerKind]string{
 		pickerModel:        pickerHint,
-		pickerCycle:        "↑/↓ select · ⏎ choose · esc close",
-		pickerScheduleMode: "↑/↓ select · ⏎ choose · esc close",
-		pickerScheduleStop: "↑/↓ select · ⏎ stop · esc close",
+		pickerCycle:        "type to filter · ↑/↓ select · ⏎ choose · esc close",
+		pickerScheduleMode: "type to filter · ↑/↓ select · ⏎ choose · esc close",
+		pickerScheduleStop: "type to filter · ↑/↓ select · ⏎ stop · esc close",
 	} {
 		if got := pickerHintFor(kind); got != want {
 			t.Errorf("pickerHintFor(%v) = %q, want %q", kind, got, want)

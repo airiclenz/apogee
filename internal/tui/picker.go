@@ -114,7 +114,11 @@ const maxPickerRows = 8
 // pickerHint is the one-line key legend shown at the foot of the overlay, for the three kinds that
 // MOVE this session (/model, /server) — "switch" is the honest verb only where accepting a row
 // re-points the session at something else.
-const pickerHint = "↑/↓ select · ⏎ switch · esc close"
+//
+// Every variant LEADS with "type to filter", because that is the one key nobody can guess: there is
+// no activation key to name (pickerKey — any printable key types) and letters announce themselves
+// nowhere else the way "↑/↓" and "esc" do. What follows the segment is what differs by kind.
+const pickerHint = "type to filter · ↑/↓ select · ⏎ switch · esc close"
 
 // pickerHintFor names what ⏎ does on the open kind. /schedule's two popups answer a question rather
 // than move anything (the Schedule is created after the LAST of them), and /schedule-stop's ⏎ ends
@@ -122,9 +126,9 @@ const pickerHint = "↑/↓ select · ⏎ switch · esc close"
 func pickerHintFor(k pickerKind) string {
 	switch k {
 	case pickerCycle, pickerScheduleMode:
-		return "↑/↓ select · ⏎ choose · esc close"
+		return "type to filter · ↑/↓ select · ⏎ choose · esc close"
 	case pickerScheduleStop:
-		return "↑/↓ select · ⏎ stop · esc close"
+		return "type to filter · ↑/↓ select · ⏎ stop · esc close"
 	}
 	return pickerHint
 }
@@ -561,9 +565,18 @@ func (m Model) pickerNote(note string) (tea.Model, tea.Cmd) {
 
 // pickerKey routes a keypress while the picker is open (at idle, and — for /schedule's kinds, whose
 // verb is live mid-run — while a worker works): ↑/↓ move the highlight (wrapping,
-// the sessionBrowser posture), ⏎ takes the highlighted row, esc closes. It always fully consumes the
-// key — the picker is modal. The count is re-derived and the selection re-clamped on every key,
-// because the rows underneath can have changed since the last one.
+// the sessionBrowser posture), ⏎ takes the highlighted row, esc closes, and everything PRINTABLE
+// types — the key's runes extend the filter that prunes the rows (pickerFilteredView), with
+// backspace as its undo. It always fully consumes the key — the picker is modal.
+//
+// There is no activation key, deliberately (ratified 2026-08-06): the overlay is modal, so no letter
+// is a verb inside it and every one of them can be the filter's. That is also why esc still closes
+// OUTRIGHT with a filter set rather than clearing it first — one key, one meaning, so the legend's
+// "esc close" is never conditionally wrong, and backspace is the way back to a wider list.
+//
+// The count is re-derived and the selection re-clamped on every key, because the rows underneath can
+// have changed since the last one — and again after a key that MOVED the filter, because the rows it
+// leaves standing can be fewer than the highlight was pointing at.
 func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	n := m.pickerCount()
 	m.picker.clampSelection(n)
@@ -587,6 +600,22 @@ func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.acceptPicker()
+	case "backspace":
+		// By RUNE rather than by byte: the filter is the human's own text, and half a multi-byte
+		// character is not a state any list can be filtered by.
+		if runes := []rune(m.picker.filter); len(runes) > 0 {
+			m.picker.filter = string(runes[:len(runes)-1])
+			m.picker.clampSelection(m.pickerCount())
+		}
+		return m, nil
+	}
+	// Text carries the key's rune(s) only for PRINTABLE input — a modifier chord carries none
+	// (bubbletea's own contract) — so a chord that is not one of the verbs above is still swallowed
+	// whole by the modal rather than typed into the filter.
+	if msg.Text != "" {
+		m.picker.filter += msg.Text
+		m.picker.clampSelection(m.pickerCount())
+		return m, nil
 	}
 	return m, nil // any other key is swallowed by the modal
 }

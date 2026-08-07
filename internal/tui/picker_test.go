@@ -1516,3 +1516,196 @@ func TestPickerFilterWithNoMatchesTakesNothing(t *testing.T) {
 		t.Errorf("rebind calls = %+v, want none", rb.calls)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Typing the filter — the overlay's key routing
+// ----------------------------------------------------------------------------
+
+// typeFilter presses one printable key per rune of text, the way a human types into the open
+// overlay: through Update, so the routing under test is the real one.
+func typeFilter(t *testing.T, m Model, text string) Model {
+	t.Helper()
+	for _, r := range text {
+		m = step(t, m, keyRune(r))
+	}
+	return m
+}
+
+// Printable keys build the filter as they are pressed and the rows narrow with it — there is no
+// activation key and nothing to submit. Backspace is the undo, one rune at a time, and on an empty
+// filter it is a no-op rather than a second way to close.
+func TestPickerTypingNarrowsTheRowsLive(t *testing.T) {
+	m, _ := seededPicker(t, testOpts)
+	m = foldBeatMsg(t, m, threeModelBeat())
+	m, _ = typeCommand(t, m, "/model")
+	if got := m.pickerCount(); got != 2 {
+		t.Fatalf("precondition: count = %d, want the two offered models", got)
+	}
+
+	m = typeFilter(t, m, "third")
+
+	if m.picker.filter != "third" {
+		t.Errorf("filter = %q, want the keys typed", m.picker.filter)
+	}
+	if got := m.pickerCount(); got != 1 {
+		t.Fatalf("count = %d, want the one row %q leaves", got, "third")
+	}
+	if rows := m.pickerRows(); rows[0][0] != "third-model" {
+		t.Errorf("rows = %v, want the row the filter left", rows)
+	}
+	if got := plain(m.View()); strings.Contains(got, "other-model") {
+		t.Errorf("the pane still paints a row the filter pruned:\n%s", got)
+	}
+
+	m = step(t, m, keyBackspace())
+	if m.picker.filter != "thir" || m.pickerCount() != 1 {
+		t.Errorf("after one backspace: filter = %q, count = %d, want %q over one row",
+			m.picker.filter, m.pickerCount(), "thir")
+	}
+	for range 4 {
+		m = step(t, m, keyBackspace())
+	}
+	if m.picker.filter != "" {
+		t.Errorf("filter = %q, want backspace to have emptied it", m.picker.filter)
+	}
+	if got := m.pickerCount(); got != 2 {
+		t.Errorf("count = %d, want the whole offering back", got)
+	}
+
+	m = step(t, m, keyBackspace())
+	if !m.picker.open || m.picker.filter != "" {
+		t.Errorf("picker = {open:%v filter:%q}, want backspace on an empty filter to do nothing",
+			m.picker.open, m.picker.filter)
+	}
+}
+
+// ⏎ takes the highlighted FILTERED row rather than the same index into the offering behind it — the
+// regression the one filtered view exists for, driven here through the keys a human actually presses:
+// row 0 of the pruned list is row 1 of the advertised offering.
+func TestPickerEnterTakesTheTypedFilterRow(t *testing.T) {
+	m, rb := seededPicker(t, testOpts)
+	m = foldBeatMsg(t, m, threeModelBeat())
+	rb.calls = nil
+	m, _ = typeCommand(t, m, "/model")
+
+	m = typeFilter(t, m, "third")
+	m, _ = stepCmd(t, m, keyEnter())
+
+	if m.picker.open {
+		t.Error("the accept left the picker open")
+	}
+	if len(rb.calls) != 1 || rb.calls[0].model != "third-model" {
+		t.Errorf("rebind calls = %+v, want the row the pane was showing", rb.calls)
+	}
+}
+
+// esc closes outright with a filter set: one key, one meaning, so the legend's "esc close" is never
+// conditionally wrong. There is no clear-the-filter-first stage — backspace is that.
+func TestPickerEscClosesMidFilter(t *testing.T) {
+	m, rb := seededPicker(t, testOpts)
+	m = foldBeatMsg(t, m, threeModelBeat())
+	rb.calls = nil
+	m, _ = typeCommand(t, m, "/model")
+	m = typeFilter(t, m, "third")
+
+	m = step(t, m, keyEsc())
+
+	if m.picker.open {
+		t.Error("esc with a filter set left the picker open")
+	}
+	if m.picker.filter != "" {
+		t.Errorf("filter = %q, want the closed overlay to carry none into the next open", m.picker.filter)
+	}
+	if len(rb.calls) != 0 {
+		t.Errorf("rebind calls = %+v, want none — esc moves nothing", rb.calls)
+	}
+}
+
+// The movement chords still MOVE: ctrl+p/ctrl+n are the picker's own verbs and carry no printable
+// text, so they can never end up in the filter. Every other chord stays swallowed by the modal.
+func TestPickerChordsMoveOrAreSwallowedRatherThanTyped(t *testing.T) {
+	m, _ := seededPicker(t, testOpts)
+	m = foldBeatMsg(t, m, threeModelBeat())
+	m, _ = typeCommand(t, m, "/model")
+
+	m = step(t, m, tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	if m.picker.selected != 1 || m.picker.filter != "" {
+		t.Errorf("after ctrl+n: selected = %d, filter = %q, want the highlight moved and nothing typed",
+			m.picker.selected, m.picker.filter)
+	}
+	m = step(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	if m.picker.selected != 0 || m.picker.filter != "" {
+		t.Errorf("after ctrl+p: selected = %d, filter = %q, want the highlight moved and nothing typed",
+			m.picker.selected, m.picker.filter)
+	}
+
+	m = step(t, m, tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+	if !m.picker.open || m.picker.selected != 0 || m.picker.filter != "" {
+		t.Errorf("picker = {open:%v selected:%d filter:%q}, want an unrelated chord swallowed whole",
+			m.picker.open, m.picker.selected, m.picker.filter)
+	}
+	if got := m.pickerCount(); got != 2 {
+		t.Errorf("count = %d, want the unfiltered offering", got)
+	}
+}
+
+// The filter is one uniform mechanism rather than a /model feature: typing into /schedule's cycle
+// popup prunes its rows the same way, and ⏎ answers with the row the pane was left showing.
+func TestPickerTypingFiltersTheCyclePicker(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m, _ = typeCommand(t, m, "/schedule tidy the logs")
+	if got := m.pickerCount(); got != len(scheduleCycles) {
+		t.Fatalf("precondition: count = %d, want every cycle preset", got)
+	}
+
+	m = typeFilter(t, m, "4h")
+
+	if got := m.pickerCount(); got != 1 {
+		t.Fatalf("count = %d, want the one cycle %q leaves", got, "4h")
+	}
+	m, _ = stepCmd(t, m, keyEnter())
+	if m.picker.draft.cycle != 4*time.Hour {
+		t.Errorf("draft cycle = %v, want the filtered row's 4h", m.picker.draft.cycle)
+	}
+}
+
+// The cycle accept is the overlay's ONE partial reset — the kind and the highlight move on rather
+// than the whole struct being zeroed — and the filter goes with them: it was typed against the
+// CYCLES, so carrying "4h" into a list of modes would open the second question over zero rows, a
+// pane that answers nothing and reads as broken.
+func TestPickerCycleAcceptClearsTheFilter(t *testing.T) {
+	sch := &fakeScheduler{}
+	m := scheduleModel(t, sch, "")
+	m, _ = typeCommand(t, m, "/schedule tidy the logs")
+	m = typeFilter(t, m, "4h")
+
+	m, _ = stepCmd(t, m, keyEnter())
+
+	if !m.picker.open || m.picker.kind != pickerScheduleMode {
+		t.Fatalf("picker = {open:%v kind:%v}, want the mode question up", m.picker.open, m.picker.kind)
+	}
+	if m.picker.filter != "" {
+		t.Errorf("filter = %q, want the cycle pane's filter cleared with the kind", m.picker.filter)
+	}
+	if got := m.pickerCount(); got != len(scheduleModes) {
+		t.Fatalf("count = %d, want every mode offered — a stale filter empties the second pane", got)
+	}
+
+	m, _ = stepCmd(t, m, keyEnter())
+	if len(sch.added) != 1 || sch.added[0].Cycle != 4*time.Hour || sch.added[0].Mode != domain.ModePlan {
+		t.Errorf("added = %+v, want one schedule on the filtered cycle in the highlighted mode", sch.added)
+	}
+}
+
+// Every hint variant LEADS with the filter segment: ↑/↓ and esc are legible from any list, but a
+// filter with no activation key is the one thing a legend has to say out loud.
+func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
+	kinds := []pickerKind{
+		pickerModel, pickerServer, pickerLoad, pickerCycle, pickerScheduleMode, pickerScheduleStop,
+	}
+	for _, kind := range kinds {
+		if got := pickerHintFor(kind); !strings.HasPrefix(got, "type to filter · ") {
+			t.Errorf("pickerHintFor(%v) = %q, want the leading filter segment", kind, got)
+		}
+	}
+}

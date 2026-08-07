@@ -204,8 +204,14 @@ func (m Model) acceptScheduleStop(offered int) (tea.Model, tea.Cmd) {
 // acceptCycle takes the cycle picker's row and asks the second question in the same overlay: the
 // draft grows a cycle, the kind moves on, and the highlight returns to the first row (plan — the
 // least-privilege default, which is also the answer for a human who just presses ⏎ twice).
+//
+// The FILTER goes with them, and for the same reason the highlight does: it was typed against the
+// CYCLES, and "4h" carried into a list of modes would open the second question over zero rows — a
+// pane that looks broken and answers nothing. This is the overlay's one PARTIAL reset (every other
+// close and accept zeroes the whole struct, which is what clears the filter there), so it is also
+// the one place a new field of the overlay's state can be forgotten.
 func (m Model) acceptCycle(cycle time.Duration) (tea.Model, tea.Cmd) {
-	m.picker.kind, m.picker.selected = pickerScheduleMode, 0
+	m.picker.kind, m.picker.selected, m.picker.filter = pickerScheduleMode, 0, ""
 	m.picker.draft.cycle = cycle
 	m.layout()
 	return m, nil
