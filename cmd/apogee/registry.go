@@ -470,11 +470,14 @@ func validateSpinnerName(value string) error {
 // default palette), and a pane that refused to write a name the loader would happily warn about
 // would be stricter than the thing it configures. What it does refuse is a name that is really a
 // path, because the resolver joins it onto the schemes folder and a `../` would reach out of it.
+// What counts as a name is [scheme.ValidName]'s call — the resolver's own rule, asked here so a bad
+// name is refused at the keystroke instead of surviving in the file until the next start; the
+// wording is this pane's, because only this pane knows the key it is about to write.
 func validateColorSchemeName(value string) error {
 	if value == "" {
 		return fmt.Errorf("apogee: invalid ui.color-scheme: name a scheme, e.g. %q", scheme.DefaultName)
 	}
-	if strings.ContainsAny(value, `/\`) || value == "." || value == ".." {
+	if !scheme.ValidName(value) {
 		return fmt.Errorf("apogee: invalid ui.color-scheme %q: a scheme is named, not a path — "+
 			"put the file in the schemes folder and name it without its .yaml", value)
 	}

@@ -139,6 +139,17 @@ rather than the item's literal `unknown color-scheme %q — using dark`: `Warnin
 (item 1, committed) already prefixes `color-scheme %q: `, so the literal wording would
 have said "color-scheme" twice.
 
+NOTES (2026-08-07): FOLLOW-UP FIX (run-level, authorised after item 9 — not a deviation from
+this item's text and not a plan item). `Resolve` joined the name onto the schemes directory
+without checking it was a name, so a hand-edited `ui.color-scheme: ../../etc/foo` in
+`config.yaml` read outside the folder: item 6's registry `Validate` guards the two WRITE paths
+(`/settings` picker, `/color-scheme <name>`) but never runs on a value the config file already
+holds. Added `scheme.ValidName` (empty/`.`/`..`/separator/NUL/absolute/volume ⇒ not a name),
+asked by `Resolve` (default + "a scheme is named, not a path" warning) and by `Export` before
+its built-in lookup, so the package is safe by construction whatever the caller;
+`validateColorSchemeName` now delegates to it, keeping its own wording. Test:
+`TestResolveRejectsNamesThatAreNotFileNames`.
+
 **What:** in `internal/scheme`:
 
 - `Discover(userDir string) []string`: sorted unique names — built-in names plus the

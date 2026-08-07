@@ -32,6 +32,25 @@ var builtinNames = sync.OnceValue(func() []string {
 	return names
 })
 
+// ValidName reports whether name can be a scheme's file name — a name, not a path. Resolve joins
+// the name onto the schemes directory, so a separator ("sub/dark"), a traversal ("../../.ssh/id_rsa")
+// or a volume would read a file from outside that directory, which is never what naming a scheme
+// means. Resolve and Export both ask this before they touch the filesystem, so the package is safe
+// however it is called; cmd/apogee asks the same question again before it WRITES the
+// `ui.color-scheme` key, so a human hears about a bad name at the keystroke rather than at the next
+// start.
+func ValidName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if strings.ContainsAny(name, `/\`) || strings.ContainsRune(name, 0) {
+		return false
+	}
+	// A Windows drive-relative spelling ("C:dark") carries no separator yet still leaves the
+	// directory. VolumeName is empty on every other OS, so this costs nothing there.
+	return !filepath.IsAbs(name) && filepath.VolumeName(name) == ""
+}
+
 // Discover lists the scheme names a user can choose from: every built-in plus every
 // *.yaml in userDir, sorted and deduplicated. A user file that shadows a built-in of the
 // same name appears once, under the one name they share — Resolve decides which of the
@@ -69,6 +88,11 @@ func Discover(userDir string) []string {
 // A name that is neither, a file that will not open, and a file with defective keys all
 // cost the user warnings and never the run — every path returns a usable Scheme.
 func Resolve(name, userDir string) (Scheme, []Warning) {
+	if !ValidName(name) {
+		// Refused before the join below, which would otherwise read <userDir>/../../x.yaml —
+		// outside the schemes directory entirely.
+		return Default(), []Warning{{File: name, Reason: fmt.Sprintf("a scheme is named, not a path — using the %q scheme", DefaultName)}}
+	}
 	file := name + fileExt
 	if userDir != "" {
 		// An empty userDir would make this a relative read out of the working directory,
@@ -99,8 +123,13 @@ func Resolve(name, userDir string) (Scheme, []Warning) {
 // destroy a scheme someone has been working on; they are told to edit or delete it
 // instead. It returns the path written.
 func Export(name, userDir string) (string, error) {
-	// Only an exact built-in name gets past this lookup, which is also what stops a name
-	// like "../../.ssh/id_rsa" from ever reaching the write below.
+	// A name that is really a path is refused by name, not as a side effect of the lookup
+	// below happening to miss: the rule is stated once (ValidName) and both entry points ask it.
+	if !ValidName(name) {
+		return "", fmt.Errorf("apogee: %q is not a color-scheme name — a scheme is named, not a path; built-ins are: %s", name, strings.Join(builtinNames(), ", "))
+	}
+	// Past that, only an exact built-in name gets through, so nothing but a shipped scheme's
+	// own name ever reaches the write below.
 	data, ok := builtinBytes(name)
 	if !ok {
 		return "", fmt.Errorf("apogee: no built-in color-scheme %q — built-ins are: %s", name, strings.Join(builtinNames(), ", "))

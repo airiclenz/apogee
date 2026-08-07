@@ -101,6 +101,49 @@ func TestResolveUnknownNameWarnsAndUsesDefault(t *testing.T) {
 	}
 }
 
+// TestResolveRejectsNamesThatAreNotFileNames pins the guard that keeps the join inside the schemes
+// directory: every spelling that is a path rather than a name loads the default and warns, and the
+// readable scheme file each one points at is NOT the one that comes back — which is the whole
+// property, since a name that escaped would look like an ordinary successful load.
+func TestResolveRejectsNamesThatAreNotFileNames(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	schemes := filepath.Join(root, "schemes")
+	const escaped = "#010203"
+	writeScheme(t, root, "escape.yaml", "error: \""+escaped+"\"\n")                        // one level above the folder
+	writeScheme(t, filepath.Join(schemes, "sub"), "dark.yaml", "error: \""+escaped+"\"\n") // one level below it
+	writeScheme(t, schemes, "mine.yaml", "error: \"#040506\"\n")
+
+	for _, name := range []string{"../escape", "sub/dark", filepath.Join(root, "escape"), "", ".", ".."} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, warnings := Resolve(name, schemes)
+			if got != Default() {
+				t.Errorf("Resolve(%q) = %+v, want the default scheme", name, got)
+			}
+			if got.Error == escaped {
+				t.Errorf("Resolve(%q) read a file outside the schemes directory", name)
+			}
+			if len(warnings) != 1 {
+				t.Fatalf("got %d warnings, want 1: %v", len(warnings), warnings)
+			}
+			if line := warnings[0].String(); !strings.Contains(line, "not a path") || !strings.Contains(line, DefaultName) {
+				t.Errorf("warning reads %q, want it to say a scheme is named, not a path, and name the fallback", line)
+			}
+		})
+	}
+
+	// The same call with a plain name still loads the user's file: the guard refuses paths, not
+	// schemes.
+	got, warnings := Resolve("mine", schemes)
+	if len(warnings) != 0 {
+		t.Errorf("Resolve(%q) warned %v, want a clean load", "mine", warnings)
+	}
+	if got.Error != "#040506" {
+		t.Errorf("error = %q, want the user file's %q", got.Error, "#040506")
+	}
+}
+
 func TestResolveUnreadableFileWarnsAndUsesDefault(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
