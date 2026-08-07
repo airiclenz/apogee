@@ -1060,28 +1060,32 @@ func anyOpenCall(entries []entry) bool {
 // blockHidesWhenCollapsed reports whether a block's collapsed paint leaves anything unshown — the
 // whole of the toggle-target rule: a header is a click target exactly when there is something
 // behind it. It asks the very functions that do the hiding — collapsedCall for the lines a cap
-// drops, collapsedBranch for a target the row budget cuts — rather than re-deriving either, so the
-// rule cannot answer differently from the paint.
+// drops, collapsedBranch and clipDetails for a line the row budget cuts — rather than re-deriving
+// any of it, so the rule cannot answer differently from the paint.
 //
-// A targeted call hides on EITHER count, and the second is why this takes a width: the collapsed
-// branch spends at most collapsedTargetRows rows on its target, so whether a long target is cut
-// depends on how wide the block is being painted this frame (clipWrap). A block that hides nothing
-// at 200 columns hides its target's tail at 60, and the indicator, the click target and the paint
-// all have to say so together — which is what makes the width an argument here rather than a fact
-// the caller keeps.
+// A call hides on EITHER count, and the second is why this takes a width: the collapsed paint
+// spends at most collapsedTargetRows rows on a target and collapsedBranchRows on each branch line
+// it keeps, so whether a long line is cut depends on how wide the block is being painted this frame
+// (clipWrap). A block that hides nothing at 200 columns hides a tail at 60, and the indicator, the
+// click target and the paint all have to say so together — which is what makes the width an
+// argument here rather than a fact the caller keeps.
 //
 // BOTH shapes answer through it, the targetless one included: an unregistered tool's verbatim
 // arguments, a registered call that arrived without its target, a stray result — all spend the same
 // collapsed budget (layout.md, "Collapsed and expanded blocks"), so a call whose argument blob
-// overflows its cap is a block that hides something and a one-line one is not. One call in a block
-// with something to reveal makes the whole block a target — the header belongs to the block, not to
-// a branch.
+// overflows its cap is a block that hides something, and so is a two-line one whose lines the width
+// cuts. One call in a block with something to reveal makes the whole block a target — the header
+// belongs to the block, not to a branch.
 func blockHidesWhenCollapsed(th theme, views []toolView, column, width int) bool {
 	for i, tv := range views {
-		if _, _, truncated := collapsedCall(tv); truncated {
+		shown, _, truncated := collapsedCall(tv)
+		if truncated {
 			return true
 		}
 		if tv.Target == "" {
+			if _, clipped := clipDetails(th, shown, width); clipped {
+				return true
+			}
 			continue
 		}
 		if _, clipped := collapsedBranch(th, tv, column, branchMarker(i == len(views)-1), width); clipped {
@@ -1105,7 +1109,8 @@ func blockHidesWhenCollapsed(th theme, views []toolView, column, width int) bool
 //     the detail lines are themselves the ┝/┕ branches, the summary last since it has no branch
 //     line to ride (an unregistered tool's labelled arguments then its "error: …"
 //     outcome, a stray result). Collapsed, that branch LIST is what the cap falls on — the
-//     block has no body to cap instead — and the remainder marker hangs beneath it.
+//     block has no body to cap instead — each surviving line clipped to a row of its own
+//     (clipDetails), and the remainder marker hangs beneath it.
 //
 // The shape follows from which halves of the outcome are filled and never from how many Details
 // there are: a body of one line and a body of ten lay out the same way.
@@ -1117,7 +1122,8 @@ func blockHidesWhenCollapsed(th theme, views []toolView, column, width int) bool
 // counts the body WHOLE — the sketch's "+5 more lines" over a five-line output. So a collapsed
 // block stands at most four rows tall whatever tool filled it and however long its target is,
 // which is the point: a scrollback of tool calls reads as a list rather than as a wall. A
-// collapsed targetless call caps its branch list instead, since there the lines ARE the branches.
+// collapsed targetless call caps its branch list instead, since there the lines ARE the branches —
+// collapsedBodyCap of them, one clipped row each — and lands on the same four rows.
 //
 // The synthesized remainder marker is marked as a click target as it is laid out, and it is laid
 // out on its own so the mark lands on exactly the marker's physical lines (all of them, should it
@@ -1130,7 +1136,8 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 		}
 		shown, remainder, truncated := collapsedCall(tv)
 		var out blockPaint
-		out.add(renderDetails(th, shown, width), targetNone)
+		rows, _ := clipDetails(th, shown, width)
+		out.add(rows, targetNone)
 		if truncated {
 			// The marker rides the branch marker's own width, the indent a targeted block's body
 			// already sits at, so the affordance sits under the lines it counts either way.
@@ -1201,13 +1208,21 @@ func collapsedBranch(th theme, tv toolView, column int, marker string, width int
 // says the same thing in the row the block was going to spend anyway.
 //
 // collapsedBodyCap is the TARGETLESS shape's cap — how many of its branch lines survive the
-// collapse (collapsedCall), the block having no body to cap instead.
+// collapse (collapsedCall), the block having no body to cap instead. It spends the same three rows
+// the other way round: TWO branch lines and the marker beneath them, since there the branch lines
+// ARE the content and there is no target line above them to read them against.
 //
-// Both are paint-time caps on content the entry keeps in full, which is why they live beside the
-// painter and not beside diffBody, the producer that used to apply the diff's own.
+// collapsedBranchRows is what one of those surviving lines may spend — one row, and the clip takes
+// the rest (clipDetails). It is what holds the targetless shape to the budget at all: two branch
+// lines are two rows only while neither soft-wraps, and an MCP call's argument blob wraps at any
+// width a terminal actually has.
+//
+// All three are paint-time caps on content the entry keeps in full, which is why they live beside
+// the painter and not beside diffBody, the producer that used to apply the diff's own.
 const (
 	collapsedTargetRows = 2
-	collapsedBodyCap    = 1
+	collapsedBodyCap    = 2
+	collapsedBranchRows = 1
 )
 
 // The collapsed prompt's numbers and wording (layout.md, "Collapsed and expanded blocks"). A
@@ -1432,6 +1447,27 @@ func renderDetails(th theme, details []detailLine, width int) []string {
 		out = append(out, hangingWrap(th, detailStyle(th, d.Kind), branchMarker(i == len(details)-1), d.Text, width)...)
 	}
 	return out
+}
+
+// clipDetails is renderDetails under the collapsed block's row budget: every branch line gets
+// collapsedBranchRows rows and the clip takes the rest (clipWrap, which ends a cut row in " …"), so
+// a collapsed targetless block spends as many rows on its branch list as the cap left it lines. It
+// is what keeps that shape inside the four-row budget the targeted one is held to — unclipped, one
+// argument blob's first line soft-wrapped the block as tall as the terminal was narrow.
+//
+// It REPORTS the cut for the same reason collapsedBranch does: whether a collapsed targetless block
+// hides anything is width-dependent once its lines can be cut, and the indicator, the click target
+// and the paint all have to agree about it (blockHidesWhenCollapsed). Each shape asks the clipper
+// that paints it, so neither can drift from what is on screen.
+func clipDetails(th theme, details []detailLine, width int) (lines []string, clipped bool) {
+	out := make([]string, 0, len(details))
+	for i, d := range details {
+		rows, cut := clipWrap(th, detailStyle(th, d.Kind), branchMarker(i == len(details)-1), d.Text,
+			width, collapsedBranchRows)
+		out = append(out, rows...)
+		clipped = clipped || cut
+	}
+	return out, clipped
 }
 
 // detailStyle maps a detail kind to its style: plain detail is dim; the diff kinds are

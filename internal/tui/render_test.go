@@ -1834,7 +1834,7 @@ func TestRenderMarksHeaderAndMarkerLines(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ weird_tool ▶"},
-				{line: 2, kind: targetMarker, entry: 0, text: "    +5 more lines"},
+				{line: 3, kind: targetMarker, entry: 0, text: "    +4 more lines"},
 			},
 		},
 		{
@@ -2507,12 +2507,13 @@ func TestRenderInFlightStandalone(t *testing.T) {
 // "Collapsed and expanded blocks").
 func TestRenderNoTargetStandalone(t *testing.T) {
 	tr := &transcript{}
-	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "mcp_thing", Arguments: []byte(`{"a":1}`)}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "mcp_thing", Arguments: []byte(`{"a":1,"b":2}`)}})
 
 	want := strings.Join([]string{
 		"✦ mcp_thing ▶",
-		"  ┕ a:",
-		"    +1 more line",
+		"  ┝ a:",
+		"  ┕   1",
+		"    +2 more lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("collapsed targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -2524,7 +2525,9 @@ func TestRenderNoTargetStandalone(t *testing.T) {
 	want = strings.Join([]string{
 		"✦ mcp_thing ▼",
 		"  ┝ a:",
-		"  ┕   1",
+		"  ┝   1",
+		"  ┝ b:",
+		"  ┕   2",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("expanded targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -2556,9 +2559,9 @@ func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 // TestTargetlessBlocksCollapseToTheBudget pins the reversal of layout.md's old never-hide rule
 // across all three targetless shapes: the unregistered/MCP argument dump, a registered call whose
 // target argument never arrived, and a stray result. Each collapses to the house budget with a
-// remainder marker and a ▶ header — three rows, whatever it is hiding, which is the whole of the
-// ask — and each expands to every line it retained. The 60-line blob is the case the old rule made
-// 61 permanent rows.
+// remainder marker and a ▶ header — two branch rows and the marker, whatever it is hiding, which is
+// the whole of the ask — and each expands to every line it retained. The 60-line blob is the case
+// the old rule made 61 permanent rows.
 func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 	blob := func(lines int) []byte {
 		items := make([]string, lines)
@@ -2579,7 +2582,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 					ID: "c1", Tool: "mcp_search", Arguments: blob(58)}})
 			},
-			wantCollapsed: []string{"✦ mcp_search ▶", "  ┕ [", "    +59 more lines"},
+			wantCollapsed: []string{"✦ mcp_search ▶", "  ┝ [", `  ┕   "arg0",`, "    +58 more lines"},
 			wantExpanded:  61,
 		},
 		{
@@ -2590,7 +2593,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 					CallID: "c1", Content: "one\ntwo\nthree\nfour"}})
 			},
-			wantCollapsed: []string{"✦ Run ▶", "  ┕ one", "    +3 more lines"},
+			wantCollapsed: []string{"✦ Run ▶", "  ┝ one", "  ┕ two", "    +2 more lines"},
 			wantExpanded:  5,
 		},
 		{
@@ -2599,7 +2602,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 					CallID: "gone", Content: "one\ntwo\nthree"}})
 			},
-			wantCollapsed: []string{"✦ result ▶", "  ┕ one", "    +2 more lines"},
+			wantCollapsed: []string{"✦ result ▶", "  ┝ one", "  ┕ two", "    +1 more line"},
 			wantExpanded:  4,
 		},
 	}
@@ -2631,6 +2634,98 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 	}
 }
 
+// TestEveryToolShapeCollapsesInsideTheRowBudget is the UNIFORM cap read across every shape that
+// wears the tool block, at a width narrow enough that each one's content soft-wraps if nothing stops
+// it: a targeted call with a long target and a long body, a targetless argument blob, a stray
+// result, a scheduled Firing and a collapsed sub-agent run. Collapsed, none of them may stand taller
+// than its header plus three content rows or wider than the column it was painted in — that is the
+// whole of the budget, and the point of it is that a reader can predict a block's height without
+// knowing which tool filled it (docs/layout/tool-layout.md).
+//
+// It asserts the SHAPE rather than the text, which the per-shape tests above pin line by line: what
+// would regress here is a path that still soft-wraps unbounded, and that shows as a row count.
+func TestEveryToolShapeCollapsesInsideTheRowBudget(t *testing.T) {
+	const width = 60
+	long := strings.Repeat("go test ./internal/tui/ -run TestSomethingLong ", 9)
+	body := "line one is itself long enough to wrap at sixty columns without help\ntwo\nthree\nfour"
+	cases := []struct {
+		name  string
+		build func() *transcript
+	}{
+		{
+			name: "a targeted call with a long target and a long body",
+			build: func() *transcript {
+				tr := &transcript{}
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":` + strconv.Quote(long) + `}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: body}})
+				return tr
+			},
+		},
+		{
+			name: "a targetless call whose one verbatim argument line overflows the row",
+			build: func() *transcript {
+				tr := &transcript{}
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "mcp_search", Arguments: []byte(strconv.Quote(long))}})
+				return tr
+			},
+		},
+		{
+			name: "a targetless argument list past both the cap and the row",
+			build: func() *transcript {
+				tr := &transcript{}
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "mcp_search", Arguments: []byte(
+						`{"query":` + strconv.Quote(long) + `,"server":"docs","limit":20}`)}})
+				return tr
+			},
+		},
+		{
+			name: "a stray result that matched no call",
+			build: func() *transcript {
+				tr := &transcript{}
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "gone", Content: long + "\n" + body}})
+				return tr
+			},
+		},
+		{
+			name:  "a scheduled Firing",
+			build: func() *transcript { return firingBlock(long + "\n" + body) },
+		},
+		{
+			name: "a collapsed sub-agent run",
+			build: func() *transcript {
+				tr := &transcript{}
+				subAgentCall(tr, "s1", long, 0)
+				runCall(tr, "c1", "go build ./...", body, 1)
+				subAgentReport(tr, "s1", long+"\n"+body, 0)
+				return tr
+			},
+		},
+	}
+	th := newTheme()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := strings.Split(renderPlain(tc.build(), width), "\n")
+			if len(lines) > 1+collapsedTargetRows+1 {
+				t.Errorf("collapsed block is %d rows, want at most %d:\n%s",
+					len(lines), 1+collapsedTargetRows+1, strings.Join(lines, "\n"))
+			}
+			for i, ln := range lines {
+				if w := th.measure.Width(ln); w > width {
+					t.Errorf("row %d measures %d cells, want at most %d: %q", i, w, width, ln)
+				}
+			}
+			// A block that hides this much says so, whatever its shape: the indicator and the click
+			// target are one predicate, so a missing ▶ here is an unreachable second state.
+			if !strings.HasSuffix(lines[0], " "+glyphCollapsed) {
+				t.Errorf("collapsed header = %q, want it to wear %q", lines[0], glyphCollapsed)
+			}
+		})
+	}
+}
+
 // A call the presenter does not recognise paints its arguments the way the approval prompt does:
 // one `name:` line per argument with the value's own real lines beneath it — no brace envelope
 // around the set, no quoted key names, and a multi-line value showing the lines it will actually
@@ -2649,8 +2744,9 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 			args: `{"query":"collapse","server":"docs","limit":20}`,
 			wantCollapsed: []string{
 				"✦ mcp_search ▶",
-				"  ┕ query:",
-				"    +5 more lines",
+				"  ┝ query:",
+				"  ┕   collapse",
+				"    +4 more lines",
 			},
 			wantExpanded: []string{
 				"✦ mcp_search ▼",
@@ -2667,8 +2763,9 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 			args: `{"script":"cd /ws\ngit status\ngit diff"}`,
 			wantCollapsed: []string{
 				"✦ mcp_search ▶",
-				"  ┕ script:",
-				"    +3 more lines",
+				"  ┝ script:",
+				"  ┕   cd /ws",
+				"    +2 more lines",
 			},
 			wantExpanded: []string{
 				"✦ mcp_search ▼",
@@ -2889,8 +2986,9 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"    +3 more lines",
 		"",
 		"✦ mcp_search ▶",
-		"  ┕ query:",
-		"    +3 more lines",
+		"  ┝ query:",
+		"  ┕   collapse",
+		"    +2 more lines",
 		"",
 		"· approval allow: terminal",
 		"",

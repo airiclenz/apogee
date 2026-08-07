@@ -49,6 +49,13 @@ point is a **minor** bump, not a breaking change.
     is cut now wears the expand indicator too — a long path with no output at all is something to
     open. Because the cut depends on how wide the block is being painted, so does the indicator: the
     same call in a wider window shows its target whole and offers no toggle.
+  - **The targetless shapes spend the same budget.** An MCP call shown as its verbatim arguments, a
+    registered call whose target argument never arrived, a stray result — there the branch lines are
+    the block's content, so two of them show, each clipped to a single row, above the same
+    `+N more lines` count. One overlong argument line used to soft-wrap the block down the screen,
+    and now cannot; a block whose lines the width alone cuts wears the expand indicator like any
+    other. Scheduled Firings and a sub-agent run's collapsed head follow, so every shape wearing a
+    tool block stands at most four rows collapsed, whatever filled it.
   - **The expand/collapse indicators are now `▶` and `▼`**, replacing the smaller `▸`/`▾`.
 
 ### Fixed

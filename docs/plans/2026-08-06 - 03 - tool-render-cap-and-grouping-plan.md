@@ -156,7 +156,16 @@ the full target.
 
 **Commit**: `feat(tui): cap collapsed tool blocks at header plus three content rows`
 
-## 3. Uniform cap across the remaining tool shapes
+## 3. Uniform cap across the remaining tool shapes — ✅ DONE (2026-08-07)
+
+NOTES (2026-08-07): `collapsedBodyCap` keeps its name while its value goes 1 → 2 — the item rebinds
+the budget, not the identifier — and the new per-line row budget beside it is `collapsedBranchRows`
+(1), spent by a new `clipDetails`. Test collateral beyond the named list, all of it the same
+arithmetic moving from one shown branch line to two: `TestRenderNoTargetStandalone` (its `{"a":1}`
+premise no longer overflows the cap, so it now calls with two keys), `TestUnregisteredCallLabels
+ItsArguments`, the targetless case of `TestRenderMarksHeaderAndMarkerLines`, and
+`TestTranscriptLayoutGolden`. The new sweep test covers the targeted single block and the sub-agent
+head as well as the three shapes the item names, since they are the shapes it asks be verified.
 
 Depends on item 2.
 
