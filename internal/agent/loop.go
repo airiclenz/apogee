@@ -180,12 +180,12 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
-		// Final no-tool response: commit the assistant message and end the Exchange. An
-		// empty final (whitespace-only text, no calls) is a harmful proxy signal for
-		// self-regulation's next-Turn judgment (R3); a substantive answer is neutral.
-		if strings.TrimSpace(resp.Text()) == "" {
-			a.tracker.noteEmptyResponse()
-		}
+		// Final no-tool response: commit the assistant message and end the Exchange. It is
+		// necessarily substantive — an empty reply never reaches here, the empty-reply guard
+		// (reviewedOutcome) faults the Turn first — so it is a NEUTRAL Turn for self-regulation's
+		// next-Turn judgment (R3), whose harmful proxy is the tool-result error alone. The empty
+		// final used to be that judgment's second harmful signal; a faulted Turn is discarded
+		// unjudged, so the signal is gone rather than merely relocated (CONTEXT: Self-regulation).
 		a.conv.Append(assistantMessage(resp, nil))
 		a.cfg.Events.Emit(domain.MessageEvent{EventBase: a.base(turn), Text: resp.Text()})
 		return a.turns.end(t, endExchangeDone), nil
@@ -305,7 +305,9 @@ const (
 // sim's retry builders carried. Corrections accumulate across attempts (each retry appends
 // onto the same request — the sim's escalating re-asks), bounded by the cap; at the cap
 // the last response passes through with no further append. It returns the reviewed
-// *Response on turnOK, or nil with turnCancelled / turnFailed / turnOverflowed.
+// *Response on turnOK, or nil with turnCancelled / turnFailed / turnOverflowed. Once the
+// hook loop resolves, every response passes the empty-reply guard (reviewedOutcome below),
+// which faults a reply carrying neither visible text nor tool calls.
 //
 // The third return is the fault message this call did NOT surface: non-empty only on
 // turnOverflowed, where the ErrorEvent is deliberately withheld because an overflow is
@@ -340,7 +342,7 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 		if hookErr != nil {
 			// A post-response hook panicked (recovered into an ErrorEvent): the model did
 			// reply, so proceed with the response as reviewed so far rather than abandon.
-			return resp, turnOK, ""
+			return a.reviewedOutcome(turn, resp)
 		}
 		if retry && attempt < maxPostResponseRetries {
 			// The Turn re-streams: tell observers the tokens emitted this attempt are
@@ -359,8 +361,42 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 			}
 			continue
 		}
+		return a.reviewedOutcome(turn, resp)
+	}
+}
+
+// emptyReplyErrFmt is the fault text an empty reviewed reply surfaces. It names the finish reason
+// because that is the one diagnostic the reply itself carries: "stop" says the Upstream believed it
+// answered (an aggregator's in-band error on an HTTP 200, a model that emitted nothing), "length"
+// says the reply was cut off before any visible token, and an empty reason says the stream ended
+// without one.
+const emptyReplyErrFmt = "upstream returned an empty reply (finish: %s)"
+
+// reviewedOutcome resolves a reviewed response into respondAndReview's return, guarding the one
+// case the Turn must not commit: a reply with nothing in it for the user — no visible text and no
+// tool calls. That is an Upstream failure wearing a success's clothes (an in-band error delivered
+// on an HTTP 200, a stream that ended before its first token), and committing it writes a blank
+// assistant message that hides the failure behind an apparently-answered Turn. So it fails the Turn
+// exactly as a stream fault does: one ErrorEvent from source "loop", then turnFailed with no
+// response. A thinking-only reply — reasoning present, but no visible text and no tool calls —
+// counts as empty: reasoning is not an answer to the user, and the Turn is just as much a non-answer
+// for carrying it.
+//
+// Placement is load-bearing. The guard runs only after the post-response hook loop has resolved, so
+// the `empty_response_recovery` Mechanism keeps first claim on an empty reply (its ActionRetry
+// re-streams the Turn before this is ever reached) and a hook retry that DID produce content passes
+// through untouched. Being engine-level, the guard also fires in Bypass, where no Mechanism is there
+// to catch the empty reply — failure honesty is provider/engine correctness, not a Mechanism's job.
+func (a *Agent) reviewedOutcome(turn int, resp *domain.Response) (*domain.Response, turnOutcome, string) {
+	if strings.TrimSpace(resp.Text()) != "" || len(resp.ToolCalls()) > 0 {
 		return resp, turnOK, ""
 	}
+	a.cfg.Events.Emit(domain.ErrorEvent{
+		EventBase: a.base(turn),
+		Source:    "loop",
+		Err:       fmt.Sprintf(emptyReplyErrFmt, resp.FinishReason()),
+	})
+	return nil, turnFailed, ""
 }
 
 // assembleResponse applies the model profile at the parse seam (D5/D6). It strips the reply's

@@ -312,8 +312,11 @@ func TestWave1_EmptyResponseRetryCarriesNudge(t *testing.T) {
 }
 
 // TestWave1_AlwaysEmptyTerminatesAtCap: a responder that never produces anything terminates at
-// the loop's maxPostResponseRetries and the last empty response passes through as the Turn's
-// final message — the off-ramp cannot spin the loop.
+// the loop's maxPostResponseRetries — the off-ramp cannot spin the loop. Past the cap the Turn
+// used to commit the last empty response as its final message; since the empty-reply guard
+// (loop.go reviewedOutcome) that reply fails the Turn visibly instead, so the exhausted off-ramp
+// now ends in a surfaced fault and an uncommitted blank message. The cap itself is unmoved, and
+// that is what this test exists for.
 func TestWave1_AlwaysEmptyTerminatesAtCap(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
@@ -328,18 +331,19 @@ func TestWave1_AlwaysEmptyTerminatesAtCap(t *testing.T) {
 	}
 	res := runExchange(t, a, "please implement the parser")
 
-	if res.Status != domain.StatusExchangeComplete {
-		t.Errorf("status = %q, want %q (the empty final passes through)", res.Status, domain.StatusExchangeComplete)
+	if res.Status != domain.StatusExchangeComplete || !res.Faulted {
+		t.Errorf("StepResult = {Status:%q Faulted:%v}, want {Status:%q Faulted:true} (the exhausted off-ramp faults)",
+			res.Status, res.Faulted, domain.StatusExchangeComplete)
 	}
 	if len(responder.got) != maxPostResponseRetries+1 {
 		t.Errorf("provider was called %d times, want %d (the retry cap)",
 			len(responder.got), maxPostResponseRetries+1)
 	}
-	if me, ok := lastMessageEvent(sink.events); !ok || me.Text != "" {
-		t.Errorf("final MessageEvent = %+v (ok=%v), want the passed-through empty reply", me, ok)
+	if _, ok := lastMessageEvent(sink.events); ok {
+		t.Error("a MessageEvent was emitted for a Turn that never produced a reply")
 	}
-	if got := a.conv.Len(); got != 2 {
-		t.Errorf("committed history has %d messages, want 2 (user + empty final assistant)", got)
+	if got := a.conv.Len(); got != 1 {
+		t.Errorf("committed history has %d messages, want 1 (the user message; no blank assistant)", got)
 	}
 }
 

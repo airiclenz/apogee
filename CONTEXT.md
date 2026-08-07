@@ -605,9 +605,17 @@ Per-Mechanism, per-Session bookkeeping that records each time a Mechanism **acts
 intervention (a non-zero decision or a mutated working value), **not** a bare inspect-only
 invocation (R4, so `LoopView.Fired` counts actions, matching the sim's `FiredCounts`) — and
 judges the **next** Turn for it. That judgment is **three-way** (R3): a Turn is **productive**
-(a novel file read, or a successful write/action), **harmful** (a tool-result error, or an
-empty final response), or **neutral** (neither), with productive winning when signals mix. The
-data behind Adaptive Suppression and the Turn Budget.
+(a novel file read, or a successful write/action), **harmful** (a tool-result error), or
+**neutral** (neither), with productive winning when signals mix. The data behind Adaptive
+Suppression and the Turn Budget.
+
+An **empty final response** was a second harmful signal until the engine's empty-reply guard
+made it a **fault**: a reply with no visible text and no tool calls is an upstream failure — an
+aggregator's in-band error on an HTTP 200, a stream that ended before its first token — so the
+Turn faults visibly instead of committing a blank assistant message, and a faulted Turn is
+**discarded unjudged**. Self-regulation therefore never sees it. That is deliberate: the signal
+was a proxy for *the model going quiet*, and it now indicts the Upstream, not the Mechanism that
+fired the Turn before. The tool-result error is R3's harmful proxy alone.
 
 **Adaptive Suppression**:
 The **per-Mechanism** withdrawal rule: a Mechanism whose next Turn is judged **harmful** several

@@ -18,9 +18,12 @@ import (
 //
 // Judgment is NEXT-Turn (R3): fires recorded in Turn N are judged by Turn N+1's outcome — a
 // Mechanism's intervention can only show up in what the model does next. Each completed Turn is
-// classified three-way on the four proxy signals: PRODUCTIVE (a novel file read, or a successful
-// write/action), HARMFUL (a tool-result error, or an empty final response), NEUTRAL (neither —
-// e.g. a substantive text-only answer); productive wins when signals mix. Strikes and the
+// classified three-way on the three proxy signals: PRODUCTIVE (a novel file read, or a successful
+// write/action), HARMFUL (a tool-result error), NEUTRAL (neither — e.g. a substantive text-only
+// answer); productive wins when signals mix. An empty final response was a second harmful signal
+// until the empty-reply guard (loop.go reviewedOutcome) made it a FAULT: a faulted Turn is
+// discarded unjudged, so an Upstream that answers with nothing is now an upstream failure to
+// surface rather than evidence against a Mechanism. Strikes and the
 // Turn-Budget streak advance ONLY on a harmful Turn; a neutral Turn freezes both (no strike, no
 // streak advance, no clear); a productive Turn is the global clear-path. Consequence: a pure Q&A
 // session neither strikes Mechanisms nor trips the Turn Budget.
@@ -51,7 +54,7 @@ const (
 	turnBudgetLimit = 8
 )
 
-// turnJudgment is the three-way classification of a completed Turn on the four proxy
+// turnJudgment is the three-way classification of a completed Turn on the three proxy
 // signals (R3). Productive wins when signals mix.
 type turnJudgment int
 
@@ -104,8 +107,8 @@ type selfRegulator struct {
 	budgetTripped bool
 
 	// sawProductive / sawHarmful are the Turn-in-flight's proxy signals: a novel read or a
-	// successful write/action sets sawProductive; a tool-result error or an empty final response
-	// sets sawHarmful. Productive wins when both are set. Reset each Turn.
+	// successful write/action sets sawProductive; a tool-result error sets sawHarmful.
+	// Productive wins when both are set. Reset each Turn.
 	sawProductive bool
 	sawHarmful    bool
 }
@@ -163,12 +166,8 @@ func (r *selfRegulator) noteRead(call domain.ToolCall) {
 // action taken).
 func (r *selfRegulator) noteWrite() { r.sawProductive = true }
 
-// noteToolError books a tool-result error as this Turn's harmful signal (R3).
+// noteToolError books a tool-result error as this Turn's harmful signal — the only one (R3).
 func (r *selfRegulator) noteToolError() { r.sawHarmful = true }
-
-// noteEmptyResponse books an empty final response (whitespace-only text, no tool calls) as
-// this Turn's harmful signal (R3).
-func (r *selfRegulator) noteEmptyResponse() { r.sawHarmful = true }
 
 // judgment classifies the Turn in flight three-way on the recorded proxy signals (R3):
 // productive wins when signals mix, harmful needs a harmful signal with no productive one,

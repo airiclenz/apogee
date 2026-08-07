@@ -1,7 +1,7 @@
 package agent
 
 // White-box tests for per-Session self-regulation (Phase-4 item 3, amended by
-// phase-4-review-fixes item 4 — R3/R4): next-Turn judgment on the four proxy signals,
+// phase-4-review-fixes item 4 — R3/R4): next-Turn judgment on the three proxy signals,
 // Adaptive Suppression, the global Turn Budget, and acted-fire booking. The selfRegulator
 // state machine is proven directly (fast, deterministic), then the loop wiring is proven
 // end-to-end through Step — a harmful session suppresses at dispatch, a pure Q&A session
@@ -180,11 +180,12 @@ func TestSelfRegulatorProductiveWinsMixedSignals(t *testing.T) {
 	if got := r.judgment(); got != judgedProductive {
 		t.Fatalf("judgment with mixed signals = %v, want judgedProductive", got)
 	}
-	// And an empty-response signal alone is harmful.
+	// And the harmful signal on its own — the tool-result error, R3's only one since the
+	// empty-reply guard turned an empty final response into a fault — judges harmful.
 	r.resetTurnScratch()
-	r.noteEmptyResponse()
+	r.noteToolError()
 	if got := r.judgment(); got != judgedHarmful {
-		t.Fatalf("judgment with an empty-response signal = %v, want judgedHarmful", got)
+		t.Fatalf("judgment with a tool-error signal alone = %v, want judgedHarmful", got)
 	}
 }
 
@@ -350,25 +351,86 @@ func TestObservedIsASnapshot(t *testing.T) {
 // Loop wiring
 // ---------------------------------------------------------------------------
 
-// TestSelfRegulationSuppressesAtDispatch proves the loop consults the tracker under the
-// next-Turn model: with every Turn harmful (empty final responses), a non-exempt Mechanism
-// firing each Turn is withdrawn once its fires collect the strike limit — Turn i's fire is
-// struck at Turn i+1, so it dispatches strikes+1 times and never again. This also proves
-// the empty-response signal is wired loop-level (step → noteEmptyResponse).
-func TestSelfRegulationSuppressesAtDispatch(t *testing.T) {
-	cfg := baseConfig(&recordingSink{})
+// The loop-level harmful-Turn driver. R3 has ONE harmful proxy signal left — the tool-result
+// error — since the empty-reply guard (loop.go reviewedOutcome) turned an empty final response
+// into a faulted Turn, and end(endAbandoned) discards a faulted Turn unjudged. So a session of
+// harmful Turns is now driven the way a model actually digs itself into one: an Exchange that
+// keeps calling a tool that keeps failing.
+
+// harmfulConfig is baseConfig plus `boom` — a read-only tool that always answers with a
+// tool-result error — and an EMPTY Mechanism registry for the caller to populate. Read-only so no
+// Approval gate stands between the model and the failure.
+func harmfulConfig(sink domain.EventSink) domain.Config {
+	boom := fakeTool{name: "boom", readOnly: true, execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+		return domain.ToolResult{CallID: call.ID, Content: "the tool failed", IsError: true}, nil
+	}}
+	cfg := configWithTools(sink, boom)
 	cfg.Mechanisms = domain.NewMechanismRegistry()
+	return cfg
+}
+
+// harmfulScripts returns `turns` scripted Upstream replies that each call `boom`, followed by a
+// closing text reply for a test that needs the Exchange ended (closeHarmfulExchange).
+func harmfulScripts(turns int) [][]provider.Delta {
+	scripts := make([][]provider.Delta, 0, turns+1)
+	for i := 0; i < turns; i++ {
+		scripts = append(scripts, toolCallScript(fmt.Sprintf("boom%d", i), "boom", `{}`))
+	}
+	return append(scripts, contentScript("I give up"))
+}
+
+// runHarmfulTurns submits ONE Exchange and Steps it `turns` times. Every Turn ends on a
+// tool-result error (dispatchTools → noteToolProductivity → noteToolError), so every Turn is
+// judged harmful, and every Turn leaves the Exchange open — the multi-Turn shape self-regulation
+// is meant to catch, rather than the one-Turn Exchange an empty reply used to make.
+func runHarmfulTurns(t *testing.T, a *Agent, turns int) {
+	t.Helper()
+	if err := a.Submit(domain.UserInput{Text: "keep at it"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	for i := 0; i < turns; i++ {
+		res, err := a.Step(context.Background())
+		if err != nil {
+			t.Fatalf("Step %d: %v", i, err)
+		}
+		if res.Status != domain.StatusTurnComplete {
+			t.Fatalf("Turn %d ended %q, want %q (the failing tool keeps the Exchange open)",
+				i, res.Status, domain.StatusTurnComplete)
+		}
+	}
+}
+
+// closeHarmfulExchange ends the open Exchange with a final text reply — a NEUTRAL Turn, which
+// freezes the accrued strikes instead of clearing them — returning the Agent to a quiescent
+// boundary that accepts a Snapshot and the next Submit.
+func closeHarmfulExchange(t *testing.T, a *Agent) {
+	t.Helper()
+	res, err := a.Step(context.Background())
+	if err != nil {
+		t.Fatalf("closing Step: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("closing Turn ended %q, want %q", res.Status, domain.StatusExchangeComplete)
+	}
+}
+
+// TestSelfRegulationSuppressesAtDispatch proves the loop consults the tracker under the
+// next-Turn model: with every Turn harmful (a tool call that keeps failing), a non-exempt
+// Mechanism firing each Turn is withdrawn once its fires collect the strike limit — Turn i's fire
+// is struck at Turn i+1, so it dispatches strikes+1 times and never again. This also proves the
+// tool-error signal is wired loop-level (dispatchTools → noteToolProductivity → noteToolError).
+func TestSelfRegulationSuppressesAtDispatch(t *testing.T) {
+	cfg := harmfulConfig(&recordingSink{})
 	fired := 0
 	mustAddMech(t, cfg.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &fired}.row())
 
-	a, err := newAgent(cfg, echoResponder{reply: ""}) // an empty final reply ⇒ every Turn harmful
+	const turns = adaptiveSuppressStrikes + 3
+	a, err := newAgent(cfg, &scriptedResponder{scripts: harmfulScripts(turns)})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	const turns = adaptiveSuppressStrikes + 3
-	for i := 0; i < turns; i++ {
-		stepOnce(t, a, "go")
-	}
+	runHarmfulTurns(t, a, turns)
+
 	if fired != adaptiveSuppressStrikes+1 {
 		t.Errorf("Mechanism dispatched %d times across %d harmful Turns, want %d (withdrawn after %d strikes)",
 			fired, turns, adaptiveSuppressStrikes+1, adaptiveSuppressStrikes)
@@ -378,21 +440,19 @@ func TestSelfRegulationSuppressesAtDispatch(t *testing.T) {
 // TestExemptFiresThroughSuppression proves an exempt off-ramp is never withdrawn — it fires every
 // Turn even past the strike limit and through the tripped Turn Budget of an all-harmful session.
 func TestExemptFiresThroughSuppression(t *testing.T) {
-	cfg := baseConfig(&recordingSink{})
-	cfg.Mechanisms = domain.NewMechanismRegistry()
+	cfg := harmfulConfig(&recordingSink{})
 	fired := 0
 	mustAddMech(t, cfg.Mechanisms, countingMech{id: "offramp", cap: domain.CapOffRamp, pol: domain.SuppressExempt, fired: &fired}.row())
 
-	a, err := newAgent(cfg, echoResponder{reply: ""}) // every Turn harmful
+	const turns = turnBudgetLimit + 2
+	a, err := newAgent(cfg, &scriptedResponder{scripts: harmfulScripts(turns)})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	const turns = turnBudgetLimit + 2
-	for i := 0; i < turns; i++ {
-		stepOnce(t, a, "go")
-	}
+	runHarmfulTurns(t, a, turns)
+
 	if !a.tracker.observed().BudgetTripped {
-		t.Error("the Turn Budget did not trip on an all-harmful (empty-response) session")
+		t.Error("the Turn Budget did not trip on an all-harmful (failing-tool) session")
 	}
 	if fired != turns {
 		t.Errorf("exempt Mechanism fired %d times across %d Turns, want %d (never suppressed)", fired, turns, turns)
@@ -433,19 +493,17 @@ func TestPureQAndANeverStrikesNorTrips(t *testing.T) {
 // and therefore it is never withdrawn even through an all-harmful session.
 func TestNoOpInvocationNotBooked(t *testing.T) {
 	sink := &recordingSink{}
-	cfg := baseConfig(sink)
-	cfg.Mechanisms = domain.NewMechanismRegistry()
+	cfg := harmfulConfig(sink)
 	invoked := 0
 	mustAddMech(t, cfg.Mechanisms, countingMech{id: "watcher", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, inspectOnly: true, fired: &invoked}.row())
 
-	a, err := newAgent(cfg, echoResponder{reply: ""}) // every Turn harmful
+	const turns = adaptiveSuppressStrikes + 2
+	a, err := newAgent(cfg, &scriptedResponder{scripts: harmfulScripts(turns)})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	const turns = adaptiveSuppressStrikes + 2
-	for i := 0; i < turns; i++ {
-		stepOnce(t, a, "go")
-	}
+	runHarmfulTurns(t, a, turns)
+
 	if invoked != turns {
 		t.Errorf("inspect-only Mechanism dispatched %d times, want %d (unbooked invocations accrue no strikes)", invoked, turns)
 	}
@@ -684,19 +742,21 @@ func TestCancelledTurnReattemptRegainsNovelty(t *testing.T) {
 // TestSelfRegulationResetsOnResume proves the per-Session tracker resets on Resume: a Mechanism
 // suppressed before the snapshot fires again in the resumed Agent (fresh tracker).
 func TestSelfRegulationResetsOnResume(t *testing.T) {
-	cfg := baseConfig(&recordingSink{})
-	cfg.Mechanisms = domain.NewMechanismRegistry()
+	cfg := harmfulConfig(&recordingSink{})
 	firedA := 0
 	mustAddMech(t, cfg.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &firedA}.row())
 
-	a, err := newAgent(cfg, echoResponder{reply: ""}) // every Turn harmful
+	const turns = adaptiveSuppressStrikes + 2
+	a, err := newAgent(cfg, &scriptedResponder{scripts: harmfulScripts(turns)})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	const turns = adaptiveSuppressStrikes + 2
-	for i := 0; i < turns; i++ {
-		stepOnce(t, a, "go")
-	}
+	runHarmfulTurns(t, a, turns)
+	// Close the Exchange before snapshotting: Snapshot and Submit both want a quiescent
+	// boundary, and the closing text Turn is neutral, so it freezes the suppression rather
+	// than clearing it.
+	closeHarmfulExchange(t, a)
+
 	if firedA != adaptiveSuppressStrikes+1 {
 		t.Fatalf("precondition: Mechanism dispatched %d times, want %d (suppressed)", firedA, adaptiveSuppressStrikes+1)
 	}
@@ -711,7 +771,7 @@ func TestSelfRegulationResetsOnResume(t *testing.T) {
 	cfg2.Mechanisms = domain.NewMechanismRegistry()
 	firedB := 0
 	mustAddMech(t, cfg2.Mechanisms, countingMech{id: "nudge", cap: domain.CapProactiveNudge, pol: domain.SuppressStrikesThree, fired: &firedB}.row())
-	b, err := resumeAgent(cfg2, snap, echoResponder{reply: ""})
+	b, err := resumeAgent(cfg2, snap, echoResponder{reply: "resumed answer"})
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}

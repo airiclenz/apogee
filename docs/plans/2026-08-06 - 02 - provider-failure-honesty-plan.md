@@ -145,7 +145,34 @@ context aborts without retrying. Update the `Client`/option doc comments to desc
 
 **Commit:** `feat(provider): honor Retry-After and slow 429 backoff`
 
-## 4. Empty-reply guard in the loop
+## 4. Empty-reply guard in the loop — ✅ DONE (2026-08-07)
+
+NOTES (2026-08-07): the guard is implemented as specified (`(*Agent).reviewedOutcome`, the single
+exit both `turnOK` paths now return through) and its three new tests pass, but "existing agent tests
+stay green" did not hold as written, in two different ways. (a) `TestWave1_AlwaysEmptyTerminatesAtCap`
+(`wave1delivery_test.go`) asserted the old, now-overturned behaviour — past the off-ramp's retry cap
+the empty reply "passes through as the Turn's final message" — so it was updated in place to assert
+the faulted Turn instead; the cap assertion it exists for is unmoved. (b) The guard makes
+`selfRegulator.noteEmptyResponse` (loop.go, the old commit path) unreachable — an empty final reply
+is now a faulted Turn, and `end(endAbandoned)` **discards** a faulted Turn without judging it — so
+self-regulation loses one of R3's two harmful proxy signals ("harmful (a tool-result error, or an
+empty final response)", CONTEXT.md ~line 609), and the loop-level self-regulation tests that drive
+harm through `echoResponder{reply: ""}` fail. That is a design call, so it was escalated rather than
+guessed; the owner's answer is the next line.
+
+NOTES (2026-08-07, owner-ratified — Resolution A): an empty final reply is an UPSTREAM fault, not a
+model-harm signal, so the signal is DROPPED from R3 rather than re-homed. Landed with the guard:
+`noteEmptyResponse` and its loop.go call site are deleted (the tool-result error is R3's harmful
+proxy alone), CONTEXT.md §Self-regulation states that and says why, and the loop-level
+self-regulation tests are re-driven on the tool-error signal — one multi-Turn Exchange that keeps
+calling an always-failing tool (`harmfulConfig` / `harmfulScripts` / `runHarmfulTurns` /
+`closeHarmfulExchange` in `selfreg_test.go`). The strike/budget arithmetic came out unchanged (still
+exactly one harmful Turn per Step), so every assertion held; the resume test gained a closing
+neutral Turn because its Snapshot now needs the multi-Turn Exchange closed. `end()`'s turn-end table
+is untouched, as instructed. Beyond the three named tests, `TestNoOpInvocationNotBooked` and the
+`judgment()` half of `TestSelfRegulatorProductiveWinsMixedSignals` also drove harm through the empty
+reply — both were still passing but had quietly stopped exercising a harmful session, so they moved
+onto the same signal.
 
 **What:** In `internal/agent/loop.go` `respondAndReview` (~line 316): when the hook loop resolves
 to returning a response (`turnOK` paths, ~lines 343 and 362) whose reply is empty — no visible text
