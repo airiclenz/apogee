@@ -1126,9 +1126,9 @@ follows them are the exception and complete instead: the four that take argument
 invocation). Accepting a skill row writes that skill's own `/id ` token into the text.
 
 **One overlay for "which one?".** `/model` and `/server` with nothing after them open a
-picker: the same bordered pane as the `/sessions` browser, one row per choice, one highlight, `↑/↓
-select · ⏎ switch · esc close` under it, at most eight rows with a window scrolling around the
-selection. It is modal — while it is open every key belongs to it. `/server` lists the servers
+picker: the same bordered pane as the `/sessions` browser, one row per choice, one highlight,
+`type to filter · ↑/↓ select · ⏎ switch · esc close` under it, at most eight rows with a window
+scrolling around the selection. It is modal — while it is open every key belongs to it. `/server` lists the servers
 `config.yaml` names plus the one this session started on, in three columns — `name`, `— endpoint`,
 `· current` — and the row the session is on is the one that fills the third, faintly; picking it
 says so instead of switching. `/model` has
@@ -1146,9 +1146,32 @@ pick — no monitor, an unreachable server, nothing advertised yet, nothing but 
 bound, no `servers:` block, no launcher config where one was named, no profiles in it, only the
 profile already loaded — the answer is one honest line in the transcript and no empty pane.
 
+**Typing into that pane narrows it, and never reorders it.** Every printable key — letters, digits,
+punctuation, the space bar — appends to the overlay's own filter, and there is no activation key to
+press first: the pane is modal, so no letter is a verb inside it and all of them can be the
+filter's. Nothing is typed into the prompt box while a pop-up is up, and the filter never touches
+the draft standing in it. A row survives when the filter, lowercased, appears anywhere in that row's
+cells joined by a single space — every cell counts, marker cells included, so `run` finds the live
+profile by its `· running` mark as readily as by its name, and case never matters. The survivors
+keep the offering's own order: the filter prunes and does nothing else, so no row is ever ranked up
+out from under the highlight while the text grows. `⌫` takes back a character, and `esc` closes the
+pane outright even mid-filter — one key, one meaning, so the legend's `esc close` is never
+conditionally wrong. The filter dies with the overlay, so the next `/model` opens on the whole list
+again. What has been typed shows under the title as `filter: qwen▌`, on a line of its own with a
+blank line above and below it, and that line exists only while there is something in it — its
+presence *is* the fact that the pane is filtered. A filter matching nothing leaves the pane open,
+titled, with its filter line, no rows and no highlight for `⏎` to take: a visible filter over an
+empty list has already said why it is empty, and `⌫` is the way back to a wider one. All three lines
+are budgeted with the rest of the pane, and on a window too short for everything the **rows** are
+what gives way — a list you cannot see all of is still being narrowed, while a filter you cannot see
+is a pane that has stopped explaining itself. Only past that do the two blanks go, together (half a
+pad moves the line instead of setting it off), and the `filter:` line itself is the last thing
+standing before the pane is down to the chrome the four-row floor leaves it.
+
 **The same overlay asks `/schedule`'s questions.** `/schedule <prompt>` with no cycle in the line
 opens the cycle pane — two columns, `1m`, `— every minute` through `4h`, `— every 4 hours` — and,
-once a row is taken, the mode pane in its place: `plan` and `auto`, each with a `—` gloss of what it
+once a row is taken, the mode pane in its place, opening on a cleared filter because a cycle's
+letters are not a mode's: `plan` and `auto`, each with a `—` gloss of what it
 means for an unattended run, and a third `· unavailable` cell on `auto` where this host's
 Auto-eligibility ladder has closed it. That row is still offered and still selectable; taking it
 prints the reason and leaves the pane open, so `plan` is one keypress away and the prompt need not
@@ -1157,6 +1180,23 @@ be retyped. `/schedule-stop` with more than one schedule live opens a third pane
 anything, so the hint under them reads `⏎ choose` and, for the stop pane, `⏎ stop`. They are the
 only panes that open while the model is working, and they claim the keyboard there exactly as they
 do at idle.
+
+**The `/sessions` browser types too, which is why its verbs are chords.** The browser filters
+exactly as those panes do — any printable key builds the same case-insensitive filter over the row's
+cells, the same `filter: …▌` line stands under the title with a blank line at each end, `⌫` undoes
+and `esc` closes — and its filter is composed *after* the workspace view, so it narrows whichever
+scope the pane is showing. That is what moved the three letter verbs onto control chords: the hint
+reads
+`type to filter · ↑/↓ select · ⏎ resume · ^r rename · ^d delete · ^a this/all · esc close`, where
+`^r` arms the rename buffer, `^d` arms the delete confirm and `^a` toggles this workspace against
+all of them. A list in which `d` might delete is a list no name can be typed into, and the store of
+saved sessions is exactly the place a human wants to type a name. The delete confirm's `y`/`n` and
+the whole rename edit are untouched by any of it: they are modal surfaces inside the modal, and
+nothing is filtered while one of them is up. Toggling the scope leaves the filter standing — it is
+what the human is looking for, and the toggle only changes where they are looking — and re-derives
+the rows under it. An empty *workspace* still states itself on its one unselectable note row,
+`no sessions in this workspace — press ^a to see all`; a filter that matched nothing gets no such
+row, for the reason the picker's zero-match pane gets none.
 
 **A firing browses like any other session, and says whose it is.** Each run of a schedule saves a
 record of its own, so it appears in the `/sessions` browser among the sessions the human held

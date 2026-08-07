@@ -8,6 +8,33 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- **Type-to-filter across the selector pop-ups.** Every overlay that offers a list now narrows as
+  you type: `/model` over the models a server advertises, `/model` over llama-launcher's Launch
+  profiles, `/server`, `/schedule`'s cycle and mode panes, `/schedule-stop`, and the `/sessions`
+  browser. Any printable key extends a case-insensitive filter — there is no activation key to press
+  first, because the pane is modal and no letter is a verb inside it — and a row survives when what
+  you typed appears anywhere in what that row shows: its name, its `— endpoint` or `— backend`
+  gloss, its `· running` marker. A three-hundred-model offering is now a few keystrokes away instead
+  of an arrow-scroll through an eight-row window.
+  - **The filter only prunes.** Surviving rows keep the offering's own order, so nothing is ranked
+    up out from under the highlight while you type, and `⏎` always takes the row the pane painted.
+  - **`⌫` takes back a character; `esc` still closes the pane outright**, even mid-filter, so the
+    hint's `esc close` never means something else. The filter is cleared with the overlay — the next
+    open starts on the whole list.
+  - **What you typed shows in the pane** as a `filter: qwen▌` line under the title, set off by a
+    blank line above and below, and only while there is something in it. A filter that matches
+    nothing leaves the pane open with that line over no rows, rather than closing or complaining.
+    On a terminal too short for everything, the rows shrink before the filter line does.
+- **The `/sessions` browser's letter verbs are now chords — `^r` rename, `^d` delete, `^a`
+  this-workspace/all-workspaces.** This changes muscle memory on purpose: a browser you can type
+  into cannot also treat `d` as delete, and the saved-session store is exactly the place you want to
+  type a name. The delete confirm's `y`/`n` and the rename editor are unchanged.
+
+  The type-to-filter grammar and the rebound verbs are documented in `layout.md` (§"One overlay for
+  'which one?'" and the `/sessions` browser paragraph beside it).
+
 ## [0.12.0] — 2026-08-07
 
 ### Added

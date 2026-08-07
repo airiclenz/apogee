@@ -118,9 +118,26 @@ now says "press ^a". It is a live UI string rather than a doc, so item 5's doc o
 
 **Commit:** `feat(tui): type-to-filter in the sessions browser; letter verbs become chords`
 
-## 5. Docs — layout.md and the changelog
+## 5. Docs — layout.md and the changelog — ✅ DONE (2026-08-07)
 
 Depends on items 2, 3 and 4.
+
+NOTES (2026-08-07): three shape deviations, none of them behavioral. (1) layout.md has NO dedicated
+`/sessions` browser section — the browser is described in fragments (the height order, the Column
+contract, the firing paragraph), all inside §"The prompt box's mini-language". The browser's amendment
+is therefore a NEW bold-lead paragraph ("The `/sessions` browser types too, which is why its verbs are
+chords") seated in that section immediately before the firing paragraph, which is where the browser's
+own grammar already lives. (2) In §"One overlay for 'which one?'" the filter is likewise its own
+bold-lead paragraph after the picker's, rather than a rewrite of the modal-keys sentence: that sentence
+("It is modal — while it is open every key belongs to it") is the PREMISE the direct-typing call rests
+on, so it stands and the new paragraph draws the consequence from it. Both places carry the full hint
+string, so the acceptance grep counts them. (3) One clause beyond the two named places: the `/schedule`
+paragraph now says the mode pane opens on a cleared filter, because item 2's `acceptCycle` NOTES made
+that a behavior this plan changed and the cycle→mode handoff is described only there. (4) One file
+beyond the item's two: `README.md` spelled the browser's OLD letter verbs ("`r` renames inline, `d`
+deletes after a confirm, `a` toggles…", and "discarding is an explicit `d`"), which item 4 made false.
+This item owns every doc edit, so they are corrected to the chords here rather than left wrong; README
+spells no picker hint anywhere, so nothing else there moved.
 
 **What:** Amend `layout.md` in both places this plan changed behavior (this item owns every doc edit — no other item touches docs): §"One overlay for 'which one?'" — the modal-keys sentence now says printable keys build a case-insensitive filter that prunes the rows (never reorders), describe the `filter:` line with its spacer lines, esc's unchanged close, and the zero-match pane; the `/sessions` browser section — the chord verbs (`^r`/`^d`/`^a`), direct typing, and the same filter line. Update the quoted hint strings wherever layout.md spells them. Add one `CHANGELOG.md` `[Unreleased]` → `### Added` entry describing type-to-filter across the selector pop-ups, naming the browser's verb rebinding explicitly (it changes existing muscle memory and deserves its own sentence).
 
