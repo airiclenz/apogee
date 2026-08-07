@@ -202,7 +202,7 @@ already handled earlier (~line 319) and never reaches the guard.
 
 **Commit:** `fix(agent): fail the turn on an empty upstream reply`
 
-## 5. CHANGELOG entry
+## 5. CHANGELOG entry — ✅ DONE (2026-08-07)
 
 Depends on items 1–4 (describes the landed behavior).
 

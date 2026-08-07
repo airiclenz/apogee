@@ -35,6 +35,49 @@ point is a **minor** bump, not a breaking change.
   The type-to-filter grammar and the rebound verbs are documented in `layout.md` (§"One overlay for
   'which one?'" and the `/sessions` browser paragraph beside it).
 
+### Fixed
+
+- **An upstream failure can no longer arrive as a silent empty reply.** OpenAI-compatible
+  aggregators deliver a provider's failure *in band*: an HTTP 200 whose JSON body — or whose SSE
+  stream — carries `{"error": {…}}` and no usable choices. apogee's wire structs ignored that
+  member, so the 200 read as a success with nothing in it, and the loop committed a blank assistant
+  turn with no error anywhere on screen; the only trace was the retry a minute later that happened
+  to come back as a real `HTTP 429`. Both paths parse the member now and surface it at once. A
+  streamed one ends the stream on a terminal error carrying the whole raw event — code, message and
+  the provider detail an aggregator packs into `metadata` — passed through the same redaction and
+  length cap every other upstream body gets, so an API key in the payload never reaches the screen.
+  A non-streamed one returns the same `*StatusError` an out-of-band status returns, so every caller
+  that already branches on a status keeps branching. An in-band `400` whose message names a context
+  overflow is classified as an overflow rather than a generic fault, which puts it in front of the
+  history fold that answers the out-of-band form. There are no hidden re-requests: the server has
+  already decided, so an in-band error is terminal.
+
+- **An empty upstream reply now fails the turn visibly instead of committing a blank message.** A
+  reply with no visible text and no tool calls is a non-answer, and it used to land in the
+  transcript and in the saved session as an empty assistant message, indistinguishable from a model
+  that had nothing to say. The loop emits the same visible error a stream fault does — naming the
+  finish reason, which is usually the whole diagnosis — and commits nothing. The guard sits after
+  the post-response hooks have resolved, so the `empty_response_recovery` Mechanism keeps first
+  claim: its retry runs first, and when that retry produces content the guard never fires. It is
+  engine-level, so it holds in Bypass too, where no Mechanism is watching — failure honesty is
+  provider correctness, not something you should have to enable. A thinking-only reply counts as
+  empty; reasoning nobody asked to see is still not an answer.
+  - **Self-regulation no longer reads an empty reply as harm.** An empty final response was one of
+    the two harmful proxy signals a Turn could raise for the effectiveness judgment. Now that it is
+    an upstream fault rather than something a Mechanism could have shepherded, the signal is dropped
+    rather than re-homed, and a tool-result error is the harmful proxy on its own. Recorded in
+    `CONTEXT.md` §Self-regulation.
+
+- **A rate-limited retry waits as long as the server asked it to, and backs off a full second when
+  it was not asked.** A 429's `Retry-After` was ignored outright: apogee re-asked after 200ms and
+  then 400ms, three requests into a limit that wanted seconds — which is how a short throttle
+  becomes a longer one. The header is honoured now in both its forms, delta-seconds and HTTP-date,
+  up to a 30-second cap; a wait longer than the cap gives up immediately and surfaces the error
+  instead of sitting blocked on what is effectively a ban, and it costs no retry budget on the way
+  out. Every wait is cancellable, so ending the turn ends it rather than sitting out the delay.
+  Without a header a 429 backs off from a 1-second base — 1s, then 2s — while transport faults and
+  5xx keep the 200ms base they always had.
+
 ## [0.12.0] — 2026-08-07
 
 ### Added
