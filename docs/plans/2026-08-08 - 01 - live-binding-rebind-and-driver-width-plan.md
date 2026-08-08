@@ -56,7 +56,16 @@ edits), and remains a real behaviour change with its own failing-first test.
 
 Commit: `fix(wire): rebind inputs overlay the live upstream binding, not launch opts`
 
-## 2. Firings resolve their spec against the live binding
+## 2. Firings resolve their spec against the live binding — ✅ DONE (2026-08-08)
+
+NOTES (2026-08-08): item 1's test read the resolution's NOTICES, which `fire` deliberately drops, so
+the extended firing test proves the same claim from the WIRE instead: beside the probe record it
+seeds a user-local validated entry (`bound-model` → `["decompose"]` alone), fires the multi-step
+prompt decompose's own tests use, and asserts decompose's step hint stands in the request's system
+prompt — default-off, so it can only have arrived via the set the bound endpoint's probe record
+promoted. That needed `firingUpstream` to record each request's system prompt alongside its tool
+menu (a third return value; both call sites updated). Verified failing-first: with the launch wire
+restored the new assertion fails.
 
 Depends on item 1.
 

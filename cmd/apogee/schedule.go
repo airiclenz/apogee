@@ -39,13 +39,16 @@ type scheduleWiring struct {
 	// otherwise fire the launch model's prompt at the model it has moved to. opts is the launch
 	// snapshot; live is the half of it a `/settings` edit can have moved since (ADR 0037), read at
 	// FIRING time for the same reason the binding is — and safely, because the holder is
-	// goroutine-safe and this runs on the Scheduler's own goroutine.
+	// goroutine-safe and this runs on the Scheduler's own goroutine. The launch snapshot's own WIRE is
+	// never used: rebindInputs overlays the binding below onto the copy it hands the resolver, so the
+	// endpoint a Firing resolves against and the endpoint it dials are one value.
 	opts  options
 	roots stateRoots
 	live  *liveSettings
 
 	// binding reads the CURRENT Upstream binding; wired to upstreamHolder.Binding, the same seam the
-	// naming call reads for the same reason.
+	// naming call reads for the same reason. It decides BOTH halves of a Firing's upstream — the wire
+	// it dials and the endpoint its spec resolution keys on — because a `/server` switch moves both.
 	binding func() upstreamBinding
 
 	// store is the session store a Firing's record lands in — the interactive session's own, so a
@@ -71,11 +74,11 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	// as unknown because only the TUI tracks it; a `context-window:` pin still wins, and an unpinned
 	// Firing runs with the Budget inactive, which for one bounded prompt is the honest degrade
 	// rather than a guess. The per-session notices are dropped: they are a launch's narration, and a
-	// Firing's narration is its own session record.
-	// The launch snapshot's own wire, restated as a binding so the overlay is a no-op for this
-	// caller: a Firing still keys its spec resolution on the LAUNCH endpoint, unchanged.
-	launch := upstreamBinding{Endpoint: w.opts.endpoint, APIKey: w.opts.apiKey}
-	base, manualIDs, pinnedWindow := w.live.rebindInputs(w.opts, launch)
+	// Firing's narration is its own session record. The binding is handed to rebindInputs as well as
+	// used for the wire below: every input the resolution keys on the ENDPOINT — the probe record
+	// behind the identity ladder's behavioral rung, and so the Validated-set decision above it — must
+	// be read for the server this session is on NOW, not the one it launched against.
+	base, manualIDs, pinnedWindow := w.live.rebindInputs(w.opts, binding)
 	spec, _, err := rebindSpecFor(base, w.roots, manualIDs, binding.Model, 0, pinnedWindow)
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: resolve the firing's bindings: %w", err)

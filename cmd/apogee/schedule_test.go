@@ -20,6 +20,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
@@ -32,15 +33,22 @@ import (
 const gateSettleWindow = 50 * time.Millisecond
 
 // firingUpstream starts a server that answers every request with one final, no-tool reply and
-// records the tool menu each request offered — which is how the "a Firing carries the library's own
-// registry, never the session's" prescription is asserted from the wire rather than from the Config.
-func firingUpstream(t *testing.T, reply string) (url string, menus func() [][]string) {
+// records what each request carried: the tool menu it offered — which is how the "a Firing carries
+// the library's own registry, never the session's" prescription is asserted from the wire rather
+// than from the Config — and its system prompt, which is where an enabled request-shaping Mechanism
+// leaves its mark, and so where the wire says which enable set the Firing resolved.
+func firingUpstream(t *testing.T, reply string) (url string, menus func() [][]string, systems func() []string) {
 	t.Helper()
 	var seen [][]string
+	var prompts []string
 	done := make(chan struct{}, 32)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var decoded struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
 			Tools []struct {
 				Function struct {
 					Name string `json:"name"`
@@ -53,17 +61,28 @@ func firingUpstream(t *testing.T, reply string) (url string, menus func() [][]st
 			menu = append(menu, tl.Function.Name)
 		}
 		seen = append(seen, menu)
+		system := ""
+		for _, m := range decoded.Messages {
+			if m.Role == "system" {
+				system = m.Content
+				break
+			}
+		}
+		prompts = append(prompts, system)
 		w.Header().Set("Content-Type", "text/event-stream")
 		e2eWriteFinal(w, reply)
 		done <- struct{}{}
 	}))
 	t.Cleanup(srv.Close)
 	// The handler appends without a lock, so the reader waits for the request it asked for rather
-	// than racing the server goroutine. A Firing makes exactly one call in these tests.
+	// than racing the server goroutine. A Firing makes exactly one call in these tests. systems does
+	// NOT wait — it reads what the requests released by menus carried, so it is called after it.
 	return srv.URL, func() [][]string {
-		<-done
-		return seen
-	}
+			<-done
+			return seen
+		}, func() []string {
+			return prompts
+		}
 }
 
 // sessionOnlyTool stands for anything the interactive session's registry carries that a Firing must
@@ -80,18 +99,55 @@ func (sessionOnlyTool) Execute(context.Context, apogee.ToolCall) (apogee.ToolRes
 	return apogee.ToolResult{}, nil
 }
 
+// firingStepPrompt is a complex, action-intent multi-step ask — the shape internal/mechanisms'
+// own decompose tests use — so that an ENABLED decompose hints a step into the system prompt of the
+// firing's very first request. That injection is the wire's evidence below; the reply is stubbed, so
+// nothing here depends on the prompt being answerable.
+const firingStepPrompt = "Build a full parser pipeline.\n" +
+	"1. First, read the grammar spec.\n" +
+	"2. Then create the tokenizer in `lexer.go`.\n" +
+	"3. Finally, delegate to a sub-agent to write the tests."
+
+// decomposeStepHintLead is decompose's own step-hint marker (internal/mechanisms, unexported), the
+// literal the Mechanism prepends to the hint it appends to the system prompt.
+const decomposeStepHintLead = "Apogee step hint:"
+
 // TestScheduleFiringRunsAgainstTheCurrentBinding is the item's headline: the Fire seam composes one
 // headless run from the binding the session holds AT FIRE TIME, in the Schedule's own mode, and the
-// record it leaves behind is an ordinary session record marked with the Schedule's identity.
+// record it leaves behind is an ordinary session record marked with the Schedule's identity. Both
+// halves of that binding are the holder's: the wire the Firing dials AND the endpoint its spec
+// resolution keys on.
 func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	t.Parallel()
 
-	url, menus := firingUpstream(t, "the build is green")
+	url, menus, systems := firingUpstream(t, "the build is green")
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
 	store := session.NewStore(roots.sessions)
+
+	// The endpoint-keyed half of the resolution, fixtured so the wire can report which endpoint it
+	// was keyed on: the identity ladder's behavioral rung is (probe dir, endpoint, model label), so
+	// the record `apogee probe model` left for the server this session MOVED to is found only when
+	// the bound endpoint reaches the resolver. Found, the identity is medium-confidence and the
+	// matching Validated set APPLIES; missed, the bare label resolves at low confidence and the set
+	// is merely offered (validatedsets.go). The set holds decompose alone, so exactly one Mechanism's
+	// mark can appear on the wire.
+	if _, err := library.SaveProbeRecord(roots.probe, library.ProbeRecord{
+		Endpoint:   url,
+		ModelLabel: "bound-model",
+		ProbedAt:   mustTime(t, "2026-07-22T10:00:00Z"),
+		Behavior:   "probe:1:tools+json+chain",
+	}); err != nil {
+		t.Fatalf("save probe record: %v", err)
+	}
+	writeUserValidatedEntry(t, roots.validated, "bound-model", `{
+		"version": 1,
+		"key": "bound-model",
+		"set": ["decompose"],
+		"evidence": {"campaign": "schedule-test"}
+	}`)
 
 	// The session's own surface: ask-before (a mode a Firing may NOT run in) and a registry carrying
 	// a tool of its own. If fire() inherited either, this run would fail rather than pass — the mode
@@ -105,7 +161,9 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	}
 	base.Tools = registryWithMCP(roots.workspace, base, []apogee.Tool{sessionOnlyTool{}})
 
-	launchOpts := options{endpoint: "http://launch.invalid", model: "launch-model"}
+	launchOpts := options{
+		endpoint: "http://launch.invalid", model: "launch-model", validatedSetsEnable: true,
+	}
 	w := scheduleWiring{
 		base:  base,
 		opts:  launchOpts,
@@ -120,7 +178,7 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	out, err := w.fire(context.Background(), schedule.Firing{
 		ScheduleID:   "sch-1-abcd",
 		ScheduleName: "Nightly build",
-		Prompt:       "check the build",
+		Prompt:       firingStepPrompt,
 		Mode:         modePlan,
 	})
 	if err != nil {
@@ -165,6 +223,21 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 			t.Errorf("the firing offered %q — it inherited the session's registry, MCP tools and all",
 				name)
 		}
+	}
+
+	// The spec resolution's own endpoint, read off the wire: decompose is default-off and reached
+	// this run only through the Validated set the probe record promoted, so its step hint standing in
+	// the system prompt is the proof that the resolver was handed the BOUND endpoint. Keyed on the
+	// launch snapshot's `http://launch.invalid` the record is missed, the set is offered rather than
+	// applied, and this system prompt carries no such mark.
+	sys := systems()
+	if len(sys) != 1 {
+		t.Fatalf("recorded %d system prompts, want the one request's", len(sys))
+	}
+	if !strings.Contains(sys[0], decomposeStepHintLead) {
+		t.Errorf("the firing's system prompt carries no %q: the validated set was not applied, so the "+
+			"spec resolution keyed on the LAUNCH endpoint rather than the bound one.\nsystem prompt: %q",
+			decomposeStepHintLead, sys[0])
 	}
 }
 
@@ -336,7 +409,7 @@ func (h *scheduleHarness) await(t *testing.T, want schedule.EventKind) schedule.
 func TestAFiringsAnswerAndStatsCrossTheFireSeam(t *testing.T) {
 	t.Parallel()
 
-	url, _ := firingUpstream(t, "the build is green")
+	url, _, _ := firingUpstream(t, "the build is green")
 	h := newScheduleHarness(t, url)
 
 	h.fire(t)
