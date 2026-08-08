@@ -1324,6 +1324,11 @@ type settingsApplier struct {
 // other is re-RESOLVED: the new value lands in the holder and the per-model resolution is re-driven
 // over it (rideTheRebind), which is how the window pin and the system prompt reach an engine that has
 // no setter for either — the same path a heartbeat-observed model change already takes.
+//
+// A key nothing HOLDS is a third answer rather than a third class: `editor` is read off the file at
+// the moment an external edit starts, so the write alone puts it in force and its case says success
+// with nothing to do (ADR 0041 decision 1). That is not the refusal above, because the file changing
+// IS the session changing for a value only ever read from the file.
 func applySettingFor(a settingsApplier) func(key, value string) (string, error) {
 	return func(key, value string) (string, error) {
 		// A member this Driver did not compose is a legitimate configuration rather than a bug (ADR
@@ -1400,6 +1405,14 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			}
 			path, _ := launcherConfigPath(value)
 			a.launcher.set(path)
+		case "editor":
+			// The one key with nothing at all behind it to move: the editor ladder reads `editor` off a
+			// FRESH projection of the file every time an external edit starts (externalEdit.spec), so the
+			// write the pane has just made is the whole of the apply and the very next ⏎ that opens an
+			// editor runs the new command (ADR 0041 decision 1: "nothing to dispatch and nothing to
+			// journal beyond the write itself"). It is named here rather than left to the default because
+			// that default is a refusal — and a refusal over a value already in force would tell the user
+			// their change had not taken effect when it had.
 		case "present.auto-open", "present.command", "present.port", "present.host":
 			return "", a.present.apply(key, value)
 		case "context-window":

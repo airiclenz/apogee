@@ -2597,7 +2597,8 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 	}{
 		// `server` is the one key with no dispatcher home and never will have one: its live apply is
 		// the picker's own switch (ADR 0037 decision 4), so a value arriving here is a value nothing
-		// can do anything with. Every other editable key now has a seam.
+		// can do anything with. Every other editable key either has a seam or, like `editor`, is
+		// already in force from the write itself (TestApplySettingAcceptsTheEditorKey).
 		{name: "a key with no live seam", key: settingKeyServer, value: "second", wantIn: "server"},
 		{name: "a key that is not a setting", key: "nonsense", value: "1", wantIn: "nonsense"},
 		{name: "a bool that is not one", key: "bypass", value: "yes please", wantIn: "bypass is true or false"},
@@ -2621,6 +2622,30 @@ func TestApplySettingRefusesWhatItCannotApply(t *testing.T) {
 	}
 }
 
+// `editor` is the counter-case to the refusal above: a key with no seam that must NOT refuse. The
+// editor ladder reads it off a fresh projection of the file every time an external edit starts, so
+// the pane's write has already put it in force — and the default refusal would have told the user
+// "editor cannot be applied to the running session" about a change that had taken effect. It answers
+// with the empty note every in-force key answers with, drives no seam, and needs no member, so an
+// applier holding nothing at all still applies it.
+func TestApplySettingAcceptsTheEditorKey(t *testing.T) {
+	t.Parallel()
+	spy := &applySettingSpy{}
+	note, err := applySettingFor(settingsApplier{engine: spy})("editor", "code -w")
+	if err != nil {
+		t.Fatalf("apply editor: %v", err)
+	}
+	if note != "" {
+		t.Errorf("note = %q, want none: the key is in force from the write itself", note)
+	}
+	if spy.drove() != 0 {
+		t.Errorf("applying editor drove an engine seam: %+v", spy)
+	}
+	if _, err := applySettingFor(settingsApplier{})("editor", "code -w"); err != nil {
+		t.Errorf("apply editor through an applier holding nothing: %v; the key reaches no member", err)
+	}
+}
+
 // The same sentence answers a key whose seam this Driver did not COMPOSE. Every member of the
 // applier is optional by design — a bench, a daemon or an embedder has no presenter, no launcher and
 // no skill catalogue (ADR 0031: the engine stays sufficient for any Driver) — so a missing member
@@ -2633,6 +2658,13 @@ func TestApplySettingRefusesEveryKeyItCannotReach(t *testing.T) {
 	t.Parallel()
 	apply := applySettingFor(settingsApplier{})
 	for _, k := range keyRegistry {
+		if k.Path == "editor" {
+			// The one exception, and the only shape that can be one: a key whose apply reaches no
+			// member at all, so there is nothing a Driver could be composed without. It is in force
+			// from the write itself (ADR 0041 decision 1) and answers success even here —
+			// TestApplySettingAcceptsTheEditorKey holds that side.
+			continue
+		}
 		t.Run(k.Path, func(t *testing.T) {
 			t.Parallel()
 			defer func() {
