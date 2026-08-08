@@ -175,11 +175,12 @@ type settingFailure struct {
 // was. It is neither a change nor a refusal, so it can be neither of the two things a row already
 // says — a ` *` claiming this session changed the key, or a ✗ claiming the act was refused.
 //
-// One act has that shape today, and it is the `server` row's: choosing the server the session is
-// already on is answered rather than acted on ([Model.switchToServer]). The answer goes to the
-// TRANSCRIPT, which this full-height pane is covering, so a ⏎ that is honestly a no-op looks from
-// inside the pane like a keypress that did nothing at all. The row says it too, and that is all this
-// slot is for.
+// Two acts have that shape. One is the `server` row's: choosing the server the session is already on
+// is answered rather than acted on ([Model.switchToServer]), and the answer goes to the TRANSCRIPT,
+// which this full-height pane is covering, so a ⏎ that is honestly a no-op looks from inside the pane
+// like a keypress that did nothing at all. The other is a detached editor launch, which moves no row
+// either and whose window may not even be on this screen ([Model.foldDetachedEdit]). The row says it
+// in both cases, and that is all this slot is for.
 //
 // Its lifetime is settingFailure's: one slot describing the last act rather than a row's condition,
 // replaced by the next landed edit (recordSettingEdit) or the next refusal (settingsFailed), and gone
@@ -640,11 +641,26 @@ func (m Model) settingsFailed(row SettingRow, msg string) (tea.Model, tea.Cmd) {
 // nil-seam degrade noSettingsWriterNote gives every other row, worded for the act this one performs.
 const noServerSwitchNote = "cannot switch server in this build"
 
-// settingsEditedMsg is the return of the external editor: which row launched it, and whether the
-// process itself ran. It is the pane's own message rather than a shared one because nothing else in
-// the frame suspends the program — the path is carried so the reload's outcome lands on the row the
-// human pressed ⏎ on, which is the only row they have any reason to be looking at.
+// settingsEditedMsg is the return of a FOREGROUND external editor: which row launched it, and
+// whether the process itself ran. It is the pane's own message rather than a shared one because
+// nothing else in the frame suspends the program — the path is carried so the reload's outcome lands
+// on the row the human pressed ⏎ on, which is the only row they have any reason to be looking at.
+//
+// A detached launch has no such return: nobody waits for it, so the message it produces is about the
+// START and nothing else ([settingsDetachedMsg]).
 type settingsEditedMsg struct {
+	path string
+	err  error
+}
+
+// settingsDetachedMsg is what a DETACHED launch has to say: it started, or it did not. There is no
+// exit to report and no re-read to trigger — the pane never left, the program outlives the keypress,
+// and what the human writes in it arrives by the config watcher instead (ADR 0041 decision 3).
+//
+// It is a message rather than a value the keypress folds in place because starting a process is
+// work, and work belongs on a Cmd goroutine rather than in Update — the same reason the foreground
+// path hands its process to Bubble Tea.
+type settingsDetachedMsg struct {
 	path string
 	err  error
 }
@@ -659,10 +675,24 @@ const (
 	noExternalEditNote   = "cannot open an editor in this build"
 )
 
-// settingsExternalEdit answers ⏎ on a row holding a structure no field can express: it suspends the
-// program into the human's own editor, opened on that key's line (ADR 0037 decision 5). The command
-// line is the binary's — which file, which line, which editor — and this only runs it
-// ([Options.ExternalEditSpec]).
+// settingsDetachedEditNote is what the row says when the editor was started DETACHED. The pane never
+// went away, so a keypress that opened a window somewhere else — behind the terminal, on another
+// desktop, in an application that was already running — looks from in here like a keypress that did
+// nothing at all. This sentence is the whole of what the row has to show for it, which is why the
+// launch lands in the pane's answer slot rather than silently ([settingAnswer]).
+const settingsDetachedEditNote = "opened in your editor"
+
+// settingsExternalEdit answers ⏎ on a row holding a structure no field can express: it opens the
+// human's own editor on that key's line (ADR 0037 decision 5). The command line is the binary's —
+// which file, which line, which editor, and whether that editor takes this terminal — and this only
+// runs it ([Options.ExternalEditSpec]).
+//
+// Two ways to run it, one keypress (ADR 0041 decision 6). A FOREGROUND editor gets the program's own
+// terminal through tea.ExecProcess and its exit is the trigger for the re-read, exactly as it has
+// always been — a terminal editor drawn over a live alt-screen TUI is broken, so there is no other
+// way to run one. Everything else is started DETACHED: the pane stays up, nothing waits, and what
+// the human saves arrives through the config watcher rather than through an exit that means nothing
+// (an opener stub returns before the editor is even on screen).
 //
 // It is offered only between runs (binding C). Mid-run the row says to wait rather than the pane
 // queueing the edit: the alternative is tearing the alternate screen down over a streaming reply and
@@ -685,20 +715,67 @@ func (m Model) settingsExternalEdit(row SettingRow) (tea.Model, tea.Cmd) {
 	if m.opts.ExternalEditSpec == nil {
 		return m.settingsFailed(row, noExternalEditNote)
 	}
-	argv, err := m.opts.ExternalEditSpec(row.Path)
+	launch, err := m.opts.ExternalEditSpec(row.Path)
 	if err != nil {
 		return m.settingsFailed(row, stripEscapes(err.Error()))
 	}
+	argv := launch.Argv
 	if len(argv) == 0 {
 		return m.settingsFailed(row, noExternalEditNote)
 	}
-	// The last refusal goes with the keypress that acted past it: the human is leaving the screen,
-	// and a ✗ from an earlier attempt has nothing to say about the file they are about to edit.
+	// The last refusal goes with the keypress that acted past it: the human is leaving the screen —
+	// or the screen is staying and the editor is opening elsewhere — and a ✗ from an earlier attempt
+	// has nothing to say about the file they are about to edit.
 	m.settings.failure = settingFailure{}
 	m.layout()
+	if launch.Detached {
+		return m, startDetachedEditor(row.Path, argv)
+	}
 	return m, tea.ExecProcess(exec.Command(argv[0], argv[1:]...), func(err error) tea.Msg {
 		return settingsEditedMsg{path: row.Path, err: err}
 	})
+}
+
+// startDetachedEditor is the launch that keeps the terminal: the program is started with no stdin,
+// stdout or stderr of ours — a nil stream in [exec.Cmd] is the null device, so the editor cannot
+// write over the frame we are still drawing and cannot read the keys we are still routing — and
+// nothing waits for it.
+//
+// The Wait in the background is not a wait FOR the editor, it is the reaping of it: a child nobody
+// waits for stays a zombie in the process table for as long as apogee runs, and a human who opens
+// their config a dozen times in a session should not leave a dozen of them. It carries no outcome —
+// what the editor did to the file is the watcher's to notice, and its exit code is an answer to a
+// question the pane stopped asking the moment it let go.
+func startDetachedEditor(path string, argv []string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command(argv[0], argv[1:]...)
+		if err := cmd.Start(); err != nil {
+			return settingsDetachedMsg{path: path, err: err}
+		}
+		go func() { _ = cmd.Wait() }()
+		return settingsDetachedMsg{path: path}
+	}
+}
+
+// foldDetachedEdit is the whole of what a detached launch does to the pane: nothing, plus a sentence.
+// A start that failed is this pane's one failure slot, on the row the human pressed ⏎ on — the same
+// place every other refusal in here lands — and a start that worked is an act that landed and changed
+// no row, which is what the answer slot is for ([settingAnswer]).
+//
+// No re-read follows either way. The editor is still open; the file is not the pane's to interpret
+// until somebody saves it, and then it is the watcher that says so (ADR 0041 decision 3).
+func (m Model) foldDetachedEdit(msg settingsDetachedMsg) (tea.Model, tea.Cmd) {
+	rows := m.settingRows()
+	launched, ok := settingRowOf(rows, msg.path)
+	if !ok {
+		launched = SettingRow{Path: msg.path}
+	}
+	if msg.err != nil {
+		return m.settingsFailed(launched, stripEscapes(msg.err.Error()))
+	}
+	m.settings.answer = settingAnswer{path: msg.path, msg: settingsDetachedEditNote}
+	m.layout()
+	return m, nil
 }
 
 // foldSettingsEdit is what happens when the editor exits: the binary re-reads the file, and every

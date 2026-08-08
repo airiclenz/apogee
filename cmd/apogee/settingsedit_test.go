@@ -92,24 +92,24 @@ func TestExternalEditPassesTheLineJumpOnlyToEditorsThatTakeOne(t *testing.T) {
 
 	// `servers:` is on the second line of that fixture, and it is the line the jump names.
 	withVim := specFor(t, home, map[string]string{"EDITOR": "vim"}, "servers")
-	if want := []string{"vim", "+2", path}; !slices.Equal(withVim, want) {
-		t.Errorf("argv = %v, want %v", withVim, want)
+	if want := []string{"vim", "+2", path}; !slices.Equal(withVim.Argv, want) {
+		t.Errorf("argv = %v, want %v", withVim.Argv, want)
 	}
 	withCode := specFor(t, home, map[string]string{"EDITOR": "code -w"}, "servers")
-	if want := []string{"code", "-w", path}; !slices.Equal(withCode, want) {
-		t.Errorf("argv = %v, want %v — an editor outside the allowlist is handed the file alone", withCode, want)
+	if want := []string{"code", "-w", path}; !slices.Equal(withCode.Argv, want) {
+		t.Errorf("argv = %v, want %v — an editor outside the allowlist is handed the file alone", withCode.Argv, want)
 	}
 	// A path-spelled editor is still recognised by its NAME, and a key the file does not set has no
 	// active line to jump to (this fixture documents no commented example either).
 	byPath := specFor(t, home, map[string]string{"EDITOR": filepath.Join("/usr", "bin", "nvim")}, "mcp-servers")
-	if want := []string{filepath.Join("/usr", "bin", "nvim"), path}; !slices.Equal(byPath, want) {
-		t.Errorf("argv = %v, want %v — no line to point at, so no jump", byPath, want)
+	if want := []string{filepath.Join("/usr", "bin", "nvim"), path}; !slices.Equal(byPath.Argv, want) {
+		t.Errorf("argv = %v, want %v — no line to point at, so no jump", byPath.Argv, want)
 	}
 	// The OS opener is the rung nobody chose, and it is the one that must never see a `+<line>`: it
 	// would hand the argument to the desktop as a second FILE to open.
 	opener := specFor(t, home, nil, "servers")
-	if want := []string{"xdg-open", path}; !slices.Equal(opener, want) {
-		t.Errorf("argv = %v, want %v — an opener takes the file alone", opener, want)
+	if want := []string{"xdg-open", path}; !slices.Equal(opener.Argv, want) {
+		t.Errorf("argv = %v, want %v — an opener takes the file alone", opener.Argv, want)
 	}
 
 	// The ladder's first rung follows the same rule as the rest: the jump goes with the program the
@@ -119,24 +119,24 @@ func TestExternalEditPassesTheLineJumpOnlyToEditorsThatTakeOne(t *testing.T) {
 	writeSettingsFixture(t, keyedPath, "editor: nvim\nmode: auto\nservers:\n"+
 		"  - name: local\n    endpoint: http://127.0.0.1:1111\n")
 	withKey := specFor(t, keyed, map[string]string{"EDITOR": "code"}, "servers")
-	if want := []string{"nvim", "+3", keyedPath}; !slices.Equal(withKey, want) {
-		t.Errorf("argv = %v, want %v — the config key outranks $EDITOR, jump included", withKey, want)
+	if want := []string{"nvim", "+3", keyedPath}; !slices.Equal(withKey.Argv, want) {
+		t.Errorf("argv = %v, want %v — the config key outranks $EDITOR, jump included", withKey.Argv, want)
 	}
 }
 
-// specFor builds the seam over a temp home and asks it for one key's command line. The platform is
-// pinned and every program is found: these are assertions about the argv the pane is handed, not
-// about which editors the machine running the test has installed.
-func specFor(t *testing.T, home string, env map[string]string, key string) []string {
+// specFor builds the seam over a temp home and asks it for one key's launch. The platform is pinned
+// and every program is found: these are assertions about the command the pane is handed, not about
+// which editors the machine running the test has installed.
+func specFor(t *testing.T, home string, env map[string]string, key string) tui.EditorCommand {
 	t.Helper()
 	e := newExternalEdit(options{configDir: home}, func(k string) string { return env[k] })
 	e.goos = "linux"
 	e.look = editorAlwaysFound
-	argv, err := e.spec(key)
+	launch, err := e.spec(key)
 	if err != nil {
 		t.Fatalf("spec(%s): %v", key, err)
 	}
-	return argv
+	return launch
 }
 
 // editorAlwaysFound is the lookup for the tests whose subject is the resolution rather than the
@@ -442,12 +442,12 @@ func TestRunRootWiresTheExternalEditSeams(t *testing.T) {
 	if rec.opts.ExternalEditSpec == nil || rec.opts.ReloadConfig == nil {
 		t.Fatal("the composition root left an external-edit seam unwired")
 	}
-	argv, err := rec.opts.ExternalEditSpec("servers")
+	launch, err := rec.opts.ExternalEditSpec("servers")
 	if err != nil {
 		t.Fatalf("ExternalEditSpec: %v", err)
 	}
-	if want := filepath.Join(home, "config.yaml"); argv[len(argv)-1] != want {
-		t.Errorf("argv ends with %q, want the session's config %q", argv[len(argv)-1], want)
+	if want := filepath.Join(home, "config.yaml"); launch.Argv[len(launch.Argv)-1] != want {
+		t.Errorf("argv ends with %q, want the session's config %q", launch.Argv[len(launch.Argv)-1], want)
 	}
 	// Nothing has touched the file since the spec read it, so the return trip over it reports nothing.
 	applied, err := rec.opts.ReloadConfig()
@@ -531,21 +531,53 @@ func TestExternalEditSpecReadsTheEditorTheFileNamesNow(t *testing.T) {
 	e.goos = "linux"
 	e.look = editorAlwaysFound
 
-	argv, err := e.spec("mode")
+	launch, err := e.spec("mode")
 	if err != nil {
 		t.Fatalf("spec: %v", err)
 	}
-	if want := []string{"xdg-open", path}; !slices.Equal(argv, want) {
-		t.Errorf("argv = %v, want %v — the file sets no editor, and the startup snapshot is not the file", argv, want)
+	if want := []string{"xdg-open", path}; !slices.Equal(launch.Argv, want) {
+		t.Errorf("argv = %v, want %v — the file sets no editor, and the startup snapshot is not the file", launch.Argv, want)
 	}
 
 	writeSettingsFixture(t, path, "editor: micro\nmode: auto\n")
-	argv, err = e.spec("mode")
+	launch, err = e.spec("mode")
 	if err != nil {
 		t.Fatalf("spec after the key was set: %v", err)
 	}
-	if want := []string{"micro", "+2", path}; !slices.Equal(argv, want) {
-		t.Errorf("argv = %v, want %v — an editor set in this session opens the next edit", argv, want)
+	if want := []string{"micro", "+2", path}; !slices.Equal(launch.Argv, want) {
+		t.Errorf("argv = %v, want %v — an editor set in this session opens the next edit", launch.Argv, want)
+	}
+}
+
+// The spawn mode crosses the seam with the argv (ADR 0041 decision 6): the renderer is told whether
+// this program takes the terminal, because which editors need a tty is a fact about the programs and
+// the thin renderer holds no table of them. The argv is the same either way — the classification
+// changes how it is STARTED, not what is run.
+func TestExternalEditSpecCarriesTheSpawnModeAcrossTheSeam(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+
+	writeSettingsFixture(t, path, "editor: vim\nmode: auto\n")
+	foreground := specFor(t, home, nil, "mode")
+	if want := []string{"vim", "+2", path}; !slices.Equal(foreground.Argv, want) {
+		t.Errorf("argv = %v, want %v", foreground.Argv, want)
+	}
+	if foreground.Detached {
+		t.Error("a terminal editor crossed the seam detached; the pane has to suspend for it")
+	}
+
+	// Nothing set: the ladder ends at the platform's opener, which returns before the editor is on
+	// screen and must never hold the pane.
+	opener := t.TempDir()
+	openerPath := filepath.Join(opener, "config.yaml")
+	writeSettingsFixture(t, openerPath, "mode: auto\n")
+	detached := specFor(t, opener, nil, "mode")
+	if want := []string{"xdg-open", openerPath}; !slices.Equal(detached.Argv, want) {
+		t.Errorf("argv = %v, want %v", detached.Argv, want)
+	}
+	if !detached.Detached {
+		t.Error("the OS opener crossed the seam foreground; the pane would blank on a stub that returns at once")
 	}
 }
 
@@ -560,9 +592,9 @@ func TestExternalEditSpecRefusesAnEditorThisMachineCannotRun(t *testing.T) {
 	e.goos = "linux"
 	e.look = func(string) (string, error) { return "", errors.New("executable file not found in $PATH") }
 
-	argv, err := e.spec("mode")
+	launch, err := e.spec("mode")
 	if err == nil {
-		t.Fatalf("spec over an editor nobody can run = %v, want the refusal", argv)
+		t.Fatalf("spec over an editor nobody can run = %+v, want the refusal", launch)
 	}
 	for _, want := range []string{"xdg-open", "editor", "$VISUAL", "$EDITOR"} {
 		if !strings.Contains(err.Error(), want) {
@@ -576,7 +608,7 @@ func TestExternalEditSpecRefusesAnEditorThisMachineCannotRun(t *testing.T) {
 func TestExternalEditSpecRefusesWhenThereIsNoConfigPath(t *testing.T) {
 	t.Parallel()
 	e := &externalEdit{getenv: func(string) string { return "" }, goos: "linux"}
-	if argv, err := e.spec("servers"); err == nil {
-		t.Errorf("spec with no config path = %v, want the refusal", argv)
+	if launch, err := e.spec("servers"); err == nil {
+		t.Errorf("spec with no config path = %+v, want the refusal", launch)
 	}
 }

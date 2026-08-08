@@ -781,6 +781,12 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// moves — the program was paused, not stopped, and the pane is still the screen.
 		return m.foldSettingsEdit(msg)
 
+	case settingsDetachedMsg:
+		// The other launch: an editor started WITHOUT this terminal (ADR 0041 decision 6) either
+		// started or did not. Nothing is re-read — the pane never left, and what gets saved out there
+		// arrives through the config watcher — so this only puts the outcome on the launching row.
+		return m.foldDetachedEdit(msg)
+
 	case sessionListMsg:
 		// Sessions.List() returned off the Update loop: open (or refresh) the /sessions browser
 		// over the metas, or note the empty/error case with no overlay (sessions.go).

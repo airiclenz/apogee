@@ -300,9 +300,21 @@ short interval:
 
 ---
 
-## 5. The spawn mode reaches the TUI
+## 5. The spawn mode reaches the TUI — ✅ DONE (2026-08-08)
 
 *Depends on item 3.*
+
+NOTES (2026-08-08): the widened seam is `ExternalEditSpec func(path string) (tui.EditorCommand, error)`, a new
+plain-data struct (`Argv []string`, `Detached bool`) beside `AppliedSetting`; `Detached` is false at the zero
+value so a Driver answering with an argv alone keeps today's suspending path. Two shape details the item text
+left open: (a) the detached start runs on a Cmd goroutine and reports back as `settingsDetachedMsg{path, err}`
+rather than forking inside `Update` — that message is also what lands the failure on the launching row, and it
+is the only reason a new message type exists; (b) after a successful `Start` a background `cmd.Wait()` REAPS
+the child (nothing in the pane waits on or reads its outcome) — without it every editor a session opens stays
+a zombie until apogee exits. Detached streams are left nil, which `exec.Cmd` connects to the null device, so
+the child inherits neither the TUI's stdin nor its stdout. The success note is `settingsDetachedEditNote =
+"opened in your editor"` in the pane's existing answer slot (`settingAnswer`) — item 6 finalizes the wording
+against the layout spec. Docs are item 7's, so nothing outside the Go files changed.
 
 **What.** Carry item 3's spawn mode across the `ExternalEditSpec` seam so the renderer
 knows whether to suspend.

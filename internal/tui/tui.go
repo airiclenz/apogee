@@ -414,19 +414,21 @@ type Options struct {
 
 	// ExternalEditSpec is the command line that opens the config file at path's own line — the
 	// nested structures' whole edit idiom (ADR 0037 decision 5): a `servers:` list or a
-	// `model-profile:` block is a shape no row can hold, so ⏎ on such a row suspends the program
-	// into the human's own editor rather than growing a form for each of them.
+	// `model-profile:` block is a shape no row can hold, so ⏎ on such a row hands the human the file
+	// itself in their own editor rather than growing a form for each of them.
 	//
-	// The binary resolves all three parts because it owns all three: the config file's location, the
-	// line that key sits on (its own splice writer already parses the document for it), and which
-	// editor this environment names — $VISUAL, then $EDITOR, then the platform's fallback, with a
-	// line-jump argument passed only to the editors known to take one. The renderer receives an argv
-	// it runs and nothing else, exactly as [WriteSetting] hands it a file format it never composes.
+	// The binary resolves all four parts because it owns all four: the config file's location, the
+	// line that key sits on (its own splice writer already parses the document for it), which editor
+	// this environment names — the `editor` key, then $VISUAL, then $EDITOR, then the platform's own
+	// opener — with a line-jump argument passed only to the editors known to take one, and whether
+	// that program takes this terminal ([EditorCommand.Detached], ADR 0041 decision 6). The renderer
+	// receives a command it runs and nothing else, exactly as [WriteSetting] hands it a file format
+	// it never composes.
 	//
-	// An error is REPORTED on the row (an unreadable config, a file shape the parse refuses) and
-	// nothing is launched. nil ⇒ no external edit is available and ⏎ on those rows does nothing, the
-	// nil-seam degrade every provider here takes.
-	ExternalEditSpec func(path string) (argv []string, err error)
+	// An error is REPORTED on the row (an unreadable config, a file shape the parse refuses, a
+	// program this machine cannot run) and nothing is launched. nil ⇒ no external edit is available
+	// and ⏎ on those rows does nothing, the nil-seam degrade every provider here takes.
+	ExternalEditSpec func(path string) (EditorCommand, error)
 
 	// ReloadConfig re-reads the config file after that external edit and reports which keys came
 	// back different — the return half of the same round trip. The binary re-runs the startup
@@ -999,13 +1001,34 @@ type SettingRow struct {
 	EditPointer string   // where a non-Editable key is edited instead; "" exactly when Editable
 	Desc        string   // the one-line description shown for the selected row
 
-	// ExternalEdit says ⏎ on this row suspends into the human's own editor ([Options.ExternalEditSpec]).
+	// ExternalEdit says ⏎ on this row opens the human's own editor ([Options.ExternalEditSpec]).
 	// It is DECLARED by the binary rather than inferred from the kind, for [SettingServer]'s reason:
 	// the confinement keys are structured and read-only too, and their interlock stays single-homed in
 	// `/confine` (ADR 0012), so "which read-only rows open an editor" is a fact about the schema and
 	// not a shape the renderer can read off a row. False for every editable row — those are written
 	// here — and false for the confinement pair, whose own pointer says where they go instead.
 	ExternalEdit bool
+}
+
+// EditorCommand is one resolved external edit — the OUT half of the round trip
+// ([Options.ExternalEditSpec]): what to run, and whether this terminal goes with it.
+//
+// Both facts are the binary's, for the same reason the argv is: which programs need a tty is a fact
+// about the PROGRAMS, resolved beside the ladder that named one (ADR 0041 decision 6), and a
+// renderer that classified editors itself would be holding a table of the world it has no business
+// holding (ADR 0011's thin renderer).
+type EditorCommand struct {
+	// Argv is the program and its arguments — the editor, its flags, the line jump for the editors
+	// that take one, and the config file. Empty means there was nothing to run and the row says so.
+	Argv []string
+
+	// Detached says this program must NOT be handed the terminal: it is started without the TUI's
+	// stdin/stdout, nothing waits for it, and the pane stays up while it is open — a GUI editor, or
+	// a desktop opener stub that returns before the editor is even on screen. False keeps the
+	// suspending path this seam has always had, which is the only way a terminal editor is usable at
+	// all, and false is also the ZERO value on purpose: a Driver that answers with an argv alone
+	// gets exactly today's behaviour.
+	Detached bool
 }
 
 // AppliedSetting is one key a config reload found CHANGED — the return half of the `$EDITOR` round

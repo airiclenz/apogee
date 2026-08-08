@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -2250,22 +2251,23 @@ func settingsStructuredRow() SettingRow {
 const pointerForTest = "⏎ opens $EDITOR"
 
 // externalEditLog is the two seams of the round trip as spies: which key was asked for a command
-// line, and what the re-read reported back.
+// line, what that command was and how it had to be started, and what the re-read reported back.
 type externalEditLog struct {
 	asked     []string
 	argv      []string
+	detached  bool
 	specErr   error
 	applied   []AppliedSetting
 	reloadErr error
 	reloads   int
 }
 
-func (l *externalEditLog) spec(path string) ([]string, error) {
+func (l *externalEditLog) spec(path string) (EditorCommand, error) {
 	l.asked = append(l.asked, path)
 	if l.specErr != nil {
-		return nil, l.specErr
+		return EditorCommand{}, l.specErr
 	}
-	return l.argv, nil
+	return EditorCommand{Argv: l.argv, Detached: l.detached}, nil
 }
 
 func (l *externalEditLog) reload() ([]AppliedSetting, error) {
@@ -2444,6 +2446,106 @@ func TestSettingsPaneDoesNotReReadAfterAFailedEditor(t *testing.T) {
 	}
 	if got := m.settingsNote(rows[0]); !strings.Contains(got, "exit status 1") {
 		t.Errorf("note = %q, want the editor's own failure", got)
+	}
+}
+
+// A FOREGROUND editor is handed to Bubble Tea, which is the only way a program that draws on this
+// terminal can run at all: the alternate screen goes, the editor gets the tty, and its exit comes
+// back as the round trip's own message (ADR 0041 decision 6).
+func TestSettingsPaneForegroundEditorTakesTheTerminal(t *testing.T) {
+	rows := []SettingRow{settingsStructuredRow()}
+	edit := &externalEditLog{argv: []string{"vi", "+7", "/tmp/config.yaml"}} // detached is false
+	m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
+
+	_, cmd := stepCmd(t, m, keyEnter())
+	if cmd == nil {
+		t.Fatal("⏎ on a structured row returned no Cmd; the editor was never launched")
+	}
+	msg := cmdMsg(cmd) // tea.ExecProcess only PACKAGES the process; nothing is started by asking
+	if _, detached := msg.(settingsDetachedMsg); detached {
+		t.Fatalf("a foreground editor yielded %T; the pane must suspend into it, not let go of it", msg)
+	}
+	if got := fmt.Sprintf("%T", msg); !strings.Contains(got, "exec") {
+		t.Errorf("the Cmd yielded %s, want Bubble Tea's own exec message", got)
+	}
+}
+
+// A DETACHED editor is started beside the pane instead: no exec message, no alt-screen release, and
+// the pane is still the screen when the launch reports back. Nothing is journaled and nothing is
+// re-read — the editor is still open, and what gets saved out there arrives through the watcher.
+func TestSettingsPaneDetachedEditorLeavesThePaneUp(t *testing.T) {
+	program := detachableProgram(t)
+	rows := []SettingRow{settingsStructuredRow()}
+	log := &settingsWriteLog{}
+	edit := &externalEditLog{argv: []string{program}, detached: true}
+	m := externalEditModel(t, rows, log, edit)
+
+	next, cmd := stepCmd(t, m, keyEnter())
+	m = next
+	if cmd == nil {
+		t.Fatal("⏎ on a structured row returned no Cmd; the editor was never launched")
+	}
+	msg, ok := cmdMsg(cmd).(settingsDetachedMsg)
+	if !ok {
+		t.Fatalf("the Cmd yielded %T, want the detached launch's own message", cmdMsg(cmd))
+	}
+	if msg.err != nil {
+		t.Fatalf("detached start of %s: %v", program, msg.err)
+	}
+	m = step(t, m, msg)
+
+	if !m.settings.open {
+		t.Error("the pane closed; a detached editor never takes the screen")
+	}
+	if edit.reloads != 0 || len(m.settingEdits) != 0 || len(log.applies) != 0 {
+		t.Errorf("a detached launch re-read %d times, journaled %+v and applied %+v; it changes nothing on its own",
+			edit.reloads, m.settingEdits, log.applies)
+	}
+	if got := m.settingsNote(rows[0]); got != "· "+settingsDetachedEditNote {
+		t.Errorf("note = %q, want %q — the row is all the human has to show for the keypress", got,
+			"· "+settingsDetachedEditNote)
+	}
+}
+
+// detachableProgram is a program this machine can really start, for the one test whose subject is the
+// start itself. It skips rather than guesses: what is being proved is that a detached launch runs,
+// not that any particular platform spells a no-op the same way.
+func detachableProgram(t *testing.T) string {
+	t.Helper()
+	for _, name := range []string{"true", "echo"} {
+		if path, err := exec.LookPath(name); err == nil {
+			return path
+		}
+	}
+	t.Skip("no trivially startable program on this machine")
+	return ""
+}
+
+// A detached start that failed says so on the row the human pressed ⏎ on — the same failure slot the
+// spec's own refusal lands in. There is no exit to wait for, so the start is the only chance this
+// path has to report anything at all.
+func TestSettingsPaneDetachedEditorReportsAStartItCouldNotMake(t *testing.T) {
+	rows := []SettingRow{settingsStructuredRow()}
+	edit := &externalEditLog{argv: []string{"apogee-no-such-editor"}, detached: true}
+	m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
+
+	next, cmd := stepCmd(t, m, keyEnter())
+	m = next
+	msg, ok := cmdMsg(cmd).(settingsDetachedMsg)
+	if !ok {
+		t.Fatalf("the Cmd yielded %T, want the detached launch's own message", cmdMsg(cmd))
+	}
+	if msg.err == nil {
+		t.Fatal("starting a program that does not exist reported no error")
+	}
+	m = step(t, m, msg)
+
+	if got := m.settingsNote(rows[0]); !strings.HasPrefix(got, "✗ ") ||
+		!strings.Contains(got, "apogee-no-such-editor") {
+		t.Errorf("note = %q, want the start's own failure on the launching row", got)
+	}
+	if !m.settings.open {
+		t.Error("the pane closed over a launch that never happened")
 	}
 }
 

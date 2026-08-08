@@ -10,8 +10,8 @@ package main
 // environment names and what the file's new text RESOLVES to are all the schema's business, and the
 // renderer that runs the command holds none of it.
 //
-// What crosses the seam is an argv on the way out and a list of changed keys on the way back — no
-// paths, no YAML, no precedence. Applying those keys is deliberately NOT here: the pane routes each
+// What crosses the seam is an argv and how to start it on the way out, and a list of changed keys on
+// the way back — no paths, no YAML, no precedence. Applying those keys is deliberately NOT here: the pane routes each
 // one through the two homes an in-pane commit already uses (its own display keys, and the live-apply
 // dispatcher), so a key edited in the file and a key edited on its row land by exactly one path.
 
@@ -141,7 +141,11 @@ func newExternalEdit(opts options, getenv func(string) string) *externalEdit {
 }
 
 // spec answers [tui.Options.ExternalEditSpec]: the command line that opens the config file at key's
-// own line, and the moment the return trip's baseline is taken.
+// own line, how that command has to be started, and the moment the return trip's baseline is taken.
+//
+// The spawn mode crosses the seam because it is a fact about the program the ladder just named
+// (ADR 0041 decision 6), and the renderer that runs the command is the one surface that must not be
+// deciding which editors need a terminal.
 //
 // The baseline is refreshed HERE, immediately before the human starts editing, so that a key the
 // pane itself persisted earlier in the session is not re-reported as something they just changed. A
@@ -152,13 +156,13 @@ func newExternalEdit(opts options, getenv func(string) string) *externalEdit {
 // will not risk still opens — at the top, with no jump — because "your config is malformed" is a
 // reason to hand somebody the file, not to keep it from them. Only a file that cannot be READ at all
 // refuses, and then the row says so.
-func (e *externalEdit) spec(key string) ([]string, error) {
+func (e *externalEdit) spec(key string) (tui.EditorCommand, error) {
 	// The read comes FIRST because it is also the seed: a home whose config.yaml is not there yet gets
 	// the documented template written into it, and a baseline taken before that would report the whole
 	// template back as the human's own edit.
 	data, err := readConfigForWrite(e.configPath)
 	if err != nil {
-		return nil, err
+		return tui.EditorCommand{}, err
 	}
 	projected, perr := e.projection()
 	e.mu.Lock()
@@ -173,13 +177,16 @@ func (e *externalEdit) spec(key string) ([]string, error) {
 
 	cmd, err := e.resolveEditor(configured)
 	if err != nil {
-		return nil, err
+		return tui.EditorCommand{}, err
 	}
 	argv := cmd.argv
 	if line := settingKeyLine(data, key); line > 0 && lineJumpEditors[editorName(argv[0])] {
 		argv = append(argv, "+"+strconv.Itoa(line))
 	}
-	return append(argv, e.configPath), nil
+	return tui.EditorCommand{
+		Argv:     append(argv, e.configPath),
+		Detached: cmd.spawn == spawnDetached,
+	}, nil
 }
 
 // changed answers [tui.Options.ReloadConfig]: the keys whose value came back different from the
