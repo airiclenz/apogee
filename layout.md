@@ -332,6 +332,15 @@ approvals do — one on the screen at a time, the asking child blocked and its s
 — and the question's own words say nothing about which of them wrote them. The line is absent at
 depth 0, so an undelegated session's box is the one it always drew.
 
+**One prompt is on the screen at a time, and "one" counts both kinds together.** The approval pane
+and the ask box are the same real estate and the same keyboard, so the queue behind them is a single
+queue rather than one per kind: an approval and a question raised by two different children at the
+same instant take their turn on that one surface, never both at once and never one replacing the
+other mid-decision. This is not something the frame arranges — the engine hands the driver one
+prompt at a time (a single slot both gates take, ADR 0039), so what is drawn here is always exactly
+one pending decision, whichever kind it is, and whichever child is waiting on it. Nothing about the
+undelegated session changes: with one agent asking there is never a second prompt to hold back.
+
 **Inside a pane's own grant the rows come first — except where the prose IS what is being decided.**
 A picker, a browser or a dropdown *is* its rows, and the caption over them takes what they leave; the
 approval prompt reads the same way and can afford to, because its offering is four fixed options and

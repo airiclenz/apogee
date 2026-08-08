@@ -23,8 +23,8 @@ import (
 // decomposition's intercept: at the top level (Depth 0) it appends a sub_agent delegation the
 // model never emitted, exactly once, and — when deferInject is set — also returns ActionDefer
 // so the mutate-AND-defer composition is exercised. Gating on Depth() == 0 keeps a nested
-// child (which shares the parent's Mechanisms) from re-appending, exercising the Depth() seam
-// in the same test.
+// child (which inherits the parent's Mechanisms into a registry of its own) from re-appending,
+// exercising the Depth() seam in the same test.
 type synthesizeCallHook struct {
 	task        string
 	callID      string

@@ -20,6 +20,11 @@ import (
 // "one prompt on the screen" true without every Driver building a queue of its own — the
 // asking child blocks on its turn while its siblings keep working, and the host's
 // wait-tolerance (ADR 0031) is what lets a queued request wait as long as the human takes.
+//
+// The queue spans BOTH kinds of prompt, not just this one: an Approval and an ask_user question
+// (Asker) contend for a single PromptSlot, so a host is never asked to approve something while it
+// still owes an answer to a question, or the reverse. A Driver therefore needs exactly one prompt
+// surface, and may implement Approver and Asker over the same one.
 type Approver interface {
 	Approve(ctx context.Context, req ApprovalRequest) (ApprovalDecision, error)
 }

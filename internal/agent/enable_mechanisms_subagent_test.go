@@ -66,7 +66,8 @@ func enableMechanismsSubAgentScripts() [][]provider.Delta {
 
 // TestEnableMechanisms_SubAgentSpawnInheritsBuiltRegistry: a parent armed via Config.EnableMechanisms
 // (registry nil ⇒ engine-built) delegates once; the spawn succeeds, the child nests at Depth 1, and
-// the child fires a catalogued Mechanism from the inherited shared registry.
+// the child fires a catalogued Mechanism from the registry it inherited (its OWN container over the
+// parent's rows — ForSubAgent — not the parent's registry object).
 func TestEnableMechanisms_SubAgentSpawnInheritsBuiltRegistry(t *testing.T) {
 	sink := &recordingSink{}
 	responder := &captureAllResponder{scripts: enableMechanismsSubAgentScripts()}
@@ -129,8 +130,9 @@ func assertSubAgentInheritedStack(t *testing.T, res domain.StepResult, sink *rec
 
 	// The spawn succeeded: the sub_agent tool result the parent saw is the child's report, not a
 	// construction error. Reverting subagent.go's `childCfg.EnableMechanisms = nil` breaks exactly
-	// this — the child would rebuild guided_decomposition/tool_result_cap into the shared registry and
-	// fail with the already-registered rejection, surfacing "could not construct sub-agent" here.
+	// this — the child would rebuild guided_decomposition/tool_result_cap into the registry it
+	// inherited and fail with the already-registered rejection, surfacing "could not construct
+	// sub-agent" here.
 	subRes, ok := lastSubAgentResult(sink.events)
 	if !ok {
 		t.Fatal("no sub_agent tool result — the parent never delegated")

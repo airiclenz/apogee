@@ -39,8 +39,9 @@ type askUserArgs struct {
 // construction Execute always has a non-nil Asker; the defensive nil-check below keeps a
 // hand-built registry that registers it with a nil Asker from panicking. Stateless across
 // Turns (ADR 0008): a fresh question per call, and nothing about one question survives into the
-// next. The one thing it does hold is the queueing seam's slot (queuedAsks), which is not Turn
-// state at all — it is the ONE prompt surface, held by whichever concurrent caller is currently in
+// next. The one thing it does hold is the queueing seam (queuedAsks), which is not Turn state at
+// all — it serializes onto the ONE prompt surface the running Agent designates on the call's
+// context, the same surface an Approval takes, held by whichever concurrent caller is currently in
 // front of the human and empty the rest of the time.
 type AskUser struct {
 	toolSpec
@@ -56,51 +57,57 @@ type AskUser struct {
 // loop consults the Approver itself, while it never touches the Asker at all. A host that builds
 // its own registry (cmd/apogee does, to register MCP tools on top) hands its raw Asker to this
 // constructor and to nothing else, so a seam installed anywhere else would be dead in exactly the
-// Driver that needs it. One tool instance is one slot, and a sub-agent runs on a SUBSET of its
-// parent's registry (the same *AskUser), so a whole Agent tree queues against that one slot.
+// Driver that needs it.
+//
+// The two seams sit in different packages but queue on ONE slot: the running Agent designates its
+// prompt surface on the call's context (domain.WithPromptSlot) and both take THAT. So it does not
+// matter that this tool instance was built long before the Agent, nor which registry it ended up
+// in — every question and every approval in one Agent tree contends for the same single prompt.
 func NewAskUser(asker domain.Asker) *AskUser {
 	return &AskUser{toolSpec: askUserSpec, asker: queuedAsks(asker)}
 }
 
-// queuedAsker queues concurrent Ask calls onto one host Asker: it holds a single slot — "the
-// question on the screen" — and admits one caller at a time. It is the engine's half of the Asker
-// contract and the exact counterpart of internal/agent's queuedApprover: once a depth-0 fan-out is
-// running (ADR 0039), several children can call ask_user at the same instant, and a host that has
-// only ever fielded one question at a time must not have to grow a queue of its own. Without it the
-// second question simply replaces the first on the Driver's single prompt surface and the first
-// child's reply channel is orphaned — that child blocks until the Turn is cancelled.
+// queuedAsker queues concurrent Ask calls onto one host Asker: it takes the single prompt slot —
+// "the question on the screen" (domain.PromptSlot) — and admits one caller at a time. It is the
+// engine's half of the Asker contract and the exact counterpart of internal/agent's queuedApprover:
+// once a depth-0 fan-out is running (ADR 0039), several children can call ask_user at the same
+// instant, and a host that has only ever fielded one question at a time must not have to grow a
+// queue of its own. Without it the second question simply replaces the first on the Driver's single
+// prompt surface and the first child's reply channel is orphaned — that child blocks until the Turn
+// is cancelled.
 //
-// The wait is a channel rather than a mutex because it has to be ctx-AWARE. A sibling queued behind
-// the visible question must be able to give up when the human cancels the Turn; under a mutex it
-// could not — it would sit in Lock until the question ahead of it was answered and only THEN hand
-// the driver a question belonging to a Turn that has already rolled back. Cancelled-while-queued
-// returns exactly what a cancelled visible question returns, (no answer, ctx.Err()), which Execute
-// turns into the Go error that rolls the Turn back (ADR 0007).
+// The slot it takes is the one the RUNNING AGENT designates on the call's context, not this
+// wrapper's own — the same slot the Approval seam takes. A Driver draws ONE prompt, and the pane an
+// approval fills is the pane a question fills, so a queue per kind would still leave exactly that
+// pair colliding: one child's approval and another child's question, raised at the same instant,
+// with one of the two reply channels orphaned. The wrapper's own slot is the fallback for a seam
+// used outside a running Agent (a unit test, a Driver embedding the engine differently), where it
+// is the only prompt surface there is.
 //
-// The slot is held for the whole of the host's Ask — the human's entire deliberation — which is the
-// point: the queue behind it is what "one question at a time" means, and the wait-tolerance
-// invariant (ADR 0031) is what makes an unbounded hold legitimate. Which queued sibling is admitted
-// next is deliberately unspecified; what is guaranteed is that exactly one is inside the host Asker
-// at a time and that every other child goes on working while it waits.
+// Cancelled-while-queued returns exactly what a cancelled visible question returns, (no answer,
+// ctx.Err()), which Execute turns into the Go error that rolls the Turn back (ADR 0007). Why the
+// wait is ctx-aware at all, and why the slot is held for the human's whole deliberation, are
+// properties of domain.PromptSlot — documented there, where both kinds of prompt inherit them.
 type queuedAsker struct {
-	slot  chan struct{} // capacity 1: the one in-flight question
+	slot  *domain.PromptSlot // this seam's own surface; the context's wins where one is designated
 	inner domain.Asker
 }
 
 func (q *queuedAsker) Ask(ctx context.Context, req domain.AskRequest) (domain.AskAnswer, error) {
-	select {
-	case q.slot <- struct{}{}:
-	case <-ctx.Done():
-		return domain.AskAnswer{}, ctx.Err()
+	slot := domain.PromptSlotFor(ctx, q.slot)
+	if err := slot.Acquire(ctx); err != nil {
+		return domain.AskAnswer{}, err
 	}
-	defer func() { <-q.slot }()
+	defer slot.Release()
 	return q.inner.Ask(ctx, req)
 }
 
 // queuedAsks wraps ap in the queueing seam, unless it already IS one. The idempotence keeps a
-// re-wrapped Asker on the SAME slot rather than stacking a private, uncontended one in front of the
-// first — the property internal/agent's queuedApprovals relies on to keep a whole Agent tree in one
-// queue, held here for the same reason a registry may be built from an already-wrapped delegate.
+// re-wrapped Asker on the SAME seam rather than stacking a second one in front of the first — held
+// for the same reason a registry may be built from an already-wrapped delegate. What keeps a whole
+// Agent tree in one queue is not this wrapping but the prompt slot the running Agent designates on
+// the call's context (domain.WithPromptSlot), which is also what puts the tree's questions and its
+// approvals in the SAME queue.
 //
 // A nil Asker stays nil. "No Asker configured" is a FACT the tool reads (Execute answers that
 // ask_user is unavailable rather than dereferencing it, and NewDefaultRegistryWithHost does not
@@ -113,7 +120,7 @@ func queuedAsks(ap domain.Asker) domain.Asker {
 	if _, already := ap.(*queuedAsker); already {
 		return ap
 	}
-	return &queuedAsker{slot: make(chan struct{}, 1), inner: ap}
+	return &queuedAsker{slot: domain.NewPromptSlot(), inner: ap}
 }
 
 // ReadOnly reports that ask_user performs no writes (asking a question mutates nothing), so

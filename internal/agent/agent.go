@@ -126,6 +126,17 @@ type Agent struct {
 	// Mechanism, so it stays live under Bypass (D5/D6).
 	tokens *apogeectx.TokenEstimator
 
+	// prompts is the ONE prompt surface this Agent's Steps designate on their context
+	// (domain.PromptSlot): the slot every human gate reached under a Step queues on, whatever KIND
+	// of gate it is — an Approval the loop raises itself, or an ask_user question a tool raises one
+	// interface boundary away. A Driver draws one prompt, so serializing each kind against itself
+	// would still let an approval and a question collide once a fan-out is running (ADR 0039).
+	// Every Agent constructs one, but only the OUTERMOST one is designated: WithPromptSlot keeps
+	// whichever the context already carries, and a sub-agent runs under a context derived from its
+	// parent's, so a whole tree — however deep, however wide — queues on the top-level Agent's and
+	// a nested Agent's own stays inert.
+	prompts *domain.PromptSlot
+
 	// now is the request-render clock the configured system prompt's {{datetime}} placeholder
 	// reads (ADR 0023). It is a field rather than a direct time.Now call so a test can pin the
 	// rendered date — the injectable-clock shape cmd/apogee's sessionHost.now already uses.

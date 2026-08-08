@@ -53,6 +53,15 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	turn := a.turns.index
 	t := &turnRun{turn: turn, start: time.Now()}
 
+	// Designate the prompt surface for everything this Turn reaches: the ONE slot an Approval and
+	// an ask_user question both queue on, so the human is never shown two prompts at once however
+	// many children are running (ADR 0039 decision 12). It is installed here — the single funnel
+	// every Step goes through, Run's and a Step-driving host's alike — because both gates hang off
+	// this context: the loop consults the Approver under it, and a tool's Execute receives it. A
+	// sub-agent's Steps run under a context derived from this one, and WithPromptSlot keeps the
+	// slot already there, so the whole tree queues on the top-level Agent's.
+	ctx = domain.WithPromptSlot(ctx, a.prompts)
+
 	// Automatic Compaction (structural, on by default — item 9): fold the conversation before this
 	// Turn's request is built when the history has outgrown its Budget allocation. It runs BEFORE
 	// consuming pending input so a just-submitted user message survives the fold as its own turn

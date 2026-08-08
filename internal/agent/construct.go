@@ -94,7 +94,9 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	cfg.Events = serializedEvents(cfg.Events)
 	// And every Approval it raises goes through one queueing seam, for the same reason one level
 	// up: concurrent children may reach an Approval gate at the same instant, and the host is
-	// promised one request at a time (domain.Approver).
+	// promised one request at a time (domain.Approver). The seam queues on the PROMPT SLOT this
+	// Agent designates below — the surface an ask_user question queues on too, so the promise holds
+	// across both kinds and not merely within each.
 	cfg.Approver = queuedApprovals(cfg.Approver)
 
 	a := &Agent{
@@ -113,7 +115,8 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		stripper:           stripper,
 		tracker:            newSelfRegulator(),
 		tokens:             apogeectx.NewTokenEstimator(),
-		now:                time.Now, // the request-render clock for the system prompt's {{datetime}}
+		prompts:            domain.NewPromptSlot(), // the one prompt surface this Agent tree queues on
+		now:                time.Now,               // the request-render clock for the system prompt's {{datetime}}
 	}
 	// Fill the context-file cache for this session's first boundary: construction. Every later
 	// refill goes through the same seam at a session boundary (contextfiles.go).
@@ -154,45 +157,46 @@ func serializedEvents(sink domain.EventSink) domain.EventSink {
 	return &serialEventSink{inner: sink}
 }
 
-// queuedApprover queues concurrent Approve calls onto one host Approver: it holds a single slot —
-// "the prompt on the screen" — and admits one caller at a time. It is the engine's half of the
-// Approver contract, the exact counterpart of serialEventSink's: once a depth-0 fan-out is running
-// (ADR 0039), several children can reach an Approval gate at the same instant, and a host that has
-// only ever fielded one request at a time must not have to grow a queue of its own.
+// queuedApprover queues concurrent Approve calls onto one host Approver: it takes the single prompt
+// slot — "the prompt on the screen" (domain.PromptSlot) — and admits one caller at a time. It is
+// the engine's half of the Approver contract, the exact counterpart of serialEventSink's: once a
+// depth-0 fan-out is running (ADR 0039), several children can reach an Approval gate at the same
+// instant, and a host that has only ever fielded one request at a time must not have to grow a
+// queue of its own.
 //
-// The wait is a channel rather than a mutex because it has to be ctx-AWARE. A sibling queued behind
-// the visible prompt must be able to give up when the human cancels the Turn; under a mutex it
-// could not — it would sit in Lock until the prompt ahead of it resolved and only THEN hand the
-// driver a request belonging to a Turn that has already rolled back. Cancelled-while-queued returns
-// exactly what a cancelled visible prompt returns, (deny, ctx.Err()), which the caller reads as
-// dispatchCancelled; the deny is the safe verdict for a request nobody will ever see, and the
-// cancellation, not the verdict, is what ends the Turn.
+// The slot it takes is the one the RUNNING AGENT designates on the call's context, not this
+// wrapper's own: a Driver draws one prompt, and an Approval shares that surface with an ask_user
+// question raised by a sibling through the tool seam in internal/tools. Queueing approvals only
+// against other approvals would leave exactly that pair colliding — one of the two reply channels
+// orphaned, its child blocked until the Turn is cancelled — so the queue is kind-blind. The
+// wrapper's own slot is the fallback for a seam used outside a running Agent (a unit test, a Driver
+// embedding the engine differently), where it is the only prompt surface there is.
 //
-// The slot is held for the whole of the host's Approve — the human's entire deliberation — which is
-// the point: the queue behind it is what "one prompt at a time" means, and the wait-tolerance
-// invariant (ADR 0031) is what makes an unbounded hold legitimate. Which queued sibling is admitted
-// next is deliberately unspecified; what is guaranteed is that exactly one is inside the host
-// Approver at a time and that every other child goes on running while it waits.
+// Cancelled-while-queued returns exactly what a cancelled visible prompt returns, (deny, ctx.Err()),
+// which the caller reads as dispatchCancelled; the deny is the safe verdict for a request nobody
+// will ever see, and the cancellation, not the verdict, is what ends the Turn. Why the wait is
+// ctx-aware at all, and why the slot is held for the human's whole deliberation, are properties of
+// domain.PromptSlot — documented there, where both kinds of prompt inherit them.
 type queuedApprover struct {
-	slot  chan struct{} // capacity 1: the one in-flight request
+	slot  *domain.PromptSlot // this seam's own surface; the context's wins where one is designated
 	inner domain.Approver
 }
 
 func (q *queuedApprover) Approve(ctx context.Context, req domain.ApprovalRequest) (domain.ApprovalDecision, error) {
-	select {
-	case q.slot <- struct{}{}:
-	case <-ctx.Done():
-		return domain.ApprovalDeny, ctx.Err()
+	slot := domain.PromptSlotFor(ctx, q.slot)
+	if err := slot.Acquire(ctx); err != nil {
+		return domain.ApprovalDeny, err
 	}
-	defer func() { <-q.slot }()
+	defer slot.Release()
 	return q.inner.Approve(ctx, req)
 }
 
 // queuedApprovals wraps ap in the queueing seam, unless it already IS one. The idempotence keeps a
-// nested sub-agent in the SAME queue as its parent, exactly as serializedEvents keeps it on the same
-// mutex: newChildAgent copies the parent's Config, so a child re-uses the parent's ONE slot instead
-// of stacking a private, uncontended one at every depth — and two siblings' children therefore queue
-// against each other too.
+// nested sub-agent on the SAME wrapper as its parent, exactly as serializedEvents keeps it on the
+// same mutex: newChildAgent copies the parent's Config, so a child re-uses the parent's seam instead
+// of stacking a private one at every depth. What actually keeps a whole tree in ONE queue is the
+// designated prompt slot, which rides the context a child inherits from its parent
+// (domain.WithPromptSlot) and therefore also holds for the ask_user questions the children raise.
 //
 // A nil Approver stays nil. "No Approver configured" is a FACT the resolver reads
 // (resolutionInput.approverPresent — a Gate with no Approver folds to a Refuse, Resolution D5), so
@@ -204,7 +208,7 @@ func queuedApprovals(ap domain.Approver) domain.Approver {
 	if _, already := ap.(*queuedApprover); already {
 		return ap
 	}
-	return &queuedApprover{slot: make(chan struct{}, 1), inner: ap}
+	return &queuedApprover{slot: domain.NewPromptSlot(), inner: ap}
 }
 
 // buildEnabledMechanisms builds each Mechanism named on cfg.EnableMechanisms and Adds it into

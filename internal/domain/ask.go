@@ -24,6 +24,11 @@ import "context"
 // what makes "one question on the screen" true without every Driver building a queue of its own —
 // the asking child blocks on its turn while its siblings keep working, and the host's
 // wait-tolerance (ADR 0031) is what lets a queued question wait as long as the human takes.
+//
+// It is the SAME queue the Approval gate uses, not a second one beside it: a question and an
+// Approval contend for a single PromptSlot, so an Asker is never called while the host still owes
+// a verdict on an Approve, or the reverse. A Driver with one prompt surface — which is what a
+// terminal has — can therefore serve both from it.
 type Asker interface {
 	Ask(ctx context.Context, req AskRequest) (AskAnswer, error)
 }

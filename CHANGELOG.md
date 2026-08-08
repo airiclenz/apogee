@@ -108,14 +108,16 @@ point is a **minor** bump, not a breaking change.
     A mixed reply runs its leaf tools first in emitted order and *then* fans out, so a write a child
     depends on has landed before the children start, and results are appended in call order however
     the children finish.
-  - **Approvals and `ask_user` questions queue, and each prompt names the child asking.** Two
-    children raising an approval — or putting a question to you — at once produce two prompts one at
-    a time, the asking child blocked and its siblings still running; the pane leads with
-    `Sub-agent: <the task it was given>` so "which agent wants this?" is answerable at a glance.
-    Both queues sit in the engine, so every driver — the TUI, the bench, a future daemon — gets
-    one-prompt-at-a-time without building a queue of its own (ADR 0031). Without them the second
-    request replaced the first on the one prompt surface and the first child hung until you
-    cancelled the turn.
+  - **Approvals and `ask_user` questions share one queue, and each prompt names the child asking.**
+    Two children raising an approval — or putting a question to you, or one of each — at once produce
+    two prompts one at a time, the asking child blocked and its siblings still running; the pane
+    leads with `Sub-agent: <the task it was given>` so "which agent wants this?" is answerable at a
+    glance. It is a **single** queue covering both kinds, not one per kind, because a driver draws
+    one prompt: the approval pane and the ask box are the same screen and the same keyboard. The
+    queue sits in the engine, so every driver — the TUI, the bench, a future daemon — gets
+    one-prompt-at-a-time without building a queue of its own (ADR 0031). Without it the second
+    request replaced the first on that one surface and the first child hung until you cancelled the
+    turn.
   - **Every event a child emits carries the call-ID of the `sub_agent` call that spawned it**, so
     interleaved streams stay attributable: usage readings, audit records and per-run stderr lines
     land on the right child. It is one additive `EventBase` member, persisted as an **additive
