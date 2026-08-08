@@ -319,6 +319,105 @@ func TestMigrateLegacyConfigLeavesANewSchemaConfigAlone(t *testing.T) {
 	}
 }
 
+// The retired top-level llama-launcher: key is refused, never folded — only the user knows which
+// entry the launcher fronts. The refusal is the last time the key is ever mentioned, so it has to
+// be the whole answer: the line to delete, and the per-entry key to paste in its place carrying the
+// value the old one had.
+func TestMigrateLegacyConfigRefusesTheRetiredLauncherKey(t *testing.T) {
+	t.Parallel()
+	// Five lines of new-schema config, so the retired key always lands on line 6.
+	const entries = "servers:\n  - name: box\n    endpoint: http://box:1111\n\nserver: box\n"
+	tests := []struct {
+		name     string
+		given    string
+		want     []string
+		unwanted []string
+	}{
+		{
+			name:  "a path comes back as the entry's own key",
+			given: entries + "llama-launcher: ~/elsewhere/launcher.yaml\n",
+			want:  []string{"line 6", "servers:", "llama-launcher: ~/elsewhere/launcher.yaml"},
+		},
+		{
+			name:  "auto stays auto",
+			given: entries + "llama-launcher: auto\n",
+			want:  []string{"line 6", "llama-launcher: auto"},
+		},
+		{
+			name:  "the bare key is the old auto-detect, so the fix is auto",
+			given: entries + "llama-launcher:\n",
+			want:  []string{"line 6", "llama-launcher: auto"},
+		},
+		{
+			name:     "off is a deletion, not a value to paste",
+			given:    entries + "llama-launcher: OFF\n",
+			want:     []string{"line 6", "Delete that line"},
+			unwanted: []string{"llama-launcher: OFF", "llama-launcher: off", "llama-launcher: auto"},
+		},
+		{
+			name:     "the refusal beats the quadruple fold",
+			given:    "endpoint: http://box:1111\nllama-launcher: auto\n",
+			want:     []string{"line 2", "llama-launcher: auto"},
+			unwanted: []string{"host-alias:"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeMigrationConfig(t, tt.given)
+			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock)
+			if err == nil {
+				t.Fatalf("a config still setting the retired launcher key was migrated to:\n%s", updated)
+			}
+			if note != "" {
+				t.Errorf("a refused config announced itself: %s", note)
+			}
+			for _, want := range append([]string{path, "retired top-level llama-launcher:"}, tt.want...) {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal does not carry %q: %v", want, err)
+				}
+			}
+			for _, unwanted := range tt.unwanted {
+				if strings.Contains(err.Error(), unwanted) {
+					t.Errorf("the refusal carries %q, which it must not: %v", unwanted, err)
+				}
+			}
+			onDisk, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read the config: %v", err)
+			}
+			if string(onDisk) != tt.given {
+				t.Errorf("a refused config was rewritten:\n%s", onDisk)
+			}
+			if entries, err := filepath.Glob(path + ".bak-*"); err != nil || len(entries) != 0 {
+				t.Errorf("a refused config was backed up: %v (%v)", entries, err)
+			}
+		})
+	}
+}
+
+// End to end: a config that still sets the retired key stops the run rather than starting a session
+// whose launcher commands would all answer "not configured".
+func TestApplyConfigRefusesTheRetiredLauncherKey(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	given := "servers:\n  - name: box\n    endpoint: http://box:1111\n\nserver: box\nllama-launcher: auto\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(given), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	opts := options{configDir: home}
+	err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, func(msg string) { t.Errorf("a refused config announced %q", msg) })
+	if err == nil {
+		t.Fatal("a config still setting the retired top-level llama-launcher: key started a session")
+	}
+	for _, want := range []string{"retired top-level llama-launcher:", "line 6", "llama-launcher: auto"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not carry %q: %v", want, err)
+		}
+	}
+}
+
 // End to end: a legacy config resolves, on the launch that migrates it, to the server it always
 // described — the point of folding rather than refusing — and the run says so once.
 func TestApplyConfigMigratesTheRetiredKeys(t *testing.T) {

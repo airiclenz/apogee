@@ -31,6 +31,12 @@ import (
 //
 // A file already in the new schema never reaches any of it. The sniff is the only trigger, so a
 // config apogee can read is one this file does not open.
+//
+// A second retired key rides along at the bottom of this file: the top-level `llama-launcher:` of
+// ADR 0029 decision 4, which moved onto the `servers:` entries. That one is REFUSED rather than
+// folded — nobody but the user knows which entry the launcher belonged to — and it is refused
+// FIRST, so a file carrying both retirements is never rewritten for one and then stopped for the
+// other.
 
 // legacyKeys are the four retired top-level keys, each with the field of the sniff struct it is
 // parsed into. The fold needs BOTH halves — the key NAME to find the line to delete, the VALUE to
@@ -67,8 +73,15 @@ const backupStampLayout = "20060102-150405"
 // cannot be made safely, so NOTHING is written and the error carries the ready-to-paste replacement
 // (legacyRefusal) — the same answer this refused with before the rewrite existed.
 //
+// Ahead of all three sits the one retirement that is not a migration at all: the top-level
+// `llama-launcher:` key, refused before a single byte is read for the fold, so a config that
+// carries both retired shapes is stopped rather than half-rewritten.
+//
 // now dates the backup and is injected so a test can name the file it expects.
 func migrateLegacyConfig(path string, data []byte, now time.Time) ([]byte, string, error) {
+	if err := refuseRetiredLauncherKey(path, data); err != nil {
+		return nil, "", err
+	}
 	var lc legacyFileConfig
 	if err := yaml.Unmarshal(data, &lc); err != nil {
 		return nil, "", fmt.Errorf("apogee: parse config %q: %w", path, err)
@@ -375,4 +388,113 @@ func legacyRefusal(path string, lc legacyFileConfig, why error) error {
 		"keys — the servers: list is now the single definition of the servers you run models on.\n\n"+
 		"apogee did not fold them in for you because %v.\n\n"+
 		"Delete those keys and put this in their place:\n\n%s", path, why, lc.block())
+}
+
+// ----------------------------------------------------------------------------
+// The retired top-level `llama-launcher:` key
+// ----------------------------------------------------------------------------
+//
+// The launcher used to be one global setting: a top-level `llama-launcher:` key that turned the
+// integration on for the whole session, whatever server it was talking to. It now belongs to the
+// `servers:` entry the launcher fronts (serverEntry.LlamaLauncher), so /model offers launch
+// profiles only while the session is ON that server and every other entry keeps the models it
+// advertises.
+//
+// The key is refused rather than migrated, because the fold the quadruple gets cannot be written
+// here: only the user knows WHICH entry the launcher starts servers for, and a config with three of
+// them offers nothing to choose by. Silence is the one answer it must not get — fileConfig no
+// longer has the field, so an unrefused key would simply stop being read, and the launcher commands
+// would answer "not configured" on a machine whose config still asks for them (ADR 0036's
+// refusal-over-silence posture, one key over).
+
+// retiredLauncherKey is that key, spelled as the retired schema spelled it — and as serverEntry
+// tags it one level down, which is the whole of what changed.
+const retiredLauncherKey = "llama-launcher"
+
+// legacyLauncherConfig reads the retired key off a file that still sets it, for the reason
+// legacyFileConfig exists one struct over: fileConfig no longer has the field, so a plain unmarshal
+// cannot tell a config that sets it from one that never did.
+type legacyLauncherConfig struct {
+	LlamaLauncher string `yaml:"llama-launcher"`
+}
+
+// refuseRetiredLauncherKey stops a config that still carries the retired top-level key, with the
+// line to delete and the entry to paste in its place. A file that does not set it returns nil and
+// reaches the rest of the migration untouched — which is every config from here on.
+//
+// It runs before the quadruple fold reads anything, so a file carrying both retirements is refused
+// with nothing written: no rewrite, and no backup either, since a copy is a write too.
+func refuseRetiredLauncherKey(path string, data []byte) error {
+	value, line, set := retiredLauncherSetting(data)
+	if !set {
+		return nil
+	}
+	where := ""
+	if line > 0 {
+		where = fmt.Sprintf(" on line %d", line)
+	}
+	// `off` was the old key's disabled spelling, and the per-entry key has no such value: absent IS
+	// the off state (validateServers refuses one). So that config's fix is the deletion alone —
+	// pasting the value back would hand the user a config the next launch refuses.
+	if strings.EqualFold(value, "off") {
+		return fmt.Errorf("apogee: %s still sets the retired top-level llama-launcher: key%s — the "+
+			"launcher now belongs to the servers: entry it fronts, so it follows the session from server "+
+			"to server.\n\n"+
+			"Delete that line. An entry with no llama-launcher: key has the launcher off for that server, "+
+			"which is what off said.", path, where)
+	}
+	return fmt.Errorf("apogee: %s still sets the retired top-level llama-launcher: key%s — the launcher "+
+		"now belongs to the servers: entry it fronts, so /model offers its launch profiles only while the "+
+		"session is on that server, and every other server keeps the models it advertises.\n\n"+
+		"Delete that line and put the key on the entry the launcher starts servers for:\n\n%s",
+		path, where, launcherEntryBlock(value))
+}
+
+// retiredLauncherSetting reports whether the file sets the retired key, the value it gives it, and
+// the 1-based line the key sits on. The node tree answers all three, and it is the only reader that
+// can: a key with no value at all parses to the same empty string an absent key does, and an empty
+// value is exactly what the old key's auto-detect shape looked like.
+//
+// A file the tree cannot be read from — more than one document, a top level that is not a block
+// mapping — falls back to the struct, with 0 for "the line cannot be named". Whether the key is set
+// decides a refusal, and that must not depend on the shape of the rest of the file.
+func retiredLauncherSetting(data []byte) (value string, line int, set bool) {
+	if doc, err := configDocument(data); err == nil {
+		if root, err := rootMapping(doc); err == nil && root != nil {
+			keyNode, valueNode := mappingEntry(root, retiredLauncherKey)
+			if keyNode == nil {
+				return "", 0, false
+			}
+			return strings.TrimSpace(valueNode.Value), keyNode.Line, true
+		}
+	}
+	var llc legacyLauncherConfig
+	if err := yaml.Unmarshal(data, &llc); err != nil {
+		return "", 0, false
+	}
+	trimmed := strings.TrimSpace(llc.LlamaLauncher)
+	return trimmed, 0, trimmed != ""
+}
+
+// launcherEntryBlock renders the fix as a whole `servers:` entry carrying the value the top-level
+// key had — a paste rather than a schema lookup. An empty value becomes `auto`: the old key read
+// the launcher's own default config when it was given nothing, and `auto` is what that shape is
+// called now.
+//
+// The entry goes through renderServerEntry, the marshaller the fold writes with, which owns the
+// quoting: a path that would not survive as a bare scalar comes back quoted rather than as an
+// example that does not parse. The name and endpoint are the seeded template's example ones — the
+// entry the user must edit is theirs, and this says what shape to give it.
+func launcherEntryBlock(value string) string {
+	if value == "" {
+		value = "auto"
+	}
+	entry := serverEntry{Name: "workstation", Endpoint: "http://192.168.64.1:1111", LlamaLauncher: value}
+	item, err := renderServerEntry(entry, listIndent)
+	if err != nil {
+		// Three strings cannot fail to marshal; if they ever do, the refusal still has to say what
+		// the key is called and where it goes.
+		return serversKey + ":\n" + strings.Repeat(" ", listIndent) + "- " + retiredLauncherKey + ": " + value + "\n"
+	}
+	return serversKey + ":\n" + strings.Join(item, "\n") + "\n"
 }

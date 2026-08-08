@@ -185,9 +185,16 @@ finds no top-level-key survivors (the per-entry `LlamaLauncher` field and
 
 **Commit:** `feat(config)!: retire the top-level llama-launcher key`
 
-## 4. Legacy refusal for the retired key
+## 4. Legacy refusal for the retired key — ✅ DONE (2026-08-08)
 
 Depends on item 3.
+
+NOTES (2026-08-08): one deviation from the literal text. The paste-able fix is
+`llama-launcher: <its value, or auto>` for every old shape EXCEPT `off` (any casing): the per-entry
+key has no `off` value — design call 7 has `validateServers` refuse one — so echoing it back would
+hand the user a config the next launch refuses. That case gets the deletion alone ("an entry with no
+llama-launcher: key has the launcher off for that server, which is what off said") and no example
+block. An absent value (bare `llama-launcher:`, the old auto-detect shape) pastes as `auto`.
 
 **What:** `cmd/apogee/configmigrate.go` — extend the legacy detection (the
 `legacyFileConfig` sniff, lines 35-95) to the retired `llama-launcher:` top-level key,
