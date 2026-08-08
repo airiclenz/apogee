@@ -22,7 +22,7 @@ muted-bright: "#b2b2b2" # the muted tone one step up: the text of an EXPANDED to
 diff-add: "#3fb950" # diff "+" lines
 diff-del: "#f85149" # diff "-" lines
 error: "#f85149"    # recovered-fault notices
-code: "#f0883e"     # inline `code` + fenced code blocks (orange)
+code: "#80AAFF"     # inline `code` + fenced code blocks
 
 # --- autonomy modes ----------------------------------------------------------------
 # The footer's mode markers, warming up the privilege ladder (least → most autonomous).
@@ -37,7 +37,7 @@ file-ref: "#cdffa4" # the prompt's inline @file token accent — the tone a refe
 
 # --- chrome accents ----------------------------------------------------------------
 prompt-toggle: "#b0d2ff" # the collapsed prompt's see-more / see-less marker — an apogee affordance that reads as chrome inside the block, not as more of what the human wrote
-tool-marker: "#80B0FF"   # a tool block's synthesized "+N more lines" remainder marker — prompt-toggle's cooler sibling, the same "apogee is talking" hue on a body column
+tool-marker: "#FFB050"   # a tool block's synthesized "+N more lines" remainder marker — prompt-toggle's cooler sibling, the same "apogee is talking" hue on a body column
 
 # --- misc --------------------------------------------------------------------------
 gauge: "#c396ff"     # context-fill gauge bar — periwinkle
