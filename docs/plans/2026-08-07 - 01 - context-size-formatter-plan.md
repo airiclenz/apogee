@@ -18,7 +18,9 @@
   - Sessions browser: `Meta.CtxUsed` is persisted but never displayed — adding a display is not this plan.
   - The narrow startup layout dropping the context row (`internal/tui/render.go:884`) — pre-existing, unrelated.
 
-## 1. Shared `internal/format` package with the unit-capped token formatter
+## 1. Shared `internal/format` package with the unit-capped token formatter — ✅ DONE (2026-08-08)
+
+NOTES (2026-08-08): the item's **What** prose says the coarse form renders `M`/`G` "with one decimal when the displayed value is < 10 (`"1.0M"`, `"1.2M"`)", but its own **Tests** pin `1048576→"1M"` and `2147483648→"2G"`, and the plan's Goal line spells the same case "`1M`" — all three cannot hold. Implemented to the Tests + Goal: the coarse form drops the decimal point when the tenth is zero (`1048576 → "1M"`, `2147483648 → "2G"`, `1153434 → "1.1M"`, `10485760 → "10M"`), so coarse `"1.0M"` is unreachable. `TokensFine` is unaffected and keeps the zero tenth (`32768 → "32.0k"`, `1048576 → "1.0M"`) exactly as the item specifies.
 
 **What:** Create a new stdlib-only package `internal/format` with two exported functions, the single global formatter for token/context-size display (this supersedes the deliberate `formatTokens` twin in `cmd/apogee/headless.go`, removed in item 3):
 
