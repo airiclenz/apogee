@@ -224,9 +224,14 @@ decision 9. ADR 0035's contract is likewise untouched.
   already are, reusing the existing baseline diff and dispatcher unchanged — ADR 0011 holds (no YAML
   reaches the renderer) and ADR 0031 holds (the engine is handed resolved values, so any Driver that
   starts the watcher gets the same live reconfiguration).
-- **The settings registry gains one editable string key with no validator and no dispatcher case.**
-  `editor` is read at launch time, so there is nothing to apply live; the registry's own bijection
-  guard forces the row, the file's commented example documents it, and the row is blank when unset.
+- **The settings registry gains one editable string key with no validator, and a dispatcher case that
+  deliberately moves nothing.** `editor` is read off a fresh projection of the file at the moment an
+  external edit starts, so the write itself is the whole apply and there is no seam to drive. The case
+  is named anyway because the dispatcher's default arm is a refusal, and refusing a key already in
+  force would report "editor cannot be applied to the running session" about a change that had taken
+  effect. It is therefore not dead code: deleting it as such reinstates that false report, and
+  `TestApplySettingAcceptsTheEditorKey` is the guard that says so. The registry's own bijection guard
+  forces the row, the file's commented example documents it, and the row is blank when unset.
 - **A visible behaviour change on upgrade.** A user with no `$VISUAL`/`$EDITOR` who pressed ⏎ on
   `servers` landed in `vi`; they now land in whatever their desktop opens `.yaml` with, and the pane
   stays on screen while they edit. README, `layout.md` and `docs/layout/settings-screen-layout.md`
