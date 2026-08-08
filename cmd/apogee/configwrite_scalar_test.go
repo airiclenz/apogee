@@ -161,6 +161,7 @@ func TestSpliceScalarSettingInsertsBelowTheTemplateExample(t *testing.T) {
 		{path: "server", value: "my-box", want: []string{"server: my-box"}},
 		{path: "mode", value: "auto", want: []string{"mode: auto"}},
 		{path: "llama-launcher", value: "off", want: []string{"llama-launcher: \"off\""}},
+		{path: "editor", value: "code -w", want: []string{"editor: code -w"}},
 		{path: "context-window", value: "32768", want: []string{"context-window: 32768"}},
 		{path: "ui.spinner", value: "glitter", want: []string{"ui:", "  spinner: glitter"}},
 		{path: "present.port", value: "8080", want: []string{"present:", "  port: 8080"}},

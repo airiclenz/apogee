@@ -90,6 +90,13 @@ type options struct {
 	// whether an auto-detected config is actually there — because only it knows the launcher.
 	llamaLauncher string
 
+	// editor is the resolved `editor:` key (ADR 0041), exactly as the user wrote it: the command line
+	// an external edit is opened with, flags included (`code -w`). Loaded from the config file only,
+	// like the launcher key above; applyConfig sets it from the resolved settings. Empty ⇒ the key
+	// names no editor, and the launch site walks the rest of the ladder ($VISUAL, $EDITOR, then the
+	// OS default opener) — which is why nothing is substituted for emptiness here.
+	editor string
+
 	// confineToWorkspace tunes Auto's blast radius (ADR 0012); default true. It is NOT a
 	// flag — it is loaded from the GLOBAL config file only (a project config cannot loosen
 	// it), so applyConfig sets it from the resolved settings. It is the EFFECTIVE value:

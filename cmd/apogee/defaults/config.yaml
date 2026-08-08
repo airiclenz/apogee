@@ -429,6 +429,15 @@ system-prompt-text: |
 # cursor-shape: block
 
 # =============================================================================
+# The editor an external edit opens in — the ⏎ jump the /settings pane makes on a key no field can
+# hold (a server list, a profile block). Write the whole command line: it is split on spaces, so
+# flags travel with the program, and the file is appended as the last argument. Four rungs, in
+# order: this key, then $VISUAL, then $EDITOR, then your desktop's default application for the file
+# (`open` on macOS, `xdg-open` on Linux, `start` on Windows) — so leaving it unset opens this file
+# in whatever already handles .yaml for you (ADR 0041). Config-file only (no flag or env).
+# editor: code -w
+
+# =============================================================================
 # Run with Mechanisms off; the structural context reducers stay on (ADR 0006).
 #   flag: --bypass     env: APOGEE_BYPASS
 # bypass: false

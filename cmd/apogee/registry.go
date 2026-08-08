@@ -303,6 +303,13 @@ var keyRegistry = []configKey{
 		Desc:     "The shape the prompt's caret is drawn with; it is always steady.",
 	},
 	{
+		// Free text with no validate hook, like present.command: the value is a command LINE, and
+		// whether this machine has that program is answered at launch, not at the field.
+		Path: "editor", Kind: kindString,
+		Editable: true,
+		Desc:     "Command an external edit opens in; unset falls back to $VISUAL, $EDITOR, the OS opener.",
+	},
+	{
 		Path: "bypass", Kind: kindBool, Default: "false",
 		EnvVar: envBypass, FlagName: "bypass",
 		Editable: true,

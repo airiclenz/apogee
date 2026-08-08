@@ -128,9 +128,18 @@ Verify every intra-ADR link target exists before writing it.
 
 ---
 
-## 2. The `editor` config key
+## 2. The `editor` config key — ✅ DONE (2026-08-08)
 
 *Depends on item 1.*
+
+NOTES (2026-08-08): the item's touch-point line reads "beside `WebSearch` at ~:809", but ~:809 is
+`LlamaLauncher`'s line, not `WebSearch`'s (824). The field was placed directly after `LlamaLauncher`
+— the cited line, and what ratified call 1 asks for ("it sits beside `server` and `llama-launcher`
+as a top-level scalar") — with the same non-empty guard the `LlamaLauncher`/`WebSearch` pair uses.
+`layer.editor` and `settings.editor` follow the same neighbour for consistency. The ADR the new doc
+comments cite is **0041**, not 0038, per item 1's own renumbering note. The registry `Desc` and the
+template paragraph describe the four-rung ladder item 3 implements, since the key has no other
+meaning; nothing in this item changes `editorArgv`.
 
 **What.** Add `editor` as a first-class editable string key, end to end through the
 schema. It carries no live-apply seam of its own — it is read at editor-launch time, so

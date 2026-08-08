@@ -126,10 +126,14 @@ var settingValues = map[string]func(options) string{
 	"ui.show-scrollbar":    func(o options) string { return boolValue(o.ui.showScrollbar) },
 	"ui.color-scheme":      func(o options) string { return o.ui.colorScheme },
 	"cursor-shape":         func(o options) string { return o.cursorShape },
-	"bypass":               func(o options) string { return boolValue(o.bypass) },
-	"mechanisms":           func(o options) string { return countSummary(enabledCount(o.mechanisms), "mechanism") },
-	"validated-sets":       func(o options) string { return validatedSetsSummary(o) },
-	"model-profile":        func(o options) string { return profileSummary(o.profile) },
+	// The command AS WRITTEN, blank when the key names none — the answer every other editable string
+	// row gives, and the only safe one here too: this value SEEDS the edit field, so a word standing
+	// in for emptiness ("$EDITOR", "the OS opener") would be a word the next ⏎ persisted as a command.
+	"editor":         func(o options) string { return o.editor },
+	"bypass":         func(o options) string { return boolValue(o.bypass) },
+	"mechanisms":     func(o options) string { return countSummary(enabledCount(o.mechanisms), "mechanism") },
+	"validated-sets": func(o options) string { return validatedSetsSummary(o) },
+	"model-profile":  func(o options) string { return profileSummary(o.profile) },
 }
 
 // settingTexts is the RAW value of the keys whose displayed value is only a summary of it — the

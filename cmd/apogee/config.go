@@ -68,6 +68,13 @@ type settings struct {
 	// deliberately not asked at startup (validateLlamaLauncher says why).
 	llamaLauncher string
 
+	// editor is the resolved `editor:` key: the command line an external edit is opened with, carried
+	// exactly as the user wrote it (`code -w` stays two words until the launch site splits it).
+	// File-only, on the llamaLauncher reasoning: naming the program installed on this machine is a
+	// config act, not an invocation one. Empty ⇒ the rest of the ladder decides — $VISUAL, then
+	// $EDITOR, then the OS default opener (ADR 0041).
+	editor string
+
 	// confineToWorkspace is GLOBAL-CONFIG-ONLY (ADR 0012): it is resolved from the config
 	// file alone, never from a flag or env, so a hostile repo invoking apogee cannot loosen
 	// Auto's blast radius. Default true. (There is no project-level config file today; the
@@ -457,6 +464,12 @@ type layer struct {
 	// auto-detect.
 	llamaLauncher *string
 
+	// editor is set only by the FILE layer (the editor command is config'd, with no flag/env — like
+	// llamaLauncher above; $VISUAL and $EDITOR are consulted at the launch site, not here, because
+	// they are a FALLBACK below this key rather than a layer above it). A nil pointer means the
+	// source names no editor, so resolution leaves it empty and the rest of the ladder decides.
+	editor *string
+
 	// confineToWorkspace is set only by the FILE layer (global-config-only, ADR 0012). The
 	// env and flag layers leave it nil so the invocation environment cannot loosen it.
 	confineToWorkspace *bool
@@ -676,6 +689,9 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 	if file.llamaLauncher != nil { // file-only (ADR 0029); env/flag never point at the launcher
 		s.llamaLauncher = *file.llamaLauncher
 	}
+	if file.editor != nil { // file-only (ADR 0041); the env rungs below it are read at launch time
+		s.editor = *file.editor
+	}
 	s.servers = file.servers             // file-only; env/flag never name an upstream server
 	s.mcpServers = file.mcpServers       // file-only (P3.15); env/flag never set MCP servers
 	s.mechanisms = file.mechanisms       // file-only (Phase 4); env/flag never enable Mechanisms
@@ -807,6 +823,14 @@ type fileConfig struct {
 	// expanded. Whether that file exists is deliberately not asked at startup, on the Servers
 	// reasoning: a missing one degrades at the moment a verb reaches for it.
 	LlamaLauncher string `yaml:"llama-launcher"`
+	// Editor names the command an external edit is opened with — the ⏎ jump the /settings pane makes
+	// on a key no field can hold, and any other edit of this file. A top-level scalar beside Server
+	// and LlamaLauncher above, file-only (no flag/env), carried verbatim: `editor: code -w` is split
+	// into words at the launch site, so flags travel with the program. Absent/empty ⇒ the rest of the
+	// ladder decides — $VISUAL, then $EDITOR, then the OS default opener (ADR 0041). It is free text
+	// with no validate hook, like present.command: which programs this machine has is not a fact this
+	// process can check from a string, and a name that is not there is answered at launch.
+	Editor string `yaml:"editor"`
 	// ConfineToWorkspace is global-config-only (ADR 0012): a pointer so an explicit
 	// `confine-to-workspace: false` is distinguishable from an absent key (which keeps the
 	// secure default true). It has no flag or env — editing the global config IS the
@@ -1224,6 +1248,9 @@ func (fc fileConfig) layer() layer {
 	if fc.LlamaLauncher != "" {
 		l.llamaLauncher = &fc.LlamaLauncher
 	}
+	if fc.Editor != "" {
+		l.editor = &fc.Editor
+	}
 	if fc.WebSearch != "" {
 		l.webSearchEndpoint = &fc.WebSearch
 	}
@@ -1602,6 +1629,7 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.servers = s.servers
 	opts.startupServer = s.startupServer
 	opts.llamaLauncher = s.llamaLauncher
+	opts.editor = s.editor
 	opts.confineToWorkspace = s.confineToWorkspace
 	opts.unconfinedHosts = s.unconfinedHosts
 	opts.webSearchEndpoint = s.webSearchEndpoint

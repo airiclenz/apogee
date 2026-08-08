@@ -24,6 +24,7 @@ func fabricatedSettings() options {
 		servers:       []serverEntry{{Name: "workstation"}, {Name: "rented-box"}, {Name: "laptop"}},
 		startupServer: "rented-box",
 		llamaLauncher: "off",
+		editor:        "code -w",
 		mode:          "auto",
 		systemPrompt: systemPromptSettings{
 			global: promptSource{text: "You are apogee.\nAnswer with code first.\n"},
@@ -206,6 +207,7 @@ func TestSettingsRowsCarryTheirSection(t *testing.T) {
 		"context-window":      "Session",
 		"present.host":        "Presentation",
 		"cursor-shape":        "Interface",
+		"editor":              "Interface",
 		"validated-sets":      "Mechanisms",
 		"model-profile":       "Model profile",
 	} {
@@ -249,6 +251,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.show-scrollbar":    "false",
 		"ui.color-scheme":      "dark",
 		"cursor-shape":         "block", // unset, so the declared default is what is in force
+		"editor":               "code -w",
 		"bypass":               "true",
 		"mechanisms":           "2 mechanisms", // the explicit `false` entry is not an enabled one
 		"validated-sets":       "on, 1 alias",

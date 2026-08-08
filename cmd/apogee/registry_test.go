@@ -385,8 +385,10 @@ func TestRegistryValidateHooksSitOnEditableKeys(t *testing.T) {
 	// `server` joins them for a reason of its own: its valid values are the names of THIS config's
 	// `servers:` entries, which no per-value hook holding no list can know — so the name is checked
 	// at selection, where the list is in hand, and any string is a writable value here.
+	// `editor` joins them for present.command's reason: it is a command LINE, and whether this
+	// machine has that program is not a fact a per-value hook can settle — it is answered at launch.
 	unchecked := map[string]bool{
-		"server": true, "present.command": true, "present.host": true,
+		"server": true, "present.command": true, "present.host": true, "editor": true,
 	}
 	for _, k := range keyRegistry {
 		switch {
