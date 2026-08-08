@@ -138,9 +138,12 @@ point is a **minor** bump, not a breaking change.
     instead of exactly one (ADR 0014's amendment), keeping the quiescent boundary between batches
     and the singular wording when a batch is one. The Mechanism stays **default-off**: the changed
     stack must re-pass the ADR 0009 bench gate before that can change.
-  - **Interactive sessions only, for now.** `apogee headless` builds its own engine config and never
-    installs the cap, so an unattended run stays serial whatever the server advertises or the key
-    pins — recorded in `ISSUES.md`.
+  - **`apogee headless` gets the same width**, so an unattended run fans out exactly as wide as a
+    session on that server would (ADR 0031's benchable-all-the-way-up). It resolves the cap through
+    the same pin-else-discover-else-1 rule, differing only in how the discovery half is fetched: with
+    no heartbeat to read, a run with no pin asks the server **once**, while it composes. A pin skips
+    that call — discovery could never overrule it — and a probe that cannot answer costs nothing but
+    the serial floor the run would have had anyway.
   - Recorded in
     [ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md),
     with amendments to ADR 0013 §5 (per-child atomicity) and ADR 0014 §3 (batch = the cap); the

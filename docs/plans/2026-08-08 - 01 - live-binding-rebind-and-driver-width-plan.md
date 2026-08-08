@@ -86,7 +86,14 @@ Depends on item 1.
 
 Commit: `fix(schedule): firing spec resolves against the live binding, not launch opts`
 
-## 3. Headless installs the parallel-agents cap (pin + one-shot probe)
+## 3. Headless installs the parallel-agents cap (pin + one-shot probe) — ✅ DONE (2026-08-08)
+
+NOTES (2026-08-08): the item says to ADD a CHANGELOG entry under the unreleased section; the entry
+was written IN PLACE of the "Interactive sessions only, for now" sub-bullet that section already
+carried, because that bullet states the very defect this item removes and both are unreleased — an
+added entry beside it would have left the same release contradicting itself. The seam takes a
+`context.Context` first parameter (`discoverSlots(ctx, endpoint, model, apiKey)`), which the item's
+own parenthesis authorizes: `heartbeat.Monitor.Beat` needs one.
 
 **Authoritative source:** ISSUES.md entry 2; ADR 0039 decision 2; ratified design call 2.
 

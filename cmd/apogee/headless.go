@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
@@ -80,6 +82,24 @@ func exitCodeFor(err error) int {
 // is the single point a test replaces, so prompt resolution, composition, output routing and exit
 // codes are all provable without a live model. Production never reassigns it.
 var runOnce = run.Once
+
+// discoverSlots is the seam onto the discovery half of the Parallel agents cap (ADR 0039 decision
+// 2): how many generation slots the bound server reports it was launched with, and 0 when it cannot
+// say. Like runOnce it exists so the composition below is provable without a live server; production
+// never reassigns it.
+//
+// It is ONE beat of the very Monitor the TUI's heartbeat drives, so an unattended run and a session
+// read the same number out of the same `/props` probe rather than growing a second, subtly different
+// discovery. One beat and no retry is the whole contract: a headless run composes once and has no
+// later beat to widen on, so it asks once and takes what comes.
+//
+// It never reports an error. A server without /props, an unreachable one, a cancelled context — all
+// of them are "nothing observed", which is 0, which resolveParallelAgents turns into the serial floor
+// a run with no signal has always had. Failing a prompt over a number nobody configured would be a
+// worse answer than running it one delegation at a time.
+var discoverSlots = func(ctx context.Context, endpoint, model, apiKey string) int {
+	return heartbeat.NewMonitor(endpoint, model, apiKey).Beat(ctx).TotalSlots
+}
 
 // newConfiner is the seam onto the host's confinement backend, for the same reason runOnce is one:
 // what a backend can enforce is a property of the MACHINE the test happens to run on — a kernel
@@ -323,6 +343,22 @@ func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) 
 		// stay nil too — run.Once pins its own, and handing it any of them is how a run acquires
 		// a human it does not have.
 	}
+
+	// How wide this run may fan its delegations out — the same cap a session resolves, installed here
+	// so every Driver reaches the same width (ADR 0031's benchable-all-the-way-up; the resolution
+	// itself is ADR 0039 decision 2). The pin is the bound entry's own `parallel-agents:`, read back
+	// off the startup entry the way every other per-entry fact is; the discovery half is the one-shot
+	// probe above, standing in for the beat an unattended run does not have.
+	//
+	// A pin skips the probe outright. resolveParallelAgents never lets discovery overrule a pin, so
+	// the round trip could not change the answer — it could only spend an unattended run's latency on
+	// a question already settled.
+	pin := startupEntry(*opts).ParallelAgents
+	slots := 0
+	if pin < 1 {
+		slots = discoverSlots(cmd.Context(), opts.endpoint, spec.Model, opts.apiKey)
+	}
+	cfg.ParallelAgents = resolveParallelAgents(pin, slots)
 
 	// The store the record lands in: the shared sessions store, so a headless run is browsable in
 	// /sessions beside the conversations it ran beside. --no-save leaves it nil, which is

@@ -402,6 +402,59 @@ func TestHeadlessComposesTheRunnerSpec(t *testing.T) {
 	}
 }
 
+// stubSlots stands in for the one-shot discovery probe: it reports the slot count the test dictates
+// and records whether it was consulted at all — the second half of the pin assertion, since a pinned
+// entry has to be answered without spending a round trip on a question already settled.
+type stubSlots struct {
+	called bool
+	slots  int
+}
+
+func (s *stubSlots) discover(context.Context, string, string, string) int {
+	s.called = true
+	return s.slots
+}
+
+// The Parallel agents cap reaches this Driver too, resolved exactly as a session resolves it (ADR
+// 0039 decision 2, ADR 0031's benchable-all-the-way-up): the bound entry's pin, else what the server
+// advertises, else one delegation at a time.
+func TestHeadlessInstallsTheParallelAgentsCap(t *testing.T) {
+	const pinnedServer = "servers:\n  - name: testbox\n    endpoint: " + testServerEndpoint +
+		"\n    parallel-agents: 3\nserver: testbox\n"
+
+	tests := []struct {
+		name       string
+		configYAML string
+		slots      int
+		want       int
+		wantProbe  bool
+	}{
+		{name: "a pin decides, and nothing is probed", configYAML: pinnedServer, slots: 9, want: 3},
+		{name: "no pin takes what the server advertises", slots: 4, want: 4, wantProbe: true},
+		{name: "no pin and a silent server is serial", slots: 0, want: 1, wantProbe: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			slots := &stubSlots{slots: tc.slots}
+			prev := discoverSlots
+			discoverSlots = slots.discover
+			t.Cleanup(func() { discoverSlots = prev })
+
+			stub := &stubRunner{}
+			home := testConfigHome(t, tc.configYAML)
+			if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+				t.Fatalf("headless: %v", err)
+			}
+			if got := stub.spec.Config.ParallelAgents; got != tc.want {
+				t.Errorf("Config.ParallelAgents = %d; want %d", got, tc.want)
+			}
+			if slots.called != tc.wantProbe {
+				t.Errorf("the discovery probe ran = %v; want %v", slots.called, tc.wantProbe)
+			}
+		})
+	}
+}
+
 // Persistence is on by default and --no-save is the opt-out, expressed the only way internal/run
 // reads it: a nil Store.
 func TestHeadlessNoSaveDropsTheStore(t *testing.T) {
