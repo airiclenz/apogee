@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
@@ -540,7 +541,7 @@ func TestFooterShowsOfflineAndConnecting(t *testing.T) {
 			t.Errorf("footer = %q, want %q kept — %q replaces the model segment alone", footer, want, connectingLabel)
 		}
 	}
-	if strings.Contains(footer, formatTokens(opts.ContextWindow)) {
+	if strings.Contains(footer, format.Tokens(opts.ContextWindow)) {
 		t.Errorf("footer = %q, want the window nowhere in it — the gauge states it now", footer)
 	}
 	if got := plain(connecting.View()); !strings.Contains(got, connectingLabel) {
@@ -561,8 +562,8 @@ func TestGaugePercentClamped(t *testing.T) {
 		t.Errorf("gauge = %q, want no over-100%% reading beside an already-clamped bar", got)
 	}
 	// The unclamped Used stands beside the window it overfills, so the overrun reads as the plain
-	// contradiction it is — "45k/32k 100%" — rather than as an impossible percentage.
-	if want := formatTokens(45000) + "/" + formatTokens(32768) + " 100%"; !strings.Contains(got, want) {
+	// contradiction it is — "44k/32k 100%" — rather than as an impossible percentage.
+	if want := format.Tokens(45000) + "/" + format.Tokens(32768) + " 100%"; !strings.Contains(got, want) {
 		t.Errorf("gauge = %q, want the unclamped count beside its window: %q", got, want)
 	}
 }

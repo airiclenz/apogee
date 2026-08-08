@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 )
 
@@ -512,7 +513,7 @@ func (m Model) launchProfileRows() []popupRow {
 		if choice.Backend != "" {
 			backend = "— " + stripEscapes(choice.Backend)
 		}
-		if tokens := formatTokens(choice.ContextWindow); tokens != "" {
+		if tokens := format.Tokens(choice.ContextWindow); tokens != "" {
 			window = "· " + tokens
 		}
 		if elsewhere := elsewherePort(choice.Addr, here); elsewhere != "" {
@@ -929,7 +930,7 @@ func (m Model) modelRows() []popupRow {
 	rows := make([]popupRow, 0, len(offering))
 	for _, offered := range offering {
 		window := ""
-		if tokens := formatTokens(offered.ContextWindow); tokens != "" {
+		if tokens := format.Tokens(offered.ContextWindow); tokens != "" {
 			window = "— " + tokens
 		}
 		rows = append(rows, popupRow{stripEscapes(displayModel(offered.ID)), window})

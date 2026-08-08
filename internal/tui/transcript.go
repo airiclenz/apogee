@@ -177,13 +177,13 @@ type presentedView struct {
 //
 // Host and Model trace to config / the CLI, so addStartup escape-strips them as addPresented does
 // its untrusted halves — defence in depth even though they are not model output. Logo (this
-// program's own embedded asset), Context (formatTokens of an int), and Version (its own build value)
+// program's own embedded asset), Context ([format.Tokens] of an int), and Version (its own build value)
 // are trusted and pass through.
 type startupView struct {
 	Logo    string // the embedded block-art "APOGEE" wordmark
 	Host    string // the upstream host label (HostAlias, or the endpoint when none)
 	Model   string // the display model id (displayModel-ed)
-	Context string // the formatted context-window size (formatTokens, e.g. "32k"); "" when unknown
+	Context string // the formatted context-window size ([format.Tokens], e.g. "32k"); "" when unknown
 	Version string // the resolved build version (Options.Version)
 }
 
@@ -280,7 +280,7 @@ func (t *transcript) addPresented(msg presentedMsg) {
 // startNewSession when /clear starts a fresh session), not folded from an engine Event: the box is
 // the HOST's opening frame, like addPresented's record of a host act. Host
 // and Model are escape-stripped (they trace to config / the CLI) so a control sequence can never
-// reach the terminal through them; the logo, context (formatTokens of an int), and version are this
+// reach the terminal through them; the logo, context ([format.Tokens] of an int), and version are this
 // program's own values and pass through untouched.
 func (t *transcript) addStartup(v startupView) {
 	v.Host = stripEscapes(v.Host)

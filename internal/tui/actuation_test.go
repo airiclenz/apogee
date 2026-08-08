@@ -10,6 +10,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/format"
 )
 
 // ----------------------------------------------------------------------------
@@ -335,7 +337,7 @@ func TestActuationFooterNarratesTheVerb(t *testing.T) {
 	if !strings.Contains(footer, "test-host") {
 		t.Errorf("footer = %q, want the host kept beside the verb", footer)
 	}
-	if strings.Contains(footer, formatTokens(m.opts.ContextWindow)) {
+	if strings.Contains(footer, format.Tokens(m.opts.ContextWindow)) {
 		t.Errorf("footer = %q, want no context window in it — the gauge states it now", footer)
 	}
 

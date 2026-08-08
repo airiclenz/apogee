@@ -38,9 +38,16 @@ Package doc comment states the ratified rule and the binary-÷1024 rationale (de
 
 **Commit:** `feat(format): add shared unit-capped token-count formatter`
 
-## 2. TUI adopts the shared formatter
+## 2. TUI adopts the shared formatter — ✅ DONE (2026-08-08)
 
 Depends on item 1.
+
+NOTES (2026-08-08): beyond the item's enumerated call sites and test pins, deleting the two helpers
+left doc comments naming a now-nonexistent identifier, so five prose references were retargeted to
+`[format.Tokens]`: `transcript.go:180,186,283`, `render.go:511` and `windowWord`'s own comment. Two of
+those also asserted the old rule in words ("the same whole-thousands form", plus
+`transcript_test.go:1055`) and now say "coarse". No CHANGELOG entry was added: item 4 is the plan's
+single owning item for cross-cutting doc edits and is not yet done.
 
 **What:** In `internal/tui`, delete `formatTokens` (`model.go:4040`) and `formatTokensFine` (`model.go:4054`) and switch every call site to `format.Tokens` / `format.TokensFine`. Sites (complete inventory): the context gauge `model.go:3999`; startup box `model.go:3697`; rebind/heartbeat notes `model.go:2602,2608,2612`; `windowWord` (`model.go:2632` — keep the wrapper, delegate to `format.Tokens`); Budget warning `model.go:430-431` (fine form); `subAgentFill` `render.go:478`; pickers `picker.go:515` and `picker.go:932`. `formatBytes` stays untouched.
 

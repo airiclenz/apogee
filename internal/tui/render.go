@@ -6,6 +6,8 @@ import (
 	"unicode/utf8"
 
 	lipgloss "charm.land/lipgloss/v2"
+
+	"github.com/airiclenz/apogee/internal/format"
 )
 
 // ----------------------------------------------------------------------------
@@ -508,7 +510,7 @@ func subAgentSummary(measure widthAuthority, head entry, span []entry) branchSum
 }
 
 // subAgentFill spells the run head's context reading as the gauge spells one — "12k/32k", the same
-// whole-thousands form the status line's window uses (formatTokens), so the two readings on screen
+// coarse form the status line's window uses ([format.Tokens]), so the two readings on screen
 // are read in one language. It is the pair frozen on the entry when the reading folded
 // (transcript.applyUsage), which is why a finished run keeps saying what it filled.
 //
@@ -520,7 +522,7 @@ func subAgentFill(head entry) string {
 	if head.ctxUsed <= 0 || head.ctxLimit <= 0 {
 		return ""
 	}
-	return formatTokens(head.ctxUsed) + "/" + formatTokens(head.ctxLimit)
+	return format.Tokens(head.ctxUsed) + "/" + format.Tokens(head.ctxLimit)
 }
 
 // subAgentGist is the second half of a collapsed run's summary, in the two tempi layout.md gives it.

@@ -15,6 +15,7 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/session"
 )
@@ -438,8 +439,8 @@ func (m *Model) noteContextFiles() {
 		m.transcript.addEphemeralNote(note)
 	}
 	if report.Oversize() {
-		m.transcript.addEphemeralNote("standing system content ~" + formatTokensFine(report.StandingTokens) +
-			" tokens exceeds its Budget share (~" + formatTokensFine(report.SystemShare) +
+		m.transcript.addEphemeralNote("standing system content ~" + format.TokensFine(report.StandingTokens) +
+			" tokens exceeds its Budget share (~" + format.TokensFine(report.SystemShare) +
 			") — trim context files or the system prompt")
 	}
 }
@@ -2654,7 +2655,7 @@ func rebindNote(oldModel string, oldWindow int, newModel string, newWindow int, 
 		}
 		note := "connected: " + displayModel(newModel)
 		if newWindow > 0 {
-			note += ", context " + formatTokens(newWindow)
+			note += ", context " + format.Tokens(newWindow)
 		}
 		return note
 	case oldModel != newModel:
@@ -2682,13 +2683,13 @@ func rebindFailNote(oldModel, target string, err error) string {
 }
 
 // windowWord renders a context window inside a change clause, naming an unknown one in words rather
-// than as the empty string formatTokens yields — "context  → 16k" reads as a rendering bug, which is
-// the very thing the gauge's clamp was fixed for.
+// than as the empty string [format.Tokens] yields — "context  → 16k" reads as a rendering bug, which
+// is the very thing the gauge's clamp was fixed for.
 func windowWord(n int) string {
 	if n <= 0 {
 		return "unknown"
 	}
-	return formatTokens(n)
+	return format.Tokens(n)
 }
 
 // foldServerSwitch folds a COMMITTED server switch (`/server`, picker.go) into the display. It is
@@ -3749,7 +3750,7 @@ func newStartupView(opts Options) startupView {
 		Logo:    strings.TrimRight(apogeeLogo, "\n"),
 		Host:    hostDisplay(opts),
 		Model:   displayModel(opts.Model),
-		Context: formatTokens(opts.ContextWindow),
+		Context: format.Tokens(opts.ContextWindow),
 		Version: opts.BaseVersion,
 	}
 }
@@ -4034,7 +4035,7 @@ func (c contextUsage) view(th theme) string {
 		return ""
 	}
 	pct := min(c.Used*100/c.Limit, 100)
-	prefix := th.statusBar.Render(fmt.Sprintf("%s/%s %d%% ", formatTokens(c.Used), formatTokens(c.Limit), pct))
+	prefix := th.statusBar.Render(fmt.Sprintf("%s/%s %d%% ", format.Tokens(c.Used), format.Tokens(c.Limit), pct))
 	return prefix + renderGaugeBar(th, c.Used, c.Limit)
 }
 
@@ -4071,29 +4072,6 @@ func renderGaugeBar(th theme, used, limit int) string {
 		b.WriteString(th.gaugeTrack.Render(strings.Repeat(" ", empty)))
 	}
 	return b.String()
-}
-
-// formatTokens renders a token count compactly: bare below 1000, else "<n>k" (32768 → 32k).
-// Zero renders as "" so an unknown window is simply omitted.
-func formatTokens(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
-	}
-	return fmt.Sprintf("%dk", n/1000)
-}
-
-// formatTokensFine renders a token count the way a COMPARISON needs it — one decimal above a
-// thousand (4212 → "4.2k"), where formatTokens' whole-thousands rounding would print both sides
-// of a narrow overrun identically and read like a bug. The status line keeps the coarse form: a
-// window size is a round number, a measured count is not.
-func formatTokensFine(n int) string {
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
-	}
-	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
 // formatBytes renders a file size for the session notice: bytes below a kibibyte, else KiB or

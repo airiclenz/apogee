@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
 
@@ -140,7 +141,7 @@ func TestNewModelSeedsStartupBox(t *testing.T) {
 		Model:         "/models/gpt-oss-20b.gguf", // displayModel strips the path + weight extension
 		Endpoint:      "http://localhost:1234",
 		HostAlias:     "test-host",
-		ContextWindow: 32768,                   // formatTokens → "32k"
+		ContextWindow: 32768,                   // format.Tokens → "32k"
 		Version:       "v1.2.3+45.gdeadbeef01", // the full string /version shows — the box must NOT use it
 		BaseVersion:   "v1.2.3",                // the clean release version the box displays
 	}
@@ -159,8 +160,8 @@ func TestNewModelSeedsStartupBox(t *testing.T) {
 	if got, want := e.startup.Model, displayModel(opts.Model); got != want {
 		t.Errorf("startup model = %q, want %q (displayModel of Options.Model)", got, want)
 	}
-	if got, want := e.startup.Context, formatTokens(opts.ContextWindow); got != want {
-		t.Errorf("startup context = %q, want %q (formatTokens of Options.ContextWindow)", got, want)
+	if got, want := e.startup.Context, format.Tokens(opts.ContextWindow); got != want {
+		t.Errorf("startup context = %q, want %q (format.Tokens of Options.ContextWindow)", got, want)
 	}
 	if got, want := e.startup.Version, opts.BaseVersion; got != want {
 		t.Errorf("startup version = %q, want %q (Options.BaseVersion, the clean release version)", got, want)
@@ -2974,7 +2975,7 @@ func TestModelStatusLine(t *testing.T) {
 	}
 	// The start-up box still states the window, so the window's departure is asserted against the
 	// footer line itself rather than the whole view.
-	if footer := ansiPattern.ReplaceAllString(m.footerContent(m.width), ""); strings.Contains(footer, formatTokens(opts.ContextWindow)) {
+	if footer := ansiPattern.ReplaceAllString(m.footerContent(m.width), ""); strings.Contains(footer, format.Tokens(opts.ContextWindow)) {
 		t.Errorf("footer = %q, want the context window gone — the gauge states it now", footer)
 	}
 }

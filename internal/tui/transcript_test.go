@@ -1052,7 +1052,7 @@ func TestCollapsedRunSaysItsGistOnce(t *testing.T) {
 // nothing to add to the count says the count alone rather than trailing an empty separator.
 //
 // Each tempo is pinned twice — with a context reading and without one. The delegate's fill takes the
-// middle cell whenever it has reported one, in the gauge's own whole-thousands spelling; where it has
+// middle cell whenever it has reported one, in the gauge's own coarse spelling; where it has
 // not, the line degrades to exactly what it said before the reading existed, separator and all, which
 // is also what an old session decodes to.
 func TestSubAgentSummaryTempi(t *testing.T) {
