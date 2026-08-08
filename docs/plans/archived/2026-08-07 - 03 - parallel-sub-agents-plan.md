@@ -306,11 +306,20 @@ BODY, mirroring the approval pane, which means on the degenerate windows where t
 falls back to its body's lead (`popupSpec.titleFromBody`) that border now leads with the identity
 rather than with the question.
 
-STILL OPEN after FU-A: the two seams hold SEPARATE slots, so an approval from one child and an
-ask_user question from another can still be live at the same instant and clobber each other on the
-TUI's single prompt state (`m.pending` vs `m.pendingAsk`). Sharing one slot means anchoring "the
-prompt on the screen" somewhere both `internal/agent` and `internal/tools` can reach — a design call
-of its own, not a fix to slip into a follow-up.
+CLOSED (2026-08-08) by follow-up work item FU-C, commit `a61b84f` — owner-authorized during this run,
+not a numbered plan item. What FU-A left open was that the two seams held SEPARATE slots, so an
+approval from one child and an `ask_user` question from another could still be live at the same
+instant and clobber each other on the TUI's single prompt state (`m.pending` vs `m.pendingAsk`).
+The anchor both `internal/agent` and `internal/tools` can reach is `domain.PromptSlot`
+(`internal/domain/promptslot.go`): one ctx-aware, capacity-1, kind-blind slot carried on the CONTEXT
+rather than on `Config` — `cmd/apogee` builds its registry from the raw Asker before `newAgent` runs,
+so a construction-time slot would be dead in the one Driver that has a human to ask. `Agent.step`
+designates `a.prompts` on the Turn's ctx, `WithPromptSlot` keeps whichever slot is already there, and
+a child runs under a context derived from its parent's, so a whole tree — however deep, however wide
+— queues on the top-level Agent's one slot. Both wrappers keep their own slot as the fallback for a
+seam used outside a running Agent, so every item-5 and FU-A test holds unchanged; nil Approver and
+nil Asker still stay nil, and `internal/tui` needed no change. The collision is now structurally
+unreachable. Proofs: `internal/agent/promptslot_test.go`, `internal/domain/promptslot_test.go`.
 
 **What:** The Approver contract is wait-tolerant (ADR 0031); what concurrency adds is
 simultaneous *requests* and an anonymous prompt.
