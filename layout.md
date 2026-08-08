@@ -86,7 +86,7 @@ the glyph the pointer is on.
 ## What "colour" means everywhere below
 
 **Every colour in this document is a role, and the hex beside it is one scheme's answer.** Colours
-come from the active **colour scheme**: one YAML file of 24 semantic roles, selected by
+come from the active **colour scheme**: one YAML file of 25 semantic roles, selected by
 `ui.color-scheme`, shipped as `dark` and `light` and overridable per user from
 `~/.apogee/schemes/` ([ADR 0040](docs/adr/0040-color-schemes-are-embedded-roles-with-user-shadowing.md),
 `CONTEXT.md` §Color scheme). Every hex quoted below is the built-in **`dark`** scheme's value — what
@@ -478,14 +478,14 @@ count `(N)`, plus — exactly where the header is a toggle target — the traili
 indicator below, **and nothing else — never a target**. That holds for every block alike: a grouped
 run, a lone call, a call still in flight, and the stray-result `result` header. The target always
 leads the first branch line instead, so the **target column does not move** when a second call joins
-the block. The label carries no brackets and is rendered **bold in the scheme's `code` role**
-(`#f0883e` under `dark`) — the tone inline code already uses, and the one `mode-auto` carries in
-both shipped schemes. The styling is uniform too: a known friendly
-label ("Read File"), an unknown tool's raw name, and `result` all look the same. The
-bare-name-means-unregistered signal was the brackets' job and dies with them. The count is **not**
-part of the name and is painted in the faint indicator tone rather than the orange: it is the
-block's own arithmetic, and a reader scanning the orange down the left edge should not read a
-number as part of a tool's name.
+the block. The label carries no brackets and is rendered **bold in the scheme's `tool-header` role**
+(`#f0883e` under `dark`) — a role of its own rather than the `code` role inline code and fenced
+blocks carry, so the blocks apogee *ran* read apart from the code it *prints*; under `dark` it is
+also the tone `mode-auto` carries. The styling is uniform too: a known friendly label ("Read File"),
+an unknown tool's raw name, and `result` all look the same. The bare-name-means-unregistered signal
+was the brackets' job and dies with them. The count is **not** part of the name and is painted in
+the faint indicator tone rather than the orange: it is the block's own arithmetic, and a reader
+scanning the orange down the left edge should not read a number as part of a tool's name.
 
 **What groups.** Consecutive tool calls at the same nesting depth carrying the same label fold
 into one block, **whatever they are carrying**. A run of `Run`s with their output, a run of edits
@@ -621,12 +621,12 @@ target — nothing has to line up beside a call that has not finished.
 An **expanded member** opens in place. Its first row keeps the branch marker, the whole branch line
 — target *and* summary, because opening a member must not take the outcome away — and a `▼` in the
 column the `▶` vacated. Every continuation row and every body line beneath it carries a `│` gutter
-under that marker, painted in the detail gray and deliberately **not** the sub-agent rail's orange,
-so an open member inside a nested run cannot be read as a frame of the run. A right-aligned
-`see less…` closes it — the prompt block's own word for the same act, one vocabulary for "close
-this". Nothing inside an open member is clipped and it grows no remainder marker: there is nothing
-left over to count. The indicator field keeps its width across the toggle, so the row never moves
-out from under the click that opened it.
+under that marker, painted in the detail gray and deliberately **not** the sub-agent rail's
+`tool-header` orange, so an open member inside a nested run cannot be read as a frame of the run. A
+right-aligned `see less…` closes it — the prompt block's own word for the same act, one vocabulary
+for "close this". Nothing inside an open member is clipped and it grows no remainder marker: there
+is nothing left over to count. The indicator field keeps its width across the toggle, so the row
+never moves out from under the click that opened it.
 
 Within a block, every target is padded with spaces to the widest target so the summary column lines
 up; a block of one pads to itself, which is no padding. In a **group** that column is additionally
@@ -730,14 +730,14 @@ moves.
 with one glyph, a single space off it: `▶` while the block is collapsed — a click opens it — and `▼`
 while it is expanded. A group **member** wears the same pair right-aligned at the block's edge
 instead, since there it is the member and not the header that opens. Both are painted in the faint
-detail tone rather than the label's orange, so they read as chrome beside the tool's name instead of
-as the last letter of it. Their presence *is* the clickability hint, because the affordance and the
-click-target rule are **one predicate**: an indicator appears exactly where a click toggles
-something, so a block that hides nothing wears none, a group's header — which toggles nothing —
-never wears one at all, and a sub-agent run's head wears one however short its own report is. The
-`+N more lines` marker is apogee's line too and is painted as one — the `tool-marker` role, a light
-blue `#80B0FF` under `dark`, no background and no bold weight, the quieter sibling of the
-prompt block's `see more` (the `prompt-toggle` role) — so a body line
+detail tone rather than the label's `tool-header` orange, so they read as chrome beside the tool's
+name instead of as the last letter of it. Their presence *is* the clickability hint, because the
+affordance and the click-target rule are **one predicate**: an indicator appears exactly where a
+click toggles something, so a block that hides nothing wears none, a group's header — which
+toggles nothing — never wears one at all, and a sub-agent run's head wears one however short its
+own report is. The `+N more lines` marker is apogee's line too and is painted as one — the
+`tool-marker` role, a light blue `#80B0FF` under `dark`, no background and no bold weight, the
+quieter sibling of the prompt block's `see more` (the `prompt-toggle` role) — so a body line
 that happens to open with `+` can never be mistaken for the affordance beneath it. The sketch at the
 top of this file shows both states side by side: a collapsed `Run ▶` over its remainder marker, and
 a `View Diff ▼` and a `Sub Agent ▼` deliberately drawn open so the shape of a full body appears

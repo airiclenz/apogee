@@ -173,7 +173,7 @@ until then `SHA256SUMS` is the check that is actually worth making.
   back — so a long prompt is re-sent or edited rather than retyped; the recall list is per
   workspace and lives in `~/.apogee/prompts/`. Transcript text stays selectable in every
   state, mid-stream included.
-- **Colours you choose** — the palette is a **colour scheme**: one YAML file of 24 semantic roles.
+- **Colours you choose** — the palette is a **colour scheme**: one YAML file of 25 semantic roles.
   `dark` and `light` ship in the binary, `ui.color-scheme` picks one, `/settings` offers a picker
   that applies live, and your own `~/.apogee/schemes/<name>.yaml` shadows a built-in of the same
   name — start from `/color-scheme export dark` and edit. A defective file costs colour, never the

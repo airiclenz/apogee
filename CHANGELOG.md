@@ -35,12 +35,12 @@ point is a **minor** bump, not a breaking change.
   The type-to-filter grammar and the rebound verbs are documented in `layout.md` (§"One overlay for
   'which one?'" and the `/sessions` browser paragraph beside it).
 - **Color schemes — apogee's palette is now a file you can pick, and write.** Every colour on screen
-  comes from the active **colour scheme**: one YAML file of 24 semantic roles (`error`, `code`,
-  `skill`, `file-ref`, `muted`/`muted-bright`, the four autonomy modes, the four spinner stops, …),
-  named for what they mean rather than where they are drawn. Two schemes ship, compiled into the
-  binary: **`dark`**, which is exactly the palette apogee has always drawn with and stays the
-  default, and a new **`light`** for light terminals. Nothing is installed on disk and nothing is
-  ever downloaded.
+  comes from the active **colour scheme**: one YAML file of 25 semantic roles (`error`, `code`,
+  `tool-header`, `skill`, `file-ref`, `muted`/`muted-bright`, the four autonomy modes, the four
+  spinner stops, …), named for what they mean rather than where they are drawn. Two schemes ship,
+  compiled into the binary: **`dark`**, which is exactly the palette apogee has always drawn with
+  and stays the default, and a new **`light`** for light terminals. Nothing is installed on disk
+  and nothing is ever downloaded.
   - **`ui.color-scheme` in the `ui:` block** selects it, and **`~/.apogee/schemes/<name>.yaml`
     shadows a built-in of the same name** — write `dark.yaml` there and you have adjusted `dark`
     while still typing `dark`; delete the file and the shipped one is back.
@@ -52,6 +52,10 @@ point is a **minor** bump, not a breaking change.
   - **The `/settings` pane carries a picker row** for the key — built-ins and your own files in one
     list — and it applies **live**: the whole screen is rebuilt and repainted on the ⏎ that saves,
     no restart anywhere.
+  - **Tool-call headers carry their own role.** `tool-header` paints a block's header label (`Run`,
+    `List Dir`, `Sub-Agent`, …) and the sub-agent rail that hangs off it, instead of borrowing the
+    `code` role that paints inline code and fenced blocks — so what apogee *ran* reads apart from
+    the code it *prints*, and either tone can be retuned without dragging the other along.
   - **A defective scheme costs colour, never the session.** A bad hex, an unknown key, an unreadable
     file or a name that resolves to nothing each fall back to the default and say so in a dim
     transcript note naming the file and the key — at start-up and after a switch alike. Every key is

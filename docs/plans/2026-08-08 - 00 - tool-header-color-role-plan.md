@@ -145,9 +145,24 @@ it names the `toolLabel` role rather than `code`, and "bold-orange" stays true u
 
 **Commit:** `feat(tui): paint tool headers and sub-agent rail with the tool-header role`
 
-## 3. Update the living docs to the 25-role vocabulary
+## 3. Update the living docs to the 25-role vocabulary — ✅ DONE (2026-08-08)
 
 Depends on items 1 and 2. This item owns ALL doc amendments for this plan.
+
+NOTES (2026-08-08): `CHANGELOG.md` was amended too, beyond the item's named files — the colour-scheme
+feature still sits under `## [Unreleased]`, so its "24 semantic roles" lead would have *shipped*
+wrong. Only that unreleased entry was touched (count → 25, `tool-header` added to the role list, one
+new sub-bullet naming the role); no released entry and no ADR text was edited, per the out-of-scope
+clause, and the item's "owns ALL doc amendments for this plan" line makes this item its home.
+
+NOTES (2026-08-08): the layout.md refs at the old ~624 / ~733 did not name the `code` role — they say
+"the sub-agent rail's orange" and "the label's orange". They were re-pointed as the item intends by
+naming the role beside the hue (`` `tool-header` orange ``), which stays true under `dark`.
+
+NOTES (2026-08-08): the paragraphs edited in `layout.md` and `CONTEXT.md` were re-wrapped to those
+files' ~98-column prose width, so the diffs show a few unchanged sentences moving between lines. The
+inserted role names are longer than the slack those lines had; whitespace only, no prose reworded
+beyond what is listed above.
 
 **What:**
 - `layout.md`: §"The rules behind the tool-call sketch", "The label." paragraph
