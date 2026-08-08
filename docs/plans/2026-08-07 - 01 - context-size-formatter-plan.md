@@ -2,7 +2,7 @@
 
 - **Goal:** one global formatter for context/token sizes that never shows a value ≥ 1000 in its unit (e.g. `1M`, never `1048k`), used at every display site; kill the duplicate helpers.
 - **Date:** 2026-08-07
-- **Status:** not started
+- **Status:** complete — all four items done (2026-08-08)
 - **Authoritative sources:** `ISSUES.md` line 5 (the request); the Ratified design calls below; the site inventory enumerated in the items (swept 2026-08-07).
 - **Ratified design calls** (owner, via AskUserQuestion, 2026-08-07):
   1. **Binary units with plain suffixes:** divide by 1024 per step, display `k` / `M` / `G`. Rationale: real context windows are powers of two (`32768`, `131072`) and models are named that way ("128k model"). Accepted consequences: `128000 → "125k"`, `1000000 → "977k"`.

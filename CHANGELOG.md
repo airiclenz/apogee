@@ -211,9 +211,9 @@ point is a **minor** bump, not a breaking change.
   - **Every display site goes through it**: the status line's context gauge, the startup box, the
     sub-agent block's `12k/32k` cell, the rebind and heartbeat notes, the `— 32k` gloss in the
     `/model` and `/server` pickers, the standing-content Budget warning, and `apogee headless`'s
-    `sub-agent:` lines on stderr. Two hand-rolled helpers — one in the TUI, one deliberately
-    duplicated in the CLI half because the TUI's was unexported — are gone, replaced by the shared
-    `internal/format` package both halves import.
+    `sub-agent:` lines on stderr. Three hand-rolled helpers — a coarse and a fine one in the TUI,
+    plus the coarse one's twin, deliberately duplicated in the CLI half because the TUI's was
+    unexported — are gone, replaced by the shared `internal/format` package both halves import.
   - **Rounding is half-up now, where the old helper truncated**, so `1999` reads `2k` rather than
     `1k`. Sizes that were already round mostly read the same (`32768` was and stays `32k`); the ones
     that move are the ones that were being rounded down or spelled past their unit.
