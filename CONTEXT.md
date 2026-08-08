@@ -456,29 +456,52 @@ unchanged), and a persist whose apply then failed says so ("saved — live apply
 Editing is **hybrid**: simple keys are edited in the pane — a bool toggles, a 3-plus-option key
 opens a selection popup, a string or an int opens a real single-line field on its row (cursor keys
 and mouse), the inline system prompt a multi-line field (⏎ inserts a newline, ctrl+s commits) —
-while the six nested structures take an **`$EDITOR` round-trip**: ⏎ suspends into the human's own
-editor at that key's line, and on return the file is re-read, validated and every changed key
-applied through those same two homes (a changed `mcp-servers:` **reconnects**, validate-then-commit:
-the new set is dialled first and the old sessions keep serving on failure; startup connect stays
-fatal). The `server` row performs the full **live switch**, identical to `/server` — and takes no
+while the six nested structures take an **external edit**: ⏎ opens the human's own editor at that
+key's line, and every changed key is applied through those same two homes (a changed `mcp-servers:`
+**reconnects**, validate-then-commit: the new set is dialled first and the old sessions keep serving
+on failure; startup connect stays fatal). Which editor is the **editor ladder** — the `editor`
+config key, then `$VISUAL`, then `$EDITOR`, then the platform's **OS opener** (`open` / `xdg-open` /
+`cmd /c start`) — an explicit setting outranking an ambient one, so a command set for apogee is
+never quietly beaten by a variable the row cannot show. How it is started splits on that answer: a
+**terminal editor** (the nine names that draw over the tty) takes a **foreground** launch — the TUI
+suspends, and its exit still triggers the re-read —
+while everything else takes a **detached** launch: nothing is suspended, nothing is waited on, the
+pane stays standing and the row says "opened in your editor". The `server` row performs the full
+**live switch**, identical to `/server` — and takes no
 reset, since its line is the switch's own recording (ADR 0036) and deleting it would leave the
 session on a server the file no longer names, so `⌫` is inert there and its hint line says so;
 `confine-to-workspace` / `unconfined-hosts` stay display-only with a "use /confine" pointer (that
-loosen stays single-homed in **`/confine`**, ADR 0012). Idle-only, and the `$EDITOR` jump is
-offered between runs only. It **reconciles** the
+loosen stays single-homed in **`/confine`**, ADR 0012). Idle-only, and the external edit is
+offered between runs only.
+
+What makes an edit apply is no longer the editor's exit but the **config watch**: a poll of
+`~/.apogee/config.yaml`'s mtime and size on a ticker, in-process and dependency-free, whose report
+is one **wait** the renderer parks (the Heartbeat posture) and re-arms per landed report. Any save
+of that file applies live — the pane's own jump, a GUI editor in another window, a `vim` in a second
+terminal — through the same re-read/diff/apply the round trip already used, so the two triggers
+cannot land a key differently. Two rules bound it: the **last-good rule** (a file that does not
+parse is ignored and the previous projection kept, because a poll will read a half-written save; a
+run of three consecutive unreadable reports surfaces one transcript note, not repeated until the
+file parses again), and **baseline refresh on every apply**, which is what keeps a pane write from
+double-applying when the watch sees the file apogee itself just wrote. `server` is the one key a
+re-read never reports (ADR 0036 decision 2). It **reconciles** the
 standing "apogee never writes your config" claims (seeding never overwrites, Probe prints
 paste-ready YAML, `/model` does not rewrite the file): never *unprompted* — a settings-screen edit
 is a deliberate user act and names the file and entry it changed, the same fence ADR 0012 applies
 to `/confine off --save`. See
 [ADR 0035](docs/adr/0035-the-settings-surface-persists-one-key-per-deliberate-edit.md) (the
 persistence contract) and
-[ADR 0037](docs/adr/0037-every-settings-edit-applies-to-the-running-session.md) (the live apply).
+[ADR 0037](docs/adr/0037-every-settings-edit-applies-to-the-running-session.md) (the live apply),
+as amended by [ADR 0041](docs/adr/0041-the-config-file-is-watched.md) (the editor ladder and the
+config watch, superseding 0037's `$VISUAL`→`$EDITOR`→`vi` ladder and its diff-on-exit trigger).
 _Avoid_: "settings menu" / "preferences dialog" (it is a pane inside the frame, not a modal
 takeover), "config editor" (it edits declared keys through a verified splice, and hands the file
-itself to `$EDITOR` for the rest; it is never a text editor of its own), "auto-sync" (no boot-time
-key syncing exists — rejected in ADR 0035), "pending edit" / "(next launch)" (nothing is pending —
-an edit applies on the ⏎ that persists it; the marker ADR 0035 introduced is abolished, not
-narrowed).
+itself to the external edit for the rest; it is never a text editor of its own), "auto-sync" (no
+boot-time key syncing exists — rejected in ADR 0035), "pending edit" / "(next launch)" (nothing is
+pending — an edit applies on the ⏎ that persists it; the marker ADR 0035 introduced is abolished,
+not narrowed), "`$EDITOR` round-trip" as the name of the whole mechanism (`$EDITOR` is one rung of
+four, and a detached launch has no round trip to come back from), "file watcher" in the
+`fsnotify`/inotify sense (it polls; there is no OS notification and no daemon).
 
 **Color scheme**:
 The **palette apogee draws with, as a file of semantic roles** — `ui.color-scheme` names it, and

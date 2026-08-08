@@ -60,6 +60,34 @@ point is a **minor** bump, not a breaking change.
     no glyph, marker or layout is themed. Recorded in
     [ADR 0040](docs/adr/0040-color-schemes-are-embedded-roles-with-user-shadowing.md), with the role
     vocabulary in `CONTEXT.md` §Color scheme and the per-role prose in `layout.md`.
+- **`editor:` names the editor, and saving `config.yaml` is what applies an edit — from any editor,
+  in any window.** The `/settings` pane's `⏎` jump on a block no row can hold used to suspend into
+  `$VISUAL`, else `$EDITOR`, else `vi`, and to diff the file when that program exited. That contract
+  broke on every editor a desktop actually opens: `open`/`xdg-open`/`code` return before the window
+  is even on screen, so the exit-triggered diff read unchanged bytes and concluded you had edited
+  nothing.
+  - **A new file-only `editor:` key** takes a whole command line (`editor: code -w` — split on
+    spaces, so flags travel with the program) and heads a **four-rung ladder**: this key, then
+    `$VISUAL`, then `$EDITOR`, then your platform's default opener (`open` on macOS, `xdg-open` on
+    Linux, `cmd /c start` on Windows). Config beats environment, so the row shows the command that
+    will really run. **Unset now means your desktop's default `.yaml` application, not `vi`** — a
+    deliberate behaviour change. When nothing on the ladder is installed, the row refuses and names
+    all three ways to set an editor instead of repeating a `$PATH` error.
+  - **Terminal editors still take the terminal** — `vi`, `vim`, `nvim`, `nano`, `pico`, `emacs`,
+    `micro`, `hx`, `kak` suspend the TUI and re-read on exit, exactly as before, because one drawn
+    over a live alternate screen is broken. **Everything else is started detached**: the pane stays
+    up, nothing waits on it, and the row says `· opened in your editor`.
+  - **`~/.apogee/config.yaml` is now watched for the whole session** — a poll of mtime and size on a
+    one-second ticker, in-process, no new dependency and no daemon. Any save applies live through
+    the same re-read/diff/apply an in-pane edit uses, whoever wrote it: the pane's jump, a GUI editor
+    left open in another window, a `vim ~/.apogee/config.yaml` in a second terminal. Each key that
+    changed wears the same ` *` on its row.
+  - **A file that does not parse changes nothing** and the session keeps the settings it had — a poll
+    will catch a half-written save sooner or later. Only three consecutive unreadable saves surface a
+    transcript note, and not again until the file parses. A write the pane made itself does not apply
+    twice, and `server:` is still never re-applied by a re-read: it names where the *next* session
+    starts. Recorded in [ADR 0041](docs/adr/0041-the-config-file-is-watched.md), which supersedes ADR
+    0037's editor ladder and its diff-on-exit trigger; the rest of ADR 0037 stands.
 
 ### Changed
 

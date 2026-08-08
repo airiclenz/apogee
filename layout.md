@@ -1347,9 +1347,12 @@ reads as one block of prose instead of sliding back under a marker that says not
 single-cell row measures a hanging indent of zero and wraps exactly where it always did. The
 **`/settings` pane's key rows are four-cell** — the key, its value, an `(env)`/`(flag)` mark where a
 higher-precedence source beat the file, and a last tier carrying whatever else is true of the row:
-the reason the last act on it was refused, else the boundary note of an edit that landed at a
-boundary this session will cross rather than at once (`· applies at next clear`), else — on a row an
-environment variable or a flag is overriding — that the override wins again at the next start, else
+the reason the last act on it was refused, else the answer to an act that landed and moved no row —
+`· already on macStudio`, or the `· opened in your editor` of an editor started **detached**, which
+opened in its own window and left this pane standing where it was — else the boundary note of an
+edit that landed at a boundary this session will cross rather than at once
+(`· applies at next clear`), else — on a row an environment variable or a flag is overriding — that
+the override wins again at the next start, else
 the `· ⏎ opens $EDITOR` or `· use /confine` pointer of a key this pane will not write. That
 tier is one column rather than three because a row is only ever one of those things at a time, and
 it and the mark before it both collapse away on a configuration with nothing overridden, nothing

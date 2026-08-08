@@ -318,18 +318,23 @@ row reports it with the same marker: `default *`.
 
 **The blocks no row can hold open your editor.** `servers:`, `mcp-servers:`, `mechanisms:`,
 `validated-sets:`, `system-prompt-models:` and the model profile render as a summary with an
-`· ⏎ opens $EDITOR` pointer, and that is what `⏎` does: apogee suspends into `$VISUAL`, else
-`$EDITOR`, else `vi` (`notepad` on Windows), with the cursor on that key's line where the
-editor takes a line argument. On the way back the file is re-read and validated, and every key
-that changed is applied the way an in-pane edit is — a changed `mcp-servers:` **reconnects**,
-connecting the new set first and swapping the tools over only once it is up, so a server that
-will not come back leaves the old connections serving and the reason on the row; a changed
-`model-profile:` swaps the parser. A non-zero exit from the editor (`:cq`) discards the round
-trip. The jump is offered between runs only — mid-run the row asks you to wait, while in-pane
-edits stay open. The confinement keys are the one pair that goes nowhere near it: they carry
-`· use /confine`, because switching Auto's fence off asks for an acknowledgement that belongs
-with [that verb](#auto-modes-blast-radius). And the `server:` row **moves the session** — the
-same switch `/server` performs, chosen from the same list, recorded the same way.
+`· ⏎ opens $EDITOR` pointer, and that is what `⏎` does — in the editor the
+[four-rung ladder](#configuration) `editor:` heads, with the cursor on that key's line where the
+editor takes a line argument. A **terminal** editor (`vi`, `vim`, `nvim`, `nano`, `pico`,
+`emacs`, `micro`, `hx`, `kak`) has to own the terminal, so apogee suspends into it and re-reads
+the file when it exits; a non-zero exit (`:cq`) discards that re-read. Anything else — a GUI
+editor, your desktop's opener — is started **detached**: the pane stays up, nothing waits on the
+window that opened somewhere else, and the row says `· opened in your editor`. Either way the
+edit lands the same way, because what applies it is the file being **saved**, not the editor
+exiting. Every key that changed is applied the way an in-pane edit is — a changed `mcp-servers:`
+**reconnects**, connecting the new set first and swapping the tools over only once it is up, so a
+server that will not come back leaves the old connections serving and the reason on the row; a
+changed `model-profile:` swaps the parser. The jump is offered between runs only — mid-run the
+row asks you to wait, while in-pane edits stay open. The confinement keys are the one pair that
+goes nowhere near it: they carry `· use /confine`, because switching Auto's fence off asks for an
+acknowledgement that belongs with [that verb](#auto-modes-blast-radius). And the `server:` row
+**moves the session** — the same switch `/server` performs, chosen from the same list, recorded
+the same way.
 
 ## Sessions
 
@@ -402,6 +407,19 @@ schema — which copies the file aside first and says so on startup. "Your edits
 never overwritten" stands: nothing is rewritten at upgrade, and no line you wrote is
 touched at any other time.
 
+**And that file is watched.** While apogee runs it polls `~/.apogee/config.yaml`, and a save
+applies itself to the session you are in — whoever wrote it: the `/settings` pane's `⏎` jump, a
+GUI editor you left open in another window, a `vim ~/.apogee/config.yaml` in a second terminal.
+No key waits for a restart and nothing has to be re-entered in the pane; every key that came back
+different is applied exactly as an in-pane edit is, and its row repaints wearing the same ` *`. A
+file that does not parse changes nothing — the session keeps running the settings it had, because
+a poll will sooner or later read a half-written save — and only when three saves in a row fail to
+parse does apogee say so in the transcript, once, until the file parses again. `server:` is the
+one key a re-read never moves: it names where the *next* session starts (see
+[The servers you run models on](#the-servers-you-run-models-on)). The watcher is a poll of the
+file's timestamp and size on a one-second ticker — no daemon, no filesystem-notification
+dependency (ADR 0041).
+
 Catalogued mechanisms are opt-in by canonical ID. Every mechanism ships **off**
 until its A/B bench run proves it a win, so enabling one is a deliberate config
 choice:
@@ -450,6 +468,24 @@ one your terminal is configured with is not something apogee can express while i
 this key is the honest substitute. The cursor is shown wherever the box is editable
 (including while the model works) and hidden where it is not, such as at an approval
 prompt.
+
+Set `editor:` (a file-only key) to the command an external edit opens in — the whole command
+line, split on spaces, so flags travel with the program and the file is appended as the last
+argument:
+
+```yaml
+# ~/.apogee/config.yaml
+editor: code -w
+```
+
+It heads a **four-rung ladder**, highest first: this key, then `$VISUAL`, then `$EDITOR`, then
+your platform's default opener — `open` on macOS, `xdg-open` on Linux, `cmd /c start` on Windows.
+An explicit setting outranks an ambient one, so a command you put here is the command that runs and
+the `/settings` row showing it is not being quietly beaten by a variable it cannot show. Leaving it
+unset means *whatever already opens `.yaml` on this desktop*, not `vi`; the row is then blank,
+because the rungs below this key are not this key's to record. If nothing on the ladder names a
+program this machine has, the `⏎` jump refuses on the row and names all three ways to set one
+rather than repeating a "not found in `$PATH`" you cannot act on.
 
 ### The servers you run models on
 

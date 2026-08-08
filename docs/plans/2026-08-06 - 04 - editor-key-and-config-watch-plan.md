@@ -410,9 +410,24 @@ interval:
 
 ---
 
-## 7. Docs sweep
+## 7. Docs sweep — ✅ DONE (2026-08-08)
 
 *Depends on items 1–6.*
+
+NOTES (2026-08-08): four deviations, all following the "the spec outranks item text" rule. (a) The item asks
+for "the `editor` row in the Interface section" of the layout spec, but that spec's key-list mockup is an
+abridged capture showing five of the pane's ten sections and containing no Interface section at all — drawing
+a row into a captured mockup would misstate what the renderer paints, so the row is documented in prose in a
+new `### The external edit` subsection and the mockup gained an explicit abridgement note naming the five
+sections it omits. (b) The `⏎ opens $EDITOR` affordance's on-screen **wording** is unchanged in the build
+(`pointerExternalEdit`, `cmd/apogee/settingsrows.go:49`) and changing it would be code, not a docs sweep; the
+spec therefore records the wording as shipped and says why it stays (`$EDITOR` is one rung of four, and the
+`editor` row is where a command set for apogee is shown). (c) `layout.md`'s last-tier enumeration also gained
+the pane's **answer slot**, which it never named — the detached-launch note lands there
+(`settingAnswer`), so `· opened in your editor` had nowhere to hang without it. (d) `ISSUES.md` and `TODO.md`
+contain no entry this plan resolves (grep for editor/$EDITOR/watch/restart), so neither file is touched. Every
+ADR cross-reference written here says **0041**, per item 1's renumbering. `make check` is red only on
+`internal/scheme TestEmbeddedDarkMatchesPinnedPalette`, pre-existing from `b2aed0e` and unrelated to this plan.
 
 **What.** Bring the prose in line with what shipped. One owning item for every
 cross-cutting amendment:

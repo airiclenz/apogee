@@ -76,6 +76,11 @@ the list losing a row. Rows are four cells — key, value, an `(env)`/`(flag)` m
 pointer — and the last two columns collapse away entirely on a configuration with nothing overridden
 and nothing read-only.
 
+The mockup is **abridged**: it shows five of the pane's ten sections. In the built pane
+`Tools & skills`, `Session`, `Presentation`, `Interface` and `Mechanisms` sit between `Confinement`
+and `Model profile`, in that order, and a section is a run over the registry's own order rather than
+a per-key label — so a key added to the registry inherits the section it was inserted into.
+
 ### An edited row
 
 ```
@@ -152,3 +157,37 @@ the glyph under the pointer — on a wrapped continuation as readily as on a lin
 selects across the lines and its release copies exactly those runes, the newlines among them, and the
 wheel walks the prose a line at a time (the window follows the caret, so moving it *is* the scroll).
 A paste lands here with its lines intact, which is what this field is for.
+
+### The external edit (`· ⏎ opens $EDITOR`)
+
+The sixth key class has no field at all: the blocks no row can hold — `servers`, `mcp-servers`,
+`mechanisms`, `validated-sets`, `system-prompt-models`, `model-profile` — carry the
+`· ⏎ opens $EDITOR` pointer in their last cell, and `⏎` opens the file itself on that key's line
+where the editor takes a line argument.
+
+Which editor is a **four-rung ladder** (ADR 0041): the `editor` config key, then `$VISUAL`, then
+`$EDITOR`, then the platform's default opener (`open`, `xdg-open`, `cmd /c start`). The pointer's
+wording stays `⏎ opens $EDITOR` — it names the affordance in the spelling a terminal user reads it
+in, and the row for `editor` is where a command set for apogee is shown.
+
+**The pane's own behaviour splits on what that resolves to.**
+
+- A **terminal** editor — `vi`, `vim`, `nvim`, `nano`, `pico`, `emacs`, `micro`, `hx`, `kak` — takes
+  the terminal. The pane goes away, the editor draws over the whole screen, and on its exit the file
+  is re-read: exactly the round trip ADR 0037 shipped, unchanged.
+- Everything else is started **detached**. The pane does not go away, nothing is suspended, no frame
+  is torn down — the row simply gains `· opened in your editor` in the same last cell, and the
+  highlight stays where it was. That sentence is the whole of what the screen has to show for a
+  keypress whose window opened behind the terminal or on another desktop, which is why it is painted
+  at all.
+
+Either way nothing is applied by the launch. What applies an edit is the **saved file**, which the
+config watcher reports; a detached launch therefore leaves the pane exactly as it found it, and the
+rows repaint — each changed one wearing its ` *` — whenever the save happens, with no keypress in
+between. A launch that could not start at all (no such program on this machine) lands on the
+launching row as a refusal in the `✗` slot, naming all three ways to set an editor.
+
+The `editor` key itself is an ordinary editable string row in the **Interface** section, between
+`cursor-shape` and the `Mechanisms` heading. Its value cell is **blank when unset** — the blank
+that seeds an edit field, not the `none` reserved for the structured rows — because unset is a real
+state here (the ladder falls through to the OS opener) and the row is one `⏎` from being a field.
