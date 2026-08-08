@@ -132,7 +132,20 @@ unchanged. Reuse the existing wire-test scaffolding for closures.
 
 **Commit:** `feat(wire): launcher integration follows the session's server entry`
 
-## 3. Retire the top-level `llama-launcher:` key
+## 3. Retire the top-level `llama-launcher:` key — ✅ DONE (2026-08-08)
+
+NOTES (2026-08-08): three deviations from the literal text. (a) Two test files the item's list does
+not name also pinned the retired key and had to be adjusted: `configwrite_scalar_test.go` (three
+splice cases keyed by the now-absent registry row, which `mustKey` panics on) and `launcher_test.go`
+(`TestLauncherConfigPathLadder`, the deleted ladder's own test). (b) `defaults_test.go` needed NO
+change — its template↔registry guards pass with the row and the teaching block gone — so it is
+untouched rather than adjusted. (c) Doc comments on neighbouring, surviving declarations that named
+the deleted field were adjusted where they would otherwise dangle: the `editor` key's three docs
+(`config.go` resolved + layered, `root.go`, and `fileConfig.Editor`, all of which said "like
+llamaLauncher above"), `registry.go`'s validate-hooks prose, `wire.go`'s `unreachable` doc, and
+`launcher.go`'s `entryLauncherPath` header (which introduced itself as the successor to the deleted
+ladder). Item 5 still owns every cross-cutting doc edit, including README's "Local servers —
+llama-launcher" section, which still teaches the retired top-level key.
 
 Depends on items 1 and 2. One item despite its file count: the registry bijection guard
 (registry rows ↔ `fileConfig` yaml tags) and the template↔registry guard

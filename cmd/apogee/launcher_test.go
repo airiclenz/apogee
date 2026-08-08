@@ -366,48 +366,10 @@ profiles:
 	}
 }
 
-// The `llama-launcher:` ladder, resolved where the launcher is known: off is off, a named path is
-// taken as written (and `~` expanded) whether or not it exists, and an absent key auto-detects —
-// lighting the verbs up only when the launcher's own config is actually there.
-func TestLauncherConfigPathLadder(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-
-	if path, enabled := launcherConfigPath("  OFF "); enabled || path != "" {
-		t.Errorf("off ⇒ (%q, %v); want ('', false) — case and spacing are not a way back on", path, enabled)
-	}
-
-	explicit := filepath.Join(home, "elsewhere", "launcher.yaml")
-	if path, enabled := launcherConfigPath(explicit); !enabled || path != explicit {
-		t.Errorf("explicit path ⇒ (%q, %v); want (%q, true) — a NAMED config stays on so the first "+
-			"verb can say it is missing", path, enabled, explicit)
-	}
-	if path, enabled := launcherConfigPath("~/launcher.yaml"); !enabled ||
-		path != filepath.Join(home, "launcher.yaml") {
-		t.Errorf("~ path ⇒ (%q, %v); want the expanded path under %q", path, enabled, home)
-	}
-
-	if path, enabled := launcherConfigPath(""); enabled || path != "" {
-		t.Errorf("auto-detect with no launcher config ⇒ (%q, %v); want ('', false) — a machine "+
-			"without the launcher simply has no local-server verbs", path, enabled)
-	}
-
-	auto := llamalauncher.DefaultConfigPath()
-	if err := os.MkdirAll(filepath.Dir(auto), 0o700); err != nil {
-		t.Fatalf("create launcher config dir: %v", err)
-	}
-	if err := os.WriteFile(auto, []byte("servers:\n  llamacpp: true\n"), 0o600); err != nil {
-		t.Fatalf("write launcher config: %v", err)
-	}
-	if path, enabled := launcherConfigPath(""); !enabled || path != auto {
-		t.Errorf("auto-detect with a launcher config present ⇒ (%q, %v); want (%q, true)", path, enabled, auto)
-	}
-}
-
-// The per-entry ladder, which differs from the one above in exactly two places: the off state is the
-// key being absent (nothing to spell), and `auto` is taken VERBATIM — a machine with no launcher
-// config still reports the integration on, so the first verb can name the file it wanted.
+// The per-entry ladder, which differs from the retired top-level key's in exactly two places: the
+// off state is the key being absent (nothing to spell), and `auto` is taken VERBATIM — a machine
+// with no launcher config still reports the integration on, so the first verb can name the file it
+// wanted.
 func TestEntryLauncherPathLadder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

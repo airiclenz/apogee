@@ -87,10 +87,9 @@ var settingSections = []settingSection{
 // path with no formatter renders as an empty value rather than panicking — a table gap must not
 // cost the user the whole surface mid-session — and that test is what keeps the gap from shipping.
 var settingValues = map[string]func(options) string{
-	"servers":        func(o options) string { return countSummary(len(o.servers), "server") },
-	"server":         func(o options) string { return o.startupServer },
-	"llama-launcher": func(o options) string { return o.llamaLauncher },
-	"mode":           func(o options) string { return o.mode },
+	"servers": func(o options) string { return countSummary(len(o.servers), "server") },
+	"server":  func(o options) string { return o.startupServer },
+	"mode":    func(o options) string { return o.mode },
 	// A SUMMARY of the prompt, since no row holds prose — the text itself travels beside it
 	// (settingTexts) for the editor to open on. Blank when nothing is set inline, the answer every
 	// other row whose value seeds a field gives: "none" would be a word standing where the prompt goes.

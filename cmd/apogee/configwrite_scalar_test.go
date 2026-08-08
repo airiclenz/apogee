@@ -160,7 +160,6 @@ func TestSpliceScalarSettingInsertsBelowTheTemplateExample(t *testing.T) {
 	}{
 		{path: "server", value: "my-box", want: []string{"server: my-box"}},
 		{path: "mode", value: "auto", want: []string{"mode: auto"}},
-		{path: "llama-launcher", value: "off", want: []string{"llama-launcher: \"off\""}},
 		{path: "editor", value: "code -w", want: []string{"editor: code -w"}},
 		{path: "context-window", value: "32768", want: []string{"context-window: 32768"}},
 		{path: "ui.spinner", value: "glitter", want: []string{"ui:", "  spinner: glitter"}},
@@ -604,12 +603,6 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 			wantMsg: "0-65535",
 		},
 		{
-			name:    "a launcher config written as a URL belongs under mcp-servers",
-			content: "mode: auto\n",
-			path:    "llama-launcher", value: "http://box:7331",
-			wantMsg: "looks like a URL",
-		},
-		{
 			name:    "a context-file name that climbs out of the workspace",
 			content: "mode: auto\n",
 			path:    "context-files.names", value: "[../secrets.md]",
@@ -845,7 +838,6 @@ func TestSpliceScalarSettingQuotesValuesThatNeedIt(t *testing.T) {
 		{path: "present.host", value: "", want: `  host: ""`},
 		{path: "server", value: "123", want: `server: "123"`},
 		{path: "present.command", value: "zed {path}", want: "  command: zed {path}"},
-		{path: "llama-launcher", value: "  /opt/launcher.yaml  ", want: "llama-launcher: /opt/launcher.yaml"},
 		{path: "context-window", value: "32768", want: "context-window: 32768"},
 		{path: "auto-compact", value: "false", want: "auto-compact: false"},
 	} {

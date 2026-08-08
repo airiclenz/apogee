@@ -3417,37 +3417,6 @@ func TestApplySettingUseProjectSkillsRescansTheSources(t *testing.T) {
 	}
 }
 
-// The `llama-launcher:` key runs the startup ladder a second time and stores what it resolves —
-// which IS the apply, since every verb re-reads the config file for itself. A value the ladder
-// refuses never displaces the path the session is working from.
-func TestApplySettingLlamaLauncherSwapsThePath(t *testing.T) {
-	t.Parallel()
-	named := filepath.Join(t.TempDir(), "launcher.yaml")
-	path := newLauncherPath("/startup/launcher.yaml")
-	apply := applySettingFor(settingsApplier{launcher: path})
-
-	if note, err := apply("llama-launcher", named); err != nil || note != "" {
-		t.Fatalf("apply llama-launcher=%s: (%q, %v); want no note and no error", named, note, err)
-	}
-	if got := path.get(); got != named {
-		t.Errorf("path = %q; want %q — the next verb reads the config the key now names", got, named)
-	}
-
-	if _, err := apply("llama-launcher", "off"); err != nil {
-		t.Fatalf("apply llama-launcher=off: %v", err)
-	}
-	if got := path.get(); got != "" {
-		t.Errorf("path after off = %q; want empty — the verbs report the integration off from here", got)
-	}
-
-	if _, err := apply("llama-launcher", "http://box:7331"); err == nil {
-		t.Error("a URL was accepted; want the startup validator's refusal — this key takes a local path")
-	}
-	if got := path.get(); got != "" {
-		t.Errorf("a refused value moved the path to %q; want the last good value kept", got)
-	}
-}
-
 // A committed `present.` key rebuilds the ladder exactly as startup built it and re-installs it, so
 // the presenter the engine captured walks the new rungs from the next presentation (ADR 0037). A
 // value the block refuses changes nothing.

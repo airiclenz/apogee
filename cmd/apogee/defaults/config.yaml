@@ -62,11 +62,36 @@
 #              you mean. Either way, when the server's loaded model changes under a running
 #              session, apogee rebinds to it within ten seconds and says so in the transcript.
 #              --model / APOGEE_MODEL overrides it for the server this session starts on.
+#   llama-launcher
+#              lets apogee start, switch and stop THIS server itself, with llama-launcher — the
+#              tool that owns the model files and the launch profiles on the machine that entry
+#              runs on. While a session is on an entry that carries this key, /model offers the
+#              launcher's launch profiles instead of what the server advertises and waits while
+#              the one you pick starts, /unload-model frees that server's model, and /stop-server
+#              stops it; all three are ordinary rows in the / menu. Optional, and three shapes:
+#
+#                (absent)  no launcher for this server — /model lists what the server
+#                          advertises, and /unload-model and /stop-server answer
+#                          "llama-launcher not configured". This is the default, and it is what
+#                          every remote entry wants.
+#                auto      read llama-launcher's own default config,
+#                          ~/.config/llama-launcher/config.yaml.
+#                <path>    read THIS launcher config instead (~ expands).
+#
+#              The integration FOLLOWS the session: /server onto a launcher-fronted entry turns
+#              it on, /server onto any other entry turns it off again, so one config can hold a
+#              local machine you launch models on and a remote provider you do not. Nothing is
+#              checked at startup — a config that is not there is reported the first time a
+#              command reaches for it, not as a refusal to start — and each command re-reads the
+#              file, so a profile you add in the launcher's own TUI is offered by the next
+#              /model. A launcher running on ANOTHER machine is a different thing: reach that one
+#              as an mcp-servers: entry below; the two compose.
 #
 # servers:
 #   - name: workstation
 #     endpoint: http://192.168.64.1:1111
 #     model: gpt-oss-20b
+#     llama-launcher: auto
 #   - name: rented-box
 #     endpoint: https://llm.example.com
 #     api-key: sk-rented-token
@@ -84,28 +109,6 @@
 # no one in front of them, so an unset or stale name stops them with an error naming this file.
 #   flag: --server     env: APOGEE_SERVER
 # server: my-box
-
-# =============================================================================
-# Start, switch and stop the LOCAL servers yourself, with llama-launcher. The servers: list above
-# says where a session may MOVE to; this says apogee may also bring one up: with a launcher
-# configured /model offers the launcher's launch profiles instead of what the server advertises and
-# waits while the one you pick starts, /unload-model frees the model of that server and
-# /stop-server stops it. All three are ordinary rows in the / menu. Config-file only (no flag or
-# env). Three values:
-#
-#   (unset)   auto-detect — apogee reads llama-launcher's own default config,
-#             ~/.config/llama-launcher/config.yaml, if that file is there. If it is not, /model
-#             lists what the server advertises, as it always did, and /unload-model and
-#             /stop-server answer "llama-launcher not configured" when you reach for one. This is
-#             the default, and on a machine with the launcher installed it needs no configuration.
-#   off       leave the local-server commands off, even on a machine that has a launcher config.
-#   <path>    read THIS launcher config instead of the default one (~ expands).
-#
-# Nothing is checked at startup: a path that is not there is reported the first time a command
-# reaches for it, not as a refusal to start. Each command re-reads the file, so a profile you add
-# in the launcher's own TUI is offered by the next /model. A launcher running on ANOTHER machine is
-# a different thing — reach that one as an mcp-servers: entry below; the two compose.
-# llama-launcher: ~/configs/llama-launcher.yaml
 
 # =============================================================================
 # Autonomy mode: how tool calls are gated (the privilege ladder, least to most autonomous).

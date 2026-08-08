@@ -158,12 +158,6 @@ var keyRegistry = []configKey{
 		Desc:     "Which servers: entry a session starts on; /server records the last one chosen.",
 	},
 	{
-		Path: "llama-launcher", Kind: kindString,
-		Editable: true,
-		Validate: validateLlamaLauncher, // the startup check itself, unwrapped: ADR 0029's three shapes
-		Desc:     "Which llama-launcher config the local-server verbs read; unset auto-detects, off disables.",
-	},
-	{
 		Path: "mode", Kind: kindEnum, Default: string(modeAskBefore), EnumValues: modeValues,
 		EnvVar: envMode, FlagName: "mode",
 		Editable: true, // Shift+Tab drives the same seam this key's live apply does
@@ -336,7 +330,7 @@ var keyRegistry = []configKey{
 // One function per key whose kind is not the whole of its contract (configKey.Validate). Each is
 // the check the STARTUP path already makes for that key, called with the value as the file would
 // spell it: uiSettings.validate for the spinner name, ParseCursorShape for the caret, parseMode for
-// the ladder, presentSettings.validate for the port, validateLlamaLauncher for the launcher path.
+// the ladder, presentSettings.validate for the port.
 // Reusing them is the point — a value refused when it is typed at a surface and the same value
 // refused at launch are refused by one implementation, so the surface can never persist a config
 // the next run will not start on.

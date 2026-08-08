@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -101,56 +99,10 @@ func (realLauncher) unload(backend, addr string) (*llamalauncher.StopResult, err
 	return llamalauncher.Unload(backend, addr)
 }
 
-// launcherConfigPath resolves the `llama-launcher:` key's three values into the one question the
-// rest of the program asks — is the integration on, and which config file does it read (ADR 0029
-// D4). The key is carried through config resolution exactly as written precisely so this decision
-// lands HERE, at the composition root: only the root knows the launcher, so only the root can ask
-// where its default config lives.
-//
-//   - `off` (any casing, surrounding space ignored — the web-search sentinel's posture) ⇒ off,
-//     even on a machine that has a launcher config.
-//   - empty or absent ⇒ AUTO-DETECT: the launcher's own default config path, and only if that
-//     file is actually there. A machine without the launcher therefore simply has no local-server
-//     verbs — nothing is reported, because nothing was asked for.
-//   - anything else ⇒ that path, `~` expanded, and on regardless of whether the file exists. A
-//     user who NAMED a config gets told at the first verb that it is missing (item 4's ladder);
-//     silently disabling the commands they configured would be the unhelpful answer.
-//
-// It takes the key AS WRITTEN rather than the whole resolved snapshot, because the same ladder now
-// runs twice: once at startup, and again whenever the `/settings` pane commits a new value into the
-// live path below (ADR 0037).
-func launcherConfigPath(value string) (string, bool) {
-	v := strings.TrimSpace(value)
-	if strings.EqualFold(v, "off") {
-		return "", false
-	}
-	if v != "" {
-		path, err := expandUserPath(v)
-		if err != nil {
-			// No home to expand against is not a reason to hide a configured integration: keep
-			// the value as written so the first verb fails naming the path the user typed.
-			return v, true
-		}
-		return path, true
-	}
-	// Auto-detect. The facade's DefaultConfigPath swallows a home-directory lookup failure and
-	// returns a RELATIVE path when it hits one, so an absoluteness check is what keeps a stray
-	// .config/llama-launcher/config.yaml under the current workspace from lighting up the verbs.
-	path := llamalauncher.DefaultConfigPath()
-	if !filepath.IsAbs(path) {
-		return "", false
-	}
-	if _, err := os.Stat(path); err != nil {
-		return "", false
-	}
-	return path, true
-}
-
 // entryLauncherPath resolves a `servers:` entry's own `llama-launcher:` value (serverEntry) into the
 // one question the rest of the program asks — is the integration on for the session's server, and
-// which config file does it read. It is the per-entry successor to launcherConfigPath above, and it
-// lands HERE for the same reason: only the composition root knows the launcher, so only the root can
-// ask where its default config lives.
+// which config file does it read. It lands HERE rather than in config resolution because only the
+// composition root knows the launcher, so only the root can ask where its default config lives.
 //
 //   - trimmed empty (the key absent) ⇒ off for that server. There is no `off` spelling to handle:
 //     validateServers refuses one, because absent already IS the off state.

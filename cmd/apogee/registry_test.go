@@ -267,8 +267,6 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 		{"web-search-endpoint", "%zz", "not a URL"},
 		{"context-window", "-1", "0 or more"},
 		{"present.port", "70000", "0-65535"},
-		{"llama-launcher", "http://box:7331", "looks like a URL"},
-		{"llama-launcher", "   ", "only whitespace"},
 		{"mode", "yolo", "invalid --mode"},
 		{"ui.spinner", "twirl", "invalid ui.spinner"},
 		{"cursor-shape", "sideways", "invalid cursor-shape"},
@@ -299,9 +297,9 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 }
 
 // And the other side of it: every value the keys DO take is accepted, including the shapes that look
-// like refusals — the sentinels and the empty values the launcher and search keys document, and the
-// zeros that mean "decide for me". A validator that refused one of those would make a documented
-// config unwritable from the settings surface.
+// like refusals — the sentinels and the empty values the search key documents, and the zeros that
+// mean "decide for me". A validator that refused one of those would make a documented config
+// unwritable from the settings surface.
 func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct{ path, value string }{
@@ -313,9 +311,6 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		{"context-window", "32768"},
 		{"present.port", "0"},
 		{"present.port", "8080"},
-		{"llama-launcher", ""},
-		{"llama-launcher", "off"},
-		{"llama-launcher", "/home/me/.llama-launcher/config.yaml"},
 		{"mode", string(modeAuto)},
 		{"ui.spinner", "glitter"},
 		{"cursor-shape", "bar"},

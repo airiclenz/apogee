@@ -94,17 +94,9 @@ type options struct {
 	// construct the engine before the TUI starts or to hand the TUI the bind seam instead.
 	prebound tui.PreboundStart
 
-	// llamaLauncher is the resolved `llama-launcher:` key (ADR 0029), exactly as the user wrote it:
-	// empty ⇒ auto-detect the launcher's own config, `off` ⇒ the local-server verbs stay off, any
-	// other value ⇒ the launcher config file to read. Loaded from the config file only, like the
-	// servers list above; applyConfig sets it from the resolved settings, having already refused a
-	// value that is no shape the key has. The composition root resolves the ladder — including
-	// whether an auto-detected config is actually there — because only it knows the launcher.
-	llamaLauncher string
-
 	// editor is the resolved `editor:` key (ADR 0041), exactly as the user wrote it: the command line
 	// an external edit is opened with, flags included (`code -w`). Loaded from the config file only,
-	// like the launcher key above; applyConfig sets it from the resolved settings. Empty ⇒ the key
+	// like the servers list above; applyConfig sets it from the resolved settings. Empty ⇒ the key
 	// names no editor, and the launch site walks the rest of the ladder ($VISUAL, $EDITOR, then the
 	// OS default opener) — which is why nothing is substituted for emptiness here.
 	editor string

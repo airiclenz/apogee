@@ -759,7 +759,6 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 			tools:      toolSet,
 			mcp:        mcpSet,
 			roots:      roots,
-			launcher:   launcher,
 			present:    presentation,
 		}),
 		// The `$EDITOR` round trip for the keys no row can hold (ADR 0037 decision 5): out through a
@@ -1321,8 +1320,6 @@ type settingsApplier struct {
 	// mcp is the session's live MCP connections: the one key whose apply is a reconnect rather than a
 	// write, and the source of half the tool set the door above swaps.
 	mcp *liveMCP
-	// launcher is the config path the local-server verbs read, and with it whether they work at all.
-	launcher *launcherPath
 	// present is the presentation ladder, which rebuilds from a changed `present:` block and
 	// re-installs itself on the presenter the engine holds.
 	present *livePresentation
@@ -1417,16 +1414,6 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			_ = a.skills.Reload()
 		case "web-search-endpoint":
 			return "", a.tools.setSearchEndpoint(value, a.engine)
-		case "llama-launcher":
-			// The startup ladder run a second time (ADR 0029 D4's three shapes), so `off` and a
-			// missing auto-detect both resolve to the empty path the verbs report themselves off
-			// from, and a named config is on from the next verb. Nothing is connected to rebuild —
-			// every verb re-reads the file — so the whole apply is this store.
-			if err := validateLlamaLauncher(value); err != nil {
-				return "", err
-			}
-			path, _ := launcherConfigPath(value)
-			a.launcher.set(path)
 		case "editor":
 			// The one key with nothing at all behind it to move: the editor ladder reads `editor` off a
 			// FRESH projection of the file every time an external edit starts (externalEdit.spec), so the
@@ -1507,7 +1494,7 @@ func cannotApply(key string) error {
 
 // unreachable reports, for one key, that this applier was composed without something that key's
 // apply has to reach. Every member is optional by design — a Driver builds the dispatcher out of
-// what it HAS, and a bench or a daemon has no presenter, no launcher and no skill catalogue (ADR
+// what it HAS, and a bench or a daemon has no presenter and no skill catalogue (ADR
 // 0031) — so a nil member has to degrade to the refusal above rather than panic on the Update
 // goroutine, halfway through an edit that has already been written to the file.
 //
@@ -1530,8 +1517,6 @@ func (a settingsApplier) unreachable(key string) error {
 		// The engine as well as the tool set: a registry with no web_search to re-point is rebuilt and
 		// handed through SwapTools, which is the swap door and not this holder's to skip.
 		reaches = a.tools != nil && a.engine != nil
-	case "llama-launcher":
-		reaches = a.launcher != nil
 	case "present.auto-open", "present.command", "present.port", "present.host":
 		reaches = a.present != nil
 	case "context-window", "system-prompt-text", "system-prompt-file", "system-prompt-models",

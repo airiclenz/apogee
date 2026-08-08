@@ -23,7 +23,6 @@ func fabricatedSettings() options {
 		model:         "gpt-oss-20b",
 		servers:       []serverEntry{{Name: "workstation"}, {Name: "rented-box"}, {Name: "laptop"}},
 		startupServer: "rented-box",
-		llamaLauncher: "off",
 		editor:        "code -w",
 		mode:          "auto",
 		systemPrompt: systemPromptSettings{
@@ -199,7 +198,6 @@ func TestSettingsRowsCarryTheirSection(t *testing.T) {
 	byPath := rowsByPath(t, rows)
 	for path, want := range map[string]string{
 		"servers":             "Upstream",
-		"llama-launcher":      "Upstream",
 		"mode":                "Autonomy",
 		"context-files.names": "System prompt",
 		"unconfined-hosts":    "Confinement",
@@ -227,7 +225,6 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 	want := map[string]string{
 		"servers":              "3 servers",
 		"server":               "rented-box",
-		"llama-launcher":       "off",
 		"mode":                 "auto",
 		"system-prompt-text":   "2 lines",
 		"system-prompt-file":   "", // unset, and an editable string row's blank is what the field seeds from
@@ -300,7 +297,7 @@ func TestSettingsRowsMarkOverriddenKeys(t *testing.T) {
 		t.Errorf("server row source = {%q %q}; want the env marker {%q %q}",
 			got.Source, got.SourceName, tui.SettingFromEnv, envServer)
 	}
-	for _, path := range []string{"servers", "llama-launcher", "bypass", "auto-compact"} {
+	for _, path := range []string{"servers", "bypass", "auto-compact"} {
 		got := byPath[path]
 		if got.Source != tui.SettingFromFile || got.SourceName != "" {
 			t.Errorf("row %q source = {%q %q}; want the unmarked file source", path, got.Source, got.SourceName)

@@ -57,20 +57,9 @@ type settings struct {
 	// selection, where the list is in hand.
 	startupServer string
 
-	// llamaLauncher is the resolved `llama-launcher:` key (ADR 0029): whether — and through which
-	// of that tool's config files — this session may start, switch and stop LOCAL servers itself.
-	// File-only on the `servers:` reasoning: naming a tool installed on this machine is a config
-	// act, not an invocation one. It is carried exactly as the user WROTE it, because the ladder
-	// it spells is resolved at the composition root rather than here: empty/absent ⇒ auto-detect
-	// (the launcher's own default config path, used only if that file exists — so a machine
-	// without the launcher simply has no local-server verbs), `off` ⇒ disabled even where a
-	// config is present, anything else ⇒ the launcher config to read. Whether that file exists is
-	// deliberately not asked at startup (validateLlamaLauncher says why).
-	llamaLauncher string
-
 	// editor is the resolved `editor:` key: the command line an external edit is opened with, carried
 	// exactly as the user wrote it (`code -w` stays two words until the launch site splits it).
-	// File-only, on the llamaLauncher reasoning: naming the program installed on this machine is a
+	// File-only, on the `servers:` reasoning: naming the program installed on this machine is a
 	// config act, not an invocation one. Empty ⇒ the rest of the ladder decides — $VISUAL, then
 	// $EDITOR, then the OS default opener (ADR 0041).
 	editor string
@@ -458,14 +447,8 @@ type layer struct {
 	// falls through to the empty default.
 	servers []serverEntry
 
-	// llamaLauncher is set only by the FILE layer (the launcher key is config'd, with no flag/env
-	// — like servers above). A nil pointer means the source says nothing about the launcher, so
-	// resolution falls through to the empty default, which the composition root reads as
-	// auto-detect.
-	llamaLauncher *string
-
 	// editor is set only by the FILE layer (the editor command is config'd, with no flag/env — like
-	// llamaLauncher above; $VISUAL and $EDITOR are consulted at the launch site, not here, because
+	// servers above; $VISUAL and $EDITOR are consulted at the launch site, not here, because
 	// they are a FALLBACK below this key rather than a layer above it). A nil pointer means the
 	// source names no editor, so resolution leaves it empty and the rest of the ladder decides.
 	editor *string
@@ -686,9 +669,6 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 	if file.contextWindow != nil {
 		s.contextWindow = *file.contextWindow
 	}
-	if file.llamaLauncher != nil { // file-only (ADR 0029); env/flag never point at the launcher
-		s.llamaLauncher = *file.llamaLauncher
-	}
 	if file.editor != nil { // file-only (ADR 0041); the env rungs below it are read at launch time
 		s.editor = *file.editor
 	}
@@ -813,19 +793,9 @@ type fileConfig struct {
 	// A name no entry carries is not refused here — which names exist is what the list says, so
 	// selection answers it.
 	Server string `yaml:"server"`
-	// LlamaLauncher says whether this session may start, switch and stop the LOCAL servers it
-	// talks to — through llama-launcher — and which of that tool's config files to read (ADR
-	// 0029). File-only (no flag/env), like Servers above. Absent/empty ⇒ auto-detect: the
-	// launcher's own default config path is read if that file exists, and the local-server verbs
-	// stay silently dormant if it does not (the container case, where the launcher's MCP adapter
-	// listed under mcp-servers: is the remote answer instead). `off` ⇒ disabled even on a machine
-	// that has a launcher config. Any other value ⇒ the launcher config to read, with `~`
-	// expanded. Whether that file exists is deliberately not asked at startup, on the Servers
-	// reasoning: a missing one degrades at the moment a verb reaches for it.
-	LlamaLauncher string `yaml:"llama-launcher"`
 	// Editor names the command an external edit is opened with — the ⏎ jump the /settings pane makes
 	// on a key no field can hold, and any other edit of this file. A top-level scalar beside Server
-	// and LlamaLauncher above, file-only (no flag/env), carried verbatim: `editor: code -w` is split
+	// above, file-only (no flag/env), carried verbatim: `editor: code -w` is split
 	// into words at the launch site, so flags travel with the program. Absent/empty ⇒ the rest of the
 	// ladder decides — $VISUAL, then $EDITOR, then the OS default opener (ADR 0041). It is free text
 	// with no validate hook, like present.command: which programs this machine has is not a fact this
@@ -1001,7 +971,7 @@ type serverEntry struct {
 // today must still be listed.
 //
 // The entry's optional `llama-launcher:` value is checked on the same footing, and for the same
-// three defects the retiring top-level key was checked for: a value that is only whitespace reads
+// three defects the retired top-level key was checked for: a value that is only whitespace reads
 // as configured but names nothing; a value carrying a URL scheme is the one confusion this key
 // invites (a launcher on another machine is an `mcp-servers:` entry, not a local file path); and
 // `off` is refused because absent is already the off state, so accepting a second spelling of it
@@ -1042,36 +1012,6 @@ func validateServers(servers []serverEntry) error {
 					"another machine is reached as an mcp-servers: entry instead", i+1, s.Name, launcher)
 			}
 		}
-	}
-	return nil
-}
-
-// validateLlamaLauncher rejects a `llama-launcher:` value that is not one of the three shapes the
-// key has (ADR 0029): absent/empty (auto-detect), `off` (disabled), or the path of a llama-launcher
-// config file. Only defects in the FILE itself are caught here, on exactly the validateServers
-// posture above — whether the named file EXISTS is deliberately not asked, because a launcher
-// config is a property of the machine rather than of the config that travels between machines, and
-// a session that never reaches for a local server must not be refused a start over one. A path that
-// is not there degrades at the moment a verb wants it, where the message can name the file.
-//
-// So two things are refused. A value that is only whitespace reads as configured but names nothing,
-// and would otherwise resolve silently back to auto-detect — the `servers:` entry-with-a-blank-name
-// case. And a value carrying a URL scheme is the one confusion the key invites: llama-launcher is
-// also reachable over MCP, and that remote form belongs under `mcp-servers:` — this key takes a
-// LOCAL file path, so a URL here would fail much later as a missing file.
-func validateLlamaLauncher(v string) error {
-	if v == "" {
-		return nil
-	}
-	if strings.TrimSpace(v) == "" {
-		return errors.New("apogee: llama-launcher: is only whitespace — leave the key out (or empty) " +
-			"to auto-detect the launcher's own config, set it to off to disable, or give the path of " +
-			"a llama-launcher config file")
-	}
-	if strings.Contains(v, "://") {
-		return fmt.Errorf("apogee: llama-launcher: %q looks like a URL — this key takes the path of a "+
-			"LOCAL llama-launcher config file (or off, or nothing at all to auto-detect); a launcher on "+
-			"another machine is reached as an mcp-servers: entry instead", v)
 	}
 	return nil
 }
@@ -1288,9 +1228,6 @@ func (fc fileConfig) layer() layer {
 	}
 	if fc.Server != "" {
 		l.startupServer = &fc.Server
-	}
-	if fc.LlamaLauncher != "" {
-		l.llamaLauncher = &fc.LlamaLauncher
 	}
 	if fc.Editor != "" {
 		l.editor = &fc.Editor
@@ -1638,13 +1575,6 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	if err := validateServers(s.servers); err != nil {
 		return err
 	}
-	// `llama-launcher:` is checked on the same footing, and just as shallowly: a value that names
-	// nothing, or that names a URL where the key takes a local path, is wrong in the file itself.
-	// Whether the launcher config it points at is present on THIS machine is not asked here (ADR
-	// 0029 — a missing one degrades at the first verb, not at startup).
-	if err := validateLlamaLauncher(s.llamaLauncher); err != nil {
-		return err
-	}
 	// Which server this session starts on. It is the last step of resolution rather than part of it
 	// (ADR 0036): the answer needs the resolved list, the resolved name and the raw invocation
 	// overrides together, and a name that matches nothing is a fact about that triple, not about
@@ -1678,7 +1608,6 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.bypass = s.bypass
 	opts.servers = s.servers
 	opts.startupServer = s.startupServer
-	opts.llamaLauncher = s.llamaLauncher
 	opts.editor = s.editor
 	opts.confineToWorkspace = s.confineToWorkspace
 	opts.unconfinedHosts = s.unconfinedHosts
