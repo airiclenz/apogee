@@ -361,7 +361,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// and the binding the out-of-band calls read). A determined startup binds HERE, before the TUI
 	// starts, which is what keeps the ordinary path exactly what it was; an undetermined one leaves
 	// both holders empty and binds through the seam handed to the renderer below.
-	binder := serverBinder{cfg: cfg, resumed: resumed, engine: engine, holder: holder}
+	// The Parallel agents cap for whichever server this session is on (ADR 0039 decision 2). It is
+	// declared beside the two holders above and for their reason: the width belongs to the SERVER, so
+	// every point the session arrives on one — this bind, a first pick, a `/server` switch — re-states
+	// it, and the beat that discovers a server's slot count re-states it again. Empty until something
+	// is bound, which resolves to 1: the serial floor.
+	caps := newParallelAgentsCap(engine)
+
+	binder := serverBinder{cfg: cfg, resumed: resumed, engine: engine, holder: holder, caps: caps}
 	if opts.prebound.Reason == "" {
 		if err := binder.bind(startupEntry(opts)); err != nil {
 			return err
@@ -442,6 +449,22 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		}, nil
 	}
 
+	// The discovery half of the Parallel agents cap (ADR 0039 decision 2), wrapped around the beat
+	// the TUI already runs rather than probing for itself: `total_slots` rides the observation the
+	// heartbeat lands every Interval (ADR 0024 — no new beat machinery), and this is the composition
+	// root reading it on the way past. An unpinned server therefore widens from serial to its own
+	// slot count within one beat of being bound, and narrows again if the operator restarts it
+	// smaller; a pinned one is unmoved, because the pin outranks discovery.
+	//
+	// It runs on the TUI's beat goroutine, which is safe on both sides: the holder has its own mutex
+	// and the engine seam behind it is the anytime-safe class (Agent.SetParallelAgents). The Beat is
+	// returned untouched — the renderer sees exactly what the server said.
+	beat := func(ctx context.Context) heartbeat.Beat {
+		observed := holder.Beat(ctx)
+		caps.observe(observed.TotalSlots)
+		return observed
+	}
+
 	// The one fold that re-points a session at another Upstream, shared by `/server`'s switch and
 	// a profile load's follow-the-profile: engine switch, Monitor swap, stored model cleared, in order
 	// (see sessionMover.move, which carries the reasoning).
@@ -480,6 +503,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// installed only after the move SUCCEEDED, so a refused switch leaves the session's launcher
 		// where the session still is.
 		launcher.follow(entry)
+		// And so does the fan-out width, for the same reason and on the same terms (ADR 0039): how
+		// many sub-agents may run at once is the new server's answer, not the old one's, and the
+		// entry's pin is in hand right here. A move is the one moment the previously observed slot
+		// count must be forgotten — parallelAgentsCap.follow does that — so an unpinned server starts
+		// serial and widens the moment its own first beat reports its slots.
+		caps.follow(entry)
 		return result, nil
 	}
 
@@ -618,8 +647,9 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// The two upstream seams (ADR 0024): the monitor observes on the TUI's cadence, and the
 		// closure applies what the observation implies. Wiring both is what makes the display live.
 		// Heartbeat goes through the holder, so the observation follows the session onto another
-		// server without the seam — or the renderer — changing shape.
-		Heartbeat: holder.Beat,
+		// server without the seam — or the renderer — changing shape; the wrapper above reads the
+		// slot count off the same observation on its way past.
+		Heartbeat: beat,
 		Rebind:    rebind,
 		// The `/server` half: the servers this session can move to (display and identity only —
 		// the keys and hints stay here) and the one verb that moves it. Both are always wired;
@@ -760,6 +790,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 			mcp:        mcpSet,
 			roots:      roots,
 			present:    presentation,
+			caps:       caps,
 		}),
 		// The `$EDITOR` round trip for the keys no row can hold (ADR 0037 decision 5): out through a
 		// command line this binary resolves — the file, the key's own line, the editor this environment
@@ -1326,6 +1357,11 @@ type settingsApplier struct {
 	// roots are this session's resolved state dirs, which is what the skill source layering is spelled
 	// out of (the same three fields runRoot builds the startup Sources from).
 	roots stateRoots
+	// caps is the session's Parallel agents cap (ADR 0039), reached by exactly one key: a re-read
+	// `servers:` list can carry a new `parallel-agents:` for the entry this session is already on, and
+	// that is a value the engine holds. nil ⇒ this Driver composed no cap, so the list still applies
+	// and only the width stands still.
+	caps *parallelAgentsCap
 }
 
 // applySettingFor builds the [tui.Options.ApplySetting] dispatcher: the one place a key the pane has
@@ -1594,6 +1630,14 @@ func (a settingsApplier) reloadServers() error {
 		return err
 	}
 	a.live.setServers(l.servers)
+	// The one thing in that list an engine DOES hold: the fan-out width of the server this session is
+	// on (ADR 0039 decision 2). Re-resolving it here is what makes `parallel-agents:` an ADR 0037 key
+	// like the rest — moved in the pane, in force in the running session — rather than one that waits
+	// for the next switch. The entry is matched back by name and the observed slot count is kept: the
+	// file changed, the server did not.
+	if a.caps != nil {
+		a.caps.relist(l.servers)
+	}
 	return nil
 }
 
@@ -2371,16 +2415,17 @@ func buildAgent(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, erro
 }
 
 // startupEntry re-assembles the server selection resolved (ADR 0036) from the flattened fields it
-// left on options: the endpoint, the key, the discovery hint, and the alias — which for a
-// configured entry IS its `servers:` name and for the ephemeral override entry is the endpoint's
-// host. It exists so the bind step below has ONE input shape, the serverEntry, whether it is
-// binding the startup server or the one a human picked out of the list.
+// left on options: the endpoint, the key, the discovery hint, the fan-out pin, and the alias —
+// which for a configured entry IS its `servers:` name and for the ephemeral override entry is the
+// endpoint's host. It exists so the bind step below has ONE input shape, the serverEntry, whether it
+// is binding the startup server or the one a human picked out of the list.
 func startupEntry(opts options) serverEntry {
 	return serverEntry{
-		Name:     opts.hostAlias,
-		Endpoint: opts.endpoint,
-		APIKey:   opts.apiKey,
-		Model:    opts.model,
+		Name:           opts.hostAlias,
+		Endpoint:       opts.endpoint,
+		APIKey:         opts.apiKey,
+		Model:          opts.model,
+		ParallelAgents: opts.startupParallelAgents,
 	}
 }
 
@@ -2395,13 +2440,17 @@ func startupEntry(opts options) serverEntry {
 // runs within seconds, for a late bind exactly as it does for the cold start a launch-time bind
 // with no model already is.
 type serverBinder struct {
-	// cfg is everything about the session the server does not decide. The three fields it does —
-	// endpoint, key, model hint — are overwritten from the entry, so nothing that reached this
-	// struct can contradict the server being bound.
+	// cfg is everything about the session the server does not decide. The four fields it does —
+	// endpoint, key, model hint, fan-out width — are overwritten from the entry, so nothing that
+	// reached this struct can contradict the server being bound.
 	cfg     apogee.Config
 	resumed *session.Record
 	engine  *lateEngine
 	holder  *upstreamHolder
+	// caps is the session's Parallel agents cap (ADR 0039). The bind is where it FOLLOWS the entry:
+	// the resolved width seeds the Config the Agent is constructed from, so a session is capped from
+	// its first Turn rather than from its first beat.
+	caps *parallelAgentsCap
 }
 
 // bind constructs the engine for entry and points both holders at it. The engine is constructed
@@ -2417,6 +2466,10 @@ func (b serverBinder) bind(entry serverEntry) error {
 	cfg.Endpoint = entry.Endpoint
 	cfg.Model = entry.Model
 	cfg.APIKey = entry.APIKey
+	// The fourth field the server decides, and the one that cannot be pushed after the fact here:
+	// the Agent does not exist yet, so the resolved cap goes in through the Config it is built from.
+	// follow's own push at the still-unbound engine is the no-op that says so.
+	cfg.ParallelAgents = b.caps.follow(entry)
 
 	if err := b.engine.Bind(func() (*apogee.Agent, error) {
 		agent, err := buildAgent(cfg, b.resumed)
@@ -2698,6 +2751,18 @@ func (e *lateEngine) SetContextFiles(enable bool, names []string) {
 	e.mu.Unlock()
 	if agent != nil {
 		agent.SetContextFiles(enable, names)
+	}
+}
+
+// SetParallelAgents moves the depth-0 fan-out width (ADR 0039). Unlike the four setters above it is
+// deliberately NOT remembered while unbound, and does not need to be: the cap is a property of the
+// server, so there is nothing to remember until one is chosen — and the bind that chooses it seeds
+// the width straight into the Config the Agent is constructed from (serverBinder.bind). A push at an
+// unbound holder is therefore the honest no-op it looks like, which is what lets the cap holder call
+// this on every path without asking whether a session has a server yet.
+func (e *lateEngine) SetParallelAgents(width int) {
+	if agent := e.bound(); agent != nil {
+		agent.SetParallelAgents(width)
 	}
 }
 

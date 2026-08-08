@@ -306,3 +306,112 @@ func serverNameList(entries []serverEntry) string {
 	}
 	return strings.Join(names, ", ")
 }
+
+// ----------------------------------------------------------------------------
+// The Parallel agents cap (ADR 0039 decision 2)
+// ----------------------------------------------------------------------------
+
+// parallelAgentsSetter is the engine mutation a cap install performs, named as the ONE method it
+// needs so the holder below is exercisable without constructing an Agent — the upstreamSwitcher
+// posture. Satisfied by *lateEngine (and, through it, by *apogee.Agent).
+type parallelAgentsSetter interface {
+	SetParallelAgents(width int)
+}
+
+// parallelAgentsCap owns the Parallel agents cap for the server this session is bound to right now
+// and is the only thing that pushes it at the engine. It exists because the cap is resolved from two
+// facts that arrive at different times and from different places: the bound entry's
+// `parallel-agents:` PIN, which comes with the entry the moment the session moves onto it, and the
+// server's own `total_slots`, which only a landed beat can report. Holding them apart and resolving
+// at the point of install is what lets either arrive first — a pinned entry is capped before the
+// first beat, an unpinned one the moment discovery answers — without a second, subtly different
+// resolution growing beside resolveParallelAgents.
+//
+// It remembers the bound entry's NAME for one job: a `servers:` list the human edits mid-session
+// (ADR 0037) has to be able to move the cap of the server the session is ALREADY on, and a name is
+// what identifies an entry across a re-read (ADR 0036 decision 1). The ephemeral `--endpoint` entry
+// is in no list, so it matches nothing and simply keeps what it was bound with — which is the honest
+// answer for a server the file does not describe.
+//
+// The mutex is the upstreamHolder's, for the upstreamHolder's reason: follow runs on the Update
+// goroutine (a `/server` switch, a first bind) while observe runs on the beat goroutine, so the two
+// fields are genuinely shared. The engine seam it pushes through is itself anytime-safe
+// (Agent.SetParallelAgents), so nothing here has to wait for a quiescent boundary.
+type parallelAgentsCap struct {
+	mu sync.Mutex
+	// name is the bound entry's `servers:` name — how a re-read list is matched back to the server
+	// this session is on. Empty until something is bound.
+	name string
+	// pinned is that entry's `parallel-agents:` value; 0 means the entry pins nothing, so the cap is
+	// discovered.
+	pinned int
+	// observed is the last `total_slots` a beat could name for the CURRENT server, and 0 until one
+	// does. It is forgotten on every move, because a slot count is a fact about one server and
+	// carrying the retired server's width onto the new one is exactly the bug that would be
+	// invisible.
+	observed int
+
+	engine parallelAgentsSetter
+}
+
+// newParallelAgentsCap builds the holder over the engine seam a resolved cap is pushed through.
+// Nothing is bound yet, so the cap it would resolve is 1 — the serial floor a session with no server
+// honestly runs at.
+func newParallelAgentsCap(engine parallelAgentsSetter) *parallelAgentsCap {
+	return &parallelAgentsCap{engine: engine}
+}
+
+// follow takes the cap onto entry: the entry's pin becomes the pin, the retired server's observed
+// slot count is dropped, and the resolved cap is pushed at the engine and returned. It is called at
+// every point a session ARRIVES on a server — the startup bind, a first pick, a `/server` switch —
+// which is exactly where the bound server's window is re-stated too.
+//
+// The return value is what makes the bind path work without a second call: an Agent that does not
+// exist yet cannot be pushed at, so the binder seeds its Config with this number and the push is the
+// no-op an unbound engine answers with.
+func (c *parallelAgentsCap) follow(entry serverEntry) int {
+	c.mu.Lock()
+	c.name, c.pinned, c.observed = entry.Name, entry.ParallelAgents, 0
+	width := resolveParallelAgents(c.pinned, c.observed)
+	c.mu.Unlock()
+	c.engine.SetParallelAgents(width)
+	return width
+}
+
+// observe records what a landed beat could say about the current server's slot count and re-installs
+// the cap. A beat that could name none (0) is not evidence the server changed — only that this beat
+// could not say — so it is dropped rather than written, exactly as liveSettings.observe treats an
+// unnamed window.
+//
+// The install is unconditional rather than change-detecting: it is one mutex and one int on a
+// ten-second cadence, and a cap that is re-stated to the value it already had is indistinguishable
+// from one nobody touched.
+func (c *parallelAgentsCap) observe(slots int) int {
+	c.mu.Lock()
+	if slots > 0 {
+		c.observed = slots
+	}
+	width := resolveParallelAgents(c.pinned, c.observed)
+	c.mu.Unlock()
+	c.engine.SetParallelAgents(width)
+	return width
+}
+
+// relist re-resolves the cap from a re-read `servers:` list (ADR 0037's live apply): the entry that
+// still carries the bound server's name supplies the pin, and the observed slot count is KEPT —
+// nothing about the server changed, only what the file says about it. A list that no longer names
+// this session's server leaves the cap exactly where it was, which is the same posture the switch
+// list takes toward an entry the human deleted while the session was on it.
+func (c *parallelAgentsCap) relist(entries []serverEntry) int {
+	c.mu.Lock()
+	for _, e := range entries {
+		if e.Name != "" && e.Name == c.name {
+			c.pinned = e.ParallelAgents
+			break
+		}
+	}
+	width := resolveParallelAgents(c.pinned, c.observed)
+	c.mu.Unlock()
+	c.engine.SetParallelAgents(width)
+	return width
+}

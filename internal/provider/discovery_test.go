@@ -223,7 +223,63 @@ func TestDiscover_NoRuntimeWindowKeepsModelsValue(t *testing.T) {
 		if info.ContextWindow != 32768 {
 			t.Errorf("ContextWindow = %d, want 32768 (no n_ctx field ⇒ keep models value)", info.ContextWindow)
 		}
+		// The same response's OTHER field is now read: a payload with no window still tells us how
+		// many slots the server was launched with, and the two are resolved independently.
+		if info.TotalSlots != 1 {
+			t.Errorf("TotalSlots = %d, want 1 (total_slots is parsed even with no n_ctx)", info.TotalSlots)
+		}
 	})
+}
+
+// The discovery half of the Parallel agents cap (ADR 0039 decision 2): `/props` reports the
+// `--parallel N` width the server was launched with, and a server that does not report it leaves the
+// number UNKNOWN — 0, never a guessed 1 — because the fallback to serial belongs to whoever resolves
+// the cap, not to the probe.
+func TestDiscover_TotalSlots(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		props string
+		want  int
+	}{
+		{
+			name:  "reported beside the runtime window",
+			props: `{"default_generation_settings":{"n_ctx":8192},"total_slots":4}`,
+			want:  4,
+		},
+		{
+			name:  "absent leaves it unknown",
+			props: `{"default_generation_settings":{"n_ctx":8192}}`,
+			want:  0,
+		},
+		{
+			name:  "nonsense is not a width",
+			props: `{"default_generation_settings":{"n_ctx":8192},"total_slots":0}`,
+			want:  0,
+		},
+		{
+			name:  "no /props at all",
+			props: "",
+			want:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv, _ := discoveryServer(`{"data":[{"id":"m","context_length":32768}]}`, tt.props)
+			defer srv.Close()
+
+			info, err := NewClient(srv.URL, "").Discover(context.Background())
+			if err != nil {
+				t.Fatalf("Discover: %v", err)
+			}
+			if info.TotalSlots != tt.want {
+				t.Errorf("TotalSlots = %d, want %d", info.TotalSlots, tt.want)
+			}
+		})
+	}
 }
 
 func TestDiscover_PropsProbeSendsAuth(t *testing.T) {

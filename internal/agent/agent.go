@@ -33,7 +33,7 @@ import (
 // Exchange: that goroutine owns the conversation there, so the boundary itself is the
 // synchronization — no lock, and no other goroutine may make the call (ADR 0025). The
 // anytime-goroutine-safe class — SetMode, SetConfineToWorkspace, SetBypass,
-// SetCompactionEnabled and SetContextFiles — is the exception: each swaps ONE live field
+// SetCompactionEnabled, SetContextFiles and SetParallelAgents — is the exception: each swaps ONE live field
 // behind its own mutex, so the host (the settings surface, Shift+Tab, /confine) may call it
 // while a Step runs and the change lands at that field's next consumption boundary.
 type Agent struct {
@@ -86,6 +86,14 @@ type Agent struct {
 
 	contextFilesMu   sync.RWMutex
 	contextFileNames []string // live workspace context-file names; seeded from cfg.ContextFiles, swappable via SetContextFiles
+
+	// parallelAgentsMu guards parallelAgents, a fifth field of the same class and for the same
+	// reason: the Parallel agents cap is a property of the SERVER this session is bound to (ADR
+	// 0039), and a `/server` switch or a heartbeat that observes another slot count moves it from
+	// the host's goroutine while a Step may be running. cfg.ParallelAgents stays the immutable
+	// construction seed.
+	parallelAgentsMu sync.RWMutex
+	parallelAgents   int // live depth-0 fan-out width; seeded from cfg.ParallelAgents, swappable via SetParallelAgents
 
 	// liveMode, when non-nil, is a sub-agent's read-only view of its PARENT's live mode: the
 	// parent's effectiveMode accessor, captured at spawn (ADR 0013). The per-call
@@ -376,6 +384,32 @@ func (a *Agent) SetContextFiles(enable bool, names []string) {
 	a.contextFilesMu.Lock()
 	a.contextFileNames = live
 	a.contextFilesMu.Unlock()
+}
+
+// SetParallelAgents moves the Parallel agents cap — the width of a depth-0 sub-agent fan-out (ADR
+// 0039) — for the rest of the session, or until the session moves to another server. Anything < 2
+// means serial, which is the floor this loop has always run at, so a host that resolves nothing
+// leaves the engine exactly where it was.
+//
+// It is the SERVER's number rather than the session's: the host resolves it from the bound entry's
+// `parallel-agents:` pin, else that server's advertised slot count, and re-states it whenever the
+// session moves or a heartbeat observes a different one. That is why it belongs to the anytime-safe
+// class alongside SetMode: the beat that observes a restarted server lands on its own goroutine,
+// and the cap is read once per dispatch rather than held across one, so a change lands on the next
+// fan-out and never mid-flight.
+func (a *Agent) SetParallelAgents(width int) {
+	a.parallelAgentsMu.Lock()
+	a.parallelAgents = width
+	a.parallelAgentsMu.Unlock()
+}
+
+// parallelAgentsCap reports the live fan-out width under the lock, so the dispatch read is race-free
+// against a concurrent SetParallelAgents. It is the ONE read seam for the cap: cfg.ParallelAgents is
+// only the construction seed.
+func (a *Agent) parallelAgentsCap() int {
+	a.parallelAgentsMu.RLock()
+	defer a.parallelAgentsMu.RUnlock()
+	return a.parallelAgents
 }
 
 // contextFileList reports the live context-file names under the lock. The returned slice is never

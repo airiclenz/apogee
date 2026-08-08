@@ -2651,3 +2651,32 @@ func TestApplyConfigRecordsOverrideSources(t *testing.T) {
 		t.Errorf("opts.overrides = %v; want %v", opts.overrides, want)
 	}
 }
+
+// The Parallel agents cap has three ranks and no fourth (ADR 0039 decision 2): a pin is never
+// overruled, discovery answers when nothing is pinned, and 1 — strictly serial, today's behaviour —
+// is what a session falls back to when neither can say.
+func TestResolveParallelAgents(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		pinned     int
+		discovered int
+		want       int
+	}{
+		{name: "pin beats discovery", pinned: 2, discovered: 8, want: 2},
+		{name: "a pin of 1 is still a pin", pinned: 1, discovered: 8, want: 1},
+		{name: "discovery beats the default", pinned: 0, discovered: 4, want: 4},
+		{name: "neither says anything", pinned: 0, discovered: 0, want: 1},
+		{name: "a nonsense pin falls through", pinned: -3, discovered: 4, want: 4},
+		{name: "a nonsense slot count falls through", pinned: 0, discovered: -1, want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := resolveParallelAgents(tt.pinned, tt.discovered); got != tt.want {
+				t.Errorf("resolveParallelAgents(%d, %d) = %d, want %d", tt.pinned, tt.discovered, got, tt.want)
+			}
+		})
+	}
+}

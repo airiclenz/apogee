@@ -97,6 +97,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		bypass:             cfg.Bypass,             // and the three the settings surface swaps: Bypass …
 		compaction:         cfg.Context.CompactionEnabled,
 		contextFileNames:   cfg.ContextFiles,
+		parallelAgents:     cfg.ParallelAgents, // and the fan-out width the host resolved per bound server
 		textParser:         textParser,
 		stripper:           stripper,
 		tracker:            newSelfRegulator(),

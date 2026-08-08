@@ -77,9 +77,25 @@ commit).
 
 **Commit:** `feat(config): add per-server parallel-agents key`
 
-## 2. Discovery and resolution: the cap reaches the engine
+## 2. Discovery and resolution: the cap reaches the engine — ✅ DONE (2026-08-08)
 
 Depends on item 1.
+
+NOTES (2026-08-08): four deviations from this item's literal text, all recorded rather than assumed.
+(a) The `/props` helper `discoverRuntimeContextWindow` is renamed `discoverProps` and returns both
+facts — the same single request now answers two questions, and the old name would have lied about
+the second. (b) The cap reaches the engine through a NEW anytime-safe mutator,
+`Agent.SetParallelAgents` (plus the unexported `parallelAgentsCap()` read seam item 4 consumes), not
+through `RebindSpec`: a `/server` switch installs the cap without any rebind, and this item's own
+test asks for exactly that. (c) `resolveParallelAgents` sits beside `validateServers` in
+`cmd/apogee/config.go` rather than at the cited `config.go:475`, which is inside the source-layer
+struct's field docs and cannot hold a function; the composition-root holder that owns the pin and the
+observed slot count is `parallelAgentsCap` in `cmd/apogee/upstream.go`, beside `sessionMover`.
+(d) Discovery reaches that holder through a wrapper around the `tui.Options.Heartbeat` seam in
+`wire.go` — the `Rebind` seam carries only model and window, and widening it is an `internal/tui`
+change this item does not own. Startup and a first bind install through `serverBinder.bind` (which
+seeds `Config.ParallelAgents` before the Agent exists); the `servers:` row's live apply re-resolves
+through `parallelAgentsCap.relist`.
 
 **What:** One new field read from a response Apogee already fetches, resolved
 pin-else-discover-else-1, delivered to the engine the same way the runtime context window

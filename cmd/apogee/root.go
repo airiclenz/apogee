@@ -86,6 +86,15 @@ type options struct {
 	// launcher's own default config lives — because only it knows the launcher.
 	startupLauncher string
 
+	// startupParallelAgents is the SELECTED startup entry's own `parallel-agents:` value, exactly as
+	// the user wrote it: 0 (the key absent) ⇒ nothing is pinned for this server, so the cap is
+	// discovered from what it advertises and falls back to 1. It is a fact about the entry this
+	// session starts ON for the same reason startupLauncher is — the width belongs to the server,
+	// not to the run — and the ephemeral `--endpoint`/`APOGEE_ENDPOINT` override entry carries none,
+	// which leaves an override run discovering. Resolved-not-flag-bound; applyConfig sets it from
+	// the startup entry, and the composition root resolves it into the engine's cap (ADR 0039).
+	startupParallelAgents int
+
 	// prebound says this session starts with NO upstream bound, and why — the zero value being the
 	// ordinary start, on the server selection determined. It is the one resolution outcome that
 	// does not come out of applyConfig's write-back but out of its refusal: the root command

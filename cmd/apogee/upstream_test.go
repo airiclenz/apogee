@@ -413,3 +413,96 @@ func TestRunRootSwitchServerUnknownNameTouchesNothing(t *testing.T) {
 		t.Errorf("beat after the refused switch = %+v; want the unchanged model-a", beat)
 	}
 }
+
+// parallelAgentsSpy records every width pushed at the engine seam, so a test can say both WHAT the
+// cap resolved to and that it was actually installed rather than merely computed.
+type parallelAgentsSpy struct{ widths []int }
+
+func (s *parallelAgentsSpy) SetParallelAgents(width int) { s.widths = append(s.widths, width) }
+
+func (s *parallelAgentsSpy) last() int {
+	if len(s.widths) == 0 {
+		return 0
+	}
+	return s.widths[len(s.widths)-1]
+}
+
+// The cap follows the SERVER (ADR 0039 decision 2), which is the whole reason it is re-stated at
+// every arrival: a `/server` switch onto a pinned entry installs that entry's pin, a switch onto an
+// unpinned one starts serial, and the slot count the retired server advertised is forgotten rather
+// than carried onto a machine that never claimed it.
+func TestParallelAgentsCapFollowsTheBoundServer(t *testing.T) {
+	t.Parallel()
+
+	spy := &parallelAgentsSpy{}
+	caps := newParallelAgentsCap(spy)
+
+	if got := caps.follow(serverEntry{Name: "pinned", ParallelAgents: 4}); got != 4 {
+		t.Errorf("follow(pinned 4) = %d, want the pin", got)
+	}
+	if spy.last() != 4 {
+		t.Errorf("installed %v; want the pin pushed at the engine", spy.widths)
+	}
+	// A pin is never overruled by what the server says about itself.
+	if got := caps.observe(2); got != 4 {
+		t.Errorf("observe(2) under a pin of 4 = %d, want 4 — discovery never outranks a pin", got)
+	}
+
+	// Onto an unpinned server: nothing is claimed, so the floor is serial — and the 2 slots the
+	// previous server reported must play no part in it.
+	if got := caps.follow(serverEntry{Name: "open"}); got != 1 {
+		t.Errorf("follow(unpinned) = %d, want 1 — an unknown server runs one agent at a time", got)
+	}
+	// …until its own first beat says how wide it is.
+	if got := caps.observe(3); got != 3 {
+		t.Errorf("observe(3) unpinned = %d, want the discovered 3", got)
+	}
+	// A beat that could name no width is not evidence the server shrank.
+	if got := caps.observe(0); got != 3 {
+		t.Errorf("observe(0) = %d, want the last 3 — a silent beat is not an observation", got)
+	}
+}
+
+// A `servers:` list the human edits mid-session (ADR 0037) moves the cap of the server the session
+// is ALREADY on: the entry is matched back by name, the observed slot count is kept — the file
+// changed, the server did not — and a list that no longer names this session's server changes
+// nothing.
+func TestParallelAgentsCapRelistMovesThePinInPlace(t *testing.T) {
+	t.Parallel()
+
+	spy := &parallelAgentsSpy{}
+	caps := newParallelAgentsCap(spy)
+	caps.follow(serverEntry{Name: "here", ParallelAgents: 2})
+	caps.observe(6)
+
+	if got := caps.relist([]serverEntry{{Name: "here", ParallelAgents: 5}, {Name: "there", ParallelAgents: 9}}); got != 5 {
+		t.Errorf("relist = %d, want the edited pin 5 — and never another entry's 9", got)
+	}
+	// A cleared pin hands the width back to what the server itself advertised, exactly as clearing
+	// `context-window:` hands the window back.
+	if got := caps.relist([]serverEntry{{Name: "here"}}); got != 6 {
+		t.Errorf("relist with the pin removed = %d, want the observed 6", got)
+	}
+	if got := caps.relist([]serverEntry{{Name: "elsewhere", ParallelAgents: 8}}); got != 6 {
+		t.Errorf("relist without this session's server = %d, want 6 unchanged", got)
+	}
+	if spy.last() != 6 {
+		t.Errorf("installed %v; want every re-resolution pushed at the engine", spy.widths)
+	}
+}
+
+// The startup half of the same fact: the entry a session was launched on carries its own pin, so a
+// session that starts on a pinned server is capped from its first Turn rather than from its first
+// beat.
+func TestStartupEntryCarriesTheParallelAgentsPin(t *testing.T) {
+	t.Parallel()
+
+	entry := startupEntry(options{
+		hostAlias:             "here",
+		endpoint:              "http://127.0.0.1:1111",
+		startupParallelAgents: 4,
+	})
+	if entry.ParallelAgents != 4 {
+		t.Errorf("startupEntry().ParallelAgents = %d, want the resolved startup entry's 4", entry.ParallelAgents)
+	}
+}

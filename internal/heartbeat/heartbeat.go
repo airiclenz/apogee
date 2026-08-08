@@ -55,6 +55,13 @@ type Beat struct {
 	// runtime window from GET /props when that probe answered, which overrides the advertised
 	// one (provider.Discover's rule: /v1/models reports the model's TRAINING context).
 	ContextWindow int
+	// TotalSlots is how many generation slots the same /props probe reported — the `--parallel N`
+	// width the server was launched with — and 0 when it reported none. It rides the beat for the
+	// window's own reason: the width is a property of the SERVER, it can move under a session when
+	// the operator restarts that server, and the caller re-resolves the Parallel agents cap from it
+	// at the next boundary (ADR 0039 decision 2, ADR 0024's rebind). One more field on the
+	// observation that already lands every Interval, never a probe of its own.
+	TotalSlots int
 	// AvailableModels is every advertised model, in the order the server listed them.
 	AvailableModels []ModelSummary
 }
@@ -114,6 +121,7 @@ func (m *Monitor) Beat(ctx context.Context) Beat {
 		Reachable:       true,
 		ActiveModel:     info.ActiveModel,
 		ContextWindow:   info.ContextWindow,
+		TotalSlots:      info.TotalSlots,
 		AvailableModels: make([]ModelSummary, 0, len(info.AvailableModels)),
 	}
 	for _, model := range info.AvailableModels {

@@ -230,3 +230,62 @@ func TestAgentAnytimeSettersConcurrent(t *testing.T) {
 	}()
 	wg.Wait()
 }
+
+// TestAgentSetParallelAgentsMovesTheFanOutWidth proves the fifth anytime-safe setter: the Parallel
+// agents cap (ADR 0039) is seeded from the construction Config and moved by SetParallelAgents with
+// no rebuild — which is what a `/server` switch onto a differently-sized server, and a beat that
+// observes one, both need. cfg.ParallelAgents stays the seed and is never read again.
+func TestAgentSetParallelAgentsMovesTheFanOutWidth(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.ParallelAgents = 3
+	a, err := newAgent(cfg, &compactSpyResponder{reply: "reply"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if got := a.parallelAgentsCap(); got != 3 {
+		t.Errorf("seeded cap = %d, want the Config's 3", got)
+	}
+
+	// A move onto a server with no width to offer: serial, and stated as such rather than left at
+	// the previous server's number.
+	a.SetParallelAgents(1)
+	if got := a.parallelAgentsCap(); got != 1 {
+		t.Errorf("cap after SetParallelAgents(1) = %d, want 1", got)
+	}
+
+	a.SetParallelAgents(8)
+	if got := a.parallelAgentsCap(); got != 8 {
+		t.Errorf("cap after SetParallelAgents(8) = %d, want 8", got)
+	}
+}
+
+// The setter is in the anytime-safe class, so it must be race-free against a concurrent read from
+// the goroutine driving the loop — the property `-race` proves and a comment cannot.
+func TestAgentSetParallelAgentsIsRaceFree(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	a, err := newAgent(cfg, &compactSpyResponder{reply: "reply"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 1; i <= 200; i++ {
+			a.SetParallelAgents(i)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			_ = a.parallelAgentsCap()
+		}
+	}()
+	wg.Wait()
+}

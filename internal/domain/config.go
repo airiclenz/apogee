@@ -148,6 +148,19 @@ type Config struct {
 	// directly.
 	ContextFiles []string
 
+	// ParallelAgents is the width of a depth-0 sub-agent fan-out (CONTEXT: Parallel agents, ADR
+	// 0039): how many of ONE reply's `sub_agent` calls the loop may run at the same time. < 2 means
+	// serial — the byte-identical floor this engine has always run at — and the engine treats it as
+	// a WIDTH, never a promise: it is an upper bound the dispatch may fall short of (a reply with
+	// one delegation runs one), and nothing reserves capacity against it.
+	//
+	// It is a property of the SERVER rather than of the session — a llama.cpp server serves
+	// `--parallel N` requests at once, each in its own slot — so the host resolves it per bound
+	// server (the entry's `parallel-agents:` pin, else that server's /props total_slots, else 1) and
+	// re-states it when the session moves. An embedder sets it directly; 0 is the safe default that
+	// asks for nothing.
+	ParallelAgents int
+
 	// Budget / Compaction knobs (context/) are structural and load-bearing — they
 	// run even under Bypass. Defaults are sane; overrides are advanced.
 	Context ContextConfig

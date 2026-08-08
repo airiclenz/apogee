@@ -3673,3 +3673,48 @@ func TestLateEngineBindRefusesAProfileItCannotParse(t *testing.T) {
 		t.Fatalf("Bind after the refused one: %v, want the holder still free", err)
 	}
 }
+
+// The `servers:` row's live apply reaches one thing the engine actually holds: the fan-out width of
+// the server this session is on (ADR 0039 decision 2). A `parallel-agents:` edited in the pane is in
+// force in the running session, like every other ADR 0037 key, rather than waiting for the next
+// switch — and clearing it hands the width back to what the server itself advertised.
+func TestApplySettingServersReResolvesTheParallelAgentsCap(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	write := func(pin string) {
+		t.Helper()
+		body := "servers:\n  - name: here\n    endpoint: http://127.0.0.1:1111\n" + pin
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+	}
+
+	spy := &parallelAgentsSpy{}
+	caps := newParallelAgentsCap(spy)
+	caps.follow(serverEntry{Name: "here", Endpoint: "http://127.0.0.1:1111", ParallelAgents: 2})
+	caps.observe(6) // what this server's own beat reported, which the pin outranks
+
+	apply := applySettingFor(settingsApplier{
+		engine:     &applySettingSpy{},
+		live:       newLiveSettings(options{}, nil),
+		configPath: path,
+		caps:       caps,
+	})
+
+	write("    parallel-agents: 5\n")
+	if _, err := apply("servers", ""); err != nil {
+		t.Fatalf("apply servers: %v", err)
+	}
+	if spy.last() != 5 {
+		t.Errorf("installed %v; want the edited pin 5 in force at once", spy.widths)
+	}
+
+	write("")
+	if _, err := apply("servers", ""); err != nil {
+		t.Fatalf("apply servers with the pin removed: %v", err)
+	}
+	if spy.last() != 6 {
+		t.Errorf("installed %v; want the observed 6 back once the pin is gone", spy.widths)
+	}
+}

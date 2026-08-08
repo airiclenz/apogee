@@ -39,6 +39,18 @@ type ModelInfo struct {
 	// `apogee probe` states the /v1/models and /props outcomes independently, and a
 	// non-zero value here is what makes a server identifiable as llama.cpp-shaped.
 	RuntimeContextWindow int
+
+	// TotalSlots is the number of generation slots the same GET /props reported — the `--parallel N`
+	// width the server was launched with — and 0 when that probe found none (no /props, or a server
+	// that does not report the field). It rides beside RuntimeContextWindow because the two are one
+	// fact seen twice: llama.cpp splits its one window into total_slots slots, so the window above is
+	// PER SLOT (ADR 0024's per-slot honesty) and this is how many of them there are.
+	//
+	// It is the DISCOVERY half of the Parallel agents cap (ADR 0039 decision 2): a host whose server
+	// entry pins no `parallel-agents:` resolves the cap from this number, and falls back to 1 —
+	// strictly serial — when it is 0. Nothing here decides that; the number is reported and the
+	// resolution belongs to whoever configured the pin.
+	TotalSlots int
 }
 
 // Discover resolves the active model and its context window from the Upstream. It runs two
@@ -49,7 +61,8 @@ type ModelInfo struct {
 // model's *training* context (meta.n_ctx_train) — often far larger than the window the
 // server was actually loaded with. A non-200, an unreachable server, or an empty model list
 // from /v1/models is an error; the /props probe is best-effort (a non-llama.cpp server has
-// no /props, so any failure there just leaves the /v1/models value untouched).
+// no /props, so any failure there just leaves the /v1/models value untouched). That same probe
+// also reports how many generation slots the server was launched with (ModelInfo.TotalSlots).
 func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
@@ -59,9 +72,11 @@ func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 		return ModelInfo{}, err
 	}
 
-	if runtime := c.discoverRuntimeContextWindow(ctx); runtime > 0 {
+	runtime, slots := c.discoverProps(ctx)
+	if runtime > 0 {
 		info.setRuntimeContextWindow(runtime)
 	}
+	info.TotalSlots = slots
 	return info, nil
 }
 
@@ -95,44 +110,53 @@ func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
 	return info, nil
 }
 
-// discoverRuntimeContextWindow probes llama.cpp's GET /props for the runtime context window
-// (default_generation_settings.n_ctx — the per-slot context the server was started with). It
-// is best-effort: a non-llama.cpp server returns a non-200 or omits the field, and any
-// failure (including a cancelled context) yields 0 so the caller keeps the /v1/models value.
-// It shares the caller's discovery deadline.
-func (c *Client) discoverRuntimeContextWindow(ctx context.Context) int {
+// discoverProps probes llama.cpp's GET /props for the two facts it reports about how the server was
+// launched: the runtime context window (default_generation_settings.n_ctx — the per-slot context)
+// and the number of generation slots (total_slots — the `--parallel N` width). It is best-effort: a
+// non-llama.cpp server returns a non-200 or omits either field, and any failure (including a
+// cancelled context) yields 0 for both, so the caller keeps the /v1/models window and treats the
+// slot count as unknown. It shares the caller's discovery deadline.
+//
+// Both come out of ONE response because they are one observation: asking twice would cost a second
+// round trip and could straddle a restart that moved both numbers at once.
+func (c *Client) discoverProps(ctx context.Context) (window, slots int) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+propsPath, nil)
 	if err != nil {
-		return 0
+		return 0, 0
 	}
 	c.setAuth(req.Header)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return 0
+		return 0, 0
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return 0
+		return 0, 0
 	}
 
 	var decoded propsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return 0
+		return 0, 0
 	}
-	if decoded.DefaultGenerationSettings.NCtx <= 0 {
-		return 0
+	if decoded.DefaultGenerationSettings.NCtx > 0 {
+		window = decoded.DefaultGenerationSettings.NCtx
 	}
-	return decoded.DefaultGenerationSettings.NCtx
+	if decoded.TotalSlots > 0 {
+		slots = decoded.TotalSlots
+	}
+	return window, slots
 }
 
 // propsResponse is the subset of llama.cpp's GET /props payload we read: the runtime context
-// window the server was launched with, reported per generation slot.
+// window the server was launched with, reported per generation slot, and how many of those slots
+// there are (the `--parallel N` width — ADR 0039's discovery source for the Parallel agents cap).
 type propsResponse struct {
 	DefaultGenerationSettings struct {
 		NCtx int `json:"n_ctx"`
 	} `json:"default_generation_settings"`
+	TotalSlots int `json:"total_slots"`
 }
 
 // setRuntimeContextWindow overrides the active model's window with the authoritative runtime

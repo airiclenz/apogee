@@ -64,6 +64,40 @@ func TestBeatCarriesDiscovery(t *testing.T) {
 	}
 }
 
+// The slot count rides the beat that already lands every Interval (ADR 0039 decision 2): the width a
+// server was launched with can move under a session when its operator restarts it, so the caller
+// re-resolves the Parallel agents cap from the observation rather than from anything captured at
+// launch. A server that reports no slots reports 0, which is "this beat could not say" and not "one".
+func TestBeatCarriesTotalSlots(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reported", func(t *testing.T) {
+		t.Parallel()
+		srv := discoveryServer(t, `{"data":[{"id":"m","context_length":32768}]}`,
+			`{"default_generation_settings":{"n_ctx":16384},"total_slots":4}`)
+
+		beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
+
+		if beat.TotalSlots != 4 {
+			t.Errorf("TotalSlots = %d, want 4 (the /props --parallel width)", beat.TotalSlots)
+		}
+		if beat.ContextWindow != 16384 {
+			t.Errorf("ContextWindow = %d, want 16384 — the slot count rides BESIDE the window", beat.ContextWindow)
+		}
+	})
+
+	t.Run("not reported", func(t *testing.T) {
+		t.Parallel()
+		srv := discoveryServer(t, `{"data":[{"id":"m","context_length":32768}]}`, "")
+
+		beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
+
+		if beat.TotalSlots != 0 {
+			t.Errorf("TotalSlots = %d, want 0 — a server with no /props names no width", beat.TotalSlots)
+		}
+	})
+}
+
 func TestBeatHintPinsActiveWindow(t *testing.T) {
 	t.Parallel()
 

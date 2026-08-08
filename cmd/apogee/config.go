@@ -1041,6 +1041,30 @@ func validateServers(servers []serverEntry) error {
 	return nil
 }
 
+// resolveParallelAgents answers the one question ADR 0039 decision 2 asks about a bound server: how
+// many sub-agents may run against it at once. pinned is that server entry's `parallel-agents:` value
+// (0 when the key is absent, which yaml cannot tell from an explicit 0) and discovered is what the
+// live server's `/props` reported as `total_slots` (0 when nothing was observed, or nothing asked).
+//
+// It is the `context-window:` idiom, and the ranks are the whole of the decision: a PIN is never
+// overruled by discovery, discovery answers when nothing is pinned, and 1 — strictly serial, exactly
+// today's behaviour — is what a session falls back to when neither can say. There is no fourth
+// answer and deliberately no "0 means unlimited": a width nobody bounded is a width that outruns the
+// server's slots, and the honest floor for an unknown server is one agent at a time.
+//
+// Both inputs are guarded rather than trusted: validateServers already refuses a negative pin at
+// startup, and a server is free to advertise nonsense, so anything below 1 simply falls through to
+// the next rank.
+func resolveParallelAgents(pinned, discovered int) int {
+	if pinned >= 1 {
+		return pinned
+	}
+	if discovered >= 1 {
+		return discovered
+	}
+	return 1
+}
+
 // validatedSetsConfig is the on-disk schema for the Validated-set surface (ADR 0016):
 // `enable` is the §5 off-switch (a pointer so an explicit `enable: false` is
 // distinguishable from an absent key, default true); `alias` is the §3 explicit
@@ -1629,6 +1653,12 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	// composition root to resolve. The ephemeral override entry carries none, which is the honest
 	// answer for an endpoint no entry names: `/server` onto a launcher-fronted entry turns it on.
 	opts.startupLauncher = startup.LlamaLauncher
+	// And how wide a fan-out that entry's server will take (ADR 0039 decision 2). Same reasoning as
+	// the launcher key above: it belongs to the entry, so what the session starts with is the
+	// SELECTED entry's own value, carried as written for the composition root to resolve against
+	// what the server itself advertises. The ephemeral override entry pins nothing, which leaves an
+	// override run discovering — and falling back to one agent at a time.
+	opts.startupParallelAgents = startup.ParallelAgents
 	opts.mode = s.mode
 	opts.bypass = s.bypass
 	opts.servers = s.servers
