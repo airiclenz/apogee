@@ -20,10 +20,11 @@ muted: "#656d76"        # status/footer/tool-detail dim
 muted-bright: "#424a53" # the muted tone one step up: the text of an EXPANDED tool block, so what a reader opened stands out from the collapsed blocks around it — on a light terminal "up" is DARKER, one rung down the same neutral ramp
 
 # --- semantic ----------------------------------------------------------------------
-diff-add: "#1a7f37" # diff "+" lines
-diff-del: "#cf222e" # diff "-" lines
-error: "#cf222e"    # recovered-fault notices
-code: "#bc4c00"     # inline `code` + fenced code blocks (orange)
+diff-add: "#1a7f37"    # diff "+" lines
+diff-del: "#cf222e"    # diff "-" lines
+error: "#cf222e"       # recovered-fault notices
+code: "#bc4c00"        # inline `code` + fenced code blocks (orange)
+tool-header: "#1f6feb" # a tool-call block's header label (Run, List Dir, Sub-Agent, …) and the sub-agent rail that hangs off it — blue, so the blocks apogee ran read apart from the code it prints
 
 # --- autonomy modes ----------------------------------------------------------------
 # The footer's mode markers, warming up the privilege ladder (least → most autonomous).

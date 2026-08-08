@@ -35,6 +35,9 @@ type Scheme struct {
 	DiffDel string `yaml:"diff-del"` // diff "-" lines
 	Error   string `yaml:"error"`    // recovered-fault notices
 	Code    string `yaml:"code"`     // inline `code` + fenced code blocks
+	// ToolHeader is the tool label's own tone, kept apart from Code so a scheme can
+	// pitch the block headers against the code it prints without moving both at once.
+	ToolHeader string `yaml:"tool-header"` // tool-call block headers + the sub-agent rail
 
 	ModePlan       string `yaml:"mode-plan"`        // autonomy mode: plan
 	ModeAskBefore  string `yaml:"mode-ask-before"`  // autonomy mode: ask-before

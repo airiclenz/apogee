@@ -75,6 +75,22 @@ func TestBuiltinSchemesKeepBothMutedStepsDistinct(t *testing.T) {
 	}
 }
 
+func TestBuiltinSchemesKeepToolHeaderAndCodeDistinct(t *testing.T) {
+	t.Parallel()
+	for _, name := range builtinNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := builtinScheme(t, name)
+			// Splitting tool-header off code is the whole point of the role: a shipped
+			// scheme that gives both one value paints tool headers in the code tone
+			// again and hands the separation back.
+			if got.ToolHeader == got.Code {
+				t.Errorf("tool-header and code are both %q — a tool block's header must not read as the code it prints", got.Code)
+			}
+		})
+	}
+}
+
 func TestBuiltinSchemesKeepModeColorsDistinct(t *testing.T) {
 	t.Parallel()
 	for _, name := range builtinNames() {
