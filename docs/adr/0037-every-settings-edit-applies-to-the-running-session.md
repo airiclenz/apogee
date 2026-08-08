@@ -4,6 +4,21 @@ Status: accepted
 
 # Every settings edit applies to the running session
 
+> **Superseded in part by [ADR 0041](0041-the-config-file-is-watched.md) (2026-08-06).** Two
+> mechanisms of decision 6 are replaced. **Binding B** — the `$VISUAL` → `$EDITOR` → `vi` ladder —
+> becomes a four-rung ladder that starts at a new top-level `editor` config key and ends at the OS
+> default opener (`open` / `xdg-open` / `cmd /c start ""`), so unset no longer means `vi`. And **the
+> diff-on-exit trigger** — the baseline taken at launch, re-read when the child process exits — is
+> replaced by a **watcher over `config.yaml`** that runs for the whole session: a launcher stub such
+> as `open` returns before the editor is even on screen, so an exit-triggered diff reads unchanged
+> bytes and concludes the user edited nothing. Terminal editors keep the blocking, TUI-suspending
+> path and still apply on exit; everything else launches detached and the watcher supplies the apply.
+> With it, the rejected option "a file watcher, so any external edit reloads live" and the
+> consequence "an edit made outside apogee still does not reload" are reversed. **Everything else
+> here stands** — the `ApplySetting` seam and its dispatcher, the two mutator classes and their
+> boundaries, the idle-only mutators and the idle-only editor jump, the row notes, the ` *` marker,
+> and the rule that a key which cannot be applied refuses on its own row.
+
 ## Context
 
 [ADR 0035](0035-the-settings-surface-persists-one-key-per-deliberate-edit.md) built the settings

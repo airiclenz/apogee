@@ -83,7 +83,15 @@ Two consequences the plan author derived from those calls, binding on implemente
 
 ---
 
-## 1. ADR 0038 — the config file is watched
+## 1. ADR 0038 — the config file is watched — ✅ DONE (2026-08-08)
+
+NOTES (2026-08-08): the record was written as **ADR 0041**, not 0038 — 0038 (windows console), 0039
+and 0040 were all taken between this plan being saved and its execution. Ratified by the owner
+2026-08-08: file `docs/adr/0041-the-config-file-is-watched.md`, and every cross-reference (including
+the blockquote added to ADR 0037) says 0041. No existing ADR was renumbered or modified apart from
+that blockquote. Its H1 stays in house style — `# The config file is watched`, no `ADR 0041 —`
+prefix — because no ADR in `docs/adr/` carries its number in the H1 and the item asks for the house
+format of 0035/0036/0037; the number lives in the filename and in the cross-references.
 
 **What.** Write `docs/adr/0038-the-config-file-is-watched.md` in the house format used by
 0035/0036/0037 (Context / Decision / Considered options / Consequences). It records the
