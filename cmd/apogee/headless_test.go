@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/run"
 )
@@ -642,11 +643,11 @@ func TestHeadlessStripEscapesDropsControlCharacters(t *testing.T) {
 	}
 }
 
-// The gauge's own spelling, pinned value by value. This package carries a twin of internal/tui's
-// formatTokens because that one is unexported in a package the CLI half must not depend on, and a
-// twin is only worth having while it agrees: two Drivers over one engine may not spell one figure
-// two ways. Whole thousands round DOWN above a thousand, and a count below one renders empty —
-// which is why a zero-limit run is dropped upstream rather than printed as "9k/".
+// The spelling this Driver's sub-agent lines are built from, pinned value by value at the CLI seam.
+// internal/format owns the rule and tests it exhaustively; what this table guards is that the
+// user-visible CLI strings keep coming from that one helper — a headless line is read by scripts,
+// so a silent change of unit here is a change of interface. A count below one renders empty, which
+// is why a zero-limit run is dropped upstream rather than printed as "9k/".
 func TestHeadlessTokenSpellingMatchesTheGauge(t *testing.T) {
 	for _, tc := range []struct {
 		n    int
@@ -657,12 +658,12 @@ func TestHeadlessTokenSpellingMatchesTheGauge(t *testing.T) {
 		{1, "1"},
 		{999, "999"},
 		{1000, "1k"},
-		{1999, "1k"},
+		{1999, "2k"},
 		{18432, "18k"},
 		{32768, "32k"},
 	} {
-		if got := formatTokens(tc.n); got != tc.want {
-			t.Errorf("formatTokens(%d) = %q; want %q", tc.n, got, tc.want)
+		if got := format.Tokens(tc.n); got != tc.want {
+			t.Errorf("format.Tokens(%d) = %q; want %q", tc.n, got, tc.want)
 		}
 	}
 }

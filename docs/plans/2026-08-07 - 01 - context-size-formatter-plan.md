@@ -59,9 +59,16 @@ Update the pinned tests — only pins whose spelling actually changes under the 
 
 **Commit:** `refactor(tui): use shared format.Tokens for context-size display`
 
-## 3. Remove the headless `formatTokens` twin
+## 3. Remove the headless `formatTokens` twin — ✅ DONE (2026-08-08)
 
 Depends on item 1.
+
+NOTES (2026-08-08): beyond the item's enumerated files, one prose claim in `docs/design/technical-design.md:208`
+described the deleted helper as "a local twin of the TUI's `formatTokens` … since that one is unexported in a
+package the CLI half must not import" — false the moment the twin was removed — so that clause now names
+`format.Tokens` and the shared package. The repurposed test kept its name (`TestHeadlessTokenSpellingMatchesTheGauge`)
+and its doc comment was rewritten, since the twin-sync rationale it stated no longer holds. No CHANGELOG entry
+was added: item 4 is the plan's single owning item for cross-cutting doc edits and is not yet done.
 
 **What:** In `cmd/apogee/headless.go`, delete the duplicate `formatTokens` (`:475`) and its doc comment (`:467-473`) that justified byte-identical duplication — the shared `internal/format` package dissolves that rationale. Switch `headlessSubAgentLines` (`:442`) to `format.Tokens`. Update `headless_test.go`: repurpose the twin-sync table (`:655-667`) to pin the shared helper's spellings at the CLI seam under the new rule (`{1999,"2k"}` etc. — keep the table, it guards the user-visible CLI strings), and check the sub-agent line pins (`:476,522,550,573` — expected unchanged: `"12k/32k"`, `"4k/32k"`).
 

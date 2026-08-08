@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
@@ -439,7 +440,7 @@ func headlessSubAgentLines(runs []run.SubAgentUsage) []string {
 		if r.Used <= 0 || r.Limit <= 0 {
 			continue
 		}
-		line := "sub-agent: " + formatTokens(r.Used) + "/" + formatTokens(r.Limit)
+		line := "sub-agent: " + format.Tokens(r.Used) + "/" + format.Tokens(r.Limit)
 		if task := clipSubAgentTask(stripEscapesToLine(r.Task)); task != "" {
 			line += " · " + task
 		}
@@ -462,24 +463,6 @@ func clipSubAgentTask(task string) string {
 		return task
 	}
 	return string(runes[:headlessTaskMax-1]) + "…"
-}
-
-// formatTokens spells a token count the way the TUI's gauge does — bare below a thousand, whole
-// thousands with a `k` above it (18432 → "18k") — so two Drivers over one engine do not spell one
-// figure two ways. A non-positive count renders empty, which no caller here can print: a line with
-// a zero half is dropped before it is composed.
-//
-// It duplicates internal/tui's identical helper for the reason stripEscapes does: that one is
-// unexported in a package the binary's CLI half must not depend on, and the twin is six lines of
-// pure function against a one-way dependency. A test pins the spellings it must match.
-func formatTokens(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
-	}
-	return fmt.Sprintf("%dk", n/1000)
 }
 
 // stripEscapes drops the C0 control characters from the model's answer before it is printed,
