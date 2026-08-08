@@ -144,9 +144,19 @@ func (h *upstreamHolder) Endpoint() string {
 	return h.endpoint
 }
 
-// Binding snapshots the current Upstream binding for a caller that must BUILD a client rather than
-// observe one — today the session-naming call in title.go, which constructs a fresh provider.Client
-// per call precisely so it follows a `/server` switch and a rebind without a seam of its own.
+// Binding snapshots the current Upstream binding for a caller that must ACT on it rather than
+// observe it — build a client against it, dial it, or resolve the config that is keyed on it. Every
+// consumer reads it at CALL time for the one reason: that is what follows a `/server` switch and a
+// rebind without a seam of its own.
+//
+//   - the session-naming call (title.go) constructs a fresh provider.Client per call from all three
+//     fields;
+//   - the rebind closure (wire.go) hands it to liveSettings.rebindInputs, so the per-model
+//     resolution keys on the server the session is on NOW rather than on the launch endpoint;
+//   - a scheduled Firing (schedule.go) takes BOTH halves of its upstream from it — the wire it
+//     dials and the endpoint that same resolution keys on;
+//   - the settings applier's rideTheRebind (wire.go) reads Model alone, to name the model a
+//     committed `/settings` edit has to be re-resolved for.
 func (h *upstreamHolder) Binding() upstreamBinding {
 	h.mu.Lock()
 	defer h.mu.Unlock()
