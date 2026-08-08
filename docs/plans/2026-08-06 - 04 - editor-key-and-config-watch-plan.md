@@ -254,9 +254,17 @@ implements ratified calls 2 and 4 and classifies the result.
 
 ---
 
-## 4. The config file watcher
+## 4. The config file watcher — ✅ DONE (2026-08-08)
 
 *Depends on item 2.*
+
+NOTES (2026-08-08): two shape details the item text left open, stated here because item 6 consumes them.
+The settle delay is a second field (`settle`, default 250ms) beside `interval`, so a test drives the
+coalescing window directly instead of inferring it from the cadence. `Stop` closes `Changes()` after
+waiting for the poll goroutine to return — that wait is what makes "no report after Stop returns" a
+guarantee rather than a probability, and the close is the watch's end-of-stream signal, so item 6's
+consumer must treat a closed receive as the end and stop selecting on it. `Start`/`Stop` are also
+no-ops when repeated, so a teardown that runs its closers twice cannot panic on a closed channel.
 
 **What.** A new `cmd/apogee/configwatch.go` holding a self-contained, dependency-free
 watcher over one path.
