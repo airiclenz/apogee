@@ -2,7 +2,9 @@
 #
 # A color scheme recolors only what apogee already colors: it never paints the full
 # terminal background, and it never touches glyphs, markers or layout. This scheme is
-# the palette apogee has always drawn with, tuned for dark terminals.
+# the palette apogee has always drawn with, tuned for dark terminals, apart from
+# three roles retuned for legibility while the scheme system was being built (`code`,
+# `tool-header` and `tool-marker`).
 #
 # Every key below is optional. A key you leave out keeps its default (dark) value, so
 # your own scheme can be as short as the handful of roles you want to change. Values
