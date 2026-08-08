@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sync"
 	"time"
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
@@ -86,6 +87,11 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		return nil, err
 	}
 
+	// Every Event this Agent (and every sub-agent it spawns) emits goes through one serializing
+	// seam, so a depth-0 fan-out's concurrent children still hand the host a LINEAR stream
+	// (domain.EventSink). It is installed once, here, rather than at the ~20 emit sites.
+	cfg.Events = serializedEvents(cfg.Events)
+
 	a := &Agent{
 		cfg:                cfg,
 		upstream:           up,
@@ -111,6 +117,36 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	// restoreState value-assigns a.conv, and the pointer keeps that write visible through a.turns.
 	a.turns = &turnLifecycle{conv: &a.conv, tracker: a.tracker}
 	return a, nil
+}
+
+// serialEventSink serializes concurrent Emit calls onto one host EventSink. It is the engine's
+// half of the EventSink contract: the loop may emit from several goroutines once a depth-0
+// fan-out is running (ADR 0039), and a host that only ever receives a linear stream — the TUI's
+// transcript, the bench's tap, a recording sink in a test — must not have to guard itself.
+//
+// Ordering between concurrent emitters is deliberately unspecified: the mutex makes the stream
+// linear and gives each observer a happens-before edge to the previous event, and the events
+// themselves carry the identity an observer demultiplexes by (EventBase.CallID).
+type serialEventSink struct {
+	mu    sync.Mutex
+	inner domain.EventSink
+}
+
+func (s *serialEventSink) Emit(e domain.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inner.Emit(e)
+}
+
+// serializedEvents wraps sink in the serializing seam, unless it already IS one. The idempotence
+// is what keeps a nested sub-agent on the SAME mutex as its parent: newChildAgent copies the
+// parent's Config, so the child's construction sees an already-wrapped sink and re-uses it rather
+// than stacking a private, uncontended lock in front of it at every depth.
+func serializedEvents(sink domain.EventSink) domain.EventSink {
+	if _, already := sink.(*serialEventSink); already {
+		return sink
+	}
+	return &serialEventSink{inner: sink}
 }
 
 // buildEnabledMechanisms builds each Mechanism named on cfg.EnableMechanisms and Adds it into

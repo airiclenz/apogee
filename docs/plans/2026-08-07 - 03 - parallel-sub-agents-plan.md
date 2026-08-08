@@ -179,10 +179,38 @@ round-trip with and without the field.
 
 **Commit:** `feat(events): stamp the spawning sub_agent call-ID on child events`
 
-## 4. Engine: concurrent depth-0 fan-out
+## 4. Engine: concurrent depth-0 fan-out — ✅ DONE (2026-08-08)
 
 Depends on items 2 and 3. The heart of the plan; if a SPLIT is needed, split the work at a
 checkpoint, not this item's scope.
+
+NOTES (2026-08-08): four deviations from this item's literal text, all recorded rather than assumed.
+(a) The partition is applied UNCONDITIONALLY — a mixed reply's leaf tools run before its
+delegations at EVERY width, not only when the group then fans out. "Cap 1 must not change
+behavior" is honoured for the execution PATH (each call takes byte-for-byte the old route, and a
+delegation group at width 1 runs through the same serial loop), but a mixed reply's dispatch ORDER
+now follows design call 11 at every cap: making the order depend on the bound server's slot count
+would mean the same reply produces a different history on different servers, which no test could
+pin and no user could predict. (b) Only the CHILD RUN is concurrent. The pre-tool-exec hooks, the
+guardrail probe and the Resolution, the audit record, the self-regulation signal, the
+post-tool-result hooks and the append into history all stay on the dispatching goroutine, in
+emitted-call order, on either side of the pool — this is what keeps the parent's registry, guards,
+tracker and conversation single-goroutine, and it satisfies the item's "each driving `runSubAgent`
+for one call" literally. One consequence is named in the code: siblings are resolved against the
+same guardrail state, so a delegation cannot observe a breaker its sibling tripped. (c) The
+"one mutex-guarded emit seam" is installed at CONSTRUCTION — `newAgent` wraps `Config.Events` in an
+idempotent `serialEventSink` — rather than at the ~20 emit sites; `newChildAgent`'s Config copy
+means the parent, every child and every descendant then share ONE mutex. (d) Per-child panic
+recovery is ADDED, in the pool worker only (`runDelegation`): the delegate path had no recover of
+its own before (the existing ones are `executeTool`'s and `recoverHook`'s), and it needs one now
+because a panic crossing a goroutine's top frame kills the process. The serial path is left exactly
+as it was, so cap 1 keeps its old behavior there too.
+
+HAZARD for item 7 / later work (not this item's scope): `newChildAgent` shares the parent's
+`MechanismRegistry` — and therefore the same Mechanism INSTANCES — with every child (ADR 0013's
+default). Concurrent siblings running a stateful Mechanism would touch one instance from two
+goroutines. Nothing is armed by default today, so no live path races; arming `guided_decomposition`
+(item 7) alongside a fan-out needs per-child instances or a lock.
 
 **What:**
 

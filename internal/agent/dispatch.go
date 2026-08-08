@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -34,11 +35,67 @@ const (
 // consulted here, AFTER the stream has closed (the §6 #6 resolution: stream fully, then
 // gate), so a blocking Approver never holds an open Upstream connection.
 //
+// A reply's calls are PARTITIONED first (ADR 0039 decision 11): the leaf tools run first, in
+// their emitted order and through exactly the path they have always taken, and the sub_agent
+// delegations run after them as one group. The order is a property of the reply alone, not of
+// the bound server's fan-out width, so the same reply produces the same history whether the
+// group then runs concurrently or serially — a write a child depends on lands before any child
+// starts, and the model maps results back by call ID either way.
+//
 // It returns dispatchCancelled only if ctx was cancelled while a tool was approving or
 // executing; the caller then rolls the Turn back. Every other failure — an unknown tool, a
 // denied call, a tool error, a recovered tool panic — becomes an error tool-result the
 // model sees on the next Turn, and dispatch continues to the next call (ADR 0007).
 func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.ToolCall) dispatchOutcome {
+	leaves, delegations := partitionDispatch(calls)
+	if outcome := a.dispatchSerially(ctx, turn, leaves); outcome == dispatchCancelled {
+		return dispatchCancelled
+	}
+	if width := a.fanOutWidth(len(delegations)); width > 1 {
+		return a.dispatchFanOut(ctx, turn, width, delegations)
+	}
+	return a.dispatchSerially(ctx, turn, delegations)
+}
+
+// partitionDispatch splits a reply's calls into the leaf tools and the sub_agent delegations,
+// each group keeping its emitted order (ADR 0039 decision 11). It is a pure function of the
+// call list: nothing about the bound server, the depth, or the cap reaches it, so the dispatch
+// ORDER a reply produces is fixed even when the fan-out width is not.
+func partitionDispatch(calls []domain.ToolCall) (leaves, delegations []domain.ToolCall) {
+	for _, call := range calls {
+		if isSubAgentCall(call) {
+			delegations = append(delegations, call)
+			continue
+		}
+		leaves = append(leaves, call)
+	}
+	return leaves, delegations
+}
+
+// fanOutWidth reports how many of a reply's delegations may run at once: min(cap, group size)
+// at depth 0 when the Parallel agents cap (ADR 0039 decision 2) allows more than one, and 1 —
+// meaning "run the group serially, exactly as this loop always has" — otherwise.
+//
+// Depth 0 is the whole eligibility rule (decision 3): a child's own delegations stay serial
+// inline, so there is no slot accounting across levels and no way for a nested fan-out to hold
+// slots its own children need. A group of one is likewise never worth a pool.
+func (a *Agent) fanOutWidth(delegations int) int {
+	if a.depth != 0 || delegations < 2 {
+		return 1
+	}
+	width := a.parallelAgentsCap()
+	if width < 2 {
+		return 1
+	}
+	return min(width, delegations)
+}
+
+// dispatchSerially is the loop this dispatch has always been: one call at a time, each carried
+// from its ToolCallEvent through the hooks, the Resolution, execution, and into history before
+// the next call is looked at. It is the path every leaf tool takes, and the path a delegation
+// group takes whenever the fan-out width is 1 (cap < 2, depth > 0, or a single call), so those
+// cases keep today's behavior exactly.
+func (a *Agent) dispatchSerially(ctx context.Context, turn int, calls []domain.ToolCall) dispatchOutcome {
 	for _, call := range calls {
 		a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call})
 
@@ -63,6 +120,179 @@ func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.Tool
 		a.appendToolResult(turn, result)
 	}
 	return dispatchDone
+}
+
+// ----------------------------------------------------------------------------
+// Depth-0 fan-out (ADR 0039 — Parallel agents)
+// ----------------------------------------------------------------------------
+//
+// A reply that asks for several delegations at once gets them at once, up to the bound server's
+// Parallel agents cap. The fan-out is deliberately NOT "run the whole per-call pipeline on N
+// goroutines": only the CHILD RUN is concurrent. Everything a delegation shares with its
+// siblings — the pre-tool-exec hooks, the guardrail probe and the Resolution, the audit record,
+// the self-regulation signals, the post-tool-result hooks, and the append into history — stays
+// on the dispatching goroutine, in emitted-call order, on either side of the pool. That is what
+// keeps the Agent's own state (registry, guards, tracker, conversation) single-goroutine while
+// N children run, and what makes the resulting history DETERMINISTIC regardless of which child
+// finishes first.
+//
+// The three phases are: prepare each call (serial), run the Delegate verdicts through a bounded
+// pool (concurrent), commit each call's result (serial). A cancellation is answered between the
+// last two — every child is joined first, then the whole group is discarded unappended, so the
+// parent Turn rolls back with no partial delegation in history (ADR 0013 §5, now N-wide).
+
+// fanOutSlot is one delegation's state as it crosses the pool: what was decided about the call
+// before any child ran, what the child produced, and how it ended. Each slot is written by
+// exactly one goroutine at a time — the dispatching one in the prepare and commit phases, one
+// worker in between — so the slice needs no lock.
+type fanOutSlot struct {
+	call    domain.ToolCall
+	verdict resolution
+	result  domain.ToolResult
+	// run marks a Delegate verdict: this slot's child still has to run through the pool. A
+	// refused (or unknown-tool, or hook-failed) slot already holds its final result.
+	run bool
+	// hookFailed marks a pre-tool-exec hook failure, whose result is appended WITHOUT the
+	// productivity signal and the post-tool-result hooks — the serial path's `continue`.
+	hookFailed bool
+	outcome    dispatchOutcome
+}
+
+// dispatchFanOut runs a reply's delegation group concurrently, width children at a time, and
+// commits their results in emitted-call order. It returns dispatchCancelled when ANY child ended
+// on a cancellation: the whole group is then dropped unappended, because a delegation is atomic
+// within the parent Turn and the Turn is about to roll back wholesale (ADR 0013 §5).
+func (a *Agent) dispatchFanOut(ctx context.Context, turn, width int, calls []domain.ToolCall) dispatchOutcome {
+	slots := make([]fanOutSlot, len(calls))
+	for i, call := range calls {
+		slots[i] = a.prepareDelegation(ctx, turn, call)
+	}
+
+	a.runDelegationPool(ctx, turn, width, slots)
+
+	// Join first, decide after: a sibling that reached its boundary with a usable result is
+	// still discarded, because the recovery point is the pre-dispatch boundary of the whole Turn.
+	for i := range slots {
+		if slots[i].outcome == dispatchCancelled {
+			return dispatchCancelled
+		}
+	}
+	for i := range slots {
+		a.commitDelegation(ctx, turn, &slots[i])
+	}
+	return dispatchDone
+}
+
+// prepareDelegation carries one delegation as far as it can go WITHOUT running a child: it
+// surfaces the ToolCallEvent, runs the pre-tool-exec hooks, and computes the call's Resolution.
+// Everything here touches Agent-wide state (the Mechanism registry, the guardrails, the
+// self-regulation view), which is why it runs on the dispatching goroutine for every call in the
+// group before any child starts.
+//
+// One consequence is deliberate and worth naming: siblings are resolved against the SAME
+// guardrail state, so a delegation cannot observe a breaker its sibling tripped. Concurrent
+// calls cannot see each other's outcomes by construction — that is what concurrent means — and
+// the shared read-only dangerous-action floor still re-fires on every call a child actually
+// makes (ADR 0013 D3).
+func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.ToolCall) fanOutSlot {
+	a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call})
+
+	if err := a.runPreToolExecHooks(ctx, turn, &call); err != nil {
+		// Same disposition as the serial path: an error result, no child, and no postlude.
+		return fanOutSlot{
+			call:       call,
+			result:     errorToolResult(call.ID, "pre-tool-exec hook failed"),
+			hookFailed: true,
+		}
+	}
+
+	tool, ok := a.lookupTool(call.Tool)
+	if !ok {
+		// The recursion point is not in this Agent's registry (e.g. withheld): the registry miss
+		// is a dispatch fact answered before resolve(), exactly as resolveAndExecute answers it.
+		return fanOutSlot{call: call, result: errorToolResult(call.ID, fmt.Sprintf("unknown tool %q", call.Tool))}
+	}
+
+	verdict := resolve(a.resolutionInput(tool, call, a.guards.PreExecute(call)))
+	if verdict.kind != resolveDelegate {
+		// resolve() answers a sub_agent call with Delegate or Refuse and nothing else (its row 2:
+		// a Tier-2 force is deliberately not applied to a delegation, so no Gate or Confine can
+		// reach here) — so this is the guard hard-refuse and the depth-bound refusal.
+		return fanOutSlot{call: call, verdict: verdict, result: a.executeRefuse(turn, call, verdict)}
+	}
+	return fanOutSlot{call: call, verdict: verdict, run: true}
+}
+
+// runDelegationPool drives every slot that still needs a child through width worker goroutines,
+// one call each, and returns once all of them have reached a boundary. The workers pull indices
+// off one channel, so width is a true concurrency bound rather than a goroutine count: a group of
+// nine under a cap of three is three children at a time, three times over.
+//
+// ctx is handed to every child unchanged, so a cancel reaches all of them at once and each
+// unwinds at its own next boundary; the join below is what "the pool waits" means. A child's
+// failure is ITS result and nothing more — no sibling is cancelled (ADR 0039 decision 4).
+func (a *Agent) runDelegationPool(ctx context.Context, turn, width int, slots []fanOutSlot) {
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < width; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				slots[i].result, slots[i].outcome = a.runDelegation(ctx, turn, slots[i].call)
+			}
+		}()
+	}
+	for i := range slots {
+		if slots[i].run {
+			jobs <- i
+		}
+	}
+	close(jobs)
+	wg.Wait()
+}
+
+// runDelegation is one worker's whole job: drive this call's nested Agent to its boundary. The
+// recover sits HERE, inside the goroutine, because that is the only place it can be: a panic
+// crossing a goroutine's top frame takes the process down with it, so the per-child fault
+// boundary ADR 0007 promises has to be the child's own goroutine. A recovered child becomes an
+// error tool-result its sibling and the parent Exchange survive.
+//
+// The serial path deliberately keeps its existing shape here — a delegation panic there still
+// unwinds to the driver, exactly as before this fan-out existed.
+func (a *Agent) runDelegation(ctx context.Context, turn int, call domain.ToolCall) (result domain.ToolResult, outcome dispatchOutcome) {
+	defer func() {
+		if r := recover(); r != nil {
+			a.cfg.Events.Emit(domain.ErrorEvent{
+				EventBase: a.base(turn),
+				Source:    call.Tool,
+				Err:       fmt.Sprintf("panic: %v", r),
+			})
+			result = errorToolResult(call.ID, fmt.Sprintf("tool %q panicked", call.Tool))
+			outcome = dispatchDone
+		}
+	}()
+	return a.runSubAgent(ctx, call)
+}
+
+// commitDelegation lands one finished delegation: the audit record its verdict earns, the
+// self-regulation signal, the post-tool-result hooks, and the append into history — the same
+// sequence, in the same order, the serial path runs inline for every call. Running it here, one
+// slot at a time in emitted-call order, is what makes the fan-out's history independent of
+// completion order.
+func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot) {
+	if slot.hookFailed {
+		a.appendToolResult(turn, slot.result)
+		return
+	}
+	if slot.run {
+		// executeDelegate's tail: a delegation that actually ran is audit-recorded under its
+		// verdict. A refused slot was already recorded by executeRefuse in the prepare phase.
+		a.recordExecuted(turn, slot.call, slot.verdict.auditDecision, slot.verdict.auditReason, slot.result)
+	}
+	a.noteToolProductivity(slot.call, slot.result)
+	a.runPostToolResultHooks(ctx, turn, slot.call, &slot.result)
+	a.appendToolResult(turn, slot.result)
 }
 
 // resolveAndExecute gathers the facts one tool call is decided from — the registry lookup, the

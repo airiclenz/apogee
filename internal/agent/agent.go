@@ -26,6 +26,12 @@ import (
 //
 // An Agent is not safe for concurrent use by multiple goroutines; drive one Agent
 // from one goroutine (Step/Run), and observe it from another only via its EventSink.
+// That is a rule about the CALLER, and a depth-0 sub-agent fan-out does not bend it: the
+// parent's loop still runs on one goroutine, and the pool it opens mid-dispatch (ADR 0039)
+// is internal to that one dispatch — each worker drives a SEPARATE nested Agent, and every
+// touch of the parent's own state happens on the dispatching goroutine before the pool opens
+// or after it joins. The children share only the Upstream and the EventSink, both of which
+// tolerate it (the sink through the engine's serializing seam).
 // The methods touching loop state fall into three call classes. Idle-only calls (Submit,
 // ClearContext, RestoreSession, Compact, Rebind, SwapTools, SetProfile, AbortExchange) need a
 // quiescent boundary with no Exchange mid-flight. Between-Steps calls by the goroutine DRIVING the loop

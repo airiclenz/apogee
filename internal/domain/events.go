@@ -7,6 +7,14 @@ package domain
 // EventSink receives typed Events as the loop produces them, including *inside* a
 // Step (streaming). The TUI adapts these to Bubble Tea messages; the bench consumes
 // them as Go values. Emit must not block the loop for long — fan out if needed.
+//
+// A sink NEVER has to be safe for concurrent use: the engine serializes emission on its side,
+// so an implementation sees one Emit at a time, each happening-after the last. That guarantee
+// survives a concurrent depth-0 sub-agent fan-out (ADR 0039), where several children emit at
+// once — the engine funnels them through one seam and the sink still receives a LINEAR stream.
+// What a driver must not assume is that a linear stream is a serial one: concurrent emitters
+// interleave in an unspecified order, so events belonging to one agent are recognised by their
+// identity (EventBase.Depth and EventBase.CallID), never by contiguity.
 type EventSink interface {
 	Emit(Event)
 }
