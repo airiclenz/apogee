@@ -352,9 +352,29 @@ commit).
 
 **Commit:** `feat(tui): live per-child blocks for concurrent sub-agent fan-out`
 
-## 7. Guided decomposition: batch = min(cap, remaining)
+## 7. Guided decomposition: batch = min(cap, remaining) — ✅ DONE (2026-08-08)
 
 Depends on item 4.
+
+NOTES (2026-08-08): four deviations from this item's literal text, all recorded rather than assumed.
+(a) The seam is the `SetDepth` SIBLING the item offers first — `Request.SetParallelAgents` +
+`LoopView.ParallelAgents()` — but it carries the DEPTH-AWARE width, not the raw cap: the loop stamps
+`Agent.delegationWidth()`, which is the resolved cap at depth 0 and 1 at any deeper level, because a
+child's own delegations run serially inline (ADR 0039 decision 3) and a Mechanism must never batch
+wider than the engine will honour. That rule already existed inside item 4's `fanOutWidth`, so it was
+extracted into `delegationWidth` and `fanOutWidth` now calls it — one rule, two readers, no behavior
+change (its table test is untouched and green). `domaintest.FakeLoopView` gained `DelegationCap` and
+`internal/mechanisms`' local `fakeView` gained the method, the whole cost of widening the interface.
+(b) A batch that covers the WHOLE enumeration (cap ≥ list) defers NOTHING rather than an empty
+directive — a directive reading "(0 left)" with an empty list would be noise the gate then has to
+read as an in-flight fan-out. Unreachable at cap 1 (the accept window is ≥ 2 items and the batch is
+1), so the serialized floor is untouched. (c) Call IDs: the first delegation of a batch keeps the
+loop's bare `text_call_<turn>` verbatim and siblings take `text_call_<turn>_<i>`, since the ID is
+what item 3's per-child attribution keys on and two siblings sharing one would collapse into each
+other. (d) The directive branches its wording on the BATCH, not the cap: `min(cap, remaining) == 1`
+prints today's singular paragraph word for word — so a wide server's LAST batch also asks in the
+singular — and only a genuine batch prints the plural ask. CHANGELOG and the
+`docs/design/mechanism-catalogue` "one per Turn" prose are item 8's drift sweep, untouched here.
 
 **What:** ADR 0014 amendment 2026-08-07, mechanically.
 

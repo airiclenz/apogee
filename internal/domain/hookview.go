@@ -9,12 +9,13 @@ package domain
 
 // loopView is the read-only window onto loop state every hook gets.
 type loopView struct {
-	messages []Message
-	tools    []ToolDef
-	budget   Budget
-	turn     int
-	fired    map[MechanismID]int
-	depth    int
+	messages       []Message
+	tools          []ToolDef
+	budget         Budget
+	turn           int
+	fired          map[MechanismID]int
+	depth          int
+	parallelAgents int
 }
 
 func (v loopView) Conversation() ConversationView { return conversationView{messages: v.messages} }
@@ -26,6 +27,8 @@ func (v loopView) Budget() Budget { return v.budget }
 func (v loopView) Turn() int { return v.turn }
 
 func (v loopView) Depth() int { return v.depth }
+
+func (v loopView) ParallelAgents() int { return v.parallelAgents }
 
 func (v loopView) Fired(id MechanismID) int { return v.fired[id] }
 

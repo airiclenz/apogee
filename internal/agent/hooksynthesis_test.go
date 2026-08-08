@@ -161,6 +161,46 @@ func TestSynthesizedToolCall_MutateAndDeferBothLand(t *testing.T) {
 	}
 }
 
+// TestLoopViewParallelAgents_StampsTheDelegationWidth proves the third hook-visible seam guided
+// decomposition needs (ADR 0039 / ADR 0014 amendment 2026-08-07): the width a Mechanism may batch
+// delegations by is the width the engine will actually honour. Both hook-facing views the loop
+// builds — the request view and the tool-stage view — carry it, it tracks the live setter rather
+// than the construction Config, and a nested agent reports 1 because its own delegations run
+// serially inline (decision 3), so a batching Mechanism can never ask for concurrency it will not get.
+func TestLoopViewParallelAgents_StampsTheDelegationWidth(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.ParallelAgents = 3
+	a, err := newAgent(cfg, &compactSpyResponder{reply: "reply"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	req, _ := a.buildRequest(0)
+	if got := req.View().ParallelAgents(); got != 3 {
+		t.Errorf("request view reports ParallelAgents %d, want the resolved cap 3", got)
+	}
+	if got := a.loopView(0).ParallelAgents(); got != 3 {
+		t.Errorf("tool-stage view reports ParallelAgents %d, want the resolved cap 3", got)
+	}
+
+	// The live setter moves it — the same anytime-safe seam a /server switch pushes through.
+	a.SetParallelAgents(1)
+	req, _ = a.buildRequest(0)
+	if got := req.View().ParallelAgents(); got != 1 {
+		t.Errorf("after SetParallelAgents(1) the request view reports %d, want 1", got)
+	}
+
+	// Deeper down the answer is 1 whatever the server offers: a child's delegations stay serial.
+	a.SetParallelAgents(3)
+	a.depth = 1
+	req, _ = a.buildRequest(0)
+	if got := req.View().ParallelAgents(); got != 1 {
+		t.Errorf("a Depth-1 agent reports ParallelAgents %d, want 1 (nested delegations stay serial)", got)
+	}
+}
+
 // lastAssistantWithCalls returns the last assistant message carrying tool calls.
 func lastAssistantWithCalls(msgs []domain.Message) (domain.Message, bool) {
 	for i := len(msgs) - 1; i >= 0; i-- {

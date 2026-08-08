@@ -729,6 +729,36 @@ func TestLoopViewDepth(t *testing.T) {
 	}
 }
 
+// TestLoopViewParallelAgents proves the ParallelAgents() seam a batching Mechanism reads (ADR 0039 /
+// ADR 0014 amendment 2026-08-07): the SetDepth sibling stamps the delegation width onto a Request,
+// the view — and the Response produced against it — surfaces it, and an unstamped Request or the
+// degraded no-view Response reports 0, the serial floor.
+func TestLoopViewParallelAgents(t *testing.T) {
+	req := NewRequest("m", []Message{{Role: RoleUser, Content: "hi"}}, nil, Budget{}, 0, nil)
+	if got := req.View().ParallelAgents(); got != 0 {
+		t.Errorf("a Request built without SetParallelAgents reports %d, want 0 (the serial floor)", got)
+	}
+
+	req.SetParallelAgents(4)
+	if got := req.View().ParallelAgents(); got != 4 {
+		t.Errorf("after SetParallelAgents(4), View().ParallelAgents() = %d, want 4", got)
+	}
+	// Like SetDepth it is loop setup, not a hook mutation — it must not read as an acted fire.
+	if req.Revision() != 0 {
+		t.Errorf("SetParallelAgents bumped the revision to %d; it must not book an acted fire", req.Revision())
+	}
+
+	// A Response produced against the request's view inherits the width — the intercept that
+	// synthesizes a batch reads it there, not on the Request.
+	resp := NewResponse("answer", "", nil, FinishStop, req.View())
+	if got := resp.View().ParallelAgents(); got != 4 {
+		t.Errorf("Response.View().ParallelAgents() = %d, want 4 (inherited from the request view)", got)
+	}
+	if got := NewResponse("x", "", nil, FinishStop, nil).View().ParallelAgents(); got != 0 {
+		t.Errorf("nil-view Response reports ParallelAgents %d, want 0", got)
+	}
+}
+
 func equalRoles(a, b []Role) bool {
 	if len(a) != len(b) {
 		return false

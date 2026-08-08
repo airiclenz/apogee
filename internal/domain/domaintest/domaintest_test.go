@@ -86,6 +86,9 @@ func TestFakeLoopViewZeroValue(t *testing.T) {
 	if got := v.Depth(); got != 0 {
 		t.Errorf("Depth() = %d, want 0", got)
 	}
+	if got := v.ParallelAgents(); got != 0 {
+		t.Errorf("ParallelAgents() = %d, want 0 (read as the serial floor)", got)
+	}
 	if got := v.Fired("anything"); got != 0 {
 		t.Errorf("Fired() = %d, want 0 from a nil FireCounts", got)
 	}
@@ -102,11 +105,12 @@ func TestFakeLoopViewReportsSetValues(t *testing.T) {
 			AssistantCalls(call).
 			ToolResult("c1", "package main").
 			Messages(),
-		ToolMenu:    []domain.ToolDef{{Name: "read_file"}},
-		BudgetValue: domain.Budget{ContextLimit: 4096, Used: 128},
-		TurnIndex:   3,
-		NestDepth:   1,
-		FireCounts:  map[domain.MechanismID]int{"read_loop_interceptor": 2},
+		ToolMenu:      []domain.ToolDef{{Name: "read_file"}},
+		BudgetValue:   domain.Budget{ContextLimit: 4096, Used: 128},
+		TurnIndex:     3,
+		NestDepth:     1,
+		DelegationCap: 3,
+		FireCounts:    map[domain.MechanismID]int{"read_loop_interceptor": 2},
 	}
 
 	conv := v.Conversation()
@@ -134,6 +138,9 @@ func TestFakeLoopViewReportsSetValues(t *testing.T) {
 	}
 	if got := v.Depth(); got != 1 {
 		t.Errorf("Depth() = %d, want 1", got)
+	}
+	if got := v.ParallelAgents(); got != 3 {
+		t.Errorf("ParallelAgents() = %d, want 3", got)
 	}
 	if got := v.Fired("read_loop_interceptor"); got != 2 {
 		t.Errorf("Fired(read_loop_interceptor) = %d, want 2", got)

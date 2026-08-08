@@ -15,9 +15,11 @@ import (
 // Default-off (D1) — the config surface builds it only when the `mechanisms:`
 // block enables it, and it is benched as a stack with tool_result_cap (Requires, below) so the
 // bench measures the two together. It steers the PRIMARY call, on an oversized task, to first
-// enumerate the work as a numbered list of self-contained subtasks, then serializes the fan-out one
-// sub_agent delegation per Turn. Two halves on one struct: the pre-request gate + enumeration steer,
-// and the PostResponse intercept + serialized follow-through (both below).
+// enumerate the work as a numbered list of self-contained subtasks, then paces the fan-out at one
+// BATCH of min(Parallel agents cap, remaining) sub_agent delegations per Turn (ADR 0014 amendment
+// 2026-08-07; cap 1 — no server slots advertised — is the ratified one-per-Turn floor). Two halves on
+// one struct: the pre-request gate + enumeration steer, and the PostResponse intercept + batched
+// follow-through (both below).
 func init() {
 	register(row{
 		descriptor: guidedDecompositionDescriptor,
@@ -47,9 +49,10 @@ const (
 )
 
 // guidedDecompositionReportHygiene is the compact-report ask (ADR 0014 §4) appended to every
-// delegated task and named in the follow-through directive. Serialized child reports accumulate in
-// one Exchange that no generative reducer can fold mid-Exchange, so each child is asked to report
-// tersely to keep the accumulation small — tool_result_cap (the Required peer) caps whatever is left.
+// delegated task and named in the follow-through directive. Child reports accumulate in one Exchange
+// that no generative reducer can fold mid-Exchange — a batch's reports land faster still, which makes
+// the coupling tighter, not looser (amendment 2026-08-07) — so each child is asked to report tersely
+// to keep the accumulation small; tool_result_cap (the Required peer) caps whatever is left.
 const guidedDecompositionReportHygiene = "When done, report back a single compact result — the key " +
 	"findings, decisions, and file paths only, not a step-by-step narration of what you did."
 
@@ -315,7 +318,7 @@ func guidedDecompositionLastAssistantCalledTools(conv domain.ConversationView) b
 	return false
 }
 
-// PostResponse is the intercept + serialized follow-through half (ADR 0014 §2/§3). Like the gate it
+// PostResponse is the intercept + batched follow-through half (ADR 0014 §2/§3). Like the gate it
 // carries no per-Mechanism state: the remaining-items queue is re-DERIVED from honest history each
 // Turn (locked decision 1) — the enumeration is the model's own list+delegation message in the
 // current Exchange and the dispatched tasks are the sub_agent calls in that Exchange — so it is
@@ -326,8 +329,9 @@ func guidedDecompositionLastAssistantCalledTools(conv domain.ConversationView) b
 //     conversation), the model replied with ONLY a subtask list and no tool calls, that list is
 //     bounded (2..12), AND a strict majority of its lines carried an explicit ordered/bullet marker
 //     (F4 — a compliant numbered reply passes; prose, a clarifying question, or a refusal does not).
-//     Synthesize the FIRST sub_agent delegation onto the response — text left verbatim (locked
-//     decision 4) — and Defer a directive carrying the remaining subtasks for the next Turn.
+//     Synthesize the FIRST BATCH of sub_agent delegations onto the response — min(cap, len(items)),
+//     text left verbatim (locked decision 4) — and Defer a directive carrying the remaining
+//     subtasks for the next Turn. A batch that covers the whole list defers nothing.
 //   - Fan-out follow-through or off-script tool Turn: a directive is steering (its marker is in the
 //     request) and the model called at least one tool this Turn — the requested sub_agent delegation
 //     OR some other, off-script tool (F2). Re-derive the remainder from history MINUS every dispatched
@@ -350,7 +354,7 @@ func (guidedDecompositionMechanism) PostResponse(_ context.Context, resp *domain
 	calls := resp.ToolCalls()
 
 	// Enumeration response: the steer is outstanding and the model answered with a bare subtask
-	// list. Synthesize the first delegation and defer the remainder.
+	// list. Synthesize the first BATCH of delegations and defer the remainder.
 	if len(calls) == 0 && guidedDecompositionMarkerPresent(conv, guidedDecompositionSteerMarker) {
 		items, marked := guidedDecompositionParseMarkedList(resp.Text())
 		if !guidedDecompositionListInBounds(items) || !guidedDecompositionMajorityMarked(items, marked) {
@@ -358,12 +362,21 @@ func (guidedDecompositionMechanism) PostResponse(_ context.Context, resp *domain
 			// — decline the whole reply, never a partial truncation (F4 / §5).
 			return domain.PostResponseDecision{}, nil
 		}
-		resp.AppendToolCall(domain.ToolCall{
-			ID:        fmt.Sprintf("text_call_%d", resp.View().Turn()), // the loop's synthesized-call style
-			Tool:      tools.SubAgentToolName,
-			Arguments: guidedDecompositionTaskArgs(items[0]),
-		})
-		return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: guidedDecompositionDirective(items[1:])}, nil
+		width := resp.View().ParallelAgents()
+		batch := guidedDecompositionBatchSize(width, len(items))
+		for i, item := range items[:batch] {
+			resp.AppendToolCall(domain.ToolCall{
+				ID:        guidedDecompositionCallID(resp.View().Turn(), i),
+				Tool:      tools.SubAgentToolName,
+				Arguments: guidedDecompositionTaskArgs(item),
+			})
+		}
+		if remainder := items[batch:]; len(remainder) > 0 {
+			return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: guidedDecompositionDirective(remainder, width)}, nil
+		}
+		// The batch covered the whole enumeration (cap ≥ list) — there is nothing to carry
+		// forward, so no directive is deferred. The appended calls already booked the fire (R4).
+		return domain.PostResponseDecision{}, nil
 	}
 
 	// Fan-out follow-through or off-script tool Turn: a directive is steering and the model called at
@@ -375,7 +388,10 @@ func (guidedDecompositionMechanism) PostResponse(_ context.Context, resp *domain
 	// decision; a no-tool final answer never reaches here (F2 — that closes the Exchange).
 	if guidedDecompositionMarkerPresent(conv, guidedDecompositionDirectiveMarker) && len(calls) > 0 {
 		if remainder := guidedDecompositionRemainder(conv, calls); len(remainder) > 0 {
-			return domain.PostResponseDecision{Action: domain.ActionDefer, Inject: guidedDecompositionDirective(remainder)}, nil
+			return domain.PostResponseDecision{
+				Action: domain.ActionDefer,
+				Inject: guidedDecompositionDirective(remainder, resp.View().ParallelAgents()),
+			}, nil
 		}
 	}
 
@@ -433,19 +449,58 @@ func guidedDecompositionTaskArgs(item string) json.RawMessage {
 	return args
 }
 
+// guidedDecompositionBatchSize is the ONE batch rule (ADR 0014 amendment 2026-08-07): a Turn
+// dispatches min(cap, remaining) delegations, where cap is the Parallel agents width the engine
+// will actually honour for this agent (LoopView.ParallelAgents — the bound server's cap at depth
+// 0, 1 deeper down). An unstamped or nonsensical width (0, or a negative one a hand-built view
+// could carry) reads as 1: the serialized floor ADR 0014 §3 ratified, which is what every server
+// advertising no slots keeps.
+func guidedDecompositionBatchSize(width, remaining int) int {
+	if width < 1 {
+		width = 1
+	}
+	return min(width, remaining)
+}
+
+// guidedDecompositionCallID renders the ID of the i-th synthesized delegation of a Turn. The first
+// keeps the loop's bare synthesized-call style verbatim, so a cap-1 batch is byte-identical to the
+// serialized behavior; the rest carry the batch index so a Turn's siblings are distinguishable —
+// the ID is what every child event, result, and TUI block is attributed by (ADR 0039 decision 5).
+func guidedDecompositionCallID(turn, i int) string {
+	if i == 0 {
+		return fmt.Sprintf("text_call_%d", turn)
+	}
+	return fmt.Sprintf("text_call_%d_%d", turn, i)
+}
+
 // guidedDecompositionDirective renders the remaining-items directive deferred into the next request
-// (ADR 0014 §3). It embeds guidedDecompositionDirectiveMarker verbatim (so the pre-request gate reads
-// a fan-out as in flight and stays quiet, and the follow-through case recognises it), lists the
-// remaining subtasks verbatim, asks for exactly ONE delegation this Turn carrying the same hygiene
-// ask, and asks the model to synthesize from all reports once none remain.
-func guidedDecompositionDirective(remaining []string) string {
+// (ADR 0014 §3, batched by the 2026-08-07 amendment). It embeds guidedDecompositionDirectiveMarker
+// verbatim (so the pre-request gate reads a fan-out as in flight and stays quiet, and the
+// follow-through case recognises it), lists the remaining subtasks verbatim, asks for the NEXT BATCH
+// of min(width, remaining) delegations this Turn carrying the same hygiene ask, and asks the model to
+// synthesize from all reports once none remain.
+//
+// A batch of one — a width-1 server, or a single outstanding item on any server — asks in the
+// singular, word for word as the serialized §3 directive always has: cap 1 is not a degenerate case
+// of a batch here, it IS the ratified floor, and the wording the bench measured stays intact.
+func guidedDecompositionDirective(remaining []string, width int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b,
-		"%s (%d left): the primary task is being fanned out one delegation per turn. Delegate EXACTLY "+
-			"the next subtask now via a single %s call — do not do the work yourself, and do not delegate "+
-			"more than one at a time. Give the sub-agent this instruction too: %q. The remaining subtasks, "+
-			"in order:\n",
-		guidedDecompositionDirectiveMarker, len(remaining), tools.SubAgentToolName, guidedDecompositionReportHygiene)
+	if batch := guidedDecompositionBatchSize(width, len(remaining)); batch > 1 {
+		fmt.Fprintf(&b,
+			"%s (%d left): the primary task is being fanned out in batches of delegations. Delegate EXACTLY "+
+				"the next %d subtasks now via %d separate %s calls in this one reply — do not do the work "+
+				"yourself, and do not delegate more than %d at a time. Give every sub-agent this instruction "+
+				"too: %q. The remaining subtasks, in order:\n",
+			guidedDecompositionDirectiveMarker, len(remaining), batch, batch, tools.SubAgentToolName, batch,
+			guidedDecompositionReportHygiene)
+	} else {
+		fmt.Fprintf(&b,
+			"%s (%d left): the primary task is being fanned out one delegation per turn. Delegate EXACTLY "+
+				"the next subtask now via a single %s call — do not do the work yourself, and do not delegate "+
+				"more than one at a time. Give the sub-agent this instruction too: %q. The remaining subtasks, "+
+				"in order:\n",
+			guidedDecompositionDirectiveMarker, len(remaining), tools.SubAgentToolName, guidedDecompositionReportHygiene)
+	}
 	for i, item := range remaining {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, item)
 	}

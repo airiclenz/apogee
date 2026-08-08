@@ -74,20 +74,32 @@ func partitionDispatch(calls []domain.ToolCall) (leaves, delegations []domain.To
 
 // fanOutWidth reports how many of a reply's delegations may run at once: min(cap, group size)
 // at depth 0 when the Parallel agents cap (ADR 0039 decision 2) allows more than one, and 1 —
-// meaning "run the group serially, exactly as this loop always has" — otherwise.
+// meaning "run the group serially, exactly as this loop always has" — otherwise. A group of
+// one is never worth a pool; everything else is delegationWidth's rule.
+func (a *Agent) fanOutWidth(delegations int) int {
+	if delegations < 2 {
+		return 1
+	}
+	return min(a.delegationWidth(), delegations)
+}
+
+// delegationWidth reports how many sub_agent delegations THIS agent may run at once,
+// independent of any particular reply: the resolved Parallel agents cap at depth 0, and 1
+// everywhere else.
 //
 // Depth 0 is the whole eligibility rule (decision 3): a child's own delegations stay serial
 // inline, so there is no slot accounting across levels and no way for a nested fan-out to hold
-// slots its own children need. A group of one is likewise never worth a pool.
-func (a *Agent) fanOutWidth(delegations int) int {
-	if a.depth != 0 || delegations < 2 {
+// slots its own children need. It is one rule with two readers — the pool below sizes itself by
+// it, and buildRequest stamps it onto the hook-facing view (LoopView.ParallelAgents) so a
+// Mechanism synthesizing delegations batches by the same width the engine will honour.
+func (a *Agent) delegationWidth() int {
+	if a.depth != 0 {
 		return 1
 	}
-	width := a.parallelAgentsCap()
-	if width < 2 {
-		return 1
+	if width := a.parallelAgentsCap(); width > 1 {
+		return width
 	}
-	return min(width, delegations)
+	return 1
 }
 
 // dispatchSerially is the loop this dispatch has always been: one call at a time, each carried

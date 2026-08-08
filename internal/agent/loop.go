@@ -631,7 +631,8 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
 	}
 	req := domain.NewRequest(a.cfg.Model, msgs, a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
-	req.SetDepth(a.depth) // surface this Agent's nesting level through req.View().Depth() (ADR 0013/0014)
+	req.SetDepth(a.depth)                      // surface this Agent's nesting level through req.View().Depth() (ADR 0013/0014)
+	req.SetParallelAgents(a.delegationWidth()) // and the width a delegation batch may take through req.View().ParallelAgents() (ADR 0039)
 	deferred, ok := a.conv.TakeDeferred()
 	if ok {
 		for _, inject := range deferred {
@@ -933,7 +934,8 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 // far" — which is why the profile's tool-instruction block is likewise absent from it.
 func (a *Agent) loopView(turn int) domain.LoopView {
 	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
-	req.SetDepth(a.depth) // the tool-stage view reports the same nesting level as the request view
+	req.SetDepth(a.depth)                      // the tool-stage view reports the same nesting level as the request view
+	req.SetParallelAgents(a.delegationWidth()) // and the same delegation width (ADR 0039)
 	return req.View()
 }
 

@@ -300,6 +300,15 @@ type LoopView interface {
 	// nested delegation it itself set up (ADR 0014 §5). A view built without a depth (a test
 	// fake, the degraded no-view Response) reports 0, the top-level default.
 	Depth() int
+	// ParallelAgents reports how many sub_agent delegations the agent this hook is firing
+	// inside may run AT ONCE — the bound server's Parallel agents cap (ADR 0039 decision 2,
+	// pin-else-discover-else-1) at Depth 0, and 1 at any deeper level, where a child's own
+	// delegations stay serial inline (decision 3). It is the width a Mechanism that
+	// synthesizes delegations batches by: guided decomposition dispatches min(cap,
+	// remaining) per Turn (ADR 0014 amendment 2026-08-07). A view built without one (a test
+	// fake, the degraded no-view Response) reports 0, which reads the same as 1 — strictly
+	// serial, the ratified floor.
+	ParallelAgents() int
 	// Fired reports how many times a Mechanism has ACTED this Session (R4): an
 	// invocation is booked only when it mutated its working value or returned a
 	// non-zero post-response Action — an inspect-and-do-nothing invocation is not a
@@ -349,6 +358,9 @@ type Request struct {
 	extras   map[string]json.RawMessage
 	revision int // bumped by each mutator — the acted-fire probe (R4), read via Revision
 	depth    int // sub-agent nesting level surfaced through View().Depth() (0 = top-level; ADR 0013/0014)
+	// parallelAgents is the delegation width surfaced through View().ParallelAgents(): how many
+	// sub_agent calls this agent may run at once (ADR 0039). 0 = unstamped, read as the serial floor.
+	parallelAgents int
 
 	// committedLen bounds the history View() exposes to the post-response scanners: it is
 	// frozen at the first retry-in-place append (AppendSupersededAssistant), so the
@@ -421,7 +433,15 @@ func (r *Request) View() LoopView {
 	if r.committedLen >= 0 && r.committedLen <= len(r.messages) {
 		messages = r.messages[:r.committedLen]
 	}
-	return loopView{messages: messages, tools: r.tools, budget: r.budget, turn: r.turn, fired: r.fired, depth: r.depth}
+	return loopView{
+		messages:       messages,
+		tools:          r.tools,
+		budget:         r.budget,
+		turn:           r.turn,
+		fired:          r.fired,
+		depth:          r.depth,
+		parallelAgents: r.parallelAgents,
+	}
 }
 
 // Model is the target model id (the Library keys its lookup on this).
@@ -438,6 +458,14 @@ func (r *Request) Revision() int { return r.revision }
 // hook mutation — it carries no acted-fire meaning and so does NOT bump the revision. A
 // Request built without it reports Depth 0, the top-level default.
 func (r *Request) SetDepth(depth int) { r.depth = depth }
+
+// SetParallelAgents records how many sub_agent delegations the agent building this request may
+// run at once (engine seam, ADR 0039 — the SetDepth sibling): the loop stamps the bound server's
+// resolved Parallel agents cap at Depth 0 and 1 deeper down, so a post-response hook reading
+// req.View().ParallelAgents() knows how wide a batch of delegations it may synthesize. Like
+// SetDepth it is loop setup rather than a hook mutation, so it does NOT bump the revision. A
+// Request built without it reports 0 — read as 1, the serial floor.
+func (r *Request) SetParallelAgents(width int) { r.parallelAgents = width }
 
 // Extra reports a preserved unknown request field (e.g. a grammar Mechanism checks
 // for an existing response_format before setting one).

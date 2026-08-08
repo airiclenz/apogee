@@ -147,15 +147,16 @@ func (b *ConversationBuilder) Messages() []domain.Message {
 // FakeLoopView is a settable domain.LoopView for hook tests. Set only the fields a
 // test cares about; the zero value is usable and reports the documented test-fake
 // defaults — an empty conversation, no tools, a zero Budget, Turn 0, Depth 0 (the
-// LoopView docstring's "a view built without a depth reports 0"), and Fired 0 for
-// every Mechanism.
+// LoopView docstring's "a view built without a depth reports 0"), ParallelAgents 0
+// (read as the serial floor), and Fired 0 for every Mechanism.
 type FakeLoopView struct {
-	Messages    []domain.Message           // the history Conversation() serves
-	ToolMenu    []domain.ToolDef           // the menu Tools() returns (as a copy)
-	BudgetValue domain.Budget              // what Budget() reports
-	TurnIndex   int                        // what Turn() reports
-	NestDepth   int                        // what Depth() reports (sub-agent nesting, ADR 0013)
-	FireCounts  map[domain.MechanismID]int // per-Mechanism Fired counts; nil reports 0
+	Messages      []domain.Message           // the history Conversation() serves
+	ToolMenu      []domain.ToolDef           // the menu Tools() returns (as a copy)
+	BudgetValue   domain.Budget              // what Budget() reports
+	TurnIndex     int                        // what Turn() reports
+	NestDepth     int                        // what Depth() reports (sub-agent nesting, ADR 0013)
+	DelegationCap int                        // what ParallelAgents() reports (fan-out width, ADR 0039)
+	FireCounts    map[domain.MechanismID]int // per-Mechanism Fired counts; nil reports 0
 }
 
 // Conversation serves a real domain conversation view over Messages, built through
@@ -179,6 +180,9 @@ func (v FakeLoopView) Turn() int { return v.TurnIndex }
 
 // Depth reports NestDepth.
 func (v FakeLoopView) Depth() int { return v.NestDepth }
+
+// ParallelAgents reports DelegationCap.
+func (v FakeLoopView) ParallelAgents() int { return v.DelegationCap }
 
 // Fired reports the FireCounts entry for id (0 when absent or the map is nil).
 func (v FakeLoopView) Fired(id domain.MechanismID) int { return v.FireCounts[id] }
