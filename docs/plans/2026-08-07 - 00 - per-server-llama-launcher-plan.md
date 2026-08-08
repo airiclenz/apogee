@@ -55,7 +55,7 @@ write time from the existing documented postures they extend:
 8. **`auto` matches case-insensitively, trimmed** — the posture the old key's `off`
    sentinel already had (`launcher.go:123-125`).
 
-## 1. Per-entry key: schema field, validation, resolver
+## 1. Per-entry key: schema field, validation, resolver — ✅ DONE (2026-08-08)
 
 **What:** Additive only — the global key keeps working untouched this item.
 

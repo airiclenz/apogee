@@ -405,6 +405,57 @@ func TestLauncherConfigPathLadder(t *testing.T) {
 	}
 }
 
+// The per-entry ladder, which differs from the one above in exactly two places: the off state is the
+// key being absent (nothing to spell), and `auto` is taken VERBATIM — a machine with no launcher
+// config still reports the integration on, so the first verb can name the file it wanted.
+func TestEntryLauncherPathLadder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	auto := llamalauncher.DefaultConfigPath()
+	explicit := filepath.Join(home, "elsewhere", "launcher.yaml")
+	tests := []struct {
+		name        string
+		value       string
+		wantPath    string
+		wantEnabled bool
+	}{
+		{name: "absent", value: "", wantPath: "", wantEnabled: false},
+		{name: "whitespace only reads as absent", value: "   ", wantPath: "", wantEnabled: false},
+		{name: "auto", value: "auto", wantPath: auto, wantEnabled: true},
+		{name: "AUTO", value: "AUTO", wantPath: auto, wantEnabled: true},
+		{name: "auto with surrounding space", value: " auto ", wantPath: auto, wantEnabled: true},
+		{name: "a ~ path expands", value: "~/x.yaml", wantPath: filepath.Join(home, "x.yaml"), wantEnabled: true},
+		{name: "an absolute path is taken as written", value: explicit, wantPath: explicit, wantEnabled: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, enabled := entryLauncherPath(tt.value)
+			if path != tt.wantPath || enabled != tt.wantEnabled {
+				t.Errorf("entryLauncherPath(%q) = (%q, %v); want (%q, %v)",
+					tt.value, path, enabled, tt.wantPath, tt.wantEnabled)
+			}
+		})
+	}
+
+	// `auto` names the launcher's default config whether or not that file is there: the old key
+	// stat-gated because it lit up silently, and an explicit opt-in has nothing to be silent about.
+	if _, err := os.Stat(auto); err == nil {
+		t.Fatalf("the temp home unexpectedly has a launcher config at %q — the auto cases above "+
+			"would then prove nothing about the missing-file behaviour", auto)
+	}
+
+	// No home to expand a `~` against: the value survives as written rather than disappearing, so
+	// the first verb fails naming the path the user typed.
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	if path, enabled := entryLauncherPath("~/x.yaml"); !enabled || path != "~/x.yaml" {
+		t.Errorf("unexpandable ~ path ⇒ (%q, %v); want (\"~/x.yaml\", true) — a configured "+
+			"integration is not hidden by a home lookup failure", path, enabled)
+	}
+}
+
 // The path the verbs read MOVES with the key (ADR 0037): a config named in the `/settings` pane is
 // what the next verb reads, and clearing the key switches the integration off from the next verb —
 // both without a relaunch, because nothing about this bridge is connected to anything.

@@ -1396,7 +1396,8 @@ func TestApplyConfigMCPServers(t *testing.T) {
 // The servers config block parses into opts.servers: every entry, in file order, with all four
 // fields — so the composition root can offer them as the servers this session may move to. It is
 // file-only, like mcp-servers, and the two optional keys default empty (a keyless server with no
-// model hint), which is what a plain local entry looks like.
+// model hint), which is what a plain local entry looks like. The optional `llama-launcher:` key
+// travels the same way and UNRESOLVED, since only the composition root knows what `auto` means.
 func TestApplyConfigServers(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1425,6 +1426,27 @@ server: workstation
 			name:       "api-key and model are optional (a keyless server, no hint)",
 			configYAML: "servers:\n  - name: laptop\n    endpoint: http://127.0.0.1:1111\nserver: laptop\n",
 			want:       []serverEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}},
+		},
+		{
+			// The launcher key rides on the entry it describes, and reaches the root as written:
+			// resolving `auto` is the composition root's job, not resolution's.
+			name: "the optional llama-launcher key travels per entry, as written",
+			configYAML: `servers:
+  - name: workstation
+    endpoint: http://192.168.64.1:1111
+    llama-launcher: auto
+  - name: rented-box
+    endpoint: https://llm.example.com
+    llama-launcher: ~/elsewhere/launcher.yaml
+  - name: openrouter
+    endpoint: https://openrouter.ai/api/v1
+server: workstation
+`,
+			want: []serverEntry{
+				{Name: "workstation", Endpoint: "http://192.168.64.1:1111", LlamaLauncher: "auto"},
+				{Name: "rented-box", Endpoint: "https://llm.example.com", LlamaLauncher: "~/elsewhere/launcher.yaml"},
+				{Name: "openrouter", Endpoint: "https://openrouter.ai/api/v1"},
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -1482,6 +1504,38 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 			name:       "a defect after a well-formed entry",
 			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n  - name: other\n",
 			wantErr:    []string{"servers: entry 2", "other", "has no endpoint"},
+		},
+		{
+			name: "an entry whose llama-launcher value is only whitespace",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    llama-launcher: \"   \"\n",
+			wantErr: []string{"servers: entry 1", "box", "llama-launcher: is only whitespace", "set auto"},
+		},
+		{
+			// Absent is already the off state, so a second spelling of it is a defect in the file.
+			name: "an entry spelling the launcher off",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    llama-launcher: off\n",
+			wantErr: []string{"servers: entry 1", "box", "off is not a value", "remove the key"},
+		},
+		{
+			name: "an entry spelling the launcher OFF in another casing",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    llama-launcher: \" OFF \"\n",
+			wantErr: []string{"servers: entry 1", "box", "off is not a value", "remove the key"},
+		},
+		{
+			// A launcher on another machine is an mcp-servers: entry; this key takes a local path.
+			name: "an entry whose llama-launcher value is a URL",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    llama-launcher: http://192.168.64.1:7331/mcp\n",
+			wantErr: []string{"servers: entry 1", "box", "looks like a URL", "mcp-servers:"},
+		},
+		{
+			name: "a launcher defect below a well-formed entry",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"  - name: other\n    endpoint: http://two:1111\n    llama-launcher: off\n",
+			wantErr: []string{"servers: entry 2", "other", "off is not a value"},
 		},
 	}
 	for _, tt := range tests {

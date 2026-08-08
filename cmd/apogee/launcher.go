@@ -146,6 +146,43 @@ func launcherConfigPath(value string) (string, bool) {
 	return path, true
 }
 
+// entryLauncherPath resolves a `servers:` entry's own `llama-launcher:` value (serverEntry) into the
+// one question the rest of the program asks — is the integration on for the session's server, and
+// which config file does it read. It is the per-entry successor to launcherConfigPath above, and it
+// lands HERE for the same reason: only the composition root knows the launcher, so only the root can
+// ask where its default config lives.
+//
+//   - trimmed empty (the key absent) ⇒ off for that server. There is no `off` spelling to handle:
+//     validateServers refuses one, because absent already IS the off state.
+//   - `auto` (any casing, surrounding space ignored — the sentinel posture the old key's `off` had)
+//     ⇒ the launcher's own default config path, taken VERBATIM: no os.Stat, no absoluteness check.
+//     The old empty-key auto-detect stat-gated because it lit up silently on any machine that
+//     happened to have a launcher config; `auto` is an explicit opt-in, so a missing file degrades
+//     at the first verb naming the path instead of quietly disabling commands the user asked for —
+//     the posture the named-path case already had.
+//   - anything else ⇒ that path, `~` expanded, and on regardless of whether the file exists.
+//
+// A resolved path is installed by whatever puts the session ON a server — startup entry selection,
+// a bind, a `/server` switch — and NOT by a launcher profile load that moves the session, possibly
+// to an endpoint no entry names: that move must leave the integration as it found it, so the
+// session that just used the launcher still has it.
+func entryLauncherPath(value string) (string, bool) {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return "", false
+	}
+	if strings.EqualFold(v, "auto") {
+		return llamalauncher.DefaultConfigPath(), true
+	}
+	path, err := expandUserPath(v)
+	if err != nil {
+		// No home to expand against is not a reason to hide a configured integration: keep the
+		// value as written so the first verb fails naming the path the user typed.
+		return v, true
+	}
+	return path, true
+}
+
 // launcherPath is the resolved config path the local-server verbs read, held so it can MOVE: the
 // `llama-launcher:` key is editable in the `/settings` pane and applies to the running session (ADR
 // 0037), which for this integration means nothing more than swapping this string. There is no

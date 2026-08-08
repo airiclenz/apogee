@@ -964,11 +964,28 @@ type unconfinedHost struct {
 // also RENDERED into a config file — the legacy migration writes an entry through the marshaller
 // (configmigrate.go) — and an optional field the user never set must not come back as an empty
 // line in their file.
+//
+// LlamaLauncher is ADR 0029 decision 4's `llama-launcher:` key moved onto the entry it actually
+// describes (2026-08-07): a launcher fronts ONE server, so a global key captured `/model` on every
+// server of a multi-server config — including remote ones like OpenRouter, whose advertised-model
+// discovery it overrode. Per entry, the integration is on only while the session is on THIS server.
+// Three shapes, and no fourth:
+//
+//   - absent ⇒ off for this server (there is no `off` spelling; leaving the key out IS the off
+//     state, and two spellings of one state invite drift).
+//   - `auto` (any casing, surrounding space ignored) ⇒ the launcher's own default config path,
+//     taken verbatim: `auto` is an explicit opt-in, so a machine without that file degrades at the
+//     first verb naming the path rather than silently having no local-server verbs.
+//   - anything else ⇒ that config file's path, `~` expanded.
+//
+// The value travels to the composition root exactly as written — only the root knows the launcher,
+// so only the root can resolve `auto` (cmd/apogee/launcher.go's entryLauncherPath).
 type serverEntry struct {
-	Name     string `yaml:"name"`
-	Endpoint string `yaml:"endpoint"`
-	APIKey   string `yaml:"api-key,omitempty"`
-	Model    string `yaml:"model,omitempty"`
+	Name          string `yaml:"name"`
+	Endpoint      string `yaml:"endpoint"`
+	APIKey        string `yaml:"api-key,omitempty"`
+	Model         string `yaml:"model,omitempty"`
+	LlamaLauncher string `yaml:"llama-launcher,omitempty"`
 }
 
 // validateServers rejects an entry that could never be switched to, at the startup boundary where
@@ -982,6 +999,15 @@ type serverEntry struct {
 // and a typo found months later has lost its context. What is deliberately NOT checked is whether
 // an endpoint answers — that is what the heartbeat asks, live, and a server that is merely off
 // today must still be listed.
+//
+// The entry's optional `llama-launcher:` value is checked on the same footing, and for the same
+// three defects the retiring top-level key was checked for: a value that is only whitespace reads
+// as configured but names nothing; a value carrying a URL scheme is the one confusion this key
+// invites (a launcher on another machine is an `mcp-servers:` entry, not a local file path); and
+// `off` is refused because absent is already the off state, so accepting a second spelling of it
+// would let two files mean the same thing differently. Whether the named file EXISTS is
+// deliberately not asked — a launcher config is a property of the machine rather than of the
+// config that travels between machines, so a missing one degrades at the verb that wants it.
 func validateServers(servers []serverEntry) error {
 	seen := make(map[string]struct{}, len(servers))
 	for i, s := range servers {
@@ -997,6 +1023,24 @@ func validateServers(servers []serverEntry) error {
 		if strings.TrimSpace(s.Endpoint) == "" {
 			return fmt.Errorf("apogee: servers: entry %d (%q): has no endpoint — give the server's "+
 				"OpenAI-compatible URL, for example http://127.0.0.1:1111", i+1, s.Name)
+		}
+		// Absent is not a defect — it is the off state — so every refusal below is about a value
+		// the user did write.
+		if launcher := s.LlamaLauncher; launcher != "" {
+			trimmed := strings.TrimSpace(launcher)
+			switch {
+			case trimmed == "":
+				return fmt.Errorf("apogee: servers: entry %d (%q): llama-launcher: is only whitespace — "+
+					"set auto to use the launcher's own config, give the path of a llama-launcher config "+
+					"file, or remove the key to disable the launcher for this server", i+1, s.Name)
+			case strings.EqualFold(trimmed, "off"):
+				return fmt.Errorf("apogee: servers: entry %d (%q): llama-launcher: off is not a value — "+
+					"remove the key to disable the launcher for this server", i+1, s.Name)
+			case strings.Contains(launcher, "://"):
+				return fmt.Errorf("apogee: servers: entry %d (%q): llama-launcher: %q looks like a URL — "+
+					"this key takes auto or the path of a LOCAL llama-launcher config file; a launcher on "+
+					"another machine is reached as an mcp-servers: entry instead", i+1, s.Name, launcher)
+			}
 		}
 	}
 	return nil
