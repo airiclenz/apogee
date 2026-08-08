@@ -990,6 +990,64 @@ func TestModelApprovalArgsKeepIndentation(t *testing.T) {
 	}
 }
 
+// A request raised by a sub-agent leads its body with the child's delegated task, so a prompt that
+// queued behind a sibling's still says which agent is asking (ADR 0039 decision 12). It leads
+// because it is the fact the rest of the pane cannot supply: the tool and the arguments read the
+// same whichever child sent them.
+func TestModelApprovalNamesTheAskingSubAgent(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	req := domain.ApprovalRequest{
+		Tool:         "write_file",
+		Reason:       "write outside the workspace",
+		SubAgentTask: "audit the config loader for drift",
+		Arguments:    json.RawMessage(`{"path":"notes.txt"}`),
+	}
+	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
+
+	view := plain(m.View())
+	task := strings.Index(view, "Sub-agent: audit the config loader for drift")
+	if task < 0 {
+		t.Fatalf("the pane does not name the asking sub-agent's task:\n%s", view)
+	}
+	reason := strings.Index(view, "Reason: write outside the workspace")
+	if reason < 0 {
+		t.Fatalf("the reason is missing from the pane:\n%s", view)
+	}
+	if task > reason {
+		t.Errorf("the Sub-agent line renders below the Reason; it must lead the body:\n%s", view)
+	}
+}
+
+// The top-level agent's own request carries no task, and its pane is unchanged to the byte — the
+// serial floor for a session that never delegates.
+func TestModelApprovalTopLevelDrawsNoSubAgentLine(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	req := domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites"}
+	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
+
+	if got := ansiPattern.ReplaceAllString(m.approvalPrompt(req), ""); strings.Contains(got, "Sub-agent") {
+		t.Errorf("a top-level prompt drew a Sub-agent line:\n%s", got)
+	}
+}
+
+// The task is the ONE string this pane clips rather than wraps (approvalTaskClipRunes): it says who
+// is asking, and who is asking must never push what is being decided off the screen. The clip is
+// marked by its ellipsis, and the reason below it survives whole.
+func TestModelApprovalClipsAnEssayLengthSubAgentTask(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	task := strings.Repeat("sprawl ", approvalTaskClipRunes) // far past the bound
+	req := domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites", SubAgentTask: task}
+	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
+
+	view := plain(m.View())
+	if !strings.Contains(view, "…") {
+		t.Errorf("an over-long task was not clipped with an ellipsis:\n%s", view)
+	}
+	if !strings.Contains(view, "Reason: it overwrites") {
+		t.Errorf("the task crowded the reason off the pane:\n%s", view)
+	}
+}
+
 // The shell tool's body reads as the command line it is about to run, under its own argument name
 // with the line indented beneath it (docs/layout/user-questions-layout.md) — not as the JSON
 // envelope that carries it. The argument braces and the quoted key are gone: this is a rendering of

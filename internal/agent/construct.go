@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -91,6 +92,10 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	// seam, so a depth-0 fan-out's concurrent children still hand the host a LINEAR stream
 	// (domain.EventSink). It is installed once, here, rather than at the ~20 emit sites.
 	cfg.Events = serializedEvents(cfg.Events)
+	// And every Approval it raises goes through one queueing seam, for the same reason one level
+	// up: concurrent children may reach an Approval gate at the same instant, and the host is
+	// promised one request at a time (domain.Approver).
+	cfg.Approver = queuedApprovals(cfg.Approver)
 
 	a := &Agent{
 		cfg:                cfg,
@@ -147,6 +152,59 @@ func serializedEvents(sink domain.EventSink) domain.EventSink {
 		return sink
 	}
 	return &serialEventSink{inner: sink}
+}
+
+// queuedApprover queues concurrent Approve calls onto one host Approver: it holds a single slot —
+// "the prompt on the screen" — and admits one caller at a time. It is the engine's half of the
+// Approver contract, the exact counterpart of serialEventSink's: once a depth-0 fan-out is running
+// (ADR 0039), several children can reach an Approval gate at the same instant, and a host that has
+// only ever fielded one request at a time must not have to grow a queue of its own.
+//
+// The wait is a channel rather than a mutex because it has to be ctx-AWARE. A sibling queued behind
+// the visible prompt must be able to give up when the human cancels the Turn; under a mutex it
+// could not — it would sit in Lock until the prompt ahead of it resolved and only THEN hand the
+// driver a request belonging to a Turn that has already rolled back. Cancelled-while-queued returns
+// exactly what a cancelled visible prompt returns, (deny, ctx.Err()), which the caller reads as
+// dispatchCancelled; the deny is the safe verdict for a request nobody will ever see, and the
+// cancellation, not the verdict, is what ends the Turn.
+//
+// The slot is held for the whole of the host's Approve — the human's entire deliberation — which is
+// the point: the queue behind it is what "one prompt at a time" means, and the wait-tolerance
+// invariant (ADR 0031) is what makes an unbounded hold legitimate. Which queued sibling is admitted
+// next is deliberately unspecified; what is guaranteed is that exactly one is inside the host
+// Approver at a time and that every other child goes on running while it waits.
+type queuedApprover struct {
+	slot  chan struct{} // capacity 1: the one in-flight request
+	inner domain.Approver
+}
+
+func (q *queuedApprover) Approve(ctx context.Context, req domain.ApprovalRequest) (domain.ApprovalDecision, error) {
+	select {
+	case q.slot <- struct{}{}:
+	case <-ctx.Done():
+		return domain.ApprovalDeny, ctx.Err()
+	}
+	defer func() { <-q.slot }()
+	return q.inner.Approve(ctx, req)
+}
+
+// queuedApprovals wraps ap in the queueing seam, unless it already IS one. The idempotence keeps a
+// nested sub-agent in the SAME queue as its parent, exactly as serializedEvents keeps it on the same
+// mutex: newChildAgent copies the parent's Config, so a child re-uses the parent's ONE slot instead
+// of stacking a private, uncontended one at every depth — and two siblings' children therefore queue
+// against each other too.
+//
+// A nil Approver stays nil. "No Approver configured" is a FACT the resolver reads
+// (resolutionInput.approverPresent — a Gate with no Approver folds to a Refuse, Resolution D5), so
+// wrapping nil into a non-nil forwarder would tell the ladder a human gate exists where none does.
+func queuedApprovals(ap domain.Approver) domain.Approver {
+	if ap == nil {
+		return nil
+	}
+	if _, already := ap.(*queuedApprover); already {
+		return ap
+	}
+	return &queuedApprover{slot: make(chan struct{}, 1), inner: ap}
 }
 
 // buildEnabledMechanisms builds each Mechanism named on cfg.EnableMechanisms and Adds it into

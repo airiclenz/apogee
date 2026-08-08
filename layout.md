@@ -312,6 +312,16 @@ JSON under its own label, which is the one place a brace still reaches this pane
 display: the arguments the tool receives are the ones the model sent, whatever shape they were read
 in.
 
+**When a sub-agent raised the call, the body says so first.** A request from a child leads with
+`Sub-agent: <its delegated task>`, above the reason, because that is the one fact the rest of the
+pane cannot supply: with several children running at once their prompts QUEUE — one on the screen at
+a time, the asking child blocked and its siblings still working — and the tool name and the
+arguments read exactly the same whichever of them sent it. The line is absent at depth 0, where the
+top-level agent is the only thing that could be asking, so a session that never delegates draws the
+pane it always drew. It is also the one string on this surface that is **clipped** rather than
+wrapped in full, ellipsis and all: it says who is asking, and who is asking must never push what is
+being decided off the screen.
+
 **Inside a pane's own grant the rows come first — except where the prose IS what is being decided.**
 A picker, a browser or a dropdown *is* its rows, and the caption over them takes what they leave; the
 approval prompt reads the same way and can afford to, because its offering is four fixed options and

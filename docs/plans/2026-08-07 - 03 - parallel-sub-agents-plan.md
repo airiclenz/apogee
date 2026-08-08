@@ -251,9 +251,29 @@ recovers without killing the sibling or the parent Exchange.
 
 **Commit:** `feat(agent): concurrent depth-0 sub-agent fan-out bounded by parallel-agents`
 
-## 5. Approvals: queued, child-named prompts
+## 5. Approvals: queued, child-named prompts — ✅ DONE (2026-08-08)
 
 Depends on item 4.
+
+NOTES (2026-08-08): four deviations from this item's literal text, all recorded rather than assumed.
+(a) The serializing seam is installed in the ENGINE, not at the TUI adapter: `newAgent` wraps
+`Config.Approver` in an idempotent `queuedApprovals` seam (`internal/agent/construct.go`), the exact
+counterpart of item 4's `serializedEvents`, so the parent and every descendant queue against ONE slot
+and every Driver — TUI, bench, a future daemon — gets one-prompt-at-a-time without building a queue
+of its own (ADR 0031). `domain.Approver` now documents that guarantee. `internal/tui` therefore needs
+no concurrency change at all, which is stronger than the item's "not a TUI change". The wait is a
+channel rather than a mutex because it must be ctx-AWARE: a sibling queued behind the visible prompt
+has to give up when the Turn is cancelled instead of handing the driver a request for a rolled-back
+Turn. (b) The task reaches the prompt by being threaded into the child at CONSTRUCTION —
+`newChildAgent(spawnCallID, task)` → `Agent.task` → `ApprovalRequest.SubAgentTask` — not by a
+CallID → spawning-arguments lookup as the item's parenthetical suggests: it is the same seam the
+call-ID already uses, and it needs no live registry of in-flight call arguments. (c) The item names
+no render site for "the prompt carries the asking child's task", so one was added: the approval pane
+leads its body with `Sub-agent: <task>` when the field is non-empty (`internal/tui/model.go`), and
+`layout.md` gained the prose — a depth-0 prompt is unchanged to the byte. (d) That line is CLIPPED
+(`approvalTaskClipRunes`) rather than wrapped in full like the Reason, a deliberate departure from
+the pane's wrap-everything rule: the task says who is asking, and who is asking must not be able to
+push what is being decided off the screen.
 
 **What:** The Approver contract is wait-tolerant (ADR 0031); what concurrency adds is
 simultaneous *requests* and an anonymous prompt.

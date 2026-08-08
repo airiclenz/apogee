@@ -1176,9 +1176,10 @@ func clipDetail(s string) string {
 }
 
 // clipRunes truncates s to n runes with an ellipsis, counting runes rather than bytes so a
-// multi-byte path is not cut mid-character. clipDetail is its one caller, and the rune spend is
-// settled there rather than a shortfall to be swept: see detailClipRunes for why the transcript's
-// bound is allowed to be a rune count where the status line's is not.
+// multi-byte path is not cut mid-character. Its callers are clipDetail and the approval pane's
+// Sub-agent line (approvalTaskClipRunes), and in both the rune spend is settled at the caller
+// rather than being a shortfall to be swept: see detailClipRunes for why the transcript's bound is
+// allowed to be a rune count where the status line's is not.
 func clipRunes(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {

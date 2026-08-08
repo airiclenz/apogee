@@ -778,7 +778,7 @@ func TestContextSeam_SubAgentRequestCarriesParentBlocks(t *testing.T) {
 		t.Fatalf("Remove: %v", err)
 	}
 
-	child, err := a.newChildAgent("call_sub")
+	child, err := a.newChildAgent("call_sub", "the delegated task")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}

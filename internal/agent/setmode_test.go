@@ -49,7 +49,7 @@ func TestNewChildAgentInheritsLiveMode(t *testing.T) {
 
 	a.SetMode(domain.ModeAllowEdits)
 
-	child, err := a.newChildAgent("call_sub")
+	child, err := a.newChildAgent("call_sub", "the delegated task")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestSubAgentSeesParentTighteningMidRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	child, err := parent.newChildAgent("call_sub")
+	child, err := parent.newChildAgent("call_sub", "the delegated task")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
@@ -107,11 +107,11 @@ func TestSubAgentTighteningComposesToGrandchild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	child, err := top.newChildAgent("call_sub")
+	child, err := top.newChildAgent("call_sub", "the delegated task")
 	if err != nil {
 		t.Fatalf("newChildAgent (depth 1): %v", err)
 	}
-	grandchild, err := child.newChildAgent("call_nested")
+	grandchild, err := child.newChildAgent("call_nested", "the nested task")
 	if err != nil {
 		t.Fatalf("newChildAgent (depth 2): %v", err)
 	}
@@ -153,11 +153,11 @@ func TestSubAgentGrandchildLooseningStaysImpossible(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	child, err := top.newChildAgent("call_sub")
+	child, err := top.newChildAgent("call_sub", "the delegated task")
 	if err != nil {
 		t.Fatalf("newChildAgent (depth 1): %v", err)
 	}
-	grandchild, err := child.newChildAgent("call_nested")
+	grandchild, err := child.newChildAgent("call_nested", "the nested task")
 	if err != nil {
 		t.Fatalf("newChildAgent (depth 2): %v", err)
 	}
@@ -184,7 +184,7 @@ func TestSubAgentParentLooseningCannotLoosenChild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	child, err := parent.newChildAgent("call_sub")
+	child, err := parent.newChildAgent("call_sub", "the delegated task")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
@@ -215,11 +215,11 @@ func TestSubAgentEffectiveModeConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	child, err := parent.newChildAgent("call_sub")
+	child, err := parent.newChildAgent("call_sub", "the delegated task")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
-	grandchild, err := child.newChildAgent("call_nested")
+	grandchild, err := child.newChildAgent("call_nested", "the nested task")
 	if err != nil {
 		t.Fatalf("newChildAgent (depth 2): %v", err)
 	}

@@ -72,7 +72,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorToolResult(call.ID, "sub_agent requires a non-empty task"), dispatchDone
 	}
 
-	sub, err := a.newChildAgent(call.ID)
+	sub, err := a.newChildAgent(call.ID, args.Task)
 	if err != nil {
 		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), dispatchDone
 	}
@@ -132,7 +132,13 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 // stream from another once siblings share a depth (ADR 0039), so it is threaded at
 // construction rather than at each emission: the child's own tools, Mechanisms and nested
 // delegations all emit through its base() and inherit it for free.
-func (a *Agent) newChildAgent(spawnCallID string) (*Agent, error) {
+//
+// task is that same call's delegated task — the child's identity in WORDS rather than in ids, and
+// the only one a human can read. It rides every Approval the child raises
+// (domain.ApprovalRequest.SubAgentTask), so a prompt that queued behind a sibling's still says
+// which agent is asking. It is threaded here for the same reason the id is: the child carries it
+// for its whole run, and every gate it reaches is one it asks for itself.
+func (a *Agent) newChildAgent(spawnCallID, task string) (*Agent, error) {
 	childCfg := a.cfg
 	childCfg.Mode = a.Mode() // inherit the parent's LIVE mode at spawn (Shift+Tab may have changed it),
 	//                          read under the lock since this runs on the worker goroutine during dispatch
@@ -158,6 +164,7 @@ func (a *Agent) newChildAgent(spawnCallID string) (*Agent, error) {
 	}
 	child.depth = a.depth + 1
 	child.callID = spawnCallID
+	child.task = task
 	child.guards = a.guards.ForSubAgent()
 	// The child belongs to the PARENT's session, so it speaks from the parent's context-file
 	// bytes: copy the cache over the one its own construction just read. A sub-agent is not a

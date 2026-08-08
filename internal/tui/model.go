@@ -4335,8 +4335,15 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int, floor popupFlo
 // approvalPrompt renders the pending tool call the human must rule on as a bordered popup pane
 // above the input box (the shared popup module; D7/D8): the title carries the RAW tool name
 // verbatim (not the friendly transcript label — the approval flow is a security surface, so the
-// human sees exactly the tool that will run), the body carries a non-empty Reason then the
-// arguments (approvalArgsBlock), and the decisions themselves are the pane's ROWS.
+// human sees exactly the tool that will run), the body carries the asking sub-agent's task when a
+// child raised the call, then a non-empty Reason, then the arguments (approvalArgsBlock), and the
+// decisions themselves are the pane's ROWS.
+//
+// The Sub-agent line leads the body because it answers a question the rest of the pane cannot: with
+// several children running at once their prompts QUEUE, one at a time, in an order nothing on the
+// screen predicts (ADR 0039), so the tool name and the arguments no longer say whose work this is.
+// It is absent at depth 0, where the top-level agent is the only thing that could be asking, so an
+// undelegated session's pane is unchanged to the byte.
 //
 // It is a MENU rather than a legend (docs/layout/user-questions-layout.md): the title rides the top
 // border, the four options of approvalMenu are menu-style rows with their shortcut letters aligned
@@ -4363,8 +4370,9 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int, floor popupFlo
 // opens a sequence, the CR that could rewind the name's own row. That is a claim about the
 // TERMINAL, not about the name: a name written entirely in printable characters, lookalikes and
 // all, reaches this pane exactly as the model wrote it. The menu's own rows are ours, not the
-// model's, so nothing there needs stripping. Empty/null arguments add no body. Only the top-level
-// (Depth == 0) prompt is rendered this phase.
+// model's, so nothing there needs stripping. Empty/null arguments add no body. There is ONE pane
+// for every depth: a child's request is rendered by this same code, told apart by its Sub-agent
+// line rather than by a nested surface of its own.
 //
 // The guarantee this security surface holds is NOT that the whole reason is always on the screen —
 // no pane can promise that on a terminal with four rows to give. It is that the human is never
@@ -4390,6 +4398,9 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int, floor popupFlo
 // where the frame draws no pane at all.
 func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	var parts []string
+	if req.SubAgentTask != "" {
+		parts = append(parts, "Sub-agent: "+clipRunes(stripEscapes(req.SubAgentTask), approvalTaskClipRunes))
+	}
 	if req.Reason != "" {
 		parts = append(parts, "Reason: "+stripEscapes(req.Reason))
 	}
@@ -4432,6 +4443,16 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	}
 	return renderPopup(m.th, spec, m.width)
 }
+
+// approvalTaskClipRunes bounds the delegated task the Sub-agent line spends body rows on. It is the
+// one string on this pane that is CLIPPED rather than wrapped in full, and the reason is what the
+// pane is for: the reason and the arguments are what the human is deciding ABOUT, while the task is
+// only who is asking, so a model that delegated an essay must not be able to push the decision's own
+// facts off the screen. Everything a clip drops is marked by the ellipsis clipRunes leaves, and the
+// rest of the body keeps the pane's no-silent-loss guarantee unchanged (the "… (+N more lines)"
+// marker). The bound is the transcript's detail bound for the same reason it was chosen there —
+// enough for a sentence naming a task, not enough for a paragraph.
+const approvalTaskClipRunes = detailClipRunes
 
 // approvalArgsBlock renders req's arguments for the approval body, escape-stripped: one `name:`
 // label line per argument with the value's own lines indented beneath it (argumentDetails), so a

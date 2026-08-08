@@ -528,6 +528,12 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 // per-call event, not a pre-allowable convenience. reason feeds the Approval prompt. It reports
 // dispatchCancelled if ctx is cancelled while the human deliberates.
 //
+// The request names the asking agent's delegated task (empty at depth 0 — a.task), because a
+// prompt raised during a fan-out may be one of several queued behind each other and "which agent
+// is asking" is otherwise unanswerable from the call alone (ADR 0039 decision 12). The queueing
+// itself is the Approver seam's (queuedApprovals): from here a gate is one blocking call whatever
+// the siblings are doing.
+//
 // The resolver only produces a Gate when an Approver is configured (a gate with none is a
 // Refuse — Resolution D5), so the nil-Approver guard below is defensive: it refuses rather than
 // dereferencing a nil Approver, never running unapproved.
@@ -539,7 +545,7 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		return false, dispatchDone
 	}
 
-	areq := domain.ApprovalRequest{Tool: call.Tool, Arguments: call.Arguments, Reason: reason}
+	areq := domain.ApprovalRequest{Tool: call.Tool, Arguments: call.Arguments, Reason: reason, SubAgentTask: a.task}
 	decision, err := a.cfg.Approver.Approve(ctx, areq)
 	if err != nil {
 		if ctx.Err() != nil {

@@ -82,7 +82,7 @@ func TestAuditEvent_SubAgentRecordReachesParentObserver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	child, err := a.newChildAgent("call_sub")
+	child, err := a.newChildAgent("call_sub", "the delegated task")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
