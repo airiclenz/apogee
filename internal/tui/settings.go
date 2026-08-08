@@ -808,9 +808,20 @@ func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
 	if err != nil {
 		return m.settingsFailed(launched, stripEscapes(err.Error()))
 	}
-	// One round trip can apply several keys, so what the applies ask for is BATCHED rather than
-	// kept one at a time: an edit that changed the colour scheme and the scroll bar in the same
-	// session of the editor has to leave with the scheme's repaint still asked for.
+	m, cmds := m.applyReloaded(rows, applied)
+	m.layout()
+	return m, tea.Batch(cmds...)
+}
+
+// applyReloaded journals and applies every key a re-read found changed. It is the one apply loop the
+// round trip's TWO triggers share (ADR 0041 decision 6: one apply path, two triggers) — an editor
+// that exited, and a file the watcher saw change — so a key can never land one way when the human
+// edited it in a terminal editor and another way when they saved it from a GUI one.
+//
+// What the applies ask for is BATCHED rather than kept one at a time: an edit that changed the colour
+// scheme and the scroll bar in one session of the editor has to leave with the scheme's repaint still
+// asked for.
+func (m Model) applyReloaded(rows []SettingRow, applied []AppliedSetting) (Model, []tea.Cmd) {
 	var cmds []tea.Cmd
 	for _, a := range applied {
 		row, ok := settingRowOf(rows, a.Path)
@@ -823,8 +834,105 @@ func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	}
+	return m, cmds
+}
+
+// configChangedMsg is one report from the binary's config watcher: the file changed, or — alive
+// false — the WATCH itself ended and nothing more will ever be reported. It carries no path and no
+// keys, because the watcher knows neither: what changed is [Options.ReloadConfig]'s answer, and the
+// message is only the news that it is worth asking (ADR 0041 decision 3).
+type configChangedMsg struct{ alive bool }
+
+// configWatchState is what the Model remembers between reports: how many re-reads in a row could not
+// be made, and whether the human has been told about it. Two plain fields in a plain value, safe in
+// the value-copied Model (ADR 0011).
+type configWatchState struct {
+	// fails counts CONSECUTIVE unreadable re-reads; a re-read that lands clears it.
+	fails int
+	// noted records that the note below has already been said for this run of failures, so the same
+	// broken file cannot narrate itself once per save.
+	noted bool
+}
+
+// configWatchStallReports is how many consecutive unreadable re-reads it takes before the transcript
+// says so (ADR 0041 decision 7). Fewer would report the ordinary case — an editor whose save the
+// watcher happened to catch mid-write — as a problem the human has to do something about.
+const configWatchStallReports = 3
+
+// configWatchStalledNote is what the transcript says when it does. It names the consequence rather
+// than the event, because a file that does not parse is not itself news: what the human needs to know
+// is that the session is NOT running what they just saved, and why.
+const configWatchStalledNote = "the config file has not parsed for three saves, so the session is " +
+	"still running the settings it had: "
+
+// awaitConfigChange opens ONE wait on the binary's config watcher (ADR 0041 decision 3). It is the
+// whole of this chain's arming: Init opens the first wait and each landed report opens the next, so
+// there is exactly one wait outstanding at any moment (doc.go's tick-chain invariant — two would
+// re-read the file twice for every save and apply everything twice).
+//
+// It takes the program context, as [Model.beatCmd] does, so a quit ends the wait where it stands
+// rather than leaving it parked on a channel until the composition root's teardown reaches the
+// watcher. nil seam ⇒ no Cmd and therefore no chain, the nil-seam degrade every provider here takes.
+func (m Model) awaitConfigChange() tea.Cmd {
+	await := m.opts.AwaitConfigChange
+	if await == nil {
+		return nil
+	}
+	ctx := m.parent
+	return func() tea.Msg {
+		return configChangedMsg{alive: await(ctx)}
+	}
+}
+
+// foldConfigChanged is what a saved config file does to a running session: the same re-read, the same
+// journal and the same applies an editor's exit produces (applyReloaded), for a save this program had
+// nothing to do with (ADR 0041 decision 5).
+//
+// It runs whether or not the pane is open and whether or not a Step is streaming, and deliberately:
+// the human saved a document, and the keys that cannot land right now refuse on their own rows
+// through the very seams that know how to refuse — the same posture an in-pane commit takes mid-run.
+// What it must NOT do is apply twice, which is what the baseline refresh on every pane write buys
+// (ADR 0041 decision 8, in the binary): a key apogee itself just wrote comes back as no change at all.
+//
+// The next wait is opened before anything is applied, so a re-read that ends in a refusal still leaves
+// the session watching — a broken config the human is about to fix is exactly the file the next report
+// has to be about. A watch that has ENDED arms nothing: there is no report to wait for any more.
+func (m Model) foldConfigChanged(msg configChangedMsg) (tea.Model, tea.Cmd) {
+	if !msg.alive {
+		return m, nil
+	}
+	next := m.awaitConfigChange()
+	if m.opts.ReloadConfig == nil {
+		return m, next
+	}
+	applied, err := m.opts.ReloadConfig()
+	if err != nil {
+		return m.foldConfigUnreadable(err), next
+	}
+	m.cfgWatch = configWatchState{}
+	m, cmds := m.applyReloaded(m.settingRows(), applied)
 	m.layout()
-	return m, tea.Batch(cmds...)
+	return m, tea.Batch(append(cmds, next)...)
+}
+
+// foldConfigUnreadable is the last-good rule's half of the fold (ADR 0041 decision 7): a file that
+// does not parse or does not validate applies NOTHING and moves nothing — the binary keeps the
+// baseline it had, so the human's fix is still diffed against the config that was last good.
+//
+// The failure is silent until it has survived configWatchStallReports saves, and then it is said
+// once. A watcher will inevitably read a file somebody is halfway through writing, so the first
+// failures are normal and self-correcting; a note per report would be an error scrolling past every
+// time somebody hits save while they are still typing. It goes to the TRANSCRIPT rather than to a row
+// because there is no row: nobody pressed anything, and the pane is very likely not even open.
+func (m Model) foldConfigUnreadable(err error) Model {
+	m.cfgWatch.fails++
+	if m.cfgWatch.fails < configWatchStallReports || m.cfgWatch.noted {
+		return m
+	}
+	m.cfgWatch.noted = true
+	m.transcript.addNote(configWatchStalledNote + err.Error())
+	m.layout()
+	return m
 }
 
 // settingRowOf finds the row for a registry path in the list as it stands — the lookup both halves

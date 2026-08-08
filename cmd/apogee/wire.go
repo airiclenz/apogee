@@ -388,6 +388,22 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// because its baseline is the file as it stands NOW, and now is before anything has been edited.
 	externalEdits := newExternalEdit(opts, os.Getenv)
 
+	// The other trigger for that same round trip (ADR 0041 decision 3): the file itself. An editor's
+	// EXIT can only speak for the editors apogee waits on, and a desktop opener returns before the
+	// human has typed a character — so `config.yaml` is polled for the whole session and every save
+	// applies, whoever made it (decision 5). Started here, beside the baseline it will be diffed
+	// against, and stopped below with the run's other closers.
+	//
+	// The path is the one this session resolved, which is the same file every seam in the block below
+	// writes; the watcher reads no YAML and holds no projection of its own (configwatch.go).
+	configWatch := newConfigWatcher(configFilePath(opts.configDir))
+	configWatch.Start()
+	// Registered after the Agent's own Close, so it runs BEFORE it (the schedules' posture, and for
+	// the schedules' reason): the poll ends while everything it reported into is still standing. Stop
+	// waits for the poll goroutine and closes the channel behind it, so the wait the renderer parks on
+	// returns rather than leaking, and nothing this line let go of outlives runRoot.
+	defer configWatch.Stop()
+
 	// The rebind closure: the composition root's half of an observed model change. The TUI decides
 	// WHEN (at idle, or at the exchange-terminal boundary), this decides WHAT — because every input
 	// to the decision is config the binary owns (the per-model system prompt, ADR 0023; the
@@ -685,13 +701,28 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// acknowledgement above records a host in (ADR 0035). The registry decides what may be
 		// written and the splice writer owns the file (configwrite.go) — the renderer hands over a
 		// path and the value as the file spells it, and learns only whether it landed.
+		//
+		// Every landed write re-takes the external edit's baseline (ADR 0041 decision 8). The pane
+		// applies the key it just persisted in the same keypress, and the watcher below is looking at
+		// the very file this wrote: without the refresh, apogee's own write comes back a second later
+		// as somebody's edit and applies twice — which for `mcp-servers:` is a second dial of every
+		// server. A write that FAILED changed no file and refreshes nothing.
 		WriteSetting: func(key, value string) error {
-			return saveConfigSetting(filepath.Join(roots.config, "config.yaml"), key, value)
+			if err := saveConfigSetting(filepath.Join(roots.config, "config.yaml"), key, value); err != nil {
+				return err
+			}
+			externalEdits.refresh()
+			return nil
 		},
 		// Reset is the same write in reverse: the key's active line is REMOVED, so the value goes
-		// back to the binary's default rather than being pinned to today's spelling of it.
+		// back to the binary's default rather than being pinned to today's spelling of it. It refreshes
+		// the same baseline for the same reason — a removed line is a change to the file like any other.
 		ResetSetting: func(key string) error {
-			return resetConfigSetting(filepath.Join(roots.config, "config.yaml"), key)
+			if err := resetConfigSetting(filepath.Join(roots.config, "config.yaml"), key); err != nil {
+				return err
+			}
+			externalEdits.refresh()
+			return nil
 		},
 		// And the apply half of the same keypress (ADR 0037): what the file now says, the session
 		// now runs. The dispatcher owns the resolution from a registry path and a file-spelled value
@@ -716,7 +747,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// file's authority and the apply's single path both stay where they were (settingsedit.go).
 		ExternalEditSpec: externalEdits.spec,
 		ReloadConfig:     externalEdits.changed,
-		Skills:           skillProvider,
+		// And the trigger that does not need an editor at all (ADR 0041 decision 3): one wait on the
+		// watcher started above, answered when the file changes. What the renderer does with the news
+		// is exactly what it does when an editor exits — re-read through ReloadConfig, apply through
+		// the two homes above — so a saved file applies whoever saved it (decision 5).
+		AwaitConfigChange: awaitConfigChangeOn(configWatch),
+		Skills:            skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
 		// on the shared Provider — the same one Config.Skills resolves against — so a skill added
 		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals
@@ -759,6 +795,26 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		fmt.Fprintln(os.Stdout, "Session saved · resume with: apogee --continue   (or /sessions inside apogee)")
 	}
 	return err
+}
+
+// awaitConfigChangeOn adapts the polling watcher to [tui.Options.AwaitConfigChange]: one wait, one
+// answer, and nothing about files or YAML crossing the seam (ADR 0041 decision 3). The renderer
+// re-reads through [tui.Options.ReloadConfig] when this returns true, which is the same call an
+// editor's exit makes — one apply path, two triggers.
+//
+// It answers false on two ends, and they mean the same thing to the caller: the program's context is
+// done (a quit, which must not leave a goroutine parked on a channel until teardown reaches the
+// watcher), or the watch itself has been stopped and closed its channel. Either way there will never
+// be another report, and the chain retires.
+func awaitConfigChangeOn(w *configWatcher) func(context.Context) bool {
+	return func(ctx context.Context) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		case _, ok := <-w.Changes():
+			return ok
+		}
+	}
 }
 
 // ----------------------------------------------------------------------------

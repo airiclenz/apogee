@@ -135,6 +135,12 @@ type Model struct {
 	// into (recordSettingEdit), so it is safe in the value-copied Model (ADR 0011).
 	settingEdits []settingEdit
 
+	// cfgWatch is the config watcher's own state on this side of the seam: how many re-reads in a row
+	// the binary could not make, and whether the transcript has said so (ADR 0041 decision 7). It sits
+	// beside the journal above rather than on the pane, for the pane's own reason — the watch runs for
+	// the whole session and most of its reports land with no overlay open at all.
+	cfgWatch configWatchState
+
 	// promptEditor owns the chat input cluster — the textarea, the autocomplete overlay (+ its
 	// skillRegion edge-trigger), the workspace file cache, and the prompt drag-selection
 	// (prompteditor.go). It is embedded ANONYMOUSLY so its fields and its
@@ -489,7 +495,8 @@ func steadyCursor(ta *textarea.Model, shape tea.CursorShape) {
 	ta.SetStyles(s)
 }
 
-// Init fires the first heartbeat and reads this workspace's prompt recall, and that is the whole of
+// Init fires the first heartbeat, reads this workspace's prompt recall and opens the wait on the
+// config file, and that is the whole of
 // its work. The window is sized by the first WindowSizeMsg the program sends, the input's focus
 // STATE is set at construction (newModel — Init holds a copy, so it could not set it here), and the
 // caret needs no start-up Cmd either: the virtual cursor is retired, so there is no blink to
@@ -498,12 +505,13 @@ func steadyCursor(ta *textarea.Model, shape tea.CursorShape) {
 // IS the first beat (the binary no longer probes before painting): the sooner it lands, the sooner
 // the footer stops saying "connecting…".
 //
-// The two are batched rather than sequenced because neither waits on the other — the recall read is
-// a file the box needs before the first ↑, the beat a network probe the footer needs. Both Cmds are
-// nil when their seam is unwired, and tea.Batch drops nils and collapses to the single survivor (or
+// The three are batched rather than sequenced because none waits on another — the recall read is a
+// file the box needs before the first ↑, the beat a network probe the footer needs, and the config
+// wait parks until somebody saves a file that may never be touched all session. Every Cmd is
+// nil when its seam is unwired, and tea.Batch drops nils and collapses to the single survivor (or
 // to nil), so an unwired TUI still starts nothing at all — exactly as before.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.beatCmd(), m.loadRecallCmd())
+	return tea.Batch(m.beatCmd(), m.loadRecallCmd(), m.awaitConfigChange())
 }
 
 // ----------------------------------------------------------------------------
@@ -786,6 +794,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// started or did not. Nothing is re-read — the pane never left, and what gets saved out there
 		// arrives through the config watcher — so this only puts the outcome on the launching row.
 		return m.foldDetachedEdit(msg)
+
+	case configChangedMsg:
+		// The config file changed on disk, whoever changed it — the detached editor above, another
+		// window's, or a second terminal's (ADR 0041 decision 3). Re-read it, apply every key that came
+		// back different through the journal and the dispatcher a pane edit uses, and open the next
+		// wait (settings.go). Nothing else moves: nobody pressed anything, so the screen is whatever it
+		// already was.
+		return m.foldConfigChanged(msg)
 
 	case sessionListMsg:
 		// Sessions.List() returned off the Update loop: open (or refresh) the /sessions browser

@@ -349,9 +349,22 @@ knows whether to suspend.
 
 ---
 
-## 6. The watcher drives the live apply
+## 6. The watcher drives the live apply — ✅ DONE (2026-08-08)
 
 *Depends on items 4 and 5.*
+
+NOTES (2026-08-08): four shape details the item text left open. (a) The watcher reports into the TUI across a
+new seam — `AwaitConfigChange func(ctx context.Context) bool`, one parked wait per report, the `Heartbeat`
+posture — rather than applying in `cmd/apogee` directly: the apply has to run on the Update goroutine (that is
+where every engine mutator is driven from, and `Agent.Rebind` refuses off a quiescent boundary) and the ` *`
+marker is journaled on the Model. So the renderer re-reads through the existing `ReloadConfig` and applies
+through the existing `ApplySetting` — which IS `applySettingFor`, unchanged in signature and cases. (b) The
+apply loop `foldSettingsEdit` already had is now `applyReloaded`, called by both triggers, so an editor's exit
+and a saved file cannot land a key differently. (c) ADR 0041's "three consecutive ticks" is implemented as
+three consecutive watcher REPORTS: the shipped watcher (item 4) reports only when the file changes, so a tick
+that reports nothing has nothing to re-read and cannot fail. (d) The baseline refresh of decision 8 is wired
+on both pane persistence paths — `WriteSetting` and `ResetSetting` — since a removed line is a change to the
+file like any other. Documentation is item 7's, so nothing outside the Go files changed.
 
 **What.** Wire the watcher to the existing apply path so a saved file applies itself,
 whoever wrote it — ratified call 5.

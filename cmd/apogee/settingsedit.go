@@ -227,6 +227,26 @@ func (e *externalEdit) changed() ([]tui.AppliedSetting, error) {
 	return applied, nil
 }
 
+// refresh re-takes the baseline from the file as it stands NOW — the whole of ADR 0041 decision 8 on
+// this side of the seam. The pane persists a key and applies it in the same keypress, so a watcher
+// that then reported that same key would apply it a SECOND time: harmless for most keys, and a second
+// dial of every server for `mcp-servers:`. Refreshing here means a change apogee itself made is not a
+// change at all by the time the watcher looks.
+//
+// It is called after a write has LANDED, so what it projects is the file the human's next edit will
+// be diffed against. A projection that fails leaves the previous baseline standing, for spec's reason:
+// a baseline that is a little stale reports one extra key, where a missing one would swallow the next
+// real edit whole.
+func (e *externalEdit) refresh() {
+	projected, err := e.projection()
+	if err != nil {
+		return
+	}
+	e.mu.Lock()
+	e.baseline = projected
+	e.mu.Unlock()
+}
+
 // settingStructures is the LOSSLESS projection of the keys whose row shows only a SUMMARY of what
 // they hold. It is what the reload diff compares them by, because two different structures summarize
 // alike: repoint the one `mcp-servers:` entry at another machine and the row still reads "1 server";

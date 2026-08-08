@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -2546,6 +2547,150 @@ func TestSettingsPaneDetachedEditorReportsAStartItCouldNotMake(t *testing.T) {
 	}
 	if !m.settings.open {
 		t.Error("the pane closed over a launch that never happened")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The watched config file (ADR 0041)
+// ----------------------------------------------------------------------------
+
+// configWatchModel is a session whose config file is WATCHED and whose pane is closed — the state
+// every watcher report actually lands in, since nobody pressed anything to produce one. The two
+// halves of the round trip are wired as the same spies the editor jump uses, so what a saved file
+// does and what a returning editor does are asserted against one another.
+func configWatchModel(t *testing.T, rows []SettingRow, log *settingsWriteLog, edit *externalEditLog) Model {
+	t.Helper()
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.WriteSetting = log.write
+	opts.ResetSetting = log.reset
+	opts.ApplySetting = log.apply
+	opts.ReloadConfig = edit.reload
+	opts.AwaitConfigChange = func(context.Context) bool { return true }
+	return newTestModelEng(t, &fakeEngine{}, opts)
+}
+
+// The headline of ADR 0041 decision 5: a file somebody else saved applies to the running session.
+// No keypress, no pane, no editor — the report alone re-reads the file, journals every key that came
+// back different (the ` *` marker of ADR 0037 decision 8) and pushes it through the same dispatcher
+// an in-pane commit uses.
+func TestConfigWatchAppliesASavedFileWithNoKeyPress(t *testing.T) {
+	rows := []SettingRow{
+		settingsStructuredRow(),
+		{Path: "context-files.names", Section: "System prompt", Kind: SettingString,
+			Value: "[AGENTS.md]", Editable: true, Desc: "Workspace files folded into the prompt."},
+	}
+	log := &settingsWriteLog{}
+	edit := &externalEditLog{applied: []AppliedSetting{
+		{Path: "context-files.names", Value: "[AGENTS.md, CLAUDE.md]"},
+	}}
+	m := configWatchModel(t, rows, log, edit)
+
+	m = step(t, m, configChangedMsg{alive: true})
+
+	if m.settings.open {
+		t.Error("the watcher opened the settings pane; nobody asked for it")
+	}
+	if edit.reloads != 1 {
+		t.Fatalf("reloads = %d, want exactly one re-read per report", edit.reloads)
+	}
+	want := []settingEdit{{path: "context-files.names", value: "[AGENTS.md, CLAUDE.md]"}}
+	if !reflect.DeepEqual(log.applies, want) {
+		t.Fatalf("applies = %+v, want %+v — the file's edit reaches the same dispatcher a row's does",
+			log.applies, want)
+	}
+	if len(log.writes) != 0 {
+		t.Errorf("the watcher wrote %+v; the file it is watching already says all of it", log.writes)
+	}
+	if got, want := m.settingsValueCell(rows[1]), "[AGENTS.md, CLAUDE.md]"+settingsEditMarker; got != want {
+		t.Errorf("names cell = %q, want %q — a watcher apply is journaled like any other", got, want)
+	}
+}
+
+// One wait at a time, and the chain is the fold's: every landed report opens the next wait, so a
+// second save is seen — and a watch that ENDED opens nothing, because there is nothing left to wait
+// for and a chain re-armed over a closed watch would spin.
+func TestConfigWatchReArmsUntilTheWatchEnds(t *testing.T) {
+	rows := []SettingRow{settingsStructuredRow()}
+	edit := &externalEditLog{}
+	m := configWatchModel(t, rows, &settingsWriteLog{}, edit)
+
+	next, cmd := stepCmd(t, m, configChangedMsg{alive: true})
+	m = next
+	if _, ok := cmdMsg(cmd).(configChangedMsg); !ok {
+		t.Fatalf("a landed report yielded %T, want the next wait on the same chain", cmdMsg(cmd))
+	}
+
+	next, cmd = stepCmd(t, m, configChangedMsg{alive: false})
+	m = next
+	if cmd != nil {
+		t.Errorf("the ended watch re-armed %T; nothing will ever report again", cmdMsg(cmd))
+	}
+	if edit.reloads != 1 {
+		t.Errorf("reloads = %d, want only the live report's one: an ended watch says nothing about the file",
+			edit.reloads)
+	}
+}
+
+// The last-good rule (ADR 0041 decision 7): a file that does not parse applies nothing and is silent
+// about it until it has failed three saves running — a watcher will inevitably read a file somebody
+// is halfway through writing. Then it says so ONCE, however many more failures follow, and the file
+// parsing again is what re-arms the sentence.
+func TestConfigWatchNotesAFileThatKeepsFailingToParseExactlyOnce(t *testing.T) {
+	rows := []SettingRow{settingsStructuredRow()}
+	log := &settingsWriteLog{}
+	edit := &externalEditLog{reloadErr: errors.New("parse config: line 4")}
+	m := configWatchModel(t, rows, log, edit)
+	notes := func() []string {
+		var out []string
+		for _, e := range m.transcript.entries {
+			if strings.Contains(e.text, "has not parsed") {
+				out = append(out, e.text)
+			}
+		}
+		return out
+	}
+
+	m = step(t, m, configChangedMsg{alive: true})
+	m = step(t, m, configChangedMsg{alive: true})
+	if got := notes(); len(got) != 0 {
+		t.Fatalf("notes after two failures = %v, want silence: a save caught mid-write is ordinary", got)
+	}
+
+	m = step(t, m, configChangedMsg{alive: true})
+	if got := notes(); len(got) != 1 || !strings.Contains(got[0], "parse config: line 4") {
+		t.Fatalf("notes after three failures = %v, want one carrying the reload's own reason", got)
+	}
+	m = step(t, m, configChangedMsg{alive: true})
+	if got := notes(); len(got) != 1 {
+		t.Fatalf("notes after four failures = %v, want the one: a note per save is an error scrolling past", got)
+	}
+	if len(m.settingEdits) != 0 || len(log.applies) != 0 {
+		t.Errorf("an unreadable file journaled %+v and applied %+v; the last good config stands",
+			m.settingEdits, log.applies)
+	}
+
+	// The file parses again, and the next run of failures is news once more.
+	edit.reloadErr = nil
+	m = step(t, m, configChangedMsg{alive: true})
+	edit.reloadErr = errors.New("parse config: line 9")
+	for range configWatchStallReports {
+		m = step(t, m, configChangedMsg{alive: true})
+	}
+	if got := notes(); len(got) != 2 {
+		t.Errorf("notes = %v, want a second one: the file parsed in between, so the count started over", got)
+	}
+}
+
+// A Driver that wired no watcher is a Driver whose config file is never re-read on its own — and
+// nothing about the session changes for it (ADR 0031's nil-seam degrade).
+func TestConfigWatchIsNotArmedWithoutTheSeam(t *testing.T) {
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return []SettingRow{settingsStructuredRow()} }
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+
+	if cmd := m.awaitConfigChange(); cmd != nil {
+		t.Errorf("an unwired watcher armed %T", cmdMsg(cmd))
 	}
 }
 

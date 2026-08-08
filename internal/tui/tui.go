@@ -448,6 +448,28 @@ type Options struct {
 	// re-reading a file. nil ⇒ the round trip ends at the editor, and the pane says so.
 	ReloadConfig func() ([]AppliedSetting, error)
 
+	// AwaitConfigChange blocks until the config file has changed on disk, and reports whether the
+	// watch is still open: false means it has ENDED — the program is shutting down, or the binary
+	// stopped watching — and nothing will ever be reported again.
+	//
+	// It is the second trigger for the round trip [ReloadConfig] answers, and the reason there is a
+	// second one (ADR 0041 decision 3). ADR 0037 made the editor's EXIT the end-of-edit signal, which
+	// a desktop opener cannot give: `open`, `xdg-open` and `cmd /c start` return the moment the file
+	// is handed to the application that owns `.yaml`, long before the human has typed anything, so the
+	// diff behind that signal reads unchanged bytes and concludes they edited nothing. The file itself
+	// is the signal instead — and then it does not matter who wrote it: the editor this pane launched,
+	// a GUI editor left open in another window, or a `vim ~/.apogee/config.yaml` in a second terminal
+	// all apply the same way (decision 5).
+	//
+	// The Model owns the cadence and the consequences and nothing else, exactly as it does for
+	// [Heartbeat]: one wait is opened at Init, each landed report re-reads through [ReloadConfig],
+	// journals and applies what came back through the same two homes an in-pane commit uses, and opens
+	// the next wait. WHICH file is watched, how, and how often is the binary's alone.
+	//
+	// nil ⇒ nothing is watched, the pre-watcher behaviour: a foreground editor still applies on exit
+	// and a detached one applies at the next relaunch.
+	AwaitConfigChange func(ctx context.Context) bool
+
 	// Skills is the discovered skill catalog the merged "/" menu lists and an inline "/token"
 	// resolves against; nil ⇒ no skills are wired (the menu offers no skills and no token
 	// resolves). The binary backs it with a live skills.Provider and the agent loop resolves the SAME
