@@ -509,7 +509,9 @@ server: workstation
 An entry's `name` is the label `/server` lists it under, the argument
 `/server <name>` takes, the value `server:` points at, and the host name the status
 footer shows while the session is on it — one name for all four jobs, so no two
-entries may share one. `endpoint` is required; `api-key` and `model` are optional.
+entries may share one. `endpoint` is required; `api-key` and `model` are optional, as is
+`llama-launcher`, which lets apogee start, switch and stop that server itself —
+[below](#local-servers--llama-launcher).
 
 **`server:` keeps itself current.** Every `/server` switch onto a listed entry
 splices `server: <name>` back into the file — that one key, your comments and layout
@@ -591,15 +593,16 @@ separate tool that stores the **Launch profiles** llama.cpp itself has no store 
 which model file, which server (llama.cpp, Ollama, LM Studio), and under what flags.
 Apogee imports it as a library, so three commands act on this machine's servers:
 
-- **`/model`** — make the world serve a profile. With a launcher configured, "switch
-  model" is answered from the launcher's side: the picker lists the **Launch profiles**
+- **`/model`** — make the world serve a profile. While the session is on a server entry
+  that names a launcher, "switch model" is answered from the launcher's side: the picker
+  lists the **Launch profiles**
   its config defines, in the launcher's own order (favourites first), instead of the
   one-row list a single-model server advertises. Each row carries the backend, the
   context window the profile configures, `· running` when that profile is live right now,
   and the port when it is not the one this session is pointed at; the profile already
   serving this session is not offered, so every row you can see switches something.
-  `/model <name>` activates one by name. Without a launcher the verb is unchanged — what
-  the server advertises, minus the model you are already on.
+  `/model <name>` activates one by name. On a server with no launcher the verb is
+  unchanged — what the server advertises, minus the model you are already on.
 - **`/unload-model`** — free the model of the server this session is on. On a *managed*
   llama.cpp server the model is baked into the process, so unloading it stops the
   server — the transcript says which of the two happened.
@@ -624,23 +627,44 @@ the verb returns. When the health wait times out the launcher deliberately leave
 running and names its PID and log path; apogee prints that and adds the honest coda —
 the heartbeat will bind it if it comes up.
 
-One **file-only** key drives all of it, and it usually needs nothing:
+One **file-only** key drives all of it, and it belongs to the server it fronts:
 
 ```yaml
 # ~/.apogee/config.yaml
-llama-launcher: ~/configs/llama-launcher.yaml   # unset = auto-detect · off = disabled
+servers:
+  - name: workstation
+    endpoint: http://192.168.64.1:1111
+    llama-launcher: auto         # absent = no launcher · auto = its default config · or a path
+  - name: rented-box
+    endpoint: https://llm.example.com
 ```
 
-Unset (the default) is **auto-detect**: apogee reads the launcher's own default config
-under your home directory — `~/.config/llama-launcher/config.yaml` — if that file is
-there, so a machine with the launcher installed needs no configuration. On a machine
-without one nothing is lost: `/model` simply lists what the server advertises, and
-`/unload-model` and `/stop-server` answer `llama-launcher not configured`. `off`
-keeps the integration off on a machine that *does* have a launcher config; a path names
-a different config. Nothing is checked at
-startup — a path that is not there is reported the first time a command reaches for it,
-never as a refusal to start — and every command re-reads the file, so a profile added in
-the launcher's own TUI is offered by the next `/model`.
+**The launcher follows the session.** While you are on an entry that carries the key,
+`/model` answers from the launcher's side and the other two verbs act on that server;
+`/server` onto any other entry — the rented box above, an OpenRouter — and the same
+`/model` goes back to listing what *that* server advertises. This is the point of the
+key living on the entry: one config can hold a machine you launch models on and a remote
+provider whose model list you would rather not lose. Coming home is the two steps it
+looks like: `/server workstation`, then `/model`.
+
+Absent (the default) means **no launcher for that server**: `/model` simply lists what
+it advertises, and `/unload-model` and `/stop-server` answer
+`llama-launcher not configured`. `auto` reads the launcher's own default config under
+your home directory — `~/.config/llama-launcher/config.yaml` — and a path reads that
+config instead (`~` expands). Nothing is checked at startup — a config that is not there
+is reported the first time a command reaches for it, naming the path, never as a refusal
+to start — and every command re-reads the file, so a profile added in the launcher's own
+TUI is offered by the next `/model`.
+
+Activating a profile that resolves to an endpoint no entry names keeps the launcher on
+for that session, so the next `/model` still answers from its side. A session started
+with `--endpoint` carries no launcher at all.
+
+**Upgrading from the old global key.** `llama-launcher:` used to sit at the top level and
+turn the integration on for every server at once. A config that still sets it is refused
+at startup, with the file, the line, and the complete `servers:` entry to paste in its
+place — an old bare `llama-launcher:` (the auto-detect shape) becomes `auto`, and an old
+`off` needs only the deletion, since an entry with no key already has the launcher off.
 
 Two limits are worth knowing. The launcher runs local processes, so the verbs that start
 and stop one need a Unix-like host: on **Windows** apogee still builds and everything the

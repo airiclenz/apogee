@@ -214,7 +214,14 @@ launcher as a library, and activating a Launch profile is what "switch model" me
 has one: the launcher **actuates** (starts and
 stops servers, loads and unloads models), the [Heartbeat](#probing-and-model-identity) **observes**,
 and every actuation is completed by the next Beat binding what it finds — the session follows the
-loaded profile to its server. The deliberate contrast is the [Model profile](#identity-and-shape):
+loaded profile to its server. Which sessions get that answer is a property of the **server entry**:
+a `servers:` entry may carry `llama-launcher: auto` (the launcher's own default config) or a path to
+one, and absent — the default, and what every remote entry wants — means the launcher is off for
+that server. The integration therefore **follows the session**: `/model` offers Launch profiles only
+while the session is on such an entry, every other server keeps the models it advertises, and a
+Launch profile load that moves the session to an endpoint no entry names keeps the launcher it just
+used. There is no global launcher key; a `config.yaml` still carrying the retired top-level one is
+refused at startup with the per-entry line to paste. The deliberate contrast is the [Model profile](#identity-and-shape):
 a Launch profile is **launch-side** (how a model comes to exist at an endpoint), a Model profile is
 **request-side** (how apogee speaks to whatever exists). The two never touch — loading a Launch
 profile changes what runs; the Model profile is global and stands through it. See
@@ -982,7 +989,10 @@ fresh provider client at the new endpoint and leaves the session with **no model
 per-server heartbeat Monitor is swapped whole behind the unchanged seam, and the new server's
 **first Beat completes the move** through that same Rebind — one code path with the cold start. A
 switch guesses nothing about the new server and destroys nothing about the session: the
-conversation, Turn counters, mode, approvals and confinement all stand. The servers it can reach
+conversation, Turn counters, mode, approvals and confinement all stand. What a switch *does* carry
+is the launcher: moving onto an entry that names a llama-launcher config turns the
+[Launch profile](#identity-and-shape) verbs on for as long as the session sits there, and moving
+onto an entry without one turns them off again. The servers it can reach
 are the `servers:` list (plus the unlisted one an `--endpoint` override started the session on),
 and a switch **onto a listed entry records the choice**: `server: <name>` is spliced into
 `config.yaml` through the [Settings surface](#safety-and-autonomy)'s writer, so the next launch

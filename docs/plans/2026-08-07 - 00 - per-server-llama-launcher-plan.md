@@ -215,9 +215,22 @@ green; `make check` before commit.
 
 **Commit:** `feat(config): refuse the legacy top-level llama-launcher key with a paste-able fix`
 
-## 5. Docs: ADR amendments, CONTEXT.md, CHANGELOG
+## 5. Docs: ADR amendments, CONTEXT.md, CHANGELOG — ✅ DONE (2026-08-08)
 
 Depends on items 1–4. This is the single owning item for every cross-cutting doc edit.
+
+NOTES (2026-08-08): one deviation from the literal text — three files beyond the four the What list
+names were edited, all under this item's "single owning item for every cross-cutting doc edit"
+clause. (a) `README.md`: item 3's NOTES handed its "Local servers — llama-launcher" section here; it
+taught the retired top-level key. The `/model` bullet's "with a launcher configured" and the
+`servers:` field list were adjusted with it. (b) `docs/layout/settings-screen-layout.md`: item 3
+deleted the `llama-launcher` registry row, leaving the key-list sketch painting a row that no longer
+exists, the blank-value-cell rule naming it, and the single-line-field sketch using it as its example
+(re-seated on `system-prompt-file`). (c) `layout.md`: the `/model` picker paragraph said the choice
+between the two offerings was a property of the host ("with llama-launcher configured"), which is
+now the session's server entry. ADR 0041 decision 1's passing "it sits beside `server` and
+`llama-launcher`" was left alone — it is the rationale of a ratified record as it stood, and
+rewriting a decision's prose is not what an amendment is for.
 
 **What:**
 

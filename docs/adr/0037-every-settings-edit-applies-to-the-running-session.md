@@ -19,6 +19,17 @@ Status: accepted
 > boundaries, the idle-only mutators and the idle-only editor jump, the row notes, the ` *` marker,
 > and the rule that a key which cannot be applied refuses on its own row.
 
+> **Note 2026-08-07 — the `llama-launcher` row left this surface.** ADR 0029's global
+> `llama-launcher:` key retired when the launcher moved onto the `servers:` entry it fronts (that
+> record's amendment of the same date), and the row went with it: no registry row, no formatter, no
+> `ApplySetting` case. Nothing here is superseded — the row was an ordinary anytime-safe member of
+> decision 2's first class and left as one — but the live-apply story for the launcher is now a
+> different mechanism entirely. Enablement follows the session's server: startup entry selection, a
+> `/server` switch and a bind install the entry's launcher path, so the thing that used to be a key
+> you edited on this screen is a consequence of a move you make in the picker decision 5 put here.
+> The setting itself now lives inside the `servers:` block, which is a decision-6 `$EDITOR` key —
+> where a per-entry field belongs.
+
 ## Context
 
 [ADR 0035](0035-the-settings-surface-persists-one-key-per-deliberate-edit.md) built the settings

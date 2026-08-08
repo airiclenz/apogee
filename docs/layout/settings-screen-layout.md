@@ -34,7 +34,7 @@ hand-drawn sketch the requirements were written against. Where the two differed:
   so neither carries the `edit in config.yaml` label the sketch showed; the label exists nowhere any
   more. What replaced it on the blocks no row can hold is `· ⏎ opens $EDITOR`.
 - **A row's value cell is blank when the key holds nothing** and it is a row that seeds an edit
-  field (`llama-launcher`, `system-prompt-file`). `none` is reserved for the structured rows, whose
+  field (`system-prompt-file`). `none` is reserved for the structured rows, whose
   `⏎` opens an editor rather than a field.
 
 ### The key list
@@ -48,7 +48,6 @@ hand-drawn sketch the requirements were written against. Where the two differed:
 │   Upstream                                                                                   │
 │ ❯ servers               2 servers    · ⏎ opens $EDITOR                                       │
 │   server                macStudio                                                            │
-│   llama-launcher                                                                             │
 │                                                                                              │
 │   Autonomy                                                                                   │
 │   mode                  ask-before                                                           │
@@ -124,7 +123,7 @@ longer names. Choosing a different server is how this key changes.
 ### The single-line field (string and int keys)
 
 ```
-│ ❯ llama-launcher        http://192.168.64.1:7331/mcp▏                                        │
+│ ❯ system-prompt-file    ~/prompts/apogee.md▏                                                 │
 ```
 
 The field opens **in place**, on the row and in the value's own column, seeded with what the key

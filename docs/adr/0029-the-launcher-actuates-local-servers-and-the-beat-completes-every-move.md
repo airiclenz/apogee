@@ -130,6 +130,40 @@ by the next `/load`. Config warnings arrive through the notice callback and land
 notes. A configured-but-missing path degrades at use ("no launcher config at …"), not at
 startup — the `servers:` posture of not probing reachability at load.
 
+> **Amendment 2026-08-07 — the key moves onto the `servers:` entry, and the global one is
+> refused.** A global launcher key makes a claim about the whole config that stops being true the
+> moment the list holds more than one server: a machine with llama-launcher installed captured
+> `/model` on **every** entry, so a session moved onto a remote provider — an OpenRouter, a rented
+> box — was offered this machine's Launch profiles instead of the hundreds of models that server
+> advertises, and ADR 0028's advertised-model discovery was unreachable for as long as the key was
+> set. The enablement belongs where the launcher's reach ends: on the entry it fronts. Revised by
+> the owner's four calls of 2026-08-07. **(1)** Each `servers:` entry may carry its own
+> `llama-launcher:` field, and `/model` offers Launch profiles only while the session is on that
+> entry; address-matching auto-detection was rejected. **(2)** The field has three shapes — absent
+> (the launcher is off for that server: the default, and what every remote entry wants), `auto`
+> (read `DefaultConfigPath()`), or a path — and the top-level key retires from the schema together
+> with its `/settings` registry row and live-apply case ([ADR 0037](0037-every-settings-edit-applies-to-the-running-session.md)).
+> **(3)** A config still carrying the top-level key **fails startup** with a ready-to-paste
+> per-entry example rather than migrating itself — [ADR 0036](0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-the-startup-choice.md)'s
+> refusal-over-silence, and pre-production (AGENTS.md) is why no shim is owed. **(4)** On a server
+> with no launcher `/model` never offers profiles, and coming home is two steps: `/server <name>`,
+> then `/model`.
+>
+> Two rules of this decision change with it. **Auto-detect by existence is superseded by an
+> explicit `auto`**: the old empty key stat-gated `DefaultConfigPath()` precisely because it lit up
+> silently, while `auto` is written by hand, so a missing config now degrades at the first verb
+> naming the path — the posture the named-path case already had. And **enablement follows the
+> session, not the process**: startup entry selection, a `/server` switch and a bind each install
+> the entry's resolved path, while a Launch-profile load that MOVES the session (possibly to an
+> endpoint no entry names) leaves it untouched, so the integration stays on for the session that
+> just used it; the `--endpoint` override entry (ADR 0036 D6) carries no launcher key, so the
+> integration is off there. Everything else here stands: the launcher's config is still the single
+> profile store, apogee still never defines, writes or caches profiles, every user-facing operation
+> still does a fresh `LoadConfig`, and the container case is unchanged — no entry carries the key
+> there, and the launcher's MCP adapter as an ordinary `mcp-servers:` entry remains the remote
+> answer; the two still compose. Recorded in
+> `docs/plans/2026-08-07 - 00 - per-server-llama-launcher-plan.md`.
+
 **5. One actuation latch, and beats in its shadow are ignored.** At most one actuation runs at
 a time, TUI-owned: while it is in flight, sends and further actuations are refused with a
 one-line note. The latch is simultaneously the per-address serialization the facade contract

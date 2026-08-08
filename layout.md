@@ -1241,12 +1241,13 @@ scrolling around the selection. It is modal — while it is open every key belon
 `config.yaml` names plus the one this session started on, in three columns — `name`, `— endpoint`,
 `· current` — and the row the session is on is the one that fills the third, faintly; picking it
 says so instead of switching. `/model` has
-two offerings and lists whichever one this host can answer from: with llama-launcher configured,
-the Launch profiles its config defines, in the launcher's own order, in five columns — `name`,
+two offerings and lists whichever one the session's own server can answer from: while it is on a
+`servers:` entry that names a llama-launcher config,
+the Launch profiles that config defines, in the launcher's own order, in five columns — `name`,
 `— backend`, `· 32k`, `(:8080)`, `· running` — where the port shows only for a profile that does
-not live where this session is pointed and `· running` marks one that is live right now; without
-it, what the server currently advertises, in two columns — `model`, `— 32k` — refreshed in place
-if a heartbeat lands underneath it. Either way what
+not live where this session is pointed and `· running` marks one that is live right now; on any
+other entry, what the server currently advertises, in two columns — `model`, `— 32k` — refreshed in
+place if a heartbeat lands underneath it. Either way what
 the session is ALREADY on is not among the rows — there is no `· current` mark to pick, because
 there is no row that would switch nothing, which is what makes the hint's `⏎ switch` true of every
 row. Given an argument (`/model <name>`, `/server <name>`) the verb acts straight away and no pane

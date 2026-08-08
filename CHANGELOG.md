@@ -159,6 +159,45 @@ point is a **minor** bump, not a breaking change.
   The row budget, the grouping scope, the per-member state and the click surface are specified in
   `layout.md` (§"The rules behind the tool-call sketch" and §"Collapsed and expanded blocks"),
   rewritten from the sketch in `docs/layout/tool-layout.md`.
+- **llama-launcher is now a property of the server it fronts, not of apogee.** The top-level
+  `llama-launcher:` key is **retired**, and the setting moves onto the `servers:` entry the launcher
+  starts servers for. A global key made a claim about the whole config that stopped being true the
+  moment the list held more than one server: on a machine with the launcher installed, `/model`
+  answered from the launcher's side on *every* entry, so a session switched to a remote provider was
+  offered this machine's Launch profiles instead of the hundreds of models that server advertises.
+  Now the integration **follows the session** — `/model` offers Launch profiles while you are on the
+  entry that names a launcher, and the moment you `/server` somewhere else the same verb goes back
+  to what that server advertises. Coming home is the two steps it looks like: `/server <name>`, then
+  `/model`.
+  - **The key has three shapes on an entry.** Absent means no launcher for that server — `/model`
+    lists what it advertises and `/unload-model` / `/stop-server` answer
+    `llama-launcher not configured` — and that is the default every remote entry wants.
+    `llama-launcher: auto` reads the launcher's own default config
+    (`~/.config/llama-launcher/config.yaml`), and a path reads that config instead (`~` expands).
+    Nothing is checked at startup, as before: a config that is not there is reported the first time a
+    command reaches for it, naming the path.
+  - **`auto` is written by hand, where the old key auto-detected by existence.** The retired key lit
+    the integration up on its own whenever the launcher's default config happened to exist, and
+    stat-gated exactly because it was silent; an entry saying `auto` is already an explicit choice,
+    so the file is read when a verb asks for it and named in the error if it is missing. There is
+    also no per-entry `off` — absent *is* off, and a config offering two spellings of one state only
+    invites them to drift, so an `off` value is refused with the fix ("remove the key").
+  - **A `/model` load keeps the launcher it just used.** Activating a Launch profile can move the
+    session to an endpoint no entry names; that move leaves the integration on, so the next `/model`
+    still answers from the launcher's side. A `--endpoint` override start carries no launcher, and a
+    launcher on another machine is unchanged — reach that one as an `mcp-servers:` entry pointing at
+    the launcher's MCP adapter; the two still compose.
+  - **A config still setting the top-level key is refused at startup, with the fix to paste.** The
+    error names the file and the line, and prints the complete `servers:` entry to put the value on
+    (an old bare `llama-launcher:` — the auto-detect shape — pastes as `auto`; an old `off` needs
+    only the deletion, since an entry with no key already has the launcher off). The refusal runs
+    before the retired-schema fold does any work, so a file is never half-rewritten and then
+    refused, and no `config.yaml.bak-*` is left behind by a start that did not finish. Nothing
+    migrates itself: this is a pre-production schema break, and the paste-able fix is what is owed
+    instead of a shim.
+  - **The `llama-launcher` row leaves `/settings`.** With the setting inside the `servers:` block it
+    is edited where that block is edited — `⏎ opens $EDITOR` — so there is no top-level row to
+    apply live. Recorded as an amendment to ADR 0029 decision 4 and a note on ADR 0037.
 
 ### Fixed
 
