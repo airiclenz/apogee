@@ -785,7 +785,7 @@ shows for the run (`reading main.go`), ticking as inner calls land; once the rep
 report's first line. The count is **transitive** — every call in the span counts, whatever its
 depth — so one number says how much work happened in there, at every nesting level by the same
 rule. The middle cell is the other half of that summary: **how full the delegate's own context
-got** (`12k/32k`), spelled in the whole thousands the status line's gauge spells its window in so
+got** (`12k/32k`), spelled in the unit-capped form the status line's gauge spells its window in so
 the two readings on screen are read in one language, and placed between the count and the gist so
 the gist — the one part with no bound on its length — is what a narrow terminal clips. It appears
 **only once a reading exists**: a run whose child has not reported usage yet keeps the count alone
@@ -987,6 +987,25 @@ and nothing in the slot ever touches the edge. The black field runs past it to t
 regardless — the row is one unbroken band, as it is on the left. In a window too narrow to hold
 both slots the right one is dropped whole rather than squeezed, two columns sooner than it used
 to be.
+
+**How a size is spelled.** Every context size on screen goes through one formatter — both halves
+of the gauge, the sub-agent block's middle cell, the startup box's window, the rebind and
+heartbeat notes, the `— 32k` gloss in the pickers — so the whole frame states a window in one
+language rather than each site inventing its own. It counts in **binary steps of 1024** and wears
+the plain suffixes `k`, `M`, `G`, because the windows themselves are powers of two and the models
+are named for them: `32768` reads `32k` and `131072` reads `128k`, which is what the reader was
+told they bought. The accepted price of the binary step is that a decimal round number does not
+stay round — `128000` reads `125k`. The unit is then chosen so that **the displayed number never
+reaches a thousand**: it steps up rather than running on, so `999k` is the largest thing `k` ever
+spells and a million-token window reads `1M`, never `1024k`. `k` is always a whole number (`2k`,
+`32k`, `977k`); `M` and `G` carry one decimal only while it says something (`1.1M`, against `1M`
+and `15M`); anything under a thousand is just itself (`999`). A size that is **not known** is
+spelled as nothing at all — the empty string is the sentinel, which is why a cell or a row with no
+reading behind it disappears instead of painting a `0`. One reading wants finer grain and gets one
+decimal in every unit (`~4.1k`, `~32.0k`): the standing-content note that fires when the system
+prompt and the context files overrun their Budget share, where a measured count is set against a
+limit the coarse form would round it onto. File sizes are a different domain and keep their own
+`KiB`/`MiB`.
 
 **And what the left slot sheds.** The left slot carries the state's own words — the running phrase
 and its clock, `approval needed`, `answer needed`, `error` — and after them the `N queued` count of

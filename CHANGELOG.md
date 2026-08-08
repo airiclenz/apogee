@@ -198,6 +198,29 @@ point is a **minor** bump, not a breaking change.
   - **The `llama-launcher` row leaves `/settings`.** With the setting inside the `servers:` block it
     is edited where that block is edited — `⏎ opens $EDITOR` — so there is no top-level row to
     apply live. Recorded as an amendment to ADR 0029 decision 4 and a note on ADR 0037.
+- **A context size never spills out of its unit again — one formatter now spells every one of
+  them.** The rule is that the displayed number never reaches a thousand: past `999k` the spelling
+  steps up rather than running on, so a million-token window reads `1M` and never the `1048k` it
+  used to. The ladder is **binary** — 1024 to a rung, plain `k`/`M`/`G` suffixes — because the
+  windows themselves are powers of two and the models are named for them, so `131072` reads `128k`
+  the way its model card does; the price of that choice, taken deliberately, is that a decimal round
+  number no longer reads round (`128000` is `125k`). `k` is a whole number (`2k`, `32k`, `977k`),
+  `M` and `G` carry one decimal only while it says something (`1.1M`, against `1M` and `15M`), and
+  an unknown size still spells as nothing at all, so a cell with no reading behind it disappears
+  instead of painting a `0`.
+  - **Every display site goes through it**: the status line's context gauge, the startup box, the
+    sub-agent block's `12k/32k` cell, the rebind and heartbeat notes, the `— 32k` gloss in the
+    `/model` and `/server` pickers, the standing-content Budget warning, and `apogee headless`'s
+    `sub-agent:` lines on stderr. Two hand-rolled helpers — one in the TUI, one deliberately
+    duplicated in the CLI half because the TUI's was unexported — are gone, replaced by the shared
+    `internal/format` package both halves import.
+  - **Rounding is half-up now, where the old helper truncated**, so `1999` reads `2k` rather than
+    `1k`. Sizes that were already round mostly read the same (`32768` was and stays `32k`); the ones
+    that move are the ones that were being rounded down or spelled past their unit.
+  - `apogee probe host` is deliberately **not** in the sweep: it is a diagnostic and prints the exact
+    number the server reported (`context window 131072`). File sizes keep their own `KiB`/`MiB`
+    spelling — different domain. The rule is written down in `layout.md` (§"The status line's right
+    slot").
 
 ### Fixed
 

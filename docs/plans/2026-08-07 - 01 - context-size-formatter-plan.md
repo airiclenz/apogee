@@ -76,9 +76,18 @@ was added: item 4 is the plan's single owning item for cross-cutting doc edits a
 
 **Commit:** `refactor(headless): drop formatTokens twin for shared format package`
 
-## 4. Docs sweep and issue closeout
+## 4. Docs sweep and issue closeout — ✅ DONE (2026-08-08)
 
 Depends on items 2 and 3.
+
+NOTES (2026-08-08): the item's `layout.md` line numbers (53, 682, 867, 1137, 1139, 1218) do not point at
+spellings — the actual example sites are 52, 788, 976, 1054, 1247, 1249, 1328, and all seven (`16k/32k`,
+`12k/32k`, `8k/98k`, `· 32k`) already match the new rule, so none changed. Two edits beyond "update any
+that do not": `layout.md:788` asserted the OLD rule in prose ("spelled in the whole thousands"), now "the
+unit-capped form"; and the new rule paragraph spells its counter-example `1024k`, not the `1048k` of the
+ISSUES request, because the item's own acceptance grep forbids that literal in `layout.md` (it survives in
+the CHANGELOG entry, outside that grep's file set). A CHANGELOG entry was added under Unreleased →
+Changed: items 2 and 3 both deferred it here as the plan's single owning item for cross-cutting doc edits.
 
 **What:** Single owning item for all cross-cutting doc edits:
 
