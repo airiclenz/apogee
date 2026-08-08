@@ -124,6 +124,10 @@ When one reply carries several `sub_agent` calls, the **top-level** agent runs t
 own delegations run serially inline); every event a sub-agent emits carries the **call-ID**
 of the `sub_agent` call that spawned it, so interleaved streams stay attributable
 ([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)).
+One shape to know when reading events: `domain.AuditEvent` carries a `CallID` of its own — the
+**audited** call, the tool call that record is about — which **shadows** the promoted
+`EventBase.CallID`, so an observer reading `ev.CallID` on an audit record gets the audited call;
+the spawning one still travels, reached as `ev.EventBase.CallID`.
 Bare "agent" means the **top-level** agent unless qualified as "sub-agent".
 _Avoid_: "child agent" (says nothing about the privilege bound), "worker".
 
@@ -147,7 +151,9 @@ A **Session** is one conversation the engine holds — the versioned `domain.Ses
 `{Version, State}`, opaque to everything outside the engine. A **Session record** is how that
 Session is *persisted*: the on-disk `session.Record` wrapper (`internal/session`) around **two
 opaque payloads** — the untouched engine Session **and** the TUI's own versioned **transcript
-blob** (the scrollback: user/assistant text, tool cards, notes, sub-agent `Depth`) — plus
+blob** (the scrollback: user/assistant text, tool cards, notes, sub-agent `Depth` and the
+**call-ID** of the `sub_agent` call that spawned each delegated entry, so a resumed fan-out
+regroups per child) — plus
 browsable `Meta` (title, timestamps, workspace, model, message count, last context fill). Not
 every scrollback entry is persisted: an **ephemeral** entry is display-only — rendered exactly
 like its kind, skipped by the encoder — because it is *re-derived* at each startup or resume

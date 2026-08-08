@@ -130,8 +130,12 @@ child's task.
   (the `context-window` idiom — yaml cannot distinguish an explicit `0` from an absent
   key); the settings surface live-applies it per
   [ADR 0037](0037-every-settings-edit-applies-to-the-running-session.md).
-- **`EventBase` grows one additive field** (spawning call-ID); the transcript blob version
-  bumps additively; bench and headless consumers read it or ignore it.
+- **`EventBase` grows one additive field** (spawning call-ID), persisted as an **additive
+  transcript-blob member** — *not* a blob version bump (corrected at implementation,
+  2026-08-08; this bullet first read "the transcript blob version bumps additively"): the
+  codec's own additive rule makes an `omitempty` member invisible to an older build, while
+  a bump would make every blob this build writes unreadable to one, on ADR 0022's
+  reject-forward rule, for no gain. Bench and headless consumers read the field or ignore it.
 - **Concurrent children share one workspace.** Two children editing the same file can race;
   that is the model's (or the enumeration's) choice, as in other agent tools. Worktree
   isolation is explicitly out of scope for v1 — parked.

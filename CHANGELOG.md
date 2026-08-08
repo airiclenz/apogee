@@ -88,6 +88,53 @@ point is a **minor** bump, not a breaking change.
     twice, and `server:` is still never re-applied by a re-read: it names where the *next* session
     starts. Recorded in [ADR 0041](docs/adr/0041-the-config-file-is-watched.md), which supersedes ADR
     0037's editor ladder and its diff-on-exit trigger; the rest of ADR 0037 stands.
+- **Sub-agents now run in parallel, bounded by a per-server Parallel agents cap.** When one reply
+  asks for several `sub_agent` delegations, the top-level agent runs them **concurrently** instead
+  of one after another — the wait for three delegated sub-tasks becomes roughly the longest of the
+  three rather than their sum. Nothing about a single delegation changes, and a server that offers
+  one slot keeps today's strictly serial behaviour to the byte.
+  - **The cap is pin-else-discover-else-1.** A `servers:` entry may carry the new optional
+    **`parallel-agents: N`** key; set, it is a **pin** discovery never overrides (the
+    `context-window:` idiom). Absent, the cap is discovered from the live server — `total_slots` in
+    the `/props` response apogee already fetches every heartbeat, which is the `--parallel N` a
+    llama.cpp server was started with. No signal at all means **1**. A negative value is refused at
+    startup naming the entry; `0` reads as unset. Remember the trade the server makes: `--parallel N`
+    splits its context into N slots, so **more parallel agents means a smaller window each** — the
+    per-slot number apogee has always shown (ADR 0024).
+  - **Depth 0 only, and siblings are independent.** A sub-agent's own delegations still run serially
+    inline, so there is no slot accounting and no deadlock. A child's failure — an error, a tripped
+    breaker, a denied approval — becomes *that child's* tool result and no sibling is cancelled;
+    `esc` still signals every in-flight child, waits for them, and rolls the whole parent turn back.
+    A mixed reply runs its leaf tools first in emitted order and *then* fans out, so a write a child
+    depends on has landed before the children start, and results are appended in call order however
+    the children finish.
+  - **Approvals queue, and each prompt names the child asking.** Two children raising an approval at
+    once produce two prompts one at a time, the asking child blocked and its siblings still running;
+    the pane leads with `Sub-agent: <the task it was given>` so "which agent wants this?" is
+    answerable at a glance. The queue sits in the engine, so every driver — the TUI, the bench, a
+    future daemon — gets one-prompt-at-a-time without building a queue of its own (ADR 0031).
+  - **Every event a child emits carries the call-ID of the `sub_agent` call that spawned it**, so
+    interleaved streams stay attributable: usage readings, audit records and per-run stderr lines
+    land on the right child. It is one additive `EventBase` member, persisted as an **additive
+    transcript member** — no blob version bump, since an omitempty member is invisible to an older
+    build while a bump would make every blob this build writes unreadable to one. (`AuditEvent`
+    keeps its own `CallID`, the *audited* call, which shadows the promoted one.)
+  - **The scrollback shows one block per child**, in the order the calls were made, each holding
+    only its own child's work: its own tool count, its own context fill, its own ticking activity
+    phrase, its own streamed text. Expanding, collapsing, clicking and resuming are unchanged — a
+    per-child block is a tool block like any other — and a session with one delegate at a time
+    renders exactly as it always has. The rendering rules are in `layout.md`.
+  - **Guided decomposition dispatches a batch of `min(cap, remaining)` delegations per Turn**
+    instead of exactly one (ADR 0014's amendment), keeping the quiescent boundary between batches
+    and the singular wording when a batch is one. The Mechanism stays **default-off**: the changed
+    stack must re-pass the ADR 0009 bench gate before that can change.
+  - **Interactive sessions only, for now.** `apogee headless` builds its own engine config and never
+    installs the cap, so an unattended run stays serial whatever the server advertises or the key
+    pins — recorded in `ISSUES.md`.
+  - Recorded in
+    [ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md),
+    with amendments to ADR 0013 §5 (per-child atomicity) and ADR 0014 §3 (batch = the cap); the
+    vocabulary is `CONTEXT.md` §Parallel agents.
 
 ### Changed
 

@@ -401,11 +401,34 @@ before commit).
 
 **Commit:** `feat(mechanisms): guided decomposition dispatches parallel-agents-sized batches`
 
-## 8. Docs: CHANGELOG and drift sweep
+## 8. Docs: CHANGELOG and drift sweep — ✅ DONE (2026-08-08)
 
 Depends on items 1–7. ADR 0039, the ADR 0013/0014 amendments, and the CONTEXT.md entries
 were written at decision time (2026-08-07) — this item closes the loop, it does not
 re-write them.
+
+NOTES (2026-08-08): the sweep ran wider than this item's literal list, on the run's binding decision
+plus two findings, all recorded rather than assumed. (a) Four folded-in amendments: the CHANGELOG
+entry also covers item 5's queued, child-named approvals; ADR 0039's Consequences bullet is reworded
+from "the transcript blob version bumps additively" to an **additive transcript member with no
+version bump** (item 3's NOTES (b) — the codec's own additive rule plus ADR 0022 reject-forward), and
+the CHANGELOG says the same; CONTEXT.md's Sub-agent entry now states that `domain.AuditEvent.CallID`
+(the audited call) SHADOWS the promoted `EventBase.CallID` (the spawning call), reachable as
+`ev.EventBase.CallID`; and the cap's TUI-only reach is recorded as a known limitation in `ISSUES.md`
+(`runHeadless` builds its own `apogee.Config` and never sets `ParallelAgents`) with a one-line caveat
+in the CHANGELOG and README — no headless code touched. (b) Two files beyond the named list: README
+gained `parallel-agents` in the `servers:` entry key sentence and a "Several sub-agents at once"
+paragraph (the item's "if it describes sub-agent execution" condition — README is where the per-entry
+keys are documented for users); and ADR 0024's known-limitation bullet "`total_slots` is **not
+read**" was falsified by item 2, so it carries a dated amendment (`docs/design/technical-design.md`
+already carried that correction from item 2). (c) Two sweep targets needed nothing:
+`docs/design/mechanism-catalogue.md` carries NO one-per-Turn or delegation-dispatch prose (its only
+`guided_decomposition` mention is a `truncate_history` incompatibility note), contra item 7's NOTES
+(d); `layout.md`'s per-child-block prose landed with item 6 and was verified, not rewritten. The
+acceptance grep still hits `CONTEXT.md` "one per Turn" — that hit is the batch entry's own
+parenthetical "(cap 1 = one per Turn, the serialized floor)", a correct qualified claim, not stale
+prose. `docs/design/technical-design.md` was left alone otherwise: its ADR index and phase table are
+not maintained for recent decisions (0037, 0040 and 0041 appear nowhere in it).
 
 **What:**
 

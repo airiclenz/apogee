@@ -222,7 +222,12 @@ proven by this work, and the UI is explicitly not built here.
 - **The gauge and the engine Budget still count different things** — the gauge uses the server's
   reported `TotalTokens`, the Budget a prompt-side estimate. That divergence is **documented and
   deliberately untouched** here; it long predates the heartbeat and is not a staleness bug.
-- **llama.cpp's `/props` `n_ctx` is PER SLOT, and `total_slots` is not read.** On a server started
+- **llama.cpp's `/props` `n_ctx` is PER SLOT** — and `total_slots` was not read (**amended
+  2026-08-08:** it is now, riding the same Beat as the discovery source for the **Parallel agents**
+  cap,
+  [ADR 0039](0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)
+  decision 2; the per-slot arithmetic below is unchanged, and is exactly why that cap and this
+  window trade are documented as one thing). On a server started
   with `--parallel N` the runtime window a beat reports is one slot's share, which is the window a
   single conversation actually gets — the honest number for the Budget. The multi-slot arithmetic
   is recorded here rather than re-derived; if a server ever reports these two in a way that makes

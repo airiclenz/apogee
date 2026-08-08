@@ -509,9 +509,20 @@ server: workstation
 An entry's `name` is the label `/server` lists it under, the argument
 `/server <name>` takes, the value `server:` points at, and the host name the status
 footer shows while the session is on it — one name for all four jobs, so no two
-entries may share one. `endpoint` is required; `api-key` and `model` are optional, as is
-`llama-launcher`, which lets apogee start, switch and stop that server itself —
-[below](#local-servers--llama-launcher).
+entries may share one. `endpoint` is required; `api-key`, `model` and `parallel-agents`
+are optional, as is `llama-launcher`, which lets apogee start, switch and stop that
+server itself — [below](#local-servers--llama-launcher).
+
+**Several sub-agents at once.** When one reply asks for several delegations, apogee
+runs them concurrently — as many at a time as that server's cap allows. Unset, the cap
+is whatever the server says: a llama.cpp started with `--parallel N` advertises N slots
+and N becomes the cap; a server that advertises nothing runs delegations one at a time,
+as apogee always has. `parallel-agents: N` (a file-only key) sets the width yourself,
+and is a **pin** apogee never overrides. Mind the trade the server makes for you:
+`--parallel N` splits its context into N slots, so more parallel agents means a smaller
+window each — the per-slot number is the one apogee has always shown you. A sub-agent's
+own delegations stay one at a time, and `apogee headless` runs delegations one at a time
+whatever this key says.
 
 **`server:` keeps itself current.** Every `/server` switch onto a listed entry
 splices `server: <name>` back into the file — that one key, your comments and layout
