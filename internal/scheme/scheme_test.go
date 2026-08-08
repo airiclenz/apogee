@@ -61,7 +61,7 @@ var darkPalette = map[string]string{
 	"skill":            "#b1baff",
 	"file-ref":         "#cdffa4",
 	"prompt-toggle":    "#b0d2ff",
-	"tool-marker":      "#8db4e6",
+	"tool-marker":      "#80B0FF",
 	"gauge":            "#c396ff",
 	"selection":        "#3a5fcd",
 	"spinner-1":        "#8668ff",
