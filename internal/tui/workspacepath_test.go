@@ -375,14 +375,14 @@ func TestTranscriptShortensPathsAndKeepsItsRootAcrossReset(t *testing.T) {
 	var tr transcript
 	tr.ws = newWorkspaceRoot("/home/me/proj")
 	tr.addToolCall(domain.ToolCall{ID: "1", Tool: "read_file",
-		Arguments: []byte(`{"path":"/home/me/proj/main.go"}`)}, 0)
+		Arguments: []byte(`{"path":"/home/me/proj/main.go"}`)}, runRef{})
 	if got := tr.entries[0].tool.Target; got != "main.go" {
 		t.Fatalf("target = %q, want %q", got, "main.go")
 	}
 
 	tr.reset()
 	tr.addToolCall(domain.ToolCall{ID: "2", Tool: "read_file",
-		Arguments: []byte(`{"path":"/home/me/proj/docs/plan.md"}`)}, 0)
+		Arguments: []byte(`{"path":"/home/me/proj/docs/plan.md"}`)}, runRef{})
 	if got := tr.entries[0].tool.Target; got != "docs/plan.md" {
 		t.Errorf("after reset the target = %q, want %q — the root did not survive /clear", got, "docs/plan.md")
 	}

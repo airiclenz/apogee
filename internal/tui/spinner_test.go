@@ -738,7 +738,7 @@ func TestTickRepaintReachesADetachedViewport(t *testing.T) {
 	m.transcript.reset() // the live block opens the scrollback…
 	openCall(&m, "c1", "go test ./...")
 	for i := 0; i < 30; i++ { // …and a screenful of history pushes it off the tail
-		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), runRef{})
 	}
 	m.refreshViewport()
 	m.detached = true

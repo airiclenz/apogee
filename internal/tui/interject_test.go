@@ -814,7 +814,7 @@ func TestScrollWhileRunningViaPgKeysAndWheel(t *testing.T) {
 		t.Helper()
 		m := runningModel(t)
 		for i := 0; i < 40; i++ {
-			m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+			m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), runRef{})
 		}
 		m.refreshViewport()
 		m.viewport.GotoBottom()

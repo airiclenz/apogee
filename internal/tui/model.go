@@ -715,7 +715,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// sending the held queue the next.
 		m.eng.AbortExchange()
 		m.lastErr = msg.Err
-		m.transcript.addError("loop", msg.Err.Error(), 0)
+		m.transcript.addError("loop", msg.Err.Error(), runRef{})
 		cmd := m.finishWorker(stateErrored)
 		m.noteHeldQueue()
 		m.refreshViewport()

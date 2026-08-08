@@ -569,7 +569,7 @@ func TestPaintedTabBearingCodeBlockKeepsItsWidth(t *testing.T) {
 			th.measure = widthAuthority{method: tc.method}
 
 			tr := &transcript{}
-			tr.commitAssistant(source, 0)
+			tr.commitAssistant(source, runRef{})
 
 			rows := tr.renderLines(th, width)
 			if len(rows) != 2 {

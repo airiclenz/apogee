@@ -817,6 +817,22 @@ the opposite: that this is the main agent's answer. Expanding the run reveals th
 and the inner blocks *in their own states*, each collapsed unless it was itself clicked open: the
 cascade is this one rule applied at every depth, not a special case.
 
+**Concurrent delegates get one block each.** When a reply asks for several delegations at once
+they run concurrently (ADR 0039), and the scrollback shows **one run block per child, in the order
+the calls were made** — the first `sub_agent` call is the first block — each holding only its own
+child's work. Nothing about a single block's shape changes: each is the same collapsed call block
+described above, in the same two tempi, under the same cap. What changes is that the grouping can
+no longer be read off the nesting depth, because siblings share it: every delegated block belongs
+to the run whose `sub_agent` call spawned it, and it is *placed* in that run's stretch of the
+scrollback as it arrives, however the children's events interleave on the way in. So each block
+counts its **own** tool calls, states its **own** context fill, and ticks with its **own** activity
+phrase — which is what makes a fan-out readable at all, since the status line can name only one
+delegate at a time. A child's live text follows its own block by the same rule: the streamed
+preview paints inside the run that produced it, elided while that run is collapsed, and two
+children talking at once neither share a block nor interleave a word. Expanding, collapsing,
+clicking and resuming are unchanged — a per-child block is a tool block like any other, and a
+session with one delegate at a time renders exactly as it always has.
+
 **The live star.** While a block still contains an open call — a call whose result has not
 landed, or a run whose report has not — its header glyph blinks: `✦` shows for half a second, then
 its cell is bare for half a second. The bare phase is a space that holds the star's column, so the

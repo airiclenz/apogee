@@ -1637,7 +1637,7 @@ func TestTranscriptReset(t *testing.T) {
 	tr := &transcript{}
 	tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
 	tr.addUser("hello", nil)
-	tr.appendToken("streamed ", 1) // sets streaming=true, stamps the buffer's depth, grows pending
+	tr.appendToken("streamed ", runRef{depth: 1}) // sets streaming=true, stamps the buffer's depth, grows pending
 	tr.debug = true
 
 	tr.reset()
@@ -1651,8 +1651,11 @@ func TestTranscriptReset(t *testing.T) {
 	if tr.streaming {
 		t.Error("streaming = true after reset, want false")
 	}
-	if tr.pendingDepth != 0 {
-		t.Errorf("pendingDepth = %d after reset, want 0", tr.pendingDepth)
+	if tr.pendingRun != (runRef{}) {
+		t.Errorf("pendingRun = %+v after reset, want the zero run", tr.pendingRun)
+	}
+	if tr.parked != nil {
+		t.Errorf("parked = %+v after reset, want nothing set aside", tr.parked)
 	}
 	if !tr.debug {
 		t.Error("debug = false after reset, want it preserved as true")
@@ -1681,7 +1684,7 @@ func TestTranscriptHasPrompt(t *testing.T) {
 			tr.addEphemeralNote("context: AGENTS.md")
 			tr.addEphemeralNote("resumed: an earlier session")
 		}},
-		{name: "error notice", build: func(tr *transcript) { tr.addError("loop", "upstream refused", 0) }},
+		{name: "error notice", build: func(tr *transcript) { tr.addError("loop", "upstream refused", runRef{}) }},
 		{name: "interjection with no opening prompt", build: func(tr *transcript) {
 			tr.addInterjected("wrong file", nil)
 		}},
@@ -1690,7 +1693,7 @@ func TestTranscriptHasPrompt(t *testing.T) {
 			tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
 			tr.addEphemeralNote("context: AGENTS.md")
 			tr.addNote("confinement: workspace")
-			tr.addError("loop", "upstream refused", 0)
+			tr.addError("loop", "upstream refused", runRef{})
 			tr.addUser("hello", nil)
 		}, want: true},
 	}

@@ -51,7 +51,11 @@
 // tool-call block sits at the PARENT's depth — the join dips there, the spacer goes bare, and the
 // descent logic opens a fresh ⤷ label for the second run. The whole frame — rail and label alike —
 // is one style role (theme's subRail) in the tool-header orange (the scheme's `code` role),
-// coherent with the orange ✦ tool markers. That whole frame is what a COLLAPSED run elides: by
+// coherent with the orange ✦ tool markers. A run's stretch stays CONTIGUOUS however its events
+// arrive: a concurrent fan-out interleaves N children's events at one depth, and each entry is
+// placed at the end of the run its spawning call id names ([transcript.place], ADR 0039) instead of
+// at the end of the list — so every rule here reads adjacency off the entries exactly as it did
+// while delegation was serial. That whole frame is what a COLLAPSED run elides: by
 // default a sub_agent call block and the span of deeper entries behind it are ONE block ([subAgentSpan],
 // [renderSubAgentRun]), its summary slot carrying the run's transitive tool-call count, the
 // delegate's own context fill where it has reported one ([subAgentFill] — not transitive, since each

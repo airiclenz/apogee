@@ -1399,7 +1399,7 @@ func modelWithOverlayRoomAt(t *testing.T, width, height int, opts Options) Model
 	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
 	m = step(t, m, tea.WindowSizeMsg{Width: width, Height: height})
 	for i := range 40 {
-		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), 0)
+		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), runRef{})
 	}
 	m.refreshViewport()
 	return m

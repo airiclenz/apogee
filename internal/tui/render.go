@@ -212,7 +212,48 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	t.paints.prune(len(t.entries))
 
 	prevDepth := 0
+	// previewAt is the index the live buffer paints AT — the end of the run that filled it
+	// (transcript.runEnd), which is where that run's blocks end rather than where the list does. In
+	// a serial session, and for the human's own conversation, the two are the same index and the
+	// preview lands exactly where it always did; while siblings run at once it lands inside the
+	// child that is talking instead of after whichever child was announced last. −1 means the
+	// buffer is not painted this frame at all: nothing is streaming, or the run holding it is
+	// collapsed and its whole span elided with it.
+	previewAt := -1
+	if t.streaming && !insideCollapsedRun(t.entries, t.pendingRun) {
+		previewAt = t.runEnd(t.pendingRun.spawn)
+	}
+	// paintPreview appends the in-progress buffer as a block of its own run, at index at. The
+	// buffer is trimmed of its trailing blank lines for display only: the buffer keeps them (a
+	// mid-stream "\n\n" may be a paragraph break about to be continued), but the preview must not
+	// grow a wobbling gap above the footer. An empty buffer still renders its lone marker line, so
+	// the human sees that streaming has begun.
+	paintPreview := func(at int) {
+		// The live buffer is painted at the depth that FILLED it (transcript.pendingRun), like
+		// every committed block above — the descent label included, which the preview owes itself
+		// when the delegate has streamed before producing any entry to announce the level.
+		if t.pendingRun.depth > prevDepth {
+			for d := prevDepth + 1; d <= t.pendingRun.depth; d++ {
+				appendBlock(false, d, at, plainPaint(renderSubAgentLabel(th, d, width)))
+			}
+		}
+		preview := renderEntryLines(th, entry{
+			kind:  entryAssistant,
+			text:  trimTrailingBlankLines(t.pending),
+			depth: t.pendingRun.depth,
+		}, width, blink)
+		appendBlock(false, t.pendingRun.depth, at, preview)
+		prevDepth = t.pendingRun.depth
+	}
+
 	for i := 0; i < len(t.entries); i++ {
+		// The preview is painted the moment the walk reaches its run's end. The test is >= rather
+		// than == because the walk SKIPS index ranges — a collapsed run's span, a folded tool run's
+		// members — and a preview whose index fell inside one would otherwise never be painted.
+		if previewAt >= 0 && i >= previewAt {
+			paintPreview(i)
+			previewAt = -1
+		}
 		e := t.entries[i]
 		// Open a ⤷ sub-agent label whenever a run descends to a deeper level than the
 		// previous block — a 0→1 (or 1→2) transition announces the nested section once,
@@ -279,25 +320,8 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		}
 		prevDepth = e.depth
 	}
-	if t.streaming && !insideCollapsedRun(t.entries, t.pendingDepth) {
-		// The live buffer is painted at the depth that FILLED it (transcript.pendingDepth), like
-		// every committed block above — the descent label included, which the preview owes itself
-		// when the delegate has streamed before producing any entry to announce the level.
-		if t.pendingDepth > prevDepth {
-			for d := prevDepth + 1; d <= t.pendingDepth; d++ {
-				appendBlock(false, d, len(t.entries), plainPaint(renderSubAgentLabel(th, d, width)))
-			}
-		}
-		// The in-progress buffer is trimmed of its trailing blank lines for display only: the
-		// buffer keeps them (a mid-stream "\n\n" may be a paragraph break about to be continued),
-		// but the preview must not grow a wobbling gap above the footer. An empty buffer still
-		// renders its lone marker line, so the human sees that streaming has begun.
-		preview := renderEntryLines(th, entry{
-			kind:  entryAssistant,
-			text:  trimTrailingBlankLines(t.pending),
-			depth: t.pendingDepth,
-		}, width, blink)
-		appendBlock(false, t.pendingDepth, len(t.entries), preview)
+	if previewAt >= 0 {
+		paintPreview(len(t.entries))
 	}
 	return renderedTranscript{lines: lines, userBlocks: userBlocks, targets: targets}
 }
@@ -416,14 +440,51 @@ func subAgentSpan(entries []entry, i int) int {
 // (layout.md), and a delegate's answer is beneath it from its first streamed token, not only once
 // its MessageEvent commits an entry the span rule can see.
 //
-// It keys on the open HEAD rather than on the span being non-empty, because a child that has
-// streamed but not yet called a tool has produced no nested entry at all — subAgentSpan is 0 there,
-// and a rule reading it would let exactly the first tokens through. Every enclosing level is asked,
-// so a nested run streaming inside a collapsed parent is elided by the parent's state as well as by
-// its own; each level's answer is its most recent still-open sub_agent head, the same backward scan
-// applyUsage attributes a reading by, and unambiguous for the same reason (delegation is serialized,
-// ADR 0014).
-func insideCollapsedRun(entries []entry, depth int) bool {
+// It keys on the HEAD rather than on the span being non-empty, because a child that has streamed
+// but not yet called a tool has produced no nested entry at all — subAgentSpan is 0 there, and a
+// rule reading it would let exactly the first tokens through. Every enclosing run is asked, so a
+// nested run streaming inside a collapsed parent is elided by the parent's state as well as by its
+// own: the chain is walked by SPAWNING CALL — this run's head, then the run that head sits in, up
+// to the top — which is what keeps the answer exact while siblings run at once (ADR 0039), where
+// the most recent open head at a level names whichever child was announced last rather than the one
+// that is talking.
+//
+// A run with no spawning call to walk from — a hand-built test transcript, a record replayed from a
+// blob written before the id was stamped — still answers by the depth rule this began as: the most
+// recent still-open head at each enclosing level.
+func insideCollapsedRun(entries []entry, run runRef) bool {
+	if run.spawn == "" {
+		return insideCollapsedRunAtDepth(entries, run.depth)
+	}
+	for spawn := run.spawn; spawn != ""; {
+		head, ok := runHead(entries, spawn)
+		if !ok {
+			return false
+		}
+		if !head.expanded {
+			return true
+		}
+		spawn = head.spawnCallID // this run is open: the run it sits in may still be collapsed
+	}
+	return false
+}
+
+// runHead finds the sub_agent call block that opened the run spawn names.
+func runHead(entries []entry, spawn string) (entry, bool) {
+	for i := len(entries) - 1; i >= 0; i-- {
+		if h := entries[i]; h.kind == entryToolCall && h.callID == spawn && h.tool.name == subAgentToolName {
+			return h, true
+		}
+	}
+	return entry{}, false
+}
+
+// insideCollapsedRunAtDepth is insideCollapsedRun's answer for a run with no spawning call id: each
+// enclosing level's most recent still-open sub_agent head, which is the only handle a stream of
+// depths alone offers. It was the whole rule while delegation was serialized (ADR 0014) and is
+// exact wherever it still applies — a session with one delegate at a time, and every replayed
+// record, whose entries are settled and stream nothing.
+func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 	for level := depth - 1; level >= 0; level-- {
 		for i := len(entries) - 1; i >= 0; i-- {
 			head := entries[i]

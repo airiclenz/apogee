@@ -1015,13 +1015,13 @@ func TestTranscriptToggleKeepsTheClickedHeaderRow(t *testing.T) {
 			m.transcript.reset()
 			m.transcript.addUser("run the tests", nil)
 			for i := range 20 {
-				m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), 0)
+				m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), runRef{})
 			}
 			m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 				ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 			m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: output}})
 			for i := range 5 { // the block stays on screen at the tail, with room below it
-				m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), 0)
+				m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), runRef{})
 			}
 			m.refreshViewport()
 			if m.detached || m.viewport.YOffset() == 0 {
@@ -1035,13 +1035,13 @@ func TestTranscriptToggleKeepsTheClickedHeaderRow(t *testing.T) {
 			m.transcript.reset()
 			m.transcript.addUser("run the tests", nil)
 			for i := range 20 { // scrollback above the block, so it can be scrolled up TO
-				m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), 0)
+				m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), runRef{})
 			}
 			m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 				ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 			m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: output}})
 			for i := range 40 { // depth below it, so the parked offset has somewhere to hold
-				m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), 0)
+				m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), runRef{})
 			}
 			m.refreshViewport()
 			m.detached = true
@@ -1087,14 +1087,14 @@ func TestTranscriptBodyClickKeepsTheAnchorRow(t *testing.T) {
 	m.transcript.reset()
 	m.transcript.addUser("run the tests", nil)
 	for i := range 20 { // scrollback above the block, so the view is parked at a real offset
-		m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), 0)
+		m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), runRef{})
 	}
 	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 		CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
 	for i := range 40 { // depth below it, so a collapse cannot run the parked offset off the end
-		m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), 0)
+		m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), runRef{})
 	}
 	m.refreshViewport()
 	m.detached = true
@@ -1452,7 +1452,7 @@ func modelWithHugePrompt(t *testing.T) Model {
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
 	m.transcript.addUser(hugePromptBody, nil)
-	m.transcript.commitAssistant("a short reply", 0)
+	m.transcript.commitAssistant("a short reply", runRef{})
 	m.refreshViewport()
 	return m
 }
@@ -1566,11 +1566,11 @@ func TestTranscriptPromptToggleKeepsTheClickedRow(t *testing.T) {
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
 	for i := range 20 { // scrollback above the prompt, so the tail is a real scroll position
-		m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), 0)
+		m.transcript.commitAssistant(fmt.Sprintf("earlier line %02d", i), runRef{})
 	}
 	m.transcript.addUser(hugePromptBody, nil)
 	for i := range 5 { // the block stays on screen at the tail, with room below it
-		m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), 0)
+		m.transcript.commitAssistant(fmt.Sprintf("later line %02d", i), runRef{})
 	}
 	m.refreshViewport()
 	if m.detached || m.viewport.YOffset() == 0 {
@@ -1605,7 +1605,7 @@ func TestTranscriptSelectionSurvivesWheelScroll(t *testing.T) {
 	m := newTestModel(t)
 	m.transcript.addUser("top prompt", nil)
 	for i := 0; i < 40; i++ {
-		m.transcript.commitAssistant("reply "+strings.Repeat("x", 5), 0)
+		m.transcript.commitAssistant("reply "+strings.Repeat("x", 5), runRef{})
 	}
 	m.refreshViewport()
 	m.viewport.GotoBottom() // scroll down so there is room to wheel back up
@@ -2157,7 +2157,7 @@ func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
 		m := newTestModel(t)
 		m.transcript.addUser("HEADERPROMPT", nil)
 		for i := 0; i < 40; i++ {
-			m.transcript.commitAssistant("reply "+strings.Repeat("x", 5), 0)
+			m.transcript.commitAssistant("reply "+strings.Repeat("x", 5), runRef{})
 		}
 		m.refreshViewport()
 		return m
@@ -2209,7 +2209,7 @@ func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
 func TestMouseClickOnOverlayRowsArmsNoSelection(t *testing.T) {
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write the notes file"})
 	for i := range 40 { // a transcript deep enough that the covered rows all name real content
-		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), 0)
+		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), runRef{})
 	}
 	m.refreshViewport()
 
@@ -2254,7 +2254,7 @@ func TestMouseClickOnOverlayRowsArmsNoSelection(t *testing.T) {
 func TestFrameRowBoundaryAgreesWithTheMouseMapping(t *testing.T) {
 	deepTranscript := func(m *Model) {
 		for i := range 60 {
-			m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), 0)
+			m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), runRef{})
 		}
 		m.refreshViewport()
 	}

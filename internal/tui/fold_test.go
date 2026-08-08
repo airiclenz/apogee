@@ -239,7 +239,7 @@ func TestFoldEventFoldsEveryVariant(t *testing.T) {
 			if got := m.transcript.pending; got != tc.wantPending {
 				t.Errorf("pending buffer = %q, want %q", got, tc.wantPending)
 			}
-			if got := m.transcript.pendingDepth; got != tc.wantPendingDepth {
+			if got := m.transcript.pendingRun.depth; got != tc.wantPendingDepth {
 				t.Errorf("pending buffer depth = %d, want %d", got, tc.wantPendingDepth)
 			}
 			if got := m.act.text(); got != tc.wantPhrase {

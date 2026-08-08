@@ -55,12 +55,12 @@ func (m Model) runColorScheme(args colorSchemeArgs) (tea.Model, tea.Cmd) {
 // file expresses the choice, the next start is drawn in it, and the note says so.
 func (m Model) switchColorScheme(name string) (tea.Model, tea.Cmd) {
 	if m.opts.WriteSetting == nil {
-		m.transcript.addError(colorSchemeSource, noSettingsWriterNote, 0)
+		m.transcript.addError(colorSchemeSource, noSettingsWriterNote, runRef{})
 		m.layout()
 		return m, nil
 	}
 	if err := m.opts.WriteSetting(settingKeyColorScheme, name); err != nil {
-		m.transcript.addError(colorSchemeSource, err.Error(), 0)
+		m.transcript.addError(colorSchemeSource, err.Error(), runRef{})
 		m.layout()
 		return m, nil
 	}
@@ -84,13 +84,13 @@ func (m Model) switchColorScheme(name string) (tea.Model, tea.Cmd) {
 // a note would read like something had.
 func (m Model) exportColorScheme(name string) (tea.Model, tea.Cmd) {
 	if m.opts.ExportScheme == nil {
-		m.transcript.addError(colorSchemeSource, noSchemeExporterNote, 0)
+		m.transcript.addError(colorSchemeSource, noSchemeExporterNote, runRef{})
 		m.layout()
 		return m, nil
 	}
 	path, err := m.opts.ExportScheme(name)
 	if err != nil {
-		m.transcript.addError(colorSchemeSource, err.Error(), 0)
+		m.transcript.addError(colorSchemeSource, err.Error(), runRef{})
 		m.layout()
 		return m, nil
 	}

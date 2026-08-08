@@ -28,6 +28,11 @@ package tui
 // because a head index that is re-used by a different session's entry would otherwise match a key
 // that is no longer about it.
 //
+// "Append-only" is the standing shape and no longer the whole of it: a concurrent fan-out's entries
+// are placed at the end of their own RUN rather than at the end of the list (transcript.place, ADR
+// 0039), which moves every later entry one index up. That is the same "index i is a different block
+// now" hazard as a truncation, and it is answered the same way — dropFrom, from the insertion point.
+//
 // Storage is a POINTER on the transcript for the reason the entries backing array is shared: the
 // Bubble Tea Model is copied by value on every Update (ADR 0011), so a cache held by value would
 // be a fresh empty cache in every copy and would never hit. Every copy of the Model points at the
@@ -182,14 +187,26 @@ func (c *paintCache) miss() {
 }
 
 // prune drops every row whose head index no longer addresses an entry. It is the truncation guard:
-// the entry list only ever grows or is emptied outright, so a row past the end is a row about a
-// transcript that no longer exists.
+// a row past the end is a row about a transcript that no longer exists.
 func (c *paintCache) prune(entries int) {
+	c.dropFrom(entries)
+}
+
+// dropFrom drops every row at or after index — every row whose head entry has just stopped being
+// the entry it was memoised about. It is the guard for the one movement the validation key cannot
+// see: [transcript.place] INSERTS a delegated entry at the end of its own run rather than at the
+// end of the list (ADR 0039), and everything from that point on has shifted one index up, so a row
+// left behind would be served for a block it is no longer about — with nothing in the key to
+// notice, since two blocks of the same kind, depth, width and state key identically.
+//
+// It is the same cut prune makes, which is why prune is stated in terms of it: a truncation is an
+// insertion's mirror, and both are "index i means something else now".
+func (c *paintCache) dropFrom(index int) {
 	if c == nil {
 		return
 	}
 	for head := range c.rows {
-		if head >= entries {
+		if head >= index {
 			delete(c.rows, head)
 		}
 	}

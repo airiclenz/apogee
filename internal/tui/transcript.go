@@ -13,8 +13,10 @@ import (
 // The transcript (phase-2 detail plan §3 C6)
 // ----------------------------------------------------------------------------
 
-// transcript is the scrollback model: an append-only list of typed entries plus a
-// single in-progress assistant buffer fed by streamed TokenEvents. It is the C6
+// transcript is the scrollback model: a list of typed entries in display order plus a
+// single in-progress assistant buffer fed by streamed TokenEvents. It grows at the end for
+// everything the human and the top-level agent do, and at the end of a RUN for everything a
+// delegate does (place), which is what keeps N concurrent children one block each. It is the C6
 // rendering model the viewport displays. apply folds the full event stream into it (P2.3):
 // tokens grow the in-progress buffer, which is finalised on a MessageEvent or the first
 // ToolCallEvent of a Turn and discarded on a StreamResetEvent; tool calls, results,
@@ -26,14 +28,22 @@ type transcript struct {
 	// not a strings.Builder: the Model is a value type copied on every
 	// Update, and a Builder forbids the copy — it panics copyCheck)
 	streaming bool // whether pending holds an un-committed assistant buffer
-	// pendingDepth is WHOSE buffer pending holds: the sub-agent nesting level of the tokens that
-	// filled it. It is the streaming path's half of the depth routing every other assistant-text
-	// event already does through its Event's own Depth (apply), and it is needed because the buffer
-	// is a single slot shared by every level: without it a delegate's live answer paints as a
-	// top-level block until its MessageEvent lands, and a delegate that never sends one leaves its
-	// text to be committed as the PARENT's. It means nothing while streaming is false.
-	pendingDepth int
-	debug        bool // when set, MechanismFiredEvents are recorded (a hidden debug view)
+	// pendingRun is WHOSE buffer pending holds: the run whose tokens filled it ([runRef] — the
+	// nesting level and the spawning call id). It is the streaming path's half of the routing every
+	// other assistant-text event already does through its Event's own base (apply), and it is needed
+	// because the buffer is a single slot shared by every run: without it a delegate's live answer
+	// paints as a top-level block until its MessageEvent lands, and a delegate that never sends one
+	// leaves its text to be committed as the PARENT's. It means nothing while streaming is false.
+	pendingRun runRef
+	// parked is the in-progress text of the runs that are NOT holding the buffer right now — one
+	// slot each, kept until the run commits it or ends (park / unpark). It exists because siblings
+	// stream at once (ADR 0039): their token batches alternate through the single buffer above, and
+	// without somewhere to set the displaced text aside every alternation would commit a fragment,
+	// shredding two answers into a column of one-chunk blocks. It is normally empty — a serial
+	// session never displaces anything — and it is written copy-on-write, so a Model copy that is
+	// discarded rather than returned cannot leave its edit behind (ADR 0011).
+	parked []parkedText
+	debug  bool // when set, MechanismFiredEvents are recorded (a hidden debug view)
 	// ws is the project root a tool card's paths are printed relative to (workspacepath.go), resolved
 	// once at construction from Options.Workspace. It lives here because addToolCall and
 	// addToolResult are reached through apply, which folds an Event with no Model in sight; it is a
@@ -46,6 +56,36 @@ type transcript struct {
 	// 0011), and every copy has to reach the one cache. It is nil on a hand-built transcript, which
 	// renders uncached — every cache method is nil-safe.
 	paints *paintCache
+}
+
+// runRef is WHERE an event came from — the two facts on [domain.EventBase] that together name the
+// agent that emitted it: its sub-agent nesting level, and the id of the sub_agent tool call that
+// spawned it. The zero value is the human's own top-level conversation (depth 0, no spawning call),
+// which is what a hand-built transcript and every event of a session that delegated nothing carry.
+//
+// Depth alone stopped being an identity when siblings started running at once (ADR 0039): two
+// children of one reply stand at the SAME depth and their events interleave, so every fold that
+// used to key on depth — which buffer these tokens grow, which run this entry belongs to, which run
+// a context reading fills — keys on the pair instead. It is comparable, so "the same run" is one
+// `==`.
+type runRef struct {
+	depth int
+	spawn string
+}
+
+// runOf reads the run an Event was emitted by off its base. It is the one place the transcript
+// turns an Event into a run identity, so the fold helpers below all speak in runs.
+func runOf(base domain.EventBase) runRef {
+	return runRef{depth: base.Depth, spawn: base.CallID}
+}
+
+// parkedText is one run's in-progress assistant text, set aside because ANOTHER run's tokens took
+// the single live buffer while it was streaming (transcript.parked). It is committed when that run
+// next commits — its MessageEvent, its next tool call — or when the run ends without ever having
+// done so (closeRun), which is what keeps a cancelled delegate's half-sentence its own.
+type parkedText struct {
+	run  runRef
+	text string
 }
 
 // entryKind tags a transcript entry so the renderer can prefix and style it. The set
@@ -193,6 +233,143 @@ type startupView struct {
 	Version string // the resolved build version (Options.Version)
 }
 
+// place commits one folded entry into the run it belongs to, which is where the transcript's
+// display order stops being the order events arrived in. A depth-0 entry — everything the human
+// says and everything the top-level agent does — is appended, exactly as every entry always was.
+// An entry carrying a spawnCallID is INSERTED at the end of its own run's stretch instead, so a
+// concurrent fan-out's children each grow one contiguous block of entries behind their own
+// sub_agent call block (ADR 0039 decision 6) rather than one interleaved braid behind whichever
+// call happened to be announced last.
+//
+// Contiguity is the point: every rule downstream of here — the run span, the ⤷ descent labels, the
+// folded tool run, the click surface's member offsets — reads a block off adjacent entries, and
+// keeping the grouping in the LIST is what lets all of them stay exactly as they were. In a serial
+// session the run's stretch IS the tail of the list, so nothing moves and nothing is inserted.
+//
+// The paint cache is the one thing an insertion invalidates: its rows are keyed by entry index, on
+// the standing assumption that the list only ever grows at the end (paintcache.go), and everything
+// from the insertion point on has just moved up one. dropFrom is that assumption's guard.
+func (t *transcript) place(e entry) {
+	at := t.runEnd(e.spawnCallID)
+	if at >= len(t.entries) {
+		t.entries = append(t.entries, e)
+		return
+	}
+	t.entries = append(t.entries, entry{})
+	copy(t.entries[at+1:], t.entries[at:])
+	t.entries[at] = e
+	t.paints.dropFrom(at)
+}
+
+// runEnd is the index one past the last entry of the run that the sub_agent call spawn opened —
+// the insertion point for that run's next entry, and the point its live preview paints at
+// (renderView). The run's stretch is its head's [subAgentSpan], so this asks the same derivation
+// the painter asks and the two cannot disagree about where a run ends.
+//
+// The end of the LIST is the answer for the top-level conversation (no spawning call), and for a
+// spawning call this transcript has no head for — a replayed record written before the id existed,
+// a hand-built test transcript. Both are the append every entry made before runs were grouped.
+func (t *transcript) runEnd(spawn string) int {
+	if spawn == "" {
+		return len(t.entries)
+	}
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		if h := t.entries[i]; h.kind == entryToolCall && h.callID == spawn && h.tool.name == subAgentToolName {
+			return i + 1 + subAgentSpan(t.entries, i)
+		}
+	}
+	return len(t.entries)
+}
+
+// displace empties the live buffer slot for the run whose event is arriving, by the rule that fits
+// the switch. It is the one place the transcript decides what a run hand-over MEANS, so the three
+// events that can trigger one — a token, a message, a tool call — cannot come to disagree.
+//
+// A switch between runs at the SAME depth is concurrent siblings alternating through the single
+// slot (ADR 0039): the displaced text is parked, because the run that streamed it is still going
+// and committing here would shred its answer into one block per token batch.
+//
+// A switch across depths is the serial hand-over the buffer was built for, and keeps its original
+// rule: the previous streamer is finished with the slot — a parent cannot stream while its delegate
+// does — so its text is committed at once, inside its OWN run. That is what keeps an abandoned
+// delegate's half-sentence the child's: without it, a delegate that faulted before its MessageEvent
+// would leave text for the parent's next event to adopt as a top-level answer, or to overwrite.
+func (t *transcript) displace(run runRef) {
+	if !t.streaming || t.pendingRun == run {
+		return
+	}
+	if t.pendingRun.depth == run.depth {
+		t.park()
+		return
+	}
+	open := t.pendingRun
+	text := trimBlankLines(t.takePending(open))
+	if text == "" {
+		return
+	}
+	t.place(entry{kind: entryAssistant, text: text, depth: open.depth, spawnCallID: open.spawn})
+}
+
+// park sets the live buffer aside under its own run instead of committing it, and empties the
+// slot for the run whose tokens are arriving. It is what a SIBLING switch does now that children
+// interleave (displace): the text waits for its own run's commit point.
+func (t *transcript) park() {
+	if !t.streaming {
+		return
+	}
+	if t.pending != "" {
+		t.stash(t.pendingRun, t.pending)
+	}
+	t.streaming = false
+	t.pending = ""
+	t.pendingRun = runRef{}
+}
+
+// stash grows the run's parked text, opening a slot for a run that has none. It rebuilds the slice
+// rather than writing through it: the Model is copied by value on every Update (ADR 0011), and a
+// shared backing array would carry a discarded copy's edit into the live one.
+func (t *transcript) stash(run runRef, text string) {
+	next := append([]parkedText(nil), t.parked...)
+	for i := range next {
+		if next[i].run == run {
+			next[i].text += text
+			t.parked = next
+			return
+		}
+	}
+	t.parked = append(next, parkedText{run: run, text: text})
+}
+
+// unpark removes the run's parked text and returns it ("" when the run has none) — the read every
+// commit point makes before it words its entry, so nothing this run streamed is left behind.
+func (t *transcript) unpark(run runRef) string {
+	for i := range t.parked {
+		if t.parked[i].run != run {
+			continue
+		}
+		text := t.parked[i].text
+		next := append([]parkedText(nil), t.parked[:i]...)
+		t.parked = append(next, t.parked[i+1:]...)
+		return text
+	}
+	return ""
+}
+
+// takePending drains everything the run has streamed and not yet committed — its parked text plus
+// the live buffer when the run is the one holding it — leaving both empty. It is the shared first
+// half of the three commit points (commitAssistant, finalizeNarration, closeRun), so a run's text
+// can only ever be committed once and only ever into its own block.
+func (t *transcript) takePending(run runRef) string {
+	text := t.unpark(run)
+	if t.streaming && t.pendingRun == run {
+		text += t.pending
+		t.streaming = false
+		t.pending = ""
+		t.pendingRun = runRef{}
+	}
+	return text
+}
+
 // addUser appends a user message — the text the human submitted to open or continue the
 // Exchange, plus spans, where any skill invocations sit in that text ([skillSpan]; nil when none),
 // so the block can light the tokens up where they were said. Called from the submit path, not the
@@ -327,7 +504,8 @@ func (t *transcript) reset() {
 	t.entries = nil
 	t.pending = ""
 	t.streaming = false
-	t.pendingDepth = 0
+	t.pendingRun = runRef{}
+	t.parked = nil
 	// The block-paint cache is keyed by ENTRY INDEX, and this is the one path that makes an index
 	// mean something else: the caller re-fills the list (a fresh start-up box, a replayed
 	// scrollback) before anything renders again, so pruning against the entry count at the next
@@ -447,22 +625,23 @@ func presentedStatus(v presentedView) string {
 func (t *transcript) apply(e domain.Event) {
 	switch e := e.(type) {
 	case domain.TokenEvent:
-		t.appendToken(e.Text, e.Depth)
+		t.appendToken(e.Text, runOf(e.EventBase))
 	case domain.StreamResetEvent:
-		t.discardPending(e.Depth)
+		t.discardPending(runOf(e.EventBase))
 	case domain.MessageEvent:
-		t.commitAssistant(e.Text, e.Depth)
+		t.commitAssistant(e.Text, runOf(e.EventBase))
 	case domain.ToolCallEvent:
-		t.finalizeNarration()
-		t.addToolCall(e.Call, e.Depth)
+		run := runOf(e.EventBase)
+		t.finalizeNarration(run)
+		t.addToolCall(e.Call, run)
 	case domain.ToolResultEvent:
-		t.addToolResult(e.Result, e.Depth)
+		t.addToolResult(e.Result, runOf(e.EventBase))
 	case domain.ApprovalEvent:
-		t.addApproval(e.Request, e.Decision, e.Depth)
+		t.addApproval(e.Request, e.Decision, runOf(e.EventBase))
 	case domain.MechanismFiredEvent:
 		t.addMechanism(e)
 	case domain.ErrorEvent:
-		t.addError(e.Source, e.Err, e.Depth)
+		t.addError(e.Source, e.Err, runOf(e.EventBase))
 	default:
 		// An unknown future variant: tolerate it. The set is sealed and additively
 		// versioned, so an unrecognised Event is rendered as nothing rather than a panic.
@@ -476,13 +655,15 @@ func (t *transcript) apply(e domain.Event) {
 // Depth > 0 UsageEvent folds nothing: a Depth 0 reading is the human's own conversation, and
 // that one belongs to the status gauge alone (foldStats).
 //
-// A Depth N reading belongs to the most recent still-open sub-agent run whose head stands at
-// depth N-1 — derived from the depths already on the entries, exactly as subAgentSpan derives
-// the run itself, and unambiguous because delegation is serialized (ADR 0014). It is never
-// transitive: each agent fills its OWN window, so a nested run's reading stops at the nested
-// head and says nothing about its parent's fill. A reading that matches no open run — one that
-// arrived after its report, or before its call — folds nothing at all, as it did before this
-// entry field existed.
+// A reading belongs to the still-open run its own SPAWNING CALL opened (domain.EventBase.CallID,
+// stamped on every delegated event): with siblings running at once the depth no longer picks a run
+// out — two children fill two windows at depth 1, and the most recent open head is simply whichever
+// was announced last. A reading carrying no call id at all — a legacy record, a hand-built test
+// stream — still falls back to the depth rule this fold was born with: the most recent still-open
+// head standing at depth N-1. It is never transitive either way: each agent fills its OWN window,
+// so a nested run's reading stops at the nested head and says nothing about its parent's fill. A
+// reading that matches no open run — one that arrived after its report, or before its call — folds
+// nothing at all, as it did before this entry field existed.
 //
 // The reading is the LATEST total and never a running sum: every Turn reports the whole context
 // it filled, so the newest number IS the fill. A total the server omitted falls back to
@@ -502,32 +683,39 @@ func (t *transcript) applyUsage(e domain.Event, window int) {
 	}
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		head := &t.entries[i]
-		if head.kind == entryToolCall && !head.done &&
-			head.depth == usage.Depth-1 && head.tool.name == subAgentToolName {
-			head.ctxUsed, head.ctxLimit = total, window
-			return
+		if head.kind != entryToolCall || head.done || head.tool.name != subAgentToolName {
+			continue
 		}
+		if usage.CallID != "" {
+			if head.callID != usage.CallID {
+				continue
+			}
+		} else if head.depth != usage.Depth-1 {
+			continue
+		}
+		head.ctxUsed, head.ctxLimit = total, window
+		return
 	}
 }
 
-// appendToken grows the in-progress assistant buffer with one streamed chunk emitted at depth. The
+// appendToken grows the in-progress assistant buffer with one streamed chunk emitted by run. The
 // buffer is committed by commitAssistant (a MessageEvent) or finalizeNarration (the first
 // ToolCall of the Turn), and is never rendered as a committed entry until then. The chunk is
 // escape-stripped as it lands (stripEscapes) so no ESC byte from the model's stream ever
 // reaches the terminal — even split across two chunks, since the byte is removed per chunk.
 //
-// A chunk from a DIFFERENT level than the one already buffered closes the open buffer first, at its
-// own depth. There is one buffer slot for every level, and delegation is serialized (ADR 0014), so
-// a level change means the previous streamer is finished with it — normally having committed its
-// own text on the way out, but not when it faulted or was cancelled before its MessageEvent. Closing
-// here is what keeps that residue the CHILD's: finalizeNarration commits it inside the run it was
-// streamed in, instead of leaving it for the parent's next event to adopt as a top-level answer.
-func (t *transcript) appendToken(text string, depth int) {
-	if t.streaming && t.pendingDepth != depth {
-		t.finalizeNarration()
+// A chunk from a DIFFERENT run than the one already buffered PARKS that run's text and resumes
+// this run's own, because the single slot is now contended: concurrent siblings' batches alternate
+// through it (ADR 0039), and a switch no longer means the previous streamer is finished. Parking is
+// what keeps each run's answer whole and its own — the text waits for its run's own commit point
+// instead of being committed as a fragment here, or left for another run's event to adopt.
+func (t *transcript) appendToken(text string, run runRef) {
+	t.displace(run)
+	if !t.streaming {
+		t.pending = t.unpark(run) // resume what this run streamed before it lost the slot
 	}
 	t.streaming = true
-	t.pendingDepth = depth
+	t.pendingRun = run
 	t.pending += stripEscapes(text)
 }
 
@@ -537,16 +725,19 @@ func (t *transcript) appendToken(text string, depth int) {
 // must never be committed (events.go contract). The re-stream's tokens arrive next and the
 // Turn's MessageEvent carries the final, accepted text.
 //
-// It drops only the buffer the resetting agent OWNS: a re-stream is one level's Turn starting over,
-// so a delegate's reset may not wipe what its parent had streamed. A reset arriving with no buffer
-// open clears the slot either way, which is what it already meant.
-func (t *transcript) discardPending(depth int) {
-	if t.streaming && t.pendingDepth != depth {
+// It drops only what the resetting agent OWNS: a re-stream is one run's Turn starting over, so a
+// delegate's reset may not wipe what its parent had streamed — nor, now that siblings share the
+// slot, what a sibling had. Its own parked text goes with it, being the same superseded stream one
+// alternation back. A reset arriving with no buffer open clears the slot either way, which is what
+// it already meant.
+func (t *transcript) discardPending(run runRef) {
+	t.unpark(run)
+	if t.streaming && t.pendingRun != run {
 		return
 	}
 	t.streaming = false
 	t.pending = ""
-	t.pendingDepth = 0
+	t.pendingRun = runRef{}
 }
 
 // commitAssistant finalises the streamed buffer into a committed assistant entry on a
@@ -556,30 +747,26 @@ func (t *transcript) discardPending(depth int) {
 // blank falls back to the accumulated tokens so nothing streamed is lost, and a text that is
 // blank either way commits no entry at all — a lone ✦ marker line is itself an unneeded line.
 //
-// A buffer left open by a DIFFERENT level is closed at its own depth first (appendToken's rule),
-// so a message from the parent neither adopts a delegate's residue nor silently drops it.
-func (t *transcript) commitAssistant(canonical string, depth int) {
-	if t.streaming && t.pendingDepth != depth {
-		t.finalizeNarration()
-	}
-	// canonical is the MessageEvent's untrusted model text; strip its escapes (t.pending was
+// A buffer left open by a DIFFERENT run is parked first (appendToken's rule), so a message from
+// the parent neither adopts a delegate's residue nor silently drops it, and a sibling still
+// streaming keeps every token it has sent.
+func (t *transcript) commitAssistant(canonical string, run runRef) {
+	t.displace(run)
+	buffered := t.takePending(run)
+	// canonical is the MessageEvent's untrusted model text; strip its escapes (the buffer was
 	// already stripped as it streamed, so a double-strip there is a cheap no-op), then drop the
 	// blank lines the model padded the message with, so the block sits exactly one blank line
 	// from its neighbours instead of two or three (layout.md).
 	text := trimBlankLines(stripEscapes(canonical))
 	if text == "" {
-		// The fallback commits the BUFFER, so it commits at the buffer's own depth — which the
-		// guard above has already made equal to depth whenever there is anything to fall back to.
-		text = trimBlankLines(t.pending)
-		depth = t.pendingDepth
+		// The fallback commits the BUFFER, which is this run's own by construction — takePending
+		// drains no other run's text.
+		text = trimBlankLines(buffered)
 	}
-	t.streaming = false
-	t.pending = ""
-	t.pendingDepth = 0
 	if text == "" {
 		return
 	}
-	t.entries = append(t.entries, entry{kind: entryAssistant, text: text, depth: depth})
+	t.place(entry{kind: entryAssistant, text: text, depth: run.depth, spawnCallID: run.spawn})
 }
 
 // finalizeNarration commits the in-progress buffer as the pre-tool narration when the first
@@ -588,23 +775,40 @@ func (t *transcript) commitAssistant(canonical string, depth int) {
 // afterwards streaming is false, so the Turn's remaining ToolCalls add no empty entry. A
 // Turn that streamed nothing — or only blank lines — before its tool call commits nothing.
 //
-// It takes no depth: the buffer is committed at the depth that FILLED it (t.pendingDepth) and never
-// at the arriving event's, because the two part company exactly where it matters — a delegate that
-// streamed and then faulted before its MessageEvent leaves the buffer standing, and the parent's
-// next tool call is what closes it.
-func (t *transcript) finalizeNarration() {
-	if !t.streaming {
-		return
-	}
-	text := trimBlankLines(t.pending)
-	depth := t.pendingDepth
-	t.streaming = false
-	t.pending = ""
-	t.pendingDepth = 0
+// It finalises the ARRIVING run's narration and only that: with siblings streaming at once the
+// buffer in hand may belong to another child entirely, and committing that one here would tear its
+// answer in half at a moment that has nothing to do with it. A buffer held by another run is parked
+// instead — so the live preview stops showing text whose Turn has moved on, and the text itself
+// waits for that run's own commit point (or for its run to end, closeRun).
+func (t *transcript) finalizeNarration(run runRef) {
+	t.displace(run)
+	text := trimBlankLines(t.takePending(run))
 	if text == "" {
 		return
 	}
-	t.entries = append(t.entries, entry{kind: entryAssistant, text: text, depth: depth})
+	t.place(entry{kind: entryAssistant, text: text, depth: run.depth, spawnCallID: run.spawn})
+}
+
+// closeRun commits what a finished run streamed and never committed — the half-sentence a delegate
+// was midway through when it faulted, was cancelled, or was displaced from the buffer by a sibling
+// and then reported. It runs as the run's report folds into its head (addToolResult), which is the
+// last moment the text can still be placed inside the block it belongs to.
+//
+// head is the run's own call block, taken by value: place may insert, and an insertion invalidates
+// every pointer into the entries slice.
+func (t *transcript) closeRun(head entry) {
+	if head.kind != entryToolCall || head.tool.name != subAgentToolName {
+		return
+	}
+	run := runRef{depth: head.depth + 1, spawn: head.callID}
+	if t.streaming && t.pendingRun == run {
+		t.park()
+	}
+	text := trimBlankLines(t.unpark(run))
+	if text == "" {
+		return
+	}
+	t.place(entry{kind: entryAssistant, text: text, depth: run.depth, spawnCallID: run.spawn})
 }
 
 // addToolCall appends a tool-call entry: the presentation view (friendly label + target)
@@ -616,12 +820,17 @@ func (t *transcript) finalizeNarration() {
 // and nothing about what was requested — and never out of what the block quotes, neither a body nor
 // a one-line output promoted onto the branch, where a path is content the approver must see as it
 // stands (toolView.shortenPaths).
-func (t *transcript) addToolCall(call domain.ToolCall, depth int) {
-	t.entries = append(t.entries, entry{
-		kind:   entryToolCall,
-		depth:  depth,
-		callID: call.ID,
-		tool:   presentToolCall(call, t.ws),
+//
+// The entry's two ids are different facts and both are kept: callID is the call the block IS —
+// what the paired result folds into, and, for a sub_agent call, what its own children's entries
+// group behind — while spawnCallID is the run this block sits IN (place).
+func (t *transcript) addToolCall(call domain.ToolCall, run runRef) {
+	t.place(entry{
+		kind:        entryToolCall,
+		depth:       run.depth,
+		callID:      call.ID,
+		spawnCallID: run.spawn,
+		tool:        presentToolCall(call, t.ws),
 	})
 }
 
@@ -631,12 +840,16 @@ func (t *transcript) addToolCall(call domain.ToolCall, depth int) {
 // (IsError) is a normal in-band outcome the model reacts to — not a recovered fault (that is
 // ErrorEvent) — so it is summarised, not raised. A result that matches no open call (the
 // defensive orphan case) is appended as a standalone result block so its outcome is not lost.
-func (t *transcript) addToolResult(result domain.ToolResult, depth int) {
+func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		e := &t.entries[i]
 		if e.kind == entryToolCall && !e.done && e.callID == result.CallID {
 			e.tool.enrichWithResult(result, t.ws)
 			e.done = true
+			// A delegation's result is its run's last word: whatever the child streamed and never
+			// committed is committed now, inside the run, before the block settles (closeRun). The
+			// head is copied out first — closeRun may place an entry, which moves the slice.
+			t.closeRun(t.entries[i])
 			return
 		}
 	}
@@ -646,7 +859,7 @@ func (t *transcript) addToolResult(result domain.ToolResult, depth int) {
 	if result.IsError {
 		text = "error: " + text
 	}
-	t.entries = append(t.entries, entry{kind: entryToolResult, text: text, depth: depth})
+	t.place(entry{kind: entryToolResult, text: text, depth: run.depth, spawnCallID: run.spawn})
 }
 
 // hasOpenToolCall reports whether any tool-call entry is still waiting for its result — the
@@ -738,9 +951,9 @@ func (t *transcript) toggleExpanded(index int) bool {
 // is echoed raw — so it is escape-stripped like every other note text. This entry is built here
 // rather than through addNote (it carries a depth), which is exactly the kind of bypass that left
 // producers unstripped before.
-func (t *transcript) addApproval(req domain.ApprovalRequest, decision domain.ApprovalDecision, depth int) {
+func (t *transcript) addApproval(req domain.ApprovalRequest, decision domain.ApprovalDecision, run runRef) {
 	text := fmt.Sprintf("approval %s: %s", decision, stripEscapes(req.Tool))
-	t.entries = append(t.entries, entry{kind: entryNote, text: text, depth: depth})
+	t.place(entry{kind: entryNote, text: text, depth: run.depth, spawnCallID: run.spawn})
 }
 
 // addMechanism records a fired Mechanism, but only in the debug view (off by default).
@@ -751,7 +964,8 @@ func (t *transcript) addMechanism(e domain.MechanismFiredEvent) {
 		return
 	}
 	text := fmt.Sprintf("mechanism %s @ %s: %s", e.Mechanism, e.Hook, e.Action)
-	t.entries = append(t.entries, entry{kind: entryNote, text: text, depth: e.Depth})
+	run := runOf(e.EventBase)
+	t.place(entry{kind: entryNote, text: text, depth: run.depth, spawnCallID: run.spawn})
 }
 
 // addError appends a recovered-fault notice (ADR 0007 — an ErrorEvent does not stop the
@@ -761,8 +975,13 @@ func (t *transcript) addMechanism(e domain.MechanismFiredEvent) {
 // quotes what failed — a path, a command, an upstream body, an MCP server's message — so it is
 // untrusted for exactly the reasons the tool card's content is, and source is the model's own tool
 // name when a tool faulted.
-func (t *transcript) addError(source, msg string, depth int) {
-	t.entries = append(t.entries, entry{kind: entryError, text: stripEscapes(source + ": " + msg), depth: depth})
+func (t *transcript) addError(source, msg string, run runRef) {
+	t.place(entry{
+		kind:        entryError,
+		text:        stripEscapes(source + ": " + msg),
+		depth:       run.depth,
+		spawnCallID: run.spawn,
+	})
 }
 
 // ----------------------------------------------------------------------------

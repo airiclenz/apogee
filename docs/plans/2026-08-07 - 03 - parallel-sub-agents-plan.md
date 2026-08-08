@@ -296,10 +296,38 @@ the other, assert each child saw its own verdict).
 
 **Commit:** `feat(approval): serialize concurrent child approvals with child-named prompts`
 
-## 6. TUI: live per-child blocks
+## 6. TUI: live per-child blocks — ✅ DONE (2026-08-08)
 
 Depends on items 3 and 4. Cited by symbol — `internal/tui` carries uncommitted edits at
 plan time.
+
+NOTES (2026-08-08): five deviations from this item's literal text, all recorded rather than assumed.
+(a) The "live tail under the existing collapsed cap" is the collapsed block's EXISTING summary line —
+per-child count · fill · ticking activity phrase — and NOT new content rows. The parenthetical "header
++ three content rows" is read as naming the cap to reuse, per ADR 0039 decision 6's "under the existing
+collapsed cap": layout.md ratifies that a collapsed run is the one block reading as a single summarised
+line, and this item's own "on completion the block becomes … `N tool calls · 12k/32k · <gist>`" is that
+same line in its other tempo (layout.md's "two tempi"). Extra rows would duplicate the phrase already on
+the summary and spend two churning rows per concurrent child. The GROUPING is what makes the tail
+per-child: each head now counts, fills and ticks off its own child's span. (b) The grouping is done by
+PLACEMENT at fold time — `transcript.place` inserts a delegated entry at the end of its own run's
+stretch — rather than by a render-time regrouping. That keeps every downstream rule (the run span, the
+⤷ descent labels, the folded tool run, the click surface's member offsets, the codec) exactly as it was,
+which is what makes the serial case byte-identical by construction instead of by care. Its one cost is
+named in the code: the paint cache keys rows by entry index on a standing append-only assumption, so it
+gained `dropFrom` and `place` calls it. (c) Three folds adjacent to the item's text had to move with it
+or the grouping would be a lie: `applyUsage` attributes a reading by the spawning call id (depth cannot
+pick one sibling out of two), `insideCollapsedRun` walks the run CHAIN by spawning call instead of
+scanning for the most recent open head per level, and the live preview paints at its own run's end
+rather than at the end of the list. Each keeps its old rule as the answer for a run with no spawning
+call — a hand-built transcript, a replayed legacy record. (d) The single streaming buffer is now
+run-keyed, with a parked slot per displaced run (`parked` / `displace` / `park` / `closeRun`): two
+siblings streaming at once alternate through the one buffer, and committing at each alternation would
+shred both answers into a column of one-batch blocks. A CROSS-DEPTH switch keeps its original
+commit-at-once rule, so an abandoned delegate's residue still lands in its run the moment the parent
+speaks, and a serial session never parks anything. (e) Fold-time stamping of `entry.spawnCallID` lands
+here, as item 3's NOTES (c) deferred it: the fold helpers now take a `runRef` (depth + spawning call)
+where they took a bare depth.
 
 **What:**
 

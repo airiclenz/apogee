@@ -3772,10 +3772,10 @@ func TestFollowsTailOfLongStreamedReply(t *testing.T) {
 func TestDetachedRepaintHoldsPosition(t *testing.T) {
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("first question", nil)
-	m.transcript.commitAssistant(strings.Repeat("filler above. ", 80), 0)
+	m.transcript.commitAssistant(strings.Repeat("filler above. ", 80), runRef{})
 	m.transcript.addUser("STICKY-PROMPT", nil)
 	for i := 0; i < 30; i++ {
-		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), runRef{})
 	}
 	m.refreshViewport()
 
@@ -3783,7 +3783,7 @@ func TestDetachedRepaintHoldsPosition(t *testing.T) {
 	m.viewport.SetYOffset(5) // up in the history, well off the bottom
 	off := m.viewport.YOffset()
 
-	m.transcript.commitAssistant("more streamed content", 0)
+	m.transcript.commitAssistant("more streamed content", runRef{})
 	m.refreshViewport()
 
 	if m.viewport.YOffset() != off {
@@ -3800,7 +3800,7 @@ func TestShrinkingContentReattachesFollow(t *testing.T) {
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("a question", nil)
 	for i := 0; i < 30; i++ {
-		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), runRef{})
 	}
 	m.refreshViewport()
 	m.detached = true
@@ -3826,7 +3826,7 @@ func TestSubmitReattachesFollow(t *testing.T) {
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("old question", nil)
 	for i := 0; i < 30; i++ {
-		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), runRef{})
 	}
 	m.refreshViewport()
 	m.detached = true
@@ -3852,7 +3852,7 @@ func TestMouseWheelScrollsWhileIdle(t *testing.T) {
 	m := newTestModel(t) // 80x24, stateIdle
 	m.transcript.addUser("question", nil)
 	for i := 0; i < 40; i++ {
-		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), runRef{})
 	}
 	m.refreshViewport() // follows the tail: the view opens at the bottom, attached
 
@@ -3919,7 +3919,7 @@ func TestPageDownToBottomReattachesFollow(t *testing.T) {
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("a question", nil)
 	for i := 0; i < 40; i++ {
-		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), runRef{})
 	}
 	m.refreshViewport()
 
@@ -3945,7 +3945,7 @@ func TestScrollMidHistoryHoldsPositionOnAppend(t *testing.T) {
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("a question", nil)
 	for i := 0; i < 60; i++ {
-		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), 0)
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), runRef{})
 	}
 	m.refreshViewport()
 
@@ -3958,7 +3958,7 @@ func TestScrollMidHistoryHoldsPositionOnAppend(t *testing.T) {
 	}
 	off := m.viewport.YOffset()
 
-	m.transcript.commitAssistant("more streamed content", 0)
+	m.transcript.commitAssistant("more streamed content", runRef{})
 	m.refreshViewport()
 
 	if m.viewport.YOffset() != off {
@@ -3999,9 +3999,9 @@ func firstViewLine(m Model) string {
 func TestShortReplyKeepsTheExchangeAtTheTail(t *testing.T) {
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("FIRST-QUESTION", nil)
-	m.transcript.commitAssistant("a prior short answer", 0)
+	m.transcript.commitAssistant("a prior short answer", runRef{})
 	m.transcript.addUser("LATEST-PROMPT", nil)
-	m.transcript.commitAssistant("a short reply", 0)
+	m.transcript.commitAssistant("a short reply", runRef{})
 	m.refreshViewport()
 
 	view := plain(m.View())
@@ -4023,7 +4023,7 @@ func TestSubmitAppendsAtTheTailWithoutJumping(t *testing.T) {
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("OLDEST-PROMPT", nil)
 	for i := 0; i < 40; i++ {
-		m.transcript.commitAssistant("history paragraph "+strings.Repeat("x", 10), 0)
+		m.transcript.commitAssistant("history paragraph "+strings.Repeat("x", 10), runRef{})
 	}
 	m.refreshViewport()
 
@@ -4055,11 +4055,11 @@ func TestStickyHeaderHandoffOnScroll(t *testing.T) {
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("PROMPT-ONE", nil)
 	for i := 0; i < 20; i++ {
-		m.transcript.commitAssistant("one reply "+strings.Repeat("x", 10), 0)
+		m.transcript.commitAssistant("one reply "+strings.Repeat("x", 10), runRef{})
 	}
 	m.transcript.addUser("PROMPT-TWO", nil)
 	for i := 0; i < 20; i++ {
-		m.transcript.commitAssistant("two reply "+strings.Repeat("y", 10), 0)
+		m.transcript.commitAssistant("two reply "+strings.Repeat("y", 10), runRef{})
 	}
 	m.refreshViewport()
 	one := m.userBlocks[0]                   // section one's user-block range (below the seeded start-up box)
@@ -4097,7 +4097,7 @@ func TestStickyHeaderShowsTheCollapsedPromptShape(t *testing.T) {
 	m.transcript.reset()
 	m.transcript.addUser("alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot", nil)
 	for i := 0; i < 30; i++ { // reply enough to scroll the prompt off the top
-		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), 0)
+		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), runRef{})
 	}
 	m.refreshViewport()
 

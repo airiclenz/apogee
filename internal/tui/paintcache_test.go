@@ -50,11 +50,11 @@ func sameRender(t *testing.T, what string, got, want renderedTranscript) {
 // checked against. It borrows the entries slice rather than copying it: the renderer only reads.
 func coldRender(tr *transcript, th theme, width int, blink bool) renderedTranscript {
 	cold := &transcript{
-		entries:      tr.entries,
-		pending:      tr.pending,
-		streaming:    tr.streaming,
-		pendingDepth: tr.pendingDepth,
-		ws:           tr.ws,
+		entries:    tr.entries,
+		pending:    tr.pending,
+		streaming:  tr.streaming,
+		pendingRun: tr.pendingRun,
+		ws:         tr.ws,
 	}
 	return cold.renderView(th, width, blink)
 }
