@@ -110,6 +110,11 @@ and `popupAccent`'s field doc ("accent-orange"). The item's out-of-scope clause 
 comment wording updates on these four styles; no styling changed. `doc.go` ~line 400 was left as-is:
 it names the `toolLabel` role rather than `code`, and "bold-orange" stays true under dark.
 
+NOTES (2026-08-08): a second `doc.go` site the item does not name — the sub-agent-frame paragraph at
+~line 53 — WAS corrected: it said the frame is "the tool-header orange (the scheme's `code` role)",
+which this item makes false, so the parenthetical now names the `tool-header` role. Prose only, and
+design call 4 (the rail follows `tool-header`) is exactly what it documents.
+
 **What:**
 - `internal/tui/theme.go`: introduce `toolHeader := lipgloss.Color(s.ToolHeader)`
   alongside the existing `code` local (~line 265); switch `toolLabel` (~line 290) and
