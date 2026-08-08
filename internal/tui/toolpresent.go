@@ -159,7 +159,7 @@ func (b *toolBody) stripEscapes() {
 // and an empty Details means nothing hangs beneath. That split IS the block's grammar —
 // the shape follows from which halves are filled, never from how many Details there are
 // (render.go). name is the raw tool id, kept to pick the result extractor and as the
-// raw-fallback label. Every Label renders the same way — bold orange (render.go) — so a raw
+// raw-fallback label. Every Label renders the same way — bold gold (render.go) — so a raw
 // fallback is not visually singled out.
 type toolView struct {
 	Label  string

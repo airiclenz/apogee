@@ -181,7 +181,7 @@ point is a **minor** bump, not a breaking change.
   admit only calls with nothing hanging beneath them, so a batch of reads folded into one aligned
   block while a batch of `Run`s or edits — the batches that fill the most screen — stayed a column
   of separate four-row blocks. They fold now, and the block says how many: the header reads
-  `✦ Run (3)`, the count in the faint chrome tone rather than the label's orange.
+  `✦ Run (3)`, the count in the faint chrome tone rather than the label's gold.
   - **A grouped member is exactly one row.** The target is clipped to a trailing `…` at the room
     its outcome leaves it, and the outcome is never traded away — a member shows what happened to
     the file even when the path had to be cut. Every summary in a block opens in the same column,
@@ -196,7 +196,7 @@ point is a **minor** bump, not a breaking change.
     header. Its `▶` becomes a `▼` in the same column, and every row the open member paints — the
     target rows, the body, the `see less…` — closes it again, so the pointer never has to travel
     back to where it started. The gutter is painted in the detail gray and never in the sub-agent
-    rail's orange, so an opened member inside a delegate's run cannot be read as part of the run's
+    rail's gold, so an opened member inside a delegate's run cannot be read as part of the run's
     frame. As everywhere else in the transcript, a drag still selects: only a motionless click
     toggles.
   - **An open block reads a step brighter.** A tool block paints its target, its outcome and its

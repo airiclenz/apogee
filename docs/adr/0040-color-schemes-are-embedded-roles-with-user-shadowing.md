@@ -195,3 +195,32 @@ looking, at the moment it happened, and does not become permanent scrollback.
 - **This is a user-visible feature** — a new config key, a new command, a new folder under
   `~/.apogee` — and **warrants a minor bump** when the next version is cut. That call is the
   owner's, and no item of the implementing plan touches a version identifier.
+
+## Amendment (2026-08-08) — the "pixel-identical dark scheme" consequence is historical, not current
+
+The consequence above — *"The dark scheme is pixel-identical to the palette that preceded this
+record"* — was true the day this record was written and is **no longer true of the shipped
+scheme**. It stands as written because it records what the implementing plan delivered; read it
+as history rather than as a description of `schemes/dark.yaml` at HEAD.
+
+Three roles of the `dark` scheme diverged from the pre-record palette afterwards, each a
+deliberate legibility call in its own commit, and none of them a change to the role vocabulary or
+to the loading rules this record decides:
+
+- **`code`** left the pre-record orange `#f0883e` for a blue — `#80AAFF` in `51e9f65`, retuned to
+  `#70BBFF` in `4b7a120` — so the code apogee *prints* no longer shares a tone with the blocks it
+  *ran*.
+- **`tool-marker`** left the pre-record gray-blue `#8db4e6` for `#80B0FF` (`b2aed0e`) and then the
+  warm orange `#FFB050` (`51e9f65`), so a synthesized `+N more lines` marker never reads as a line
+  of the body it counts.
+- **`tool-header`** is a role the pre-record palette had no counterpart for: added as the 25th key
+  by `docs/plans/2026-08-08 - 00 - tool-header-color-role-plan.md` to split the tool-call header
+  label and the sub-agent rail off the `code` role they used to borrow. It landed carrying the old
+  `#f0883e` (`4c3b8b9`) and ships `#FFD060`, a gold (`4b7a120`).
+
+What this record decides is untouched: the role set is a compatibility surface (a *rename* still
+needs an amendment; `tool-header` was an additive 25th key), a role's *value* is scheme data
+rather than a decision of this record, and the cross-scheme skill/file-ref distinction test still
+holds. The "existing render tests are the proof" clause reads as history too — those tests assert
+against `scheme.Default()` rather than against pinned literals, so they followed the retunes;
+`internal/scheme`'s `darkPalette` drift guard is what pins the shipped hex today.

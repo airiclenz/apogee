@@ -484,8 +484,8 @@ blocks carry, so the blocks apogee *ran* read apart from the code it *prints*, a
 be retuned without dragging the other along. The styling is uniform too: a known friendly label
 ("Read File"), an unknown tool's raw name, and `result` all look the same. The
 bare-name-means-unregistered signal was the brackets' job and dies with them. The count is **not**
-part of the name and is painted in the faint indicator tone rather than the orange: it is the
-block's own arithmetic, and a reader scanning the orange down the left edge should not read a
+part of the name and is painted in the faint indicator tone rather than the gold: it is the
+block's own arithmetic, and a reader scanning the gold down the left edge should not read a
 number as part of a tool's name.
 
 **What groups.** Consecutive tool calls at the same nesting depth carrying the same label fold
@@ -623,7 +623,7 @@ An **expanded member** opens in place. Its first row keeps the branch marker, th
 — target *and* summary, because opening a member must not take the outcome away — and a `▼` in the
 column the `▶` vacated. Every continuation row and every body line beneath it carries a `│` gutter
 under that marker, painted in the detail gray and deliberately **not** the sub-agent rail's
-`tool-header` orange, so an open member inside a nested run cannot be read as a frame of the run. A
+`tool-header` gold, so an open member inside a nested run cannot be read as a frame of the run. A
 right-aligned `see less…` closes it — the prompt block's own word for the same act, one vocabulary
 for "close this". Nothing inside an open member is clipped and it grows no remainder marker: there
 is nothing left over to count. The indicator field keeps its width across the toggle, so the row
@@ -731,7 +731,7 @@ moves.
 with one glyph, a single space off it: `▶` while the block is collapsed — a click opens it — and `▼`
 while it is expanded. A group **member** wears the same pair right-aligned at the block's edge
 instead, since there it is the member and not the header that opens. Both are painted in the faint
-detail tone rather than the label's `tool-header` orange, so they read as chrome beside the tool's
+detail tone rather than the label's `tool-header` gold, so they read as chrome beside the tool's
 name instead of as the last letter of it. Their presence *is* the clickability hint, because the
 affordance and the click-target rule are **one predicate**: an indicator appears exactly where a
 click toggles something, so a block that hides nothing wears none, a group's header — which

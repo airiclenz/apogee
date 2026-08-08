@@ -231,8 +231,9 @@ working, too — commands that need a quiet engine wear an `— idle only` tag f
 as the engine is busy, and say so if you pick one anyway, while `/version`, `/skills`
 and `/confine`'s status report answer immediately. Once the engine is idle that tag is
 gone from the menu entirely — there is nothing left for it to warn about. A token
-lights up in the box exactly when it resolves — violet for a skill your catalog has,
-blue for a file your workspace has — so a typo is visible before you send.
+lights up in the box exactly when it resolves — the `skill` role for a skill your catalog
+has, the `file-ref` role for a file your workspace has (violet and green under `dark`) — so
+a typo is visible before you send.
 
 | What you type | Does | While the model works |
 |---|---|---|

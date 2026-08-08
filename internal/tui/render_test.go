@@ -626,17 +626,17 @@ func TestRenderSpacerRailIsStyledAndUntrailed(t *testing.T) {
 }
 
 // The sub-agent frame — rail and ⤷ label alike, both the subRail role — is painted in the scheme's
-// `tool-header` role, the same orange toolLabel carries, so a nested run reads as one coloured frame
+// `tool-header` role, the same gold toolLabel carries, so a nested run reads as one coloured frame
 // rather than as dim chrome. The assertion compares against the palette's own render rather than
 // a lipgloss byte-golden; the guard below it catches the opposite failure, a subRail role that
 // paints nothing at all and would leave the rail unstyled.
-func TestSubRailPaintedInToolHeaderOrange(t *testing.T) {
+func TestSubRailPaintedInToolHeaderGold(t *testing.T) {
 	th := newTheme(scheme.Default())
 
 	rail := th.subRail.Render(glyphSubRail)
 
 	if want := lipgloss.NewStyle().Foreground(lipgloss.Color(scheme.Default().ToolHeader)).Render(glyphSubRail); rail != want {
-		t.Errorf("rail = %q; want the `tool-header` role's orange %q the tool header carries", rail, want)
+		t.Errorf("rail = %q; want the `tool-header` role's gold %q the tool header carries", rail, want)
 	}
 	if rail == glyphSubRail {
 		t.Fatal("the subRail role renders no escape sequence; the rail and label would be unstyled")
@@ -648,7 +648,7 @@ func TestSubRailPaintedInToolHeaderOrange(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // A tool header shows the label alone — no brackets and, now that the block shape is uniform, no
-// target either — and that label carries the bold-orange style, baked in before the wrap so the
+// target either — and that label carries the bold-gold style, baked in before the wrap so the
 // visible text is unaffected. The style assertion is a loose contains against the theme's own
 // render rather than a byte-exact golden, so a lipgloss change cannot false-fail it; the guard
 // below it catches the opposite failure, a toolLabel role that paints nothing at all.
@@ -1357,7 +1357,7 @@ func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 }
 
 // The count is the group's own arithmetic and is painted as such: it rides the header in the faint
-// indicator tone rather than in the label's bold orange, so a reader scanning the orange down the
+// indicator tone rather than in the label's bold gold, so a reader scanning the gold down the
 // left edge does not read "(3)" as part of the tool's name (design call 6). The header wears no
 // state indicator and takes no click — the members own their state.
 func TestGroupHeaderCountIsFaintAndInert(t *testing.T) {
@@ -1487,7 +1487,7 @@ func TestGroupMemberMarksNameTheirOwnCalls(t *testing.T) {
 }
 
 // An open member nested inside a sub-agent run wears TWO vertical bars on the same row, and they
-// must not read as one: the run's rail is the label orange and the member's gutter is the detail
+// must not read as one: the run's rail is the label gold and the member's gutter is the detail
 // tone (design call 8). Painted in the same style, a member's body would look like a section of the
 // delegate's frame rather than the output of one call inside it.
 func TestExpandedMemberGutterIsNotTheSubAgentRail(t *testing.T) {
@@ -2466,7 +2466,7 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 	}
 }
 
-// The indicator is painted apart from the label: the detail tone, never toolLabel's bold orange, so
+// The indicator is painted apart from the label: the detail tone, never toolLabel's bold gold, so
 // the affordance reads as chrome beside the tool's name rather than as the last letter of it. The
 // assertion is against the theme's own roles rather than a lipgloss byte-golden, and the second
 // guard catches the opposite failure — an indicator styled into the label's run.
@@ -3451,7 +3451,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 // approval note, and a sub-agent read — as an exact line sequence, blank lines included. It is the
 // backstop across the layout changes rather than a test of any one of them: the blank-line hygiene
 // shows as the single separator row between every block — empty at the top level, the │ rail
-// gutter inside the sub-agent run — the bracketless bold-orange label as the
+// gutter inside the sub-agent run — the bracketless bold-gold label as the
 // header text, the grouping as the two counted blocks — three reads aligned under "Read File (3)",
 // and the two consecutive edits under "Edit File (2)", differently tooled and sharing a label, each
 // held to one member row with its diff behind its own indicator now that a body no longer breaks a

@@ -41,9 +41,8 @@ var roleTable = []struct {
 	{"spinner-4", func(s Scheme) string { return s.Spinner4 }},
 }
 
-// darkPalette pins the shipped "dark" values. It is the drift guard between
-// schemes/dark.yaml and the palette apogee shipped with (internal/tui/theme.go): change
-// one without the other and this fails.
+// darkPalette pins the shipped "dark" values. It is the drift guard on
+// schemes/dark.yaml: change the file without this map and this fails.
 var darkPalette = map[string]string{
 	"user-text":        "#ffffff",
 	"chrome":           "#4a4a4a",

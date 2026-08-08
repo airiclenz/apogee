@@ -25,7 +25,7 @@ diff-add: "#3fb950"    # diff "+" lines
 diff-del: "#f85149"    # diff "-" lines
 error: "#f85149"       # recovered-fault notices
 code: "#70BBFF"        # inline `code` + fenced code blocks
-tool-header: "#FFD060" # a tool-call block's header label (Run, List Dir, Sub-Agent, …) and the sub-agent rail that hangs off it — orange, so the blocks apogee ran read apart from the code it prints
+tool-header: "#FFD060" # a tool-call block's header label (Run, List Dir, Sub-Agent, …) and the sub-agent rail that hangs off it — gold, so the blocks apogee ran read apart from the code it prints
 
 # --- autonomy modes ----------------------------------------------------------------
 # The footer's mode markers, warming up the privilege ladder (least → most autonomous).

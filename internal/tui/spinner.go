@@ -263,8 +263,8 @@ const spinnerColorPeriod = 10 * time.Second
 // amber → pink and back to violet under the dark scheme. They live on the theme ([theme.spinnerStops],
 // built in newTheme) rather than in a package var of this file, because a package var is fixed at init
 // and the active scheme is not: a runtime scheme switch has to move the loop with it (ADR 0040). Named
-// stops rather than a raw hue circle is the point: the footer's autonomy-mode markers and the orange
-// code accent are already on screen, and a full hue sweep would collide with them.
+// stops rather than a raw hue circle is the point: the footer's autonomy-mode markers and the
+// `code` role's accent are already on screen, and a full hue sweep would collide with them.
 
 // buildSpinnerStops converts a scheme's spinner colours into the space the blend works in, once per
 // theme.

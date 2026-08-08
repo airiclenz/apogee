@@ -1032,7 +1032,7 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // standalone"). The caller frames the block for depth (renderView
 // and renderEntryLines apply the rail) — width is already the railed inner column.
 //
-// The label is styled (bold orange) before the header is wrapped — the markdown.go posture:
+// The label is styled (bold gold) before the header is wrapped — the markdown.go posture:
 // the authority's wrap is SGR-aware and its measure strips ANSI, so baking the style into the text
 // leaves the soft-wrap and sticky-offset arithmetic untouched.
 //
@@ -1074,7 +1074,7 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // disagree — a block that wears an indicator is clickable and a block that does not is not, with
 // one condition behind both. Unlike the mark, the glyph is state-DEPENDENT: it is what says which
 // way the click will go (stateIndicator). It is styled apart from the label (th.toolIndicator, the
-// detail tone) so it reads as chrome beside the orange rather than as the last letter of it.
+// detail tone) so it reads as chrome beside the gold rather than as the last letter of it.
 func renderToolBlock(th theme, views []toolView, width int, state blockState) blockPaint {
 	if len(views) == 0 {
 		return blockPaint{}
@@ -1114,9 +1114,9 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 // header names the label and how many calls carry it, and a COLLAPSED member gets exactly ONE row
 // so ten grouped calls read as ten lines rather than as ten blocks that happen to share a star.
 //
-// The header wears the count in the faint indicator tone rather than the label's bold orange
+// The header wears the count in the faint indicator tone rather than the label's bold gold
 // (design call 6): "(3)" is the block's own arithmetic, not part of the tool's name, and a reader
-// scanning the orange down the left edge should not read the number as one. It wears no state
+// scanning the gold down the left edge should not read the number as one. It wears no state
 // indicator and is NOT a click target, because a group has no single state to toggle — expansion
 // belongs to the members, each of which owns its own.
 //
@@ -1229,7 +1229,7 @@ func renderGroupMember(th theme, tv toolView, column int, marker string, width, 
 // The gutter is what makes the open member read as one thing rather than as a member followed by
 // loose output, and it is painted in the DETAIL tone (design call 8): its shape is the sub-agent
 // rail's and its meaning is not, so an open member inside a nested run must not wear the rail's
-// orange — the two frames are read at a glance and confusing them would misattribute the body.
+// gold — the two frames are read at a glance and confusing them would misattribute the body.
 //
 // The first row is the branch TEXT, not the bare target: the summary is the call's outcome and
 // opening a member must not take it away, and composing it through the same branchText the
@@ -2168,7 +2168,7 @@ func railSpacer(th theme, depth int) string {
 // level to each physical line, so a sub-agent's nested block reads as a vertical-ruled
 // sub-section (P3.14). Depth 0 is the common case and returns the lines untouched, so the
 // flat top-level transcript renders exactly as before. The rail is styled in the subRail role's
-// tool-header orange and sits left of any per-line background (e.g. the user block's), matching
+// tool-header gold and sits left of any per-line background (e.g. the user block's), matching
 // the marker hanging indent.
 func railLines(th theme, lines []string, depth int) []string {
 	if depth <= 0 {

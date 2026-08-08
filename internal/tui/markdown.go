@@ -10,8 +10,8 @@ import (
 //
 // Assistant messages arrive as markdown source; this file turns the small, common subset the
 // transcript needs into styled physical lines: **bold**, # headings (bold white), `inline code`
-// and ``` fenced blocks ``` (orange), bullet/numbered lists, and GFM pipe tables — the last
-// dispatched from the walk below into its companion mdtable.go, which draws them as aligned
+// and ``` fenced blocks ``` (the scheme's `code` role), bullet/numbered lists, and GFM pipe tables
+// — the last dispatched from the walk below into its companion mdtable.go, which draws them as aligned
 // columns ruled by a faint │ and by a ─ under the header and between adjacent body rows, wrapping
 // an over-wide cell inside its column rather than cutting it and falling back to plain paragraphs
 // below a readable column floor, all under the same absolute width cap. It is a deliberately spare, lipgloss-only renderer (no syntax highlighting, no
@@ -159,8 +159,8 @@ func renderCodeBlock(th theme, code []string, width int) []string {
 	return out
 }
 
-// renderInline styles the inline spans in one logical line: `code` (orange) and **bold**. Code
-// spans win over bold (no bold is parsed inside a code span), matching CommonMark's code-span
+// renderInline styles the inline spans in one logical line: `code` (the scheme's `code` role) and
+// **bold**. Code spans win over bold (no bold is parsed inside a code span), matching CommonMark's code-span
 // precedence. An unterminated ` or ** is emitted literally so a mid-stream line renders cleanly.
 func renderInline(th theme, s string) string {
 	var b strings.Builder

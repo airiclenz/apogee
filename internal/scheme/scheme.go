@@ -11,7 +11,8 @@ import (
 )
 
 // DefaultName is the built-in scheme every fallback lands on: the palette apogee has
-// always drawn with.
+// always drawn with, apart from three roles retuned for legibility while the scheme
+// system was being built (`code`, `tool-header` and `tool-marker`).
 const DefaultName = "dark"
 
 // builtinFS carries the shipped schemes. They live in the binary, never on disk —

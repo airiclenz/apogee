@@ -41,7 +41,7 @@ const (
 	glyphUser           = "❯"
 	glyphMenuUnselected = "·" // U+00B7 MIDDLE DOT — an unselected row of a menu-style popup (popupSpec.menuRows): glyphUser's counterpart, deliberately NOT glyphBullet's "•", because a menu row is an option waiting to be pointed at rather than an item of a list
 	glyphSubRail        = "│"
-	glyphMemberGutter   = "│" // U+2502 LIGHT VERTICAL — the gutter continuing an EXPANDED group member's rows under its ┝ (memberGutter, render.go). Its shape is glyphSubRail's and deliberately NOT shared with it: the member gutter is painted in the detail tone and the sub-agent rail in the label orange (design call 8), so an open member nested inside a run cannot be read as a frame of the run.
+	glyphMemberGutter   = "│" // U+2502 LIGHT VERTICAL — the gutter continuing an EXPANDED group member's rows under its ┝ (memberGutter, render.go). Its shape is glyphSubRail's and deliberately NOT shared with it: the member gutter is painted in the detail tone and the sub-agent rail in the label gold (design call 8), so an open member nested inside a run cannot be read as a frame of the run.
 	glyphSubLabel       = "⤷"
 	glyphBullet         = "•" // a markdown bullet-list item (- / * / +)
 	glyphSkill          = "✦" // marks a skill: the "/" menu's skill rows (the sent block marks its own by colouring the token, not by badging it)
@@ -128,7 +128,7 @@ type theme struct {
 	promptToggle  lipgloss.Style // the see-more / see-less marker a long prompt block carries near its right edge (renderUserBlock): bold light gray-blue on the block's OWN dark-gray field, held a promptMarkerMargin off the edge, so the toggle reads as an affordance sitting inside the block rather than as another row of what the human wrote
 	toolHeader    lipgloss.Style // the ✦ Label target header
 	toolLabel     lipgloss.Style // the tool label inside that header (bold, in the scheme's `tool-header` role — a tone of the header's own, no longer borrowed from the `code` role inline code and fenced blocks carry)
-	toolIndicator lipgloss.Style // the ▶/▼ state indicator trailing that label where the header is a toggle target: the detail tone, deliberately NOT toolLabel's orange, so the affordance reads as chrome beside the label rather than as part of it
+	toolIndicator lipgloss.Style // the ▶/▼ state indicator trailing that label where the header is a toggle target: the detail tone, deliberately NOT toolLabel's gold, so the affordance reads as chrome beside the label rather than as part of it
 	toolDetail    lipgloss.Style // the ┝/┕ branch detail lines of a COLLAPSED block (dim)
 	// toolDetailBright is toolDetail's open twin: the same lines once the block they belong to is
 	// expanded, a step out of the collapsed dim (the scheme's `muted-bright` role against
@@ -150,7 +150,7 @@ type theme struct {
 	subRail          lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (toolLabel's `tool-header` role — one tone for the whole sub-agent frame)
 	skillAccent      lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
 	skillToken       lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)
-	fileToken        lipgloss.Style // a RESOLVING inline "@path" token in the prompt box (blue on the box's black)
+	fileToken        lipgloss.Style // a RESOLVING inline "@path" token in the prompt box (the scheme's `file-ref` role on the box's black — a pale green under `dark`, an olive one under `light`)
 	selection        lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
 	diffAdded        lipgloss.Style // a "+" diff detail line (reserved)
 	diffRemoved      lipgloss.Style // a "-" diff detail line (reserved)

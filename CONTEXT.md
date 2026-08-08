@@ -523,8 +523,10 @@ a user file **shadows** a shipped scheme of the same name rather than replacing 
 scheme file is YAML with **one key per role — 25 of them**, named for meaning rather than place
 (`error`, `code`, `tool-header`, `file-ref`, `skill`, `muted` / `muted-bright`, the four `mode-*`,
 the four `spinner-*`, …) — and **every key is optional**: a missing one inherits the built-in
-**`dark`** default, which is the palette apogee has always drawn with and remains the default
-scheme. Two schemes ship, `dark` and a `light` one *for light terminals*; both are compiled into
+**`dark`** default, which is the palette apogee has always drawn with apart from three roles
+retuned for legibility while the scheme system was being built (`code`, `tool-header` and
+`tool-marker`), and remains the default scheme. Two schemes ship, `dark` and a `light` one *for
+light terminals*; both are compiled into
 the binary with `go:embed` and are **never installed on disk and never downloaded** —
 `/color-scheme export <name>` is the only way one reaches the user's disk, verbatim comments and
 all, and it refuses to overwrite. Loading is **forgiving**: a bad hex, an unknown key, an

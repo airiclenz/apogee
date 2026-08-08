@@ -404,11 +404,13 @@ system-prompt-text: |
 #              apogee has always shown, kept as a permanent choice rather than a fallback.
 #              One column wide.
 #
-# The colour loop is a soft ten-second lap through three colours already on this screen —
-# periwinkle → turquoise → blue → back — blended so no step is visible. The lap takes ten
-# seconds under every style. With `spinner-color: false` the glyph keeps your terminal's own text
-# colour: `classic` with the loop off is exactly the status line apogee rendered before these
-# styles existed, and `classic` with it on is those same glyphs in the new colours.
+# The colour loop is a soft ten-second lap through the active scheme's four `spinner-*` roles,
+# visited in order and closing back on the first — violet → green → amber → pink under `dark` —
+# blended so no step is visible. Picking another colour scheme moves the loop with it — the stops
+# are the scheme's, not this file's. The lap takes ten seconds under every style. With
+# `spinner-color: false` the glyph keeps your terminal's own text colour: `classic` with the loop
+# off is exactly the status line apogee rendered before these styles existed, and `classic` with it
+# on is those same glyphs in the new colours.
 #
 # CAVEAT: apogee does not detect your terminal's colour depth. On a 256-colour terminal the
 # gradient steps visibly, and on a 16-colour one it collapses to a couple of tones — that is what
@@ -420,9 +422,11 @@ system-prompt-text: |
 # hidden bar does not leave an empty stripe behind. Default on.
 #
 # `color-scheme` names the palette every coloured thing on the screen takes its colour from. Two
-# schemes ship in the binary: `dark` (the default — the palette apogee has always drawn) and
-# `light`, for a terminal with a light background. apogee never paints the full-screen background;
-# a scheme recolours only what apogee already colours, so your terminal's own background stays.
+# schemes ship in the binary: `dark` (the default — the palette apogee has always drawn, apart from
+# three roles retuned for legibility while the scheme system was being built: `code`, `tool-header`
+# and `tool-marker`) and `light`, for a terminal with a light background. apogee never paints the
+# full-screen background; a scheme recolours only what apogee already colours, so your terminal's
+# own background stays.
 #
 # You can write your own. `/color-scheme export dark` writes a fully-commented copy to
 # ~/.apogee/schemes/dark.yaml for you to edit; a file there SHADOWS a built-in of the same name, so
