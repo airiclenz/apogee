@@ -17,7 +17,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -44,6 +46,39 @@ var lineJumpEditors = map[string]bool{
 	"emacs": true, "micro": true, "hx": true, "kak": true,
 }
 
+// terminalEditors are the editors that must OWN the terminal: they draw a full-screen interface on
+// the tty they are started from, so the pane suspends for them, runs them in the foreground and
+// applies what they wrote when they exit (ADR 0041 decision 6). Everything else — a GUI editor, a
+// desktop opener stub — is started detached, and the file watcher supplies the apply.
+//
+// It holds the same nine names as lineJumpEditors and is a separate table on purpose: one answers
+// "does this program understand `+<line>`" and the other "does this program need the terminal", and
+// the day a program answers the two questions differently the tables part without either being
+// re-derived from the other.
+var terminalEditors = map[string]bool{
+	"vi": true, "vim": true, "nvim": true, "nano": true, "pico": true,
+	"emacs": true, "micro": true, "hx": true, "kak": true,
+}
+
+// spawnMode is how a resolved editor has to be started, which is a fact about the PROGRAM and so is
+// answered here rather than at the renderer that runs it (ADR 0011's thin renderer).
+type spawnMode int
+
+const (
+	// spawnForeground: suspend the TUI, hand the editor this terminal, and wait for it — the only way
+	// a terminal editor is usable at all, since one drawn over a live alt-screen TUI is broken.
+	spawnForeground spawnMode = iota
+	// spawnDetached: start the program without the terminal and do not wait for it, so the pane stays
+	// up while a GUI editor is open and an opener stub returning instantly means nothing.
+	spawnDetached
+)
+
+// editorCommand is one walk down the editor ladder: the command line to run, and how to run it.
+type editorCommand struct {
+	argv  []string
+	spawn spawnMode
+}
+
 // externalEdit is the pair of seams the pane drives across one round trip, and the baseline they
 // share. The baseline is the config as the FILE alone projected it at the moment the editor was
 // launched: the return trip diffs against that rather than against the session's resolution, so what
@@ -63,9 +98,13 @@ type externalEdit struct {
 	// configPath is the file both halves work on — the one this session resolved.
 	configPath string
 	// getenv and goos are injected for the same reason every resolution seam in this binary injects
-	// them: the editor ladder is a table test, not a machine.
+	// them: the editor ladder is a table test, not a machine. look is injected beside them and
+	// answers the one question the ladder cannot — whether this machine actually has the program the
+	// ladder named — so a test about which argv the pane is handed is not also a test of which
+	// editors the machine running it has installed.
 	getenv func(string) string
 	goos   string
+	look   func(string) (string, error)
 }
 
 // fileProjection is one reading of the config file, in the two spellings the round trip needs: the
@@ -91,6 +130,7 @@ func newExternalEdit(opts options, getenv func(string) string) *externalEdit {
 		configPath: configFilePath(opts.configDir),
 		getenv:     getenv,
 		goos:       runtime.GOOS,
+		look:       exec.LookPath,
 	}
 	projected, err := e.projection()
 	if err != nil {
@@ -120,12 +160,22 @@ func (e *externalEdit) spec(key string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if projected, err := e.projection(); err == nil {
-		e.mu.Lock()
+	projected, perr := e.projection()
+	e.mu.Lock()
+	if perr == nil {
 		e.baseline = projected
-		e.mu.Unlock()
 	}
-	argv := editorArgv(e.getenv, e.goos)
+	// The `editor` key comes off that same fresh projection rather than off e.opts, which is the
+	// STARTUP snapshot: a key set on its row a minute ago — or by another window — has to open the
+	// next edit, not the next run.
+	configured := e.baseline.opts.editor
+	e.mu.Unlock()
+
+	cmd, err := e.resolveEditor(configured)
+	if err != nil {
+		return nil, err
+	}
+	argv := cmd.argv
 	if line := settingKeyLine(data, key); line > 0 && lineJumpEditors[editorName(argv[0])] {
 		argv = append(argv, "+"+strconv.Itoa(line))
 	}
@@ -252,20 +302,69 @@ func (e *externalEdit) projection() (fileProjection, error) {
 func noFlagChanged(string) bool   { return false }
 func noEnvironment(string) string { return "" }
 
-// editorArgv is the editor this environment names, split into a program and its arguments so a
-// $EDITOR carrying flags ("code -w", "emacsclient -nw") is honoured rather than looked up as a
-// program with a space in its name. The ladder is ADR 0037 binding B: $VISUAL, then $EDITOR, then the
-// platform's own fallback — vi everywhere a POSIX shell lives, notepad on Windows.
-func editorArgv(getenv func(string) string, goos string) []string {
-	for _, name := range []string{"VISUAL", "EDITOR"} {
-		if fields := strings.Fields(getenv(name)); len(fields) > 0 {
-			return fields
+// editorArgv is the editor an edit opens in, resolved down the four rungs of ADR 0041 decision 2 —
+// the `editor` key, then $VISUAL, then $EDITOR, then the platform's own default opener — and
+// classified by how it has to be started (decision 6).
+//
+// Every rung is split into a program and its arguments, so a value carrying flags ("code -w",
+// "emacsclient -nw") is honoured as the command line it is rather than looked up as a program with a
+// space in its name; a blank or whitespace-only rung is no answer at all and the ladder walks on.
+//
+// The config key outranks the environment because it is the only rung the user set FOR APOGEE: an
+// inherited $VISUAL is an ambient answer to a different question, and a row reading `code -w` while
+// something else opened would be a row that lies.
+func editorArgv(configured string, getenv func(string) string, goos string) editorCommand {
+	argv := osOpener(goos)
+	for _, rung := range []string{configured, getenv("VISUAL"), getenv("EDITOR")} {
+		if fields := strings.Fields(rung); len(fields) > 0 {
+			argv = fields
+			break
 		}
 	}
-	if goos == "windows" {
-		return []string{"notepad"}
+	if terminalEditors[editorName(argv[0])] {
+		return editorCommand{argv: argv, spawn: spawnForeground}
 	}
-	return []string{"vi"}
+	return editorCommand{argv: argv, spawn: spawnDetached}
+}
+
+// osOpener is the ladder's last rung (ADR 0041 decision 4): the desktop's own answer to "what opens
+// a .yaml", which it knows and apogee does not. Anything that is neither darwin nor windows is
+// offered the freedesktop opener, which is the right guess for every platform that has one and no
+// worse than a guess at a text editor for the platforms that do not.
+//
+// The empty string on Windows is `start`'s window-TITLE argument: without it, a quoted path is read
+// as the title and nothing opens.
+func osOpener(goos string) []string {
+	switch goos {
+	case "darwin":
+		return []string{"open"}
+	case "windows":
+		return []string{"cmd", "/c", "start", ""}
+	default:
+		return []string{"xdg-open"}
+	}
+}
+
+// resolveEditor walks the ladder and then answers the question no resolution can: whether this
+// machine has that program at all. A program nobody can run is refused HERE — before the pane
+// suspends into it, or starts a detached child that dies unwatched — and the refusal names all three
+// ways to set an editor (ADR 0041 decision 4).
+//
+// It deliberately does not carry Go's own "executable file not found in $PATH" through: on a box
+// without xdg-utils the ladder ends at an opener the user never chose, and naming that program at
+// them explains nothing they can act on.
+func (e *externalEdit) resolveEditor(configured string) (editorCommand, error) {
+	cmd := editorArgv(configured, e.getenv, e.goos)
+	look := e.look
+	if look == nil {
+		look = exec.LookPath
+	}
+	if _, err := look(cmd.argv[0]); err != nil {
+		return editorCommand{}, fmt.Errorf("cannot run editor %q: name one in the `editor` key of "+
+			"config.yaml, or in $VISUAL or $EDITOR, or install this platform's default opener (%s)",
+			cmd.argv[0], osOpener(e.goos)[0])
+	}
+	return cmd, nil
 }
 
 // editorName is the editor's own name, out of whatever path or command spelled it — the key the

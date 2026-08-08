@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,32 +15,69 @@ import (
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
-// The editor ladder is $VISUAL, then $EDITOR, then the platform's own fallback (ADR 0037 binding B).
-// A variable carrying flags is honoured as the command line it is rather than looked up as a program
-// with a space in its name, and a blank or whitespace-only variable is no answer at all.
+// The editor ladder has four rungs (ADR 0041 decision 2): the `editor` key, then $VISUAL, then
+// $EDITOR, then the platform's own default opener. The key outranks the environment because it is
+// the only rung set for apogee, a rung carrying flags is honoured as the command line it is rather
+// than looked up as a program with a space in its name, and a blank or whitespace-only rung is no
+// answer at all.
 func TestEditorArgvFollowsTheLadder(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		env  map[string]string
-		goos string
-		want []string
+		name       string
+		configured string
+		env        map[string]string
+		goos       string
+		want       []string
 	}{
+		{name: "the config key outranks VISUAL", configured: "code -w",
+			env: map[string]string{"VISUAL": "hx", "EDITOR": "vi"}, goos: "linux", want: []string{"code", "-w"}},
 		{name: "VISUAL outranks EDITOR", env: map[string]string{"VISUAL": "hx", "EDITOR": "vi"}, goos: "linux", want: []string{"hx"}},
 		{name: "EDITOR when VISUAL is unset", env: map[string]string{"EDITOR": "nvim"}, goos: "darwin", want: []string{"nvim"}},
 		{name: "a command with flags", env: map[string]string{"EDITOR": "code -w"}, goos: "linux", want: []string{"code", "-w"}},
 		{name: "an empty variable is no answer", env: map[string]string{"VISUAL": "   ", "EDITOR": "nano"}, goos: "linux", want: []string{"nano"}},
-		{name: "the posix fallback", goos: "linux", want: []string{"vi"}},
-		{name: "the windows fallback", goos: "windows", want: []string{"notepad"}},
+		{name: "a whitespace-only key is no answer either", configured: "  \t ",
+			env: map[string]string{"EDITOR": "nano"}, goos: "linux", want: []string{"nano"}},
+		{name: "the darwin opener", goos: "darwin", want: []string{"open"}},
+		{name: "the linux opener", goos: "linux", want: []string{"xdg-open"}},
+		{name: "the windows opener", goos: "windows", want: []string{"cmd", "/c", "start", ""}},
+		{name: "an unknown platform is offered the freedesktop opener", goos: "plan9", want: []string{"xdg-open"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := editorArgv(func(k string) string { return tt.env[k] }, tt.goos)
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("editorArgv = %v, want %v", got, tt.want)
+			got := editorArgv(tt.configured, func(k string) string { return tt.env[k] }, tt.goos)
+			if !slices.Equal(got.argv, tt.want) {
+				t.Errorf("editorArgv = %v, want %v", got.argv, tt.want)
 			}
 		})
+	}
+}
+
+// How a resolved editor is started is a fact about the program (ADR 0041 decision 6): the nine
+// terminal editors need the tty and are run in the foreground, and everything else — a GUI editor, a
+// desktop opener stub, a program apogee has never heard of — is started detached, because a GUI
+// editor held open by the pane blanks the session for as long as somebody is editing and an opener
+// returns before the editor is even on screen.
+func TestEditorArgvClassifiesTheSpawnMode(t *testing.T) {
+	t.Parallel()
+	for _, program := range []string{"vi", "vim", "nvim", "nano", "pico", "emacs", "micro", "hx", "kak"} {
+		if got := editorArgv(program, noEnvironment, "linux"); got.spawn != spawnForeground {
+			t.Errorf("%s resolved detached; a terminal editor drawn over a live alt-screen TUI is broken", program)
+		}
+	}
+	// A terminal editor spelled as a path is still recognised by its name, exactly as the line jump is.
+	if got := editorArgv(filepath.Join("/usr", "bin", "vim"), noEnvironment, "linux"); got.spawn != spawnForeground {
+		t.Error("a path-spelled vim resolved detached; the classification asks for the program's NAME")
+	}
+	for _, program := range []string{"code -w", "open", "xdg-open", "some-editor-nobody-has-heard-of"} {
+		if got := editorArgv(program, noEnvironment, "linux"); got.spawn != spawnDetached {
+			t.Errorf("%s resolved foreground; only the nine terminal editors take the terminal", program)
+		}
+	}
+	for _, goos := range []string{"darwin", "linux", "windows", "plan9"} {
+		if got := editorArgv("", noEnvironment, goos); got.spawn != spawnDetached {
+			t.Errorf("the %s opener resolved foreground; an opener is a launcher stub, not a terminal editor", goos)
+		}
 	}
 }
 
@@ -66,18 +105,43 @@ func TestExternalEditPassesTheLineJumpOnlyToEditorsThatTakeOne(t *testing.T) {
 	if want := []string{filepath.Join("/usr", "bin", "nvim"), path}; !slices.Equal(byPath, want) {
 		t.Errorf("argv = %v, want %v — no line to point at, so no jump", byPath, want)
 	}
+	// The OS opener is the rung nobody chose, and it is the one that must never see a `+<line>`: it
+	// would hand the argument to the desktop as a second FILE to open.
+	opener := specFor(t, home, nil, "servers")
+	if want := []string{"xdg-open", path}; !slices.Equal(opener, want) {
+		t.Errorf("argv = %v, want %v — an opener takes the file alone", opener, want)
+	}
+
+	// The ladder's first rung follows the same rule as the rest: the jump goes with the program the
+	// `editor` key names, and `servers:` sits one line lower in a file that sets it.
+	keyed := t.TempDir()
+	keyedPath := filepath.Join(keyed, "config.yaml")
+	writeSettingsFixture(t, keyedPath, "editor: nvim\nmode: auto\nservers:\n"+
+		"  - name: local\n    endpoint: http://127.0.0.1:1111\n")
+	withKey := specFor(t, keyed, map[string]string{"EDITOR": "code"}, "servers")
+	if want := []string{"nvim", "+3", keyedPath}; !slices.Equal(withKey, want) {
+		t.Errorf("argv = %v, want %v — the config key outranks $EDITOR, jump included", withKey, want)
+	}
 }
 
-// specFor builds the seam over a temp home and asks it for one key's command line.
+// specFor builds the seam over a temp home and asks it for one key's command line. The platform is
+// pinned and every program is found: these are assertions about the argv the pane is handed, not
+// about which editors the machine running the test has installed.
 func specFor(t *testing.T, home string, env map[string]string, key string) []string {
 	t.Helper()
 	e := newExternalEdit(options{configDir: home}, func(k string) string { return env[k] })
+	e.goos = "linux"
+	e.look = editorAlwaysFound
 	argv, err := e.spec(key)
 	if err != nil {
 		t.Fatalf("spec(%s): %v", key, err)
 	}
 	return argv
 }
+
+// editorAlwaysFound is the lookup for the tests whose subject is the resolution rather than the
+// machine: every program the ladder names exists.
+func editorAlwaysFound(program string) (string, error) { return program, nil }
 
 // The return trip reports what the human CHANGED and nothing else: the baseline is taken when the
 // editor is launched, so a key they left alone is silent however this session resolved it. Two kinds
@@ -91,6 +155,7 @@ func TestExternalEditReloadReportsTheKeysTheFileChanged(t *testing.T) {
 		"  - name: local\n    endpoint: http://127.0.0.1:1111\n")
 
 	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+	e.look = editorAlwaysFound                   // the subject is the return trip, not this machine's editors
 	if _, err := e.spec("servers"); err != nil { // the baseline the return trip diffs against
 		t.Fatalf("spec: %v", err)
 	}
@@ -357,6 +422,13 @@ func TestRunRootWiresTheExternalEditSeams(t *testing.T) {
 	t.Parallel()
 	rec := &recordingLauncher{}
 	home := t.TempDir()
+	// The composition root looks the resolved editor up for real, so the config names one that exists
+	// on every machine this suite runs on: the test binary itself.
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "editor: "+self+"\nmode: ask-before\n")
 	opts := options{
 		endpoint:  "http://127.0.0.1:1111",
 		model:     "fake",
@@ -377,8 +449,7 @@ func TestRunRootWiresTheExternalEditSeams(t *testing.T) {
 	if want := filepath.Join(home, "config.yaml"); argv[len(argv)-1] != want {
 		t.Errorf("argv ends with %q, want the session's config %q", argv[len(argv)-1], want)
 	}
-	// The seeded template is what the spec just created, and it changed nothing, so the return trip
-	// over it reports nothing.
+	// Nothing has touched the file since the spec read it, so the return trip over it reports nothing.
 	applied, err := rec.opts.ReloadConfig()
 	if err != nil {
 		t.Fatalf("ReloadConfig: %v", err)
@@ -445,6 +516,58 @@ func TestExternalEditBaselineIsTheFileNotTheResolution(t *testing.T) {
 	}
 	if len(applied) != 0 {
 		t.Errorf("reload reported %+v over an unedited file; the baseline must be the file's own view", applied)
+	}
+}
+
+// The `editor` key is read from the FILE at every launch, not from the session's startup snapshot:
+// a key set on its row a minute ago — or by another window — opens the next edit, not the next run.
+func TestExternalEditSpecReadsTheEditorTheFileNamesNow(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, "mode: auto\n")
+	// The startup snapshot names an editor the file no longer does; it must not be consulted.
+	e := newExternalEdit(options{configDir: home, editor: "stale-editor"}, func(string) string { return "" })
+	e.goos = "linux"
+	e.look = editorAlwaysFound
+
+	argv, err := e.spec("mode")
+	if err != nil {
+		t.Fatalf("spec: %v", err)
+	}
+	if want := []string{"xdg-open", path}; !slices.Equal(argv, want) {
+		t.Errorf("argv = %v, want %v — the file sets no editor, and the startup snapshot is not the file", argv, want)
+	}
+
+	writeSettingsFixture(t, path, "editor: micro\nmode: auto\n")
+	argv, err = e.spec("mode")
+	if err != nil {
+		t.Fatalf("spec after the key was set: %v", err)
+	}
+	if want := []string{"micro", "+2", path}; !slices.Equal(argv, want) {
+		t.Errorf("argv = %v, want %v — an editor set in this session opens the next edit", argv, want)
+	}
+}
+
+// A program this machine cannot run is refused before the pane suspends into it, and the refusal
+// names all three ways to set an editor (ADR 0041 decision 4): with nothing set the ladder ends at an
+// opener the user never chose, and "executable file not found in $PATH" names that program at them.
+func TestExternalEditSpecRefusesAnEditorThisMachineCannotRun(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "mode: auto\n")
+	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+	e.goos = "linux"
+	e.look = func(string) (string, error) { return "", errors.New("executable file not found in $PATH") }
+
+	argv, err := e.spec("mode")
+	if err == nil {
+		t.Fatalf("spec over an editor nobody can run = %v, want the refusal", argv)
+	}
+	for _, want := range []string{"xdg-open", "editor", "$VISUAL", "$EDITOR"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not name %s; all three ways to set an editor belong in it", err, want)
+		}
 	}
 }
 

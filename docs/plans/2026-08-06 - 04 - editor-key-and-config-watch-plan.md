@@ -197,9 +197,21 @@ commented example.
 
 ---
 
-## 3. Editor resolution: the four-rung ladder and the spawn mode
+## 3. Editor resolution: the four-rung ladder and the spawn mode — ✅ DONE (2026-08-08)
 
 *Depends on item 2.*
+
+NOTES (2026-08-08): `editorArgv` returns an `editorCommand{argv, spawn}` — the "resolver result carrying a
+spawn mode" the item asks for — and `spec` still returns `[]string` alone, because widening the
+`ExternalEditSpec` seam is item 5's; the `spawn` field therefore has no non-test reader until then. The
+missing-program refusal is raised in `spec` (a new `resolveEditor`) rather than at launch, so both spawn
+paths inherit one message and the pane never suspends into a program nobody can run; the `exec.LookPath`
+call is injected as an `externalEdit.look` field beside `getenv`/`goos`, which is what lets the argv tests
+keep asserting `vim`/`nvim`/`code` on machines that have none of them. Two existing tests moved with it:
+`TestExternalEditReloadReportsTheKeysTheFileChanged` stubs the lookup, and
+`TestRunRootWiresTheExternalEditSeams` — which resolves through the real composition root — now writes a
+config naming `os.Executable()` as its editor, since the unset ladder now ends at `xdg-open` and a CI box
+need not have one. Documentation is item 7's per this plan, so nothing outside the two Go files changed.
 
 **What.** Replace `editorArgv` in `cmd/apogee/settingsedit.go:255` with a resolver that
 implements ratified calls 2 and 4 and classifies the result.
