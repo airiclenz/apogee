@@ -396,6 +396,59 @@ func TestMigrateLegacyConfigRefusesTheRetiredLauncherKey(t *testing.T) {
 	}
 }
 
+// The refusal must not depend on the shape of the rest of the file. A config the node tree cannot be
+// read from — more than one document, a flow-style top level — is read by the struct instead, and a
+// bare `llama-launcher:` there is as set as one carrying a path: an empty value is the old key's
+// auto-detect shape, not an absent key. Only the line number is lost with the tree, so the refusal
+// names no line and still says what to paste.
+func TestMigrateLegacyConfigRefusesTheValuelessLauncherKeyWithoutTheNodeTree(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		given string
+	}{
+		{
+			name:  "more than one document",
+			given: "servers:\n  - name: box\n    endpoint: http://box:1111\nllama-launcher:\n---\nmode: plan\n",
+		},
+		{
+			name:  "a flow-style top level",
+			given: "{server: box, llama-launcher: }\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeMigrationConfig(t, tt.given)
+			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock)
+			if err == nil {
+				t.Fatalf("a valueless retired launcher key went unrefused; the config resolved to:\n%s", updated)
+			}
+			if note != "" {
+				t.Errorf("a refused config announced itself: %s", note)
+			}
+			for _, want := range []string{path, "retired top-level llama-launcher:", "llama-launcher: auto"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal does not carry %q: %v", want, err)
+				}
+			}
+			if strings.Contains(err.Error(), "on line") {
+				t.Errorf("the refusal names a line the tree could not give it: %v", err)
+			}
+			onDisk, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read the config: %v", err)
+			}
+			if string(onDisk) != tt.given {
+				t.Errorf("a refused config was rewritten:\n%s", onDisk)
+			}
+			if backups, err := filepath.Glob(path + ".bak-*"); err != nil || len(backups) != 0 {
+				t.Errorf("a refused config was backed up: %v (%v)", backups, err)
+			}
+		})
+	}
+}
+
 // End to end: a config that still sets the retired key stops the run rather than starting a session
 // whose launcher commands would all answer "not configured".
 func TestApplyConfigRefusesTheRetiredLauncherKey(t *testing.T) {

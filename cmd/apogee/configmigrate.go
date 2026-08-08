@@ -414,8 +414,13 @@ const retiredLauncherKey = "llama-launcher"
 // legacyLauncherConfig reads the retired key off a file that still sets it, for the reason
 // legacyFileConfig exists one struct over: fileConfig no longer has the field, so a plain unmarshal
 // cannot tell a config that sets it from one that never did.
+//
+// The field is a yaml.Node rather than a string because the two questions asked of it come apart on
+// a bare `llama-launcher:`: decoded into a string, that key is the same empty string an absent key
+// decodes to, and the refusal would miss the very shape the old key's auto-detect wore. The node
+// keeps its own existence — a null scalar the decoder still stores — separate from its text.
 type legacyLauncherConfig struct {
-	LlamaLauncher string `yaml:"llama-launcher"`
+	LlamaLauncher yaml.Node `yaml:"llama-launcher"`
 }
 
 // refuseRetiredLauncherKey stops a config that still carries the retired top-level key, with the
@@ -451,13 +456,14 @@ func refuseRetiredLauncherKey(path string, data []byte) error {
 }
 
 // retiredLauncherSetting reports whether the file sets the retired key, the value it gives it, and
-// the 1-based line the key sits on. The node tree answers all three, and it is the only reader that
-// can: a key with no value at all parses to the same empty string an absent key does, and an empty
-// value is exactly what the old key's auto-detect shape looked like.
+// the 1-based line the key sits on. Neither reader may answer the first question with the value: a
+// key with no value at all is set, and an empty value is exactly what the old key's auto-detect
+// shape looked like, so a config wearing it must be refused like any other.
 //
 // A file the tree cannot be read from — more than one document, a top level that is not a block
-// mapping — falls back to the struct, with 0 for "the line cannot be named". Whether the key is set
-// decides a refusal, and that must not depend on the shape of the rest of the file.
+// mapping — falls back to the struct, whose yaml.Node field draws that same present/absent line,
+// with 0 for "the line cannot be named". Only the line is lost to the fallback; whether the key is
+// set decides a refusal, and that must not depend on the shape of the rest of the file.
 func retiredLauncherSetting(data []byte) (value string, line int, set bool) {
 	if doc, err := configDocument(data); err == nil {
 		if root, err := rootMapping(doc); err == nil && root != nil {
@@ -472,8 +478,10 @@ func retiredLauncherSetting(data []byte) (value string, line int, set bool) {
 	if err := yaml.Unmarshal(data, &llc); err != nil {
 		return "", 0, false
 	}
-	trimmed := strings.TrimSpace(llc.LlamaLauncher)
-	return trimmed, 0, trimmed != ""
+	if llc.LlamaLauncher.IsZero() { // the zero node is the key the file never had
+		return "", 0, false
+	}
+	return strings.TrimSpace(llc.LlamaLauncher.Value), 0, true
 }
 
 // launcherEntryBlock renders the fix as a whole `servers:` entry carrying the value the top-level
