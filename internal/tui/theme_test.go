@@ -39,9 +39,9 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 	s := scheme.Scheme{
 		UserText: "#010101", Chrome: "#020202", Divider: "#030303", Surface: "#040404",
 		Muted: "#050505", MutedBright: "#181818", DiffAdd: "#060606", DiffDel: "#070707", Error: "#080808",
-		Code: "#090909", ModePlan: "#0a0a0a", ModeAskBefore: "#0b0b0b", ModeAllowEdits: "#0c0c0c",
-		ModeAuto: "#0d0d0d", Skill: "#0e0e0e", FileRef: "#0f0f0f", PromptToggle: "#101010",
-		ToolMarker: "#111111", Gauge: "#121212", Selection: "#131313",
+		Code: "#090909", ToolHeader: "#191919", ModePlan: "#0a0a0a", ModeAskBefore: "#0b0b0b",
+		ModeAllowEdits: "#0c0c0c", ModeAuto: "#0d0d0d", Skill: "#0e0e0e", FileRef: "#0f0f0f",
+		PromptToggle: "#101010", ToolMarker: "#111111", Gauge: "#121212", Selection: "#131313",
 		Spinner1: "#141414", Spinner2: "#151515", Spinner3: "#161616", Spinner4: "#171717",
 	}
 	th := newTheme(s)
@@ -70,7 +70,11 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 		// The roles that are easiest to cross, because their dark values coincide today.
 		{"diffAdded fg", th.diffAdded.GetForeground(), s.DiffAdd},
 		{"diffRemoved fg", th.diffRemoved.GetForeground(), s.DiffDel},
-		{"toolLabel fg", th.toolLabel.GetForeground(), s.Code},
+		// The tool header's own role and the code role it used to borrow: sampled together, because
+		// keeping them apart is the whole reason `tool-header` exists.
+		{"toolLabel fg", th.toolLabel.GetForeground(), s.ToolHeader},
+		{"subRail fg", th.subRail.GetForeground(), s.ToolHeader},
+		{"mdCode fg", th.mdCode.GetForeground(), s.Code},
 		{"gaugeFill fg", th.gaugeFill.GetForeground(), s.Gauge},
 		{"hairline fg", th.hairline.GetForeground(), s.Divider},
 		{"toolMarker fg", th.toolMarker.GetForeground(), s.ToolMarker},

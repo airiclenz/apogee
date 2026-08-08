@@ -626,7 +626,7 @@ func TestRenderSpacerRailIsStyledAndUntrailed(t *testing.T) {
 }
 
 // The sub-agent frame — rail and ⤷ label alike, both the subRail role — is painted in the scheme's
-// `code` role, the same tool-header orange toolLabel carries, so a nested run reads as one coloured frame
+// `tool-header` role, the same orange toolLabel carries, so a nested run reads as one coloured frame
 // rather than as dim chrome. The assertion compares against the palette's own render rather than
 // a lipgloss byte-golden; the guard below it catches the opposite failure, a subRail role that
 // paints nothing at all and would leave the rail unstyled.
@@ -635,8 +635,8 @@ func TestSubRailPaintedInToolHeaderOrange(t *testing.T) {
 
 	rail := th.subRail.Render(glyphSubRail)
 
-	if want := lipgloss.NewStyle().Foreground(lipgloss.Color(scheme.Default().Code)).Render(glyphSubRail); rail != want {
-		t.Errorf("rail = %q; want the `code` role's orange %q the tool header carries", rail, want)
+	if want := lipgloss.NewStyle().Foreground(lipgloss.Color(scheme.Default().ToolHeader)).Render(glyphSubRail); rail != want {
+		t.Errorf("rail = %q; want the `tool-header` role's orange %q the tool header carries", rail, want)
 	}
 	if rail == glyphSubRail {
 		t.Fatal("the subRail role renders no escape sequence; the rail and label would be unstyled")

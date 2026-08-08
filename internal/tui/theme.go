@@ -127,7 +127,7 @@ type theme struct {
 	userBlock     lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
 	promptToggle  lipgloss.Style // the see-more / see-less marker a long prompt block carries near its right edge (renderUserBlock): bold light gray-blue on the block's OWN dark-gray field, held a promptMarkerMargin off the edge, so the toggle reads as an affordance sitting inside the block rather than as another row of what the human wrote
 	toolHeader    lipgloss.Style // the ✦ Label target header
-	toolLabel     lipgloss.Style // the tool label inside that header (bold, orange — the `code` role's tone inline code and the auto-mode marker already carry)
+	toolLabel     lipgloss.Style // the tool label inside that header (bold, in the scheme's `tool-header` role — a tone of the header's own, no longer borrowed from the `code` role inline code and fenced blocks carry)
 	toolIndicator lipgloss.Style // the ▶/▼ state indicator trailing that label where the header is a toggle target: the detail tone, deliberately NOT toolLabel's orange, so the affordance reads as chrome beside the label rather than as part of it
 	toolDetail    lipgloss.Style // the ┝/┕ branch detail lines of a COLLAPSED block (dim)
 	// toolDetailBright is toolDetail's open twin: the same lines once the block they belong to is
@@ -147,7 +147,7 @@ type theme struct {
 	// affordances are not what the reader opened the block for (detailStyle).
 	toolDetailBright lipgloss.Style
 	toolMarker       lipgloss.Style // the synthesized "+N more lines" remainder marker beneath a hidden body: light gray-blue, no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "+" — the prompt block's see-more keeps the heavier promptToggle treatment
-	subRail          lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (the toolLabel orange — one tone for the whole sub-agent frame)
+	subRail          lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (toolLabel's `tool-header` role — one tone for the whole sub-agent frame)
 	skillAccent      lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
 	skillToken       lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)
 	fileToken        lipgloss.Style // a RESOLVING inline "@path" token in the prompt box (blue on the box's black)
@@ -160,12 +160,12 @@ type theme struct {
 	presentTitle     lipgloss.Style // the ▤ marker and title of a presented document (bold white — a deliverable reads as a heading, not as plumbing; its path and URL stay unstyled so the terminal linkifies plain text)
 
 	// Markdown styles for assistant chat text (markdown.go): **bold** weight, ## headings
-	// as bold white, `inline code` and ``` fenced blocks ``` in orange, and the dim frame a
-	// table draws around its columns.
+	// as bold white, `inline code` and ``` fenced blocks ``` in the scheme's `code` role, and the
+	// dim frame a table draws around its columns.
 	mdBold        lipgloss.Style // **bold** span
 	mdHeading     lipgloss.Style // # … ###### heading line (bold white)
-	mdCode        lipgloss.Style // `inline code` span (orange)
-	mdCodeBlock   lipgloss.Style // a ``` fenced ``` code-block line (orange)
+	mdCode        lipgloss.Style // `inline code` span (the `code` role)
+	mdCodeBlock   lipgloss.Style // a ``` fenced ``` code-block line (the `code` role)
 	mdRule        lipgloss.Style // a markdown table's whole frame: the ─ run under its header, the ─ runs between its body rows, and the │ divider between its columns (with the ┼ where the two meet) — faint, because the frame frames the columns and is not content
 	inputBorder   lipgloss.Style // the rounded, dark-gray, black-bg input box — a closed frame, bottom edge included
 	startupBorder lipgloss.Style // the one-time start-up card: the prompt box's rounded glyphs, no black fill (transparent, self-closing) — shares its shape with popupBorder
@@ -174,7 +174,7 @@ type theme struct {
 	popupBodyLead lipgloss.Style // the LABEL a popup's body block may open with (popupSpec.bodyLead — the /settings header's "Description:"): popupBody bolded, so the label reads as the heading of the sentence it leads rather than as a second colour inside it
 	popupHeading  lipgloss.Style // a SECTION header row inside a popup's row list (popupRowHeading — /settings' UPSTREAM, AUTONOMY, …): white on the pane's black, one weight above the faint rows it opens, so the divisions of a long list are found without being read (docs/layout/settings-screen-layout.md)
 	popupEdit     lipgloss.Style // the row a pane is EDITING (popupRowEditing): the selection's own full-width bar with its text lit in the accent tone instead of white — the row is selected either way, and what the colour says is that the next keypress goes INTO it
-	popupAccent   lipgloss.Style // the SELECTED row of a MENU-style popup (popupSpec.menuRows): its ❯ and its label lit as one bold accent-orange run on the pane's black, with no highlight bar behind them — the cue th.userBlock's full-width bar is replaced by wherever a pane is a menu rather than a list
+	popupAccent   lipgloss.Style // the SELECTED row of a MENU-style popup (popupSpec.menuRows): its ❯ and its label lit as one bold run of the `code` role on the pane's black, with no highlight bar behind them — the cue th.userBlock's full-width bar is replaced by wherever a pane is a menu rather than a list
 	statusFaint   lipgloss.Style // dim status text, bg-free (approval/ask prompts)
 	statusBar     lipgloss.Style // status-line segments: faint on black
 	spinnerBase   lipgloss.Style // the status-line spinner's field: the status bar's black, with no foreground of its own so an uncoloured glyph keeps the terminal's text colour — the colour loop layers a per-frame foreground onto it (spinner.go)
@@ -263,6 +263,7 @@ func newTheme(s scheme.Scheme) theme {
 		diffDel        = lipgloss.Color(s.DiffDel)
 		errFg          = lipgloss.Color(s.Error)
 		code           = lipgloss.Color(s.Code)
+		toolHeaderFg   = lipgloss.Color(s.ToolHeader)
 		modePlan       = lipgloss.Color(s.ModePlan)
 		modeAskBefore  = lipgloss.Color(s.ModeAskBefore)
 		modeAllowEdits = lipgloss.Color(s.ModeAllowEdits)
@@ -287,12 +288,12 @@ func newTheme(s scheme.Scheme) theme {
 		// shouts is one you stop reading past.
 		promptToggle:     lipgloss.NewStyle().Bold(true).Foreground(promptToggleFg).Background(chrome),
 		toolHeader:       lipgloss.NewStyle(),
-		toolLabel:        lipgloss.NewStyle().Bold(true).Foreground(code),
+		toolLabel:        lipgloss.NewStyle().Bold(true).Foreground(toolHeaderFg),
 		toolIndicator:    lipgloss.NewStyle().Foreground(muted),
 		toolDetail:       lipgloss.NewStyle().Foreground(muted),
 		toolDetailBright: lipgloss.NewStyle().Foreground(openDetail),
 		toolMarker:       lipgloss.NewStyle().Foreground(toolMarkerFg),
-		subRail:          lipgloss.NewStyle().Foreground(code),
+		subRail:          lipgloss.NewStyle().Foreground(toolHeaderFg),
 		// The inline token accents are one act on two fields: the skill's violet moves to the
 		// FOREGROUND and the background stays whatever the token is standing on — the prompt box's
 		// black while the message is being typed, the user block's dark gray once it is sent — so an
@@ -344,8 +345,9 @@ func newTheme(s scheme.Scheme) theme {
 		// a second block of colour, popupAccent's argument on a field that is already there.
 		popupEdit: lipgloss.NewStyle().Bold(true).Foreground(code).Background(chrome),
 		// A menu's selected row is marked by LIGHT rather than by a block of colour: bold in the
-		// accent tone the theme already spends on "this is apogee's own" — the `code` role, the orange
-		// the tool label, the sub-agent rail and the auto-mode marker all carry — against the faint gray
+		// accent tone the theme already spends on "this is apogee's own" — the `code` role, the tone
+		// inline code and fenced code blocks carry (the tool label and the sub-agent rail have their own
+		// `tool-header` role now, and the auto-mode marker its `mode-auto` one) — against the faint gray
 		// the other rows keep. The contrast between the two IS the cue, which is why the row needs no
 		// bar behind it: a full-width highlight on a four-row decision menu paints a quarter of the
 		// pane a second colour and reads as a banner, not as a pointer. The black is the pane's own

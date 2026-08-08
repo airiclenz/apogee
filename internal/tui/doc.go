@@ -50,7 +50,7 @@
 // reach, and two consecutive sub_agent calls are never joined, because the second call's own
 // tool-call block sits at the PARENT's depth — the join dips there, the spacer goes bare, and the
 // descent logic opens a fresh ⤷ label for the second run. The whole frame — rail and label alike —
-// is one style role (theme's subRail) in the tool-header orange (the scheme's `code` role),
+// is one style role (theme's subRail) in the tool-header orange (the scheme's `tool-header` role),
 // coherent with the orange ✦ tool markers. A run's stretch stays CONTIGUOUS however its events
 // arrive: a concurrent fan-out interleaves N children's events at one depth, and each entry is
 // placed at the end of the run its spawning call id names ([transcript.place], ADR 0039) instead of

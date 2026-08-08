@@ -90,9 +90,25 @@ the alignment those files keep per group. Whitespace only; no values changed.
 
 **Commit:** `feat(scheme): add tool-header role so tool headers stop sharing the code color`
 
-## 2. Paint tool headers and the sub-agent rail with the new role
+## 2. Paint tool headers and the sub-agent rail with the new role — ✅ DONE (2026-08-08)
 
 Depends on item 1.
+
+NOTES (2026-08-08): the colour local is named `toolHeaderFg`, not the item's literal `toolHeader` —
+`theme` already has a *style* field called `toolHeader` (the ✦ Label header itself), and the file's
+convention for exactly this collision is the `Fg` suffix (`toolMarkerFg`, `promptToggleFg`, `errFg`).
+The acceptance grep for `toolHeader` still matches.
+
+NOTES (2026-08-08): `TestNewThemeTakesItsColoursFromTheScheme` gained an `mdCode fg` → `s.Code` row
+alongside the two the item names. `toolLabel` was that table's ONLY sample of the `code` role, so
+re-pointing it at `ToolHeader` would have dropped `code` out of the sampled set and quietly broken the
+test's stated invariant ("a swap between any two of the sampled roles fails here").
+
+NOTES (2026-08-08): three further stale-hue comments were reworded in `theme.go` — the `mdCode` /
+`mdCodeBlock` field docs and the markdown-group lead (all said "orange"; dark's `code` is now blue)
+and `popupAccent`'s field doc ("accent-orange"). The item's out-of-scope clause explicitly permits
+comment wording updates on these four styles; no styling changed. `doc.go` ~line 400 was left as-is:
+it names the `toolLabel` role rather than `code`, and "bold-orange" stays true under dark.
 
 **What:**
 - `internal/tui/theme.go`: introduce `toolHeader := lipgloss.Color(s.ToolHeader)`
