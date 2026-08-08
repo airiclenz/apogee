@@ -950,12 +950,27 @@ type unconfinedHost struct {
 //
 // The value travels to the composition root exactly as written — only the root knows the launcher,
 // so only the root can resolve `auto` (cmd/apogee/launcher.go's entryLauncherPath).
+//
+// ParallelAgents is ADR 0039 decision 2's cap on how many sub-agents this server may run at once,
+// per entry because the width is a property of the SERVER (its slots), not of the session. It is
+// the `context-window:` idiom — a PIN, never a preference discovery may overrule — and has three
+// states, not four:
+//
+//   - absent (or 0, which yaml cannot tell from absent) ⇒ discover: the live server's `/props`
+//     `total_slots`, and 1 — today's strictly serial behaviour — when it advertises nothing.
+//   - N ≥ 1 ⇒ pin N, whatever the server says.
+//   - negative ⇒ refused by validateServers; there is no meaning to give it.
+//
+// The trade the number buys is the server operator's and worth saying out loud: more parallel
+// agents means a smaller context window each, since `--parallel N` splits one window into N slots
+// (ADR 0024 — Apogee's numbers are per-slot-honest either way).
 type serverEntry struct {
-	Name          string `yaml:"name"`
-	Endpoint      string `yaml:"endpoint"`
-	APIKey        string `yaml:"api-key,omitempty"`
-	Model         string `yaml:"model,omitempty"`
-	LlamaLauncher string `yaml:"llama-launcher,omitempty"`
+	Name           string `yaml:"name"`
+	Endpoint       string `yaml:"endpoint"`
+	APIKey         string `yaml:"api-key,omitempty"`
+	Model          string `yaml:"model,omitempty"`
+	LlamaLauncher  string `yaml:"llama-launcher,omitempty"`
+	ParallelAgents int    `yaml:"parallel-agents,omitempty"`
 }
 
 // validateServers rejects an entry that could never be switched to, at the startup boundary where
@@ -978,6 +993,11 @@ type serverEntry struct {
 // would let two files mean the same thing differently. Whether the named file EXISTS is
 // deliberately not asked — a launcher config is a property of the machine rather than of the
 // config that travels between machines, so a missing one degrades at the verb that wants it.
+//
+// The entry's optional `parallel-agents:` value is checked for the one defect it can carry: a
+// negative cap. Absent and 0 are the same state (discover — yaml cannot distinguish them) and any
+// N ≥ 1 is a pin, so a negative number is the only value with nothing to mean, and saying so here
+// beats resolving it to a silent 1 months later.
 func validateServers(servers []serverEntry) error {
 	seen := make(map[string]struct{}, len(servers))
 	for i, s := range servers {
@@ -1011,6 +1031,11 @@ func validateServers(servers []serverEntry) error {
 					"this key takes auto or the path of a LOCAL llama-launcher config file; a launcher on "+
 					"another machine is reached as an mcp-servers: entry instead", i+1, s.Name, launcher)
 			}
+		}
+		if s.ParallelAgents < 0 {
+			return fmt.Errorf("apogee: servers: entry %d (%q): parallel-agents: %d is negative — give the "+
+				"number of sub-agents this server may run at once (1 or more), or remove the key to take "+
+				"the server's own slot count", i+1, s.Name, s.ParallelAgents)
 		}
 	}
 	return nil

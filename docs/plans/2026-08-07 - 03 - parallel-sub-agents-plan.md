@@ -54,7 +54,7 @@ Decided by the owner, 2026-08-07, via AskUserQuestion during the grill that prod
     names the asking child's task. `0` in `parallel-agents` reads as unset (yaml cannot
     see an explicit 0; negative values are refused).
 
-## 1. Config: the per-entry `parallel-agents` key
+## 1. Config: the per-entry `parallel-agents` key — ✅ DONE (2026-08-08)
 
 **What:** Additive schema only — nothing reads the value yet.
 

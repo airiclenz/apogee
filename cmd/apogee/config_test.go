@@ -1479,6 +1479,32 @@ server: workstation
 				{Name: "openrouter", Endpoint: "https://openrouter.ai/api/v1"},
 			},
 		},
+		{
+			// The cap is a pin per entry (ADR 0039 decision 2): a positive value travels as written,
+			// and both spellings of unset — the absent key and an explicit 0 — resolve to the same
+			// zero, which is what tells the resolver to ask the server instead.
+			name: "the optional parallel-agents cap travels per entry, absent and 0 alike",
+			configYAML: `servers:
+  - name: workstation
+    endpoint: http://192.168.64.1:1111
+    parallel-agents: 4
+  - name: single-slot
+    endpoint: http://192.168.64.1:2222
+    parallel-agents: 1
+  - name: explicit-zero
+    endpoint: http://192.168.64.1:3333
+    parallel-agents: 0
+  - name: openrouter
+    endpoint: https://openrouter.ai/api/v1
+server: workstation
+`,
+			want: []serverEntry{
+				{Name: "workstation", Endpoint: "http://192.168.64.1:1111", ParallelAgents: 4},
+				{Name: "single-slot", Endpoint: "http://192.168.64.1:2222", ParallelAgents: 1},
+				{Name: "explicit-zero", Endpoint: "http://192.168.64.1:3333"},
+				{Name: "openrouter", Endpoint: "https://openrouter.ai/api/v1"},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1567,6 +1593,20 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
 				"  - name: other\n    endpoint: http://two:1111\n    llama-launcher: off\n",
 			wantErr: []string{"servers: entry 2", "other", "off is not a value"},
+		},
+		{
+			// Absent and 0 already mean discover and every N ≥ 1 is a pin, so a negative cap is the
+			// one parallel-agents value with nothing left to mean.
+			name: "an entry whose parallel-agents cap is negative",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    parallel-agents: -1\n",
+			wantErr: []string{"servers: entry 1", "box", "parallel-agents: -1 is negative", "1 or more"},
+		},
+		{
+			name: "a negative cap below a well-formed entry",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"  - name: other\n    endpoint: http://two:1111\n    parallel-agents: -4\n",
+			wantErr: []string{"servers: entry 2", "other", "parallel-agents: -4 is negative"},
 		},
 	}
 	for _, tt := range tests {

@@ -86,12 +86,30 @@
 #              file, so a profile you add in the launcher's own TUI is offered by the next
 #              /model. A launcher running on ANOTHER machine is a different thing: reach that one
 #              as an mcp-servers: entry below; the two compose.
+#   parallel-agents
+#              how many sub-agents this server may run at once. When one model reply asks for
+#              several delegations, apogee runs up to this many of them side by side instead of
+#              one after another, and guided decomposition dispatches batches of the same size.
+#              Optional, and it is a PIN — set it and nothing overrides it:
+#
+#                (absent)  ask the server: apogee uses the slot count it advertises. A server
+#                          that advertises none — a cloud endpoint, anything without /props —
+#                          means 1, one agent at a time: exactly today's behaviour, and what
+#                          you get until a server says otherwise.
+#                N         run at most N at once, whatever the server says. 1 keeps delegations
+#                          strictly serial.
+#
+#              Worth knowing before raising it: a llama.cpp server started with --parallel N
+#              splits its context window into N slots, so more parallel agents means a SMALLER
+#              window each. apogee's context numbers are per-slot either way, so the footer
+#              keeps telling you what you actually have.
 #
 # servers:
 #   - name: workstation
 #     endpoint: http://192.168.64.1:1111
 #     model: gpt-oss-20b
 #     llama-launcher: auto
+#     parallel-agents: 4
 #   - name: rented-box
 #     endpoint: https://llm.example.com
 #     api-key: sk-rented-token
