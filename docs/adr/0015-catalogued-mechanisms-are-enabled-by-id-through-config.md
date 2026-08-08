@@ -138,7 +138,21 @@ already in the plan's per-item NOTES, mirrored here so the ADR stays the ground 
   the same catalogued Mechanisms and trip the registry's duplicate-ID rejection on every spawn.
   The child therefore inherits the parent's already-built registry and clears `EnableMechanisms`,
   so it fires the identical Mechanisms without rebuilding — a construction detail §1 did not
-  spell out, consistent with "built … at construction".
+  spell out, consistent with "built … at construction". *(Ownership amended 2026-08-08.)* The
+  inheritance goes through **`MechanismRegistry.ForSubAgent()`**, not by pointer: ADR 0039's
+  depth-0 fan-out runs **sibling children at once**, and two siblings driving one hook instance
+  would both race on its state and see each other's run. The contract is now the one
+  `Guards.ForSubAgent` states one line down (ADR 0013 §3) — isolate what is live, share what is
+  read-only: the registry **container** is always the child's own (so no two agents can race
+  through the registry itself, and it is read-only in the engine besides — only `Add` /
+  `AddExperimental`, both construction-time, mutate one), a hook declaring
+  **`domain.SubAgentScoped`** hands each child the instance it chooses, and a hook declaring
+  nothing is inherited **verbatim**. Which is every Mechanism in today's catalogue but `library`:
+  they are value hooks whose fields are read-only after construction, so the child fires the
+  identical Mechanisms exactly as this bullet has always said. `library` — the one row held by
+  pointer — declares a fresh instance over the **same** mutex-guarded store, because the store is
+  the session's one cross-session memory. A catalogue test refuses any future pointer-held row
+  that declares neither.
 - **A degraded Library store never blocks construction.** §2's "the library store is loaded from
   `Config.LibraryDir` … the way `cmd/apogee/wire.go` derives them today" is made literal: a
   corrupt or absent store degrades to an empty store with an `os.Stderr` notice, so

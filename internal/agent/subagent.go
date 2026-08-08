@@ -149,13 +149,18 @@ func (a *Agent) newChildAgent(spawnCallID, task string) (*Agent, error) {
 	// The context-file NAMES are deliberately NOT re-read from the live list: the child copies the
 	// parent's context-file CONTENT verbatim below, because a sub-agent is not a session boundary.
 	childCfg.Tools = a.defaultSubAgentTools()
-	// The sub-agent shares the parent's ALREADY-BUILT registry (a.registry — the parent's
+	// The sub-agent inherits the parent's ALREADY-BUILT catalogue (a.registry — the parent's
 	// Config.Mechanisms merged with whatever Config.EnableMechanisms armed), so it fires the same
 	// catalogued + experimental Mechanisms; an explicit per-sub-agent catalogue is a later refinement
-	// (ADR 0013 leaves the default = the parent's). EnableMechanisms is cleared because those IDs are
-	// already built into a.registry — re-building them into the shared registry would trip the
-	// already-registered rejection and fail every sub-agent spawn.
-	childCfg.Mechanisms = a.registry
+	// (ADR 0013 leaves the default = the parent's). It inherits it through ForSubAgent rather than by
+	// pointer: siblings in a depth-0 fan-out run AT ONCE (ADR 0039), so the child gets a registry of
+	// its own — and a hook carrying live state gets a per-child instance, the same isolate-the-live-
+	// state / share-the-read-only-floor answer Guards.ForSubAgent gives one line down. A hook with
+	// nothing live to isolate is still inherited verbatim, so the delegation is unchanged for every
+	// Mechanism in today's catalogue. EnableMechanisms is cleared because those IDs are already built
+	// into the inherited registry — re-building them into it would trip the already-registered
+	// rejection and fail every sub-agent spawn.
+	childCfg.Mechanisms = a.registry.ForSubAgent()
 	childCfg.EnableMechanisms = nil
 
 	child, err := newAgent(childCfg, a.upstream)

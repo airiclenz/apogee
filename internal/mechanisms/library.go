@@ -122,6 +122,20 @@ func newLibrary(deps Deps) (any, error) {
 	return &libraryMechanism{store: deps.Library, fingerprint: deps.Fingerprint}, nil
 }
 
+// ForSubAgent gives a delegated sub-agent its own libraryMechanism over the SAME store
+// (domain.SubAgentScoped). library is the one catalogued Mechanism held by pointer, so it is the
+// one that must say how it crosses the delegation boundary — and with a depth-0 fan-out running
+// siblings at once (ADR 0039), "it doesn't" is not an answer.
+//
+// What is shared is deliberate and what is not is structural. The STORE is shared: it is the
+// session's one cross-session memory, it guards its own state with a RWMutex, and a child that
+// observed into a private copy would learn nothing the next session could read. The fingerprint is
+// immutable and copies with the instance. The instance ITSELF is fresh so that a later per-run
+// field on this struct is per-agent by construction rather than by whoever remembers to look.
+func (m *libraryMechanism) ForSubAgent() any {
+	return &libraryMechanism{store: m.store, fingerprint: m.fingerprint}
+}
+
 // libraryDescriptor identifies library as a strikes-3 proactive-nudge Mechanism (catalogue Table A
 // footnote 4): disabled under Bypass (D5), with strikes-3 as the uniform self-regulation backstop
 // over its confidence-driven injection gate.

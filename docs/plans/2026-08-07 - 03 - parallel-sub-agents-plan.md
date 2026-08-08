@@ -212,6 +212,14 @@ default). Concurrent siblings running a stateful Mechanism would touch one insta
 goroutines. Nothing is armed by default today, so no live path races; arming `guided_decomposition`
 (item 7) alongside a fan-out needs per-child instances or a lock.
 
+CLOSED (2026-08-08) by follow-up work item FU-B — owner-authorized during this run, not a numbered
+plan item. `newChildAgent` now inherits through `domain.MechanismRegistry.ForSubAgent()`: the
+registry container is always the child's own, and a hook declaring the new `domain.SubAgentScoped`
+seam hands each child its own instance (a hook declaring nothing is inherited verbatim, so today's
+value-hook catalogue is unchanged). A catalogue guard test in `internal/mechanisms` refuses a future
+pointer-held Mechanism that declares neither. ADR 0015's Realisation bullet carries the amended
+ownership contract; `internal/agent/mechanism_fanout_test.go` is the `-race` proof.
+
 **What:**
 
 - `internal/agent/dispatch.go`: the sequential loop (lines 41-66) partitions a reply's

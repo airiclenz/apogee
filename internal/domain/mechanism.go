@@ -111,6 +111,28 @@ type RegisteredMechanism struct {
 	Hook any
 }
 
+// SubAgentScoped is the optional seam a hook implements when a delegated sub-agent must NOT run
+// this very instance. A hook carrying per-run mutable state implements it and returns a fresh
+// instance for the child; a hook whose state is read-only after construction — every
+// value-receiver Mechanism in the catalogue — implements nothing and is inherited verbatim,
+// exactly as before this seam existed.
+//
+// It exists because a depth-0 fan-out runs SIBLING children AT ONCE (ADR 0039). Two siblings
+// sharing one hook instance would touch its state from two goroutines — a data race — and would
+// see each other's state besides, which is wrong even when it is race-free: a Mechanism's state
+// is about ONE agent's run. MechanismRegistry.ForSubAgent applies this seam at every spawn, so
+// no caller has to remember to.
+//
+// Returning the receiver is a legitimate answer — it says "sharing this instance across the
+// delegation boundary is deliberate and safe", which is true of a hook whose only mutable state
+// is a collaborator that guards itself. But it has to be SAID: a catalogue guard test refuses a
+// pointer-shaped Mechanism (the shape per-instance state requires) that declares neither.
+type SubAgentScoped interface {
+	// ForSubAgent returns the hook instance a delegated sub-agent runs. It is called once per
+	// spawn, on the spawning agent's goroutine, before the child exists.
+	ForSubAgent() any
+}
+
 // MechanismID is the canonical, stable identifier of a Mechanism — also the stable
 // tiebreak in the deterministic total order (ADR 0003).
 type MechanismID string
@@ -178,6 +200,15 @@ var errNoHookInterface = errors.New("implements no hook interface")
 // MechanismRegistry is the injectable catalogue plus the bench's experimental-hook
 // slots (ADR 0002/0003). The built-in catalogue is curated; Add is how internal
 // Mechanisms join, AddExperimental is how the bench registers a candidate hook.
+//
+// OWNERSHIP AND CONCURRENCY. A registry is MUTABLE while it is being built (Add /
+// AddExperimental, both single-goroutine at construction) and READ-ONLY once the engine has it:
+// the read seams (Ordered, Experimental) and the three validate gates only read, so any number
+// of goroutines may drive one registry at once. Instance ownership is the separate question a
+// concurrent depth-0 fan-out asks (ADR 0039), and ForSubAgent is its answer: an agent never
+// hands a delegated child the registry it is itself running, so the two can never race through
+// the container, and a hook that carries live state declares its own per-child instance
+// (SubAgentScoped) rather than being silently shared.
 type MechanismRegistry struct {
 	mechanisms   []RegisteredMechanism // catalogued Mechanism rows registered via Add
 	experimental map[HookPoint][]any   // bench experimental hooks registered via AddExperimental
@@ -234,6 +265,48 @@ func (r *MechanismRegistry) AddExperimental(at HookPoint, hook any) error {
 // reaching into the registry's unexported storage (ADR 0010 — internal subsystems
 // see domain through its methods, the same way the public surface does).
 func (r *MechanismRegistry) Experimental(at HookPoint) []any { return r.experimental[at] }
+
+// ForSubAgent returns the registry a delegated sub-agent runs: the same catalogue rows and the
+// same experimental hooks, in a container of the CHILD's own, with every hook declaring itself
+// SubAgentScoped replaced by the instance it hands that child. It is the Mechanism-side
+// counterpart of security.Guards.ForSubAgent (ADR 0013 §3) and answers the same question the same
+// way — isolate what is live, share what is read-only — one level up: the container is always
+// fresh, so a parent and its children (and two siblings, which is the case that bites — ADR 0039)
+// can never race through the registry itself, while a hook with nothing live to isolate is
+// inherited by pointer exactly as it always was.
+//
+// A hook that declares nothing is therefore shared VERBATIM, which is what keeps the inheritance
+// byte-identical for every Mechanism in today's catalogue: they are value hooks whose fields are
+// read-only after construction, so a value receiver cannot mutate anything a sibling can observe.
+// The rule a new Mechanism inherits: state that changes per run lives behind a pointer, and a
+// pointer hook must say how it scopes to a child.
+func (r *MechanismRegistry) ForSubAgent() *MechanismRegistry {
+	sub := &MechanismRegistry{
+		mechanisms:   make([]RegisteredMechanism, len(r.mechanisms)),
+		experimental: make(map[HookPoint][]any, len(r.experimental)),
+	}
+	for i, m := range r.mechanisms {
+		m.Hook = hookForSubAgent(m.Hook)
+		sub.mechanisms[i] = m
+	}
+	for at, hooks := range r.experimental {
+		scoped := make([]any, len(hooks))
+		for i, hook := range hooks {
+			scoped[i] = hookForSubAgent(hook)
+		}
+		sub.experimental[at] = scoped
+	}
+	return sub
+}
+
+// hookForSubAgent returns the instance of hook a delegated sub-agent runs: what the hook itself
+// says (SubAgentScoped), or the hook unchanged when it says nothing.
+func hookForSubAgent(hook any) any {
+	if scoped, ok := hook.(SubAgentScoped); ok {
+		return scoped.ForSubAgent()
+	}
+	return hook
+}
 
 // ValidateOrdering reports ErrOrderingCycle if the catalogued Mechanisms' Before/After
 // constraints form a cycle (ADR 0003 — a constraint cycle is a startup error). New

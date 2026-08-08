@@ -5,8 +5,9 @@ package agent
 // EnableMechanisms but never delegates, and guided_decomposition_test.go delegates but arms via a
 // pre-built Config.Mechanisms (wave1Registry). Neither exercises the seam the ADR names — a spawned
 // sub-agent inherits the parent's ALREADY-BUILT registry (subagent.go: childCfg.Mechanisms =
-// a.registry) and CLEARS EnableMechanisms so the child does not rebuild those IDs into the shared
-// registry and trip the already-registered rejection. These tests arm guided_decomposition +
+// a.registry.ForSubAgent(), which hands the child that catalogue in a container of its own) and
+// CLEARS EnableMechanisms so the child does not rebuild those IDs into the inherited registry and
+// trip the already-registered rejection. These tests arm guided_decomposition +
 // tool_result_cap by ID with Config.Mechanisms left nil (the engine BUILDS the stack), drive one
 // real delegation, and prove the child ran the inherited stack — through New and through Resume, the
 // one construction path the ADR names.

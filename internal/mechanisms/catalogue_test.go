@@ -372,3 +372,43 @@ func TestDepsNeeded(t *testing.T) {
 		})
 	}
 }
+
+// Every catalogued Mechanism held by POINTER declares how it scopes to a delegated sub-agent
+// (domain.SubAgentScoped). This is the catalogue's half of the fan-out safety rule (ADR 0039):
+// siblings in a depth-0 fan-out run at once, so a hook instance reached from two children at once
+// must either carry no per-run state or hand each child its own. A VALUE hook is exempt by
+// construction — its methods take value receivers, so a fire cannot mutate anything a sibling can
+// observe, and what a value hook does hold (autofix's resolved formatter table, grammar's gate
+// flag) is read-only after construction, the same standing the dangerous-action floor has when
+// Guards.ForSubAgent shares IT by pointer. Holding the hook by pointer is exactly the shape
+// per-instance state requires, so that is where the declaration is demanded: a new stateful
+// Mechanism fails this test on the day it is written rather than racing on the day it is armed
+// beside a fan-out.
+func TestCatalogueHooksDeclareTheirSubAgentScope(t *testing.T) {
+	t.Parallel()
+	for _, id := range KnownIDs() {
+		// library needs its store injected (D3); every other Mechanism builds with zero Deps.
+		deps := Deps{}
+		if id == libraryID {
+			deps = Deps{Library: library.NewStore(t.TempDir())}
+		}
+		m, err := Build(id, deps)
+		if err != nil {
+			t.Errorf("Build(%q): %v", id, err)
+			continue
+		}
+		if reflect.ValueOf(m.Hook).Kind() != reflect.Pointer {
+			continue // a value hook cannot mutate shared state through a value receiver
+		}
+		scoped, ok := m.Hook.(domain.SubAgentScoped)
+		if !ok {
+			t.Errorf("Mechanism %q is held by pointer but declares no domain.SubAgentScoped: "+
+				"a pointer hook is shared with every sub-agent, and depth-0 siblings run it at once — "+
+				"say whether the child gets its own instance or shares this one", id)
+			continue
+		}
+		if child := scoped.ForSubAgent(); child == nil {
+			t.Errorf("Mechanism %q: ForSubAgent() returned nil; a child must get a runnable hook", id)
+		}
+	}
+}
