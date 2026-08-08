@@ -491,6 +491,43 @@ func TestParallelAgentsCapRelistMovesThePinInPlace(t *testing.T) {
 	}
 }
 
+// current answers the question follow and observe answer, for the caller that composes a Config of
+// its own instead of mutating the running engine — a scheduled Firing. What the assertion is really
+// about is the ENGINE: a read must install nothing, or a Schedule's cadence would be re-stating the
+// running Agent's cap from the scheduler's goroutine for no reason.
+func TestParallelAgentsCapCurrentReadsWithoutInstalling(t *testing.T) {
+	t.Parallel()
+
+	spy := &parallelAgentsSpy{}
+	caps := newParallelAgentsCap(spy)
+
+	// Nothing bound yet, so the honest answer is the serial floor — and it is still only an answer.
+	if got := caps.current(); got != 1 {
+		t.Errorf("current() before any bind = %d, want the serial floor 1", got)
+	}
+	if len(spy.widths) != 0 {
+		t.Errorf("current() installed %v; a read must push nothing at the engine", spy.widths)
+	}
+
+	caps.follow(serverEntry{Name: "open"})
+	caps.observe(3)
+	installed := len(spy.widths)
+
+	if got := caps.current(); got != 3 {
+		t.Errorf("current() = %d, want the discovered 3 the cap already stands at", got)
+	}
+	// A pin edited into the list mid-session moves what current reports, exactly as it moves what is
+	// installed: one resolution, read through two doors.
+	caps.relist([]serverEntry{{Name: "open", ParallelAgents: 5}})
+	if got := caps.current(); got != 5 {
+		t.Errorf("current() after the pin was edited in = %d, want the pin 5", got)
+	}
+	if len(spy.widths) != installed+1 {
+		t.Errorf("the engine saw %v; want only relist's own install — the two current() reads pushed "+
+			"nothing", spy.widths[installed:])
+	}
+}
+
 // The startup half of the same fact: the entry a session was launched on carries its own pin, so a
 // session that starts on a pinned server is capped from its first Turn rather than from its first
 // beat.

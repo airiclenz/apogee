@@ -397,6 +397,23 @@ func (c *parallelAgentsCap) observe(slots int) int {
 	return width
 }
 
+// current reports the width the bound server resolves to right now, and installs nothing. It is the
+// door for a caller that COMPOSES a Config of its own rather than mutating the running engine — a
+// scheduled Firing is that caller (schedule.go), and ADR 0031 is why it needs one: a Firing builds a
+// second, short-lived Agent out of this session's shape, so the width it fans out at has to be the
+// width the session it runs beneath is fanning out at. Its own Config was copied before the startup
+// bind and carries a zero, which no engine reads as a cap.
+//
+// It is deliberately the only reader that does not push. follow, observe and relist each mark a MOVE
+// the running engine has to be told about; a Firing asking how wide the server is changes nothing
+// about the server or the session on it, and re-stating the Agent's cap on a Schedule's cadence,
+// from the scheduler's goroutine, would be a mutation nobody asked for.
+func (c *parallelAgentsCap) current() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return resolveParallelAgents(c.pinned, c.observed)
+}
+
 // relist re-resolves the cap from a re-read `servers:` list (ADR 0037's live apply): the entry that
 // still carries the bound server's name supplies the pin, and the observed slot count is KEPT —
 // nothing about the server changed, only what the file says about it. A list that no longer names

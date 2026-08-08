@@ -144,6 +144,11 @@ point is a **minor** bump, not a breaking change.
     no heartbeat to read, a run with no pin asks the server **once**, while it composes. A pin skips
     that call — discovery could never overrule it — and a probe that cannot answer costs nothing but
     the serial floor the run would have had anyway.
+  - **A scheduled firing gets it too**, taken from the session it fires beneath at the moment it
+    fires — so a firing fans out exactly as wide as the server the session is on *now*, and a
+    `/server` switch moves the width with it. Previously a firing composed its run from the config
+    copied before the session bound anything, which named no width at all: every scheduled run
+    delegated one child at a time however the entry read.
   - Recorded in
     [ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md),
     with amendments to ADR 0013 §5 (per-child atomicity) and ADR 0014 §3 (batch = the cap); the

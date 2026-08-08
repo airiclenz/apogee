@@ -116,7 +116,16 @@ own parenthesis authorizes: `heartbeat.Monitor.Beat` needs one.
 
 Commit: `fix(headless): install the parallel-agents cap from the pin and a one-shot probe`
 
-## 4. Firings carry the current parallel-agents width
+## 4. Firings carry the current parallel-agents width — ✅ DONE (2026-08-08)
+
+NOTES (2026-08-08): the item's own Tests line requires asserting the fired run's `Config`, which
+nothing could observe — `fire` called `run.Once` directly. It now calls the package's existing
+`runOnce` seam (headless.go:84, "the single point a test replaces"; production never reassigns it),
+a behaviour-identical one-token change that makes the composed Spec readable, and the new test swaps
+it with the headless suite's own `stubRunner`. Per that suite's discipline the swapping test is NOT
+`t.Parallel`. The three existing `scheduleWiring` literals in schedule_test.go were given a `width`
+too, so no construction leaves the seam nil. Docs: CHANGELOG sub-bullet + README clause beside item
+3's headless ones (the paragraph enumerates which drivers reach the cap).
 
 Depends on item 2 (same file, `cmd/apogee/schedule.go`).
 

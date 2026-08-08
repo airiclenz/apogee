@@ -51,6 +51,15 @@ type scheduleWiring struct {
 	// it dials and the endpoint its spec resolution keys on — because a `/server` switch moves both.
 	binding func() upstreamBinding
 
+	// width reports the Parallel agents cap the bound server resolves to right now; wired to
+	// parallelAgentsCap.current, which already owns that number for the interactive session. It is a
+	// seam read at FIRING time for the binding's own reason — a `/server` switch moves the width with
+	// the server — and it exists at all because base cannot carry it: that Config was copied before
+	// the startup bind, so its ParallelAgents is a zero, and a Firing that inherited it would fan out
+	// one sub-agent at a time while the session it runs beneath fans out several (ADR 0039; ADR 0031,
+	// every Driver reaching the same engine behaviour).
+	width func() int
+
 	// store is the session store a Firing's record lands in — the interactive session's own, so a
 	// Firing shows up in /sessions beside the conversations it ran beneath (items 2 and 7).
 	store *session.Store
@@ -86,6 +95,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 
 	cfg := w.base
 	cfg.Endpoint, cfg.APIKey = binding.Endpoint, binding.APIKey
+	cfg.ParallelAgents = w.width()
 	cfg.Model, cfg.SystemPrompt = spec.Model, spec.SystemPrompt
 	cfg.EnableMechanisms = spec.EnableMechanisms
 	cfg.Context.MaxContextTokens = spec.MaxContextTokens
@@ -97,7 +107,10 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	cfg.Tools = nil
 	cfg.Events, cfg.Approver, cfg.Asker, cfg.Presenter = nil, nil, nil, nil
 
-	res, err := run.Once(ctx, run.Spec{
+	// Through the package's runner seam (headless.go) rather than run.Once directly: production never
+	// reassigns it, so this is the same call, and it is what lets a test read the Config a Firing
+	// composed — the width below being the whole point of one.
+	res, err := runOnce(ctx, run.Spec{
 		Config:       cfg,
 		Prompt:       f.Prompt,
 		ScheduleID:   f.ScheduleID,

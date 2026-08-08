@@ -592,6 +592,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		roots:   roots,
 		live:    live,
 		binding: holder.Binding,
+		width:   caps.current,
 		store:   store,
 	}
 	gate := newIdleGate()

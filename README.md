@@ -524,7 +524,9 @@ and is a **pin** apogee never overrides. Mind the trade the server makes for you
 window each — the per-slot number is the one apogee has always shown you. A sub-agent's
 own delegations stay one at a time. `apogee headless` resolves the cap the same way a
 session does: the pin if the entry carries one, and otherwise a single look at what the
-server advertises, taken once as the run is composed.
+server advertises, taken once as the run is composed. A scheduled firing runs at the
+width the session it fires beneath is running at, read when it fires — so a `/server`
+switch carries the new server's cap into the next firing.
 
 **`server:` keeps itself current.** Every `/server` switch onto a listed entry
 splices `server: <name>` back into the file — that one key, your comments and layout

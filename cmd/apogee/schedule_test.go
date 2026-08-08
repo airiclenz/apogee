@@ -172,6 +172,7 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 		// The binding the session has MOVED to since launch (a /server switch, a rebind). The Firing
 		// must follow it rather than the launch values in opts above.
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: url, Model: "bound-model"} },
+		width:   func() int { return 1 },
 		store:   store,
 	}
 
@@ -262,10 +263,51 @@ func TestScheduleFiringReportsAPerModelResolutionFailure(t *testing.T) {
 		binding: func() upstreamBinding {
 			return upstreamBinding{Endpoint: "http://unused.invalid", Model: "bound-model"}
 		},
+		width: func() int { return 1 },
 	}
 
 	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check", Mode: modePlan}); err == nil {
 		t.Fatal("fire returned nil for a model whose system prompt cannot be read; want the failure")
+	}
+}
+
+// A Firing fans out at the width the session's bound server resolves to (ADR 0039; ADR 0031 — every
+// Driver reaches the same engine behaviour). The number can only come from the wired width seam:
+// base is the pre-bind Config copy, so its ParallelAgents is a zero, and a Firing that inherited it
+// would run its delegations one at a time beneath a session running several.
+//
+// Composed against the package's runner seam rather than a live model, which is why this test does
+// not call t.Parallel: it replaces a package-level var, exactly as every headless test that reads a
+// composed Spec does.
+func TestScheduleFiringCarriesTheParallelAgentsWidth(t *testing.T) {
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	stub := &stubRunner{}
+	prevRunner := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prevRunner })
+
+	w := scheduleWiring{
+		// The session's own construction surface as the binary hands it over: copied before the
+		// startup bind, so it pins no width at all.
+		base:    apogee.Config{WorkspaceDir: roots.workspace},
+		roots:   roots,
+		live:    newLiveSettings(options{}, nil),
+		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
+		width:   func() int { return 6 },
+	}
+
+	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: modePlan}); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+	if !stub.called {
+		t.Fatal("the firing composed no run at all")
+	}
+	if got := stub.spec.Config.ParallelAgents; got != 6 {
+		t.Errorf("the firing runs at ParallelAgents = %d, want the wired width 6 — it inherited the "+
+			"pre-bind zero instead of the cap the session's server resolves to", got)
 	}
 }
 
@@ -347,6 +389,7 @@ func newScheduleHarness(t *testing.T, endpoint string) *scheduleHarness {
 		roots:   roots,
 		live:    newLiveSettings(options{}, nil),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: endpoint, Model: "bound-model"} },
+		width:   func() int { return 1 },
 		store:   store,
 	}
 
