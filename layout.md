@@ -736,7 +736,7 @@ affordance and the click-target rule are **one predicate**: an indicator appears
 click toggles something, so a block that hides nothing wears none, a group's header — which
 toggles nothing — never wears one at all, and a sub-agent run's head wears one however short its
 own report is. The `+N more lines` marker is apogee's line too and is painted as one — the
-`tool-marker` role, a light blue `#80B0FF` under `dark`, no background and no bold weight, the
+`tool-marker` role, a warm orange `#FFB050` under `dark`, no background and no bold weight, the
 quieter sibling of the prompt block's `see more` (the `prompt-toggle` role) — so a body line
 that happens to open with `+` can never be mistaken for the affordance beneath it. The sketch at the
 top of this file shows both states side by side: a collapsed `Run ▶` over its remainder marker, and

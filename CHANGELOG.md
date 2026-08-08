@@ -277,6 +277,13 @@ point is a **minor** bump, not a breaking change.
     number the server reported (`context window 131072`). File sizes keep their own `KiB`/`MiB`
     spelling — different domain. The rule is written down in `layout.md` (§"The status line's right
     slot").
+- **The `+N more lines` marker is orange under `dark` now.** The remainder marker beneath a
+  collapsed tool block used to be a light gray-blue — the prompt block's `see more` tone carried
+  onto a body column — and the shipped `dark` scheme paints the `tool-marker` role a warm `#FFB050`
+  instead, so the row that counts a hidden body stands clear of the dim text around it. Only the
+  value moved: the marker keeps its own role, its no-background, no-bold-weight treatment and its
+  one-click open, the `light` scheme keeps its blue, and a scheme of your own that sets
+  `tool-marker` still overrides whatever ships.
 
 ### Fixed
 
