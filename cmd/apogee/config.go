@@ -1668,6 +1668,12 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	// An undetermined startup is neither: nothing was selected, so there is nothing to synthesize a
 	// switch row for either.
 	opts.startupEphemeral = startupErr == nil && startup.Name == ""
+	// And which launcher config — if any — that entry fronts its server with. The key belongs to the
+	// entry (this plan, 2026-08-07: ADR 0029 decision 4's global key moved onto the `servers:` list),
+	// so what the session starts with is the SELECTED entry's own value, carried as written for the
+	// composition root to resolve. The ephemeral override entry carries none, which is the honest
+	// answer for an endpoint no entry names: `/server` onto a launcher-fronted entry turns it on.
+	opts.startupLauncher = startup.LlamaLauncher
 	opts.mode = s.mode
 	opts.bypass = s.bypass
 	opts.servers = s.servers

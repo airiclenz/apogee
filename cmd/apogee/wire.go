@@ -447,6 +447,15 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// (see sessionMover.move, which carries the reasoning).
 	mover := sessionMover{agent: engine, holder: holder, host: host, live: live}
 
+	// Where "is the llama-launcher integration on, and against which config" lives for this session
+	// (ADR 0029 D4, per-entry since 2026-08-07). It is declared HERE, above the two closures that
+	// install into it, because enablement follows the session's server entry: the startup entry's own
+	// key is what the session begins with, and a `/server` switch or a first bind replaces it. A
+	// pre-bound start therefore begins empty — the verbs answer tui.ErrNoLauncher until a bind
+	// installs a value — and so does a run on the ephemeral `--endpoint` entry, which names no key.
+	startPath, _ := entryLauncherPath(opts.startupLauncher)
+	launcher := newLauncherPath(startPath)
+
 	// The server-switch closure: the composition root's half of `/server`. The TUI decides WHEN
 	// (at idle, on an explicit act by the human), this decides everything the move touches —
 	// because a server is an endpoint, a key, and a discovery hint, and all three are config the
@@ -460,7 +469,18 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		if err != nil {
 			return tui.ServerSwitchResult{}, err
 		}
-		return mover.move(entry.Endpoint, entry.Name, entry.Model, entry.APIKey)
+		result, err := mover.move(entry.Endpoint, entry.Name, entry.Model, entry.APIKey)
+		if err != nil {
+			return tui.ServerSwitchResult{}, err
+		}
+		// The launcher follows the entry the session just moved onto — off when the entry names no
+		// config, on against its own when it does. It is installed HERE, at the switch, and not
+		// inside the shared move: a profile load reaches that move directly and must leave the
+		// integration exactly as it found it (launcherPath.follow carries the reasoning). And it is
+		// installed only after the move SUCCEEDED, so a refused switch leaves the session's launcher
+		// where the session still is.
+		launcher.follow(entry)
+		return result, nil
 	}
 
 	// The recording closure: the composition root's half of ADR 0036 decision 2 — the `server:` key
@@ -500,6 +520,10 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		if err := binder.bind(entry); err != nil {
 			return tui.ServerSwitchResult{}, err
 		}
+		// The same install as the switch above, for the same reason: this is the other way a session
+		// arrives ON an entry, so a pre-bound start that binds the launcher-fronted server has the
+		// integration from that moment. A refused bind installs nothing.
+		launcher.follow(entry)
 		return tui.ServerSwitchResult{
 			Endpoint:      entry.Endpoint,
 			HostAlias:     entry.Name,
@@ -508,14 +532,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	}
 
 	// The llama-launcher seams (ADR 0029 D1): four closures over the bridge in launcher.go, which is
-	// the only file that names the library. The `llama-launcher:` key's three values resolve HERE,
-	// at the layer that knows the launcher — into the live path holder, which is where "is the
-	// integration on" now lives (ADR 0037: the key is editable, so an off session can be switched on
-	// without a relaunch). The four members are wired UNCONDITIONALLY for that reason and answer
+	// the only file that names the library. An entry's `llama-launcher:` value resolves HERE, at the
+	// layer that knows the launcher — into the path holder above, which is where "is the integration
+	// on" lives. The four members are wired UNCONDITIONALLY for that reason and answer
 	// tui.ErrNoLauncher while the holder is empty, which the renderer reads as the host having no
-	// launcher — the same degrade the nil seams used to express, now able to change its mind.
-	startPath, _ := launcherConfigPath(opts.llamaLauncher)
-	launcher := newLauncherPath(startPath)
+	// launcher — the same degrade the nil seams used to express, now able to change its mind when
+	// the session moves to another server.
 	launcherSeams := launcherWiring{sessionMover: mover, ops: realLauncher{}, path: launcher}
 
 	// The session-naming seam (ADR 0022 addendum): one out-of-band completion, built per call from

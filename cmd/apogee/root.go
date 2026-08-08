@@ -74,6 +74,18 @@ type options struct {
 	// nowhere. Resolved-not-flag-bound; applyConfig sets it.
 	startupEphemeral bool
 
+	// startupLauncher is the SELECTED startup entry's own `llama-launcher:` value, exactly as the
+	// user wrote it: empty (the key absent) ⇒ the launcher integration is off for this server,
+	// `auto` ⇒ the launcher's own default config, anything else ⇒ the config file to read. It is a
+	// fact about the entry this session starts ON rather than a global one, which is the whole
+	// point of the per-entry key: only the server the launcher actually fronts offers `/model`'s
+	// Launch profiles, and every other entry keeps its advertised-model discovery. The ephemeral
+	// `--endpoint`/`APOGEE_ENDPOINT` override entry carries none, so an override run starts with
+	// the integration off. Resolved-not-flag-bound like the two fields above; applyConfig sets it
+	// from the startup entry. The composition root resolves the value — including where the
+	// launcher's own default config lives — because only it knows the launcher.
+	startupLauncher string
+
 	// prebound says this session starts with NO upstream bound, and why — the zero value being the
 	// ordinary start, on the server selection determined. It is the one resolution outcome that
 	// does not come out of applyConfig's write-back but out of its refusal: the root command

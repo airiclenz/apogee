@@ -83,9 +83,20 @@ validateServers accepts absent/`auto`/path, refuses whitespace-only, `off`, `OFF
 
 **Commit:** `feat(config): add per-server llama-launcher key with auto/path resolution`
 
-## 2. The launcher path follows the session's server entry
+## 2. The launcher path follows the session's server entry — ✅ DONE (2026-08-08)
 
 Depends on item 1.
+
+NOTES (2026-08-08): three deviations from the literal text. (a) The two-line install is a
+`(*launcherPath).follow(entry serverEntry)` method in `launcher.go` that both closures call, rather
+than the lines inlined twice — one place for design call 5's "and NOT the mover" rule, with the
+short comment still at each install site as the item asks. (b) The holder construction
+(`entryLauncherPath(opts.startupLauncher)` + `newLauncherPath`) moved UP to just above the
+`switchServer`/`bindServer` closures, because Go resolves a captured local only if it is declared
+first; the seams block keeps `launcherSeams` and its (updated) comment. (c)
+`TestRunRootWiresTheLauncherSeamsForTheWholeSession` was rewritten onto `startupLauncher` — the
+global key no longer reaches the holder, so its `off`-key case failed as of this item; item 3 still
+owns deleting the key itself.
 
 **What:** The `launcherPath` holder (`cmd/apogee/launcher.go:149-185`) keeps its type and
 its four seams; what changes is who sets it.

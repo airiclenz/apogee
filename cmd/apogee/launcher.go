@@ -184,10 +184,10 @@ func entryLauncherPath(value string) (string, bool) {
 }
 
 // launcherPath is the resolved config path the local-server verbs read, held so it can MOVE: the
-// `llama-launcher:` key is editable in the `/settings` pane and applies to the running session (ADR
-// 0037), which for this integration means nothing more than swapping this string. There is no
-// connection to rebuild — every verb re-reads the config file for itself (ADR 0029 D4) — so the
-// whole live apply is one atomic store, and the next verb reads the new file.
+// `llama-launcher:` key belongs to a `servers:` ENTRY, so the integration follows the session from
+// server to server, which for this integration means nothing more than swapping this string. There
+// is no connection to rebuild — every verb re-reads the config file for itself (ADR 0029 D4) — so
+// the whole install is one atomic store, and the next verb reads the new file.
 //
 // Empty is the OFF state, and it is the state the four seams answer [tui.ErrNoLauncher] from. That
 // is why the seams are wired unconditionally now: whether the integration is on is a fact that can
@@ -219,6 +219,21 @@ func (p *launcherPath) get() string {
 // set points every later verb at path (empty switches the integration off).
 func (p *launcherPath) set(path string) {
 	p.v.Store(&path)
+}
+
+// follow installs the launcher config this entry names, and is the whole of "the integration
+// follows the session's server": whatever puts the session ON a `servers:` entry — startup
+// selection, the first bind out of a pre-bound start, a `/server` switch — resolves that entry's
+// own key here, so an entry with no key switches the verbs off exactly as one with a key switches
+// them on.
+//
+// It is called by those three sites and NOT by the shared move underneath them (sessionMover.move):
+// a Launch profile load can move the session too, possibly to an endpoint no entry names, and that
+// move must leave the integration as it found it — the session that just used the launcher still
+// has it. Routing the install through the entry rather than the move is what keeps the two apart.
+func (p *launcherPath) follow(entry serverEntry) {
+	path, _ := entryLauncherPath(entry.LlamaLauncher)
+	p.set(path)
 }
 
 // launchProfile is one row of `/model`'s launcher picker as this bridge assembles it — a Launch
@@ -513,11 +528,12 @@ func dialAddr(addr string) string {
 // The bodies live here rather than in wire.go because they name facade types — RunningInstance,
 // StopResult, ResolvedProfile — and this file is the only place in apogee that may (see the header).
 //
-// The four members are wired for the life of the session and the WHETHER moved inside them (ADR
-// 0037): `llama-launcher:` is editable in the `/settings` pane, so a session that started with the
-// integration off can turn it on, and one that started with it on can clear it. Each verb therefore
-// opens by asking the path holder, and answers [tui.ErrNoLauncher] while it is empty — the same
-// sentence the renderer's own unwired-seam branch says.
+// The four members are wired for the life of the session and the WHETHER moved inside them:
+// `llama-launcher:` belongs to a `servers:` entry, so enablement FOLLOWS THE SESSION'S SERVER —
+// a session that started on a plain entry turns the integration on by switching onto the entry the
+// launcher fronts, and off again by leaving it (launcherPath.follow). Each verb therefore opens by
+// asking the path holder, and answers [tui.ErrNoLauncher] while it is empty — the same sentence the
+// renderer's own unwired-seam branch says, which `/model` reads as "offer the advertised models".
 type launcherWiring struct {
 	sessionMover
 	ops  launcherOps

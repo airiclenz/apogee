@@ -798,6 +798,48 @@ func TestApplyConfigSelectsTheNamedServer(t *testing.T) {
 	}
 }
 
+// The launcher a session STARTS with is the selected entry's own key, carried as written for the
+// composition root to resolve: the key belongs to the entry the launcher fronts, so a session that
+// starts on any other entry starts with the integration off and reaches it by switching. The
+// ephemeral entry a raw `--endpoint`/`APOGEE_ENDPOINT` override builds carries no key at all, which
+// is the honest answer for an endpoint no entry names.
+func TestApplyConfigStartupLauncherComesFromTheSelectedEntry(t *testing.T) {
+	t.Parallel()
+	const servers = "servers:\n" +
+		"  - name: laptop\n    endpoint: http://127.0.0.1:1111\n    llama-launcher: auto\n" +
+		"  - name: workstation\n    endpoint: http://192.168.1.9:1111\n"
+
+	tests := []struct {
+		name     string
+		start    string
+		endpoint string
+		want     string
+	}{
+		{name: "the selected entry names a launcher", start: "laptop", want: "auto"},
+		{name: "the selected entry names none", start: "workstation"},
+		{name: "an endpoint override names nothing", start: "laptop", endpoint: "http://rented.example:8080/v1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := options{configDir: testConfigHome(t, servers+"server: "+tt.start+"\n")}
+			getenv := func(name string) string {
+				if name == envEndpoint {
+					return tt.endpoint
+				}
+				return ""
+			}
+			if err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("applyConfig: %v", err)
+			}
+			if opts.startupLauncher != tt.want {
+				t.Errorf("startupLauncher = %q; want %q — the key travels from the SELECTED entry, unresolved",
+					opts.startupLauncher, tt.want)
+			}
+		})
+	}
+}
+
 // --server beats APOGEE_SERVER beats `server:` at selection too, not only in resolution: the value
 // that wins is the one the entry is looked up by.
 func TestApplyConfigStartupServerOverrideSelects(t *testing.T) {

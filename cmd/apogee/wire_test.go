@@ -2332,10 +2332,11 @@ func TestActuationResultKeepsTheStepsBesideTheError(t *testing.T) {
 	}
 }
 
-// The four seams exist for the whole session whatever `llama-launcher:` said at startup, because
-// the key is editable and applies live (ADR 0037): whether the integration works is a fact the
-// VERBS answer per call. Off, every one of them reports tui.ErrNoLauncher — the renderer's own
-// no-launcher sentence, which `/model` reads as "offer the models the server advertises".
+// The four seams exist for the whole session whatever the startup entry's `llama-launcher:` said,
+// because the key belongs to a `servers:` ENTRY and the session can move between entries: whether
+// the integration works is a fact the VERBS answer per call. Off, every one of them reports
+// tui.ErrNoLauncher — the renderer's own no-launcher sentence, which `/model` reads as "offer the
+// models the server advertises".
 func TestRunRootWiresTheLauncherSeamsForTheWholeSession(t *testing.T) {
 	t.Parallel()
 
@@ -2343,9 +2344,15 @@ func TestRunRootWiresTheLauncherSeamsForTheWholeSession(t *testing.T) {
 		name    string
 		key     string
 		enabled bool
+		// probeVerbs also asks the two I/O verbs what they SAY. It is off for `auto`, whose path is
+		// whatever launcher config the machine running the test happens to have — a real address a
+		// test must not drive an unload against.
+		probeVerbs bool
 	}{
-		{name: "off ⇒ the verbs report the integration off", key: "off"},
-		{name: "a named config ⇒ the verbs act on it", key: filepath.Join(t.TempDir(), "launcher.yaml"), enabled: true},
+		{name: "no key on the entry ⇒ the verbs report the integration off", probeVerbs: true},
+		{name: "a named config ⇒ the verbs act on it", key: filepath.Join(t.TempDir(), "launcher.yaml"),
+			enabled: true, probeVerbs: true},
+		{name: "auto ⇒ the launcher's own default config, unchecked", key: "auto", enabled: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2354,12 +2361,12 @@ func TestRunRootWiresTheLauncherSeamsForTheWholeSession(t *testing.T) {
 			upstream := upstreamServer(t, "model-a", 4096)
 			rec := &recordingLauncher{}
 			opts := options{
-				endpoint:      upstream.URL,
-				mode:          "ask-before",
-				workspace:     t.TempDir(),
-				configDir:     t.TempDir(),
-				autoCompact:   true,
-				llamaLauncher: tt.key,
+				endpoint:        upstream.URL,
+				mode:            "ask-before",
+				workspace:       t.TempDir(),
+				configDir:       t.TempDir(),
+				autoCompact:     true,
+				startupLauncher: tt.key,
 			}
 			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 				t.Fatalf("runRoot: %v", err)
@@ -2384,6 +2391,9 @@ func TestRunRootWiresTheLauncherSeamsForTheWholeSession(t *testing.T) {
 				t.Errorf("LauncherEnabled() = %v; want the integration reported %v", got, tt.enabled)
 			}
 
+			if !tt.probeVerbs {
+				return
+			}
 			// What the seams SAY is where off and on differ now. A named config that is not there
 			// fails as the launcher's own missing-file error, which is emphatically not the
 			// integration being off.
@@ -2395,6 +2405,140 @@ func TestRunRootWiresTheLauncherSeamsForTheWholeSession(t *testing.T) {
 				t.Errorf("UnloadServer error = %v; want the integration reported %v", err, tt.enabled)
 			}
 		})
+	}
+}
+
+// The integration follows the session's SERVER: `/server` onto the entry the launcher fronts turns
+// the verbs on, and switching away turns them off again. That is the whole of the per-entry key —
+// `/model` offers Launch profiles only while the session is on the launcher's own server, and every
+// other entry keeps the advertised-model discovery a remote server answers with.
+func TestSwitchServerFollowsTheEntrysLauncher(t *testing.T) {
+	t.Parallel()
+
+	local := upstreamServer(t, "model-a", 4096)
+	remote := upstreamServer(t, "model-b", 8192)
+	launcherYAML := filepath.Join(t.TempDir(), "launcher.yaml")
+	rec := &recordingLauncher{}
+	opts := options{
+		// The session starts on the plain entry, so it starts with the integration off.
+		endpoint:      remote.URL,
+		hostAlias:     "remote",
+		startupServer: "remote",
+		mode:          "ask-before",
+		workspace:     t.TempDir(),
+		configDir:     t.TempDir(),
+		autoCompact:   true,
+		servers: []serverEntry{
+			{Name: "local", Endpoint: local.URL, Model: "model-a", LlamaLauncher: launcherYAML},
+			{Name: "remote", Endpoint: remote.URL, Model: "model-b"},
+		},
+	}
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+
+	if rec.opts.LauncherEnabled() {
+		t.Fatal("LauncherEnabled() = true on a startup entry that names no launcher")
+	}
+	if _, err := rec.opts.SwitchServer("local"); err != nil {
+		t.Fatalf("SwitchServer(local): %v", err)
+	}
+	if !rec.opts.LauncherEnabled() {
+		t.Error("LauncherEnabled() = false after switching onto the launcher-fronted entry")
+	}
+	// And it is THAT entry's config the verbs now read: the file is not there, so the launcher's own
+	// missing-file error names it — which is emphatically not the integration being off.
+	if _, err := rec.opts.LaunchProfiles(); !strings.Contains(fmt.Sprint(err), launcherYAML) {
+		t.Errorf("LaunchProfiles error = %v; want the entry's own config path %q named", err, launcherYAML)
+	}
+
+	// A switch that resolves to nothing moved no session, so it installs nothing either.
+	if _, err := rec.opts.SwitchServer("nope"); err == nil {
+		t.Fatal("SwitchServer accepted a name no entry carries")
+	}
+	if !rec.opts.LauncherEnabled() {
+		t.Error("LauncherEnabled() = false after a REFUSED switch; the session never left the launcher's server")
+	}
+
+	// Leaving turns it off again: the remote server has no launcher in front of it, and `/model`
+	// there must fall back to what that server advertises.
+	if _, err := rec.opts.SwitchServer("remote"); err != nil {
+		t.Fatalf("SwitchServer(remote): %v", err)
+	}
+	if rec.opts.LauncherEnabled() {
+		t.Error("LauncherEnabled() = true after switching back to an entry that names no launcher")
+	}
+	if _, err := rec.opts.LaunchProfiles(); !errors.Is(err, tui.ErrNoLauncher) {
+		t.Errorf("LaunchProfiles error = %v; want tui.ErrNoLauncher off the launcher's server", err)
+	}
+}
+
+// The other way a session arrives on an entry is the first bind out of a pre-bound start, and it
+// installs the launcher exactly as a switch does. Until it happens the holder is empty: a session
+// with no server bound has no entry to take a launcher from.
+func TestBindServerInstallsTheEntrysLauncher(t *testing.T) {
+	t.Parallel()
+
+	local := upstreamServer(t, "model-a", 4096)
+	launcherYAML := filepath.Join(t.TempDir(), "launcher.yaml")
+	rec := &recordingLauncher{}
+	opts := options{
+		mode:        "ask-before",
+		workspace:   t.TempDir(),
+		configDir:   t.TempDir(),
+		autoCompact: true,
+		servers: []serverEntry{
+			{Name: "local", Endpoint: local.URL, Model: "model-a", LlamaLauncher: launcherYAML},
+		},
+		prebound: tui.PreboundStart{Reason: tui.PreboundFirstBoot},
+	}
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+
+	if rec.opts.LauncherEnabled() {
+		t.Fatal("LauncherEnabled() = true before anything was bound")
+	}
+	if _, err := rec.opts.BindServer("local"); err != nil {
+		t.Fatalf("BindServer: %v", err)
+	}
+	if !rec.opts.LauncherEnabled() {
+		t.Error("LauncherEnabled() = false after binding the launcher-fronted entry")
+	}
+	if _, err := rec.opts.LaunchProfiles(); !strings.Contains(fmt.Sprint(err), launcherYAML) {
+		t.Errorf("LaunchProfiles error = %v; want the bound entry's own config path %q named", err, launcherYAML)
+	}
+}
+
+// A profile load that MOVES the session preserves the launcher, because that move goes through the
+// shared sessionMover and not through an entry: the endpoint it lands on may be one no `servers:`
+// entry names, and taking the integration away from the session that just used it would leave the
+// human unable to load a second profile.
+func TestLoadProfileMovePreservesTheLauncher(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{
+		cfg:        twoServerConfig(t),
+		loadResult: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "127.0.0.1", Port: 9090},
+	}
+	wiring, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+
+	result, err := wiring.load("there", nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if result.Move == nil {
+		t.Fatalf("result = %+v; want a resolved Move — the profile serves another address", result)
+	}
+	if _, err := result.Move(); err != nil {
+		t.Fatalf("committing the resolved move: %v", err)
+	}
+
+	if got := wiring.path.get(); got != "/etc/llama-launcher/config.yaml" {
+		t.Errorf("launcher path after a profile-load move = %q; want the session's own, untouched", got)
+	}
+	if !wiring.on() {
+		t.Error("the integration went off with a profile-load move; the session that used it still has it")
 	}
 }
 
