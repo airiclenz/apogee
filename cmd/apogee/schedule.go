@@ -72,7 +72,10 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	// Firing runs with the Budget inactive, which for one bounded prompt is the honest degrade
 	// rather than a guess. The per-session notices are dropped: they are a launch's narration, and a
 	// Firing's narration is its own session record.
-	base, manualIDs, pinnedWindow := w.live.rebindInputs(w.opts)
+	// The launch snapshot's own wire, restated as a binding so the overlay is a no-op for this
+	// caller: a Firing still keys its spec resolution on the LAUNCH endpoint, unchanged.
+	launch := upstreamBinding{Endpoint: w.opts.endpoint, APIKey: w.opts.apiKey}
+	base, manualIDs, pinnedWindow := w.live.rebindInputs(w.opts, launch)
 	spec, _, err := rebindSpecFor(base, w.roots, manualIDs, binding.Model, 0, pinnedWindow)
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: resolve the firing's bindings: %w", err)

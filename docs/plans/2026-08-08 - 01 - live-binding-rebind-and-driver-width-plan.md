@@ -28,7 +28,14 @@
 
 ---
 
-## 1. Overlay the live binding onto the rebind inputs
+## 1. Overlay the live binding onto the rebind inputs — ✅ DONE (2026-08-08)
+
+NOTES (2026-08-08): the item says not to touch `schedule.go`, but the signature change breaks its
+build, and this item's Acceptance requires `make check`. `schedule.go:75` therefore got the minimal
+BEHAVIOUR-PRESERVING compile fix — it passes `upstreamBinding{Endpoint: w.opts.endpoint, APIKey:
+w.opts.apiKey}`, i.e. the launch snapshot's own wire, so a Firing still keys on the launch endpoint
+exactly as before. Item 2 owns swapping that for the live `binding` (and the doc-comment + ISSUES.md
+edits), and remains a real behaviour change with its own failing-first test.
 
 **Authoritative source:** ISSUES.md entry 1; ratified design call 1.
 

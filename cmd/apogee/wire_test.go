@@ -18,6 +18,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
@@ -264,6 +265,80 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 				tt.wantEnable(t, spec.EnableMechanisms)
 			}
 		})
+	}
+}
+
+// The wire is the holder's to state, never the launch snapshot's: rebindInputs overlays the CURRENT
+// binding's endpoint and key onto the copy it hands rebindSpecFor, so a session that has moved
+// server since launch re-resolves against where it is now.
+func TestRebindInputsOverlayTheBoundUpstream(t *testing.T) {
+	t.Parallel()
+	launchOpts := options{endpoint: "http://launch.invalid", apiKey: "launch-key"}
+	live := newLiveSettings(launchOpts, nil)
+	bound := upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model", APIKey: "bound-key"}
+
+	base, _, _ := live.rebindInputs(launchOpts, bound)
+
+	if base.endpoint != bound.Endpoint {
+		t.Errorf("endpoint = %q; want the bound %q, not the launch snapshot's", base.endpoint, bound.Endpoint)
+	}
+	if base.apiKey != bound.APIKey {
+		t.Errorf("apiKey = %q; want the bound %q — a key from before a switch opens the wrong server",
+			base.apiKey, bound.APIKey)
+	}
+}
+
+// What the overlay is FOR, proven through the rebind path rather than at the seam: the identity
+// ladder's middle rung is keyed on (probe dir, endpoint, model id), so a rebind that still carried
+// the launch endpoint would miss the record `apogee probe model` left for the server the session is
+// on now — resolving at low confidence, where a matching Validated set is merely OFFERED. With the
+// bound endpoint the same record promotes the identity to medium and the set APPLIES.
+func TestRebindResolutionKeysOnTheBoundEndpoint(t *testing.T) {
+	t.Parallel()
+	const boundEndpoint = "http://127.0.0.1:65535"
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	if _, err := library.SaveProbeRecord(roots.probe, library.ProbeRecord{
+		Endpoint:   boundEndpoint,
+		ModelLabel: gemmaKey,
+		ProbedAt:   mustTime(t, "2026-07-22T10:00:00Z"),
+		Behavior:   "probe:1:tools+json+chain",
+	}); err != nil {
+		t.Fatalf("save probe record: %v", err)
+	}
+
+	// The launch snapshot names a server this session has since left.
+	launchOpts := options{endpoint: "http://launch.invalid", validatedSetsEnable: true}
+	live := newLiveSettings(launchOpts, nil)
+
+	// The rebind closure the composition root wires, reconstructed as the other rebind tests do.
+	var spec apogee.RebindSpec
+	var notices []string
+	rebind := func(model string, window int) (tui.RebindResult, error) {
+		bound := upstreamBinding{Endpoint: boundEndpoint, Model: model}
+		base, manualIDs, pinnedWindow := live.rebindInputs(launchOpts, bound)
+		got, ns, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow)
+		if err != nil {
+			return tui.RebindResult{}, err
+		}
+		spec, notices = got, ns
+		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
+	}
+
+	if _, err := rebind(gemmaKey, 8192); err != nil {
+		t.Fatalf("rebind: %v", err)
+	}
+	if len(spec.EnableMechanisms) == 0 {
+		t.Fatalf("EnableMechanisms is empty: the set was not applied, so the resolution missed the "+
+			"record keyed to the bound endpoint; notices=%v", notices)
+	}
+	if !noticeContains(notices, "Validated set for "+gemmaKey+" applied") {
+		t.Errorf("want the applying notice, got %v", notices)
+	}
+	if noticeContains(notices, "To apply it") {
+		t.Errorf("the low-confidence OFFER means the launch endpoint was keyed on, not the bound one: %v", notices)
 	}
 }
 
@@ -2964,7 +3039,7 @@ func TestApplySettingSystemPromptReResolvesFromTheFile(t *testing.T) {
 	// dispatcher installed there is what the spec carries.
 	var spec apogee.RebindSpec
 	rebind := func(model string, window int) (tui.RebindResult, error) {
-		base, manualIDs, pinnedWindow := live.rebindInputs(launchOpts)
+		base, manualIDs, pinnedWindow := live.rebindInputs(launchOpts, upstreamBinding{Model: "bound-model"})
 		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow)
 		if err != nil {
 			return tui.RebindResult{}, err

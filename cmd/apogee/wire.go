@@ -424,7 +424,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// against the pin: a later pin EDIT re-drives this closure with no beat of its own, and a
 		// cleared pin has to bind the discovered window rather than unbind it (ADR 0024).
 		live.observe(window)
-		base, manualIDs, pinnedWindow := live.rebindInputs(opts)
+		base, manualIDs, pinnedWindow := live.rebindInputs(opts, holder.Binding())
 		spec, notices, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow)
 		if err != nil {
 			return tui.RebindResult{}, err
@@ -1065,9 +1065,19 @@ func (s *liveSettings) setValidatedSets(enable bool, alias map[string]string) {
 // arguments rebindSpecFor takes them as. It is the one place the overlay is spelled out, so a caller
 // cannot re-resolve half from the holder and half from the launch: every re-resolution — the rebind
 // closure, a scheduled Firing — opens with this call.
-func (s *liveSettings) rebindInputs(base options) (options, []apogee.MechanismID, int) {
+//
+// The charter covers the WIRE too, which this settings holder deliberately does not own: bound is the
+// upstreamHolder's snapshot, and it is overlaid unconditionally because the holder — not the launch
+// snapshot — is the authority on where this session is pointed (ADR 0036: one upstream definition).
+// Without it a `/server` switch would leave the resolution keyed on the LAUNCH endpoint, and every
+// input that is keyed on the endpoint — the probe record behind the identity ladder's middle rung,
+// and so the Validated-set decision above it — would be resolved against a server the session left.
+// Both live callers run only after the startup bind, so the snapshot is always a real binding.
+func (s *liveSettings) rebindInputs(base options, bound upstreamBinding) (options, []apogee.MechanismID, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	base.endpoint = bound.Endpoint
+	base.apiKey = bound.APIKey
 	base.contextWindow = s.pinnedWindow
 	base.servers = s.servers
 	base.mechanisms = s.mechanisms
