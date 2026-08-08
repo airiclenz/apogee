@@ -122,6 +122,108 @@ func TestSubAgent_EventsNestAtDepthOne(t *testing.T) {
 	}
 }
 
+// TestSubAgent_EventsCarryTheSpawningCallID proves the RUN IDENTITY every delegated event now
+// carries (ADR 0039): a child stamps the id of the sub_agent call that spawned it on every Event
+// it emits, the top-level agent stamps none, and two delegations — which Depth alone cannot tell
+// apart, since both children run at Depth 1 — carry different ids. It is the attribution
+// concurrent fan-out rests on, pinned here while delegation is still serial so the identity is in
+// place before the pool exists.
+func TestSubAgent_EventsCarryTheSpawningCallID(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("c1", "first task"),
+		contentScript("first child reply"),
+		subAgentCallScript("c2", "second task"),
+		contentScript("second child reply"),
+		contentScript("parent done"),
+	}}
+	a, _ := newAgent(cfg, responder)
+	_ = a.Submit(domain.UserInput{Text: "go"})
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Every event, whatever its variant: a delegated one names its spawning call, a top-level
+	// one names none.
+	ids := map[string]bool{}
+	for _, e := range sink.events {
+		base, ok := eventBaseOf(e)
+		if !ok {
+			t.Fatalf("eventBaseOf does not know %T — teach it the new variant", e)
+		}
+		if base.Depth == 0 {
+			if base.CallID != "" {
+				t.Errorf("%T at Depth 0 carries CallID %q, want empty — the top-level agent was spawned by no call", e, base.CallID)
+			}
+			continue
+		}
+		if base.CallID == "" {
+			t.Errorf("%T at Depth %d carries no CallID, want the spawning call's id", e, base.Depth)
+			continue
+		}
+		ids[base.CallID] = true
+	}
+	if len(ids) != 2 || !ids["c1"] || !ids["c2"] {
+		t.Errorf("the delegated events carried ids %v, want exactly c1 and c2", ids)
+	}
+
+	// And each child's own answer is stamped with the call that asked for it — not merely with
+	// SOME id, which a single shared stamp would also satisfy.
+	want := map[string]string{"first child reply": "c1", "second child reply": "c2"}
+	for _, e := range sink.events {
+		me, ok := e.(domain.MessageEvent)
+		if !ok {
+			continue
+		}
+		id, tracked := want[me.Text]
+		if !tracked {
+			continue
+		}
+		if me.CallID != id {
+			t.Errorf("the child's %q message carries CallID %q, want %q", me.Text, me.CallID, id)
+		}
+		delete(want, me.Text)
+	}
+	if len(want) != 0 {
+		t.Errorf("never saw the child messages %v", want)
+	}
+}
+
+// eventBaseOf returns the EventBase a variant embeds, so a test can read Depth and CallID without
+// knowing which variant it holds. domain seals the Event interface with an unexported method, so a
+// switch over the variants is the only way to reach the base from here; ok=false means the set
+// grew a variant this switch has not been taught.
+func eventBaseOf(e domain.Event) (domain.EventBase, bool) {
+	switch ev := e.(type) {
+	case domain.TokenEvent:
+		return ev.EventBase, true
+	case domain.ReasoningEvent:
+		return ev.EventBase, true
+	case domain.StreamResetEvent:
+		return ev.EventBase, true
+	case domain.MessageEvent:
+		return ev.EventBase, true
+	case domain.ToolCallEvent:
+		return ev.EventBase, true
+	case domain.ToolResultEvent:
+		return ev.EventBase, true
+	case domain.ApprovalEvent:
+		return ev.EventBase, true
+	case domain.MechanismFiredEvent:
+		return ev.EventBase, true
+	case domain.ErrorEvent:
+		return ev.EventBase, true
+	case domain.UsageEvent:
+		return ev.EventBase, true
+	case domain.AuditEvent:
+		return ev.EventBase, true // the base's CallID, not the audited call's shadowing member
+	default:
+		return domain.EventBase{}, false
+	}
+}
+
 // TestSubAgent_InheritsPlanModeCannotWrite proves a sub-agent in a Plan-mode parent inherits
 // Plan and therefore refuses a write its child attempts (the acceptance ADR 0013 pins).
 func TestSubAgent_InheritsPlanModeCannotWrite(t *testing.T) {
@@ -586,7 +688,7 @@ func TestSubAgentInheritsSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	child, err := a.newChildAgent()
+	child, err := a.newChildAgent("call_sub")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}

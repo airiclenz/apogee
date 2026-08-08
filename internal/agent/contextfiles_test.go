@@ -401,7 +401,7 @@ func TestSubAgentInheritsParentContextFiles(t *testing.T) {
 		t.Fatalf("Remove: %v", err)
 	}
 
-	child, err := a.newChildAgent()
+	child, err := a.newChildAgent("call_sub")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}

@@ -225,7 +225,7 @@ func TestAgentAnytimeSettersConcurrent(t *testing.T) {
 			_ = a.skipUnderBypass(row)
 			_ = a.shouldAutoCompact()
 			_ = a.contextFileList()
-			_, _ = a.newChildAgent() // the spawn seam reads the live Bypass and Compaction gates too
+			_, _ = a.newChildAgent("call_sub") // the spawn seam reads the live Bypass and Compaction gates too
 		}
 	}()
 	wg.Wait()

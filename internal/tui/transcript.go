@@ -101,14 +101,20 @@ const (
 // captured together at fold time and frozen there, which is what keeps a finished run's history
 // out of reach of a later window rebind.
 type entry struct {
-	kind      entryKind
-	text      string
-	depth     int
-	callID    string
-	tool      toolView
-	done      bool
-	expanded  bool // view-only block state: false = collapsed (the default); never persisted
-	ephemeral bool // display-only: rendered, never persisted (see encodeTranscript)
+	kind   entryKind
+	text   string
+	depth  int
+	callID string
+	// spawnCallID is the RUN this entry belongs to: the id of the sub_agent call that spawned
+	// the agent whose event folded into it (domain.EventBase.CallID), empty for the human's own
+	// top-level conversation. It is what tells one delegated run's entries from another's when
+	// several children run at once (ADR 0039) — depth cannot, because siblings share it — and it
+	// is a different fact from callID above, which is the entry's OWN tool call.
+	spawnCallID string
+	tool        toolView
+	done        bool
+	expanded    bool // view-only block state: false = collapsed (the default); never persisted
+	ephemeral   bool // display-only: rendered, never persisted (see encodeTranscript)
 	// entryUser / entryInterjected: where the skills this message invoked sit IN text — one span
 	// per occurrence
 	skillSpans []skillSpan

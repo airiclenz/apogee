@@ -128,10 +128,30 @@ default, absent-absent → 1; a `/server` switch to a pinned entry installs the 
 
 **Commit:** `feat(provider): discover total_slots and resolve the parallel-agents cap`
 
-## 3. Event identity: the spawning call-ID on every child event
+## 3. Event identity: the spawning call-ID on every child event — ✅ DONE (2026-08-08)
 
 Independent of items 1–2 (pure engine/persistence plumbing; lands before item 4 so
 concurrency is born attributable).
+
+NOTES (2026-08-08): five deviations from this item's literal text, all recorded rather than assumed.
+(a) The TUI member is named `spawnCallID` (entry + wire, `"spawnCallID,omitempty"`), not `callID`:
+`entry.callID` already exists and means the entry's OWN tool call (a result pairs to it), so
+re-using the name would conflate two different facts and a second `callID` is impossible. (b) NO
+transcript blob version bump — "per its existing versioning rules" resolves to no bump: the file
+states that rule three times over for its earlier additive members (`SkillSpans`, `CtxUsed`/
+`CtxLimit`, `Solo`, `Quoted`), an omitempty member is invisible to an older build, and a bump would
+make every blob this build writes UNREADABLE to any older one (the reject-forward rule) for zero
+gain. Item 8's CHANGELOG line should therefore read "additive transcript member", not "version
+bump". (c) Fold-time stamping of `entry.spawnCallID` is NOT done here: the transcript model still
+appends entries without it, because threading the id through the six fold helpers IS item 6's
+"groups Depth > 0 events by CallID" — item 3 lands the identity, the persistence and the round
+trip. (d) `internal/domain/events.go`: `AuditEvent.CallID` (the audited call) now SHADOWS the
+promoted `EventBase.CallID` (the spawning call). Both are documented on each other and pinned by
+`TestAuditEventCallIDShadowsTheSpawningCall` rather than renaming an existing exported field.
+(e) The planned "domain — base() stamps CallID" test lives in `internal/agent` (`base()` is an
+Agent method); `internal/domain` got the shadowing and sibling-separation tests instead. Also:
+`internal/tui/sink.go`'s token-coalescing doc was corrected — its buffer key is the whole
+`EventBase`, so concurrent siblings' tokens now split buffers for free.
 
 **What:**
 

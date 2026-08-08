@@ -18,7 +18,7 @@ import (
 //
 // Delivery is lossless: no Event's content is ever dropped or reordered — the correctness floor
 // the bench-side ordering and the TUI both want. It is not, however, one-Msg-per-Event: adjacent
-// TokenEvents sharing a (Depth, Turn) are coalesced — their text accumulates for a short window
+// TokenEvents sharing an EventBase are coalesced — their text accumulates for a short window
 // (tokenCoalesceWindow) and lands as a single TokenEvent — which is the option phase-2 detail
 // plan §3 C2 held in reserve, taken because a provider emits one delta per visible byte-run
 // (internal/agent/loop.go) and every Msg costs the TUI a transcript render. Every other variant
@@ -35,9 +35,11 @@ type teaSink struct {
 	// pending is the accumulated TokenEvent text — a plain string, never a strings.Builder,
 	// per this package's no-copy-type hygiene (ADR 0011, doc.go).
 	pending string
-	// base is the (Depth, Turn) the pending text belongs to. Only tokens sharing it may
-	// merge: a sub-agent's stream (Depth > 0) nests inside the parent's and is a different
-	// block in the transcript, and a Turn boundary is a commit point.
+	// base is the (Depth, Turn, run identity) the pending text belongs to. Only tokens sharing
+	// all three may merge: a sub-agent's stream (Depth > 0) nests inside the parent's and is a
+	// different block in the transcript, a Turn boundary is a commit point, and two children of
+	// one reply share a depth but not a spawning call id (domain.EventBase.CallID), so the id is
+	// what keeps concurrent siblings' text from merging into one another's block (ADR 0039).
 	base domain.EventBase
 	// buffering says a buffer is open, which an empty pending string cannot: a zero-length
 	// token must still be delivered rather than silently swallowed.
@@ -82,7 +84,7 @@ func (s *teaSink) Emit(e domain.Event) {
 }
 
 // emitToken merges tok into the open buffer, or opens a new one when nothing is buffered or
-// the stream moved to another (Depth, Turn). Nothing is delivered here unless a boundary
+// the stream moved to another (Depth, Turn, run identity). Nothing is delivered here unless a boundary
 // forces it: the window timer does the delivering.
 func (s *teaSink) emitToken(tok domain.TokenEvent) {
 	s.mu.Lock()

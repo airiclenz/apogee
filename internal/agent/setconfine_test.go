@@ -101,7 +101,7 @@ func TestNewChildAgentInheritsLiveConfineToWorkspace(t *testing.T) {
 	}
 	call := domain.ToolCall{ID: "c1", Tool: "w"}
 
-	spawnedConfined, err := a.newChildAgent()
+	spawnedConfined, err := a.newChildAgent("call_sub")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestNewChildAgentInheritsLiveConfineToWorkspace(t *testing.T) {
 
 	a.SetConfineToWorkspace(false)
 
-	child, err := a.newChildAgent()
+	child, err := a.newChildAgent("call_sub")
 	if err != nil {
 		t.Fatalf("newChildAgent after the toggle: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestAgentSetConfineToWorkspaceConcurrent(t *testing.T) {
 		for i := 0; i < iters; i++ {
 			_ = a.ConfineToWorkspace()
 			_ = resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call)))
-			_, _ = a.newChildAgent() // the spawn seam reads the live flag too
+			_, _ = a.newChildAgent("call_sub") // the spawn seam reads the live flag too
 		}
 	}()
 	wg.Wait()

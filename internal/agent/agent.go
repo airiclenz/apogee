@@ -143,6 +143,7 @@ type Agent struct {
 	compactSat   bool                // saturation latch: a prior auto-fold could not bring history under its allocation, so further automatic folds stand down until the estimate drops back under it (S2)
 	approved     map[string]bool     // tools the human allowed for the rest of this Session
 	depth        int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
+	callID       string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
 }
 
 // New constructs an Agent from cfg. It validates the configuration — including the

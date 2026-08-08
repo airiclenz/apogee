@@ -503,9 +503,14 @@ func toolResult(depth int, id string) domain.ToolResultEvent {
 	}
 }
 
-// usageAt is one Turn's token accounting at depth.
-func usageAt(depth, total int) domain.UsageEvent {
-	return domain.UsageEvent{EventBase: domain.EventBase{Depth: depth}, TotalTokens: total}
+// usageAt is one Turn's token accounting at depth, reported by the agent spawnCallID
+// delegated to ("" for the Firing's own top-level agent — the run identity every event now
+// carries, domain.EventBase.CallID).
+func usageAt(depth int, spawnCallID string, total int) domain.UsageEvent {
+	return domain.UsageEvent{
+		EventBase:   domain.EventBase{Depth: depth, CallID: spawnCallID},
+		TotalTokens: total,
+	}
 }
 
 // TestEventTapKeepsTheFiringsFillFreeOfADelegatedRun pins the top-level filter the record's
@@ -518,10 +523,10 @@ func TestEventTapKeepsTheFiringsFillFreeOfADelegatedRun(t *testing.T) {
 	const window = 32000
 	tap := &eventTap{window: window}
 
-	tap.Emit(usageAt(0, 900))
+	tap.Emit(usageAt(0, "", 900))
 	tap.Emit(subAgentCall(0, "call_1", "audit the issues"))
-	tap.Emit(usageAt(1, 5000))
-	tap.Emit(usageAt(1, 12000))
+	tap.Emit(usageAt(1, "call_1", 5000))
+	tap.Emit(usageAt(1, "call_1", 12000))
 
 	if got := tap.fill(); got != 900 {
 		t.Errorf("fill() = %d, want 900 — a delegated run's usage is not the firing's", got)
@@ -556,16 +561,50 @@ func TestEventTapAttributesANestedRunToItsOwnDepth(t *testing.T) {
 	tap := &eventTap{window: window}
 
 	tap.Emit(subAgentCall(0, "call_1", "outer task"))
-	tap.Emit(usageAt(1, 4000))
+	tap.Emit(usageAt(1, "call_1", 4000))
 	tap.Emit(subAgentCall(1, "call_2", "nested task"))
-	tap.Emit(usageAt(2, 9000))
-	tap.Emit(toolResult(1, "call_2")) // the nested run closes first
-	tap.Emit(usageAt(1, 5000))        // the outer run keeps going, on its own window
+	tap.Emit(usageAt(2, "call_2", 9000))
+	tap.Emit(toolResult(1, "call_2"))    // the nested run closes first
+	tap.Emit(usageAt(1, "call_1", 5000)) // the outer run keeps going, on its own window
 	tap.Emit(toolResult(0, "call_1"))
 
 	want := []SubAgentUsage{
 		{Used: 9000, Limit: window, Task: "nested task"},
 		{Used: 5000, Limit: window, Task: "outer task"},
+	}
+	runs := tap.subAgentRuns()
+	if len(runs) != len(want) {
+		t.Fatalf("subAgentRuns() = %+v, want %+v", runs, want)
+	}
+	for i := range want {
+		if runs[i] != want[i] {
+			t.Errorf("subAgentRuns()[%d] = %+v, want %+v", i, runs[i], want[i])
+		}
+	}
+}
+
+// TestEventTapAttributesTwoRunsFromOneTurnByCallID pins the re-keying (ADR 0039): two
+// delegations dispatched in ONE Turn share a depth, so nothing but each reading's run identity
+// can say whose fill it is. The readings interleave and the runs close out of dispatch order,
+// which is exactly the shape a concurrent fan-out produces — a depth-keyed bracket would report
+// whichever landed last as both runs' fill, and lose one of them entirely.
+func TestEventTapAttributesTwoRunsFromOneTurnByCallID(t *testing.T) {
+	t.Parallel()
+
+	const window = 32000
+	tap := &eventTap{window: window}
+
+	tap.Emit(subAgentCall(0, "call_a", "audit the issues"))
+	tap.Emit(subAgentCall(0, "call_b", "write the docs"))
+	tap.Emit(usageAt(1, "call_a", 4000))
+	tap.Emit(usageAt(1, "call_b", 9000))
+	tap.Emit(usageAt(1, "call_a", 7000)) // a later Turn of the FIRST child restates its whole fill
+	tap.Emit(toolResult(0, "call_b"))    // the second child finishes first
+	tap.Emit(toolResult(0, "call_a"))
+
+	want := []SubAgentUsage{
+		{Used: 9000, Limit: window, Task: "write the docs"},
+		{Used: 7000, Limit: window, Task: "audit the issues"},
 	}
 	runs := tap.subAgentRuns()
 	if len(runs) != len(want) {
@@ -588,21 +627,21 @@ func TestEventTapDropsWhatItCannotAttribute(t *testing.T) {
 	tap := &eventTap{window: 32000}
 
 	// Nothing is open: a deep usage event has no owner and is dropped.
-	tap.Emit(usageAt(1, 7000))
+	tap.Emit(usageAt(1, "call_9", 7000))
 	tap.Emit(toolResult(0, "call_0"))
 	// A plain tool call opens no bracket, so the usage that follows it stays unattributed.
 	tap.Emit(domain.ToolCallEvent{
 		EventBase: domain.EventBase{},
 		Call:      domain.ToolCall{ID: "call_1", Tool: "read_file"},
 	})
-	tap.Emit(usageAt(1, 7000))
+	tap.Emit(usageAt(1, "call_1", 7000))
 	if runs := tap.subAgentRuns(); len(runs) != 0 {
 		t.Fatalf("subAgentRuns() = %+v, want none — nothing was ever delegated", runs)
 	}
 
 	// A real delegation, but the same Turn's OTHER tool result must not close it.
 	tap.Emit(subAgentCall(0, "call_2", "audit the issues"))
-	tap.Emit(usageAt(1, 6000))
+	tap.Emit(usageAt(1, "call_2", 6000))
 	tap.Emit(toolResult(0, "call_1"))
 	if runs := tap.subAgentRuns(); len(runs) != 0 {
 		t.Fatalf("subAgentRuns() = %+v, want none — call_1 is not the delegating call", runs)

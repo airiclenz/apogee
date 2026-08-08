@@ -61,7 +61,14 @@ type wireEntry struct {
 	Text   string `json:"text,omitempty"`
 	Depth  int    `json:"depth,omitempty"`
 	CallID string `json:"callID,omitempty"`
-	Done   bool   `json:"done,omitempty"`
+	// SpawnCallID is the run identity of a delegated entry (entry.spawnCallID): the id of the
+	// sub_agent call that spawned the agent whose event it folded from. It is ADDITIVE within
+	// transcriptVersion and needs no bump, on the wireEntry rule above — it takes omitempty, so a
+	// top-level entry writes nothing new and an older build ignores a member it cannot place,
+	// while a blob written before it existed decodes to "" for every entry: the one run a
+	// serialized session ever had, which is how such a record was written and how it still reads.
+	SpawnCallID string `json:"spawnCallID,omitempty"`
+	Done        bool   `json:"done,omitempty"`
 	// the fill a sub-agent run's head wears (entry.ctxUsed / ctxLimit): what the delegate's context
 	// held when it last reported, and the window that reading filled. Both members are ADDITIVE
 	// within transcriptVersion and travel together, because a fill says nothing without its limit —
@@ -254,14 +261,15 @@ func decodeTranscript(data []byte) ([]entry, error) {
 // would have to be kept in step with it.
 func toWireEntry(e *entry, kind string) wireEntry {
 	w := wireEntry{
-		Kind:       kind,
-		Text:       e.text,
-		Depth:      e.depth,
-		CallID:     e.callID,
-		Done:       e.done,
-		CtxUsed:    e.ctxUsed,
-		CtxLimit:   e.ctxLimit,
-		SkillSpans: toWireSkillSpans(e.skillSpans),
+		Kind:        kind,
+		Text:        e.text,
+		Depth:       e.depth,
+		CallID:      e.callID,
+		SpawnCallID: e.spawnCallID,
+		Done:        e.done,
+		CtxUsed:     e.ctxUsed,
+		CtxLimit:    e.ctxLimit,
+		SkillSpans:  toWireSkillSpans(e.skillSpans),
 	}
 	if e.kind == entryToolCall || e.kind == entrySchedule {
 		w.Tool = toWireToolView(e.tool)
@@ -331,13 +339,14 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 		return entry{}, false
 	}
 	e := entry{
-		kind:     kind,
-		text:     stripEscapes(w.Text),
-		depth:    w.Depth,
-		callID:   w.CallID,
-		done:     w.Done,
-		ctxUsed:  w.CtxUsed,
-		ctxLimit: w.CtxLimit,
+		kind:        kind,
+		text:        stripEscapes(w.Text),
+		depth:       w.Depth,
+		callID:      w.CallID,
+		spawnCallID: w.SpawnCallID,
+		done:        w.Done,
+		ctxUsed:     w.CtxUsed,
+		ctxLimit:    w.CtxLimit,
 	}
 	// The offsets were measured against the text as SENT, and the text above has just been
 	// re-stripped as untrusted disk input, so a span is kept only while it still locates a run of

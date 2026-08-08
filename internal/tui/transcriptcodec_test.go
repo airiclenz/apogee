@@ -902,6 +902,67 @@ func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
 	})
 }
 
+// TestTranscriptCodecRoundTripsTheSpawningCallID pins the run identity a delegated entry keeps
+// across a resume (ADR 0039): the id of the sub_agent call that spawned the agent whose event
+// folded into it, which is what tells two concurrent children's blocks apart once several run at
+// once — depth cannot, because siblings share it. The member is additive within transcriptVersion,
+// so it must be absent from a top-level entry's wire form and must decode to "" from a blob
+// written before it existed: such a record had exactly one run in flight at a time, which is what
+// an empty identity already means.
+func TestTranscriptCodecRoundTripsTheSpawningCallID(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a delegated entry carries its spawning call through the record", func(t *testing.T) {
+		tr := &transcript{entries: []entry{
+			{kind: entryUser, text: "delegate it"},
+			{kind: entryAssistant, text: "first child answer", depth: 1, spawnCallID: "c1"},
+			{kind: entryAssistant, text: "second child answer", depth: 1, spawnCallID: "c2"},
+			{kind: entryAssistant, text: "both done"},
+		}}
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		// The member is part of the record now: pin its name and the fact the top-level entries
+		// write it not at all (two entries, two occurrences).
+		if got := strings.Count(string(data), `"spawnCallID"`); got != 2 {
+			t.Errorf("wire blob carries %d spawnCallID members, want 2 (the delegated entries only):\n%s", got, data)
+		}
+
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != len(tr.entries) {
+			t.Fatalf("decoded %d entries, want %d", len(got), len(tr.entries))
+		}
+		for i := range tr.entries {
+			if got[i].spawnCallID != tr.entries[i].spawnCallID {
+				t.Errorf("entry %d replayed spawnCallID %q, want %q",
+					i, got[i].spawnCallID, tr.entries[i].spawnCallID)
+			}
+		}
+	})
+
+	t.Run("a blob written before the member decodes to no run identity", func(t *testing.T) {
+		legacy := []byte(`{"version":1,"entries":[{"kind":"assistant","text":"child answer","depth":1}]}`)
+		got, err := decodeTranscript(legacy)
+		if err != nil {
+			t.Fatalf("decodeTranscript(legacy): %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries, want the one nested block", len(got))
+		}
+		if got[0].spawnCallID != "" {
+			t.Errorf("a blob predating the member decoded spawnCallID %q, want empty", got[0].spawnCallID)
+		}
+		if got[0].depth != 1 || got[0].text != "child answer" {
+			t.Errorf("the rest of the legacy entry decoded as %+v, want the nested block unchanged", got[0])
+		}
+	})
+}
+
 // TestTranscriptCodecGoldenV1 pins the exact v1 wire shape: field names, the string kind enum,
 // the nested tool card with its name and coloured details, the presented Method as a domain
 // string, and omitempty behaviour. A change to any of these — a renamed field, a reordered kind

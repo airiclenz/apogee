@@ -23,12 +23,30 @@ type Event interface {
 // with Depth > 0 (ADR 0005). Turn is the Turn index the event belongs to.
 //
 // It is exported so the engine and other internal subsystems can construct Event
-// variants (setting Turn/Depth), but it is deliberately NOT re-exported by the root
-// facade: the sealing method eventDepth() stays unexported in this package, so no
+// variants (setting Turn/Depth/CallID), but it is deliberately NOT re-exported by the
+// root facade: the sealing method eventDepth() stays unexported in this package, so no
 // package outside internal/* can satisfy Event — the variant set remains closed.
 type EventBase struct {
 	Depth int
 	Turn  int
+	// CallID is the RUN IDENTITY of the agent that emitted the event: the id of the
+	// sub_agent tool call that spawned it. It is stamped once, at that agent's
+	// construction, and every event the agent emits carries it — including the events of
+	// the tools it runs — so an observer can attribute a delegated event to the delegation
+	// that asked for it. It is empty at Depth 0: the top-level agent was spawned by no call.
+	//
+	// Depth alone cannot do this once children run CONCURRENTLY (ADR 0039): two siblings
+	// spawned by one reply share a depth, so a depth-keyed observer would braid their
+	// streams together. The call id is unique per spawning call, so it separates them, and
+	// it also identifies the tool call whose result the run will become — the same id the
+	// parent's ToolCallEvent and ToolResultEvent carry for that delegation.
+	//
+	// It names the SPAWNING call and never the event's own subject. A variant that also
+	// reports a call of its OWN — AuditEvent's audited call, ToolResultEvent's completed
+	// call — carries that one in its own member; AuditEvent's is named CallID too and
+	// therefore SHADOWS this field, so the spawning id is reached there as
+	// ev.EventBase.CallID.
+	CallID string
 }
 
 func (b EventBase) eventDepth() int { return b.Depth }
@@ -150,7 +168,11 @@ type UsageEvent struct {
 // string (e.g. "allowed", "dangerous-refused", "circuit-tripped").
 type AuditEvent struct {
 	EventBase
-	Tool     string
+	Tool string
+	// CallID is the AUDITED call's id — the tool call this record is about. It shadows
+	// EventBase.CallID, which is a different fact (the sub_agent call that spawned the
+	// emitting agent, empty at Depth 0): both travel, and the spawning one is reached as
+	// ev.EventBase.CallID. Pinned by TestAuditEventCallIDShadowsTheSpawningCall.
 	CallID   string
 	Decision string
 	Reason   string // the guardrail reason, if any

@@ -302,16 +302,16 @@ func (d *denier) count() int {
 // window of its own rather than its parent's, and a sub-agent's message is reported back to
 // its parent, never to the Firing's caller. The third reading is the deeper half of that same
 // fact, not an exception to it — a delegated run's fill is real, is nobody else's, and dies
-// with the child Agent unless it is caught here. So the tap BRACKETS each run: the delegating
-// sub_agent ToolCallEvent at depth d opens a bracket for child depth d+1, usage at depth d+1
-// updates it, and the tool result closing that same call closes it into Result.SubAgents.
-// Nothing accrues across depths — a usage event only ever reaches the bracket at its OWN
-// depth — so a nested run's fill never lands on the run that spawned it.
+// with the child Agent unless it is caught here. So the tap BRACKETS each run BY THE CALL THAT
+// ASKED FOR IT: the delegating sub_agent ToolCallEvent opens a bracket under its call id, the
+// child's usage — stamped with that same id as its run identity (domain.EventBase.CallID) —
+// updates it, and the tool result closing that call closes the bracket into Result.SubAgents.
 //
-// One bracket per depth suffices because delegation is SERIALIZED (ADR 0014): a second
-// delegation at a given depth cannot begin before the first one's result has landed. Should
-// concurrent fan-out ever land, UsageEvent would need a run identity and this bracketing
-// would have to follow it; until then an event with no matching bracket is dropped.
+// The call id is what makes the bracketing survive CONCURRENT delegation (ADR 0039): siblings
+// spawned by one reply share a depth, so a depth-keyed bracket would braid their fills
+// together and report whichever landed last as both. Each run's identity is its own, so
+// nothing accrues across runs — a nested run's fill never lands on the run that spawned it,
+// and a reading with no matching bracket is dropped.
 type eventTap struct {
 	inner domain.EventSink
 	// window is the Firing's context window, stamped onto each finished run's reading: a
@@ -321,18 +321,18 @@ type eventTap struct {
 	mu    sync.Mutex
 	total int
 	final string
-	// open holds the in-flight sub-agent run per child depth; runs is the finished ones in
-	// finish order.
-	open map[int]*openSubAgent
+	// open holds the in-flight sub-agent runs, keyed by the id of the delegating call that
+	// opened each one; runs is the finished ones in finish order.
+	open map[string]*openSubAgent
 	runs []SubAgentUsage
 }
 
-// openSubAgent is one sub-agent run in flight: the delegating call that will close it, the
-// task it was given, and the latest fill its own Turns have reported.
+// openSubAgent is one sub-agent run in flight: the task it was given, and the latest fill its
+// own Turns have reported. The delegating call that will close it is the map key it is filed
+// under, not a member — one run, one identity.
 type openSubAgent struct {
-	callID string
-	task   string
-	used   int
+	task string
+	used int
 }
 
 // Emit records a top-level usage total and answer, tracks the sub-agent runs that pass
@@ -347,7 +347,7 @@ func (t *eventTap) Emit(e domain.Event) {
 			total = ev.PromptTokens + ev.CompletionTokens
 		}
 		if total > 0 {
-			t.noteUsage(ev.Depth, total)
+			t.noteUsage(ev.Depth, ev.CallID, total)
 		}
 	case domain.MessageEvent:
 		if ev.Depth != 0 {
@@ -358,58 +358,59 @@ func (t *eventTap) Emit(e domain.Event) {
 		t.mu.Unlock()
 	case domain.ToolCallEvent:
 		if ev.Call.Tool == tools.SubAgentToolName {
-			t.openSubAgentRun(ev.Depth+1, ev.Call)
+			t.openSubAgentRun(ev.Call)
 		}
 	case domain.ToolResultEvent:
 		// A tool result carries no tool NAME, so the call id is what identifies it as the
 		// delegation's: only the result closing the call that opened the bracket closes it.
-		t.closeSubAgentRun(ev.Depth+1, ev.Result.CallID)
+		t.closeSubAgentRun(ev.Result.CallID)
 	}
 	if t.inner != nil {
 		t.inner.Emit(e)
 	}
 }
 
-// noteUsage files one Turn's token total under the agent that reported it: the Firing's own
-// at depth 0, else the sub-agent run open at that depth. The latest total wins — a Turn
-// restates the whole fill rather than adding to it — and a total with no run to belong to is
-// dropped.
-func (t *eventTap) noteUsage(depth, total int) {
+// noteUsage files one Turn's token total under the agent that reported it: the Firing's own at
+// depth 0, else the sub-agent run the reading's own run identity names (callID — the
+// delegating call that spawned the reporting agent). The latest total wins — a Turn restates
+// the whole fill rather than adding to it — and a total with no run to belong to is dropped.
+func (t *eventTap) noteUsage(depth int, callID string, total int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if depth == 0 {
 		t.total = total
 		return
 	}
-	if run := t.open[depth]; run != nil {
+	if run := t.open[callID]; run != nil {
 		run.used = total
 	}
 }
 
-// openSubAgentRun starts the bracket for the run call is delegating, which will report at
-// childDepth. An unfinished bracket already at that depth cannot happen while delegation is
-// serialized, and replacing it is the safe read of that contract having moved.
-func (t *eventTap) openSubAgentRun(childDepth int, call domain.ToolCall) {
+// openSubAgentRun starts the bracket for the run call is delegating, filed under that call's
+// own id — the identity the spawned agent will stamp on every event it emits. A second
+// delegation opens a bracket of its own, whether it starts after the first one closed or
+// beside it.
+func (t *eventTap) openSubAgentRun(call domain.ToolCall) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.open == nil {
-		t.open = make(map[int]*openSubAgent)
+		t.open = make(map[string]*openSubAgent)
 	}
-	t.open[childDepth] = &openSubAgent{callID: call.ID, task: firstTaskLine(call.Arguments)}
+	t.open[call.ID] = &openSubAgent{task: firstTaskLine(call.Arguments)}
 }
 
-// closeSubAgentRun finishes the run at childDepth when callID is the delegating call's,
-// appending its reading in finish order. A result for any OTHER call — a plain tool the same
-// Turn ran — leaves the bracket alone, and a run that reported no usage at all is dropped: a
-// zero fill is the absence of a reading, not a reading of zero.
-func (t *eventTap) closeSubAgentRun(childDepth int, callID string) {
+// closeSubAgentRun finishes the run callID delegated, appending its reading in finish order. A
+// result for any OTHER call — a plain tool the same Turn ran, or a leaf tool the child itself
+// ran — matches no bracket and leaves them all alone, and a run that reported no usage at all
+// is dropped: a zero fill is the absence of a reading, not a reading of zero.
+func (t *eventTap) closeSubAgentRun(callID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	run := t.open[childDepth]
-	if run == nil || run.callID != callID {
+	run := t.open[callID]
+	if run == nil {
 		return
 	}
-	delete(t.open, childDepth)
+	delete(t.open, callID)
 	if run.used <= 0 {
 		return
 	}
