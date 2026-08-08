@@ -17,6 +17,13 @@ import "context"
 // (returns promptly with an error or a scripted answer) rather than hanging — and a nil
 // Asker means the ask_user tool is simply not registered (graceful), so the model is never
 // offered a question it cannot have answered.
+//
+// An Asker NEVER has to be safe for concurrent use, exactly as Approver never has to be: the
+// engine QUEUES questions on its side, so an implementation sees one Ask at a time even while a
+// depth-0 sub-agent fan-out has several children running (ADR 0039 decision 12). That queue is
+// what makes "one question on the screen" true without every Driver building a queue of its own —
+// the asking child blocks on its turn while its siblings keep working, and the host's
+// wait-tolerance (ADR 0031) is what lets a queued question wait as long as the human takes.
 type Asker interface {
 	Ask(ctx context.Context, req AskRequest) (AskAnswer, error)
 }
@@ -45,6 +52,43 @@ type AskRequest struct {
 	// caller, Driver, or reply changes shape. Meaningless without Choices — a multi-select
 	// request with none simply leaves the human nothing to check, which is not an error.
 	MultiSelect bool
+
+	// SubAgentTask is the delegated task of the SUB-AGENT that asked — the answer to "which agent
+	// is asking", which stops being obvious the moment several children run at once and their
+	// questions queue one behind another (ADR 0039). It is the twin of ApprovalRequest.SubAgentTask
+	// and carries the same text: the task from the spawning sub_agent call, so a nested delegation
+	// names its OWN task rather than its parent's.
+	//
+	// It is empty when the top-level agent asks: a session that never delegates carries no extra
+	// fact, and its question reads exactly as it always has. Unlike the Approval one — which the
+	// loop stamps on a request it builds itself — this field is filled from the ctx the tool call
+	// runs under (WithSubAgentTask), because the ask_user TOOL is what builds an AskRequest.
+	SubAgentTask string
+}
+
+// subAgentTaskCtxKey keys the asking Agent's delegated task in a tool call's context.
+type subAgentTaskCtxKey struct{}
+
+// WithSubAgentTask returns a context carrying task as the delegated task of the sub-agent whose
+// tool call runs under it, so a host-delegate tool can name the agent that invoked it
+// (AskRequest.SubAgentTask). It is the identity carrier the Approval path does not need: the loop
+// builds an ApprovalRequest itself and stamps the task straight onto it, while an AskRequest is
+// built by the ask_user tool, one interface boundary away from the Agent that knows the task.
+// Request-scoped identity crossing an API the caller does not own is what a context value is for —
+// the same seam WithConfinement uses to hand a subprocess tool its box.
+//
+// The engine installs it per tool call, so a nested delegation overwrites its parent's value with
+// its own (a sub_agent task is non-empty by construction) and a top-level agent installs nothing.
+func WithSubAgentTask(ctx context.Context, task string) context.Context {
+	return context.WithValue(ctx, subAgentTaskCtxKey{}, task)
+}
+
+// SubAgentTaskFromContext returns the delegated task installed by WithSubAgentTask, or "" when the
+// call belongs to the top-level agent — the same emptiness that means "nobody but the top-level
+// agent could be asking" on the request itself, so a caller needs no second signal.
+func SubAgentTaskFromContext(ctx context.Context) string {
+	task, _ := ctx.Value(subAgentTaskCtxKey{}).(string)
+	return task
 }
 
 // AskAnswer is the human's free-text reply. A STRUCT for the same freeze-safety reason

@@ -275,6 +275,35 @@ leads its body with `Sub-agent: <task>` when the field is non-empty (`internal/t
 the pane's wrap-everything rule: the task says who is asking, and who is asking must not be able to
 push what is being decided off the screen.
 
+NOTES (2026-08-08) — **follow-up FU-A** (owner-authorised during the run, NOT a numbered plan item;
+item 5 stays as it was): `ask_user` carried the identical hazard and this item did not cover it —
+`case askReqMsg` overwrote `m.pendingAsk` unconditionally, so two concurrent children calling
+ask_user orphaned the first one's reply channel. The queueing counterpart landed with four
+deviations from item 5's shape, all forced by where the Asker is CONSUMED. (a) The seam
+(`queuedAsks`/`queuedAsker`) lives at the TOOL — `tools.NewAskUser`, `internal/tools/ask_user.go` —
+not in `newAgent` beside `queuedApprovals`, because the loop consults the Approver itself but never
+touches the Asker: `ask_user` does, and `cmd/apogee/wire.go` builds its own registry (MCP tools) from
+the RAW `Config.Asker` before the engine sees it, so a seam installed on `Config.Asker` in `newAgent`
+would be dead in the one Driver that has a human to ask. Its properties are item 5's verbatim —
+ctx-aware channel wait, nil stays nil, idempotent — and one `*AskUser` is one slot, which a whole
+Agent tree shares because `defaultSubAgentTools` subsets the PARENT's registry (same instance).
+(b) The asking child's identity rides the CONTEXT (`domain.WithSubAgentTask`, installed per call in
+`executeTool`, read in `AskUser.Execute`) rather than being stamped by the loop: the loop builds an
+`ApprovalRequest` itself, but the tool builds its own `AskRequest` one interface boundary away. It is
+the seam `WithConfinement` already uses for exactly this. (c) The seam's own unit tests (nil,
+idempotence, cancelled-while-queued) are in `internal/tools/askqueue_test.go`, the package the seam
+is in; the behavioural ones the item named — two concurrent children, the single delegation, the
+top-level floor — are in `internal/agent/askqueue_test.go`. (d) The pane's `Sub-agent:` line leads the
+BODY, mirroring the approval pane, which means on the degenerate windows where the ask pane's border
+falls back to its body's lead (`popupSpec.titleFromBody`) that border now leads with the identity
+rather than with the question.
+
+STILL OPEN after FU-A: the two seams hold SEPARATE slots, so an approval from one child and an
+ask_user question from another can still be live at the same instant and clobber each other on the
+TUI's single prompt state (`m.pending` vs `m.pendingAsk`). Sharing one slot means anchoring "the
+prompt on the screen" somewhere both `internal/agent` and `internal/tools` can reach — a design call
+of its own, not a fix to slip into a follow-up.
+
 **What:** The Approver contract is wait-tolerant (ADR 0031); what concurrency adds is
 simultaneous *requests* and an anonymous prompt.
 

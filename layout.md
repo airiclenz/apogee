@@ -322,6 +322,16 @@ pane it always drew. It is also the one string on this surface that is **clipped
 wrapped in full, ellipsis and all: it says who is asking, and who is asking must never push what is
 being decided off the screen.
 
+**The ask prompt says it the same way, in the same words.** A question a sub-agent put to you leads
+its body with the same `Sub-agent: <its delegated task>` line, above the question, under the same
+clip — because it answers the same question the approval pane's line does, and two decision surfaces
+answering "which agent is this?" in two different ways would be a dialect rather than a design.
+`ask_user` runs in a delegate exactly as it runs at the top level, so concurrent children can put
+questions to you at the same moment; those questions **queue** on the one prompt surface just as
+approvals do — one on the screen at a time, the asking child blocked and its siblings still working
+— and the question's own words say nothing about which of them wrote them. The line is absent at
+depth 0, so an undelegated session's box is the one it always drew.
+
 **Inside a pane's own grant the rows come first — except where the prose IS what is being decided.**
 A picker, a browser or a dropdown *is* its rows, and the caption over them takes what they leave; the
 approval prompt reads the same way and can afford to, because its offering is four fixed options and

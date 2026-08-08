@@ -4571,6 +4571,14 @@ func askChoiceRows(labels []string, multi bool, checked []bool) []popupRow {
 // line of the question, and an offering whose answers are a blank line apart would otherwise crowd
 // its last one against the border.
 //
+// A question a SUB-AGENT raised leads its body with `Sub-agent: <its delegated task>`, the approval
+// pane's line verbatim and under the same clip (approvalTaskClipRunes) — because it answers the same
+// question that pane's does, and answering it two different ways on two decision surfaces would be a
+// dialect rather than a design. Concurrent children's questions queue one at a time (ADR 0039), in an
+// order nothing on the screen predicts, so the question's own words no longer say whose work it
+// serves. The line is absent at depth 0 and the pane is then byte-identical to the one drawn before
+// delegation existed.
+//
 // A MULTI-SELECT question (domain.AskRequest.MultiSelect) draws one thing more: a checkbox in front
 // of every option, "[x]" where the row is ticked and "[ ]" where it is not (askChoiceRows), and a
 // hint that names ␣ among the live keys. The boxes are a COLUMN of the popup's own rather than three
@@ -4619,6 +4627,15 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	}
 
 	question := stripEscapes(req.Question)
+	// A question raised by a sub-agent leads with the child's delegated task, exactly as an approval
+	// prompt does (approvalPrompt) and clipped by the same bound: with several children running at
+	// once their questions QUEUE — one on the screen at a time, the asking child blocked and its
+	// siblings still working — and the question's own words say nothing about which of them wrote
+	// them. Absent at depth 0, so an undelegated session's pane is unchanged to the byte.
+	if req.SubAgentTask != "" {
+		question = "Sub-agent: " + clipRunes(stripEscapes(req.SubAgentTask), approvalTaskClipRunes) +
+			"\n" + question
+	}
 
 	// Budget against the live layout so a long question or choice set never pushes the input box
 	// off-screen (D2); past the question's own floor the rows get priority and the body takes what is

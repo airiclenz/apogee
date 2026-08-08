@@ -615,6 +615,17 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		}
 	}()
 
+	if a.task != "" {
+		// Install this Agent's delegated task so a tool that puts a QUESTION to the human can name
+		// the agent asking it (domain.AskRequest.SubAgentTask), the way an ApprovalRequest already
+		// names it. The Approval path needs no carrier — the loop builds that request itself
+		// (approve) — but ask_user builds its own, one interface boundary away from the Agent that
+		// knows the task, so the identity rides the call's context (ADR 0039 decision 12).
+		// Nothing is installed at depth 0: there, the top-level agent is the only thing that could
+		// be asking.
+		ctx = domain.WithSubAgentTask(ctx, a.task)
+	}
+
 	if box != nil {
 		// Install the Confinement handle so the subprocess tool confines the command it
 		// launches. resolve() chose Confine only after confirming caps (§4), so the Confiner is

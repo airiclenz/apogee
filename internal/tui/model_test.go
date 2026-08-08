@@ -1574,6 +1574,62 @@ func TestModelAskPromptMenuChrome(t *testing.T) {
 	}
 }
 
+// A question raised by a sub-agent leads its body with the child's delegated task, exactly as an
+// approval prompt does (ADR 0039 decision 12): concurrent children's questions queue one at a time,
+// in an order nothing on the screen predicts, so the question's own words no longer say whose work
+// it serves.
+func TestModelAskPromptNamesTheAskingSubAgent(t *testing.T) {
+	lines := askPaneLines(t, 100, domain.AskRequest{
+		Question:     "should I rewrite the loader or patch it?",
+		SubAgentTask: "audit the config loader for drift",
+	})
+	got := strings.Join(lines, "\n")
+
+	task := strings.Index(got, "Sub-agent: audit the config loader for drift")
+	if task < 0 {
+		t.Fatalf("the pane does not name the asking sub-agent's task:\n%s", got)
+	}
+	question := strings.Index(got, "should I rewrite the loader or patch it?")
+	if question < 0 {
+		t.Fatalf("the question is missing from the pane:\n%s", got)
+	}
+	if task > question {
+		t.Errorf("the Sub-agent line renders below the question; it must lead the body:\n%s", got)
+	}
+}
+
+// The top-level agent's own question carries no task, and its pane is unchanged to the byte — the
+// serial floor for a session that never delegates.
+func TestModelAskPromptTopLevelDrawsNoSubAgentLine(t *testing.T) {
+	req := domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}}
+	plainPane := strings.Join(askPaneLines(t, 100, req), "\n")
+	if strings.Contains(plainPane, "Sub-agent") {
+		t.Errorf("a top-level question drew a Sub-agent line:\n%s", plainPane)
+	}
+
+	req.SubAgentTask = "delegated work"
+	named := strings.Join(askPaneLines(t, 100, req), "\n")
+	if named == plainPane {
+		t.Error("naming the asking sub-agent changed nothing on the pane")
+	}
+}
+
+// The task is CLIPPED rather than wrapped, under the approval pane's own bound: it says who is
+// asking, and who is asking must never push what is being asked off the screen.
+func TestModelAskPromptClipsAnEssayLengthSubAgentTask(t *testing.T) {
+	got := strings.Join(askPaneLines(t, 100, domain.AskRequest{
+		Question:     "shall I proceed?",
+		SubAgentTask: strings.Repeat("sprawl ", approvalTaskClipRunes), // far past the bound
+	}), "\n")
+
+	if !strings.Contains(got, "…") {
+		t.Errorf("an over-long task was not clipped with an ellipsis:\n%s", got)
+	}
+	if !strings.Contains(got, "shall I proceed?") {
+		t.Errorf("the task crowded the question off the pane:\n%s", got)
+	}
+}
+
 // TestModelAskNamesItselfWhereTheQuestionHasNoRow is the ask pane's half of the promise the approval
 // prompt keeps with its border title: a decision surface with live keys always says what it is
 // deciding. The ask box says it with the question, and the question is BODY — so on the windows that
