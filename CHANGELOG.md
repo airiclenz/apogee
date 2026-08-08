@@ -38,9 +38,10 @@ point is a **minor** bump, not a breaking change.
   comes from the active **colour scheme**: one YAML file of 25 semantic roles (`error`, `code`,
   `tool-header`, `skill`, `file-ref`, `muted`/`muted-bright`, the four autonomy modes, the four
   spinner stops, …), named for what they mean rather than where they are drawn. Two schemes ship,
-  compiled into the binary: **`dark`**, which is exactly the palette apogee has always drawn with
-  and stays the default, and a new **`light`** for light terminals. Nothing is installed on disk
-  and nothing is ever downloaded.
+  compiled into the binary: **`dark`**, which is the palette apogee has always drawn with apart from
+  three roles retuned for legibility while the scheme system was being built (`code`, `tool-header`
+  and `tool-marker`) and stays the default, and a new **`light`** for light terminals. Nothing is
+  installed on disk and nothing is ever downloaded.
   - **`ui.color-scheme` in the `ui:` block** selects it, and **`~/.apogee/schemes/<name>.yaml`
     shadows a built-in of the same name** — write `dark.yaml` there and you have adjusted `dark`
     while still typing `dark`; delete the file and the shipped one is back.

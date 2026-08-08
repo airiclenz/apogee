@@ -146,7 +146,7 @@ type theme struct {
 	// (toolIndicator, toolMarker, the open member's gutter) stays dim in both, because the
 	// affordances are not what the reader opened the block for (detailStyle).
 	toolDetailBright lipgloss.Style
-	toolMarker       lipgloss.Style // the synthesized "+N more lines" remainder marker beneath a hidden body: light gray-blue, no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "+" — the prompt block's see-more keeps the heavier promptToggle treatment
+	toolMarker       lipgloss.Style // the synthesized "+N more lines" remainder marker beneath a hidden body: its own `tool-marker` role (a warm orange under `dark`, a cooler blue under `light`), no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "+" — the prompt block's see-more keeps the heavier promptToggle treatment
 	subRail          lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (toolLabel's `tool-header` role — one tone for the whole sub-agent frame)
 	skillAccent      lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
 	skillToken       lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)

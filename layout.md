@@ -479,13 +479,14 @@ indicator below, **and nothing else — never a target**. That holds for every b
 run, a lone call, a call still in flight, and the stray-result `result` header. The target always
 leads the first branch line instead, so the **target column does not move** when a second call joins
 the block. The label carries no brackets and is rendered **bold in the scheme's `tool-header` role**
-(`#f0883e` under `dark`) — a role of its own rather than the `code` role inline code and fenced
-blocks carry, so the blocks apogee *ran* read apart from the code it *prints*; under `dark` it is
-also the tone `mode-auto` carries. The styling is uniform too: a known friendly label ("Read File"),
-an unknown tool's raw name, and `result` all look the same. The bare-name-means-unregistered signal
-was the brackets' job and dies with them. The count is **not** part of the name and is painted in
-the faint indicator tone rather than the orange: it is the block's own arithmetic, and a reader
-scanning the orange down the left edge should not read a number as part of a tool's name.
+(`#FFD060` under `dark`) — a role of its own rather than the `code` role inline code and fenced
+blocks carry, so the blocks apogee *ran* read apart from the code it *prints*, and either tone can
+be retuned without dragging the other along. The styling is uniform too: a known friendly label
+("Read File"), an unknown tool's raw name, and `result` all look the same. The
+bare-name-means-unregistered signal was the brackets' job and dies with them. The count is **not**
+part of the name and is painted in the faint indicator tone rather than the orange: it is the
+block's own arithmetic, and a reader scanning the orange down the left edge should not read a
+number as part of a tool's name.
 
 **What groups.** Consecutive tool calls at the same nesting depth carrying the same label fold
 into one block, **whatever they are carrying**. A run of `Run`s with their output, a run of edits
