@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -91,6 +92,19 @@ func headlessRunOn(t *testing.T, stub *stubRunner, confiner apogee.Confiner, con
 func unconfinedHome(t *testing.T) string {
 	t.Helper()
 	return testConfigHome(t, "confine-to-workspace: false\n")
+}
+
+// subAgentStderrLines picks the per-delegation lines out of a headless run's stderr, in the order
+// they were printed, so an assertion can be about the WHOLE line rather than a substring of the
+// stream — which is what "byte-identical to what this line has always printed" needs.
+func subAgentStderrLines(errOut string) []string {
+	var lines []string
+	for _, l := range strings.Split(errOut, "\n") {
+		if strings.HasPrefix(l, "sub-agent:") {
+			lines = append(lines, l)
+		}
+	}
+	return lines
 }
 
 // The prompt is the argument, or stdin, or a usage error — never an empty request to the model.
@@ -575,6 +589,71 @@ func TestHeadlessOutputRouting(t *testing.T) {
 		}
 		if !strings.Contains(errOut, "sub-agent: 4k/32k · this one has one") {
 			t.Errorf("the reportable run was dropped with it: %q", errOut)
+		}
+	})
+
+	// The collapsed run header's rule, kept on the Driver that has no header: a named delegation is
+	// reported by its name, an unnamed one by its task exactly as before names existed. The unnamed
+	// expectation is spelled as a whole line rather than a substring, because "byte-identical to what
+	// this line has always printed" is the actual claim.
+	t.Run("a named delegation is reported by its name, an unnamed one by its task", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 3,
+			SubAgents: []run.SubAgentUsage{
+				{Used: 12000, Limit: 32768, Task: "audit the config loader", Name: "repo-scout"},
+				{Used: 4000, Limit: 32768, Task: "summarise the findings"},
+			},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		lines := subAgentStderrLines(errOut)
+		want := []string{
+			"sub-agent: 12k/32k · repo-scout",
+			"sub-agent: 4k/32k · summarise the findings",
+		}
+		if !slices.Equal(lines, want) {
+			t.Errorf("sub-agent lines = %q; want %q", lines, want)
+		}
+		if strings.Contains(errOut, "audit the config loader") {
+			t.Errorf("a named delegation printed its task beside the name: %q", errOut)
+		}
+	})
+
+	// A name is raw model output on the same terms as the task, and it stands in the same slot: it is
+	// folded to one line, stripped and clipped identically, and a "name" that is nothing but control
+	// characters survives none of that — the task still shows rather than the slot going blank.
+	t.Run("a delegation name is escape-stripped, clipped, and never blanks the slot", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 3,
+			SubAgents: []run.SubAgentUsage{
+				{Used: 4000, Limit: 32768, Task: "the task", Name: "safe\rname\tcol\nline"},
+				{Used: 4000, Limit: 32768, Task: "the task", Name: strings.Repeat("n", 200)},
+				{Used: 4000, Limit: 32768, Task: "the fallback task", Name: "\x1b\x07\x00"},
+			},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.ContainsRune(errOut, 0x1b) {
+			t.Errorf("an ESC byte reached stderr: %q", errOut)
+		}
+		lines := subAgentStderrLines(errOut)
+		if len(lines) != 3 {
+			t.Fatalf("want three sub-agent lines; got %q", lines)
+		}
+		if lines[0] != "sub-agent: 4k/32k · safename col line" {
+			t.Errorf("the name did not fold onto its own single line: %q", lines[0])
+		}
+		clipped := strings.TrimPrefix(lines[1], "sub-agent: 4k/32k · ")
+		if n := len([]rune(clipped)); n != headlessTaskMax || !strings.HasSuffix(clipped, "…") {
+			t.Errorf("the name printed %d runes (%q); want it clipped to %d with an ellipsis",
+				n, clipped, headlessTaskMax)
+		}
+		if lines[2] != "sub-agent: 4k/32k · the fallback task" {
+			t.Errorf("an all-escapes name blanked the slot instead of falling back: %q", lines[2])
 		}
 	})
 

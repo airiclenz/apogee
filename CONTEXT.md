@@ -108,9 +108,9 @@ not reduced**: the child inherits the parent's `Config` verbatim (`internal/agen
 so it works against a window — and a Budget over it — of the same size the parent has. How
 full that window got is **visible per run**: the TUI paints the run's own reading on its
 collapsed call block (`N tool calls · 12k/32k · <gist>`) and `apogee headless` prints one
-`sub-agent: <used>/<limit> · <task>` line on stderr per run. Each reading belongs to the
-agent that filled it — it never moves the parent's gauge and never accrues to an enclosing
-run. Its privileges are always **≤ the parent's** (mode, guardrails, Confinement,
+`sub-agent: <used>/<limit> · <the delegation's name, else the task>` line on stderr per run.
+Each reading belongs to the agent that filled it — it never moves the parent's gauge and never
+accrues to an enclosing run. Its privileges are always **≤ the parent's** (mode, guardrails, Confinement,
 tool set) — see [ADR 0005](docs/adr/0005-sub-agent-privileges-are-bounded-by-the-parent.md).
 The *shape* is [ADR 0013](docs/adr/0013-the-sub-agent-orchestrator-is-the-recursion-point-with-isolated-live-guard-state.md):
 the model reaches it through a **`sub_agent` tool** that dispatch treats as a **recursion

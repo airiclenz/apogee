@@ -460,16 +460,11 @@ func headlessSummary(res run.Result) string {
 
 // headlessSubAgentLines renders what each delegated run did to its own context: one line per
 // finished sub-agent run, in the order the runs finished, stating how full that run's window got
-// and the task it was given. It is the headless twin of the reading the TUI paints on a collapsed
+// and which delegation it was. It is the headless twin of the reading the TUI paints on a collapsed
 // sub-agent block — the same fill, from the same events, on the Driver that has no block to paint.
 //
 // A run whose reading or whose window is zero is omitted rather than spelled against nothing (the
-// TUI cell's rule, and the gauge's before it): a fill only means something beside its limit. The
-// task is stripped of control characters HERE, at this render seam, because internal/run hands it
-// over as raw model output exactly as it hands over the answer — in the line-safe form, so a task
-// carrying a tab or a stray CR cannot rewind or re-column the reading it sits beside — and clipped,
-// so a model that delegated a screenful of instructions cannot take the terminal over with one
-// line.
+// TUI cell's rule, and the gauge's before it): a fill only means something beside its limit.
 func headlessSubAgentLines(runs []run.SubAgentUsage) []string {
 	lines := make([]string, 0, len(runs))
 	for _, r := range runs {
@@ -477,12 +472,31 @@ func headlessSubAgentLines(runs []run.SubAgentUsage) []string {
 			continue
 		}
 		line := "sub-agent: " + format.Tokens(r.Used) + "/" + format.Tokens(r.Limit)
-		if task := clipSubAgentTask(stripEscapesToLine(r.Task)); task != "" {
-			line += " · " + task
+		if who := headlessSubAgentTarget(r); who != "" {
+			line += " · " + who
 		}
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+// headlessSubAgentTarget says WHICH delegation a sub-agent line is reporting on: the short name the
+// call gave it, falling back to the delegated task's first line when it gave none — which is every
+// delegation written before the name argument existed, and every one a Mechanism synthesises. That
+// is the collapsed run header's rule (subAgentTarget, internal/tui) kept on the Driver that has no
+// header to paint, so the two twins name a child the same way rather than in two dialects.
+//
+// Both spellings get the same treatment, because run.SubAgentUsage hands both over as raw model
+// output on the same terms as the answer: stripped of control characters HERE, at this render seam,
+// in the line-safe form — so neither can rewind or re-column the reading it sits beside — and
+// clipped, so a model that "named" a delegation with a screenful of instructions cannot take the
+// terminal over with one line. The fallback is decided on the RENDERED form, so a name that is
+// nothing but control characters leaves the task showing rather than blanking the slot.
+func headlessSubAgentTarget(r run.SubAgentUsage) string {
+	if name := clipSubAgentTask(stripEscapesToLine(r.Name)); name != "" {
+		return name
+	}
+	return clipSubAgentTask(stripEscapesToLine(r.Task))
 }
 
 // headlessTaskMax is how wide a delegated task prints on a sub-agent line, in runes: enough for a
@@ -492,7 +506,8 @@ const headlessTaskMax = 80
 
 // clipSubAgentTask cuts a task label to headlessTaskMax runes, ellipsis included in the cap, so a
 // clipped label is never wider than an unclipped one. It never splits a rune: the cut is made on
-// the decoded slice, not on the bytes.
+// the decoded slice, not on the bytes. A delegation's name is spent from the same budget
+// (headlessSubAgentTarget): it stands in the same slot, and a name is not licence to be wider.
 func clipSubAgentTask(task string) string {
 	runes := []rune(task)
 	if len(runes) <= headlessTaskMax {

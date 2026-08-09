@@ -179,6 +179,11 @@ point is a **minor** bump, not a breaking change.
     (`Sub-agent: repo-scout — audit the config loader`), under the clip those lines already had,
     spent now on the whole line so a named prompt is never longer than an unnamed one. A delegation
     that named nothing renders byte-for-byte as before in all three places.
+  - **`apogee headless` reports each delegated run by its name.** The per-run stderr line —
+    `sub-agent: 12k/32k · repo-scout` — now leads with the delegation's name where the call gave one,
+    on the collapsed run header's rule and under the same clip the task label already had, so a
+    headless fan-out reads as which child filled which window. An unnamed delegation prints the
+    delegated task exactly as before.
 
 ### Changed
 

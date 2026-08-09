@@ -213,10 +213,20 @@
 // the offset. The Model stays the
 // coordinator that owns the lifecycle state machine, the transcript + render cache, the
 // stats/gauge, the theme, and the layout; the editor never touches the engine. The empty box's
-// invitation is state the Model SETS, not a render-time choice: setPlaceholder swaps idlePlaceholder
+// invitation is state the Model SETS, not a render-time choice: setPlaceholder swaps the idle legend
 // ("⏎ send") for runningPlaceholder ("⏎ queue · esc stop") on the lifecycle transitions that open and
 // close an Exchange, so the chrome names what ⏎ will actually do — which is also why the ask
-// rendezvous swaps BACK to the idle legend while it borrows the box for an answer.
+// rendezvous swaps BACK to the idle legend while it borrows the box for an answer. The idle side of
+// that swap is two constants rather than one, because a key it names is not on every terminal: ⇧⏎
+// reaches the program only where the enhanced keyboard protocol's key disambiguation was negotiated,
+// and everywhere else the terminal folds the chord into a plain ⏎ — which is a SEND, so advertising
+// it unconditionally promises a newline and delivers a sent message. idlePlaceholder therefore names
+// ⌥⏎ alone and idleShiftPlaceholder names ⇧⏎/⌥⏎, idleLegend() picks between them off the editor's own
+// keyDisambiguation flag, and the tea.KeyboardEnhancementsMsg arm in model.go sets that flag when the
+// terminal answers bubbletea's query — repainting an already-drawn idle legend in place, since capable
+// terminals answer a few frames after the first one is on screen. The startup default is the
+// pessimistic form: a terminal that never answers keeps the ⌥⏎-only legend, which is the honest
+// reading rather than a guess.
 //
 // Typing while the model works is that swap's substance, and it is a three-party split ADR 0025
 // records: this package STAGES, the worker DELIVERS, the engine COMMITS. interject.go holds the

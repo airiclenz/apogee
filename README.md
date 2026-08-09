@@ -952,7 +952,8 @@ and `present_document` are not registered, and no MCP server is contacted.
 Only the model's answer goes to **stdout**; resolution notices and the one-line summary
 go to **stderr**, so a pipeline reads the text and nothing else. A run that delegated
 adds one stderr line per sub-agent run just ahead of that summary —
-`sub-agent: 12k/32k · <the task it was given>`, in the order the runs finished — because
+`sub-agent: 12k/32k · <the name it was given, else the task>`, in the order the runs
+finished — because
 each child fills a context window of its own that the run's own figures say nothing
 about; a run that delegated nothing prints none. The exit status says which kind of
 thing happened:
