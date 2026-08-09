@@ -588,9 +588,12 @@ func subAgentFill(head entry) string {
 
 // subAgentGist is the second half of a collapsed run's summary, in the two tempi layout.md gives it.
 // While the run works — the head has no result yet — it is the live phrase for the call the span has
-// open, the same composition the status line shows for that call (toolPhrase, activity.go), read off
-// the span at paint rather than kept as a second copy of the activity state. The MOST RECENT open
-// call is the honest one when several are open at once: it is the work the child turned to last.
+// open: verb and shortened target together (toolPhrase, activity.go), worded from the same view the
+// status line reads its verb from, but KEEPING the target the status line sheds. Inside a collapsed
+// run the gist is the only live view of what the child is touching, since the block that would have
+// named that target is elided. It is read off the span at paint rather than kept as a second copy of
+// the activity state. The MOST RECENT open call is the honest one when several are open at once:
+// it is the work the child turned to last.
 //
 // Once the report lands the head has a gist of its own and that is the line — the summary a short
 // report was compressed to, or, where the report was long enough to become a body, its first line.
