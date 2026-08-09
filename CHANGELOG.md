@@ -164,6 +164,12 @@ point is a **minor** bump, not a breaking change.
     `domain.WithSubAgentName` / `domain.SubAgentNameFromContext` as the ask path's carrier — and a
     headless run reports it on `run.SubAgentUsage.Name`. All three are additive fields: an unnamed
     delegation leaves them empty, which is the signal to fall back to the task.
+  - **The collapsed run header leads with the name.** The `Sub-Agent` block's target — the text
+    beside the label — is the delegation's name when the call gave one, clipped and escape-stripped
+    exactly as a task line is, so a fan-out of concurrent children reads as what each is *for*
+    rather than as several openings of one instruction. Saved sessions replay it with no format
+    change: the name is already the header's finished text, so it rides the record's existing
+    target and the transcript wire gained no member.
 
 ### Changed
 

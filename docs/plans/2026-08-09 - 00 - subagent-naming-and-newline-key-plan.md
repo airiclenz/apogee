@@ -119,9 +119,19 @@ delegation and empty for an unnamed one.
 
 **Commit:** `feat(agent): the delegation name rides approval, ask and run records`
 
-## 3. The collapsed run header shows the name
+## 3. The collapsed run header shows the name — ✅ DONE (2026-08-09)
 
 Depends on item 1.
+
+NOTES (2026-08-09): three additions beyond the item's literal text. (a) The registry's target became two
+named helpers in `internal/tui/toolpresent.go` — `subAgentName` (the tool's own normalisation: trimmed
+first line, `clipDetail`-capped) and `subAgentTarget` (name, else `firstLineArg("task")`) — rather than an
+inline closure, so the presenter and item 4's lookup point at one definition of the rule; `presentToolCall`
+stamps `tv.agentName = subAgentName(args)` under an explicit `call.Tool == subAgentToolName` branch (the
+registry's `target` signature returns only a string and cannot set a second field). (b) `agentName` is added
+to `toolView.sanitize` — it is painted display text like `Target`, and the item's "escape-stripped" is not
+otherwise true of the field item 4 reads. (c) A CHANGELOG sub-bullet under the existing "A delegation can
+carry a name" entry, per the repo convention; no release heading, no VERSION touched.
 
 **What:**
 

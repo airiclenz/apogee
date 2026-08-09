@@ -178,6 +178,19 @@ type toolView struct {
 
 	name string
 
+	// agentName is the short name a delegation was given (the sub_agent call's optional `name`
+	// argument, normalised the way the tool normalises it: trimmed first line, empty when absent).
+	// It is the same text the Target already leads with on a named delegation, kept apart from it
+	// because the two answer different questions: Target is the header's text whatever filled it —
+	// the task's first line on an unnamed call — while this says whether a NAME was given at all,
+	// which is what the live status line looks up to word a phrase as "<name> · reading main.go"
+	// rather than "sub-agent · reading main.go".
+	//
+	// It is display text like the fields above it and is escape-stripped with them (sanitize), but
+	// deliberately NOT on the wire (wireToolView): the status line is live-only, and the persisted
+	// header display already rides Target.
+	agentName string
+
 	// solo marks a call that must never be folded into a grouped block, however well it matches its
 	// neighbours (groupable, render.go). Grouping's own rule is about the SHAPE of a call — a target
 	// to lead an aligned member row — and says nothing about what the block MEANS; solo is where a
@@ -443,8 +456,8 @@ var toolRegistry = map[string]toolPresenter{
 	"sub_agent": {
 		label:  "Sub-Agent",
 		verb:   "delegating",
-		target: firstLineArg("task"),
-		detail: outputDetail, // the report's gist; the nested run already rendered railed
+		target: subAgentTarget, // the delegation's name when it was given one, else the task's first line
+		detail: outputDetail,   // the report's gist; the nested run already rendered railed
 	},
 	askUserToolName: {
 		label:   "Ask User",
@@ -500,6 +513,13 @@ func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
 	// (subAgentToolName) so the two cannot drift apart.
 	tv.solo = call.Tool == subAgentToolName
 	args := parseArgs(call.Arguments)
+	// A delegation's name is recorded beside the Target rather than read back out of it: the header
+	// text is the same string on a named call, but only this says a name was GIVEN, which is the
+	// question the live status line asks (toolView.agentName). The Target is settled by the
+	// registry's own extractor either way (subAgentTarget), so the two cannot disagree.
+	if call.Tool == subAgentToolName {
+		tv.agentName = subAgentName(args)
+	}
 	if p.target != nil {
 		tv.Target = p.target(args)
 	}
@@ -588,6 +608,7 @@ func (tv *toolView) sanitize() {
 	tv.Label = stripEscapes(tv.Label)
 	tv.Verb = stripEscapes(tv.Verb)
 	tv.Target = stripEscapes(tv.Target)
+	tv.agentName = stripEscapes(tv.agentName)
 	tv.Summary.Text = stripEscapes(tv.Summary.Text)
 	tv.Details.stripEscapes()
 }
@@ -722,6 +743,30 @@ func firstLineArg(key string) func(map[string]any) string {
 		}
 		return ""
 	}
+}
+
+// subAgentName reads the optional short name off a sub_agent call's arguments, normalised the way
+// the tool itself normalises it before stamping it on the child (delegationName, internal/agent):
+// the trimmed first line, empty when the call named nothing. The clip is the branch line's own
+// budget, so a model that sends a sentence where a name was asked for still leads one row.
+func subAgentName(args map[string]any) string {
+	v, ok := args["name"].(string)
+	if !ok {
+		return ""
+	}
+	return clipDetail(strings.TrimSpace(firstLine(v)))
+}
+
+// subAgentTarget leads a delegation's header with the name the model gave it, falling back to the
+// delegated task's first line when it gave none — which is every delegation written before the
+// argument existed, and every one a Mechanism synthesises (guided decomposition names nothing).
+// The two spellings get the same treatment, so a name is clipped and escape-stripped exactly as a
+// task line is (firstLineArg, finishDisplay).
+func subAgentTarget(args map[string]any) string {
+	if n := subAgentName(args); n != "" {
+		return n
+	}
+	return firstLineArg("task")(args)
 }
 
 // joinedArgs returns a target extractor that joins the named string arguments with a space,

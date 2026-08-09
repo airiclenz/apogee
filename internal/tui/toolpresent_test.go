@@ -321,6 +321,93 @@ func TestPresentToolCall(t *testing.T) {
 	}
 }
 
+// TestPresentSubAgentNameLeadsTheHeader pins what a delegation's run header says it is. The
+// sub_agent call may carry an optional short name, and when it does that name — not the delegated
+// task's opening words — is the target the collapsed header leads with, which is what makes a
+// fan-out of concurrent children readable as four different jobs. A call that names nothing is
+// byte-identical to before: the task's first line, as every delegation written before the argument
+// existed and every one a Mechanism synthesises still is.
+//
+// The presenter also records the name apart from the header text (toolView.agentName), because
+// only that says a name was GIVEN — the live status line reads it to word "<name> · reading" —
+// and it must be empty on exactly the calls that fall back. The normalisation is the tool's own
+// (delegationName, internal/agent): trimmed first line, and a name that empties out is no name.
+func TestPresentSubAgentNameLeadsTheHeader(t *testing.T) {
+	t.Parallel()
+	const task = `Survey the tests.\nReport gaps.`
+	cases := []struct {
+		name       string
+		args       string
+		wantTarget string
+		wantAgent  string
+	}{
+		{
+			name:       "a named delegation leads with its name",
+			args:       `{"name":"test-surveyor","task":"` + task + `"}`,
+			wantTarget: "test-surveyor",
+			wantAgent:  "test-surveyor",
+		},
+		{
+			name:       "an unnamed delegation leads with the task's first line",
+			args:       `{"task":"` + task + `"}`,
+			wantTarget: "Survey the tests.",
+			wantAgent:  "",
+		},
+		{
+			name:       "a padded multi-line name collapses to its trimmed first line",
+			args:       `{"name":"  test-surveyor \nand then some","task":"` + task + `"}`,
+			wantTarget: "test-surveyor",
+			wantAgent:  "test-surveyor",
+		},
+		{
+			name:       "a name that is only whitespace is no name",
+			args:       `{"name":"   ","task":"` + task + `"}`,
+			wantTarget: "Survey the tests.",
+			wantAgent:  "",
+		},
+		{
+			name:       "a non-string name is no name",
+			args:       `{"name":7,"task":"` + task + `"}`,
+			wantTarget: "Survey the tests.",
+			wantAgent:  "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tv := presentToolCall(domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(tc.args)}, workspaceRoot{})
+			if tv.Target != tc.wantTarget {
+				t.Errorf("Target = %q, want %q", tv.Target, tc.wantTarget)
+			}
+			if tv.agentName != tc.wantAgent {
+				t.Errorf("agentName = %q, want %q", tv.agentName, tc.wantAgent)
+			}
+			if tv.Label != "Sub-Agent" || tv.Verb != "delegating" {
+				t.Errorf("label/verb = %q/%q; the name changes neither", tv.Label, tv.Verb)
+			}
+		})
+	}
+
+	t.Run("a name is escape-stripped and clipped like any other target", func(t *testing.T) {
+		t.Parallel()
+		long := strings.Repeat("n", detailClipRunes+20)
+		args, err := json.Marshal(map[string]any{"name": "\x1b[31m" + long, "task": "Survey the tests."})
+		if err != nil {
+			t.Fatalf("marshal args: %v", err)
+		}
+		tv := presentToolCall(domain.ToolCall{ID: "s2", Tool: "sub_agent", Arguments: args}, workspaceRoot{})
+		if strings.ContainsRune(tv.Target, 0x1b) || strings.ContainsRune(tv.agentName, 0x1b) {
+			t.Errorf("an ESC byte survived into the header: target=%q name=%q", tv.Target, tv.agentName)
+		}
+		if n := len([]rune(tv.Target)); n > detailClipRunes+1 {
+			t.Errorf("target ran to %d runes; the branch's cap is %d plus the ellipsis", n, detailClipRunes)
+		}
+		if !strings.HasSuffix(tv.Target, "…") {
+			t.Errorf("a clipped target = %q; want it to end in the ellipsis that says it goes on", tv.Target)
+		}
+	})
+}
+
 // An error result is summarised as an "error: …" detail rather than the tool's normal
 // summary — a normal in-band outcome the model reacts to. It is the *summary*, not a body
 // line, which is what keeps an errored call grouping with its neighbours.

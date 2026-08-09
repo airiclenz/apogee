@@ -902,6 +902,81 @@ func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
 	})
 }
 
+// TestTranscriptCodecPersistsANamedDelegationAsItsTarget pins how a named delegation survives a
+// resume — and how it deliberately does not. What a saved session keeps is the FINISHED header
+// text, and on a named call that text already IS the name (subAgentTarget), so the record needs no
+// member of its own: Target carries it through encode/decode with no wire change at all. The
+// presenter's agentName is the live half — the status line's lookup, and the status line does not
+// outlive the process — so it is absent from the blob and empty after a decode, which is the same
+// nothing an unnamed delegation says.
+//
+// The member census is the guard on that claim. This item added display state to toolView, and the
+// cheapest way to have got it onto the screen after a resume would have been to widen the wire;
+// the two field lists below are what makes such a widening a failing test rather than a silent
+// format change (both structs are inside transcriptVersion 1, so every member is forever).
+func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a named head replays with the name as its target", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ToolCallEvent{
+			Call: domain.ToolCall{ID: "s1", Tool: "sub_agent",
+				Arguments: []byte(`{"name":"test-surveyor","task":"Survey the tests."}`)},
+		})
+		subAgentReport(tr, "s1", "tests read", 0)
+		if got := tr.entries[0].tool.agentName; got != "test-surveyor" {
+			t.Fatalf("live head agentName = %q; want the delegation's name before anything is encoded", got)
+		}
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		if want := `"target":"test-surveyor"`; !strings.Contains(string(data), want) {
+			t.Errorf("wire blob does not carry %s:\n%s", want, data)
+		}
+		if strings.Contains(string(data), "agentName") {
+			t.Errorf("the live-only name reached the wire:\n%s", data)
+		}
+
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 1 || got[0].kind != entryToolCall {
+			t.Fatalf("decoded %+v; want the one sub-agent run head", got)
+		}
+		if got[0].tool.Target != "test-surveyor" {
+			t.Errorf("replayed target = %q; want the name the header was painted with", got[0].tool.Target)
+		}
+		if got[0].tool.agentName != "" {
+			t.Errorf("replayed agentName = %q; the live half is not persisted", got[0].tool.agentName)
+		}
+	})
+
+	t.Run("the wire structs gained no members", func(t *testing.T) {
+		fields := func(v any) []string {
+			typ := reflect.TypeOf(v)
+			out := make([]string, 0, typ.NumField())
+			for i := range typ.NumField() {
+				out = append(out, typ.Field(i).Name)
+			}
+			return out
+		}
+		wantEntry := []string{
+			"Kind", "Text", "Depth", "CallID", "SpawnCallID", "Done",
+			"CtxUsed", "CtxLimit", "SkillSpans", "Tool", "Presented",
+		}
+		if got := fields(wireEntry{}); !slices.Equal(got, wantEntry) {
+			t.Errorf("wireEntry members = %v, want %v — widening the wire needs its own decision", got, wantEntry)
+		}
+		wantTool := []string{"Label", "Verb", "Target", "Name", "Solo", "Summary", "Details"}
+		if got := fields(wireToolView{}); !slices.Equal(got, wantTool) {
+			t.Errorf("wireToolView members = %v, want %v — widening the wire needs its own decision", got, wantTool)
+		}
+	})
+}
+
 // TestTranscriptCodecRoundTripsTheSpawningCallID pins the run identity a delegated entry keeps
 // across a resume (ADR 0039): the id of the sub_agent call that spawned the agent whose event
 // folded into it, which is what tells two concurrent children's blocks apart once several run at

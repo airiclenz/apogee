@@ -809,7 +809,11 @@ click.
 
 **A sub-agent run collapses to its call block.** The `Sub-Agent` call block is the run's header
 block: collapsed, it stands alone and the whole railed span beneath it — every inner block, rail
-and all — is elided. Its summary line is `N tool calls · <used>/<window> · ` plus the run's gist,
+and all — is elided. **Its target slot — the text beside the `Sub-Agent` label — is the
+delegation's name** when the call gave one, and the delegated task's first line when it did not, so
+a fan-out reads as what each child is *for* rather than as several openings of one instruction. The
+name is clipped and escape-stripped exactly as a task line is, and an unnamed delegation's header
+is unchanged. Its summary line is `N tool calls · <used>/<window> · ` plus the run's gist,
 and the gist arrives in two tempi: while the run works, the same activity phrase the status line
 shows for the run (`reading main.go`), ticking as inner calls land; once the report arrives, the
 report's first line. The count is **transitive** — every call in the span counts, whatever its
