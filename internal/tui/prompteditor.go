@@ -72,6 +72,17 @@ type promptEditor struct {
 	// unwired host leaves it — a plain value with a replaced-never-mutated slice, so it copies with
 	// the Model like sel above (ADR 0011).
 	recall promptRecall
+
+	// keyDisambiguation records whether the terminal negotiated the enhanced (kitty) keyboard
+	// protocol's key disambiguation — the thing that makes ⇧⏎ reach the program as a key of its
+	// own instead of as a plain ⏎. It starts FALSE and is set from tea.KeyboardEnhancementsMsg
+	// (the arm in model.go), which capable terminals answer within the first frames; on a terminal
+	// that never answers it stays false, which is the honest reading rather than a guess.
+	//
+	// Only the idle legend reads it (idleLegend). The textarea's InsertNewline binding keeps
+	// "shift+enter" either way — a chord the terminal never delivers costs nothing to leave bound,
+	// and unbinding it would break the terminals that do.
+	keyDisambiguation bool
 }
 
 // The prompt's two placeholders — what the empty box invites, which is not the same thing while a
@@ -86,9 +97,16 @@ type promptEditor struct {
 // Both legends advertise ↑ recall, and both earn it: the placeholder is drawn only on an EMPTY box,
 // which is exactly the box where ↑ starts a walk through what this workspace has sent (recall.go),
 // and the walk is live at idle and while a worker runs alike.
+//
+// The idle one comes in two forms because one of the keys it names is not always there: ⇧⏎ reaches
+// the program only on a terminal that negotiated the enhanced keyboard protocol, and everywhere
+// else the terminal folds it into a plain ⏎ — which is a SEND. Advertising it unconditionally
+// therefore promises a newline and delivers a sent message, so the chord is named only once the
+// answer to bubbletea's keyboard query says it will arrive (idleLegend).
 const (
-	idlePlaceholder    = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ↑ recall · ⌃c quit"
-	runningPlaceholder = "queue a message…  ⏎ queue · ↑ recall · esc stop"
+	idlePlaceholder      = "Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit"
+	idleShiftPlaceholder = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ↑ recall · ⌃c quit"
+	runningPlaceholder   = "queue a message…  ⏎ queue · ↑ recall · esc stop"
 )
 
 // cursorShapeNames is the vocabulary [ParseCursorShape] accepts, in the order its error lists
@@ -137,7 +155,7 @@ func ParseCursorShape(s string) (tea.CursorShape, error) {
 // empty workspace file cache.
 func newPromptEditor(shape tea.CursorShape, surface color.Color) promptEditor {
 	e := newLineEditor(shape, surface)
-	e.input.Placeholder = idlePlaceholder
+	e.input.Placeholder = idlePlaceholder // the not-yet-negotiated legend; idleLegend upgrades it if the terminal answers
 	// Plain Enter submits (intercepted in handleKey), so the textarea's newline binding is
 	// repurposed: shift+enter works on terminals that support the Kitty keyboard protocol,
 	// and alt+enter / ctrl+j are byte-distinct fallbacks that insert a newline everywhere.
@@ -158,11 +176,40 @@ func (e promptEditor) submitParse(known func(string) bool) parsedInput {
 	return parseInput(e.input.Value(), known)
 }
 
-// setPlaceholder swaps what the empty box invites (idlePlaceholder / runningPlaceholder). It is
+// setPlaceholder swaps what the empty box invites (idleLegend / runningPlaceholder). It is
 // called on the lifecycle transitions that open and close an Exchange, not per frame, so the
 // legend is one assignment rather than a branch in the renderer.
 func (e *promptEditor) setPlaceholder(text string) {
 	e.input.Placeholder = text
+}
+
+// idleLegend is the idle invitation as it stands for THIS terminal: the ⇧⏎ form once key
+// disambiguation was negotiated, the ⌥⏎-only form until then. Callers hand its result to
+// setPlaceholder rather than naming a constant, so there is one place that decides which chords
+// the box may claim.
+//
+// The default is the pessimistic one on purpose: a terminal that supports the protocol confirms it
+// within the first frames and the legend catches up (setKeyDisambiguation), while one that never
+// will keeps a legend naming only keys it actually delivers. ⌥⏎ is byte-distinct and works
+// everywhere; ctrl+j remains a working, undocumented third fallback.
+func (e promptEditor) idleLegend() string {
+	if e.keyDisambiguation {
+		return idleShiftPlaceholder
+	}
+	return idlePlaceholder
+}
+
+// setKeyDisambiguation records the terminal's answer to the keyboard-protocol query and re-resolves
+// the legend in place when the box is currently showing an idle one — the answer lands a few frames
+// after start-up, by which time the idle placeholder has already been set from the pessimistic
+// default, and nothing else would revisit it until the next lifecycle transition. A box showing the
+// running invitation is left alone: that legend names no newline chord, and the transition back to
+// idle re-resolves it anyway.
+func (e *promptEditor) setKeyDisambiguation(ok bool) {
+	e.keyDisambiguation = ok
+	if e.input.Placeholder == idlePlaceholder || e.input.Placeholder == idleShiftPlaceholder {
+		e.input.Placeholder = e.idleLegend()
+	}
 }
 
 // reset clears the editor back to empty after a message is sent: it empties the textarea and

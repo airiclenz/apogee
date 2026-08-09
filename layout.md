@@ -1498,7 +1498,13 @@ ever sees them — the walk would otherwise be stolen by its own first entry. Th
 moment the human acts, which is the same moment the arrows do. The empty box advertises the gesture
 in its own legend, in both states: `Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ↑ recall · ⌃c quit`
 at idle, `queue a message…  ⏎ queue · ↑ recall · esc stop` while the model works — a placeholder is
-only ever painted on an empty box, which is exactly the box where ↑ starts a walk.
+only ever painted on an empty box, which is exactly the box where ↑ starts a walk. **The idle legend
+names ⇧⏎ only on a terminal that negotiated the enhanced keyboard protocol**, which is what makes
+that chord arrive as a key of its own rather than as a plain ⏎ — a send. Until the terminal answers
+bubbletea's keyboard query (and forever, on one that never will) the legend reads
+`Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit`, naming only the chord every terminal
+delivers; a capable one answers within the first frames and the legend upgrades in place. The
+shift+enter binding itself is unconditional either way — the legend is the only thing that adapts.
 
 **Tokens light up when they resolve.** Inside the box a `/token` is painted in the `skill` role
 only when it names a skill in the catalog, and an `@path` in the `file-ref` role only when the path

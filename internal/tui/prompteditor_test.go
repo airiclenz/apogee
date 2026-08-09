@@ -182,3 +182,42 @@ func TestPromptEditorRowsGrowsAndClamps(t *testing.T) {
 		t.Errorf("rows(overflow) = %d, want the %d cap", got, maxInputRows)
 	}
 }
+
+// The idle legend names ⇧⏎ only once the terminal has negotiated key disambiguation. A fresh
+// editor is pessimistic, the answer swaps the legend in place both ways, and a box showing the
+// running invitation — which names no newline chord — is left as it is.
+func TestPromptEditorIdleLegendFollowsKeyDisambiguation(t *testing.T) {
+	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
+
+	if got := e.idleLegend(); got != idlePlaceholder {
+		t.Errorf("fresh idleLegend() = %q, want the ⌥⏎-only legend %q", got, idlePlaceholder)
+	}
+	if got := e.input.Placeholder; got != idlePlaceholder {
+		t.Errorf("fresh placeholder = %q, want %q", got, idlePlaceholder)
+	}
+	if strings.Contains(idlePlaceholder, "⇧⏎") {
+		t.Errorf("the not-negotiated legend advertises ⇧⏎: %q", idlePlaceholder)
+	}
+
+	e.setKeyDisambiguation(true)
+	if got := e.idleLegend(); got != idleShiftPlaceholder {
+		t.Errorf("negotiated idleLegend() = %q, want %q", got, idleShiftPlaceholder)
+	}
+	if got := e.input.Placeholder; got != idleShiftPlaceholder {
+		t.Errorf("negotiated placeholder = %q, want the legend swapped in place to %q", got, idleShiftPlaceholder)
+	}
+
+	e.setKeyDisambiguation(false)
+	if got := e.input.Placeholder; got != idlePlaceholder {
+		t.Errorf("placeholder after a bare answer = %q, want %q back", got, idlePlaceholder)
+	}
+
+	e.setPlaceholder(runningPlaceholder)
+	e.setKeyDisambiguation(true)
+	if got := e.input.Placeholder; got != runningPlaceholder {
+		t.Errorf("running placeholder = %q, want it untouched by the keyboard answer", got)
+	}
+	if got := e.idleLegend(); got != idleShiftPlaceholder {
+		t.Errorf("idleLegend() after the answer = %q, want %q for the next idle transition", got, idleShiftPlaceholder)
+	}
+}

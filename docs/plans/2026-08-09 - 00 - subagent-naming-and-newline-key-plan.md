@@ -209,9 +209,25 @@ TODO.md` returns 0 in the Remaining list (the Closed-entries trail line may ment
 
 **Commit:** `feat(tui): status line and prompts name the asking delegation`
 
-## 5. The newline legend follows the negotiated keyboard protocol
+## 5. The newline legend follows the negotiated keyboard protocol — ✅ DONE (2026-08-09)
 
 No dependencies.
+
+NOTES (2026-08-09): four additions beyond the item's literal text. (a) The negotiated flag is stored on
+`promptEditor` (`keyDisambiguation`), not on the Model proper — the editor owns the legend and the two new
+seams touch only its own fields (the partial-lift rule in prompteditor.go): `idleLegend()` resolves which
+form to paint and `setKeyDisambiguation(bool)` records the answer and swaps an already-painted idle legend
+in place. It still reads as `m.keyDisambiguation`/`m.idleLegend()` (anonymous embedding), and model.go's new
+`tea.KeyboardEnhancementsMsg` arm is what calls the setter, per the item. Consequence: the two
+`m.setPlaceholder(idlePlaceholder)` call sites in `model.go` (the ask borrowing the box, and the return to
+idle) now pass `m.idleLegend()`. (b) The legend is two constants: `idlePlaceholder` KEEPS its name and
+becomes the not-yet-negotiated `⌥⏎`-only form, `idleShiftPlaceholder` is the `⇧⏎/⌥⏎` form — so
+`interject_test.go`'s existing placeholder assertions stay correct untouched (nothing there negotiates).
+(c) Tests landed in two files: an editor-direct one in `prompteditor_test.go` (default, both flips, and the
+running legend left alone) and the Model-level one in `model_test.go` beside the untouched
+`TestModelNewlineKeysInsertLineBreak`. (d) A CHANGELOG entry under `## [Unreleased]` → `### Changed` per the
+repo convention; no release heading, no VERSION touched. The accessor on bubbletea v2.0.8 is
+`KeyboardEnhancementsMsg.SupportsKeyDisambiguation()` (`Flags > 0`), verified against the module source.
 
 **What:** shift+enter needs the kitty/enhanced keyboard protocol; today the legend
 advertises `⇧⏎` unconditionally and apogee never learns what the terminal negotiated

@@ -263,7 +263,10 @@ untouched.
 
 The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
 the model works — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
-prompts you have already sent in this workspace, `esc` stops a run, `⌃c` quits. Beyond
+prompts you have already sent in this workspace, `esc` stops a run, `⌃c` quits. The box
+advertises `⇧⏎` only on terminals that negotiated the enhanced (kitty) keyboard
+protocol — the thing that makes that chord arrive as anything other than a plain `⏎`;
+everywhere else the legend names `⌥⏎` alone, which works on every terminal. Beyond
 the box, `⇧⇥` cycles the autonomy mode — Plan → Ask-Before → Allow-Edits → Auto — at
 any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. `⌃l` is the
 readline redraw: it forces a full repaint, which is the way back from a terminal that

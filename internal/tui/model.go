@@ -570,6 +570,19 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.KeyboardEnhancementsMsg:
+		// The terminal answered bubbletea's kitty-keyboard query — sent on the first frame and
+		// again whenever the enhancements or the screen switch
+		// (bubbletea/v2@v2.0.8/cursed_renderer.go:378-393), so a capable terminal is heard from
+		// within the first frames and one that is not simply never sends this. Non-zero flags mean
+		// key disambiguation is on, which is the ONLY condition under which ⇧⏎ arrives as anything
+		// other than a plain ⏎; the prompt legend is the one thing that must not claim the chord
+		// before then (prompteditor.go). Nothing else in the program reads this message — like the
+		// mode report above it is consumed here rather than falling through to the input widget,
+		// which ignores it.
+		m.setKeyDisambiguation(msg.SupportsKeyDisambiguation())
+		return m, nil
+
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
@@ -644,7 +657,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.input.Reset()
 		// The box is borrowed for the answer, so ⏎ sends rather than queues: the legend must say so
 		// for as long as the question stands (submitAnswer swaps it back when the answer is away).
-		m.setPlaceholder(idlePlaceholder)
+		m.setPlaceholder(m.idleLegend())
 		m.sel = promptSel{} // the input was emptied for the answer; drop any stale selection
 		m.dropRecall()      // and any walk in progress: the box now belongs to the question
 		m.layout()
@@ -1875,7 +1888,7 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// flushes them into a new Exchange (flushAfterCompletion), a stop or a fault holds them for
 	// the next ⏎ (noteHeldQueue) — ADR 0025.
 	m.box = nil
-	m.setPlaceholder(idlePlaceholder) // nothing is running: ⏎ sends again
+	m.setPlaceholder(m.idleLegend()) // nothing is running: ⏎ sends again
 	m.genStart = time.Time{}
 	// The worker has unwound, so the activity is over — including a sticky "stopping", which
 	// only this path clears (activity.go). Idle renders an empty left slot.

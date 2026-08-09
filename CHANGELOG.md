@@ -182,6 +182,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The prompt legend advertises `⇧⏎` only where `⇧⏎` actually works.** That chord needs the
+  enhanced (kitty) keyboard protocol: on a terminal that has not negotiated it, shift+enter is
+  folded into a plain `⏎` and the "newline" the legend promised sends the message instead. The empty
+  box now starts on the honest legend — `⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit` — and upgrades
+  itself to `⏎ send · ⇧⏎/⌥⏎ newline · …` within the first frames on terminals that answer the
+  protocol query. `⌥⏎` is byte-distinct and works everywhere, and `⌃j` remains a third, undocumented
+  fallback; the shift+enter binding itself is unchanged, so nothing that worked stops working.
+
 - **A collapsed tool block now stands at most four rows: its header, two rows of target, and the
   count of what it hides.** A long command used to soft-wrap over as many rows as it needed and then
   spend one more previewing the first line of its output, so a scrollback of tool calls read as a

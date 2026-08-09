@@ -554,6 +554,35 @@ func TestModelNewlineKeysInsertLineBreak(t *testing.T) {
 	}
 }
 
+// The empty box advertises ⇧⏎ only on a terminal that negotiated the enhanced keyboard protocol:
+// the model starts pessimistic and follows bubbletea's KeyboardEnhancementsMsg, in both directions.
+func TestModelNewlineLegendFollowsKeyboardProtocol(t *testing.T) {
+	m := newTestModel(t)
+
+	// No answer yet — the start-up default names only the chord every terminal delivers.
+	if got := m.input.Placeholder; got != idlePlaceholder {
+		t.Fatalf("start-up legend = %q, want the ⌥⏎-only %q", got, idlePlaceholder)
+	}
+	if got := plain(m.View()); !strings.Contains(got, idlePlaceholder) {
+		t.Errorf("the frame does not paint the start-up legend %q", idlePlaceholder)
+	}
+
+	// The terminal answers with key disambiguation on: the chord now arrives, so the legend names it.
+	on := step(t, m, tea.KeyboardEnhancementsMsg{Flags: ansi.KittyDisambiguateEscapeCodes})
+	if got := on.input.Placeholder; got != idleShiftPlaceholder {
+		t.Errorf("legend after the enhanced answer = %q, want %q", got, idleShiftPlaceholder)
+	}
+	if got := plain(on.View()); !strings.Contains(got, idleShiftPlaceholder) {
+		t.Errorf("the frame does not paint the negotiated legend %q", idleShiftPlaceholder)
+	}
+
+	// And back: an answer carrying no enhancements returns the box to the honest legend.
+	off := step(t, on, tea.KeyboardEnhancementsMsg{})
+	if got := off.input.Placeholder; got != idlePlaceholder {
+		t.Errorf("legend after a bare answer = %q, want %q back", got, idlePlaceholder)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Cancellation and quit
 // ----------------------------------------------------------------------------
