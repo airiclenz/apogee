@@ -3469,7 +3469,9 @@ func TestModelStatusLineActivity(t *testing.T) {
 		t.Errorf("running status line = %q, want an elapsed clock suffix", got)
 	}
 
-	// Each Event re-derives the phrase: streamed text, then a named tool with its target.
+	// Each Event re-derives the phrase: streamed text, then the verb of the tool that is running.
+	// The tool's TARGET stays off the row — the call's own block already names it, and the path is
+	// what used to push the context gauge off the line.
 	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "hi"}})
 	if got := statusText(t, m); !strings.Contains(got, "responding") {
 		t.Errorf("status line while streaming = %q, want it to contain %q", got, "responding")
@@ -3477,8 +3479,11 @@ func TestModelStatusLineActivity(t *testing.T) {
 	m = step(t, m, eventMsg{Event: domain.ToolCallEvent{
 		Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
 	}})
-	if got := statusText(t, m); !strings.Contains(got, "reading · main.go") {
-		t.Errorf("status line during a tool call = %q, want it to name the tool and target", got)
+	if got := statusText(t, m); !strings.Contains(got, "reading") {
+		t.Errorf("status line during a tool call = %q, want it to name what the tool is doing", got)
+	}
+	if got := statusText(t, m); strings.Contains(got, "main.go") {
+		t.Errorf("status line during a tool call = %q, want it to leave the target to the call's block", got)
 	}
 
 	// Esc registers the stop, and the phrase stays until the worker's terminal Msg unwinds it.

@@ -16,7 +16,11 @@
   - Engine/domain event types (`domain.ToolCallEvent` is folded by the transcript too — no plumbing changes upstream of the TUI model).
   - Any VERSION / CHANGELOG / tag change (see closing note).
 
-## 1. Verb-only status label with per-call clock restart
+## 1. Verb-only status label with per-call clock restart — ✅ DONE (2026-08-09)
+
+NOTES (2026-08-09): the clock is keyed on `e.Call.ID`, not on the `EventBase.CallID` the item text names — that field is the SPAWNING run's identity (`domain/events.go:40`, already carried as `activity.spawn`) and is identical across every call one agent makes, so it cannot key a per-call restart. Ratified call 2's "the call's identity (its call ID)" is `domain.ToolCall.ID`; sources win over item text.
+NOTES (2026-08-09): `fanout_test.go:137,142` were left unchanged — both assert the collapsed run's live tail (`plainRender` → `subAgentGist`), which ratified call 3 preserves; that file holds no status-line assertion.
+NOTES (2026-08-09): `TestFoldActivityClockRunsPerPhrase` gained the per-call cases rather than being replaced by them — its token-stream and phrase-change assertions pin the non-tool restart rule, which still stands.
 
 **What:**
 In `internal/tui/activity.go`:

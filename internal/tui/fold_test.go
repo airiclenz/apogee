@@ -91,7 +91,7 @@ func foldCases() []foldCase {
 			name:        "ToolCallEvent records the call and names it in the phrase",
 			event:       domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}},
 			wantEntries: 1,
-			wantPhrase:  "reading · main.go",
+			wantPhrase:  "reading",
 		},
 		{
 			name: "ToolResultEvent with no call to pair appends the orphan and returns to thinking",
@@ -264,7 +264,7 @@ func TestFoldEventPairsResultWithCallBeforeActivity(t *testing.T) {
 
 		m := newTestModel(t)
 		m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
-		if got, want := m.act.text(""), "reading · a.go"; got != want {
+		if got, want := m.act.text(""), "reading"; got != want {
 			t.Fatalf("phrase while the call is open = %q, want %q", got, want)
 		}
 
@@ -285,7 +285,7 @@ func TestFoldEventPairsResultWithCallBeforeActivity(t *testing.T) {
 		m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "2", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)}})
 
 		m = m.foldEvent(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: "ok"}})
-		if got, want := m.act.text(""), "reading · b.go"; got != want {
+		if got, want := m.act.text(""), "reading"; got != want {
 			t.Errorf("phrase with the second call still open = %q, want %q", got, want)
 		}
 		if !m.transcript.hasOpenToolCall() {

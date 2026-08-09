@@ -677,22 +677,30 @@ func TestStripEscapesDropsControlCharacters(t *testing.T) {
 	}
 }
 
-// The status line's tool phrase is built only from presentToolCall's view, so it inherits the tool
-// card's seam. It is pinned here because foldActivity paints it the moment a call is ANNOUNCED —
+// The live phrases — the status line's verb (toolActivityVerb) and the collapsed run gist's verb and
+// target (toolPhrase) — are built only from presentToolCall's view, so both inherit the tool card's
+// seam. They are pinned here because foldActivity paints the verb the moment a call is ANNOUNCED —
 // before any approval gate runs — which makes it the earliest point a hostile model's argument
 // reaches the screen.
-func TestToolActivityLabelCarriesNoEscape(t *testing.T) {
-	label := toolActivityLabel(newWidthAuthority(), domain.ToolCall{
+func TestToolActivityVerbCarriesNoEscape(t *testing.T) {
+	call := domain.ToolCall{
 		Tool:      "terminal",
 		Arguments: escapedArgs(t, "command", "npm "+escOSC52+"test"),
-	}, workspaceRoot{})
-	assertNoESCIn(t, "the activity label", label)
-	if !strings.Contains(label, "running") || !strings.Contains(label, "npm ") {
-		t.Errorf("stripping ate the benign label text: %q", label)
+	}
+	verb := toolActivityVerb(call, workspaceRoot{})
+	assertNoESCIn(t, "the activity verb", verb)
+	if !strings.Contains(verb, "running") {
+		t.Errorf("stripping ate the benign verb text: %q", verb)
 	}
 
-	unknown := toolActivityLabel(newWidthAuthority(), domain.ToolCall{Tool: "mcp" + escCSI + "_thing"}, workspaceRoot{})
-	assertNoESCIn(t, "the unregistered-tool activity label", unknown)
+	phrase := toolPhrase(newWidthAuthority(), presentToolCall(call, workspaceRoot{}))
+	assertNoESCIn(t, "the gist phrase", phrase)
+	if !strings.Contains(phrase, "running") || !strings.Contains(phrase, "npm ") {
+		t.Errorf("stripping ate the benign phrase text: %q", phrase)
+	}
+
+	unknown := toolActivityVerb(domain.ToolCall{Tool: "mcp" + escCSI + "_thing"}, workspaceRoot{})
+	assertNoESCIn(t, "the unregistered-tool activity verb", unknown)
 }
 
 // Every cell the autocomplete overlay builds is escape-stripped where the row is built, exactly as

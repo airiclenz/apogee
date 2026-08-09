@@ -27,7 +27,7 @@ func TestActivityText(t *testing.T) {
 		{name: "retrying", act: activity{kind: actRetrying}, want: "retrying"},
 		{name: "compacting", act: activity{kind: actCompacting}, want: "compacting"},
 		{name: "stopping", act: activity{kind: actStopping}, want: "stopping"},
-		{name: "tool renders its label", act: activity{kind: actTool, label: "reading · main.go"}, want: "reading · main.go"},
+		{name: "tool renders its label", act: activity{kind: actTool, label: "reading"}, want: "reading"},
 		{name: "tool with no label says nothing", act: activity{kind: actTool}, want: ""},
 		{
 			name: "sub-agent prefixes the phrase",
@@ -36,8 +36,8 @@ func TestActivityText(t *testing.T) {
 		},
 		{
 			name: "sub-agent prefixes a tool phrase at any depth",
-			act:  activity{kind: actTool, label: "searching · TODO", depth: 2},
-			want: "sub-agent · searching · TODO",
+			act:  activity{kind: actTool, label: "searching", depth: 2},
+			want: "sub-agent · searching",
 		},
 	}
 	for _, tc := range tests {
@@ -49,10 +49,11 @@ func TestActivityText(t *testing.T) {
 	}
 }
 
-// TestToolActivityLabel proves the actTool phrase is built from the presentation registry: the
-// tool's active verb, its target when the call names one, the raw-name fallback for an
-// unregistered (MCP) tool, and a status-tight clip so a long target cannot crowd out the gauge.
-func TestToolActivityLabel(t *testing.T) {
+// TestToolActivityVerb proves the actTool phrase is built from the presentation registry and is the
+// tool's active verb ALONE — the raw-name fallback for an unregistered (MCP) tool included. The
+// target the registry also carries never reaches the status line: the tool-call block a line below
+// already names it, and the path was what pushed the context gauge off the row.
+func TestToolActivityVerb(t *testing.T) {
 	longPath := "internal/tui/" + strings.Repeat("deeply-nested/", 6) + "main.go"
 
 	tests := []struct {
@@ -61,17 +62,17 @@ func TestToolActivityLabel(t *testing.T) {
 		want string
 	}{
 		{
-			name: "registered tool with a target",
+			name: "registered tool with a target keeps only the verb",
 			call: domain.ToolCall{Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
-			want: "reading · main.go",
+			want: "reading",
 		},
 		{
-			name: "registered tool with a command target",
+			name: "registered tool with a command target keeps only the verb",
 			call: domain.ToolCall{Tool: "terminal", Arguments: []byte(`{"command":"npm test"}`)},
-			want: "running · npm test",
+			want: "running",
 		},
 		{
-			name: "registered tool with no target argument → the bare verb",
+			name: "registered tool with no target argument reads the same",
 			call: domain.ToolCall{Tool: "read_file"},
 			want: "reading",
 		},
@@ -80,46 +81,56 @@ func TestToolActivityLabel(t *testing.T) {
 			call: domain.ToolCall{Tool: "mcp_weather", Arguments: []byte(`{"city":"Oslo"}`)},
 			want: "running mcp_weather",
 		},
+		{
+			name: "a target long enough to have crowded the row contributes nothing",
+			call: domain.ToolCall{Tool: "read_file", Arguments: []byte(`{"path":"` + longPath + `"}`)},
+			want: "reading",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := toolActivityLabel(newWidthAuthority(), tc.call, workspaceRoot{}); got != tc.want {
-				t.Errorf("toolActivityLabel() = %q, want %q", got, tc.want)
+			if got := toolActivityVerb(tc.call, workspaceRoot{}); got != tc.want {
+				t.Errorf("toolActivityVerb() = %q, want %q", got, tc.want)
 			}
 		})
 	}
+}
 
-	// The cap is spent in CELLS, ellipsis included, so the clipped target totals the budget rather
-	// than the budget plus a cell — and a double-width path spends the same 32 the ASCII one does,
-	// which is the whole point of measuring rather than counting runes.
-	t.Run("a long target is clipped to the status cap", func(t *testing.T) {
-		measure := newWidthAuthority()
-		for _, tc := range []struct {
-			name string
-			path string
-		}{
-			{"an ASCII path", longPath},
-			{"a double-width path", strings.Repeat("字", 32) + ".go"},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				got := toolActivityLabel(measure, domain.ToolCall{
-					Tool:      "read_file",
-					Arguments: []byte(`{"path":"` + tc.path + `"}`),
-				}, workspaceRoot{})
-				if !strings.HasPrefix(got, "reading · ") {
-					t.Fatalf("clipped label lost its verb: %q", got)
-				}
-				target := strings.TrimPrefix(got, "reading · ")
-				if !strings.HasSuffix(target, "…") {
-					t.Errorf("long target %q was not clipped: %q", tc.path, target)
-				}
-				if n := measure.Width(target); n > statusTargetCells {
-					t.Errorf("clipped target paints %d cells, want at most the cap's %d: %q",
-						n, statusTargetCells, target)
-				}
-			})
-		}
-	})
+// TestToolPhraseClipsTheTarget pins the cap on the phrase that DOES carry a target: a collapsed
+// run's gist (subAgentGist, render.go), which has no block of its own to read the path off.
+//
+// The cap is spent in CELLS, ellipsis included, so the clipped target totals the budget rather
+// than the budget plus a cell — and a double-width path spends the same 32 the ASCII one does,
+// which is the whole point of measuring rather than counting runes.
+func TestToolPhraseClipsTheTarget(t *testing.T) {
+	longPath := "internal/tui/" + strings.Repeat("deeply-nested/", 6) + "main.go"
+
+	measure := newWidthAuthority()
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{"an ASCII path", longPath},
+		{"a double-width path", strings.Repeat("字", 32) + ".go"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := toolPhrase(measure, presentToolCall(domain.ToolCall{
+				Tool:      "read_file",
+				Arguments: []byte(`{"path":"` + tc.path + `"}`),
+			}, workspaceRoot{}))
+			if !strings.HasPrefix(got, "reading · ") {
+				t.Fatalf("clipped phrase lost its verb: %q", got)
+			}
+			target := strings.TrimPrefix(got, "reading · ")
+			if !strings.HasSuffix(target, "…") {
+				t.Errorf("long target %q was not clipped: %q", tc.path, target)
+			}
+			if n := measure.Width(target); n > statusTargetCells {
+				t.Errorf("clipped target paints %d cells, want at most the cap's %d: %q",
+					n, statusTargetCells, target)
+			}
+		})
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -194,7 +205,7 @@ func TestFoldActivitySequence(t *testing.T) {
 		{
 			name:  "tool call",
 			event: domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}},
-			want:  "reading · main.go",
+			want:  "reading",
 		},
 		{
 			name:  "tool result → back to thinking",
@@ -217,8 +228,13 @@ func TestFoldActivitySequence(t *testing.T) {
 	}
 }
 
-// TestFoldActivityClockRunsPerPhrase proves the elapsed clock belongs to the phrase, not to
+// TestFoldActivityClockRunsPerPhrase proves the elapsed clock belongs to the work in flight, not to
 // the exchange: consecutive TokenEvents keep one running clock, and a changed phrase restarts it.
+//
+// A TOOL call is clocked on the call's own identity rather than on the phrase, because the phrase
+// can no longer tell two of them apart — with the target gone, every read words itself "reading",
+// and a clock keyed on that text would show the second file's call still counting the first one's
+// seconds. Within one call the reverse holds: re-announcing it must not restart anything.
 func TestFoldActivityClockRunsPerPhrase(t *testing.T) {
 	m := newTestModel(t)
 
@@ -238,6 +254,32 @@ func TestFoldActivityClockRunsPerPhrase(t *testing.T) {
 	if m.act.since.Equal(started) {
 		t.Error("the phrase changed to thinking but the clock kept the responding start")
 	}
+
+	read := func(id, path string) domain.Event {
+		return domain.ToolCallEvent{Call: domain.ToolCall{
+			ID: id, Tool: "read_file", Arguments: []byte(`{"path":"` + path + `"}`)}}
+	}
+
+	m = m.foldEvent(read("1", "a.go"))
+	first := m.act.since
+	if got, want := m.act.text(""), "reading"; got != want {
+		t.Fatalf("tool phrase = %q, want %q — the rest of this test rests on the two calls reading alike", got, want)
+	}
+
+	// The same call announced again (a streamed argument settling) is the same work: one clock.
+	m = m.foldEvent(read("1", "a.go"))
+	if !m.act.since.Equal(first) {
+		t.Errorf("a repeat announcement of call 1 restarted the clock (%v → %v)", first, m.act.since)
+	}
+
+	// A second call wording itself identically is nonetheless new work: a clock of its own.
+	m = m.foldEvent(read("2", "b.go"))
+	if m.act.since.Equal(first) {
+		t.Error("a second call with the same verb kept the first call's clock")
+	}
+	if got, want := m.act.call, "2"; got != want {
+		t.Errorf("the activity names call %q, want %q", got, want)
+	}
 }
 
 // TestFoldActivityDepthPrefixesSubAgent proves a nested (Depth > 0) event renders under the
@@ -249,7 +291,7 @@ func TestFoldActivityDepthPrefixesSubAgent(t *testing.T) {
 		EventBase: domain.EventBase{Depth: 1},
 		Call:      domain.ToolCall{ID: "1", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)},
 	})
-	if got, want := m.act.text(""), "sub-agent · searching · TODO"; got != want {
+	if got, want := m.act.text(""), "sub-agent · searching"; got != want {
 		t.Errorf("nested tool phrase = %q, want %q", got, want)
 	}
 
@@ -334,7 +376,7 @@ func TestFoldActivityBatchStaysOnTool(t *testing.T) {
 	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "2", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)}})
 
 	m = m.foldEvent(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: "ok"}})
-	if got, want := m.act.text(""), "reading · b.go"; got != want {
+	if got, want := m.act.text(""), "reading"; got != want {
 		t.Errorf("phrase with one call still open = %q, want %q", got, want)
 	}
 

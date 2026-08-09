@@ -353,17 +353,17 @@ func TestUnregisteredToolCardQuotesItsArgumentsVerbatim(t *testing.T) {
 	}
 }
 
-// The status line words a call from the same view the block does (toolActivityLabel →
-// presentToolCall), so the phrase beside the spinner and the branch line beneath it can never
-// spell one path two ways.
-func TestActivityLabelSharesTheWorkspaceRelativePath(t *testing.T) {
+// A collapsed run's live gist words a call from the same view the block does (toolPhrase →
+// presentToolCall), so the phrase on the run's summary line and the branch line inside it can never
+// spell one path two ways. (The status line spells no path at all — toolActivityVerb.)
+func TestToolPhraseSharesTheWorkspaceRelativePath(t *testing.T) {
 	t.Parallel()
 
 	ws := newWorkspaceRoot("/home/me/proj")
-	got := toolActivityLabel(newWidthAuthority(), domain.ToolCall{Tool: "read_file",
-		Arguments: []byte(`{"path":"/home/me/proj/docs/plan.md"}`)}, ws)
+	got := toolPhrase(newWidthAuthority(), presentToolCall(domain.ToolCall{Tool: "read_file",
+		Arguments: []byte(`{"path":"/home/me/proj/docs/plan.md"}`)}, ws))
 	if want := "reading · docs/plan.md"; got != want {
-		t.Errorf("activity label = %q, want %q", got, want)
+		t.Errorf("tool phrase = %q, want %q", got, want)
 	}
 }
 

@@ -28,8 +28,8 @@ import (
 // or any other self-pointer no-copy type (ADR 0011; doc.go; TestModelNoBuilderByValue).
 
 // activityKind is what the worker is doing right now — the coarse vocabulary the status line
-// renders. actTool is the one kind that carries a payload (the label naming the tool and its
-// target); every other kind renders a fixed word.
+// renders. actTool is the one kind that carries a payload (the label naming what the tool is
+// doing); every other kind renders a fixed word.
 type activityKind int
 
 const (
@@ -44,12 +44,18 @@ const (
 
 // activity is the status line's live left slot: what is happening, since when, at which
 // sub-agent nesting depth, and on whose behalf. label is used by actTool only; since is when
-// THIS activity began, so the elapsed clock measures the current phrase rather than the whole
+// THIS activity began, so the elapsed clock measures the work in flight rather than the whole
 // exchange.
 type activity struct {
 	kind  activityKind
-	label string // actTool only: "<verb> · <clipped target>", or the bare verb when there is none
-	depth int    // > 0 → the phrase is prefixed with the acting sub-agent's identity
+	label string // actTool only: the presented verb alone ("reading", "running mcp_weather")
+	// call is WHICH tool call the phrase describes: the id of the call whose announcement set this
+	// activity (domain.ToolCall.ID), empty for every other kind. It is what the elapsed clock is
+	// keyed on, because a verb-only label can no longer tell two calls apart — back-to-back reads
+	// both word themselves "reading", and a clock restarted only when the TEXT changes would count
+	// the previous file's call straight through the new one.
+	call  string
+	depth int // > 0 → the phrase is prefixed with the acting sub-agent's identity
 	// spawn is WHICH sub-agent is acting: the id of the sub_agent call that spawned the agent
 	// whose event set this activity (domain.EventBase.CallID), empty for the top-level agent.
 	// Depth cannot answer that once children run CONCURRENTLY (ADR 0039) — siblings share it —
@@ -68,7 +74,7 @@ type activity struct {
 //
 // name is the acting delegation's short name, resolved by the caller (runningPhrase, against
 // transcript.runName) and "" when the delegation was given none. A named child takes its name in
-// place of the generic word — "repo-scout · reading · main.go" — because with a fan-out running
+// place of the generic word — "repo-scout · reading" — because with a fan-out running
 // the slot can name only one delegate at a time and "sub-agent" says nothing about which. An
 // unnamed one keeps the subAgentLabel the transcript rail uses, to the byte.
 func (a activity) text(name string) string {
@@ -132,41 +138,40 @@ func formatElapsed(d time.Duration) string {
 	return fmt.Sprintf("%dm %02ds", secs/secondsPerMinute, secs%secondsPerMinute)
 }
 
-// statusTargetCells caps a tool target in the status line, in the CELLS the screen spends on it
-// (toolPhrase measures it through the width authority — width.go). It is far tighter than
-// clipDetail's transcript cap: the left slot shares one row with the context gauge, so a long
-// path or a pasted command must not push the gauge off the line. The gap < 1 truncation in
-// statusLine stays the floor for a window too narrow even for this.
+// statusTargetCells caps a tool target in the CELLS the screen spends on it (toolPhrase measures
+// it through the width authority — width.go). It is far tighter than clipDetail's transcript cap:
+// the phrase it bounds rides a COLLAPSED run's single summary line (subAgentGist, render.go),
+// beside that run's own call count and context fill, so a long path or a pasted command must not
+// crowd them off it.
 const statusTargetCells = 32
 
-// toolActivityLabel builds the actTool phrase for a call from the presentation registry: the
-// tool's active verb and, when the call names one, the target it acts on ("reading · main.go",
-// "running · npm test"). An unregistered (dynamic MCP) tool inherits presentToolCall's
-// "running <raw name>" fallback, so it is still a truthful fragment.
+// toolActivityVerb builds the actTool phrase for a call from the presentation registry: the tool's
+// active verb and nothing else ("reading", "running"). An unregistered (dynamic MCP) tool inherits
+// presentToolCall's "running <raw name>" fallback, so it is still a truthful fragment.
 //
-// It needs no escape-stripping and no path-shortening of its own: the phrase is built ONLY from
-// presentToolCall's view, which leaves that function through finishDisplay, so the status line
-// inherits the tool card's seam rather than re-deriving the discipline — and reads the same
-// workspace-relative path the block beneath it will. That matters here more than it looks —
-// foldActivity paints this label the moment a call is ANNOUNCED, before any approval gate runs, so
-// it is the earliest point at which a hostile model's argument reaches the screen. It also buys the
-// left slot its width back: statusTargetCells clips at 32 cells, which a project-relative path fits
-// and an absolute one routinely did not.
+// The TARGET is deliberately absent. The status line shares one row with the context gauge, and the
+// path it used to carry was both the thing that pushed the gauge off that row and a restatement of
+// the tool-call block already on screen a line below — so the slot keeps the half only it can say
+// (what is happening right now) and leaves the target to the block. toolPhrase still words the pair
+// for the one surface that has no block to read: a collapsed sub-agent run's gist.
 //
-// measure is the width authority the cap is spent through (toolPhrase), threaded in rather than
-// hard-wired so the budget is counted in the measure the painter is actually using (width.go).
-func toolActivityLabel(measure widthAuthority, call domain.ToolCall, ws workspaceRoot) string {
-	return toolPhrase(measure, presentToolCall(call, ws))
+// It needs no escape-stripping of its own: the phrase is built ONLY from presentToolCall's view,
+// which leaves that function through finishDisplay, so the status line inherits the tool card's
+// seam rather than re-deriving the discipline. That matters here more than it looks — foldActivity
+// paints this label the moment a call is ANNOUNCED, before any approval gate runs, so it is the
+// earliest point at which a hostile model's argument reaches the screen.
+func toolActivityVerb(call domain.ToolCall, ws workspaceRoot) string {
+	return presentToolCall(call, ws).Verb
 }
 
-// toolPhrase is the composition itself: a call's view worded as the sentence fragment naming what
-// it is doing right now. It is split out from toolActivityLabel because a COLLAPSED sub-agent run
-// says the same thing about the call its span has open (subAgentGist, render.go) and must not word
-// it a second way — there is ONE phrase for "what is happening", wherever it is shown, so a change
-// to the wording moves the status line and the run's summary together.
+// toolPhrase words a call's view as the sentence fragment naming what it is doing right now, target
+// and all ("reading · main.go", "running · npm test"). It belongs to the COLLAPSED sub-agent run's
+// gist (subAgentGist, render.go) and to that alone: inside a collapsed run the gist is the only live
+// view of what the child is touching, so it keeps the target the status line sheds
+// (toolActivityVerb).
 //
 // It takes the view rather than the call, since the transcript's own entries carry views already
-// sanitized by presentToolCall; toolActivityLabel is the seam that builds one from a raw call.
+// sanitized by presentToolCall.
 func toolPhrase(measure widthAuthority, tv toolView) string {
 	if tv.Target == "" {
 		return tv.Verb
@@ -174,30 +179,44 @@ func toolPhrase(measure widthAuthority, tv toolView) string {
 	// The cap is spent in CELLS, through the width authority (width.go) — the painter's own measure,
 	// so the budget the slot promises is the budget the screen bills. Spent in RUNES it was no budget
 	// at all: a double-width glyph is one rune the screen pays two cells for, so a 32-rune CJK path
-	// painted up to 64 cells, statusLeft truthfully truncated that over-wide phrase against the whole
-	// window, and the gauge this cap exists to keep on an 80-column row went off it. The ellipsis is
-	// spent INSIDE the budget (Truncate's tail), so the clipped target totals at most
-	// statusTargetCells cells rather than the cap plus one more.
+	// painted up to 64 cells and the row carrying it was truthfully truncated whole against the
+	// window. The ellipsis is spent INSIDE the budget (Truncate's tail), so the clipped target totals
+	// at most statusTargetCells cells rather than the cap plus one more.
 	//
-	// The target is EXPANDED before the cap counts it (expandTabs, render.go) and stays so: statusLeft
-	// composes the phrase through a style, which rewrites the tab into its four spaces before
-	// th.measure reads the result, and the gist's line is wrapped by wrapText, which settles its own
-	// tabs — so no tab ever reaches the screen, and the cap must count the form that does.
+	// The target is EXPANDED before the cap counts it (expandTabs, render.go) and stays so: the gist's
+	// line is wrapped by wrapText, which settles its own tabs — so no tab ever reaches the screen, and
+	// the cap must count the form that does.
 	return tv.Verb + " · " + measure.Truncate(expandTabs(tv.Target), statusTargetCells, "…")
 }
 
-// setActivity moves the model to a new activity. The elapsed clock restarts only when the
-// rendered phrase actually changes (kind or label) — a stream of TokenEvents must keep one
-// running clock, not reset it on every chunk. Depth and spawn alone do not restart it: the
-// phrase's sub-agent prefix changes, but the same work is still in flight.
+// setActivity moves the model to a new activity that is not an open tool call, keyed on the phrase
+// it renders (kind and label). Tool calls go through setToolActivity, which carries the identity
+// their clock is keyed on instead.
 func (m *Model) setActivity(kind activityKind, label string, depth int, spawn string) {
-	if m.act.kind != kind || m.act.label != label {
-		m.act.since = time.Now()
+	m.moveActivity(activity{kind: kind, label: label, depth: depth, spawn: spawn})
+}
+
+// setToolActivity moves the model to the tool call an announcement opened: verb is the phrase the
+// slot renders (toolActivityVerb) and call is the id of the call it describes (domain.ToolCall.ID),
+// which is what the elapsed clock is keyed on — a second read of a second file is a new call and
+// deserves a clock of its own even though both phrases read "reading".
+func (m *Model) setToolActivity(verb, call string, depth int, spawn string) {
+	m.moveActivity(activity{kind: actTool, label: verb, call: call, depth: depth, spawn: spawn})
+}
+
+// moveActivity is the single seat of the elapsed clock's origin: next inherits the running clock
+// unless what it says the worker is doing actually changed — its kind, its phrase, or the tool call
+// it names. A stream of TokenEvents must keep one running clock, not reset it on every chunk, and
+// the same holds for the repeated announcement of one call. Depth and spawn alone do not restart it
+// either: the phrase's sub-agent prefix changes, but the same work is still in flight.
+//
+// next.since is ignored — callers state what is happening, never when it started.
+func (m *Model) moveActivity(next activity) {
+	next.since = m.act.since
+	if m.act.kind != next.kind || m.act.label != next.label || m.act.call != next.call {
+		next.since = time.Now()
 	}
-	m.act.kind = kind
-	m.act.label = label
-	m.act.depth = depth
-	m.act.spawn = spawn
+	m.act = next
 }
 
 // foldActivity derives the live activity from one engine Event (the third fold foldEvent runs).
@@ -231,7 +250,7 @@ func (m Model) foldActivity(e domain.Event, openCall bool) Model {
 	case domain.StreamResetEvent:
 		m.setActivity(actRetrying, "", e.Depth, e.EventBase.CallID)
 	case domain.ToolCallEvent:
-		m.setActivity(actTool, toolActivityLabel(m.th.measure, e.Call, m.transcript.ws), e.Depth, e.EventBase.CallID)
+		m.setToolActivity(toolActivityVerb(e.Call, m.transcript.ws), e.Call.ID, e.Depth, e.EventBase.CallID)
 	case domain.ToolResultEvent:
 		// One result does not end the tool phase while another call is still open (a parallel
 		// batch); today's loop dispatches sequentially, so this normally falls straight through
