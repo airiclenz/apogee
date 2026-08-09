@@ -762,8 +762,16 @@ func subAgentName(args map[string]any) string {
 // argument existed, and every one a Mechanism synthesises (guided decomposition names nothing).
 // The two spellings get the same treatment, so a name is clipped and escape-stripped exactly as a
 // task line is (firstLineArg, finishDisplay).
+//
+// The fallback is decided on the RENDERED form — the name as the view's own escape strip will leave
+// it, run here and again on the way out (sanitize, idempotent) — because a name is model output and
+// the strip can empty one out: a "name" of nothing but control characters is non-empty as it
+// arrives, so deciding on the raw string would pick it over the task and then paint a blank slot.
+// The trim goes with the strip for the same reason, a control character being all that separated
+// two spaces. headlessSubAgentTarget (cmd/apogee) decides the same question the same way, so the
+// Driver with no header to paint and the one that paints it name a child alike.
 func subAgentTarget(args map[string]any) string {
-	if n := subAgentName(args); n != "" {
+	if n := strings.TrimSpace(stripEscapes(subAgentName(args))); n != "" {
 		return n
 	}
 	return firstLineArg("task")(args)

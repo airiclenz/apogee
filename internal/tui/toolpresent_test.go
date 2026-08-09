@@ -371,6 +371,16 @@ func TestPresentSubAgentNameLeadsTheHeader(t *testing.T) {
 			wantTarget: "Survey the tests.",
 			wantAgent:  "",
 		},
+		{
+			// A name that survives arrival but not the escape strip is no name either: deciding the
+			// fallback on the raw string would choose it over the task and then leave the header's
+			// slot blank, which is the one thing the slot may never be. The status line reads the
+			// same emptiness off agentName and words the run "sub-agent" (transcript.runName).
+			name:       "a name of nothing but control characters is no name",
+			args:       `{"name":"\u0001\u0002\u007f","task":"` + task + `"}`,
+			wantTarget: "Survey the tests.",
+			wantAgent:  "",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
