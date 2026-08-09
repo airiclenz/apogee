@@ -252,9 +252,20 @@ default (no message) shows the `⌥⏎`-only variant; `TestModelNewlineKeysInser
 
 **Commit:** `feat(tui): the newline legend follows the negotiated keyboard protocol`
 
-## 6. Pin and fix the shift+enter regression
+## 6. Pin and fix the shift+enter regression — ✅ DONE (2026-08-09)
 
 Depends on item 5.
+
+NOTES (2026-08-09): outcome = the pre-decided **Neither** branch, on the owner's check against a real
+terminal — so the two-build A/B was moot and was NOT performed: the alt-screen pre-claim
+(`claimTerminalScreen`) stands untouched and `go.mod`/`go.sum` are byte-unchanged (no ultraviolet pin).
+Owner-confirmed: shift+enter inserts a newline on the affected terminal, normally. The failure was
+load behavior, not an apogee regression — the keypress was simply not recognized while a local LLM was
+saturating the host GPU (100% utilization). Environment: VS Code's integrated terminal, SSH'd from VS
+Code into a Mac container, with the LLM running on the Mac host. Item 5's adaptive legend is the
+standing answer, so this item changes no code: its whole deliverable is the ISSUES.md close-out (that
+line now reads `[X]` with the outcome clause) plus this record. Consequently no CHANGELOG entry — no
+user-facing behavior changed here beyond what item 5 already recorded.
 
 **What:** the dispatch layer is provably intact (the existing model-level test passes; the
 `handleKey` fall-through to the textarea is unchanged since the 2026-07-19 baseline), so the
