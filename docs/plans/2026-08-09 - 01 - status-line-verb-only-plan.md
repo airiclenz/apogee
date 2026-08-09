@@ -48,7 +48,11 @@ In `internal/tui/activity.go`:
 
 **Commit:** `feat(tui): the status line keeps the tool verb and drops the path`
 
-## 2. Docs follow the verb-only status line
+## 2. Docs follow the verb-only status line — ✅ DONE (2026-08-09)
+
+NOTES (2026-08-09): the `⣾ read… · 5 queued` example at `layout.md` "And what the left slot sheds" was kept verbatim instead of being rewritten — it is still exactly what renders under a verb-only phrase (20 columns − 2 lead − 11 for ` · 5 queued` = 7 cells; `⣾ reading · 3s` truncated to 7 cells is `⣾ read…`), so restating it would have made the spec wrong. The prose the item asked for was added beside it: verbs are short, so trimming is now the rare case and the stated order is what happens on the windows that still force it.
+NOTES (2026-08-09): the gist paragraph's phrase example was corrected from `reading main.go` to `reading · main.go` — `toolPhrase` (`activity.go:175`) joins verb and target with ` · `, and the paragraph was being reworded around that exact claim.
+NOTES (2026-08-09): `layout.md:1016` ("The phrase and the elapsed clock beside it…") names no path, so it was left unchanged, as the item's "adjust only if it names the path" allows. Historical `CHANGELOG.md` entries quoting the old phrase were left alone — they are the record of shipped releases, and the plan's closing note bars CHANGELOG edits.
 
 Depends on item 1.
 

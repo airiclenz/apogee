@@ -49,7 +49,7 @@
   chat content and the bottom prompt/information section like displayed here.
 
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ centered session name ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-  ⠉⠹ reading · main.go · 3s                                    16k/32k 50% █████░░░░░
+  ⠉⠹ reading · 3s                                              16k/32k 50% █████░░░░░
 ╭─────────────────────────────────────────────────────────────────────────────────────╮
 │ Send a message… [Shift] + [Enter] creates a line break                              │
 │ This text box can be multiline. The text edit area auto increases height to         │
@@ -543,8 +543,10 @@ rewritten, so the agent's view of a path and the transcript's differ in spelling
 else. It is applied to the workspace root's own spelling wherever such a line mentions it, so a
 line that merely contains a slash — a URL, a fraction, a regex — is not a path and is left alone,
 and a sibling directory whose name only opens with the root's spelling (`/home/me/proj-old`) stays
-whole. The status line's live phrase reads the same shortened path the block beneath it will, for
-the same reason it reads the same verb: both are worded from one view.
+whole. The **collapsed sub-agent run's gist** reads the same shortened path the blocks it elides
+would, for the same reason it reads the same verb: both are worded from one view. The status line
+takes the verb from that view and stops there — the target it would have named is already on the
+block a row beneath it, and the room that path was costing goes to the context gauge.
 
 **A body is quoted, never respelled — and so is a promoted line.** The rule above reaches the paths
 a block *names* and stops there. The **body** beneath the branch is text the block *quotes* — a
@@ -818,9 +820,11 @@ delegation's name** when the call gave one, and the delegated task's first line 
 a fan-out reads as what each child is *for* rather than as several openings of one instruction. The
 name is clipped and escape-stripped exactly as a task line is, and an unnamed delegation's header
 is unchanged. Its summary line is `N tool calls · <used>/<window> · ` plus the run's gist,
-and the gist arrives in two tempi: while the run works, the same activity phrase the status line
-shows for the run (`reading main.go`), ticking as inner calls land; once the report arrives, the
-report's first line. The count is **transitive** — every call in the span counts, whatever its
+and the gist arrives in two tempi: while the run works, the verb and shortened target of the call
+in flight (`reading · main.go`), ticking as inner calls land; once the report arrives, the
+report's first line. That pair is worded from the same view the status line reads its verb from,
+but the gist keeps the **target** the status line sheds: inside a collapsed run the gist is the
+only live view of what the child is touching, since the block that would have named it is elided. The count is **transitive** — every call in the span counts, whatever its
 depth — so one number says how much work happened in there, at every nesting level by the same
 rule. The middle cell is the other half of that summary: **how full the delegate's own context
 got** (`12k/32k`), spelled in the unit-capped form the status line's gauge spells its window in so
@@ -857,8 +861,8 @@ counts its **own** tool calls, states its **own** context fill, and ticks with i
 phrase — which is what makes a fan-out readable at all, since the status line can name only one
 delegate at a time. Which one it is naming is no longer left to inference: the slot's phrase belongs
 to whichever child emitted the last event, and when that delegation was **given a name** the name
-takes the place of the generic word — `repo-scout · reading · main.go` rather than
-`sub-agent · reading · main.go`. A delegation that named nothing, and one whose run block has not
+takes the place of the generic word — `repo-scout · reading` rather than
+`sub-agent · reading`. A delegation that named nothing, and one whose run block has not
 opened yet, both keep the generic word. A child's live text follows its own block by the same rule: the streamed
 preview paints inside the run that produced it, elided while that run is collapsed, and two
 children talking at once neither share a block nor interleave a word. Expanding, collapsing,
@@ -1072,6 +1076,10 @@ exactly as a pane's title row is: the **count** is the last thing it gives up an
 what is trimmed around it (`⣾ read… · 5 queued` at 20 columns), because on the short windows where
 the band has been dropped that count is the only thing the whole frame says about the queue. Below
 two columns of room the phrase goes whole, separator and all, rather than reading as an ellipsis.
+The trimming is now the rare case rather than the ordinary one: a running phrase is a **verb and a
+clock** (`reading · 3s`) since the tool's target left this slot, so on any window with room for the
+gauge it arrives whole — which is the point of it having left. The order above is what happens on
+the windows narrow enough that something must still give.
 
 **And the two facts an *idle* frame may still carry.** Idle otherwise says nothing for itself — the
 input box below already invites a message — but the slot is where a surface that has gone leaves its

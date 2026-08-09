@@ -258,8 +258,17 @@
 // translation, the hidden states, and the shape.
 //
 // activity.go replaces the status line's turn index — which answered nothing the human was
-// asking — with a live activity phrase and an elapsed clock ("thinking · 12s", "reading ·
-// main.go · 3s", "sub-agent · searching · 6s"). [Model.foldActivity] derives it from the same
+// asking — with a live activity phrase and an elapsed clock ("thinking · 12s", "reading · 3s",
+// "sub-agent · searching · 6s"). A tool's phrase is the presented VERB and nothing else: the target
+// it used to carry restated the tool-call block one row beneath it and routinely pushed the context
+// gauge off the row, so it stays with the block. [toolPhrase] still words verb and target together
+// for the one surface with no block to read — a COLLAPSED sub-agent run's gist, whose inner blocks
+// are elided. Dropping the target makes the elapsed clock's key a real question: back-to-back reads
+// both word themselves "reading", so a clock restarted on a change of TEXT would count the first
+// file's call straight through the second. A tool activity therefore carries the id of the call it
+// describes (domain.ToolCall.ID) and restarts when that changes; every other kind keeps the
+// phrase-change rule, since for those the text is what actually changed.
+// [Model.foldActivity] derives all of it from the same
 // Event stream the transcript folds (including [domain.ReasoningEvent], the observability seam
 // that makes "thinking" a fact rather than a guess), and the transitions no Event announces —
 // submit, /compact, the stop key, the worker's terminal Msg — set it directly. It adds no
@@ -564,8 +573,8 @@
 // [transcript.addEphemeralNote], [transcript.addError], [transcript.addApproval] and
 // [transcript.addToolResult]'s orphan branch for the scrollback, [toolView.sanitize] (run by
 // [toolView.finishDisplay], which presentToolCall and enrichWithResult both leave through) for the
-// tool card and everything derived from it (toolActivityLabel), and each popupRow builder for the
-// overlays, since the popup module strips
+// tool card and everything derived from it (toolActivityVerb, toolPhrase), and each popupRow
+// builder for the overlays, since the popup module strips
 // nothing and truncates ANSI-preservingly. stripEscapes is idempotent and allocation-free on text
 // with nothing to rewrite — no control character, no DEL, no invalid UTF-8 byte — so a producer
 // that also strips costs nothing. TestTranscriptStripsTerminalEscapes and its siblings pin every
