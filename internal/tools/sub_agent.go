@@ -27,16 +27,22 @@ var subAgentSpec = toolSpec{
   "type": "object",
   "required": ["task"],
   "properties": {
-    "task": {"type": "string", "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."}
+    "task": {"type": "string", "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
+    "name": {"type": "string", "description": "Optional short name for this delegation, shown in the UI."}
   }
 }`),
 }
 
-// SubAgentArgs is the sub_agent tool's argument shape: a single self-contained task string.
-// It is exported so the dispatch layer parses the delegated task without re-declaring the
-// schema.
+// SubAgentArgs is the sub_agent tool's argument shape: a self-contained task string plus an
+// OPTIONAL short name for the delegation. It is exported so the dispatch layer parses the
+// delegated task without re-declaring the schema.
+//
+// Name is display identity only, never privilege (ADR 0005): it is what the session chat calls
+// the child instead of the task's first line. It is not required — an absent or blank name
+// leaves every display on that fallback.
 type SubAgentArgs struct {
 	Task string `json:"task"`
+	Name string `json:"name"`
 }
 
 // SubAgent is the model-facing descriptor for delegating a sub-task to a nested agent

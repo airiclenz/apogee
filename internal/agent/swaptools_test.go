@@ -162,7 +162,7 @@ func TestSwapToolsIsSeenByTheNextSubAgentSpawn(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 
-	before, err := a.newChildAgent("call_sub", "the delegated task")
+	before, err := a.newChildAgent("call_sub", "the delegated task", "")
 	if err != nil {
 		t.Fatalf("newChildAgent before the swap: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestSwapToolsIsSeenByTheNextSubAgentSpawn(t *testing.T) {
 		t.Fatalf("SwapTools: %v", err)
 	}
 
-	after, err := a.newChildAgent("call_sub", "the delegated task")
+	after, err := a.newChildAgent("call_sub", "the delegated task", "")
 	if err != nil {
 		t.Fatalf("newChildAgent after the swap: %v", err)
 	}

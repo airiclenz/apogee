@@ -688,11 +688,120 @@ func TestSubAgentInheritsSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	child, err := a.newChildAgent("call_sub", "the delegated task")
+	child, err := a.newChildAgent("call_sub", "the delegated task", "")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
 	if child.cfg.SystemPrompt != a.cfg.SystemPrompt {
 		t.Errorf("child SystemPrompt = %q, want the parent's %q", child.cfg.SystemPrompt, a.cfg.SystemPrompt)
+	}
+}
+
+// subAgentNamedArgs builds the sub_agent tool's JSON argument payload for a delegated task that
+// also carries the optional short name.
+func subAgentNamedArgs(task, name string) string {
+	b, _ := json.Marshal(tools.SubAgentArgs{Task: task, Name: name})
+	return string(b)
+}
+
+// TestDelegationNameNormalisesToATrimmedFirstLine pins the one normalisation the recursion point
+// performs on a model-supplied name, so no display downstream has to defend itself: the first
+// line only, trimmed. Anything that normalises to nothing is ABSENT — the signal every caller
+// reads as "fall back to the task".
+func TestDelegationNameNormalisesToATrimmedFirstLine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"plain", "repo-scout", "repo-scout"},
+		{"padded", "   repo-scout\t ", "repo-scout"},
+		{"multi-line keeps the first line", "repo-scout\nand then some prose", "repo-scout"},
+		{"padded multi-line", "  repo-scout  \n more prose\n", "repo-scout"},
+		{"carriage return", "repo-scout\r\nprose", "repo-scout"},
+		{"missing", "", ""},
+		{"whitespace only", "   \n  ", ""},
+		{"leading blank line is absent", "\nrepo-scout", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := delegationName(tc.raw); got != tc.want {
+				t.Errorf("delegationName(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSubAgent_ChildCarriesTheDelegationName proves the spawn seam stamps the name beside the
+// child's other identity fields, and that an unnamed delegation leaves it empty so every display
+// falls back to the task. The name is DISPLAY identity only (ADR 0005): the child's task and
+// spawning call id must be untouched by it.
+func TestSubAgent_ChildCarriesTheDelegationName(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	a, err := newAgent(subAgentConfig(sink, domain.ModeAskBefore), &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	named, err := a.newChildAgent("c1", "summarise the repo", "repo-scout")
+	if err != nil {
+		t.Fatalf("newChildAgent (named): %v", err)
+	}
+	if named.name != "repo-scout" {
+		t.Errorf("named child name = %q, want %q", named.name, "repo-scout")
+	}
+	if named.task != "summarise the repo" {
+		t.Errorf("named child task = %q, want the delegated task", named.task)
+	}
+	if named.callID != "c1" {
+		t.Errorf("named child callID = %q, want c1", named.callID)
+	}
+
+	unnamed, err := a.newChildAgent("c2", "summarise the repo", "")
+	if err != nil {
+		t.Fatalf("newChildAgent (unnamed): %v", err)
+	}
+	if unnamed.name != "" {
+		t.Errorf("unnamed child name = %q, want empty — the displays fall back to the task", unnamed.name)
+	}
+}
+
+// TestSubAgent_NamedDelegationStillReportsBack drives the whole recursion point with a name in
+// the arguments: the optional field must parse, normalise and delegate exactly as a bare task
+// does, so adding a name can never cost a model its delegation.
+func TestSubAgent_NamedDelegationStillReportsBack(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", tools.SubAgentToolName, subAgentNamedArgs("summarise the repo", "  repo-scout\nignored prose")),
+		contentScript("the repo is a Go TUI agent"),
+		contentScript("done — delegated and summarised"),
+	}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	res, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	if res.IsError {
+		t.Fatalf("named sub_agent result is an error: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "Go TUI agent") {
+		t.Errorf("named sub_agent result = %q, want the child's final message", res.Content)
 	}
 }

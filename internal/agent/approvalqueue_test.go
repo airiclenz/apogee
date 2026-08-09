@@ -268,7 +268,7 @@ func TestQueuedApprovals_OneSlotPerAgentTree(t *testing.T) {
 	if parent.cfg.Approver == domain.Approver(inner) {
 		t.Fatal("construction did not install the queueing seam")
 	}
-	child, err := parent.newChildAgent("c1", "a delegated task")
+	child, err := parent.newChildAgent("c1", "a delegated task", "")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}

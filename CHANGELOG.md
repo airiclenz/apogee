@@ -153,6 +153,11 @@ point is a **minor** bump, not a breaking change.
     [ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md),
     with amendments to ADR 0013 §5 (per-child atomicity) and ADR 0014 §3 (batch = the cap); the
     vocabulary is `CONTEXT.md` §Parallel agents.
+- **A delegation can carry a name.** The `sub_agent` tool now takes an optional `name` argument
+  beside `task` — a short label for what that child is for, normalised to a trimmed first line.
+  It is display identity only, never privilege (ADR 0005), and it stays optional: a delegation
+  that names nothing behaves exactly as before, with every display falling back to the delegated
+  task's first line.
 
 ### Changed
 

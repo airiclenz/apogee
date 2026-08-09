@@ -124,6 +124,10 @@ When one reply carries several `sub_agent` calls, the **top-level** agent runs t
 own delegations run serially inline); every event a sub-agent emits carries the **call-ID**
 of the `sub_agent` call that spawned it, so interleaved streams stay attributable
 ([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)).
+A delegation may also carry a model-supplied short **name** — an optional `name` argument on the
+`sub_agent` call, normalised to a trimmed first line — which is what the session chat calls that
+child; it is display identity only, never privilege, and every display falls back to the
+delegated task's first line when it is absent.
 One shape to know when reading events: `domain.AuditEvent` carries a `CallID` of its own — the
 **audited** call, the tool call that record is about — which **shadows** the promoted
 `EventBase.CallID`, so an observer reading `ev.CallID` on an audit record gets the audited call;

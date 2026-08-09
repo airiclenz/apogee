@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -45,6 +46,17 @@ func isSubAgentCall(call domain.ToolCall) bool {
 	return call.Tool == tools.SubAgentToolName
 }
 
+// delegationName normalises the OPTIONAL name a sub_agent call may carry into the one form
+// every display can paint on a single line: the first line only, trimmed of surrounding
+// whitespace. A name that is empty after normalisation is ABSENT — the callers fall back to the
+// delegated task's first line, exactly as they did before names existed. It runs once here at
+// the recursion point rather than at each display, so a model that pads or newlines its name
+// cannot break a status line or a prompt body downstream.
+func delegationName(raw string) string {
+	first, _, _ := strings.Cut(raw, "\n")
+	return strings.TrimSpace(first)
+}
+
 // runSubAgent is the recursion point: it parses the delegated task, constructs a nested Agent
 // bounded by this Agent's privileges (ADR 0005/0013), drives it to its Exchange boundary, and
 // returns the sub-agent's final message as this call's tool result. A cancellation propagates
@@ -72,7 +84,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorToolResult(call.ID, "sub_agent requires a non-empty task"), dispatchDone
 	}
 
-	sub, err := a.newChildAgent(call.ID, args.Task)
+	sub, err := a.newChildAgent(call.ID, args.Task, delegationName(args.Name))
 	if err != nil {
 		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), dispatchDone
 	}
@@ -138,7 +150,13 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 // (domain.ApprovalRequest.SubAgentTask), so a prompt that queued behind a sibling's still says
 // which agent is asking. It is threaded here for the same reason the id is: the child carries it
 // for its whole run, and every gate it reaches is one it asks for itself.
-func (a *Agent) newChildAgent(spawnCallID, task string) (*Agent, error) {
+//
+// name is the OPTIONAL short name the same call may have supplied, already normalised by
+// delegationName — the child's identity in a FEW words where the task is a sentence, so a
+// display too narrow for the task can still say which delegation it is showing. Empty means the
+// model named no delegation, and every display falls back to the task's first line. Like the
+// task it is display identity only: it is never consulted for privilege (ADR 0005).
+func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	childCfg := a.cfg
 	childCfg.Mode = a.Mode() // inherit the parent's LIVE mode at spawn (Shift+Tab may have changed it),
 	//                          read under the lock since this runs on the worker goroutine during dispatch
@@ -170,6 +188,7 @@ func (a *Agent) newChildAgent(spawnCallID, task string) (*Agent, error) {
 	child.depth = a.depth + 1
 	child.callID = spawnCallID
 	child.task = task
+	child.name = name
 	child.guards = a.guards.ForSubAgent()
 	// The child belongs to the PARENT's session, so it speaks from the parent's context-file
 	// bytes: copy the cache over the one its own construction just read. A sub-agent is not a
