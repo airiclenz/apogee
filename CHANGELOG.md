@@ -170,6 +170,15 @@ point is a **minor** bump, not a breaking change.
     rather than as several openings of one instruction. Saved sessions replay it with no format
     change: the name is already the header's finished text, so it rides the record's existing
     target and the transcript wire gained no member.
+  - **The status line says WHICH delegate is working, and the prompt panes say which one is asking.**
+    The left slot's phrase takes the acting child's name in place of the generic word —
+    `repo-scout · reading · main.go` where it used to read `sub-agent · reading · main.go` — resolved
+    per frame from the event's spawning call against that run's header, so with several children
+    running at once the slot names the one whose event it is showing. The approval pane's and the ask
+    box's `Sub-agent:` line leads with the name and keeps the task behind it
+    (`Sub-agent: repo-scout — audit the config loader`), under the clip those lines already had,
+    spent now on the whole line so a named prompt is never longer than an unnamed one. A delegation
+    that named nothing renders byte-for-byte as before in all three places.
 
 ### Changed
 

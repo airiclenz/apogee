@@ -42,7 +42,7 @@ func TestActivityText(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.act.text(); got != tc.want {
+			if got := tc.act.text(""); got != tc.want {
 				t.Errorf("text() = %q, want %q", got, tc.want)
 			}
 		})
@@ -205,14 +205,14 @@ func TestFoldActivitySequence(t *testing.T) {
 	}
 	for _, s := range steps {
 		m = m.foldEvent(s.event)
-		if got := m.act.text(); got != s.want {
+		if got := m.act.text(""); got != s.want {
 			t.Errorf("after %s the phrase is %q, want %q", s.name, got, s.want)
 		}
 	}
 
 	// A re-streamed turn says so.
 	m = m.foldEvent(domain.StreamResetEvent{})
-	if got := m.act.text(); got != "retrying" {
+	if got := m.act.text(""); got != "retrying" {
 		t.Errorf("after a stream reset the phrase is %q, want %q", got, "retrying")
 	}
 }
@@ -249,12 +249,78 @@ func TestFoldActivityDepthPrefixesSubAgent(t *testing.T) {
 		EventBase: domain.EventBase{Depth: 1},
 		Call:      domain.ToolCall{ID: "1", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)},
 	})
-	if got, want := m.act.text(), "sub-agent · searching · TODO"; got != want {
+	if got, want := m.act.text(""), "sub-agent · searching · TODO"; got != want {
 		t.Errorf("nested tool phrase = %q, want %q", got, want)
 	}
 
 	m = m.foldEvent(domain.MessageEvent{Text: "back"})
-	if got, want := m.act.text(), "thinking"; got != want {
+	if got, want := m.act.text(""), "thinking"; got != want {
+		t.Errorf("phrase after the parent resumed = %q, want %q", got, want)
+	}
+}
+
+// TestStatusPhraseNamesTheActingDelegation proves the slot says WHICH delegate is working. Depth
+// alone could only say "a sub-agent is", and with a fan-out running (ADR 0039) the slot names one
+// child at a time — so a named delegation puts its name where the generic word was, resolved from
+// the event's spawning call id against the run head the parent's own sub_agent call folded.
+//
+// The two fallbacks matter as much as the hit: a delegation that named nothing, and one whose head
+// this transcript has not got (a child's first event beating its parent's tool call in, a replay),
+// both read exactly as the line read before names existed. The clock is read at the activity's own
+// start so the phrase is asserted whole, "0s" and all.
+func TestStatusPhraseNamesTheActingDelegation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		head string // the spawning sub_agent call's arguments; "" = no run head folds at all
+		want string
+	}{
+		{
+			name: "a named delegation takes the prefix",
+			head: `{"name":"repo-scout","task":"audit the config loader"}`,
+			want: "repo-scout · responding · 0s",
+		},
+		{
+			name: "an unnamed delegation keeps the generic word",
+			head: `{"task":"audit the config loader"}`,
+			want: subAgentLabel + " · responding · 0s",
+		},
+		{
+			name: "an unknown run reads as unnamed rather than as nothing",
+			want: subAgentLabel + " · responding · 0s",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel(t)
+			if tc.head != "" {
+				m = m.foldEvent(domain.ToolCallEvent{
+					Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(tc.head)},
+				})
+			}
+			m = m.foldEvent(domain.TokenEvent{
+				EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+				Text:      "working on it",
+			})
+			if got := m.runningPhrase(m.act.since); got != tc.want {
+				t.Errorf("status phrase = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestStatusPhraseDropsTheNameWhenTheParentResumes proves the name is the ACTING agent's, not a mode
+// the slot latches into: the parent's own events carry no spawning call, so its phrase is bare again.
+func TestStatusPhraseDropsTheNameWhenTheParentResumes(t *testing.T) {
+	m := newTestModel(t)
+	m = m.foldEvent(domain.ToolCallEvent{
+		Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"name":"repo-scout","task":"audit"}`)},
+	})
+	m = m.foldEvent(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "working"})
+	if got, want := m.runningPhrase(m.act.since), "repo-scout · responding · 0s"; got != want {
+		t.Fatalf("delegate phrase = %q, want %q", got, want)
+	}
+
+	m = m.foldEvent(domain.MessageEvent{Text: "back"})
+	if got, want := m.runningPhrase(m.act.since), "thinking · 0s"; got != want {
 		t.Errorf("phrase after the parent resumed = %q, want %q", got, want)
 	}
 }
@@ -268,12 +334,12 @@ func TestFoldActivityBatchStaysOnTool(t *testing.T) {
 	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "2", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)}})
 
 	m = m.foldEvent(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: "ok"}})
-	if got, want := m.act.text(), "reading · b.go"; got != want {
+	if got, want := m.act.text(""), "reading · b.go"; got != want {
 		t.Errorf("phrase with one call still open = %q, want %q", got, want)
 	}
 
 	m = m.foldEvent(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "2", Content: "ok"}})
-	if got, want := m.act.text(), "thinking"; got != want {
+	if got, want := m.act.text(""), "thinking"; got != want {
 		t.Errorf("phrase after the batch drained = %q, want %q", got, want)
 	}
 }
@@ -283,7 +349,7 @@ func TestFoldActivityBatchStaysOnTool(t *testing.T) {
 // overwrite "stopping". Only finishWorker clears it.
 func TestFoldActivityStoppingIsSticky(t *testing.T) {
 	m := newTestModel(t)
-	m.setActivity(actStopping, "", 0)
+	m.setActivity(actStopping, "", 0, "")
 
 	for _, e := range []domain.Event{
 		domain.ReasoningEvent{Text: "still going"},
@@ -294,13 +360,13 @@ func TestFoldActivityStoppingIsSticky(t *testing.T) {
 		domain.StreamResetEvent{},
 	} {
 		m = m.foldEvent(e)
-		if got := m.act.text(); got != "stopping" {
+		if got := m.act.text(""); got != "stopping" {
 			t.Fatalf("%T overwrote the sticky stop phrase with %q", e, got)
 		}
 	}
 
 	m.finishWorker(stateIdle)
-	if got := m.act.text(); got != "" {
+	if got := m.act.text(""); got != "" {
 		t.Errorf("finishWorker left the phrase %q, want the idle empty slot", got)
 	}
 }

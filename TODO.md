@@ -22,8 +22,6 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
 
 **Remaining:**
 
-- **Naming Sub-Agents** Sub agents should be able to receive a summary / name that identifies what they do. This should be visible in the session chat.
-
 - **[P1] Server / model switching** — **every switch SHIPPED (2026-07-28 the two user-facing ones,
   2026-07-29 the local-server half); the profile half is all that remains.** The shipped bodies have
   left this file for their authoritative records — see the ledger at the end of this entry
@@ -802,6 +800,13 @@ repo does yet — settle that first.
 Full records live in the named docs; a line here keeps the deferral trail deliberate and carries
 any standing constraint that must not be re-filed.
 
+- **Naming Sub-Agents** — CLOSED 2026-08-09, **shipped rather than deferred**
+  (`docs/plans/2026-08-09 - 00 - subagent-naming-and-newline-key-plan.md` items 1–4): the `sub_agent`
+  tool takes an optional `name`, and it shows in the session chat on the collapsed run header, the
+  status line (`<name> · <phrase>`), both prompt panes and a headless run's records. **Standing:**
+  the name is display identity only, never privilege (ADR 0005), it stays OPTIONAL with the task's
+  first line as the fallback everywhere, and the `⤷ sub-agent` rail label is deliberately not part
+  of it — do not re-file either as a gap.
 - **VS Code names agent CLIs from an allowlist — get `apogee` onto it** — CLOSED 2026-08-03, **moot
   rather than declined** (`docs/plans/2026-08-03 - 01 - session-name-on-the-top-rule-plan.md`
   item 1): apogee no longer sets a terminal title at all, so there is nothing an allowlist entry

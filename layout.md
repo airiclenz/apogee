@@ -316,15 +316,19 @@ in.
 `Sub-agent: <its delegated task>`, above the reason, because that is the one fact the rest of the
 pane cannot supply: with several children running at once their prompts QUEUE — one on the screen at
 a time, the asking child blocked and its siblings still working — and the tool name and the
-arguments read exactly the same whichever of them sent it. The line is absent at depth 0, where the
-top-level agent is the only thing that could be asking, so a session that never delegates draws the
-pane it always drew. It is also the one string on this surface that is **clipped** rather than
-wrapped in full, ellipsis and all: it says who is asking, and who is asking must never push what is
-being decided off the screen.
+arguments read exactly the same whichever of them sent it. When the delegation was **given a name**,
+the line leads with it and keeps the task behind it — `Sub-agent: <its name> — <its delegated task>`
+— because the name is what you recognise the asker by across a queue of siblings, while the task is
+still the sentence saying what you are authorising on its behalf. The line is absent at depth 0,
+where the top-level agent is the only thing that could be asking, so a session that never delegates
+draws the pane it always drew. It is also the one string on this surface that is **clipped** rather
+than wrapped in full, ellipsis and all: it says who is asking, and who is asking must never push
+what is being decided off the screen. The clip is spent on the **whole** line, name included, so a
+named request is never longer than an unnamed one.
 
 **The ask prompt says it the same way, in the same words.** A question a sub-agent put to you leads
-its body with the same `Sub-agent: <its delegated task>` line, above the question, under the same
-clip — because it answers the same question the approval pane's line does, and two decision surfaces
+its body with the same `Sub-agent: …` line — name and task, or task alone — above the question,
+under the same clip — because it answers the same question the approval pane's line does, and two decision surfaces
 answering "which agent is this?" in two different ways would be a dialect rather than a design.
 `ask_user` runs in a delegate exactly as it runs at the top level, so concurrent children can put
 questions to you at the same moment; those questions **queue** on the one prompt surface just as
@@ -851,7 +855,11 @@ to the run whose `sub_agent` call spawned it, and it is *placed* in that run's s
 scrollback as it arrives, however the children's events interleave on the way in. So each block
 counts its **own** tool calls, states its **own** context fill, and ticks with its **own** activity
 phrase — which is what makes a fan-out readable at all, since the status line can name only one
-delegate at a time. A child's live text follows its own block by the same rule: the streamed
+delegate at a time. Which one it is naming is no longer left to inference: the slot's phrase belongs
+to whichever child emitted the last event, and when that delegation was **given a name** the name
+takes the place of the generic word — `repo-scout · reading · main.go` rather than
+`sub-agent · reading · main.go`. A delegation that named nothing, and one whose run block has not
+opened yet, both keep the generic word. A child's live text follows its own block by the same rule: the streamed
 preview paints inside the run that produced it, elided while that run is collapsed, and two
 children talking at once neither share a block nor interleave a word. Expanding, collapsing,
 clicking and resuming are unchanged — a per-child block is a tool block like any other, and a

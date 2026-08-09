@@ -281,6 +281,33 @@ func (t *transcript) runEnd(spawn string) int {
 	return len(t.entries)
 }
 
+// runName is the short name the model gave the delegation that the sub_agent call spawn opened, or
+// "" when it gave none. It is the status line's answer to "which delegate is this?" (activity.spawn
+// → activity.text): with a fan-out running, the slot names ONE delegate at a time, and the depth it
+// used to name it by is shared by every sibling.
+//
+// It reads the run's HEAD, the same entry runEnd derives a run's stretch from, so the phrase in the
+// status line and the header of the block the work is landing in cannot come to say different
+// things about whose work it is. The name is the head's live agentName rather than its Target: on a
+// named call the two agree, but on an unnamed one the Target is the delegated task, and a status
+// line that swapped a whole sentence in for "sub-agent" would push the context gauge off the row.
+//
+// "" is also the answer for the top-level conversation (no spawning call) and for a spawning call
+// this transcript has no head for — a replayed record, a hand-built test transcript, a child whose
+// first event beat its parent's tool call in. All three read as unnamed, which is exactly the
+// phrase the status line drew before names existed.
+func (t *transcript) runName(spawn string) string {
+	if spawn == "" {
+		return ""
+	}
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		if h := t.entries[i]; h.kind == entryToolCall && h.callID == spawn && h.tool.name == subAgentToolName {
+			return h.tool.agentName
+		}
+	}
+	return ""
+}
+
 // displace empties the live buffer slot for the run whose event is arriving, by the rule that fits
 // the switch. It is the one place the transcript decides what a run hand-over MEANS, so the three
 // events that can trigger one — a token, a message, a tool call — cannot come to disagree.

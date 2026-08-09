@@ -42,21 +42,36 @@ const (
 	actStopping                       // Esc fired the cancel; the worker has not unwound yet
 )
 
-// activity is the status line's live left slot: what is happening, since when, and at which
-// sub-agent nesting depth. label is used by actTool only; since is when THIS activity began,
-// so the elapsed clock measures the current phrase rather than the whole exchange.
+// activity is the status line's live left slot: what is happening, since when, at which
+// sub-agent nesting depth, and on whose behalf. label is used by actTool only; since is when
+// THIS activity began, so the elapsed clock measures the current phrase rather than the whole
+// exchange.
 type activity struct {
 	kind  activityKind
-	label string    // actTool only: "<verb> · <clipped target>", or the bare verb when there is none
-	depth int       // > 0 → the phrase is prefixed with subAgentLabel (a sub-agent is acting)
+	label string // actTool only: "<verb> · <clipped target>", or the bare verb when there is none
+	depth int    // > 0 → the phrase is prefixed with the acting sub-agent's identity
+	// spawn is WHICH sub-agent is acting: the id of the sub_agent call that spawned the agent
+	// whose event set this activity (domain.EventBase.CallID), empty for the top-level agent.
+	// Depth cannot answer that once children run CONCURRENTLY (ADR 0039) — siblings share it —
+	// and the slot names one delegate at a time, so it must name the right one. It is the LOOKUP
+	// key, not the name: the delegation's name is resolved against the transcript at compose time
+	// (transcript.runName), so a run head that has not folded yet simply reads as unnamed rather
+	// than freezing a stale answer here.
+	spawn string
 	since time.Time // when this activity began — the elapsed clock's origin
 }
 
 // text renders the activity as the status line's unstyled phrase. Idle says nothing at all —
 // the input box below already invites a message, so a word there would be noise. A phrase from
-// a sub-agent (Depth > 0) is prefixed with the same subAgentLabel the transcript rail uses, so
-// "sub-agent · searching" reads as one sentence fragment at any nesting level.
-func (a activity) text() string {
+// a sub-agent (Depth > 0) is prefixed with its identity, so "sub-agent · searching" reads as one
+// sentence fragment at any nesting level.
+//
+// name is the acting delegation's short name, resolved by the caller (runningPhrase, against
+// transcript.runName) and "" when the delegation was given none. A named child takes its name in
+// place of the generic word — "repo-scout · reading · main.go" — because with a fan-out running
+// the slot can name only one delegate at a time and "sub-agent" says nothing about which. An
+// unnamed one keeps the subAgentLabel the transcript rail uses, to the byte.
+func (a activity) text(name string) string {
 	var phrase string
 	switch a.kind {
 	case actIdle:
@@ -78,6 +93,9 @@ func (a activity) text() string {
 		return "" // an actTool with no label (a tool with neither verb nor target): say nothing
 	}
 	if a.depth > 0 {
+		if name != "" {
+			return name + " · " + phrase
+		}
 		return subAgentLabel + " · " + phrase
 	}
 	return phrase
@@ -170,15 +188,16 @@ func toolPhrase(measure widthAuthority, tv toolView) string {
 
 // setActivity moves the model to a new activity. The elapsed clock restarts only when the
 // rendered phrase actually changes (kind or label) — a stream of TokenEvents must keep one
-// running clock, not reset it on every chunk. Depth alone does not restart it: the phrase's
-// sub-agent prefix changes, but the same work is still in flight.
-func (m *Model) setActivity(kind activityKind, label string, depth int) {
+// running clock, not reset it on every chunk. Depth and spawn alone do not restart it: the
+// phrase's sub-agent prefix changes, but the same work is still in flight.
+func (m *Model) setActivity(kind activityKind, label string, depth int, spawn string) {
 	if m.act.kind != kind || m.act.label != label {
 		m.act.since = time.Now()
 	}
 	m.act.kind = kind
 	m.act.label = label
 	m.act.depth = depth
+	m.act.spawn = spawn
 }
 
 // foldActivity derives the live activity from one engine Event (the third fold foldEvent runs).
@@ -193,6 +212,12 @@ func (m *Model) setActivity(kind activityKind, label string, depth int) {
 // stopping is STICKY: once Esc has fired the cancel the worker keeps emitting events until it
 // reaches a quiescent boundary, and overwriting the phrase there would tell the human their
 // stop was ignored. Only finishWorker clears it, when the worker has actually unwound.
+//
+// Every arm carries the emitting agent's SPAWNING call id beside its depth, and reads it as
+// e.EventBase.CallID rather than e.CallID: a variant that also reports a call of its own names it
+// CallID too and therefore shadows the embedded field (domain.AuditEvent — not folded here, but the
+// spelling must not depend on which arm you are in). It is the id the delegation's name is looked
+// up by; empty at depth 0, where nothing spawned the emitter.
 func (m Model) foldActivity(e domain.Event, openCall bool) Model {
 	if m.act.kind == actStopping {
 		return m
@@ -200,13 +225,13 @@ func (m Model) foldActivity(e domain.Event, openCall bool) Model {
 	switch e := e.(type) {
 	case domain.ReasoningEvent:
 		// The honest "thinking": the model is reasoning, not merely unanswered.
-		m.setActivity(actThinking, "", e.Depth)
+		m.setActivity(actThinking, "", e.Depth, e.EventBase.CallID)
 	case domain.TokenEvent:
-		m.setActivity(actResponding, "", e.Depth)
+		m.setActivity(actResponding, "", e.Depth, e.EventBase.CallID)
 	case domain.StreamResetEvent:
-		m.setActivity(actRetrying, "", e.Depth)
+		m.setActivity(actRetrying, "", e.Depth, e.EventBase.CallID)
 	case domain.ToolCallEvent:
-		m.setActivity(actTool, toolActivityLabel(m.th.measure, e.Call, m.transcript.ws), e.Depth)
+		m.setActivity(actTool, toolActivityLabel(m.th.measure, e.Call, m.transcript.ws), e.Depth, e.EventBase.CallID)
 	case domain.ToolResultEvent:
 		// One result does not end the tool phase while another call is still open (a parallel
 		// batch); today's loop dispatches sequentially, so this normally falls straight through
@@ -214,11 +239,11 @@ func (m Model) foldActivity(e domain.Event, openCall bool) Model {
 		if openCall {
 			break
 		}
-		m.setActivity(actThinking, "", e.Depth)
+		m.setActivity(actThinking, "", e.Depth, e.EventBase.CallID)
 	case domain.MessageEvent:
 		// A completed message does not mean idle: the loop may keep stepping (a tool turn
 		// follows a narration). finishWorker is what decides the exchange is over.
-		m.setActivity(actThinking, "", e.Depth)
+		m.setActivity(actThinking, "", e.Depth, e.EventBase.CallID)
 	}
 	return m
 }

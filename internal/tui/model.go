@@ -1457,7 +1457,7 @@ func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 	m.cancel = cancel
 	m.state = stateRunning
 	m.setPlaceholder(runningPlaceholder) // the empty box now invites a queued message, not a send
-	m.setActivity(actThinking, "", 0)
+	m.setActivity(actThinking, "", 0, "")
 	tick := m.spin.arm()
 	return m, tea.Batch(cmd, tick)
 }
@@ -1604,7 +1604,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			m.cancel = cancel
 			m.state = stateRunning
 			m.setPlaceholder(runningPlaceholder)
-			m.setActivity(actThinking, "", 0) // the resumed work is a request in flight (as in submit)
+			m.setActivity(actThinking, "", 0, "") // the resumed work is a request in flight (as in submit)
 			tick := m.spin.arm()
 			return m, tea.Batch(cmd, tick)
 		}
@@ -1621,7 +1621,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		m.cancel = cancel
 		m.state = stateRunning
 		m.setPlaceholder(runningPlaceholder)
-		m.setActivity(actThinking, "", 0) // a canned turn is still a request in flight (as in submit)
+		m.setActivity(actThinking, "", 0, "") // a canned turn is still a request in flight (as in submit)
 		tick := m.spin.arm()
 		return m, tea.Batch(cmd, tick)
 
@@ -1721,7 +1721,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// (there is no Exchange to interject into), so the legend says "queue" here as well.
 		m.setPlaceholder(runningPlaceholder)
 		// Compaction emits no Events until it lands, so the phrase is set here or not at all.
-		m.setActivity(actCompacting, "", 0)
+		m.setActivity(actCompacting, "", 0, "")
 		tick := m.spin.arm()
 		return m, tea.Batch(cmd, tick)
 
@@ -1834,7 +1834,7 @@ func (m *Model) stopWorker() {
 	if m.cancel != nil {
 		m.cancel()
 	}
-	m.setActivity(actStopping, "", 0)
+	m.setActivity(actStopping, "", 0, "")
 }
 
 // finishWorker returns the model to a terminal state once the worker's terminal Msg
@@ -3959,9 +3959,14 @@ func (m Model) statusLeft() string {
 // counting THIS activity ("thinking · 12s"). An activity with no phrase — the defensive case,
 // since every path into stateRunning sets one — degrades to the bare clock rather than to a
 // dangling separator. now is passed in so the composition is testable off the wall clock.
+//
+// This is the seam where the acting delegation's NAME is resolved: activity carries the spawning
+// call id, the transcript owns the run heads, and the phrase itself stays pure (activity.go). The
+// lookup happens per frame rather than at fold time on purpose — the name is display identity that
+// the head may not have folded yet, and an unresolved one costs a fallback word, not a wrong word.
 func (m Model) runningPhrase(now time.Time) string {
 	clock := formatElapsed(m.act.elapsed(now))
-	if phrase := m.act.text(); phrase != "" {
+	if phrase := m.act.text(m.transcript.runName(m.act.spawn)); phrase != "" {
 		return phrase + " · " + clock
 	}
 	return clock
@@ -4398,8 +4403,8 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int, floor popupFlo
 // where the frame draws no pane at all.
 func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	var parts []string
-	if req.SubAgentTask != "" {
-		parts = append(parts, "Sub-agent: "+clipRunes(stripEscapes(req.SubAgentTask), approvalTaskClipRunes))
+	if line := subAgentPromptLine(req.SubAgentName, req.SubAgentTask); line != "" {
+		parts = append(parts, line)
 	}
 	if req.Reason != "" {
 		parts = append(parts, "Reason: "+stripEscapes(req.Reason))
@@ -4453,6 +4458,32 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 // marker). The bound is the transcript's detail bound for the same reason it was chosen there —
 // enough for a sentence naming a task, not enough for a paragraph.
 const approvalTaskClipRunes = detailClipRunes
+
+// subAgentPromptLine is the identity line a prompt raised by a delegate leads with — "who is
+// asking", in the one wording BOTH decision surfaces use (approvalPrompt, askPrompt), because two
+// panes answering that question in two dialects would be a design that had stopped being one.
+//
+// A named delegation leads with its name and keeps the task behind it — "Sub-agent: repo-scout —
+// audit the config loader" — rather than replacing one with the other: the name is what a human
+// recognises the child by across a fan-out of queued prompts, and the task is still the sentence
+// that says what they are being asked to authorise on its behalf. An unnamed one is byte-identical
+// to the line this pane has always drawn, and depth 0 (no task) draws none at all, so an
+// undelegated session's pane is untouched.
+//
+// The clip is spent on the WHOLE line, not on the task alone: approvalTaskClipRunes is the budget
+// "who is asking" gets before it starts pushing the decision's own facts off the pane, and a name
+// is part of who is asking. So a named line is never longer than an unnamed one, however long a
+// name the model sent.
+func subAgentPromptLine(name, task string) string {
+	if task == "" {
+		return ""
+	}
+	who := stripEscapes(task)
+	if clean := stripEscapes(name); clean != "" {
+		who = clean + " — " + who
+	}
+	return "Sub-agent: " + clipRunes(who, approvalTaskClipRunes)
+}
 
 // approvalArgsBlock renders req's arguments for the approval body, escape-stripped: one `name:`
 // label line per argument with the value's own lines indented beneath it (argumentDetails), so a
@@ -4627,14 +4658,14 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	}
 
 	question := stripEscapes(req.Question)
-	// A question raised by a sub-agent leads with the child's delegated task, exactly as an approval
-	// prompt does (approvalPrompt) and clipped by the same bound: with several children running at
-	// once their questions QUEUE — one on the screen at a time, the asking child blocked and its
-	// siblings still working — and the question's own words say nothing about which of them wrote
-	// them. Absent at depth 0, so an undelegated session's pane is unchanged to the byte.
-	if req.SubAgentTask != "" {
-		question = "Sub-agent: " + clipRunes(stripEscapes(req.SubAgentTask), approvalTaskClipRunes) +
-			"\n" + question
+	// A question raised by a sub-agent leads with the child's identity — its name when the delegation
+	// was given one, and its delegated task either way — exactly as an approval prompt does
+	// (subAgentPromptLine) and clipped by the same bound: with several children running at once their
+	// questions QUEUE — one on the screen at a time, the asking child blocked and its siblings still
+	// working — and the question's own words say nothing about which of them wrote them. Absent at
+	// depth 0, so an undelegated session's pane is unchanged to the byte.
+	if line := subAgentPromptLine(req.SubAgentName, req.SubAgentTask); line != "" {
+		question = line + "\n" + question
 	}
 
 	// Budget against the live layout so a long question or choice set never pushes the input box

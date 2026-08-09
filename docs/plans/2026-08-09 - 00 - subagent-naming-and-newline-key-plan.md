@@ -156,9 +156,23 @@ collapsed-header paint tests stay green.
 
 **Commit:** `feat(tui): the sub-agent run header shows the delegation name`
 
-## 4. The status line and the prompts name the asking child
+## 4. The status line and the prompts name the asking child — ✅ DONE (2026-08-09)
 
 Depends on items 1, 2, 3.
+
+NOTES (2026-08-09): four additions beyond the item's literal text. (a) The status seam chosen (the item
+left it to the implementer) is a parameter: `activity.text(name string)`, with `runningPhrase`
+resolving `m.transcript.runName(m.act.spawn)` per frame — activity.go stays pure and there is one
+definition of the prefix rule. This widened two existing signatures, so `setActivity` gained a fourth
+`spawn string` parameter and its 5 production call sites (all top-level, `""`) plus the `text()`/
+`setActivity` call sites in `activity_test.go`, `fold_test.go` and `interject_test.go` take a
+mechanical append. (b) The two prompt bodies share one new helper `subAgentPromptLine(name, task)` in
+`model.go` rather than each composing the line inline — the item requires the two panes to read
+identically, and the ask body's own doc comment already says a dialect there would be a defect. (c) A
+CHANGELOG sub-bullet under the existing "A delegation can carry a name" entry, per the repo
+convention; no release heading, no VERSION touched. (d) Not done (not named by this item, and item 2's
+own NOTES already flagged it): `cmd/apogee/headless.go` still prints only the task on its sub-agent
+line.
 
 **What:**
 

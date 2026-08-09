@@ -242,7 +242,7 @@ func TestFoldEventFoldsEveryVariant(t *testing.T) {
 			if got := m.transcript.pendingRun.depth; got != tc.wantPendingDepth {
 				t.Errorf("pending buffer depth = %d, want %d", got, tc.wantPendingDepth)
 			}
-			if got := m.act.text(); got != tc.wantPhrase {
+			if got := m.act.text(""); got != tc.wantPhrase {
 				t.Errorf("activity phrase = %q, want %q", got, tc.wantPhrase)
 			}
 			if got := statsOf(m); got != tc.wantStats {
@@ -264,12 +264,12 @@ func TestFoldEventPairsResultWithCallBeforeActivity(t *testing.T) {
 
 		m := newTestModel(t)
 		m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
-		if got, want := m.act.text(), "reading · a.go"; got != want {
+		if got, want := m.act.text(""), "reading · a.go"; got != want {
 			t.Fatalf("phrase while the call is open = %q, want %q", got, want)
 		}
 
 		m = m.foldEvent(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: "ok"}})
-		if got, want := m.act.text(), "thinking"; got != want {
+		if got, want := m.act.text(""), "thinking"; got != want {
 			t.Errorf("phrase after the only call was answered = %q, want %q", got, want)
 		}
 		if m.transcript.hasOpenToolCall() {
@@ -285,7 +285,7 @@ func TestFoldEventPairsResultWithCallBeforeActivity(t *testing.T) {
 		m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "2", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)}})
 
 		m = m.foldEvent(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: "ok"}})
-		if got, want := m.act.text(), "reading · b.go"; got != want {
+		if got, want := m.act.text(""), "reading · b.go"; got != want {
 			t.Errorf("phrase with the second call still open = %q, want %q", got, want)
 		}
 		if !m.transcript.hasOpenToolCall() {

@@ -1018,6 +1018,64 @@ func TestModelApprovalNamesTheAskingSubAgent(t *testing.T) {
 	}
 }
 
+// A delegation the model NAMED leads that same line with its name and keeps the task behind it: the
+// name is what a human recognises the asker by across a queue of siblings, and the task is still the
+// sentence saying what is being authorised on its behalf (subAgentPromptLine).
+func TestModelApprovalNamesTheAskingSubAgentByName(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	req := domain.ApprovalRequest{
+		Tool:         "write_file",
+		Reason:       "write outside the workspace",
+		SubAgentTask: "audit the config loader for drift",
+		SubAgentName: "repo-scout",
+		Arguments:    json.RawMessage(`{"path":"notes.txt"}`),
+	}
+	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
+
+	view := plain(m.View())
+	if !strings.Contains(view, "Sub-agent: repo-scout — audit the config loader for drift") {
+		t.Errorf("the pane does not lead with the delegation's name:\n%s", view)
+	}
+}
+
+// TestSubAgentPromptLineComposition pins the rule both panes share. The clip is the part worth
+// pinning: it is spent on the WHOLE line, so a model that sends a paragraph where a name was asked
+// for buys itself no more of the pane than an unnamed delegation gets — and the name reaches this
+// composition raw off the engine, which makes this the boundary that strips its escapes.
+func TestSubAgentPromptLineComposition(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ name, agent, task, want string }{
+		{name: "no task draws no line at all"},
+		{name: "an unnamed delegation reads as it always did", task: "audit the loader", want: "Sub-agent: audit the loader"},
+		{name: "a named one leads with the name", agent: "repo-scout", task: "audit the loader", want: "Sub-agent: repo-scout — audit the loader"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := subAgentPromptLine(tc.agent, tc.task); got != tc.want {
+				t.Errorf("subAgentPromptLine(%q, %q) = %q, want %q", tc.agent, tc.task, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("an escape in the name never reaches the pane", func(t *testing.T) {
+		got := subAgentPromptLine("repo\x1b]52;c;cGF5bG9hZA==\x07scout", "audit")
+		if strings.ContainsAny(got, "\x1b\x07") {
+			t.Errorf("a control character survived into the prompt line: %q", got)
+		}
+	})
+
+	t.Run("the clip is spent on the whole line", func(t *testing.T) {
+		got := subAgentPromptLine(strings.Repeat("n", approvalTaskClipRunes), "audit the loader")
+		if body := strings.TrimPrefix(got, "Sub-agent: "); len([]rune(body)) != approvalTaskClipRunes+1 {
+			t.Errorf("named line spends %d runes, want the %d-rune bound plus its ellipsis",
+				len([]rune(body)), approvalTaskClipRunes)
+		}
+		if !strings.HasSuffix(got, "…") {
+			t.Errorf("the over-long line was not marked as clipped: %q", got)
+		}
+	})
+}
+
 // The top-level agent's own request carries no task, and its pane is unchanged to the byte — the
 // serial floor for a session that never delegates.
 func TestModelApprovalTopLevelDrawsNoSubAgentLine(t *testing.T) {
@@ -1595,6 +1653,20 @@ func TestModelAskPromptNamesTheAskingSubAgent(t *testing.T) {
 	}
 	if task > question {
 		t.Errorf("the Sub-agent line renders below the question; it must lead the body:\n%s", got)
+	}
+}
+
+// And a named delegation leads it with its name, in the approval pane's words to the byte — the two
+// decision surfaces share one composition (subAgentPromptLine), so they cannot drift into dialects.
+func TestModelAskPromptNamesTheAskingSubAgentByName(t *testing.T) {
+	got := strings.Join(askPaneLines(t, 100, domain.AskRequest{
+		Question:     "should I rewrite the loader or patch it?",
+		SubAgentTask: "audit the config loader for drift",
+		SubAgentName: "repo-scout",
+	}), "\n")
+
+	if !strings.Contains(got, "Sub-agent: repo-scout — audit the config loader for drift") {
+		t.Errorf("the pane does not lead with the delegation's name:\n%s", got)
 	}
 }
 
