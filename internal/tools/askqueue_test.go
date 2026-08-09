@@ -148,6 +148,41 @@ func TestAskUser_ExecuteNamesTheAskingSubAgent(t *testing.T) {
 	}
 }
 
+// TestAskUser_ExecuteNamesTheAskingDelegationByName is the same carrier one field over: when the
+// delegation was given a short NAME, the tool stamps that beside the task, so a prompt can say who
+// is asking in the few words a human recognises. A context carrying only a task leaves the name
+// empty — the fall-back-to-the-task signal — and so does the top-level agent's bare context.
+func TestAskUser_ExecuteNamesTheAskingDelegationByName(t *testing.T) {
+	var seen []domain.AskRequest
+	tool := NewAskUser(askerFunc(func(_ context.Context, req domain.AskRequest) (domain.AskAnswer, error) {
+		seen = append(seen, req)
+		return domain.AskAnswer{Text: "ok"}, nil
+	}))
+	call := domain.ToolCall{ID: "q1", Tool: "ask_user", Arguments: []byte(`{"question":"which one?"}`)}
+
+	taskOnly := domain.WithSubAgentTask(context.Background(), "audit the config loader")
+	if _, err := tool.Execute(taskOnly, call); err != nil {
+		t.Fatalf("Execute (unnamed sub-agent): %v", err)
+	}
+	named := domain.WithSubAgentName(taskOnly, "repo-scout")
+	if _, err := tool.Execute(named, call); err != nil {
+		t.Fatalf("Execute (named sub-agent): %v", err)
+	}
+
+	if len(seen) != 2 {
+		t.Fatalf("the host was asked %d times, want twice", len(seen))
+	}
+	if seen[0].SubAgentName != "" {
+		t.Errorf("an unnamed sub-agent's question named %q, want none", seen[0].SubAgentName)
+	}
+	if seen[1].SubAgentName != "repo-scout" {
+		t.Errorf("a named sub-agent's question named %q, want its delegation name", seen[1].SubAgentName)
+	}
+	if seen[1].SubAgentTask != "audit the config loader" {
+		t.Errorf("the named question's task = %q, want the name to ride BESIDE the task", seen[1].SubAgentTask)
+	}
+}
+
 // askerFunc adapts a function to domain.Asker for the tests above.
 type askerFunc func(context.Context, domain.AskRequest) (domain.AskAnswer, error)
 

@@ -43,6 +43,15 @@ type ApprovalRequest struct {
 	// It is empty when the top-level agent asks: a session that never delegates carries no
 	// extra fact, and its prompt reads exactly as it always has.
 	SubAgentTask string
+	// SubAgentName is the OPTIONAL short name the spawning sub_agent call gave that child — the
+	// few words a human recognises it by where SubAgentTask is a whole sentence. It is DISPLAY
+	// identity only, never privilege (ADR 0005): a prompt reads better for it, nothing is
+	// decided by it.
+	//
+	// It is empty whenever the delegation carried no name (and always at depth 0), which is the
+	// signal to fall back to SubAgentTask — so a Driver needs no second flag to know which of
+	// the two to paint.
+	SubAgentName string
 }
 
 // ApprovalDecision is the Approver's verdict.

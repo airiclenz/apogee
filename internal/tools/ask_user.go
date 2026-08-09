@@ -157,6 +157,9 @@ func (t *AskUser) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 		// because it is a fact about the question and not about the queue — the queue only decides
 		// when the human sees it.
 		SubAgentTask: domain.SubAgentTaskFromContext(ctx),
+		// The same fact in fewer words, when the delegation was given a name at all — read off the
+		// same ctx, stamped at the same seam, empty whenever the child is unnamed.
+		SubAgentName: domain.SubAgentNameFromContext(ctx),
 	}
 	answer, err := t.asker.Ask(ctx, req)
 	if err != nil {

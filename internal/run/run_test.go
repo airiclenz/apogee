@@ -617,6 +617,51 @@ func TestEventTapAttributesTwoRunsFromOneTurnByCallID(t *testing.T) {
 	}
 }
 
+// namedSubAgentCall is the delegating tool-call event for a delegation that carries the OPTIONAL
+// short name beside its task.
+func namedSubAgentCall(depth int, id, task, name string) domain.ToolCallEvent {
+	args, err := json.Marshal(tools.SubAgentArgs{Task: task, Name: name})
+	if err != nil {
+		panic("marshal sub_agent args: " + err.Error())
+	}
+	return domain.ToolCallEvent{
+		EventBase: domain.EventBase{Depth: depth},
+		Call:      domain.ToolCall{ID: id, Tool: tools.SubAgentToolName, Arguments: args},
+	}
+}
+
+// TestEventTapRecordsTheDelegationName pins what a headless caller can say about a run beyond its
+// fill: the short name the delegation was given, normalised on the way in the way the recursion
+// point normalises it (first line, trimmed), so a record carries a label a line can hold. A
+// delegation that named nothing records nothing — the emptiness that means "fall back to the task".
+func TestEventTapRecordsTheDelegationName(t *testing.T) {
+	t.Parallel()
+
+	const window = 32000
+	tap := &eventTap{window: window}
+
+	tap.Emit(namedSubAgentCall(0, "call_a", "audit the issues", "  repo-scout \n and some prose"))
+	tap.Emit(subAgentCall(0, "call_b", "write the docs"))
+	tap.Emit(usageAt(1, "call_a", 4000))
+	tap.Emit(usageAt(1, "call_b", 9000))
+	tap.Emit(toolResult(0, "call_a"))
+	tap.Emit(toolResult(0, "call_b"))
+
+	want := []SubAgentUsage{
+		{Used: 4000, Limit: window, Task: "audit the issues", Name: "repo-scout"},
+		{Used: 9000, Limit: window, Task: "write the docs"},
+	}
+	runs := tap.subAgentRuns()
+	if len(runs) != len(want) {
+		t.Fatalf("subAgentRuns() = %+v, want %+v", runs, want)
+	}
+	for i := range want {
+		if runs[i] != want[i] {
+			t.Errorf("subAgentRuns()[%d] = %+v, want %+v", i, runs[i], want[i])
+		}
+	}
+}
+
 // TestEventTapDropsWhatItCannotAttribute covers the defensive edges: usage with no run to
 // belong to, a result that closes some OTHER call, a plain tool that is not a delegation at
 // all, and a run whose Upstream never reported usage — the last one is skipped rather than

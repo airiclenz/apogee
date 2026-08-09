@@ -158,6 +158,12 @@ point is a **minor** bump, not a breaking change.
   It is display identity only, never privilege (ADR 0005), and it stays optional: a delegation
   that names nothing behaves exactly as before, with every display falling back to the delegated
   task's first line.
+  - **The name travels with the child to every place that asks on its behalf.** An Approval a child
+    raises and a question it puts through `ask_user` both carry it — `domain.ApprovalRequest` and
+    `domain.AskRequest` gained an additive `SubAgentName` beside `SubAgentTask`, with
+    `domain.WithSubAgentName` / `domain.SubAgentNameFromContext` as the ask path's carrier — and a
+    headless run reports it on `run.SubAgentUsage.Name`. All three are additive fields: an unnamed
+    delegation leaves them empty, which is the signal to fall back to the task.
 
 ### Changed
 

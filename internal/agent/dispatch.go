@@ -540,9 +540,10 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 // per-call event, not a pre-allowable convenience. reason feeds the Approval prompt. It reports
 // dispatchCancelled if ctx is cancelled while the human deliberates.
 //
-// The request names the asking agent's delegated task (empty at depth 0 — a.task), because a
-// prompt raised during a fan-out may be one of several queued behind each other and "which agent
-// is asking" is otherwise unanswerable from the call alone (ADR 0039 decision 12). The queueing
+// The request names the asking agent's delegated task (empty at depth 0 — a.task) and, when the
+// delegation carried one, its short name (a.name), because a prompt raised during a fan-out may be
+// one of several queued behind each other and "which agent is asking" is otherwise unanswerable
+// from the call alone (ADR 0039 decision 12). The queueing
 // itself is the Approver seam's (queuedApprovals): from here a gate is one blocking call whatever
 // the siblings are doing.
 //
@@ -557,7 +558,13 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		return false, dispatchDone
 	}
 
-	areq := domain.ApprovalRequest{Tool: call.Tool, Arguments: call.Arguments, Reason: reason, SubAgentTask: a.task}
+	areq := domain.ApprovalRequest{
+		Tool:         call.Tool,
+		Arguments:    call.Arguments,
+		Reason:       reason,
+		SubAgentTask: a.task,
+		SubAgentName: a.name,
+	}
 	decision, err := a.cfg.Approver.Approve(ctx, areq)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -624,6 +631,10 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		// Nothing is installed at depth 0: there, the top-level agent is the only thing that could
 		// be asking.
 		ctx = domain.WithSubAgentTask(ctx, a.task)
+		// The delegation's short name rides beside it, installed even when EMPTY: an unnamed child
+		// must report its own namelessness rather than let an outer value stand in for it, and ""
+		// is exactly the "fall back to the task" signal the prompt reads.
+		ctx = domain.WithSubAgentName(ctx, a.name)
 	}
 
 	if box != nil {

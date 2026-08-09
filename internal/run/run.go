@@ -102,6 +102,11 @@ type SubAgentUsage struct {
 	// Task is the first line of the delegated task, "" when the call carried none. Like
 	// FinalText it is RAW model output — a surface escape-strips it at its own render seam.
 	Task string
+	// Name is the OPTIONAL short name the sub_agent call gave the delegation, "" when it named
+	// none — the signal to fall back to Task, which is what every surface did before names
+	// existed. RAW model output on the same terms as Task: a surface escape-strips and clips it
+	// at its own render seam.
+	Name string
 }
 
 // Once performs one Firing and returns its Result: it validates the mode, constructs a
@@ -327,11 +332,12 @@ type eventTap struct {
 	runs []SubAgentUsage
 }
 
-// openSubAgent is one sub-agent run in flight: the task it was given, and the latest fill its
-// own Turns have reported. The delegating call that will close it is the map key it is filed
-// under, not a member — one run, one identity.
+// openSubAgent is one sub-agent run in flight: the task it was given, the optional name it was
+// given with it, and the latest fill its own Turns have reported. The delegating call that will
+// close it is the map key it is filed under, not a member — one run, one identity.
 type openSubAgent struct {
 	task string
+	name string
 	used int
 }
 
@@ -396,7 +402,10 @@ func (t *eventTap) openSubAgentRun(call domain.ToolCall) {
 	if t.open == nil {
 		t.open = make(map[string]*openSubAgent)
 	}
-	t.open[call.ID] = &openSubAgent{task: firstTaskLine(call.Arguments)}
+	t.open[call.ID] = &openSubAgent{
+		task: firstTaskLine(call.Arguments),
+		name: delegationName(call.Arguments),
+	}
 }
 
 // closeSubAgentRun finishes the run callID delegated, appending its reading in finish order. A
@@ -414,7 +423,7 @@ func (t *eventTap) closeSubAgentRun(callID string) {
 	if run.used <= 0 {
 		return
 	}
-	t.runs = append(t.runs, SubAgentUsage{Used: run.used, Limit: t.window, Task: run.task})
+	t.runs = append(t.runs, SubAgentUsage{Used: run.used, Limit: t.window, Task: run.task, Name: run.name})
 }
 
 // firstTaskLine reads the sub_agent call's task argument and returns its first line, "" when
@@ -429,6 +438,25 @@ func firstTaskLine(args json.RawMessage) string {
 		return ""
 	}
 	line := decoded.Task
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	return strings.TrimSpace(line)
+}
+
+// delegationName reads the sub_agent call's OPTIONAL name argument and normalises it the way the
+// recursion point does (first line, trimmed): "" when the arguments are malformed or name none,
+// which is the delegation-is-unnamed signal every surface reads as "fall back to the task". It sits
+// beside firstTaskLine, and is duplicated from internal/agent for the same reason that one is —
+// this package cannot import the rule from the loop that applies it (ADR 0010).
+func delegationName(args json.RawMessage) string {
+	var decoded struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(args, &decoded); err != nil {
+		return ""
+	}
+	line := decoded.Name
 	if i := strings.IndexByte(line, '\n'); i >= 0 {
 		line = line[:i]
 	}

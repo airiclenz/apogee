@@ -80,9 +80,21 @@ first line; missing name → empty string); existing sub-agent tests stay green.
 
 **Commit:** `feat(tools): sub_agent accepts an optional delegation name`
 
-## 2. The name rides approval, ask and run records
+## 2. The name rides approval, ask and run records — ✅ DONE (2026-08-09)
 
 Depends on item 1.
+
+NOTES (2026-08-09): three additions beyond the item's literal file list. (a) `internal/tools/ask_user.go`
+stamps `SubAgentName: domain.SubAgentNameFromContext(ctx)` beside the task where it builds the
+`AskRequest` — without it the new field has no producer at all (the ask_user tool is the only thing
+that constructs an AskRequest), so "the name rides the ask record" would not be true and item 4's
+named-ask prompt would have nothing to paint. (b) The ctx install in `dispatch.go` is
+UNCONDITIONAL inside the existing `a.task != ""` guard — an unnamed child installs `""` rather than
+skipping the install, so it reports its own namelessness instead of letting an outer value stand in.
+(c) A CHANGELOG sub-bullet under the existing "A delegation can carry a name" entry, per the repo
+convention; no release heading, no VERSION touched. Not done (not named by this item and not covered
+by its acceptance command): `cmd/apogee/headless.go` still prints only the task on its sub-agent
+line — the record carries the name, the headless RENDER of it does not yet use it.
 
 **What:**
 

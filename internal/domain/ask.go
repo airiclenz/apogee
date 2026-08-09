@@ -69,6 +69,16 @@ type AskRequest struct {
 	// loop stamps on a request it builds itself — this field is filled from the ctx the tool call
 	// runs under (WithSubAgentTask), because the ask_user TOOL is what builds an AskRequest.
 	SubAgentTask string
+
+	// SubAgentName is the OPTIONAL short name the spawning sub_agent call gave that child, the twin
+	// of ApprovalRequest.SubAgentName: the few words a human recognises it by where SubAgentTask is
+	// a whole sentence. DISPLAY identity only, never privilege (ADR 0005).
+	//
+	// It is empty whenever the delegation carried no name (and always at depth 0) — the signal to
+	// fall back to SubAgentTask. It rides the same ctx carrier the task does (WithSubAgentName),
+	// for the same reason: ask_user builds this request an interface boundary away from the Agent
+	// that knows the name.
+	SubAgentName string
 }
 
 // subAgentTaskCtxKey keys the asking Agent's delegated task in a tool call's context.
@@ -94,6 +104,29 @@ func WithSubAgentTask(ctx context.Context, task string) context.Context {
 func SubAgentTaskFromContext(ctx context.Context) string {
 	task, _ := ctx.Value(subAgentTaskCtxKey{}).(string)
 	return task
+}
+
+// subAgentNameCtxKey keys the asking Agent's delegation name in a tool call's context.
+type subAgentNameCtxKey struct{}
+
+// WithSubAgentName returns a context carrying name as the short display name of the sub-agent whose
+// tool call runs under it (AskRequest.SubAgentName). It is the twin of WithSubAgentTask and travels
+// the same seam for the same reason: the ask_user tool builds its own request, one interface
+// boundary away from the Agent that knows the name.
+//
+// The engine installs it per tool call BESIDE the task, unconditionally for a child — including
+// with an empty name — so an unnamed delegation nested under a named one reports its own
+// namelessness rather than inheriting a name that is not its.
+func WithSubAgentName(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, subAgentNameCtxKey{}, name)
+}
+
+// SubAgentNameFromContext returns the delegation name installed by WithSubAgentName, or "" when the
+// delegation carried no name (or the call belongs to the top-level agent) — the one emptiness that
+// means "fall back to the task", so a caller needs no second signal.
+func SubAgentNameFromContext(ctx context.Context) string {
+	name, _ := ctx.Value(subAgentNameCtxKey{}).(string)
+	return name
 }
 
 // AskAnswer is the human's free-text reply. A STRUCT for the same freeze-safety reason
