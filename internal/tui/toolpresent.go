@@ -435,6 +435,12 @@ var toolRegistry = map[string]toolPresenter{
 		target: refRangeTarget,
 		detail: outputDetail,
 	},
+	"git_status": {
+		label: "Git Status",
+		verb:  "checking",
+		// No target: the tool takes no arguments — the repository IS the target.
+		detail: outputDetail, // the branch line plus the staged/unstaged/untracked sections
+	},
 	"diagnostics": {
 		label:  "Diagnostics",
 		verb:   "checking",

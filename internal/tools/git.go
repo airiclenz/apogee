@@ -3,9 +3,11 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,18 +15,19 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The git tools (P3.9) — branch / commit / diff-range over the system git
+// The git tools (P3.9) — branch / commit / diff-range / status over the system git
 // ----------------------------------------------------------------------------
 //
-// Three one-shot tools shell out to the system `git` (§3a — a convenience dep,
+// Four one-shot tools shell out to the system `git` (§3a — a convenience dep,
 // detected on PATH and degrading gracefully when absent, never a hard
 // dependency). They are SubprocessTools (domain.SubprocessTool): the dispatch
-// disposition runs all three under Confiner.Confine in Auto and gates them when
+// disposition runs all of them under Confiner.Confine in Auto and gates them when
 // fs-confinement is unavailable ("confine if you can, gate if you can't").
-// git_diff_range also declares ReadOnly(), but the unfakeable subprocess marker
-// outranks that self-declaration (confinement-execution-contract §4, amended
-// 2026-07-26) — and since 2026-08-02 the Plan tool menu keys on the same class the
-// ladder does, so git_diff_range is neither offered nor run in Plan. All three are
+// git_diff_range and git_status also declare ReadOnly(), but the unfakeable
+// subprocess marker outranks that self-declaration
+// (confinement-execution-contract §4, amended 2026-07-26) — and since 2026-08-02
+// the Plan tool menu keys on the same class the ladder does, so neither is offered
+// nor run in Plan. All of them are
 // stateless across Turns (ADR 0008 — a fresh git
 // process per call), path-scope their inputs to the workspace root, and run with
 // a scrubbed, allowlisted environment so a stray inherited variable cannot change
@@ -527,6 +530,236 @@ func (t *GitDiffRange) Execute(ctx context.Context, call domain.ToolCall) (domai
 	return okResult(call.ID, gitResultText(res, "No differences found")), nil
 }
 
+// ----------------------------------------------------------------------------
+// git_status — branch, upstream divergence, and the working-tree lists
+// ----------------------------------------------------------------------------
+
+var gitStatusSpec = toolSpec{
+	name:        "git_status",
+	description: "Show the git working-tree status: the current branch, how far it is ahead of and behind its upstream, and the staged, unstaged, and untracked files. Read-only — it changes nothing. Long file lists are capped and the result says how many entries were left out.",
+	schema: json.RawMessage(`{
+  "type": "object",
+  "properties": {}
+}`),
+}
+
+// maxGitStatusPaths bounds EACH of the three path lists git_status reports. A repository
+// mid-refactor can hold thousands of changed paths, and a status the model cannot read is
+// worse than a truncated one — the section header states the real total and the tail states
+// how many were withheld, so nothing is silently lost.
+const maxGitStatusPaths = 50
+
+// gitStatusReport is the parsed shape of `git status --porcelain=v2 --branch -z`: the branch
+// headers plus the three path lists, each entry already rendered as "<code> <path>".
+type gitStatusReport struct {
+	branch   string // the current branch; empty when the header is absent (e.g. detached)
+	detached bool   // HEAD is not on a branch
+	upstream string // the upstream ref, empty when the branch tracks nothing
+	hasAB    bool   // an ahead/behind header was present (only ever with an upstream)
+	ahead    int
+	behind   int
+
+	staged    []string
+	unstaged  []string
+	untracked []string
+}
+
+// GitStatus reports the working-tree status of the repository at a workspace root over the
+// system git. It is read-only — it inspects and never mutates — but like git_diff_range it is
+// a SubprocessTool, and that marker is what classifies the call.
+type GitStatus struct {
+	toolSpec
+	root string
+}
+
+// NewGitStatus returns a git-status tool operating in root.
+func NewGitStatus(root string) *GitStatus { return &GitStatus{toolSpec: gitStatusSpec, root: root} }
+
+// ReadOnly reports that git_status performs no writes (reading the index and working tree
+// changes nothing) — an honest statement about the tool, read by self-regulation's read/write
+// tally. As with git_diff_range it is NOT what classifies the call: the Subprocess marker
+// below outranks it in both the disposition and the Plan menu.
+func (t *GitStatus) ReadOnly() bool { return true }
+
+// Subprocess reports that git_status launches an OS subprocess (the system git) — the
+// unfakeable marker that OUTRANKS the read-only declaration above
+// (confinement-execution-contract §4, amended 2026-07-26), so the call takes the subprocess
+// row: confined in Auto, gated below it.
+func (t *GitStatus) Subprocess() bool { return true }
+
+// Execute runs `git status` in porcelain v2 form and renders it for the model. A missing git
+// or a git failure (not a repository, most often) is surfaced as a result; only ctx
+// cancellation or a confinement-unavailable demotion is a Go error.
+func (t *GitStatus) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.ToolResult{}, err
+	}
+
+	gitPath, ok := lookGit()
+	if !ok {
+		return errorResult(call.ID, gitUnavailableMessage), nil
+	}
+
+	// Porcelain v2 is the stable machine format (it carries the branch and ahead/behind
+	// headers v1 lacks), and -z makes every record NUL-terminated so a path containing a
+	// space, a quote, or a newline arrives verbatim instead of C-quoted.
+	res, err := runGit(ctx, gitPath, t.root, gitTimeout, "status", "--porcelain=v2", "--branch", "-z")
+	if err != nil {
+		return domain.ToolResult{}, err
+	}
+	if res.exitCode != 0 {
+		return errorResult(call.ID, gitResultText(res, "git status failed")), nil
+	}
+	return okResult(call.ID, renderGitStatus(parseGitStatus(res.combinedOutput))), nil
+}
+
+// parseGitStatus reads the NUL-terminated porcelain v2 records into a report. A record it does
+// not recognise is skipped rather than failing the call: git may prepend a warning on stderr
+// (the capture is combined), and a status the model can mostly read beats an error it cannot.
+func parseGitStatus(out string) gitStatusReport {
+	var rep gitStatusReport
+	records := strings.Split(out, "\x00")
+	for i := 0; i < len(records); i++ {
+		record := records[i]
+		switch {
+		case strings.HasPrefix(record, "# branch.head "):
+			head := strings.TrimSpace(strings.TrimPrefix(record, "# branch.head "))
+			if head == "(detached)" {
+				rep.detached = true
+			} else {
+				rep.branch = head
+			}
+		case strings.HasPrefix(record, "# branch.upstream "):
+			rep.upstream = strings.TrimSpace(strings.TrimPrefix(record, "# branch.upstream "))
+		case strings.HasPrefix(record, "# branch.ab "):
+			rep.ahead, rep.behind, rep.hasAB = parseAheadBehind(strings.TrimPrefix(record, "# branch.ab "))
+		case strings.HasPrefix(record, "1 "):
+			// Ordinary change: "1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>".
+			if fields, ok := porcelainFields(record, 9); ok {
+				rep.addChange(fields[1], fields[8], "")
+			}
+		case strings.HasPrefix(record, "2 "):
+			// Rename/copy: "2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <Xscore> <path>", with the
+			// ORIGINAL path in the next record — the one place a record spans two fields.
+			if fields, ok := porcelainFields(record, 10); ok {
+				origin := ""
+				if i+1 < len(records) {
+					origin = records[i+1]
+					i++
+				}
+				rep.addChange(fields[1], fields[9], origin)
+			}
+		case strings.HasPrefix(record, "u "):
+			// Unmerged: "u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>". A conflicted
+			// path is reported once, under unstaged — it is work the tree still owes, not a
+			// change already staged.
+			if fields, ok := porcelainFields(record, 11); ok {
+				rep.unstaged = append(rep.unstaged, "U  "+fields[10]+" (unmerged)")
+			}
+		case strings.HasPrefix(record, "? "):
+			rep.untracked = append(rep.untracked, strings.TrimPrefix(record, "? "))
+		}
+	}
+	return rep
+}
+
+// addChange files one ordinary or renamed entry under the lists its XY code selects: X (index
+// vs HEAD) puts it in staged, Y (working tree vs index) in unstaged, and a path that is both —
+// staged then edited again — is listed in both, which is exactly what git reports.
+func (r *gitStatusReport) addChange(xy, path, origin string) {
+	if len(xy) != 2 {
+		return
+	}
+	suffix := ""
+	if origin != "" {
+		suffix = " (from " + origin + ")"
+	}
+	if xy[0] != '.' {
+		r.staged = append(r.staged, string(xy[0])+"  "+path+suffix)
+	}
+	if xy[1] != '.' {
+		r.unstaged = append(r.unstaged, string(xy[1])+"  "+path+suffix)
+	}
+}
+
+// porcelainFields splits a porcelain v2 record into n space-separated fields, the last of which
+// is the trailing path (which may itself contain spaces, so the split is bounded). It reports
+// false for a record with too few fields — a truncated or unexpected line the caller skips.
+func porcelainFields(record string, n int) ([]string, bool) {
+	fields := strings.SplitN(record, " ", n)
+	if len(fields) < n {
+		return nil, false
+	}
+	return fields, true
+}
+
+// parseAheadBehind reads the "+<ahead> -<behind>" pair of the branch.ab header. It reports
+// false when the header is malformed, in which case the divergence is simply not stated.
+func parseAheadBehind(header string) (ahead, behind int, ok bool) {
+	fields := strings.Fields(header)
+	if len(fields) != 2 || !strings.HasPrefix(fields[0], "+") || !strings.HasPrefix(fields[1], "-") {
+		return 0, 0, false
+	}
+	ahead, err := strconv.Atoi(fields[0][1:])
+	if err != nil {
+		return 0, 0, false
+	}
+	behind, err = strconv.Atoi(fields[1][1:])
+	if err != nil {
+		return 0, 0, false
+	}
+	return ahead, behind, true
+}
+
+// renderGitStatus writes the report as the text the model reads: a branch line, an upstream
+// line when the branch tracks one, then the three capped sections — or the clean-tree line
+// when there is nothing to list.
+func renderGitStatus(rep gitStatusReport) string {
+	var b strings.Builder
+	switch {
+	case rep.detached:
+		b.WriteString("HEAD detached (not on a branch)")
+	case rep.branch != "":
+		b.WriteString("On branch " + rep.branch)
+	default:
+		b.WriteString("On branch (unknown)")
+	}
+	if rep.upstream != "" {
+		b.WriteString("\nUpstream " + rep.upstream)
+		if rep.hasAB {
+			fmt.Fprintf(&b, ": ahead %d, behind %d", rep.ahead, rep.behind)
+		}
+	}
+
+	if len(rep.staged) == 0 && len(rep.unstaged) == 0 && len(rep.untracked) == 0 {
+		b.WriteString("\n\nWorking tree clean")
+		return b.String()
+	}
+	writeStatusSection(&b, "Staged", rep.staged)
+	writeStatusSection(&b, "Unstaged", rep.unstaged)
+	writeStatusSection(&b, "Untracked", rep.untracked)
+	return b.String()
+}
+
+// writeStatusSection writes one titled, capped list. The header carries the FULL count, so a
+// truncated section never misreports how much changed.
+func writeStatusSection(b *strings.Builder, title string, entries []string) {
+	if len(entries) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "\n\n%s (%d):", title, len(entries))
+	shown := entries
+	if len(shown) > maxGitStatusPaths {
+		shown = shown[:maxGitStatusPaths]
+	}
+	for _, entry := range shown {
+		b.WriteString("\n  " + entry)
+	}
+	if len(entries) > len(shown) {
+		fmt.Fprintf(b, "\n  [...%d more]", len(entries)-len(shown))
+	}
+}
+
 // gitUnavailableMessage is the graceful-degradation result when git is not on PATH
 // (§3a — git is a convenience dep, never a hard requirement).
 const gitUnavailableMessage = "git not available: no git executable found on PATH"
@@ -539,4 +772,7 @@ var (
 	_ domain.Tool           = (*GitDiffRange)(nil)
 	_ domain.ReadOnlyTool   = (*GitDiffRange)(nil)
 	_ domain.SubprocessTool = (*GitDiffRange)(nil)
+	_ domain.Tool           = (*GitStatus)(nil)
+	_ domain.ReadOnlyTool   = (*GitStatus)(nil)
+	_ domain.SubprocessTool = (*GitStatus)(nil)
 )

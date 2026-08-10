@@ -79,6 +79,10 @@ func diffCall(id, args string) domain.ToolCall {
 	return domain.ToolCall{ID: id, Tool: "git_diff_range", Arguments: []byte(args)}
 }
 
+func statusCall(id string) domain.ToolCall {
+	return domain.ToolCall{ID: id, Tool: "git_status"}
+}
+
 // ----------------------------------------------------------------------------
 // Markers
 // ----------------------------------------------------------------------------
@@ -120,6 +124,22 @@ func TestGit_Markers(t *testing.T) {
 	if !domain.IsSubprocessTool(dr) {
 		t.Error("git_diff_range must still be a SubprocessTool (it launches the system git)")
 	}
+
+	// git_status carries the same pair as git_diff_range: an honest read-only declaration and
+	// the subprocess marker that outranks it.
+	st := NewGitStatus(root)
+	if st.Name() != "git_status" {
+		t.Errorf("status Name() = %q", st.Name())
+	}
+	if !domain.IsReadOnly(st) {
+		t.Error("git_status must be ReadOnly (reporting the tree changes nothing)")
+	}
+	if !domain.IsSubprocessTool(st) {
+		t.Error("git_status must be a SubprocessTool (it launches the system git)")
+	}
+	if IsWorkspaceScopedWriter(st) {
+		t.Error("git_status must NOT carry the workspaceScopedWriter marker (it is OS-confined)")
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -142,6 +162,9 @@ func TestGit_GracefulWhenAbsent(t *testing.T) {
 		}},
 		{"diff", func() (domain.ToolResult, error) {
 			return NewGitDiffRange(root).Execute(context.Background(), diffCall("c1", `{"base":"a","head":"b"}`))
+		}},
+		{"status", func() (domain.ToolResult, error) {
+			return NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
 		}},
 	}
 	for _, tc := range cases {
@@ -530,5 +553,244 @@ func TestGitCommit_ConfinementUnavailablePropagates(t *testing.T) {
 	_, err := co.Execute(ctx, commitCall("c1", `{"message":"should not run"}`))
 	if !errors.Is(err, domain.ErrConfinementUnavailable) {
 		t.Fatalf("Execute err = %v, want ErrConfinementUnavailable (must not run unconfined)", err)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// git_status — porcelain v2 parsing, the caps, and the live tree
+// ----------------------------------------------------------------------------
+
+// porcelainZ joins records the way `git status --porcelain=v2 -z` emits them: every record,
+// headers included, terminated by a NUL.
+func porcelainZ(records ...string) string {
+	var b strings.Builder
+	for _, record := range records {
+		b.WriteString(record)
+		b.WriteString("\x00")
+	}
+	return b.String()
+}
+
+// TestGitStatus_ParsesPorcelainRecords covers the record shapes against the renderer, which is
+// where a mis-split path or a mis-filed XY code becomes visible to the model.
+func TestGitStatus_ParsesPorcelainRecords(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		out  string
+		want []string
+		deny []string
+	}{
+		{
+			name: "branch with upstream divergence",
+			out: porcelainZ(
+				"# branch.oid abc123",
+				"# branch.head main",
+				"# branch.upstream origin/main",
+				"# branch.ab +2 -1",
+			),
+			want: []string{"On branch main", "Upstream origin/main: ahead 2, behind 1", "Working tree clean"},
+		},
+		{
+			name: "detached head",
+			out:  porcelainZ("# branch.oid abc123", "# branch.head (detached)"),
+			want: []string{"HEAD detached"},
+			deny: []string{"On branch"},
+		},
+		{
+			name: "no upstream states no divergence",
+			out:  porcelainZ("# branch.head feature"),
+			want: []string{"On branch feature"},
+			deny: []string{"Upstream", "ahead"},
+		},
+		{
+			name: "a malformed ab header leaves the divergence unstated",
+			out:  porcelainZ("# branch.head main", "# branch.upstream origin/main", "# branch.ab nonsense"),
+			want: []string{"Upstream origin/main"},
+			deny: []string{"ahead"},
+		},
+		{
+			name: "a path changed on both sides is listed on both",
+			out: porcelainZ("# branch.head main",
+				"1 MM N... 100644 100644 100644 aaaa bbbb pkg/my file.go"),
+			want: []string{"Staged (1):", "M  pkg/my file.go", "Unstaged (1):"},
+		},
+		{
+			name: "a rename carries the original path",
+			out: porcelainZ("# branch.head main",
+				"2 R. N... 100644 100644 100644 aaaa bbbb R100 new.go", "old.go"),
+			want: []string{"Staged (1):", "R  new.go (from old.go)"},
+			deny: []string{"Unstaged"},
+		},
+		{
+			name: "an unmerged path is listed once, as unstaged",
+			out: porcelainZ("# branch.head main",
+				"u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.go"),
+			want: []string{"Unstaged (1):", "U  conflict.go (unmerged)"},
+			deny: []string{"Staged"},
+		},
+		{
+			name: "untracked names survive their spaces",
+			out:  porcelainZ("# branch.head main", "? notes and more.txt"),
+			want: []string{"Untracked (1):", "notes and more.txt"},
+		},
+		{
+			name: "an unrecognised record is skipped, not fatal",
+			out:  porcelainZ("warning: something git said", "# branch.head main", "? kept.txt"),
+			want: []string{"On branch main", "Untracked (1):", "kept.txt"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := renderGitStatus(parseGitStatus(tc.out))
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("status = %q, want it to contain %q", got, want)
+				}
+			}
+			for _, deny := range tc.deny {
+				if strings.Contains(got, deny) {
+					t.Errorf("status = %q, want it NOT to contain %q", got, deny)
+				}
+			}
+		})
+	}
+}
+
+// TestGitStatus_CapsEachList proves the bound: a section longer than the cap shows the cap's
+// worth of paths, states the FULL count in its header, and names how many it withheld — so a
+// repository mid-refactor cannot flood the model's context.
+func TestGitStatus_CapsEachList(t *testing.T) {
+	t.Parallel()
+
+	const extra = 5
+	records := []string{"# branch.head main"}
+	for i := 0; i < maxGitStatusPaths+extra; i++ {
+		records = append(records, fmt.Sprintf("? file%d.txt", i))
+	}
+	got := renderGitStatus(parseGitStatus(porcelainZ(records...)))
+
+	if want := fmt.Sprintf("Untracked (%d):", maxGitStatusPaths+extra); !strings.Contains(got, want) {
+		t.Errorf("status = %q, want the header %q with the full count", got, want)
+	}
+	if n := strings.Count(got, "\n  file"); n != maxGitStatusPaths {
+		t.Errorf("listed %d paths, want the cap of %d", n, maxGitStatusPaths)
+	}
+	if want := fmt.Sprintf("[...%d more]", extra); !strings.Contains(got, want) {
+		t.Errorf("status = %q, want the truncation note %q", got, want)
+	}
+}
+
+func TestGitStatus_CleanTree(t *testing.T) {
+	root := gitRepo(t)
+
+	res, err := NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("status errored: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "On branch main") || !strings.Contains(res.Content, "Working tree clean") {
+		t.Errorf("status = %q, want the branch line and a clean tree", res.Content)
+	}
+}
+
+func TestGitStatus_ReportsStagedUnstagedAndUntracked(t *testing.T) {
+	root := gitRepo(t)
+	gitPath, _ := exec.LookPath("git")
+	runIn := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(gitPath, args...)
+		cmd.Dir = root
+		cmd.Env = safeGitEnv()
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	if err := writeFileForTest(root, "staged.txt", "new and staged\n"); err != nil {
+		t.Fatalf("write staged.txt: %v", err)
+	}
+	runIn("add", "staged.txt")
+	if err := writeFileForTest(root, "README.md", "edited, not staged\n"); err != nil {
+		t.Fatalf("edit README.md: %v", err)
+	}
+	if err := writeFileForTest(root, "untracked.txt", "never added\n"); err != nil {
+		t.Fatalf("write untracked.txt: %v", err)
+	}
+
+	res, err := NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("status errored: %q", res.Content)
+	}
+	for _, want := range []string{
+		"Staged (1):", "A  staged.txt",
+		"Unstaged (1):", "M  README.md",
+		"Untracked (1):", "untracked.txt",
+	} {
+		if !strings.Contains(res.Content, want) {
+			t.Errorf("status = %q, want it to contain %q", res.Content, want)
+		}
+	}
+}
+
+func TestGitStatus_DetachedHead(t *testing.T) {
+	root := gitRepo(t)
+	gitPath, _ := exec.LookPath("git")
+	cmd := exec.Command(gitPath, "checkout", "--detach")
+	cmd.Dir = root
+	cmd.Env = safeGitEnv()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout --detach: %v\n%s", err, out)
+	}
+
+	res, err := NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("status errored: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "HEAD detached") {
+		t.Errorf("status = %q, want it to report a detached HEAD", res.Content)
+	}
+}
+
+// TestGitStatus_NotARepoMatchesOtherGitTools pins the error SHAPE: outside a repository
+// git_status fails the way the other git tools do — an IsError result carrying git's own
+// message, never a Go error and never a success claiming a clean tree.
+func TestGitStatus_NotARepoMatchesOtherGitTools(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git on PATH; skipping the live git-tool run")
+	}
+	root := t.TempDir()
+
+	status, err := NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+	if err != nil {
+		t.Fatalf("status Execute err = %v, want the failure as a result", err)
+	}
+	diff, err := NewGitDiffRange(root).Execute(context.Background(), diffCall("c2", `{"base":"HEAD","head":"HEAD"}`))
+	if err != nil {
+		t.Fatalf("diff Execute err = %v, want the failure as a result", err)
+	}
+
+	// The shape both tools share: a failed git is an IsError RESULT carrying git's own words —
+	// never a Go error, and never a success claiming a clean tree. (The words differ per
+	// subcommand; git_status gets the plain "not a git repository", which is the point of
+	// surfacing git's message rather than a wording of our own.)
+	if !status.IsError || !diff.IsError {
+		t.Fatalf("outside a repo both tools must be IsError; status=%v diff=%v", status.IsError, diff.IsError)
+	}
+	if strings.TrimSpace(diff.Content) == "" {
+		t.Error("git_diff_range outside a repo must still carry git's message")
+	}
+	if !strings.Contains(status.Content, "not a git repository") {
+		t.Errorf("status = %q, want git's own not-a-repository message", status.Content)
 	}
 }

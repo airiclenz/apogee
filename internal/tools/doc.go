@@ -73,6 +73,14 @@
 // untouched), skips grepExcludeDirs, and paginates like grep. It attaches no ToolSummary: what
 // it reports IS the list of names, and its header states the count in prose.
 //
+// git_status (2026-08-10) joins the P3.9 git family as its fourth member: a read-only report
+// of the current branch, the ahead/behind divergence from its upstream when one exists, and
+// the staged / unstaged / untracked path lists. It reads git's porcelain v2 format with -z, so
+// a path with a space, a quote, or a newline arrives verbatim rather than C-quoted, and it
+// caps EACH list (maxGitStatusPaths) while stating the full count in the section header — a
+// tree mid-refactor must not flood a small model's context. Like git_diff_range it declares
+// ReadOnly() and still carries the subprocess marker, which is what classifies the call.
+//
 // present_document (ADR 0019) is the Asker pattern applied to showing a finished document:
 // the model names a deliverable it has written and the HOST picks the mechanism (the
 // presentation ladder — the transcript baseline always, the OS opener on a local desktop, a

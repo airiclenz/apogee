@@ -194,7 +194,21 @@ passes.
 
 **Commit:** `feat(config): tools.disabled key toggles tools off at registry level`
 
-## 5. New `git_status` tool
+## 5. New `git_status` tool — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): no CHANGELOG entry was written for this item — the owner ratified that NO item
+in this plan touches CHANGELOG.md. Four things beyond the item's literal text, all consequences of
+adding a tool rather than choices about it: (a) the tool is registered in
+`internal/tools/registry.go` (an unregistered tool is not a tool), which necessarily moved the
+registry tests' name lists, ordering and counts; (b) the three roster-facing places item 3 already
+established are updated so they stay true of the shipped set — `internal/tools/doc.go`,
+`internal/tui/toolpresent.go` (a card entry; no renderer change, and no `target` because the tool
+takes no arguments), and the tool-suite counts in `docs/design/technical-design.md` (22 → 23);
+(c) the git-family header comment in `git.go` said "Three one-shot tools", now four. Two shape
+calls the item left open: no parameters at all (the existing git tools take `files`/`paths`, never
+a plain optional `path`, so the item's conditional resolves to none), and an UNMERGED path is
+reported once under Unstaged — work the tree still owes — rather than in both lists its XY code
+would otherwise select.
 
 **What:** In `internal/tools/git.go`, add a read-only `git_status` tool: current
 branch, ahead/behind upstream counts when an upstream exists, and bounded lists of
