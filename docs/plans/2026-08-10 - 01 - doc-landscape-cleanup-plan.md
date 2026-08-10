@@ -306,7 +306,7 @@ audited prunable line (3 + 75 = 78) is 8.6% — and this item also *adds* requir
 lines (the trail entry, two refreshed parentheticals, the ADR 0034 note).
 Actual: 910 → 863 (−5.2%), with all the audited prunable content gone.
 
-## 10. cmd/apogee package map
+## 10. cmd/apogee package map — ✅ DONE (2026-08-10)
 
 What: add `cmd/apogee/doc.go` at the standard the internal packages already
 meet — package comment plus a file map of the 25 non-test files (config
@@ -320,3 +320,17 @@ Acceptance: `cmd/apogee` has a doc.go naming every non-test file with a
 half-line role each; `gofmt` clean; `make check` green.
 
 Commit: `docs(cmd): add the cmd/apogee package map`
+
+NOTES (2026-08-10): two departures from the item's literal text. (a) `main.go`
+already carried the package's doc comment (the composition-root paragraph), and a
+second one in `doc.go` would give the package two package comments that `go doc`
+concatenates. So that comment MOVED into `doc.go` verbatim as its opening — the
+item says doc.go carries "a package comment plus a file map", and the only way to
+have one package comment is for main.go to stop holding it; `main.go` now opens
+with a bare `package main` and is otherwise untouched. (b) The forwarded
+coding-standards Go rule pairs a >10-file `doc.go` map with "a structural test
+that fails when a file is missing from the map". No such test exists for any of
+the 22 `internal/*` doc.go maps, so writing one here would exceed both this item's
+"Tests: none" line and "the standard the internal packages already meet"; it is
+left for a separate decision. The map names all 25 non-test files plus doc.go
+itself, in the internal/tui closing style.

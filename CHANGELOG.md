@@ -433,6 +433,13 @@ point is a **minor** bump, not a breaking change.
   open `ISSUES.md` entry it now cites. `mcp-client.md` picks up the Resolution vocabulary — the
   retired `dispoGate`/"disposition table" becomes `resolveGate` and the Resolution ladder
   (`internal/agent/resolution.go`), and the D5 gate is named Resolution, not disposition.
+- **`cmd/apogee` has a package map.** The composition root was the last sizable package in the repo
+  without a `doc.go`: 25 files, no map, and a package comment that named the binary's job but not
+  where any of it lived. It now meets the standard every `internal/*` package already does — the
+  role of the layer, then every non-test file in one line, grouped the way the package actually
+  divides (entry and command surface, the config cluster, the two `/settings` seams, the session's
+  wiring, the subcommands, the confined-exec twins). The narration that used to sit on `main.go`
+  opens it unchanged, so the package still has exactly one package comment.
 
 ### Fixed
 
