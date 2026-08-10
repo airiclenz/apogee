@@ -130,7 +130,7 @@ also assert the forced request carries an empty CacheKey.
 
 **Commit:** `fix(agent): sub-agents share the session allow-for-session approval cache`
 
-## 3. Amend the docs that pinned the old boundary; close the ISSUES entry
+## 3. Amend the docs that pinned the old boundary; close the ISSUES entry — ✅ DONE (2026-08-10)
 
 Depends on item 2.
 

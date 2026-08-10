@@ -536,6 +536,28 @@ point is a **minor** bump, not a breaking change.
   silently dropping, so the next seam to consult it is not misled. Additive: a transcript written
   before the member decodes exactly as it does now.
 
+- **"Allow for session" now covers the whole agent tree, so sub-agents stop re-asking for what you
+  already granted.** The memory of an allow-for-session was kept per `Agent`, and a sub-agent is a
+  new one: a delegation-heavy run in Auto could ask for the same shell command or the same MCP tool
+  once per child, which is precisely the prompt fatigue the choice exists to end. The memory is now
+  the **Session's** — one cache on the approver queueing seam, the single object a parent and all
+  its descendants already share — so "allow for session" means the Session and not the one Agent
+  that happened to ask. An allow granted anywhere in the tree clears that prompt everywhere, including for the parent and for siblings started later, and it outlives the child
+  that earned it. It stays in memory only: a restored session starts with an empty memory, which
+  errs toward a prompt too many rather than an unapproved call.
+  - **A duplicate approval queued behind the one that answered it auto-clears instead of asking
+    twice.** Siblings in a fan-out reach a gate at the same instant (ADR 0039), so the second one
+    has already checked the memory — and found nothing — by the time the human allows the first.
+    It re-checks after it reaches the front of the queue and clears itself, emitting its ordinary
+    approval event with an allow-for-session verdict so the transcript still says why a prompt you
+    were expecting never appeared.
+  - **Forced gates are untouched.** A Tier-2 speed-bump or a runtime demote still asks every single
+    time and still seeds nothing: it carries no cache key, and the seam keys everything off that, so
+    a forced allow-for-session authorises its own call and nothing later — exactly as before.
+    Recorded in [ADR 0013](docs/adr/0013-the-sub-agent-orchestrator-is-the-recursion-point-with-isolated-live-guard-state.md)
+    (amended), whose statelessness boundary no longer withholds this cache from a child; parent
+    conversation and pending input stay withheld as they were.
+
 ## [0.12.0] — 2026-08-07
 
 ### Added

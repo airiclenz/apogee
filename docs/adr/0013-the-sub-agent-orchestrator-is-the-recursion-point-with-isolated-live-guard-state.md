@@ -57,7 +57,17 @@ impossible because the subset is built from the parent registry's own names), an
 parent+1. The nested loop emits through the parent's `EventSink`, and because each `Agent`
 stamps its own `Depth` in `base()`, the sub-agent's events nest at **`Depth = 1`** with no
 per-call threading. The sub-agent starts **fresh** — only the delegated task, no parent
-conversation/pending-input/approval-cache (the ADR 0008 statelessness boundary).
+conversation and no parent pending input (the ADR 0008 statelessness boundary).
+
+> **Amended 2026-08-10:** the allow-for-session approval cache used to be on that withheld list and
+> no longer is. It is now **session-scoped**, shared tree-wide through the approver queueing seam
+> (`queuedApprover`, whose idempotent wrapping already gives a parent and all its descendants ONE
+> object), so "allow for session" means the whole Session rather than the Agent that happened to
+> ask: an allow granted in a sub-agent clears the prompt for its parent and its siblings and
+> outlives the child that earned it. Forced gates are unaffected — they carry an empty
+> `ApprovalRequest.CacheKey` and so neither read nor seed the memory. Conversation and
+> pending-input isolation are unchanged. See plan `docs/plans/2026-08-10 - 03 -
+> shared-session-approval-cache-plan.md`.
 
 **3 — Live guard state is ISOLATED; the dangerous floor is SHARED read-only.** `Guards` gains
 `ForSubAgent()`, used to build the child's bundle:

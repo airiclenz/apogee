@@ -136,8 +136,12 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 // the SAME Upstream responder and EventSink, the parent session's context-file content
 // verbatim (copied, never re-read — a sub-agent is not a session boundary), and Depth =
 // parent+1 so its events nest. The
-// nested Agent is NOT given the parent's pending input, conversation, or approval cache — it
-// starts fresh with only the delegated task (the ADR-0008 statelessness boundary).
+// nested Agent is NOT given the parent's pending input or conversation — it starts fresh with only
+// the delegated task (the ADR-0008 statelessness boundary). The allow-for-session approval memory is
+// deliberately NOT on that withheld list: it is scoped to the SESSION rather than to an Agent, and
+// it reaches the child through the very Approver threaded above — the shared queueing seam holds it
+// (approvalCache in approvalcache.go), so a gate the human already cleared anywhere in the tree does
+// not ask the child again, and an allow the child earns outlives it for the parent and its siblings.
 //
 // spawnCallID is the id of the sub_agent tool call being served — the child's RUN IDENTITY,
 // stamped on every Event it emits (domain.EventBase.CallID). It is what tells one delegated
