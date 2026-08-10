@@ -96,7 +96,8 @@ opens it), and type-to-filter in every selector pop-up. Released just before
 those: the [`/settings`](#the-settings-screen--settings) screen,
 [`apogee headless`](#running-one-prompt--apogee-headless), and scheduled prompts
 (`/schedule`, each firing saving its own browsable session). The mechanism catalogue
-is fully ported (21 mechanisms) and the first Validated set
+is complete at 21 mechanisms — the predecessor's twenty, all ported, plus
+apogee's own `guided_decomposition` — and the first Validated set
 (`gemma-4-e4b-it-qat`) ships with the binary; current work is per-model bench
 validation of that catalogue alongside TUI layout refinement. See
 [`docs/plans/`](docs/plans/) and the [`CHANGELOG`](CHANGELOG.md) for what's

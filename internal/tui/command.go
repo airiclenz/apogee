@@ -64,10 +64,13 @@ type parsedInput struct {
 //     parse (parseConfine) on top of them; every non-takesArgs verb ignores surplus tokens, as it
 //     always has. It is also what the dropdown reads to COMPLETE such a verb rather than run it
 //     (acceptAutocomplete): firing a verb that is not finished would be wrong.
-//   - whileRunning — the verb is safe to run while a worker is working, because it only REPORTS:
-//     no engine mutation, no worker of its own, no quiescent boundary needed. Every other verb is
-//     idle-only and earns commandsAtIdleNote mid-run instead of running (parsedInput.safeWhileRunning
-//     is where the flag is read, and /confine's reporting FORM is the one nuance it adds).
+//   - whileRunning — the verb is safe to run while a worker is working, because nothing it does
+//     needs this session's engine quiescent: it either only REPORTS, or — the Schedule pair
+//     /schedule and /schedule-stop — writes only to the scheduler library, whose Schedules fire as
+//     separate headless runs (ADR 0033). Either way: no engine mutation, no worker of its own, no
+//     quiescent boundary needed. Every other verb is idle-only and earns commandsAtIdleNote mid-run
+//     instead of running (parsedInput.safeWhileRunning is where the flag is read, and /confine's
+//     reporting FORM is the one nuance it adds).
 //   - noRecall — a sent invocation of this verb is NEVER recorded as a recallable prompt, in memory
 //     or on disk. The session-reset pair /clear and /new carry it because recall exists so a line
 //     can be handed back and re-sent with one ⏎, and a walk that hands back a session wipe arms that

@@ -440,6 +440,16 @@ point is a **minor** bump, not a breaking change.
   divides (entry and command surface, the config cluster, the two `/settings` seams, the session's
   wiring, the subcommands, the confined-exec twins). The narration that used to sit on `main.go`
   opens it unchanged, so the package still has exactly one package comment.
+- **A follow-up pass over four residues the doc sweep itself left.** `ISSUES.md` no longer says the
+  confinement contract still calls the out-of-workspace row "unreachable" — that paragraph was
+  rewritten in this same sweep, and the entry now cites what §4 actually says; `README.md` counts
+  the Mechanism catalogue honestly, twenty ports plus apogee's own `guided_decomposition`, instead
+  of calling all 21 ported; the `whileRunning` flag's doc covers the Schedule pair that carries it
+  (they write to the scheduler library, never this session's engine) instead of promising every
+  mid-run verb only reports; and `layout.md`'s opening mockup draws the EXPANDED `Sub-Agent` head
+  with the report's own summary rather than the collapsed run's count line, with one overlong prose
+  line reflowed and the approval pane's renderer comment spelling its argument label as the spec
+  does.
 
 ### Fixed
 

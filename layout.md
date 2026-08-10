@@ -40,7 +40,7 @@
     + another new code line
 
 ✦ Sub-Agent ▼
-  ┕ survey the tests  2 tool calls · 12k/32k · Found 4 gaps
+  ┕ survey the tests  Found 4 gaps
 
 │ ⤷ sub-agent
 │
@@ -1325,7 +1325,8 @@ everything on either side is untouched.
 rest of what was typed stays in the box with the caret where it belongs. The verbs that need what
 follows them are the exception and complete instead: the ones that take arguments — today
 `/color-scheme`, `/confine`, `/model`, `/rename`, `/schedule` and `/server` (and arguments are
-only ever read from a whole-line invocation). Accepting a skill row writes that skill's own `/id ` token into the text.
+only ever read from a whole-line invocation). Accepting a skill row writes that skill's own
+`/id ` token into the text.
 
 **One overlay for "which one?".** `/model` and `/server` with nothing after them open a
 picker: the same bordered pane as the `/sessions` browser, one row per choice, one highlight,

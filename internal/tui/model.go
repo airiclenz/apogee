@@ -4451,7 +4451,7 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	spec := popupSpec{
 		title:         "Approve " + stripEscapes(req.Tool) + "?",
 		titleInBorder: true,
-		body:          strings.Join(parts, "\n"), // Reason: and Command: adjacent, as the mockup draws them
+		body:          strings.Join(parts, "\n"), // Reason: and command: adjacent, as the mockup draws them
 		maxBodyRows:   maxBodyRows,
 		rows:          rows,
 		menuRows:      true,
