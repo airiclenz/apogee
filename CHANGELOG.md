@@ -450,6 +450,18 @@ point is a **minor** bump, not a breaking change.
   with the report's own summary rather than the collapsed run's count line, with one overlong prose
   line reflowed and the approval pane's renderer comment spelling its argument label as the spec
   does.
+- **File-level structure is now a written rule — [ADR 0043](docs/adr/0043-files-split-by-concern-and-config-gets-a-package.md).**
+  ADR 0010 settled the layout above the file and said nothing below it, which is how a 4,743-line
+  `model.go` and a 2,932-line `wire.go` grew inside a package layout the doc audit called
+  exemplary. Four calls close the gap: a coordinator file splits by concern cluster and keeps only
+  coordination; a composition root splits into `wire_<seam>.go` files with a file-top map naming
+  every seam; the config cluster (core, writer, migrate, watch, key registry, the resolved options)
+  becomes `internal/config` while the /settings display projection stays in the binary, because the
+  schema, the precedence and the masking are the binary's knowledge and the renderer holds none of
+  it (ADR 0011); and a package past ~10 non-test files carries a `doc.go` file map that a test
+  enforces, so the navigation aid cannot rot. Nothing about behaviour, ownership or layering moves —
+  `internal/config` imports `internal/domain` and never root, `internal/tui` stays flat, and the
+  "the binary owns it" stances of ADRs 0024 and 0028 stand.
 
 ### Fixed
 

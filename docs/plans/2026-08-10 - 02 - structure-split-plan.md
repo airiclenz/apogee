@@ -12,7 +12,8 @@
   - `docs/reviews/2026-08-10 - 00 - doc-landscape-audit.md` §Flags 3–4
   - ADR 0010 (layering; `internal/*` never imports root), ADR 0011 (value-copied Model;
     no held-by-value no-copy types — `TestModelNoBuilderByValue`), ADR 0031 (door-keeping
-    invariants), ADR 0042 (written by item 2 of this plan; later items cite it)
+    invariants), ADR 0043 (written by item 2 of this plan; later items cite it — the plan text says
+    0042, but that number was taken on 2026-08-10 before this plan ran; see item 2's NOTES)
   - coding-standards skill structure rules (airiclenz/skills `da76213`): coordinator
     types split by concern cluster; composition roots split by seam with a map comment;
     packages past ~10 files carry a test-enforced doc.go file map.
@@ -64,7 +65,14 @@ succeeds and `ls "docs/plans/" | grep -F "tool-surface"` finds nothing.
 **Commit:** `chore(plans): confirm tool-surface plan archived before structure split`
 (plan-file mark only).
 
-## 2. ADR 0042 — file-level structure rules and internal/config
+## 2. ADR 0042 — file-level structure rules and internal/config — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): landed as **ADR 0043**, not 0042 — `0042-external-programs-are-optional-enhancements-never-prerequisites.md`
+was taken earlier the same day by the doc-landscape cleanup plan's ADR salvage (`5a2bbe0`). The
+item's own parenthetical rule ("next free number") governs, so the record is
+`docs/adr/0043-files-split-by-concern-and-config-gets-a-package.md`; the intro bullet's ADR
+reference is updated to 0043 so later items cite the right number. A CHANGELOG `[Unreleased]` →
+`Changed` entry was added per the repo's convention for ADR-ratifying commits.
 
 **What:** Write `docs/adr/0042-files-split-by-concern-and-config-gets-a-package.md`
 (next free number after 0041), status accepted, recording the owner-ratified calls
