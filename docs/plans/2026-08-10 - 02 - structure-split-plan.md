@@ -276,7 +276,52 @@ ADR-0010 import check must stay green); `config.go` no longer imports
 
 **Commit:** `refactor(cmd): retype config core onto internal/domain; extract shared test fixtures`
 
-## 9. Config move I — registry, options, migrate, watch move behind a bridge
+## 9. Config move I — registry, options, migrate, watch move behind a bridge — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): **items 9 and 10 are MERGED into this item by owner decision** (after a BLOCKED
+report that item 9's bridge could not be written without item 10's files): the whole five-file
+cluster plus `options` moved in one commit. **No `configbridge.go` was created** — with the whole
+cluster moving at once every crossing name could be exported and qualified directly, so item 11 has
+no bridge to delete; only its "qualify call sites" half was needed, and it is already done here.
+
+Placements. (a) `parseMode` moved to `internal/domain` as `domain.ParseMode`; the four mode
+constants needed no move — `internal/domain` already exported `ModePlan`/`ModeAskBefore`/
+`ModeAllowEdits`/`ModeAuto` and `cmd/apogee` merely aliased them through the root package, so the
+aliases were deleted and every call site now names `domain.ModeX` / `domain.ParseMode`. (b)
+`apogeeHome` → `config.ApogeeHome` (config.go, beside `resolveConfigDir`/`FilePath`, which both
+call it). (c) `defaults.go` moved WHOLE — `defaultConfigYAML`, its `//go:embed`, the `defaults/`
+directory, `seedConfig` and `seedDefaultConfig` — because an embed cannot reach out of its own
+package directory; the template now lives at `internal/config/defaults/config.yaml` and the stale
+path references in ADR 0023, ADR 0035, `TODO.md` and `internal/tui/settings_test.go` were corrected.
+(d) `options` → `internal/config/options.go` as `Options`, all fields exported. (e) `serverNameList`
+(from `upstream.go`) → `config.ServerNameList`: it takes `[]ServerEntry` and the moved refusals call
+it. (f) `lineCount`/`listValue` DUPLICATED (unexported) into `internal/config/configwrite.go` per the
+owner's allowance; `cmd/apogee/settingsrows.go` keeps its own, and both copies say why. (g)
+`cmd/apogee/testdata/` moved — only `configwrite_scalar_test.go` read it.
+
+Naming rule applied to the ~50 crossing names: names that BEGIN with the package name are
+de-stuttered (`configKey`→`Key`, `configKind`→`Kind`, `configSource`→`Source`,
+`configWatcher`→`Watcher`, `newConfigWatcher`→`NewWatcher`, `configDocument`→`Document`,
+`configFilePath`→`FilePath`), everything else is capitalised as-is. Enumeration sets are exported
+whole rather than half (`Kind*`, `Source*`, `Env*`), and every struct whose fields cross the seam
+exports ALL of them (`Options`, `Settings`, `Layer`, `PresentSettings`, `PromptSource`,
+`SystemPromptSettings`, `UISettings`, `ServerEntry`, `UnconfinedHost`, `StartupUndetermined`,
+`ScalarTarget`) so no public type is half-visible. Renames were applied with a `go/types`-driven
+positional rewriter, not text substitution, so no same-named field on another struct was touched.
+
+Three test-seam consequences. (1) `internal/config/testsupport_test.go` is a COPY of the subset of
+`cmd/apogee/testsupport_test.go` the moved suite needs — a `_test.go` file is not importable, and
+item 8's extraction was for the staying half. (2) `configwatch_apply_test.go` stayed as the item
+says; `Watcher.interval`/`settle` are now exported `Interval`/`Settle` (settable before `Start`) so
+it can drive the poll in milliseconds through the exported surface, and it carries its own small
+`startConfigWatcher`. (3) `TestStartupOverrideSourcesBindTheDetachedNames` split: the table
+invariants stay in `internal/config`, and the half that asserted the flags are really registered on
+the cobra root command became `cmd/apogee`'s `TestRootCommandRegistersTheStartupOverrideFlags`,
+driven by a new `config.StartupOverrideFlags()` so neither side restates the other's names.
+
+`internal/config/doc.go` was written with the REAL file map now (not the stub item 9 called for),
+since item 10's files arrived in the same commit; `cmd/apogee/doc.go` lost its config-cluster
+paragraph. No CHANGELOG entry, per items 3–8's precedent for a behaviour-preserving move.
 
 Depends on item 8.
 
@@ -304,7 +349,12 @@ validation is allowed — sibling import, no cycle), never the root module.
 
 **Commit:** `refactor(config): move key registry, options, migrate, and watch into internal/config behind a bridge`
 
-## 10. Config move II — config.go and configwrite.go follow
+## 10. Config move II — config.go and configwrite.go follow — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): this item's work was ABSORBED into item 9 by owner decision (2026-08-10) — the
+five-file cluster could not be split across two commits without a bridge nobody wanted, so
+`config.go`, `configwrite.go` and their three test files moved with the rest in item 9's commit.
+Nothing is left here to implement; see item 9's NOTES for the placements and the naming rule.
 
 Depends on item 9.
 

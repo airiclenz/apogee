@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/run"
@@ -74,7 +75,7 @@ func headlessRunOn(t *testing.T, stub *stubRunner, confiner apogee.Confiner, con
 	newConfiner = func() apogee.Confiner { return confiner }
 	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
 	// The environment must not decide what the mode assertions measure.
-	t.Setenv(envMode, "")
+	t.Setenv(config.EnvMode, "")
 
 	cmd := newHeadlessCommand()
 	var outBuf, errBuf bytes.Buffer
@@ -852,7 +853,7 @@ func TestHeadlessAnswerLandsOnTheProcessStdout(t *testing.T) {
 	prev := runOnce
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prev })
-	t.Setenv(envMode, "")
+	t.Setenv(config.EnvMode, "")
 
 	configDir, workspace := testConfigHome(t, ""), t.TempDir()
 	var runErr error
@@ -1025,8 +1026,8 @@ func TestHeadlessUsageErrorsNeverStartARun(t *testing.T) {
 // picker for the reason ADR 0036 gives: there is nobody to ask.
 func TestHeadlessWithNoServerNeverStartsARun(t *testing.T) {
 	// The host's own environment must not hand the run a server the test is asserting is absent.
-	t.Setenv(envServer, "")
-	t.Setenv(envMode, "")
+	t.Setenv(config.EnvServer, "")
+	t.Setenv(config.EnvMode, "")
 
 	cmd := newHeadlessCommand()
 	var out, errOut bytes.Buffer
@@ -1058,9 +1059,9 @@ func TestHeadlessWithNoServerNeverStartsARun(t *testing.T) {
 // refusal here, because the reason the TUI may ask instead (there is a human in front of it) is
 // exactly the reason a headless run may not.
 func TestHeadlessRefusesEveryUndeterminedStartup(t *testing.T) {
-	t.Setenv(envServer, "")
-	t.Setenv(envMode, "")
-	t.Setenv(envEndpoint, "")
+	t.Setenv(config.EnvServer, "")
+	t.Setenv(config.EnvMode, "")
+	t.Setenv(config.EnvEndpoint, "")
 
 	const list = "servers:\n  - name: laptop\n    endpoint: http://127.0.0.1:1111\n"
 	tests := []struct {
@@ -1108,7 +1109,7 @@ func TestHeadlessReadsThePromptFromStdin(t *testing.T) {
 	prev := runOnce
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prev })
-	t.Setenv(envMode, "")
+	t.Setenv(config.EnvMode, "")
 
 	cmd := newHeadlessCommand()
 	var out, errOut bytes.Buffer

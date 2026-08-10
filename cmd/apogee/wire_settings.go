@@ -16,6 +16,8 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -54,7 +56,7 @@ type liveSettings struct {
 
 	// servers is the `servers:` list: the single upstream definition (ADR 0036), which the switch
 	// list, the `server:` recording check and the pane's picker all resolve names against.
-	servers []serverEntry
+	servers []config.ServerEntry
 
 	// manualIDs and mechanisms are the two halves of the `mechanisms:` block: the validated enabled
 	// ids the engine arms, and the block itself, whose mere non-emptiness is what suppresses a matched
@@ -70,8 +72,8 @@ type liveSettings struct {
 
 	// systemPrompt is the `system-prompt-text` / `system-prompt-file` / `system-prompt-models` trio
 	// (ADR 0023). It is held whole rather than per key because selection is whole-entry replacement:
-	// the three keys are one prompt, and resolveSystemPrompt collapses them per model at every rebind.
-	systemPrompt systemPromptSettings
+	// the three keys are one prompt, and ResolveSystemPrompt collapses them per model at every rebind.
+	systemPrompt config.SystemPromptSettings
 
 	// contextFilesEnable and contextFileNames are the `context-files:` block's two keys as the session
 	// holds them NOW. They live here because each key's edit has to carry the OTHER half — the engine
@@ -88,17 +90,17 @@ type liveSettings struct {
 // The context-file PAIR is seeded from the resolved name list, which is the very read the pane's own
 // two rows are formatted from (settingsrows.go): the two spellings of "off" collapse into an empty
 // list at startup, so an enable read back off that list and a row showing `false` say the same thing.
-func newLiveSettings(opts options, manualIDs []apogee.MechanismID) *liveSettings {
+func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveSettings {
 	return &liveSettings{
-		pinnedWindow:       opts.contextWindow,
-		servers:            opts.servers,
+		pinnedWindow:       opts.ContextWindow,
+		servers:            opts.Servers,
 		manualIDs:          manualIDs,
-		mechanisms:         opts.mechanisms,
-		validatedEnable:    opts.validatedSetsEnable,
-		validatedAlias:     opts.validatedSetsAlias,
-		systemPrompt:       opts.systemPrompt,
-		contextFilesEnable: len(opts.contextFiles) > 0,
-		contextFileNames:   opts.contextFiles,
+		mechanisms:         opts.Mechanisms,
+		validatedEnable:    opts.ValidatedSetsEnable,
+		validatedAlias:     opts.ValidatedSetsAlias,
+		systemPrompt:       opts.SystemPrompt,
+		contextFilesEnable: len(opts.ContextFiles) > 0,
+		contextFileNames:   opts.ContextFiles,
 	}
 }
 
@@ -141,7 +143,7 @@ func (s *liveSettings) observed() int {
 
 // serverList reports the `servers:` entries as they stand now — the question the `server:` recording
 // seam asks, which is about the FILE's list and not about the switchable rows below.
-func (s *liveSettings) serverList() []serverEntry {
+func (s *liveSettings) serverList() []config.ServerEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.servers
@@ -151,15 +153,15 @@ func (s *liveSettings) serverList() []serverEntry {
 // upstreamChoices derivation startup made, re-run against the live list rather than the launch one, so
 // the one row it may synthesize — the ephemeral `--endpoint` startup, a fact about the invocation that
 // no edit can change — is still exactly where it was.
-func (s *liveSettings) choices(base options) []serverEntry {
-	base.servers = s.serverList()
+func (s *liveSettings) choices(base config.Options) []config.ServerEntry {
+	base.Servers = s.serverList()
 	return upstreamChoices(base)
 }
 
 // setSystemPrompt installs a re-read `system-prompt-*` block. The caller validates first: this is the
 // commit half of a validate-then-commit, so a block the file cannot express never displaces a working
 // prompt.
-func (s *liveSettings) setSystemPrompt(sp systemPromptSettings) {
+func (s *liveSettings) setSystemPrompt(sp config.SystemPromptSettings) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.systemPrompt = sp
@@ -188,7 +190,7 @@ func (s *liveSettings) setContextFileNames(names []string) bool {
 // switch and the `server:` recording all resolve names against this field (ADR 0036: one upstream
 // definition) — so this store IS the whole apply for that key. The caller validates first, the
 // setSystemPrompt posture: a list with a nameless or duplicated entry never displaces a working one.
-func (s *liveSettings) setServers(servers []serverEntry) {
+func (s *liveSettings) setServers(servers []config.ServerEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.servers = servers
@@ -225,17 +227,17 @@ func (s *liveSettings) setValidatedSets(enable bool, alias map[string]string) {
 // input that is keyed on the endpoint — the probe record behind the identity ladder's middle rung,
 // and so the Validated-set decision above it — would be resolved against a server the session left.
 // Both live callers run only after the startup bind, so the snapshot is always a real binding.
-func (s *liveSettings) rebindInputs(base options, bound upstreamBinding) (options, []apogee.MechanismID, int) {
+func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) (config.Options, []apogee.MechanismID, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	base.endpoint = bound.Endpoint
-	base.apiKey = bound.APIKey
-	base.contextWindow = s.pinnedWindow
-	base.servers = s.servers
-	base.mechanisms = s.mechanisms
-	base.validatedSetsEnable = s.validatedEnable
-	base.validatedSetsAlias = s.validatedAlias
-	base.systemPrompt = s.systemPrompt
+	base.Endpoint = bound.Endpoint
+	base.APIKey = bound.APIKey
+	base.ContextWindow = s.pinnedWindow
+	base.Servers = s.servers
+	base.Mechanisms = s.mechanisms
+	base.ValidatedSetsEnable = s.validatedEnable
+	base.ValidatedSetsAlias = s.validatedAlias
+	base.SystemPrompt = s.systemPrompt
 	return base, s.manualIDs, s.pinnedWindow
 }
 
@@ -311,7 +313,7 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 		}
 		switch key {
 		case "mode":
-			mode, err := parseMode(value)
+			mode, err := domain.ParseMode(value)
 			if err != nil {
 				return "", err
 			}
@@ -344,7 +346,7 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			// rendered — and is read back by the same parse, so the engine is handed the list a reader
 			// takes out of the file rather than a second reading of the keystrokes. The switch travels
 			// with it: names alone are not a state the engine can be put into.
-			names := parseSettingList(value)
+			names := config.ParseSettingList(value)
 			a.engine.SetContextFiles(a.live.setContextFileNames(names), names)
 			return contextFileNote, nil
 		case "use-project-skills":
@@ -371,13 +373,13 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			// this is the swap door and not a re-point (setDisabled). The value arrives as the FILE
 			// spells it and is read back by the same parse the writer rendered it with, so the set the
 			// session runs and the line the file carries cannot be two readings of one edit.
-			names := parseSettingList(value)
+			names := config.ParseSettingList(value)
 			if err := a.tools.setDisabled(names, a.engine); err != nil {
 				return "", err
 			}
 			// A name that matches no tool is reported on the row rather than refused, exactly as it is
 			// at startup: the rest of the list has already applied, and saying so is the honest note.
-			if unknown := unknownToolNames(names); len(unknown) > 0 {
+			if unknown := config.UnknownToolNames(names); len(unknown) > 0 {
 				return "no tool named " + strings.Join(unknown, ", "), nil
 			}
 			return toolRosterNote, nil
@@ -531,15 +533,15 @@ func (a settingsApplier) rideTheRebind() error {
 // dropped rather than surfaced: a file still in the retired schema was already migrated and announced
 // at launch, and this read happens after the pane has just written to it.
 func (a settingsApplier) reloadSystemPrompt() error {
-	l, err := loadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
-	var sp systemPromptSettings
-	if l.systemPrompt != nil {
-		sp = *l.systemPrompt
+	var sp config.SystemPromptSettings
+	if l.SystemPrompt != nil {
+		sp = *l.SystemPrompt
 	}
-	if err := sp.validate(); err != nil {
+	if err := sp.Validate(); err != nil {
 		return err
 	}
 	a.live.setSystemPrompt(sp)
@@ -554,21 +556,21 @@ func (a settingsApplier) reloadSystemPrompt() error {
 // re-reading that one layer resolves it exactly as startup resolved it — reloadSystemPrompt's own
 // reasoning, and the reason the migration notice is dropped here too.
 func (a settingsApplier) reloadServers() error {
-	l, err := loadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
-	if err := validateServers(l.servers); err != nil {
+	if err := config.ValidateServers(l.Servers); err != nil {
 		return err
 	}
-	a.live.setServers(l.servers)
+	a.live.setServers(l.Servers)
 	// The one thing in that list an engine DOES hold: the fan-out width of the server this session is
 	// on (ADR 0039 decision 2). Re-resolving it here is what makes `parallel-agents:` an ADR 0037 key
 	// like the rest — moved in the pane, in force in the running session — rather than one that waits
 	// for the next switch. The entry is matched back by name and the observed slot count is kept: the
 	// file changed, the server did not.
 	if a.caps != nil {
-		a.caps.relist(l.servers)
+		a.caps.relist(l.Servers)
 	}
 	return nil
 }
@@ -578,32 +580,32 @@ func (a settingsApplier) reloadServers() error {
 // enabled and disabled alike — so a Mechanism id this build does not know is refused here rather than
 // silently arming nothing, exactly as it is at launch (ADR 0015 §1).
 func (a settingsApplier) reloadMechanisms() error {
-	l, err := loadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
-	ids, err := mechanismIDs(l.mechanisms, mechanisms.KnownIDs())
+	ids, err := mechanismIDs(l.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
 		return err
 	}
-	a.live.setMechanisms(ids, l.mechanisms)
+	a.live.setMechanisms(ids, l.Mechanisms)
 	return nil
 }
 
 // reloadValidatedSets re-reads the `validated-sets:` block. An absent off-switch resolves to ON, the
-// default resolveSettings starts from, so a block the human deleted goes back to the surface being
+// default ResolveSettings starts from, so a block the human deleted goes back to the surface being
 // available rather than to it being off — the difference between "unset" and "false" that the file
 // layer's pointer carries.
 func (a settingsApplier) reloadValidatedSets() error {
-	l, err := loadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
 	enable := true
-	if l.validatedSetsEnable != nil {
-		enable = *l.validatedSetsEnable
+	if l.ValidatedSetsEnable != nil {
+		enable = *l.ValidatedSetsEnable
 	}
-	a.live.setValidatedSets(enable, l.validatedSetsAlias)
+	a.live.setValidatedSets(enable, l.ValidatedSetsAlias)
 	return nil
 }
 
@@ -615,11 +617,11 @@ func (a settingsApplier) reloadValidatedSets() error {
 // A file that no longer parses is refused before anything is dialled, so a typo in an unrelated key
 // cannot cost the session the servers it is talking to.
 func (a settingsApplier) reconnectMCP() error {
-	l, err := loadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
-	return a.mcp.reconnect(l.mcpServers, a.tools, a.engine)
+	return a.mcp.reconnect(l.MCPServers, a.tools, a.engine)
 }
 
 // reloadProfile re-reads the `model-profile:` block and swaps it into the running engine. The
@@ -632,18 +634,18 @@ func (a settingsApplier) reconnectMCP() error {
 // human who deleted the block asked for native tool calls and no inline thinking channel, not for
 // whatever the process happened to launch with.
 func (a settingsApplier) reloadProfile() error {
-	l, err := loadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
 	var profile apogee.ModelProfile
-	if l.profile != nil {
-		profile = *l.profile
+	if l.Profile != nil {
+		profile = *l.Profile
 	}
 	return a.engine.SetProfile(profile)
 }
 
-// settingInt reads a whole count the same way (kindInt's own validators do, validateContextWindow),
+// settingInt reads a whole count the same way (KindInt's own validators do, validateContextWindow),
 // so a value the registry accepted is a value this parses. Negative is refused here too rather than
 // trusted from the file: the pane is not the only thing that can write one.
 func settingInt(key, value string) (int, error) {
@@ -694,16 +696,16 @@ func settingBool(key, value string) (bool, error) {
 // dangling validated-sets alias is the user's own config being wrong about the new model — and the
 // caller then leaves the engine bound to what it had, which is the honest outcome.
 func rebindSpecFor(
-	opts options,
+	opts config.Options,
 	roots stateRoots,
 	manualIDs []apogee.MechanismID,
 	model string,
 	window, pinnedWindow int,
 ) (apogee.RebindSpec, []string, error) {
 	next := opts
-	next.model = model
+	next.Model = model
 
-	sysPrompt, err := resolveSystemPrompt(next.systemPrompt, model, roots.config, os.ReadFile)
+	sysPrompt, err := config.ResolveSystemPrompt(next.SystemPrompt, model, roots.config, os.ReadFile)
 	if err != nil {
 		return apogee.RebindSpec{}, nil, err
 	}

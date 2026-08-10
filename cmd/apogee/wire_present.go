@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/present"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -36,15 +37,15 @@ import (
 //
 // Rung 0 — the transcript line carrying the path — is deliberately absent: it needs no mechanism,
 // it is never skipped, and nothing in the config can turn it off.
-func presentationRungs(p presentSettings, workspace, goos string, env func(string) string) tui.Presentation {
+func presentationRungs(p config.PresentSettings, workspace, goos string, env func(string) string) tui.Presentation {
 	rungs := tui.Presentation{Local: present.Locality(env) == present.Local}
-	if rungs.Local && p.autoOpen {
-		rungs.Opener = &present.Opener{GOOS: goos, Env: env, CommandOverride: p.command}
+	if rungs.Local && p.AutoOpen {
+		rungs.Opener = &present.Opener{GOOS: goos, Env: env, CommandOverride: p.Command}
 	}
 	if !rungs.Local {
 		rungs.Docs = &present.DocServer{
-			Host: present.AdvertiseHost(env, p.host),
-			Port: p.port,
+			Host: present.AdvertiseHost(env, p.Host),
+			Port: p.Port,
 			Root: workspace,
 		}
 	}
@@ -66,7 +67,7 @@ func presentationRungs(p presentSettings, workspace, goos string, env func(strin
 // Update goroutine while the presenter reads its own copy of the rungs under its own lock.
 type livePresentation struct {
 	mu       sync.Mutex
-	settings presentSettings
+	settings config.PresentSettings
 	rungs    tui.Presentation
 
 	// The three inputs presentationRungs takes beside the block, held so a rebuild is the identical
@@ -81,7 +82,7 @@ type livePresentation struct {
 
 // newLivePresentation builds this session's ladder and installs it — the call that also makes
 // bridge.Presenter() non-nil, and with it registers present_document.
-func newLivePresentation(p presentSettings, workspace, goos string, env func(string) string,
+func newLivePresentation(p config.PresentSettings, workspace, goos string, env func(string) string,
 	install func(tui.Presentation)) *livePresentation {
 	live := &livePresentation{
 		settings:  p,
@@ -109,23 +110,23 @@ func (l *livePresentation) apply(key, value string) error {
 		if err != nil {
 			return err
 		}
-		next.autoOpen = on
+		next.AutoOpen = on
 	case "present.command":
-		next.command = value
+		next.Command = value
 	case "present.port":
 		port, err := settingInt(key, value)
 		if err != nil {
 			return err
 		}
-		next.port = port
+		next.Port = port
 	case "present.host":
-		next.host = value
+		next.Host = value
 	default:
 		return fmt.Errorf("apogee: %s is not a presentation setting", key)
 	}
 	// The startup check on the whole block, so a value that would fail deep inside the first
 	// presentation is refused here instead — the same validate() the registry's own validator runs.
-	if err := next.validate(); err != nil {
+	if err := next.Validate(); err != nil {
 		return err
 	}
 

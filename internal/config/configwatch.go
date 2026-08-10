@@ -1,4 +1,4 @@
-package main
+package config
 
 // The config file watcher: ADR 0041 decision 3.
 //
@@ -48,19 +48,21 @@ func (s configFileState) equal(other configFileState) bool {
 	return s.size == other.size && s.modTime.Equal(other.modTime)
 }
 
-// configWatcher reports that one path changed. Start it once, read Changes for the life of the
+// Watcher reports that one path changed. Start it once, read Changes for the life of the
 // session, Stop it at teardown — Start and Stop belong to the goroutine that owns the watcher (the
 // composition root), and Stop does not return until the poll goroutine is gone.
-type configWatcher struct {
+type Watcher struct {
 	// path is the single file under watch: config.yaml, and deliberately nothing else. Skills,
 	// MCP manifests and context files each have their own reload semantics (ADR 0041 decision 5
 	// — one file, one contract).
 	path string
-	// interval is the poll cadence — a field, not the constant, so a test can drive the watcher
-	// in milliseconds instead of waiting out seconds of real time.
-	interval time.Duration
-	// settle is the quiet period a change must survive before it is reported.
-	settle time.Duration
+	// Interval is the poll cadence and Settle the quiet period a change must survive before it is
+	// reported. NewWatcher sets both to the production constants below; they are exported and
+	// settable BEFORE Start so a test — in this package or in a Driver's — can drive the watcher in
+	// milliseconds instead of waiting out seconds of real time. Changing either after Start has no
+	// effect: the poll loop reads them once.
+	Interval time.Duration
+	Settle   time.Duration
 
 	// changes carries one value per settled change. It is buffered by one and sent to without
 	// blocking, because the signal is "the file changed": a report the consumer has not taken yet
@@ -80,13 +82,13 @@ type configWatcher struct {
 	stopOnce sync.Once
 }
 
-// newConfigWatcher builds a watcher over path at the production cadence. It touches nothing, and
+// NewWatcher builds a watcher over path at the production cadence. It touches nothing, and
 // starts nothing, until Start.
-func newConfigWatcher(path string) *configWatcher {
-	return &configWatcher{
+func NewWatcher(path string) *Watcher {
+	return &Watcher{
 		path:     path,
-		interval: configWatchInterval,
-		settle:   configWatchSettle,
+		Interval: configWatchInterval,
+		Settle:   configWatchSettle,
 		changes:  make(chan struct{}, 1),
 		stop:     make(chan struct{}),
 		done:     make(chan struct{}),
@@ -96,14 +98,14 @@ func newConfigWatcher(path string) *configWatcher {
 // Changes delivers one value per settled change to the watched file. It is closed once Stop has
 // returned, so a consumer ranging over it terminates with the watcher; a consumer selecting on it
 // must treat a closed receive as the end of the watch and stop selecting on it.
-func (w *configWatcher) Changes() <-chan struct{} { return w.changes }
+func (w *Watcher) Changes() <-chan struct{} { return w.changes }
 
 // Start samples the file and launches the poll. The baseline is taken here rather than on the first
 // tick so that a change made immediately after Start is measured against the file as it stood when
 // the caller began watching. A file that cannot be stat'ed at Start leaves the zero sample as the
 // baseline, which no real file matches — so the file appearing later is reported as the change it
 // is. A second Start is a no-op.
-func (w *configWatcher) Start() {
+func (w *Watcher) Start() {
 	if !w.started.CompareAndSwap(false, true) {
 		return
 	}
@@ -114,7 +116,7 @@ func (w *configWatcher) Start() {
 // Stop ends the poll and closes Changes. It waits for the poll goroutine to return before closing,
 // so the goroutine cannot outlive the watcher and cannot send into a channel Stop has closed. Safe
 // to call twice, and safe to call on a watcher that was never started.
-func (w *configWatcher) Stop() {
+func (w *Watcher) Stop() {
 	w.stopOnce.Do(func() {
 		close(w.stop)
 		if w.started.Load() {
@@ -125,13 +127,13 @@ func (w *configWatcher) Stop() {
 }
 
 // poll is the watcher's one goroutine: sample, compare, and report once the file has held still for
-// the settle delay. last is the sample every comparison is made against; it advances on each
+// the Settle delay. last is the sample every comparison is made against; it advances on each
 // observed change, so the write/truncate/rename burst of a single save moves it several times and
 // reports once.
-func (w *configWatcher) poll(last configFileState) {
+func (w *Watcher) poll(last configFileState) {
 	defer close(w.done)
 
-	ticker := time.NewTicker(w.interval)
+	ticker := time.NewTicker(w.Interval)
 	defer ticker.Stop()
 
 	// reportAt is when the pending change becomes reportable, and the zero time means nothing is
@@ -148,7 +150,7 @@ func (w *configWatcher) poll(last configFileState) {
 			}
 			if !current.equal(last) {
 				last = current
-				reportAt = now.Add(w.settle)
+				reportAt = now.Add(w.Settle)
 				continue
 			}
 			if reportAt.IsZero() || now.Before(reportAt) {
@@ -162,7 +164,7 @@ func (w *configWatcher) poll(last configFileState) {
 
 // report announces a settled change, dropping it when one is already queued: two undelivered
 // reports say exactly what one says, and the poll must not block on the consumer.
-func (w *configWatcher) report() {
+func (w *Watcher) report() {
 	select {
 	case w.changes <- struct{}{}:
 	default:
@@ -173,7 +175,7 @@ func (w *configWatcher) report() {
 // the file is briefly absent while an editor renames its temp file over it, so calling that a change
 // would report one save twice, and calling it an error would end a watch over a file that is about to
 // exist again. The tick is skipped, the last known sample stands, and the next tick retries.
-func (w *configWatcher) sample() (configFileState, bool) {
+func (w *Watcher) sample() (configFileState, bool) {
 	info, err := os.Stat(w.path)
 	if err != nil {
 		return configFileState{}, false

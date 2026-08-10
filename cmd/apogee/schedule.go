@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
@@ -42,7 +43,7 @@ type scheduleWiring struct {
 	// goroutine-safe and this runs on the Scheduler's own goroutine. The launch snapshot's own WIRE is
 	// never used: rebindInputs overlays the binding below onto the copy it hands the resolver, so the
 	// endpoint a Firing resolves against and the endpoint it dials are one value.
-	opts  options
+	opts  config.Options
 	roots stateRoots
 	live  *liveSettings
 

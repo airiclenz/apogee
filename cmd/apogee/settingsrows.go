@@ -1,6 +1,6 @@
 package main
 
-// The wire side of the /settings surface: it projects the declarative key registry (registry.go)
+// The wire side of the /settings surface: it projects the declarative key registry (internal/config/registry.go)
 // plus the values THIS run resolved (options) onto the renderer's plain-data rows (tui.SettingRow).
 //
 // It sits here, in the composition root, for the reason every other display seam does: the schema,
@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -86,66 +87,66 @@ var settingSections = []settingSection{
 // It is keyed by registry path and covers every row (TestSettingValuesCoverEveryRegistryKey). A
 // path with no formatter renders as an empty value rather than panicking — a table gap must not
 // cost the user the whole surface mid-session — and that test is what keeps the gap from shipping.
-var settingValues = map[string]func(options) string{
-	"servers": func(o options) string { return countSummary(len(o.servers), "server") },
-	"server":  func(o options) string { return o.startupServer },
-	"mode":    func(o options) string { return o.mode },
+var settingValues = map[string]func(config.Options) string{
+	"servers": func(o config.Options) string { return countSummary(len(o.Servers), "server") },
+	"server":  func(o config.Options) string { return o.StartupServer },
+	"mode":    func(o config.Options) string { return o.Mode },
 	// A SUMMARY of the prompt, since no row holds prose — the text itself travels beside it
 	// (settingTexts) for the editor to open on. Blank when nothing is set inline, the answer every
 	// other row whose value seeds a field gives: "none" would be a word standing where the prompt goes.
-	"system-prompt-text": func(o options) string { return countSummary(lineCount(o.systemPrompt.global.text), "line") },
+	"system-prompt-text": func(o config.Options) string { return countSummary(lineCount(o.SystemPrompt.Global.Text), "line") },
 	// The path AS WRITTEN, blank when the key names no file — the three other editable string rows'
 	// answer (present.command, present.host, web-search-endpoint), and the only safe one: this row's
 	// value is what the edit field is SEEDED with, so a word standing in for emptiness would be a word
 	// the next ⏎ persisted as a path, and a row reading "none" against a blank default would arm a
 	// reset for a key with no line to remove.
-	"system-prompt-file": func(o options) string { return o.systemPrompt.global.file },
-	"system-prompt-models": func(o options) string {
-		return countSummary(len(o.systemPrompt.models), "model")
+	"system-prompt-file": func(o config.Options) string { return o.SystemPrompt.Global.File },
+	"system-prompt-models": func(o config.Options) string {
+		return countSummary(len(o.SystemPrompt.Models), "model")
 	},
 	// The `context-files:` block resolves to the NAME LIST in force (nil when the feature is off,
 	// however it got there — `enable: false`, or an empty `names:`), which is why enable is reported
 	// from the list rather than from a flag: the effective outcome is what the row is asked about.
-	"context-files.enable": func(o options) string { return boolValue(len(o.contextFiles) > 0) },
-	"context-files.names":  func(o options) string { return listValue(o.contextFiles) },
-	"confine-to-workspace": func(o options) string { return boolValue(o.confineToWorkspace) },
-	"unconfined-hosts":     func(o options) string { return countSummary(len(o.unconfinedHosts), "host") },
-	"web-search-endpoint":  func(o options) string { return o.webSearchEndpoint },
-	"mcp-servers":          func(o options) string { return countSummary(len(o.mcpServers), "server") },
+	"context-files.enable": func(o config.Options) string { return boolValue(len(o.ContextFiles) > 0) },
+	"context-files.names":  func(o config.Options) string { return listValue(o.ContextFiles) },
+	"confine-to-workspace": func(o config.Options) string { return boolValue(o.ConfineToWorkspace) },
+	"unconfined-hosts":     func(o config.Options) string { return countSummary(len(o.UnconfinedHosts), "host") },
+	"web-search-endpoint":  func(o config.Options) string { return o.WebSearchEndpoint },
+	"mcp-servers":          func(o config.Options) string { return countSummary(len(o.MCPServers), "server") },
 	// The roster switch shows the NAMES it holds, not a count: the list is short, and which tools
 	// are off is the whole of what the row is asked. Blank when nothing is disabled — the answer
 	// every editable field row gives, since this value seeds the edit field.
-	"tools.disabled":     func(o options) string { return listValue(o.toolsDisabled) },
-	"use-project-skills": func(o options) string { return boolValue(o.useProjectSkills) },
-	"auto-compact":       func(o options) string { return boolValue(o.autoCompact) },
-	"auto-title":         func(o options) string { return boolValue(o.autoTitle) },
-	"context-window":     func(o options) string { return strconv.Itoa(o.contextWindow) },
-	"present.auto-open":  func(o options) string { return boolValue(o.present.autoOpen) },
-	"present.command":    func(o options) string { return o.present.command },
-	"present.port":       func(o options) string { return strconv.Itoa(o.present.port) },
-	"present.host":       func(o options) string { return o.present.host },
-	"ui.spinner":         func(o options) string { return string(o.ui.spinner) },
-	"ui.spinner-color":   func(o options) string { return boolValue(o.ui.spinnerColor) },
-	"ui.show-scrollbar":  func(o options) string { return boolValue(o.ui.showScrollbar) },
-	"ui.color-scheme":    func(o options) string { return o.ui.colorScheme },
-	"cursor-shape":       func(o options) string { return o.cursorShape },
+	"tools.disabled":     func(o config.Options) string { return listValue(o.ToolsDisabled) },
+	"use-project-skills": func(o config.Options) string { return boolValue(o.UseProjectSkills) },
+	"auto-compact":       func(o config.Options) string { return boolValue(o.AutoCompact) },
+	"auto-title":         func(o config.Options) string { return boolValue(o.AutoTitle) },
+	"context-window":     func(o config.Options) string { return strconv.Itoa(o.ContextWindow) },
+	"present.auto-open":  func(o config.Options) string { return boolValue(o.Present.AutoOpen) },
+	"present.command":    func(o config.Options) string { return o.Present.Command },
+	"present.port":       func(o config.Options) string { return strconv.Itoa(o.Present.Port) },
+	"present.host":       func(o config.Options) string { return o.Present.Host },
+	"ui.spinner":         func(o config.Options) string { return string(o.UI.Spinner) },
+	"ui.spinner-color":   func(o config.Options) string { return boolValue(o.UI.SpinnerColor) },
+	"ui.show-scrollbar":  func(o config.Options) string { return boolValue(o.UI.ShowScrollbar) },
+	"ui.color-scheme":    func(o config.Options) string { return o.UI.ColorScheme },
+	"cursor-shape":       func(o config.Options) string { return o.CursorShape },
 	// The command AS WRITTEN, blank when the key names none — the answer every other editable string
 	// row gives, and the only safe one here too: this value SEEDS the edit field, so a word standing
 	// in for emptiness ("$EDITOR", "the OS opener") would be a word the next ⏎ persisted as a command.
-	"editor":         func(o options) string { return o.editor },
-	"bypass":         func(o options) string { return boolValue(o.bypass) },
-	"mechanisms":     func(o options) string { return countSummary(enabledCount(o.mechanisms), "mechanism") },
-	"validated-sets": func(o options) string { return validatedSetsSummary(o) },
-	"model-profile":  func(o options) string { return profileSummary(o.profile) },
+	"editor":         func(o config.Options) string { return o.Editor },
+	"bypass":         func(o config.Options) string { return boolValue(o.Bypass) },
+	"mechanisms":     func(o config.Options) string { return countSummary(enabledCount(o.Mechanisms), "mechanism") },
+	"validated-sets": func(o config.Options) string { return validatedSetsSummary(o) },
+	"model-profile":  func(o config.Options) string { return profileSummary(o.Profile) },
 }
 
 // settingTexts is the RAW value of the keys whose displayed value is only a summary of it — the
-// kindText rows, whose editor is seeded with the prose itself (tui.SettingRow.Text). It is a second,
+// KindText rows, whose editor is seeded with the prose itself (tui.SettingRow.Text). It is a second,
 // deliberately tiny table rather than a second return from settingValues: exactly one key of the
 // schema is prose, and every other row would have to answer a question it has no answer to.
 // TestSettingTextsCoverEveryTextKey pins it to the registry.
-var settingTexts = map[string]func(options) string{
-	"system-prompt-text": func(o options) string { return o.systemPrompt.global.text },
+var settingTexts = map[string]func(config.Options) string{
+	"system-prompt-text": func(o config.Options) string { return o.SystemPrompt.Global.Text },
 }
 
 // settingsRows builds the /settings pane's rows: one per registry key, in registry order (which is
@@ -157,11 +158,11 @@ var settingTexts = map[string]func(options) string{
 // "none", and a key whose effective value came out empty while the registry declares a default
 // shows that default — an unset `cursor-shape:` is a block caret, and saying so is the honest
 // answer to "what is this set to".
-func settingsRows(opts options) []tui.SettingRow {
-	rows := make([]tui.SettingRow, 0, len(keyRegistry))
+func settingsRows(opts config.Options) []tui.SettingRow {
+	rows := make([]tui.SettingRow, 0, len(config.KeyRegistry))
 	section := ""
 	next := 0
-	for _, k := range keyRegistry {
+	for _, k := range config.KeyRegistry {
 		if next < len(settingSections) && settingSections[next].Opens == k.Path {
 			section = settingSections[next].Name
 			next++
@@ -173,7 +174,7 @@ func settingsRows(opts options) []tui.SettingRow {
 		switch {
 		case k.Masked && value != "":
 			value = maskedSettingValue
-		case value == "" && k.Kind == kindStructured:
+		case value == "" && k.Kind == config.KindStructured:
 			value = noneSettingValue
 		case value == "" && k.Default != "":
 			value = k.Default
@@ -182,7 +183,7 @@ func settingsRows(opts options) []tui.SettingRow {
 		if raw, ok := settingTexts[k.Path]; ok {
 			text = raw(opts)
 		}
-		source, sourceName := settingSource(k, opts.overrides)
+		source, sourceName := settingSource(k, opts.Overrides)
 		rows = append(rows, tui.SettingRow{
 			Path:         k.Path,
 			Section:      section,
@@ -209,28 +210,28 @@ func settingsRows(opts options) []tui.SettingRow {
 // the pane as an unhandled string. An unmapped kind falls back to structured, the read-only end:
 // the surface that cannot say what a value is must not offer to write it.
 //
-// kindStringList is the one kind that does NOT get a renderer kind of its own, and deliberately: what
+// KindStringList is the one kind that does NOT get a renderer kind of its own, and deliberately: what
 // the pane does with a name list is exactly what it does with a string — open a field on the row and
-// type the one line the value is written on. The list-ness is the WRITER's business (kindStringList,
-// parseSettingList), and giving the renderer a kind for it would only be a second name for the same
+// type the one line the value is written on. The list-ness is the WRITER's business (KindStringList,
+// ParseSettingList), and giving the renderer a kind for it would only be a second name for the same
 // idiom.
-func settingKind(kind configKind) tui.SettingKind {
+func settingKind(kind config.Kind) tui.SettingKind {
 	switch kind {
-	case kindBool:
+	case config.KindBool:
 		return tui.SettingBool
-	case kindInt:
+	case config.KindInt:
 		return tui.SettingInt
-	case kindString, kindStringList:
+	case config.KindString, config.KindStringList:
 		return tui.SettingString
-	case kindText:
+	case config.KindText:
 		return tui.SettingText
-	case kindEnum:
+	case config.KindEnum:
 		return tui.SettingEnum
-	case kindServer:
+	case config.KindServer:
 		return tui.SettingServer
-	case kindScheme:
+	case config.KindScheme:
 		// The pane picks a scheme from a list exactly as it picks an enum value, so it reaches the
-		// renderer as the enum idiom; what makes it kindScheme on this side is only that the LIST
+		// renderer as the enum idiom; what makes it KindScheme on this side is only that the LIST
 		// comes from the session rather than from the row (settingsVocabulary).
 		return tui.SettingEnum
 	default:
@@ -241,11 +242,11 @@ func settingKind(kind configKind) tui.SettingKind {
 // settingSource reports the override marker for a row: which higher-precedence source beat the
 // file for this key this run, and what that source is CALLED, so the pane's note can name it
 // ("APOGEE_MODE", "--mode") instead of saying "something".
-func settingSource(k configKey, overrides map[string]configSource) (tui.SettingSource, string) {
+func settingSource(k config.Key, overrides map[string]config.Source) (tui.SettingSource, string) {
 	switch overrides[k.Path] {
-	case sourceEnv:
+	case config.SourceEnv:
 		return tui.SettingFromEnv, k.EnvVar
-	case sourceFlag:
+	case config.SourceFlag:
 		return tui.SettingFromFlag, "--" + k.FlagName
 	default:
 		return tui.SettingFromFile, ""
@@ -256,7 +257,7 @@ func settingSource(k configKey, overrides map[string]configSource) (tui.SettingS
 // key. The confinement pair is the one case that does not open an editor: their acknowledgement
 // interlock stays single-homed in /confine (ADR 0012), and GlobalOnly is exactly the property that
 // marks them, so the pointer follows the registry rather than a second list of paths.
-func editPointer(k configKey) string {
+func editPointer(k config.Key) string {
 	switch {
 	case k.Editable:
 		return ""
@@ -274,7 +275,7 @@ func editPointer(k configKey) string {
 // It is every key the pane will not write except the confinement pair, rather than "every structured
 // key": what makes a key unopenable is its interlock (ADR 0012), not its shape, and a key that
 // became read-only for some other reason tomorrow should reach the editor like the rest.
-func externallyEdited(k configKey) bool { return !k.Editable && !k.GlobalOnly }
+func externallyEdited(k config.Key) bool { return !k.Editable && !k.GlobalOnly }
 
 // boolValue spells a bool the way the config file spells it.
 func boolValue(v bool) string { return strconv.FormatBool(v) }
@@ -284,7 +285,8 @@ func boolValue(v bool) string { return strconv.FormatBool(v) }
 // "[]" rather than "none": the key holds a list, and an empty one is a value the user can have set.
 //
 // It is also the CANONICAL spelling the splice writer verifies a written list against
-// (configwrite.go): the row's text and the value a reader takes back out of the file are one string,
+// (internal/config/configwrite.go, which carries its own copy of this three-line spelling for the
+// same reason): the row's text and the value a reader takes back out of the file are one string,
 // or an edit would come back reading differently from what was typed.
 func listValue(names []string) string { return "[" + strings.Join(names, ", ") + "]" }
 
@@ -328,11 +330,11 @@ func enabledCount(mechanisms map[string]bool) int {
 // validatedSetsSummary summarizes the `validated-sets:` block: its off-switch first, because that
 // is the fact that decides whether the rest of the block does anything, then how many explicit
 // carry-over aliases are configured.
-func validatedSetsSummary(o options) string {
-	if !o.validatedSetsEnable {
+func validatedSetsSummary(o config.Options) string {
+	if !o.ValidatedSetsEnable {
 		return "off"
 	}
-	if n := len(o.validatedSetsAlias); n > 0 {
+	if n := len(o.ValidatedSetsAlias); n > 0 {
 		return "on, " + countSummary(n, "alias")
 	}
 	return "on"

@@ -9,9 +9,9 @@
 // detail plan §6).
 //
 // Everything this layer owns is a fact nothing above it holds: where state lives on
-// disk, which server a run starts on, what a config key may contain, which of those a
-// live session may change, and what an out-of-band call — a naming completion, a
-// scheduled Firing — is built against. Each of them crosses to the renderer or the
+// disk, which server a run starts on, how this host draws and edits a config key, which
+// of them a live session may change, and what an out-of-band call — a naming completion,
+// a scheduled Firing — is built against. Each of them crosses to the renderer or the
 // engine as plain data behind a seam, which is what keeps internal/tui a thin renderer
 // (ADR 0011) and keeps internal/* off the root module path (ADR 0010).
 //
@@ -19,8 +19,8 @@
 //
 // Entry and command surface: main.go is the process entry — dispatch the
 // __confined-exec sentinel, build the root, turn an error into an exit code; root.go
-// the root command itself, its flag set, the [options] value the flags bind to, and the
-// `launcher` seam main backs with tui.Run; subcommands.go the one registration seam
+// the root command itself, its flag set, the [config.Options] value the flags bind to,
+// and the `launcher` seam main backs with tui.Run; subcommands.go the one registration seam
 // naming the children the shipped binary carries; wire.go the composition proper —
 // runRoot assembling roots, config, tools, MCP, sessions, recall and engine into a
 // running TUI, the state-root resolution behind it, the narrow surfaces its seam files
@@ -40,15 +40,10 @@
 // startup selection collapses to, the one step that binds any entry to a session, and
 // the config-change wait the reload chain parks on.
 //
-// The config cluster: config.go the resolved [settings], the on-disk schema
-// (fileConfig), and the flag > env > file > default precedence between them;
-// registry.go the declarative table that describes every schema key exactly once,
-// guarded as a bijection with fileConfig; defaults.go the embedded starter config
-// seeded on first run; configwrite.go the textual splice writer that persists one key —
-// or one host acknowledgement — without disturbing a comment; configmigrate.go the
-// one-time fold of the retired top-level upstream keys into `servers:` (ADR 0036
-// decision 9); configwatch.go the one-goroutine poller that reports the file changed,
-// whoever changed it (ADR 0041).
+// The config cluster is no longer here: the schema, the precedence, the key registry, the
+// splice writer, the legacy fold, the watcher and the [config.Options] the flags bind to all
+// live in internal/config (ADR 0043) — a fact about the config file is not a fact about this
+// Driver. This binary calls that package and keeps only its own display projection of it.
 //
 // The /settings seams: settingsrows.go projects the key registry plus the values THIS
 // run resolved onto the renderer's plain rows, masking what must never be shown;

@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -94,7 +95,7 @@ type externalEdit struct {
 
 	// opts is the session's resolved snapshot, for the two fields a re-resolution needs to answer
 	// from the same home and workspace this run does.
-	opts options
+	opts config.Options
 	// configPath is the file both halves work on — the one this session resolved.
 	configPath string
 	// getenv and goos are injected for the same reason every resolution seam in this binary injects
@@ -117,17 +118,17 @@ type externalEdit struct {
 // (appliedValue) and the values say WHETHER it changed (settingChanged).
 type fileProjection struct {
 	rows []tui.SettingRow
-	opts options
+	opts config.Options
 }
 
 // newExternalEdit seeds the baseline from the file as it stands at launch. A projection that cannot
 // be made — a config that has since become unreadable — falls back to the session's own resolution,
 // whose rows are never nil: a baseline that exists and is a little stale reports one extra key,
 // where a missing baseline would report none at all and swallow the human's edit whole.
-func newExternalEdit(opts options, getenv func(string) string) *externalEdit {
+func newExternalEdit(opts config.Options, getenv func(string) string) *externalEdit {
 	e := &externalEdit{
 		opts:       opts,
-		configPath: configFilePath(opts.configDir),
+		configPath: config.FilePath(opts.ConfigDir),
 		getenv:     getenv,
 		goos:       runtime.GOOS,
 		look:       exec.LookPath,
@@ -160,7 +161,7 @@ func (e *externalEdit) spec(key string) (tui.EditorCommand, error) {
 	// The read comes FIRST because it is also the seed: a home whose config.yaml is not there yet gets
 	// the documented template written into it, and a baseline taken before that would report the whole
 	// template back as the human's own edit.
-	data, err := readConfigForWrite(e.configPath)
+	data, err := config.ReadConfigForWrite(e.configPath)
 	if err != nil {
 		return tui.EditorCommand{}, err
 	}
@@ -172,7 +173,7 @@ func (e *externalEdit) spec(key string) (tui.EditorCommand, error) {
 	// The `editor` key comes off that same fresh projection rather than off e.opts, which is the
 	// STARTUP snapshot: a key set on its row a minute ago — or by another window — has to open the
 	// next edit, not the next run.
-	configured := e.baseline.opts.editor
+	configured := e.baseline.opts.Editor
 	e.mu.Unlock()
 
 	cmd, err := e.resolveEditor(configured)
@@ -212,7 +213,7 @@ func (e *externalEdit) changed() ([]tui.AppliedSetting, error) {
 	e.mu.Unlock()
 
 	var applied []tui.AppliedSetting
-	for i, k := range keyRegistry {
+	for i, k := range config.KeyRegistry {
 		if k.GlobalOnly || k.Path == settingKeyServer {
 			continue
 		}
@@ -262,16 +263,16 @@ func (e *externalEdit) refresh() {
 //
 // The values are compared, never rendered — a `servers:` entry carries an api-key, and it stays as
 // far from a row as it has always been (maskedSettingValue).
-var settingStructures = map[string]func(options) any{
-	"servers":              func(o options) any { return o.servers },
-	"system-prompt-models": func(o options) any { return o.systemPrompt.models },
-	"unconfined-hosts":     func(o options) any { return o.unconfinedHosts },
-	"mcp-servers":          func(o options) any { return o.mcpServers },
-	"mechanisms":           func(o options) any { return o.mechanisms },
+var settingStructures = map[string]func(config.Options) any{
+	"servers":              func(o config.Options) any { return o.Servers },
+	"system-prompt-models": func(o config.Options) any { return o.SystemPrompt.Models },
+	"unconfined-hosts":     func(o config.Options) any { return o.UnconfinedHosts },
+	"mcp-servers":          func(o config.Options) any { return o.MCPServers },
+	"mechanisms":           func(o config.Options) any { return o.Mechanisms },
 	// The block's two resolved facts together: the off-switch decides whether the aliases do
 	// anything, and it is the pair that `validated-sets` applies.
-	"validated-sets": func(o options) any { return []any{o.validatedSetsEnable, o.validatedSetsAlias} },
-	"model-profile":  func(o options) any { return o.profile },
+	"validated-sets": func(o config.Options) any { return []any{o.ValidatedSetsEnable, o.ValidatedSetsAlias} },
+	"model-profile":  func(o config.Options) any { return o.Profile },
 }
 
 // settingChanged reports whether the key at registry index i came back holding something else.
@@ -281,7 +282,7 @@ var settingStructures = map[string]func(options) any{
 // whose row shows a summary is answered by its structure as well (settingStructures), and the two
 // tests are OR-ed rather than exclusive: the row still catches everything it ever caught, and the
 // structure catches what a summary cannot say.
-func settingChanged(k configKey, before, after fileProjection, i int) bool {
+func settingChanged(k config.Key, before, after fileProjection, i int) bool {
 	if structure, ok := settingStructures[k.Path]; ok &&
 		!reflect.DeepEqual(structure(before.opts), structure(after.opts)) {
 		return true
@@ -301,7 +302,7 @@ func appliedValue(row tui.SettingRow) string {
 }
 
 // projection reads the config file — and only the file — into the two views the diff needs. It runs
-// the STARTUP resolution (applyConfig) with no flags and no environment, which is what makes the two
+// the STARTUP resolution (ApplyConfig) with no flags and no environment, which is what makes the two
 // sides of the diff comparable and the validation the real one rather than a second, weaker copy of
 // it; the rows come off that same resolution (settingsRows), so a key added to the registry is
 // diffed the day it is added rather than the day someone remembers.
@@ -310,20 +311,20 @@ func appliedValue(row tui.SettingRow) string {
 // holds it (root.go): resolution succeeded, it simply could not name a server, and a config being
 // edited towards its first `servers:` entry is in that state by definition.
 func (e *externalEdit) projection() (fileProjection, error) {
-	next := options{
-		configDir:       e.opts.configDir,
-		workspace:       e.opts.workspace,
-		serverFlagBound: e.opts.serverFlagBound,
+	next := config.Options{
+		ConfigDir:       e.opts.ConfigDir,
+		Workspace:       e.opts.Workspace,
+		ServerFlagBound: e.opts.ServerFlagBound,
 	}
-	err := applyConfig(&next, noFlagChanged, noEnvironment, os.ReadFile, func(string) {})
-	var undetermined *startupUndetermined
+	err := config.ApplyConfig(&next, noFlagChanged, noEnvironment, os.ReadFile, func(string) {})
+	var undetermined *config.StartupUndetermined
 	if err != nil && !errors.As(err, &undetermined) {
 		return fileProjection{}, err
 	}
 	return fileProjection{rows: settingsRows(next), opts: next}, nil
 }
 
-// The two stubs that make applyConfig resolve from the FILE alone: no flag was set on this
+// The two stubs that make ApplyConfig resolve from the FILE alone: no flag was set on this
 // invocation, and no variable is in the environment. They are the file layer's own view of the
 // config, which is the only view two reads of the same file can be compared in.
 func noFlagChanged(string) bool   { return false }
@@ -415,19 +416,19 @@ func editorName(program string) string {
 // either way, and a document too malformed to locate a key in is the document most in need of being
 // opened.
 func settingKeyLine(data []byte, key string) int {
-	k, ok := lookupKey(key)
+	k, ok := config.LookupKey(key)
 	if !ok {
 		return 0
 	}
-	doc, err := configDocument(data)
+	doc, err := config.Document(data)
 	if err != nil {
 		return 0
 	}
-	if t, err := scalarTargetIn(doc, k); err == nil && t.isSet() {
-		return t.keyNode.Line
+	if t, err := config.ScalarTargetIn(doc, k); err == nil && t.IsSet() {
+		return t.KeyNode.Line
 	}
 	head, _, _ := strings.Cut(k.Path, ".")
-	line, err := commentedExampleLine(splitConfigLines(data), head)
+	line, err := config.CommentedExampleLine(config.SplitConfigLines(data), head)
 	if err != nil {
 		return 0
 	}

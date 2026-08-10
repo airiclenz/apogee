@@ -520,7 +520,7 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// The sub-list opens ON the value the key holds, not at the top of the list: the human who
-		// presses ⏎ twice has then confirmed what was already set — which saveConfigSetting writes
+		// presses ⏎ twice has then confirmed what was already set — which config.SaveConfigSetting writes
 		// nothing for — where a highlight reset to the first row would have silently changed the key.
 		m.settings.kind = settingsEnumList
 		m.settings.sub = max(0, indexOfSetting(values, m.settingsCurrentValue(row)))

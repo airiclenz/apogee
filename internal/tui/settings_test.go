@@ -623,7 +623,7 @@ func settingsEditModel(t *testing.T, rows []SettingRow, log *settingsWriteLog) (
 }
 
 // settingsBoolRow is one editable bool row — `auto-title:` as the registry describes it
-// (cmd/apogee/registry.go), a key the renderer itself applies.
+// (internal/config/registry.go), a key the renderer itself applies.
 func settingsBoolRow() SettingRow {
 	return SettingRow{
 		Path: "auto-title", Section: "Session", Kind: SettingBool, Value: "true", Default: "true",
@@ -736,7 +736,7 @@ func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
 	}
 }
 
-// settingsServerRow is the `server:` row as the registry describes it (cmd/apogee/registry.go): a
+// settingsServerRow is the `server:` row as the registry describes it (internal/config/registry.go): a
 // row picked from a sub-list like an enum, but with no vocabulary of its own — what it may hold is
 // whatever [Options.Servers] answers with — and whose ⏎ is the `/server` switch rather than a write.
 func settingsServerRow() SettingRow {
@@ -1732,7 +1732,7 @@ func TestSettingsPaneBufferKeepsARefusedValueForCorrection(t *testing.T) {
 		t.Errorf("marker = %q, want the refusal's reason", got)
 	}
 	// On the row itself the reason is truncated to the column, so what is asserted there is its FRONT:
-	// a refusal is worded key-first for exactly this reason (cmd/apogee/registry.go).
+	// a refusal is worded key-first for exactly this reason (internal/config/registry.go).
 	if pane := strip(m.renderSettings()); !strings.Contains(pane, "invalid present.port") ||
 		!strings.Contains(pane, settingsCaret) {
 		t.Errorf("the pane shows neither the refusal nor the still-open buffer:\n%s", pane)
@@ -1998,7 +1998,7 @@ func TestSettingsSecondStepsFallBackWhenTheirKeyGoesAway(t *testing.T) {
 func keyCtrlS() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl} }
 
 // settingsTextRow is the one text row the schema has — `system-prompt-text:` as the registry
-// describes it (cmd/apogee/registry.go): a value cell holding a SUMMARY of the prose, and the prose
+// describes it (internal/config/registry.go): a value cell holding a SUMMARY of the prose, and the prose
 // itself beside it for the editor to open on.
 func settingsTextRow() SettingRow {
 	return SettingRow{
@@ -2699,7 +2699,7 @@ func TestConfigWatchIsNotArmedWithoutTheSeam(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // settingsSchemeRow is the `ui.color-scheme:` row as the registry describes it
-// (cmd/apogee/registry.go): an enum to the pane, because picking a scheme is picking a value from a
+// (internal/config/registry.go): an enum to the pane, because picking a scheme is picking a value from a
 // list — but with EnumValues deliberately empty, because what may be picked is whatever the schemes
 // folder holds right now and no static table can name it (settingsVocabulary).
 func settingsSchemeRow() SettingRow {

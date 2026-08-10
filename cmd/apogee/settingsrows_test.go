@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -15,37 +16,37 @@ import (
 // values are deliberately not the defaults: `api-key` is set (so masking has something to hide),
 // `cursor-shape` is left unset (so the default-fallback rule has a subject), and `mechanisms`
 // carries an explicit `false` entry (so counting keys instead of enabled ones would overcount).
-func fabricatedSettings() options {
-	return options{
-		endpoint:      "http://192.168.64.1:1111",
-		apiKey:        "sk-my-server-token",
-		hostAlias:     "workstation",
-		model:         "gpt-oss-20b",
-		servers:       []serverEntry{{Name: "workstation"}, {Name: "rented-box"}, {Name: "laptop"}},
-		startupServer: "rented-box",
-		editor:        "code -w",
-		mode:          "auto",
-		systemPrompt: systemPromptSettings{
-			global: promptSource{text: "You are apogee.\nAnswer with code first.\n"},
-			models: map[string]promptSource{"gpt-oss-20b": {file: "~/prompts/gpt-oss.md"}},
+func fabricatedSettings() config.Options {
+	return config.Options{
+		Endpoint:      "http://192.168.64.1:1111",
+		APIKey:        "sk-my-server-token",
+		HostAlias:     "workstation",
+		Model:         "gpt-oss-20b",
+		Servers:       []config.ServerEntry{{Name: "workstation"}, {Name: "rented-box"}, {Name: "laptop"}},
+		StartupServer: "rented-box",
+		Editor:        "code -w",
+		Mode:          "auto",
+		SystemPrompt: config.SystemPromptSettings{
+			Global: config.PromptSource{Text: "You are apogee.\nAnswer with code first.\n"},
+			Models: map[string]config.PromptSource{"gpt-oss-20b": {File: "~/prompts/gpt-oss.md"}},
 		},
-		contextFiles:        []string{"AGENTS.md", "CLAUDE.md"},
-		confineToWorkspace:  false,
-		unconfinedHosts:     []unconfinedHost{{ID: "host-1"}},
-		webSearchEndpoint:   "off",
-		toolsDisabled:       []string{"view_diff"},
-		useProjectSkills:    false,
-		autoCompact:         true,
-		autoTitle:           false,
-		contextWindow:       32768,
-		present:             presentSettings{autoOpen: true, command: "zed {path}", port: 8080},
-		ui:                  uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: true, showScrollbar: false, colorScheme: "dark"},
-		bypass:              true,
-		mechanisms:          map[string]bool{"validate": true, "syntax": true, "autofix": false},
-		validatedSetsEnable: true,
-		validatedSetsAlias:  map[string]string{"gpt-oss-20b": "gpt-oss"},
-		profile:             apogee.ModelProfile{},
-		overrides:           map[string]configSource{"mode": sourceFlag, "server": sourceEnv},
+		ContextFiles:        []string{"AGENTS.md", "CLAUDE.md"},
+		ConfineToWorkspace:  false,
+		UnconfinedHosts:     []config.UnconfinedHost{{ID: "host-1"}},
+		WebSearchEndpoint:   "off",
+		ToolsDisabled:       []string{"view_diff"},
+		UseProjectSkills:    false,
+		AutoCompact:         true,
+		AutoTitle:           false,
+		ContextWindow:       32768,
+		Present:             config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
+		UI:                  config.UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark"},
+		Bypass:              true,
+		Mechanisms:          map[string]bool{"validate": true, "syntax": true, "autofix": false},
+		ValidatedSetsEnable: true,
+		ValidatedSetsAlias:  map[string]string{"gpt-oss-20b": "gpt-oss"},
+		Profile:             apogee.ModelProfile{},
+		Overrides:           map[string]config.Source{"mode": config.SourceFlag, "server": config.SourceEnv},
 	}
 }
 
@@ -67,10 +68,10 @@ func TestSettingsRowsMatchTheRegistryOrder(t *testing.T) {
 	t.Parallel()
 
 	rows := settingsRows(fabricatedSettings())
-	if len(rows) != len(keyRegistry) {
-		t.Fatalf("settingsRows returned %d rows; want one per registry key (%d)", len(rows), len(keyRegistry))
+	if len(rows) != len(config.KeyRegistry) {
+		t.Fatalf("settingsRows returned %d rows; want one per registry key (%d)", len(rows), len(config.KeyRegistry))
 	}
-	for i, k := range keyRegistry {
+	for i, k := range config.KeyRegistry {
 		if rows[i].Path != k.Path {
 			t.Errorf("row %d is %q; want the registry's %q — the pane paints rows in this order",
 				i, rows[i].Path, k.Path)
@@ -84,32 +85,32 @@ func TestSettingsRowsMatchTheRegistryOrder(t *testing.T) {
 func TestSettingValuesCoverEveryRegistryKey(t *testing.T) {
 	t.Parallel()
 
-	for _, k := range keyRegistry {
+	for _, k := range config.KeyRegistry {
 		if _, ok := settingValues[k.Path]; !ok {
 			t.Errorf("registry key %q has no settingValues formatter — /settings would show it blank", k.Path)
 		}
 	}
 	for path := range settingValues {
-		if _, ok := lookupKey(path); !ok {
+		if _, ok := config.LookupKey(path); !ok {
 			t.Errorf("settingValues formats %q, which the registry does not describe (renamed or removed key?)", path)
 		}
 	}
 }
 
-// The same guard for the second, tiny table: a kindText row whose prose nothing projects would open
+// The same guard for the second, tiny table: a KindText row whose prose nothing projects would open
 // its editor on an empty field and offer to overwrite the prompt with what was typed into it, and a
 // projection for a key that is not text would be prose no surface reads.
 func TestSettingTextsCoverEveryTextKey(t *testing.T) {
 	t.Parallel()
 
-	for _, k := range keyRegistry {
-		if _, ok := settingTexts[k.Path]; ok != (k.Kind == kindText) {
+	for _, k := range config.KeyRegistry {
+		if _, ok := settingTexts[k.Path]; ok != (k.Kind == config.KindText) {
 			t.Errorf("registry key %q is kind %q but settingTexts projects it = %v — the raw value is "+
 				"carried for exactly the text keys", k.Path, k.Kind, ok)
 		}
 	}
 	for path := range settingTexts {
-		if _, ok := lookupKey(path); !ok {
+		if _, ok := config.LookupKey(path); !ok {
 			t.Errorf("settingTexts projects %q, which the registry does not describe (renamed or removed key?)", path)
 		}
 	}
@@ -121,7 +122,7 @@ func TestSettingsRowsCarryThePromptTextBesideItsSummary(t *testing.T) {
 	t.Parallel()
 
 	opts := fabricatedSettings()
-	opts.systemPrompt = systemPromptSettings{global: promptSource{text: "one\ntwo\nthree\n"}}
+	opts.SystemPrompt = config.SystemPromptSettings{Global: config.PromptSource{Text: "one\ntwo\nthree\n"}}
 	row := rowsByPath(t, settingsRows(opts))["system-prompt-text"]
 	if row.Kind != tui.SettingText {
 		t.Errorf("row kind = %q; want %q", row.Kind, tui.SettingText)
@@ -133,7 +134,7 @@ func TestSettingsRowsCarryThePromptTextBesideItsSummary(t *testing.T) {
 		t.Errorf("row text = %q; want the prompt itself", row.Text)
 	}
 
-	opts.systemPrompt = systemPromptSettings{}
+	opts.SystemPrompt = config.SystemPromptSettings{}
 	blank := rowsByPath(t, settingsRows(opts))["system-prompt-text"]
 	if blank.Value != "" || blank.Text != "" {
 		t.Errorf("an unset prompt reads {%q %q}; want both blank — the row seeds a field, so no word "+
@@ -147,8 +148,8 @@ func TestSettingsRowsCarryThePromptTextBesideItsSummary(t *testing.T) {
 func TestSettingSectionsOpenInRegistryOrder(t *testing.T) {
 	t.Parallel()
 
-	paths := make([]string, 0, len(keyRegistry))
-	for _, k := range keyRegistry {
+	paths := make([]string, 0, len(config.KeyRegistry))
+	for _, k := range config.KeyRegistry {
 		paths = append(paths, k.Path)
 	}
 	previous := -1
@@ -167,9 +168,9 @@ func TestSettingSectionsOpenInRegistryOrder(t *testing.T) {
 			t.Errorf("section opening at %q has no name", section.Opens)
 		}
 	}
-	if len(settingSections) == 0 || settingSections[0].Opens != keyRegistry[0].Path {
+	if len(settingSections) == 0 || settingSections[0].Opens != config.KeyRegistry[0].Path {
 		t.Errorf("the first registry key %q opens no section, so the rows above the first opener "+
-			"would have none", keyRegistry[0].Path)
+			"would have none", config.KeyRegistry[0].Path)
 	}
 }
 
@@ -261,9 +262,9 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 			t.Errorf("row %q value = %q; want %q", path, got, wantValue)
 		}
 	}
-	if len(want) != len(keyRegistry) {
+	if len(want) != len(config.KeyRegistry) {
 		t.Errorf("this table pins %d values for %d registry keys — pin the new key's value too",
-			len(want), len(keyRegistry))
+			len(want), len(config.KeyRegistry))
 	}
 }
 
@@ -275,7 +276,7 @@ func TestSettingsRowsNeverCarryAnAPIKey(t *testing.T) {
 
 	opts := fabricatedSettings()
 	for _, r := range settingsRows(opts) {
-		if strings.Contains(r.Value, opts.apiKey) {
+		if strings.Contains(r.Value, opts.APIKey) {
 			t.Errorf("row %q leaks the api key in its value %q", r.Path, r.Value)
 		}
 	}
@@ -295,9 +296,9 @@ func TestSettingsRowsMarkOverriddenKeys(t *testing.T) {
 		t.Errorf("mode row source = {%q %q}; want the flag marker {%q %q}",
 			got.Source, got.SourceName, tui.SettingFromFlag, "--mode")
 	}
-	if got := byPath["server"]; got.Source != tui.SettingFromEnv || got.SourceName != envServer {
+	if got := byPath["server"]; got.Source != tui.SettingFromEnv || got.SourceName != config.EnvServer {
 		t.Errorf("server row source = {%q %q}; want the env marker {%q %q}",
-			got.Source, got.SourceName, tui.SettingFromEnv, envServer)
+			got.Source, got.SourceName, tui.SettingFromEnv, config.EnvServer)
 	}
 	for _, path := range []string{"servers", "bypass", "auto-compact"} {
 		got := byPath[path]
@@ -364,7 +365,7 @@ func TestSettingsRowsProjectRegistryMetadata(t *testing.T) {
 	t.Parallel()
 
 	byPath := rowsByPath(t, settingsRows(fabricatedSettings()))
-	for _, k := range keyRegistry {
+	for _, k := range config.KeyRegistry {
 		row := byPath[k.Path]
 		if want := settingKind(k.Kind); row.Kind != want {
 			t.Errorf("row %q kind = %q; want %q", k.Path, row.Kind, want)
@@ -381,14 +382,14 @@ func TestSettingsRowsProjectRegistryMetadata(t *testing.T) {
 	// (the read-only end the fallback lands on). The one many-to-one is deliberate: a name list is
 	// typed on its row exactly as a string is, so it projects onto the string idiom and keeps its
 	// list-ness on the writer's side of the seam (settingKind).
-	for kind, want := range map[configKind]tui.SettingKind{
-		kindBool:       tui.SettingBool,
-		kindInt:        tui.SettingInt,
-		kindString:     tui.SettingString,
-		kindStringList: tui.SettingString,
-		kindEnum:       tui.SettingEnum,
-		kindServer:     tui.SettingServer,
-		kindStructured: tui.SettingStructured,
+	for kind, want := range map[config.Kind]tui.SettingKind{
+		config.KindBool:       tui.SettingBool,
+		config.KindInt:        tui.SettingInt,
+		config.KindString:     tui.SettingString,
+		config.KindStringList: tui.SettingString,
+		config.KindEnum:       tui.SettingEnum,
+		config.KindServer:     tui.SettingServer,
+		config.KindStructured: tui.SettingStructured,
 	} {
 		if got := settingKind(kind); got != want {
 			t.Errorf("settingKind(%q) = %q; want %q", kind, got, want)
@@ -403,32 +404,32 @@ func TestSettingsRowsSummarizeStructuredBlocks(t *testing.T) {
 
 	cases := []struct {
 		name string
-		mut  func(*options)
+		mut  func(*config.Options)
 		path string
 		want string
 	}{
 		{
 			name: "an empty block reads none",
-			mut:  func(o *options) { o.servers = nil },
+			mut:  func(o *config.Options) { o.Servers = nil },
 			path: "servers",
 			want: noneSettingValue,
 		},
 		{
 			name: "one entry is singular",
-			mut:  func(o *options) { o.servers = []serverEntry{{Name: "workstation"}} },
+			mut:  func(o *config.Options) { o.Servers = []config.ServerEntry{{Name: "workstation"}} },
 			path: "servers",
 			want: "1 server",
 		},
 		{
 			name: "the validated-set off-switch leads its summary",
-			mut:  func(o *options) { o.validatedSetsEnable = false },
+			mut:  func(o *config.Options) { o.ValidatedSetsEnable = false },
 			path: "validated-sets",
 			want: "off",
 		},
 		{
 			name: "a configured profile names its format and thinking style",
-			mut: func(o *options) {
-				o.profile = apogee.ModelProfile{
+			mut: func(o *config.Options) {
+				o.Profile = apogee.ModelProfile{
 					ToolCallFormat: apogee.FormatMarkdownFenced,
 					Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingHarmony},
 				}
@@ -438,7 +439,7 @@ func TestSettingsRowsSummarizeStructuredBlocks(t *testing.T) {
 		},
 		{
 			name: "context files off resolves to an empty list, not to none",
-			mut:  func(o *options) { o.contextFiles = nil },
+			mut:  func(o *config.Options) { o.ContextFiles = nil },
 			path: "context-files.names",
 			want: "[]",
 		},

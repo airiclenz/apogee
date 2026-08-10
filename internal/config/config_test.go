@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -23,7 +23,7 @@ func intptr(i int) *int       { return &i }
 // default spinner style with its colour loop on, and the transcript's scroll bar shown. It is
 // spelled out rather than taken from defaultUISettings, so a change to any shipped default shows up
 // here as a failure instead of silently agreeing with itself.
-var wantUIDefault = uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "dark"}
+var wantUIDefault = UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"}
 
 // wantContextFilesDefault is the resolved `context-files:` block a config that configures none must
 // produce: the feature on, looking for the one default name in the workspace root. Spelled out
@@ -31,7 +31,7 @@ var wantUIDefault = uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, sh
 // either shipped default shows up here as a failure instead of silently agreeing with itself.
 var wantContextFilesDefault = contextFilesSettings{enable: true, names: []string{"AGENTS.md"}}
 
-// testHostID is the machine identity injected into resolveSettings so the Host
+// testHostID is the machine identity injected into ResolveSettings so the Host
 // acknowledgement ladder is pinned off whatever host the tests happen to run on.
 const testHostID = "testbox-a1b2c3"
 
@@ -47,240 +47,240 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name            string
-		file, env, flag layer
-		want            settings
+		file, env, flag Layer
+		want            Settings
 	}{
 		{
 			name: "all empty → defaults",
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "file fills every field",
-			file: layer{startupServer: strptr("file-box"), mode: strptr("plan"), bypass: boolptr(true)},
-			want: settings{startupServer: "file-box", mode: "plan", bypass: true, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: Layer{StartupServer: strptr("file-box"), Mode: strptr("plan"), Bypass: boolptr(true)},
+			want: Settings{StartupServer: "file-box", Mode: "plan", Bypass: true, ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "env beats file, file fills the rest",
-			file: layer{startupServer: strptr("file-box"), mode: strptr("plan")},
-			env:  layer{startupServer: strptr("env-box")},
-			want: settings{startupServer: "env-box", mode: "plan", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: Layer{StartupServer: strptr("file-box"), Mode: strptr("plan")},
+			env:  Layer{StartupServer: strptr("env-box")},
+			want: Settings{StartupServer: "env-box", Mode: "plan", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "flag beats env beats file, per field",
-			file: layer{startupServer: strptr("file-box"), mode: strptr("plan")},
-			env:  layer{startupServer: strptr("env-box"), mode: strptr("auto")},
-			flag: layer{startupServer: strptr("flag-box")},
-			want: settings{startupServer: "flag-box", mode: "auto", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: Layer{StartupServer: strptr("file-box"), Mode: strptr("plan")},
+			env:  Layer{StartupServer: strptr("env-box"), Mode: strptr("auto")},
+			flag: Layer{StartupServer: strptr("flag-box")},
+			want: Settings{StartupServer: "flag-box", Mode: "auto", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "explicit false in a higher layer overrides true below it",
-			file: layer{bypass: boolptr(true)},
-			flag: layer{bypass: boolptr(false)},
-			want: settings{mode: "ask-before", bypass: false, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: Layer{Bypass: boolptr(true)},
+			flag: Layer{Bypass: boolptr(false)},
+			want: Settings{Mode: "ask-before", Bypass: false, ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			// The servers list is file-only: it describes machines, not this invocation, so neither
 			// the environment nor a flag can name one (only `server:` — which of them to start on —
 			// rides the layers above the file).
 			name: "servers is file-only",
-			file: fileConfig{Servers: []serverEntry{{Name: "box", Endpoint: "http://box:1111"}}}.layer(),
-			want: settings{mode: "ask-before", servers: []serverEntry{{Name: "box", Endpoint: "http://box:1111"}}, confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: fileConfig{Servers: []ServerEntry{{Name: "box", Endpoint: "http://box:1111"}}}.layer(),
+			want: Settings{Mode: "ask-before", Servers: []ServerEntry{{Name: "box", Endpoint: "http://box:1111"}}, ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "confine-to-workspace is file-only and defaults true",
-			file: layer{confineToWorkspace: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: Layer{ConfineToWorkspace: boolptr(false)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: false, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "use-project-skills is file-only and defaults true",
-			file: layer{useProjectSkills: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: false, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: Layer{UseProjectSkills: boolptr(false)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: false, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "use-project-skills is NOT set by env or flag (file-only)",
-			env:  layer{useProjectSkills: boolptr(false)},
-			flag: layer{useProjectSkills: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{UseProjectSkills: boolptr(false)},
+			flag: Layer{UseProjectSkills: boolptr(false)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "auto-compact is file-only and defaults true",
-			file: layer{autoCompact: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: false, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: Layer{AutoCompact: boolptr(false)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: false, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "auto-compact is NOT set by env or flag (file-only)",
-			env:  layer{autoCompact: boolptr(false)},
-			flag: layer{autoCompact: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{AutoCompact: boolptr(false)},
+			flag: Layer{AutoCompact: boolptr(false)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "auto-title is file-only and defaults true",
-			file: layer{autoTitle: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: false, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: Layer{AutoTitle: boolptr(false)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: false, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "an explicit auto-title: true resolves to the same value as an absent key",
-			file: layer{autoTitle: boolptr(true)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			file: Layer{AutoTitle: boolptr(true)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "auto-title is NOT set by env or flag (file-only)",
-			env:  layer{autoTitle: boolptr(false)},
-			flag: layer{autoTitle: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{AutoTitle: boolptr(false)},
+			flag: Layer{AutoTitle: boolptr(false)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "context-window is file-only (default 0 ⇒ discover)",
-			file: layer{contextWindow: intptr(65536)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, contextWindow: 65536},
+			file: Layer{ContextWindow: intptr(65536)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, ContextWindow: 65536},
 		},
 		{
 			name: "context-window is NOT set by env or flag (file-only)",
-			env:  layer{contextWindow: intptr(65536)},
-			flag: layer{contextWindow: intptr(65536)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{ContextWindow: intptr(65536)},
+			flag: Layer{ContextWindow: intptr(65536)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "confine-to-workspace is NOT loosenable by env or flag (global-config-only)",
-			env:  layer{confineToWorkspace: boolptr(false)}, // an env layer cannot carry it in practice; assert it is ignored even if set
-			flag: layer{confineToWorkspace: boolptr(false)},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{ConfineToWorkspace: boolptr(false)}, // an env layer cannot carry it in practice; assert it is ignored even if set
+			flag: Layer{ConfineToWorkspace: boolptr(false)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "a matching unconfined-hosts entry resolves confine-to-workspace to false",
-			file: layer{unconfinedHosts: []unconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: false, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault,
-				unconfinedHosts: []unconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
+			file: Layer{UnconfinedHosts: []UnconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: false, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
+				UnconfinedHosts: []UnconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
 		},
 		{
 			name: "unconfined-hosts is NOT settable by env or flag (global-config-only)",
-			env:  layer{unconfinedHosts: []unconfinedHost{{ID: testHostID}}},
-			flag: layer{unconfinedHosts: []unconfinedHost{{ID: testHostID}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{UnconfinedHosts: []UnconfinedHost{{ID: testHostID}}},
+			flag: Layer{UnconfinedHosts: []UnconfinedHost{{ID: testHostID}}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "web-search endpoint is file-only (default empty)",
-			file: layer{webSearchEndpoint: strptr("https://search.example.com")},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, webSearchEndpoint: "https://search.example.com"},
+			file: Layer{WebSearchEndpoint: strptr("https://search.example.com")},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, WebSearchEndpoint: "https://search.example.com"},
 		},
 		{
 			name: "mcp servers are file-only (default empty)",
-			file: layer{mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, mcpServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
+			file: Layer{MCPServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, MCPServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
 		},
 		{
 			name: "mcp servers are NOT settable by env or flag (file-only)",
-			env:  layer{mcpServers: []mcp.ServerConfig{{Name: "fromenv"}}},
-			flag: layer{mcpServers: []mcp.ServerConfig{{Name: "fromflag"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{MCPServers: []mcp.ServerConfig{{Name: "fromenv"}}},
+			flag: Layer{MCPServers: []mcp.ServerConfig{{Name: "fromflag"}}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "servers are file-only (default empty)",
-			file: layer{servers: []serverEntry{{Name: "workstation", Endpoint: "http://box:1111"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, servers: []serverEntry{{Name: "workstation", Endpoint: "http://box:1111"}}},
+			file: Layer{Servers: []ServerEntry{{Name: "workstation", Endpoint: "http://box:1111"}}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, Servers: []ServerEntry{{Name: "workstation", Endpoint: "http://box:1111"}}},
 		},
 		{
 			name: "servers are NOT settable by env or flag (file-only)",
-			env:  layer{servers: []serverEntry{{Name: "fromenv", Endpoint: "http://env:1111"}}},
-			flag: layer{servers: []serverEntry{{Name: "fromflag", Endpoint: "http://flag:1111"}}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{Servers: []ServerEntry{{Name: "fromenv", Endpoint: "http://env:1111"}}},
+			flag: Layer{Servers: []ServerEntry{{Name: "fromflag", Endpoint: "http://flag:1111"}}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "model profile is file-only (default zero)",
-			file: layer{profile: &apogee.ModelProfile{
-				ToolCallFormat: apogee.FormatMarkdownFenced,
-				Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>"},
+			file: Layer{Profile: &domain.ModelProfile{
+				ToolCallFormat: domain.FormatMarkdownFenced,
+				Thinking:       domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
 			}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, profile: apogee.ModelProfile{
-				ToolCallFormat: apogee.FormatMarkdownFenced,
-				Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>"},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, Profile: domain.ModelProfile{
+				ToolCallFormat: domain.FormatMarkdownFenced,
+				Thinking:       domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
 			}},
 		},
 		{
 			name: "model profile is NOT settable by env or flag (file-only)",
-			env:  layer{profile: &apogee.ModelProfile{ToolCallFormat: apogee.FormatCustomRegex}},
-			flag: layer{profile: &apogee.ModelProfile{ToolCallFormat: apogee.FormatMarkdownFenced}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{Profile: &domain.ModelProfile{ToolCallFormat: domain.FormatCustomRegex}},
+			flag: Layer{Profile: &domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "mechanisms are file-only (default empty)",
-			file: layer{mechanisms: map[string]bool{"validate": true, "syntax": false}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault, mechanisms: map[string]bool{"validate": true, "syntax": false}},
+			file: Layer{Mechanisms: map[string]bool{"validate": true, "syntax": false}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, Mechanisms: map[string]bool{"validate": true, "syntax": false}},
 		},
 		{
 			name: "mechanisms are NOT settable by env or flag (file-only)",
-			env:  layer{mechanisms: map[string]bool{"fromenv": true}},
-			flag: layer{mechanisms: map[string]bool{"fromflag": true}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{Mechanisms: map[string]bool{"fromenv": true}},
+			flag: Layer{Mechanisms: map[string]bool{"fromflag": true}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "the present block is file-only (all four keys)",
-			file: layer{present: &presentSettings{autoOpen: false, command: "zed {path}", port: 8934, host: "10.0.0.2"}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault,
-				present: presentSettings{autoOpen: false, command: "zed {path}", port: 8934, host: "10.0.0.2"}, ui: wantUIDefault},
+			file: Layer{Present: &PresentSettings{AutoOpen: false, Command: "zed {path}", Port: 8934, Host: "10.0.0.2"}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault,
+				Present: PresentSettings{AutoOpen: false, Command: "zed {path}", Port: 8934, Host: "10.0.0.2"}, UI: wantUIDefault},
 		},
 		{
 			name: "present is NOT settable by env or flag (file-only ⇒ auto-open stays on)",
-			env:  layer{present: &presentSettings{autoOpen: false, port: 1}},
-			flag: layer{present: &presentSettings{autoOpen: false, port: 2}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{Present: &PresentSettings{AutoOpen: false, Port: 1}},
+			flag: Layer{Present: &PresentSettings{AutoOpen: false, Port: 2}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "the ui block is file-only (all three keys)",
 			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false)}}.layer(),
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
-				ui: uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false, showScrollbar: false, colorScheme: "dark"}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
+				UI: UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "dark"}},
 		},
 		{
 			// The keys are independent: naming a style says nothing about the colour loop.
 			name: "ui with only spinner: set → the colour loop stays at its default",
 			file: fileConfig{UI: &uiConfig{Spinner: "classic"}}.layer(),
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
-				ui: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true, showScrollbar: true, colorScheme: "dark"}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
+				UI: UISettings{Spinner: tui.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"}},
 		},
 		{
 			// …and the other way round: turning the loop off does not change which style paints.
 			name: "ui with only spinner-color: false → the style stays at its default",
 			file: fileConfig{UI: &uiConfig{SpinnerColor: boolptr(false)}}.layer(),
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
-				ui: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: false, showScrollbar: true, colorScheme: "dark"}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
+				UI: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark"}},
 		},
 		{
 			// The scroll-bar switch is the third independent key: hiding the bar leaves both
 			// spinner keys exactly where they were.
 			name: "ui with only show-scrollbar: false → the spinner keys stay at their defaults",
 			file: fileConfig{UI: &uiConfig{ShowScrollbar: boolptr(false)}}.layer(),
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true},
-				ui: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: false, colorScheme: "dark"}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
+				UI: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark"}},
 		},
 		{
 			name: "ui is NOT settable by env or flag (file-only ⇒ the defaults hold)",
-			env:  layer{ui: &uiSettings{spinner: tui.SpinnerClassic, showScrollbar: false}},
-			flag: layer{ui: &uiSettings{spinner: tui.SpinnerGlitter, showScrollbar: false}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{UI: &UISettings{Spinner: tui.SpinnerClassic, ShowScrollbar: false}},
+			flag: Layer{UI: &UISettings{Spinner: tui.SpinnerGlitter, ShowScrollbar: false}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
 			name: "a context-files block replaces the default name list whole",
 			file: fileConfig{ContextFiles: &contextFilesConfig{Names: []string{"CONVENTIONS.md", "AGENTS.md"}}}.layer(),
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, present: presentSettings{autoOpen: true}, ui: wantUIDefault,
-				contextFiles: contextFilesSettings{enable: true, names: []string{"CONVENTIONS.md", "AGENTS.md"}}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
+				ContextFiles: contextFilesSettings{enable: true, names: []string{"CONVENTIONS.md", "AGENTS.md"}}},
 		},
 		{
 			name: "context-files is NOT settable by env or flag (file-only ⇒ the defaults hold)",
-			env:  layer{contextFiles: &contextFilesSettings{enable: true, names: []string{"from-env.md"}}},
-			flag: layer{contextFiles: &contextFilesSettings{enable: false}},
-			want: settings{mode: "ask-before", confineToWorkspace: true, useProjectSkills: true, autoCompact: true, autoTitle: true, validatedSetsEnable: true, contextFiles: wantContextFilesDefault, present: presentSettings{autoOpen: true}, ui: wantUIDefault},
+			env:  Layer{ContextFiles: &contextFilesSettings{enable: true, names: []string{"from-env.md"}}},
+			flag: Layer{ContextFiles: &contextFilesSettings{enable: false}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, notices := resolveSettings(tt.file, tt.env, tt.flag, testHostID)
+			got, notices := ResolveSettings(tt.file, tt.env, tt.flag, testHostID)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("resolveSettings = %+v; want %+v", got, tt.want)
+				t.Errorf("ResolveSettings = %+v; want %+v", got, tt.want)
 			}
 			if len(notices) != 0 {
-				t.Errorf("resolveSettings notices = %q; want none for a well-formed config", notices)
+				t.Errorf("ResolveSettings notices = %q; want none for a well-formed config", notices)
 			}
 		})
 	}
@@ -305,30 +305,30 @@ func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
 		flagName        string // the flag name the row must carry; "" ⇒ the key has none
 		file, env, flag string // what each source supplies, as that source spells it
 		setFile         func(*fileConfig, string)
-		setFlag         func(*options, string)
-		resolved        func(settings) string
+		setFlag         func(*Options, string)
+		resolved        func(Settings) string
 	}{
 		{
 			path: "server", envVar: "APOGEE_SERVER", flagName: "server",
 			file: "the-file-box", env: "the-env-box", flag: "the-flag-box",
 			setFile:  func(fc *fileConfig, v string) { fc.Server = v },
-			setFlag:  func(o *options, v string) { o.startupServer = v },
-			resolved: func(s settings) string { return s.startupServer },
+			setFlag:  func(o *Options, v string) { o.StartupServer = v },
+			resolved: func(s Settings) string { return s.StartupServer },
 		},
 		{
 			path: "mode", envVar: "APOGEE_MODE", flagName: "mode",
-			file: string(modePlan), env: string(modeAllowEdits), flag: string(modeAuto),
+			file: string(domain.ModePlan), env: string(domain.ModeAllowEdits), flag: string(domain.ModeAuto),
 			setFile:  func(fc *fileConfig, v string) { fc.Mode = v },
-			setFlag:  func(o *options, v string) { o.mode = v },
-			resolved: func(s settings) string { return s.mode },
+			setFlag:  func(o *Options, v string) { o.Mode = v },
+			resolved: func(s Settings) string { return s.Mode },
 		},
 		{
 			path: "bypass", envVar: "APOGEE_BYPASS", flagName: "bypass",
 			file: "true", env: "false", flag: "true",
 			setFile: func(fc *fileConfig, v string) { fc.Bypass = boolptr(v == "true") },
-			setFlag: func(o *options, v string) { o.bypass = v == "true" },
-			resolved: func(s settings) string {
-				if s.bypass {
+			setFlag: func(o *Options, v string) { o.Bypass = v == "true" },
+			resolved: func(s Settings) string {
+				if s.Bypass {
 					return "true"
 				}
 				return "false"
@@ -338,7 +338,7 @@ func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
 			t.Parallel()
-			row, ok := lookupKey(tt.path)
+			row, ok := LookupKey(tt.path)
 			if !ok {
 				t.Fatalf("no registry row for %q — resolution reads this key's sources from it", tt.path)
 			}
@@ -354,11 +354,11 @@ func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
 			var fc fileConfig
 			tt.setFile(&fc, tt.file)
 			file := fc.layer()
-			if got, _ := resolveSettings(file, layer{}, layer{}, testHostID); tt.resolved(got) != tt.file {
+			if got, _ := ResolveSettings(file, Layer{}, Layer{}, testHostID); tt.resolved(got) != tt.file {
 				t.Fatalf("file only: %s = %q, want %q", tt.path, tt.resolved(got), tt.file)
 			}
 
-			var env layer
+			var env Layer
 			if tt.envVar != "" {
 				var err error
 				env, err = envLayer(func(name string) string {
@@ -370,17 +370,17 @@ func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
 				if err != nil {
 					t.Fatalf("envLayer with %s=%q: %v", tt.envVar, tt.env, err)
 				}
-				if got, _ := resolveSettings(file, env, layer{}, testHostID); tt.resolved(got) != tt.env {
+				if got, _ := ResolveSettings(file, env, Layer{}, testHostID); tt.resolved(got) != tt.env {
 					t.Errorf("%s over the file: %s = %q, want %q (does the row still name %s?)", tt.envVar,
 						tt.path, tt.resolved(got), tt.env, tt.envVar)
 				}
 			}
 
 			if tt.flagName != "" {
-				var opts options
+				var opts Options
 				tt.setFlag(&opts, tt.flag)
 				flag := flagLayer(opts, func(name string) bool { return name == tt.flagName })
-				if got, _ := resolveSettings(file, env, flag, testHostID); tt.resolved(got) != tt.flag {
+				if got, _ := ResolveSettings(file, env, flag, testHostID); tt.resolved(got) != tt.flag {
 					t.Errorf("--%s over %s: %s = %q, want %q (does the row still name --%s?)", tt.flagName,
 						tt.envVar, tt.path, tt.resolved(got), tt.flag, tt.flagName)
 				}
@@ -389,19 +389,19 @@ func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
 	}
 }
 
-// resolveSettings takes its base mode from the registry row rather than a literal, so the row is
+// ResolveSettings takes its base mode from the registry row rather than a literal, so the row is
 // what the "all empty → defaults" expectation above now rests on. This pins that row to the
 // autonomy ladder's own default constant: a row edited to another mode — or to nothing — would
 // otherwise quietly change what a session with no config starts in.
 func TestRegistryModeDefaultIsTheLadderDefault(t *testing.T) {
 	t.Parallel()
-	row, ok := lookupKey("mode")
+	row, ok := LookupKey("mode")
 	if !ok {
-		t.Fatal("no registry row for mode — resolveSettings takes the default mode from it")
+		t.Fatal("no registry row for mode — ResolveSettings takes the default mode from it")
 	}
-	if row.Default != string(modeAskBefore) {
+	if row.Default != string(domain.ModeAskBefore) {
 		t.Errorf("registry mode default = %q, want %q (the mode a session with no config starts in)",
-			row.Default, string(modeAskBefore))
+			row.Default, string(domain.ModeAskBefore))
 	}
 }
 
@@ -415,7 +415,7 @@ func TestMultiSourceKeysBindDescribedKeys(t *testing.T) {
 
 	bound := map[string]multiSourceKey{}
 	for _, k := range multiSourceKeys {
-		if _, ok := lookupKey(k.row.Path); !ok {
+		if _, ok := LookupKey(k.row.Path); !ok {
 			t.Errorf("multiSourceKeys binds %q, which the registry does not describe", k.row.Path)
 		}
 		if k.overlay == nil {
@@ -429,7 +429,7 @@ func TestMultiSourceKeysBindDescribedKeys(t *testing.T) {
 		}
 		bound[k.row.Path] = k
 	}
-	for _, row := range keyRegistry {
+	for _, row := range KeyRegistry {
 		if row.EnvVar == "" && row.FlagName == "" {
 			continue // file-only, so nothing above the file has to be plumbed
 		}
@@ -460,7 +460,7 @@ func TestResolveConfineToWorkspace(t *testing.T) {
 	tests := []struct {
 		name        string
 		explicit    *bool
-		hosts       []unconfinedHost
+		hosts       []UnconfinedHost
 		hostID      string
 		want        bool
 		wantNotices int
@@ -470,40 +470,40 @@ func TestResolveConfineToWorkspace(t *testing.T) {
 		{name: "explicit global true, no acknowledgement → confined", explicit: boolptr(true), hostID: testHostID, want: true},
 		{
 			name:   "this host is acknowledged → unconfined here",
-			hosts:  []unconfinedHost{{ID: otherHost}, {ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable container"}},
+			hosts:  []UnconfinedHost{{ID: otherHost}, {ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable container"}},
 			hostID: testHostID,
 			want:   false,
 		},
 		{
 			name:   "only other machines are acknowledged → still confined here",
-			hosts:  []unconfinedHost{{ID: otherHost}, {ID: "buildbox-000111"}},
+			hosts:  []UnconfinedHost{{ID: otherHost}, {ID: "buildbox-000111"}},
 			hostID: testHostID,
 			want:   true,
 		},
 		{
 			name:     "an explicit true does not veto a match — the entry is the more specific claim",
 			explicit: boolptr(true),
-			hosts:    []unconfinedHost{{ID: testHostID}},
+			hosts:    []UnconfinedHost{{ID: testHostID}},
 			hostID:   testHostID,
 			want:     false,
 		},
 		{
 			name:        "a malformed entry is skipped with a notice, the well-formed one still matches",
-			hosts:       []unconfinedHost{{Note: "no id here"}, {ID: testHostID}},
+			hosts:       []UnconfinedHost{{Note: "no id here"}, {ID: testHostID}},
 			hostID:      testHostID,
 			want:        false,
 			wantNotices: 1,
 		},
 		{
 			name:        "a blank id never matches a blank host id — it is malformed, not a wildcard",
-			hosts:       []unconfinedHost{{ID: "   "}},
+			hosts:       []UnconfinedHost{{ID: "   "}},
 			hostID:      "",
 			want:        true,
 			wantNotices: 1,
 		},
 		{
 			name:        "an identity-less host is not acknowledged by an entry naming its shared id",
-			hosts:       []unconfinedHost{{ID: unidentifiedTestHostID, Acknowledged: "2026-07-21"}},
+			hosts:       []UnconfinedHost{{ID: unidentifiedTestHostID, Acknowledged: "2026-07-21"}},
 			hostID:      unidentifiedTestHostID,
 			want:        true,
 			wantNotices: 1,
@@ -511,7 +511,7 @@ func TestResolveConfineToWorkspace(t *testing.T) {
 		{
 			name:     "an explicit global false still loosens an identity-less host — step 1 is untouched",
 			explicit: boolptr(false),
-			hosts:    []unconfinedHost{{ID: unidentifiedTestHostID}},
+			hosts:    []UnconfinedHost{{ID: unidentifiedTestHostID}},
 			hostID:   unidentifiedTestHostID,
 			want:     false,
 			// The entry is still reported: the match was refused, and saying so is what keeps
@@ -520,7 +520,7 @@ func TestResolveConfineToWorkspace(t *testing.T) {
 		},
 		{
 			name:   "an identity-less host with a real machine's entry is simply not that machine",
-			hosts:  []unconfinedHost{{ID: otherHost}},
+			hosts:  []UnconfinedHost{{ID: otherHost}},
 			hostID: unidentifiedTestHostID,
 			want:   true,
 		},
@@ -563,16 +563,16 @@ func TestApplyConfigUnconfinedHosts(t *testing.T) {
 		configYAML := "unconfined-hosts:\n  - id: \"" + platform.HostID() + "\"\n" +
 			"    acknowledged: \"2026-07-21\"\n    note: \"disposable container\"\n"
 		writeConfigHome(t, home, configYAML)
-		opts := options{configDir: home}
-		if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile, noNotify); err != nil {
-			t.Fatalf("applyConfig: %v", err)
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, noFlags, noEnv, os.ReadFile, noNotify); err != nil {
+			t.Fatalf("ApplyConfig: %v", err)
 		}
-		if opts.confineToWorkspace {
+		if opts.ConfineToWorkspace {
 			t.Error("opts.confineToWorkspace = true; want false — this host is acknowledged")
 		}
-		want := []unconfinedHost{{ID: platform.HostID(), Acknowledged: "2026-07-21", Note: "disposable container"}}
-		if !reflect.DeepEqual(opts.unconfinedHosts, want) {
-			t.Errorf("opts.unconfinedHosts = %+v; want %+v", opts.unconfinedHosts, want)
+		want := []UnconfinedHost{{ID: platform.HostID(), Acknowledged: "2026-07-21", Note: "disposable container"}}
+		if !reflect.DeepEqual(opts.UnconfinedHosts, want) {
+			t.Errorf("opts.unconfinedHosts = %+v; want %+v", opts.UnconfinedHosts, want)
 		}
 	})
 
@@ -581,11 +581,11 @@ func TestApplyConfigUnconfinedHosts(t *testing.T) {
 		home := testConfigHome(t, "")
 		const configYAML = "unconfined-hosts:\n  - id: \"someone-elses-box-abc123\"\n"
 		writeConfigHome(t, home, configYAML)
-		opts := options{configDir: home}
-		if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile, noNotify); err != nil {
-			t.Fatalf("applyConfig: %v", err)
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, noFlags, noEnv, os.ReadFile, noNotify); err != nil {
+			t.Fatalf("ApplyConfig: %v", err)
 		}
-		if !opts.confineToWorkspace {
+		if !opts.ConfineToWorkspace {
 			t.Error("opts.confineToWorkspace = false; want true — the acknowledgement names another machine")
 		}
 	})
@@ -596,11 +596,11 @@ func TestApplyConfigUnconfinedHosts(t *testing.T) {
 		const configYAML = "unconfined-hosts:\n  - note: \"forgot the id\"\n"
 		writeConfigHome(t, home, configYAML)
 		var got []string
-		opts := options{configDir: home}
-		if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile, func(msg string) { got = append(got, msg) }); err != nil {
-			t.Fatalf("applyConfig: %v; want a soft skip, not a blocked startup", err)
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, noFlags, noEnv, os.ReadFile, func(msg string) { got = append(got, msg) }); err != nil {
+			t.Fatalf("ApplyConfig: %v; want a soft skip, not a blocked startup", err)
 		}
-		if !opts.confineToWorkspace {
+		if !opts.ConfineToWorkspace {
 			t.Error("opts.confineToWorkspace = false; want true — a malformed entry acknowledges nothing")
 		}
 		if len(got) != 1 || !strings.Contains(got[0], "unconfined-hosts") {
@@ -609,7 +609,7 @@ func TestApplyConfigUnconfinedHosts(t *testing.T) {
 	})
 }
 
-// applyConfig drives the whole chain end-to-end: a config file on disk, env overrides, and
+// ApplyConfig drives the whole chain end-to-end: a config file on disk, env overrides, and
 // an explicit flag, all resolved with the real loader/parser against injected sources.
 func TestApplyConfigEndToEnd(t *testing.T) {
 	t.Parallel()
@@ -620,27 +620,27 @@ func TestApplyConfigEndToEnd(t *testing.T) {
 
 	// env turns bypass off; the flag names another server, whose own fields come with it.
 	getenv := func(k string) string {
-		if k == envBypass {
+		if k == EnvBypass {
 			return "false"
 		}
 		return ""
 	}
 	changed := func(name string) bool { return name == "server" || name == "config" }
-	opts := options{configDir: home, startupServer: "flag-box"}
+	opts := Options{ConfigDir: home, StartupServer: "flag-box"}
 
-	if err := applyConfig(&opts, changed, getenv, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	if err := ApplyConfig(&opts, changed, getenv, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if opts.endpoint != "http://flag:1111" {
-		t.Errorf("endpoint = %q; want the --server entry's", opts.endpoint)
+	if opts.Endpoint != "http://flag:1111" {
+		t.Errorf("endpoint = %q; want the --server entry's", opts.Endpoint)
 	}
-	if opts.model != "m-flag" {
-		t.Errorf("model = %q; want the --server entry's hint", opts.model)
+	if opts.Model != "m-flag" {
+		t.Errorf("model = %q; want the --server entry's hint", opts.Model)
 	}
-	if opts.mode != "plan" {
-		t.Errorf("mode = %q; want the file value", opts.mode)
+	if opts.Mode != "plan" {
+		t.Errorf("mode = %q; want the file value", opts.Mode)
 	}
-	if opts.bypass {
+	if opts.Bypass {
 		t.Error("bypass = true; want the env value false to override the file's true")
 	}
 }
@@ -650,22 +650,22 @@ func TestApplyConfigDefaults(t *testing.T) {
 	t.Parallel()
 	noEnv := func(string) string { return "" }
 	noFlags := func(string) bool { return false }
-	opts := options{configDir: testConfigHome(t, "")} // nothing but a startup server
+	opts := Options{ConfigDir: testConfigHome(t, "")} // nothing but a startup server
 
-	if err := applyConfig(&opts, noFlags, noEnv, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	if err := ApplyConfig(&opts, noFlags, noEnv, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if opts.model != "" || opts.bypass {
+	if opts.Model != "" || opts.Bypass {
 		t.Errorf("non-default model/bypass: %+v", opts)
 	}
-	if opts.mode != string(modeAskBefore) {
-		t.Errorf("mode = %q; want the default %q", opts.mode, modeAskBefore)
+	if opts.Mode != string(domain.ModeAskBefore) {
+		t.Errorf("mode = %q; want the default %q", opts.Mode, domain.ModeAskBefore)
 	}
-	if !opts.autoCompact {
+	if !opts.AutoCompact {
 		t.Error("autoCompact = false; want the structural default true (auto-compaction on)")
 	}
-	if opts.apiKey != "" {
-		t.Errorf("apiKey = %q; want empty — an unconfigured key sends no Authorization header", opts.apiKey)
+	if opts.APIKey != "" {
+		t.Errorf("apiKey = %q; want empty — an unconfigured key sends no Authorization header", opts.APIKey)
 	}
 }
 
@@ -678,28 +678,28 @@ func TestApplyConfigSelectsTheNamedServer(t *testing.T) {
 		"  - name: laptop\n    endpoint: http://127.0.0.1:1111\n"+
 		"  - name: workstation\n    endpoint: http://192.168.1.9:1111\n    api-key: sk-work\n    model: qwen\n"+
 		"server: workstation\n")
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if opts.endpoint != "http://192.168.1.9:1111" {
-		t.Errorf("endpoint = %q; want the named entry's", opts.endpoint)
+	if opts.Endpoint != "http://192.168.1.9:1111" {
+		t.Errorf("endpoint = %q; want the named entry's", opts.Endpoint)
 	}
-	if opts.apiKey != "sk-work" {
-		t.Errorf("apiKey = %q; want the named entry's", opts.apiKey)
+	if opts.APIKey != "sk-work" {
+		t.Errorf("apiKey = %q; want the named entry's", opts.APIKey)
 	}
-	if opts.model != "qwen" {
-		t.Errorf("model = %q; want the named entry's hint", opts.model)
+	if opts.Model != "qwen" {
+		t.Errorf("model = %q; want the named entry's hint", opts.Model)
 	}
-	if opts.hostAlias != "workstation" {
-		t.Errorf("hostAlias = %q; want the entry's own name — the name IS the alias", opts.hostAlias)
+	if opts.HostAlias != "workstation" {
+		t.Errorf("hostAlias = %q; want the entry's own name — the name IS the alias", opts.HostAlias)
 	}
-	if opts.startupServer != "workstation" {
-		t.Errorf("startupServer = %q; want the resolved server: value", opts.startupServer)
+	if opts.StartupServer != "workstation" {
+		t.Errorf("startupServer = %q; want the resolved server: value", opts.StartupServer)
 	}
 	// A startup that came out of the list is not ephemeral, which is what tells the switch list it
 	// already holds this server (upstreamChoices).
-	if opts.startupEphemeral {
+	if opts.StartupEphemeral {
 		t.Error("startupEphemeral = true; want false — the session started on a configured entry")
 	}
 }
@@ -728,19 +728,19 @@ func TestApplyConfigStartupLauncherComesFromTheSelectedEntry(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			opts := options{configDir: testConfigHome(t, servers+"server: "+tt.start+"\n")}
+			opts := Options{ConfigDir: testConfigHome(t, servers+"server: "+tt.start+"\n")}
 			getenv := func(name string) string {
-				if name == envEndpoint {
+				if name == EnvEndpoint {
 					return tt.endpoint
 				}
 				return ""
 			}
-			if err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
-				t.Fatalf("applyConfig: %v", err)
+			if err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if opts.startupLauncher != tt.want {
+			if opts.StartupLauncher != tt.want {
 				t.Errorf("startupLauncher = %q; want %q — the key travels from the SELECTED entry, unresolved",
-					opts.startupLauncher, tt.want)
+					opts.StartupLauncher, tt.want)
 			}
 		})
 	}
@@ -754,13 +754,13 @@ func TestApplyConfigStartupServerOverrideSelects(t *testing.T) {
 		"  - name: laptop\n    endpoint: http://127.0.0.1:1111\n"+
 		"  - name: workstation\n    endpoint: http://192.168.1.9:1111\n"+
 		"server: laptop\n")
-	opts := options{configDir: home, startupServer: "workstation"}
+	opts := Options{ConfigDir: home, StartupServer: "workstation"}
 	changed := func(name string) bool { return name == "server" }
-	if err := applyConfig(&opts, changed, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	if err := ApplyConfig(&opts, changed, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if opts.endpoint != "http://192.168.1.9:1111" {
-		t.Errorf("endpoint = %q; want the --server entry's", opts.endpoint)
+	if opts.Endpoint != "http://192.168.1.9:1111" {
+		t.Errorf("endpoint = %q; want the --server entry's", opts.Endpoint)
 	}
 }
 
@@ -806,8 +806,8 @@ func TestApplyConfigStartupServerRefusals(t *testing.T) {
 			}
 			// serverFlagBound as the root command sets it: these messages name `--server` as the
 			// fix, and only a command that registers the flag may say so (see the remedy test).
-			opts := options{configDir: home, mode: "ask-before", serverFlagBound: true}
-			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+			opts := Options{ConfigDir: home, Mode: "ask-before", ServerFlagBound: true}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
 				os.ReadFile, noNotify)
 			if err == nil {
 				t.Fatal("startup was allowed with no server to talk to")
@@ -817,28 +817,28 @@ func TestApplyConfigStartupServerRefusals(t *testing.T) {
 					t.Errorf("the refusal does not mention %q: %v", want, err)
 				}
 			}
-			var undetermined *startupUndetermined
+			var undetermined *StartupUndetermined
 			if !errors.As(err, &undetermined) {
-				t.Fatalf("the refusal is not a startupUndetermined (%T); the TUI cannot tell it from "+
+				t.Fatalf("the refusal is not a StartupUndetermined (%T); the TUI cannot tell it from "+
 					"a config error it must print", err)
 			}
-			if undetermined.start != tt.wantStart {
-				t.Errorf("reason = %+v; want %+v", undetermined.start, tt.wantStart)
+			if undetermined.Start != tt.wantStart {
+				t.Errorf("reason = %+v; want %+v", undetermined.Start, tt.wantStart)
 			}
 			// Resolution finished despite the refusal: the list to pick from is there, and so is
 			// every other key. Nothing is bound, so the upstream fields are empty and the startup
 			// is not the ephemeral one either.
-			if len(opts.servers) != strings.Count(tt.configYAML, "  - name:") {
-				t.Errorf("opts.servers = %+v; want the file's list, resolved despite the refusal", opts.servers)
+			if len(opts.Servers) != strings.Count(tt.configYAML, "  - name:") {
+				t.Errorf("opts.servers = %+v; want the file's list, resolved despite the refusal", opts.Servers)
 			}
-			if opts.mode != "plan" && tt.configYAML == "mode: plan\n" {
-				t.Errorf("opts.mode = %q; want the file's — the write-back must complete", opts.mode)
+			if opts.Mode != "plan" && tt.configYAML == "mode: plan\n" {
+				t.Errorf("opts.mode = %q; want the file's — the write-back must complete", opts.Mode)
 			}
-			if opts.endpoint != "" || opts.apiKey != "" || opts.model != "" || opts.hostAlias != "" {
+			if opts.Endpoint != "" || opts.APIKey != "" || opts.Model != "" || opts.HostAlias != "" {
 				t.Errorf("an undetermined startup left upstream fields set: endpoint=%q key-set=%t model=%q alias=%q",
-					opts.endpoint, opts.apiKey != "", opts.model, opts.hostAlias)
+					opts.Endpoint, opts.APIKey != "", opts.Model, opts.HostAlias)
 			}
-			if opts.startupEphemeral {
+			if opts.StartupEphemeral {
 				t.Error("startupEphemeral = true; nothing was selected, so there is no row to synthesize")
 			}
 		})
@@ -852,7 +852,7 @@ func TestApplyConfigStartupServerRefusals(t *testing.T) {
 // Both name-shaped refusals are pinned, in both directions: what is offered, and what must not be.
 func TestSelectStartupServerRemedyFollowsTheFlagSurface(t *testing.T) {
 	t.Parallel()
-	servers := []serverEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}}
+	servers := []ServerEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}}
 	tests := []struct {
 		name       string
 		chosen     string
@@ -886,7 +886,7 @@ func TestSelectStartupServerRemedyFollowsTheFlagSurface(t *testing.T) {
 	}
 }
 
-// The raw invocation overrides, end to end through applyConfig (ADR 0036 decision 6). An endpoint
+// The raw invocation overrides, end to end through ApplyConfig (ADR 0036 decision 6). An endpoint
 // override builds an EPHEMERAL unnamed entry that wins over any recorded or flagged name and
 // carries the key and hint overrides as its own fields; without one, those two overlay the
 // selected entry's own fields and the list is still what says where the session talks.
@@ -900,7 +900,7 @@ func TestApplyConfigStartupOverrides(t *testing.T) {
 	tests := []struct {
 		name          string
 		configYAML    string
-		flags         options
+		flags         Options
 		changed       map[string]bool
 		env           map[string]string
 		wantEndpoint  string
@@ -911,28 +911,28 @@ func TestApplyConfigStartupOverrides(t *testing.T) {
 		{
 			name:          "APOGEE_ENDPOINT alone builds the ephemeral entry",
 			configYAML:    twoServers,
-			env:           map[string]string{envEndpoint: "http://rented:8080"},
+			env:           map[string]string{EnvEndpoint: "http://rented:8080"},
 			wantEndpoint:  "http://rented:8080",
 			wantHostAlias: "rented",
 		},
 		{
 			name:          "--endpoint beats APOGEE_ENDPOINT",
 			configYAML:    twoServers,
-			flags:         options{endpoint: "http://flag-box:1111"},
+			flags:         Options{Endpoint: "http://flag-box:1111"},
 			changed:       map[string]bool{"endpoint": true},
-			env:           map[string]string{envEndpoint: "http://env-box:1111"},
+			env:           map[string]string{EnvEndpoint: "http://env-box:1111"},
 			wantEndpoint:  "http://flag-box:1111",
 			wantHostAlias: "flag-box",
 		},
 		{
 			name:       "the ephemeral entry carries the key and hint overrides",
 			configYAML: twoServers,
-			flags:      options{model: "flag-model"},
+			flags:      Options{Model: "flag-model"},
 			changed:    map[string]bool{"model": true},
 			env: map[string]string{
-				envEndpoint: "http://rented:8080",
-				envAPIKey:   "sk-rented",
-				envModel:    "env-model",
+				EnvEndpoint: "http://rented:8080",
+				EnvAPIKey:   "sk-rented",
+				EnvModel:    "env-model",
 			},
 			wantEndpoint:  "http://rented:8080",
 			wantAPIKey:    "sk-rented",
@@ -942,9 +942,9 @@ func TestApplyConfigStartupOverrides(t *testing.T) {
 		{
 			name:       "an endpoint override ignores server: and --server",
 			configYAML: twoServers,
-			flags:      options{startupServer: "workstation"},
+			flags:      Options{StartupServer: "workstation"},
 			changed:    map[string]bool{"server": true},
-			env:        map[string]string{envEndpoint: "http://rented:8080"},
+			env:        map[string]string{EnvEndpoint: "http://rented:8080"},
 			// Neither the recorded `laptop` nor the flagged `workstation`: the URL is the most
 			// explicit thing the invocation said.
 			wantEndpoint:  "http://rented:8080",
@@ -953,7 +953,7 @@ func TestApplyConfigStartupOverrides(t *testing.T) {
 		{
 			name:          "an endpoint override rescues a config that lists nothing",
 			configYAML:    "mode: plan\n",
-			env:           map[string]string{envEndpoint: "http://rented:8080", envAPIKey: "sk-rented"},
+			env:           map[string]string{EnvEndpoint: "http://rented:8080", EnvAPIKey: "sk-rented"},
 			wantEndpoint:  "http://rented:8080",
 			wantAPIKey:    "sk-rented",
 			wantHostAlias: "rented",
@@ -961,7 +961,7 @@ func TestApplyConfigStartupOverrides(t *testing.T) {
 		{
 			name:          "APOGEE_API_KEY overlays the selected entry's own key",
 			configYAML:    twoServers,
-			env:           map[string]string{envAPIKey: "sk-today"},
+			env:           map[string]string{EnvAPIKey: "sk-today"},
 			wantEndpoint:  "http://127.0.0.1:1111",
 			wantAPIKey:    "sk-today",
 			wantModel:     "file-model",
@@ -970,7 +970,7 @@ func TestApplyConfigStartupOverrides(t *testing.T) {
 		{
 			name:          "--model overlays the selected entry's own hint",
 			configYAML:    twoServers,
-			flags:         options{model: "flag-model"},
+			flags:         Options{Model: "flag-model"},
 			changed:       map[string]bool{"model": true},
 			wantEndpoint:  "http://127.0.0.1:1111",
 			wantAPIKey:    "file-key",
@@ -995,23 +995,23 @@ func TestApplyConfigStartupOverrides(t *testing.T) {
 				t.Fatalf("write config: %v", err)
 			}
 			opts := tt.flags
-			opts.configDir = home
-			err := applyConfig(&opts, func(name string) bool { return tt.changed[name] },
+			opts.ConfigDir = home
+			err := ApplyConfig(&opts, func(name string) bool { return tt.changed[name] },
 				func(name string) string { return tt.env[name] }, os.ReadFile, noNotify)
 			if err != nil {
-				t.Fatalf("applyConfig: %v", err)
+				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if opts.endpoint != tt.wantEndpoint {
-				t.Errorf("endpoint = %q; want %q", opts.endpoint, tt.wantEndpoint)
+			if opts.Endpoint != tt.wantEndpoint {
+				t.Errorf("endpoint = %q; want %q", opts.Endpoint, tt.wantEndpoint)
 			}
-			if opts.apiKey != tt.wantAPIKey {
-				t.Errorf("apiKey = %q; want %q", opts.apiKey, tt.wantAPIKey)
+			if opts.APIKey != tt.wantAPIKey {
+				t.Errorf("apiKey = %q; want %q", opts.APIKey, tt.wantAPIKey)
 			}
-			if opts.model != tt.wantModel {
-				t.Errorf("model = %q; want %q", opts.model, tt.wantModel)
+			if opts.Model != tt.wantModel {
+				t.Errorf("model = %q; want %q", opts.Model, tt.wantModel)
 			}
-			if opts.hostAlias != tt.wantHostAlias {
-				t.Errorf("hostAlias = %q; want %q", opts.hostAlias, tt.wantHostAlias)
+			if opts.HostAlias != tt.wantHostAlias {
+				t.Errorf("hostAlias = %q; want %q", opts.HostAlias, tt.wantHostAlias)
 			}
 			// An override describes ONE run: it is never written back, so the file the run read
 			// must come out of it byte-identical and the home must gain nothing.
@@ -1020,7 +1020,7 @@ func TestApplyConfigStartupOverrides(t *testing.T) {
 				t.Fatalf("re-read config: %v", readErr)
 			}
 			if string(after) != tt.configYAML {
-				t.Errorf("applyConfig rewrote config.yaml:\n%s\nwant:\n%s", after, tt.configYAML)
+				t.Errorf("ApplyConfig rewrote config.yaml:\n%s\nwant:\n%s", after, tt.configYAML)
 			}
 			assertHomeHoldsOnlyConfig(t, home, "an override run")
 		})
@@ -1033,26 +1033,26 @@ func TestApplyConfigStartupOverrides(t *testing.T) {
 func TestApplyConfigEphemeralEntryIsUnnamed(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
-	opts := options{configDir: home}
+	opts := Options{ConfigDir: home}
 	getenv := func(name string) string {
-		if name == envEndpoint {
+		if name == EnvEndpoint {
 			return "http://rented.example:8080/v1"
 		}
 		return ""
 	}
-	if err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	if err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if opts.hostAlias != "rented.example" {
-		t.Errorf("hostAlias = %q; want the endpoint host — an ephemeral entry has no name", opts.hostAlias)
+	if opts.HostAlias != "rented.example" {
+		t.Errorf("hostAlias = %q; want the endpoint host — an ephemeral entry has no name", opts.HostAlias)
 	}
-	if opts.startupServer != testServerName {
+	if opts.StartupServer != testServerName {
 		t.Errorf("startupServer = %q; want the file's %q — an override does not rewrite the record",
-			opts.startupServer, testServerName)
+			opts.StartupServer, testServerName)
 	}
 	// And it is marked ephemeral, because nothing in `servers:` names it: the switch list has to
 	// synthesize a row for it or the way back to this run's server would be lost.
-	if !opts.startupEphemeral {
+	if !opts.StartupEphemeral {
 		t.Error("startupEphemeral = false; want true — the run started on an override endpoint")
 	}
 }
@@ -1062,10 +1062,10 @@ func TestApplyConfigEphemeralEntryIsUnnamed(t *testing.T) {
 // the opposite of what was typed.
 func TestResolveStartupOverridesEmptyFlagBeatsTheVariable(t *testing.T) {
 	t.Parallel()
-	got := resolveStartupOverrides(options{},
+	got := resolveStartupOverrides(Options{},
 		func(name string) bool { return name == "endpoint" },
 		func(name string) string {
-			if name == envEndpoint {
+			if name == EnvEndpoint {
 				return "http://env-box:1111"
 			}
 			return ""
@@ -1096,7 +1096,7 @@ func TestStartupOverrideSourcesBindTheDetachedNames(t *testing.T) {
 				"must be read, and one that is read must be advertised", src.envVar, src.flagName, src.fromFlag != nil)
 		}
 		seen[src.envVar] = true
-		for _, row := range keyRegistry {
+		for _, row := range KeyRegistry {
 			if row.EnvVar == src.envVar {
 				t.Errorf("startup override %s is also registry row %q's variable", src.envVar, row.Path)
 			}
@@ -1105,7 +1105,7 @@ func TestStartupOverrideSourcesBindTheDetachedNames(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{envEndpoint, envAPIKey, envModel} {
+	for _, name := range []string{EnvEndpoint, EnvAPIKey, EnvModel} {
 		if !seen[name] {
 			t.Errorf("%s is named as a startup override but nothing reads it", name)
 		}
@@ -1115,17 +1115,12 @@ func TestStartupOverrideSourcesBindTheDetachedNames(t *testing.T) {
 			len(startupOverrideSources), len(seen))
 	}
 
-	// And the flags they name are really on the root command, so none advertises a flag cobra
-	// would reject.
-	flags := newRootCommand((&recordingLauncher{}).launch).Flags()
-	for _, src := range startupOverrideSources {
-		if src.flagName == "" {
-			continue
-		}
-		if flags.Lookup(src.flagName) == nil {
-			t.Errorf("startup override %s reads --%s, which the root command does not register",
-				src.envVar, src.flagName)
-		}
+	// The other half of the claim — that the flags they name are really registered, so none
+	// advertises a flag cobra would reject — belongs to the Driver that owns the flag set:
+	// cmd/apogee's TestRootCommandRegistersTheStartupOverrideFlags walks StartupOverrideFlags
+	// against its own root command.
+	if got := StartupOverrideFlags(); len(got) == 0 {
+		t.Error("StartupOverrideFlags names nothing, so the Driver-side guard checks nothing")
 	}
 }
 
@@ -1171,8 +1166,8 @@ func TestApplyConfigRefusesTheRetiredKeys(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
 				t.Fatalf("write config: %v", err)
 			}
-			opts := options{configDir: home}
-			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
 				os.ReadFile, noNotify)
 			if err == nil {
 				t.Fatal("a config in the retired schema was accepted")
@@ -1190,18 +1185,18 @@ func TestApplyConfigRefusesTheRetiredKeys(t *testing.T) {
 func TestApplyConfigNewSchemaDoesNotTripTheLegacySniff(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "mode: plan\nweb-search-endpoint: \"off\"\n")
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
 		os.ReadFile, noNotify); err != nil {
 		t.Fatalf("a new-schema config was refused: %v", err)
 	}
-	if opts.endpoint != testServerEndpoint || opts.hostAlias != testServerName {
-		t.Errorf("endpoint/alias = %q/%q; want the entry's %q/%q", opts.endpoint, opts.hostAlias,
+	if opts.Endpoint != testServerEndpoint || opts.HostAlias != testServerName {
+		t.Errorf("endpoint/alias = %q/%q; want the entry's %q/%q", opts.Endpoint, opts.HostAlias,
 			testServerEndpoint, testServerName)
 	}
 }
 
-// The api-key surface end-to-end through applyConfig. Since ADR 0036 the key belongs to the
+// The api-key surface end-to-end through ApplyConfig. Since ADR 0036 the key belongs to the
 // `servers:` entry the session starts on, not to a top-level key of its own: the selected entry's
 // key is the one sent, and an entry that names none resolves empty — which is what makes a keyless
 // local server behave exactly as it did before the key existed (no Authorization header).
@@ -1233,13 +1228,13 @@ func TestApplyConfigAPIKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			home := testConfigHome(t, tt.configYAML)
-			opts := options{configDir: home}
-			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
 				os.ReadFile, noNotify); err != nil {
-				t.Fatalf("applyConfig: %v", err)
+				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if opts.apiKey != tt.want {
-				t.Errorf("opts.apiKey = %q; want %q", opts.apiKey, tt.want)
+			if opts.APIKey != tt.want {
+				t.Errorf("opts.apiKey = %q; want %q", opts.APIKey, tt.want)
 			}
 		})
 	}
@@ -1251,11 +1246,11 @@ func TestApplyConfigAutoCompactOptOut(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
 	writeConfigHome(t, home, "auto-compact: false\n")
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if opts.autoCompact {
+	if opts.AutoCompact {
 		t.Error("opts.autoCompact = true; want the file's explicit false to opt out")
 	}
 }
@@ -1283,12 +1278,12 @@ func TestApplyConfigAutoTitle(t *testing.T) {
 			if tt.fileYAML != "" {
 				writeConfigHome(t, home, tt.fileYAML)
 			}
-			opts := options{configDir: home}
-			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-				t.Fatalf("applyConfig: %v", err)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if opts.autoTitle != tt.want {
-				t.Errorf("opts.autoTitle = %v; want %v", opts.autoTitle, tt.want)
+			if opts.AutoTitle != tt.want {
+				t.Errorf("opts.autoTitle = %v; want %v", opts.AutoTitle, tt.want)
 			}
 		})
 	}
@@ -1302,12 +1297,12 @@ func TestApplyConfigContextWindow(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
 	writeConfigHome(t, home, "context-window: 65536\n")
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if opts.contextWindow != 65536 {
-		t.Errorf("opts.contextWindow = %d; want the file's explicit 65536", opts.contextWindow)
+	if opts.ContextWindow != 65536 {
+		t.Errorf("opts.contextWindow = %d; want the file's explicit 65536", opts.ContextWindow)
 	}
 }
 
@@ -1327,17 +1322,17 @@ func TestApplyConfigMCPServers(t *testing.T) {
     endpoint: https://mcp.example.com/
 `
 	writeConfigHome(t, home, configYAML)
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
 
 	want := []mcp.ServerConfig{
 		{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp", Args: []string{"--stdio"}, Env: []string{"TOKEN=x"}},
 		{Name: "docs", Transport: mcp.TransportStreamableHTTP, Endpoint: "https://mcp.example.com/"},
 	}
-	if !reflect.DeepEqual(opts.mcpServers, want) {
-		t.Errorf("mcpServers = %+v; want %+v", opts.mcpServers, want)
+	if !reflect.DeepEqual(opts.MCPServers, want) {
+		t.Errorf("mcpServers = %+v; want %+v", opts.MCPServers, want)
 	}
 }
 
@@ -1352,13 +1347,13 @@ func TestApplyConfigToolsDisabled(t *testing.T) {
 		t.Parallel()
 		home := testConfigHome(t, "")
 		writeConfigHome(t, home, "tools:\n  disabled: [view_diff, python_exec]\n")
-		opts := options{configDir: home}
-		if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
 			os.ReadFile, noNotify); err != nil {
-			t.Fatalf("applyConfig: %v", err)
+			t.Fatalf("ApplyConfig: %v", err)
 		}
-		if want := []string{"view_diff", "python_exec"}; !reflect.DeepEqual(opts.toolsDisabled, want) {
-			t.Errorf("toolsDisabled = %v; want %v", opts.toolsDisabled, want)
+		if want := []string{"view_diff", "python_exec"}; !reflect.DeepEqual(opts.ToolsDisabled, want) {
+			t.Errorf("toolsDisabled = %v; want %v", opts.ToolsDisabled, want)
 		}
 	})
 
@@ -1366,13 +1361,13 @@ func TestApplyConfigToolsDisabled(t *testing.T) {
 		t.Parallel()
 		home := testConfigHome(t, "")
 		writeConfigHome(t, home, "mode: plan\n")
-		opts := options{configDir: home}
-		if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
 			os.ReadFile, noNotify); err != nil {
-			t.Fatalf("applyConfig: %v", err)
+			t.Fatalf("ApplyConfig: %v", err)
 		}
-		if len(opts.toolsDisabled) != 0 {
-			t.Errorf("toolsDisabled = %v; want nothing disabled", opts.toolsDisabled)
+		if len(opts.ToolsDisabled) != 0 {
+			t.Errorf("toolsDisabled = %v; want nothing disabled", opts.ToolsDisabled)
 		}
 	})
 
@@ -1380,15 +1375,15 @@ func TestApplyConfigToolsDisabled(t *testing.T) {
 		t.Parallel()
 		home := testConfigHome(t, "")
 		writeConfigHome(t, home, "tools:\n  disabled: [grepp, grep]\n")
-		opts := options{configDir: home}
+		opts := Options{ConfigDir: home}
 		var notices []string
-		err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
 			os.ReadFile, func(n string) { notices = append(notices, n) })
 		if err != nil {
 			t.Fatalf("an unrecognised tool name must not stop startup: %v", err)
 		}
-		if want := []string{"grepp", "grep"}; !reflect.DeepEqual(opts.toolsDisabled, want) {
-			t.Errorf("toolsDisabled = %v; want the list as written %v", opts.toolsDisabled, want)
+		if want := []string{"grepp", "grep"}; !reflect.DeepEqual(opts.ToolsDisabled, want) {
+			t.Errorf("toolsDisabled = %v; want the list as written %v", opts.ToolsDisabled, want)
 		}
 		var warned string
 		for _, n := range notices {
@@ -1417,7 +1412,7 @@ func TestApplyConfigServers(t *testing.T) {
 	tests := []struct {
 		name       string
 		configYAML string
-		want       []serverEntry
+		want       []ServerEntry
 	}{
 		{
 			name: "every entry resolves in file order, with all four fields",
@@ -1431,7 +1426,7 @@ func TestApplyConfigServers(t *testing.T) {
     model: qwen2.5-coder
 server: workstation
 `,
-			want: []serverEntry{
+			want: []ServerEntry{
 				{Name: "workstation", Endpoint: "http://192.168.64.1:1111", Model: "gpt-oss-20b"},
 				{Name: "rented-box", Endpoint: "https://llm.example.com", APIKey: "sk-rented-token", Model: "qwen2.5-coder"},
 			},
@@ -1439,7 +1434,7 @@ server: workstation
 		{
 			name:       "api-key and model are optional (a keyless server, no hint)",
 			configYAML: "servers:\n  - name: laptop\n    endpoint: http://127.0.0.1:1111\nserver: laptop\n",
-			want:       []serverEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}},
+			want:       []ServerEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}},
 		},
 		{
 			// The launcher key rides on the entry it describes, and reaches the root as written:
@@ -1456,7 +1451,7 @@ server: workstation
     endpoint: https://openrouter.ai/api/v1
 server: workstation
 `,
-			want: []serverEntry{
+			want: []ServerEntry{
 				{Name: "workstation", Endpoint: "http://192.168.64.1:1111", LlamaLauncher: "auto"},
 				{Name: "rented-box", Endpoint: "https://llm.example.com", LlamaLauncher: "~/elsewhere/launcher.yaml"},
 				{Name: "openrouter", Endpoint: "https://openrouter.ai/api/v1"},
@@ -1481,7 +1476,7 @@ server: workstation
     endpoint: https://openrouter.ai/api/v1
 server: workstation
 `,
-			want: []serverEntry{
+			want: []ServerEntry{
 				{Name: "workstation", Endpoint: "http://192.168.64.1:1111", ParallelAgents: 4},
 				{Name: "single-slot", Endpoint: "http://192.168.64.1:2222", ParallelAgents: 1},
 				{Name: "explicit-zero", Endpoint: "http://192.168.64.1:3333"},
@@ -1493,12 +1488,12 @@ server: workstation
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			home := testConfigHome(t, tt.configYAML)
-			opts := options{configDir: home}
-			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-				t.Fatalf("applyConfig: %v", err)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if !reflect.DeepEqual(opts.servers, tt.want) {
-				t.Errorf("opts.servers = %#v; want %#v", opts.servers, tt.want)
+			if !reflect.DeepEqual(opts.Servers, tt.want) {
+				t.Errorf("opts.servers = %#v; want %#v", opts.Servers, tt.want)
 			}
 		})
 	}
@@ -1597,10 +1592,10 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 			t.Parallel()
 			home := testConfigHome(t, "")
 			writeConfigHome(t, home, tt.configYAML)
-			opts := options{configDir: home}
-			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 			if err == nil {
-				t.Fatalf("applyConfig = nil error; want the entry refused (opts.servers = %#v)", opts.servers)
+				t.Fatalf("ApplyConfig = nil error; want the entry refused (opts.servers = %#v)", opts.Servers)
 			}
 			for _, want := range tt.wantErr {
 				if !strings.Contains(err.Error(), want) {
@@ -1624,14 +1619,14 @@ func TestApplyConfigMechanisms(t *testing.T) {
   truncate_history: false
 `
 	writeConfigHome(t, home, configYAML)
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
 
 	want := map[string]bool{"validate": true, "syntax": true, "truncate_history": false}
-	if !reflect.DeepEqual(opts.mechanisms, want) {
-		t.Errorf("opts.mechanisms = %+v; want %+v", opts.mechanisms, want)
+	if !reflect.DeepEqual(opts.Mechanisms, want) {
+		t.Errorf("opts.mechanisms = %+v; want %+v", opts.Mechanisms, want)
 	}
 }
 
@@ -1639,12 +1634,12 @@ func TestApplyConfigMechanisms(t *testing.T) {
 // byte-identical anchor: a config without the block behaves exactly as before.
 func TestApplyConfigNoMechanismsIsNil(t *testing.T) {
 	t.Parallel()
-	opts := options{configDir: testConfigHome(t, "")} // nothing but a startup server
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: testConfigHome(t, "")} // nothing but a startup server
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if opts.mechanisms != nil {
-		t.Errorf("opts.mechanisms = %+v; want nil (no block ⇒ nothing enabled)", opts.mechanisms)
+	if opts.Mechanisms != nil {
+		t.Errorf("opts.mechanisms = %+v; want nil (no block ⇒ nothing enabled)", opts.Mechanisms)
 	}
 }
 
@@ -1661,17 +1656,17 @@ func TestApplyConfigValidatedSets(t *testing.T) {
     my-quant: gemma-4-e4b-it-qat
 `
 	writeConfigHome(t, home, configYAML)
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
 
-	if opts.validatedSetsEnable {
+	if opts.ValidatedSetsEnable {
 		t.Errorf("opts.validatedSetsEnable = true; want false (explicit enable: false)")
 	}
 	wantAlias := map[string]string{"gemma-4-e4b-it-qat": "gemma-4-e4b-it-qat", "my-quant": "gemma-4-e4b-it-qat"}
-	if !reflect.DeepEqual(opts.validatedSetsAlias, wantAlias) {
-		t.Errorf("opts.validatedSetsAlias = %+v; want %+v", opts.validatedSetsAlias, wantAlias)
+	if !reflect.DeepEqual(opts.ValidatedSetsAlias, wantAlias) {
+		t.Errorf("opts.validatedSetsAlias = %+v; want %+v", opts.ValidatedSetsAlias, wantAlias)
 	}
 }
 
@@ -1687,14 +1682,14 @@ func TestApplyConfigPresent(t *testing.T) {
   host: 192.168.64.2
 `
 	writeConfigHome(t, home, configYAML)
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
 
-	want := presentSettings{autoOpen: false, command: "zed {path}", port: 8934, host: "192.168.64.2"}
-	if opts.present != want {
-		t.Errorf("opts.present = %+v; want %+v", opts.present, want)
+	want := PresentSettings{AutoOpen: false, Command: "zed {path}", Port: 8934, Host: "192.168.64.2"}
+	if opts.Present != want {
+		t.Errorf("opts.present = %+v; want %+v", opts.Present, want)
 	}
 }
 
@@ -1706,14 +1701,14 @@ func TestApplyConfigPresentPartialKeepsDefaults(t *testing.T) {
 	home := testConfigHome(t, "")
 	const configYAML = "present:\n  port: 8934\n"
 	writeConfigHome(t, home, configYAML)
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
 
-	want := presentSettings{autoOpen: true, port: 8934}
-	if opts.present != want {
-		t.Errorf("opts.present = %+v; want %+v (an absent auto-open keeps the default)", opts.present, want)
+	want := PresentSettings{AutoOpen: true, Port: 8934}
+	if opts.Present != want {
+		t.Errorf("opts.present = %+v; want %+v (an absent auto-open keeps the default)", opts.Present, want)
 	}
 }
 
@@ -1722,12 +1717,12 @@ func TestApplyConfigPresentPartialKeepsDefaults(t *testing.T) {
 // port, and a detected advertise host.
 func TestApplyConfigNoPresentDefaultsAutoOpen(t *testing.T) {
 	t.Parallel()
-	opts := options{configDir: testConfigHome(t, "")} // nothing but a startup server
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: testConfigHome(t, "")} // nothing but a startup server
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if want := (presentSettings{autoOpen: true}); opts.present != want {
-		t.Errorf("opts.present = %+v; want %+v (no block ⇒ auto-open on, everything else zero)", opts.present, want)
+	if want := (PresentSettings{AutoOpen: true}); opts.Present != want {
+		t.Errorf("opts.present = %+v; want %+v (no block ⇒ auto-open on, everything else zero)", opts.Present, want)
 	}
 }
 
@@ -1740,10 +1735,10 @@ func TestApplyConfigPresentPortRangeErrors(t *testing.T) {
 		home := testConfigHome(t, "")
 		configYAML := "present:\n  port: " + port + "\n"
 		writeConfigHome(t, home, configYAML)
-		opts := options{configDir: home}
-		err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+		opts := Options{ConfigDir: home}
+		err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 		if err == nil {
-			t.Errorf("applyConfig with present.port %s: want an error, got nil", port)
+			t.Errorf("ApplyConfig with present.port %s: want an error, got nil", port)
 			continue
 		}
 		if !strings.Contains(err.Error(), "present.port") {
@@ -1756,27 +1751,27 @@ func TestApplyConfigPresentPortRangeErrors(t *testing.T) {
 		home := testConfigHome(t, "")
 		configYAML := "present:\n  port: " + port + "\n"
 		writeConfigHome(t, home, configYAML)
-		opts := options{configDir: home}
-		if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-			t.Errorf("applyConfig with present.port %s: %v", port, err)
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+			t.Errorf("ApplyConfig with present.port %s: %v", port, err)
 		}
 	}
 }
 
 // The three system-prompt keys parse into opts.systemPrompt (ADR 0023): the global prompt and the
 // per-model overrides, file-only like the blocks around them. This is the end-to-end proof that
-// the keys reach the composition root, which is where resolveSystemPrompt then selects one.
+// the keys reach the composition root, which is where ResolveSystemPrompt then selects one.
 func TestApplyConfigSystemPrompt(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name       string
 		configYAML string
-		want       systemPromptSettings
+		want       SystemPromptSettings
 	}{
 		{
 			name:       "an inline prompt reaches the global source",
 			configYAML: "system-prompt-text: \"hi {{workspace}}\"\n",
-			want:       systemPromptSettings{global: promptSource{text: "hi {{workspace}}"}},
+			want:       SystemPromptSettings{Global: PromptSource{Text: "hi {{workspace}}"}},
 		},
 		{
 			// Every key spelling at once, in the only shape that is legal: text and file at ONE
@@ -1790,18 +1785,18 @@ system-prompt-models:
   gpt-oss-20b:
     system-prompt-file: ~/prompts/gpt-oss.md
 `,
-			want: systemPromptSettings{
-				global: promptSource{file: "prompts/global.md"},
-				models: map[string]promptSource{
-					"qwen2.5-coder": {text: "code first, prose second"},
-					"gpt-oss-20b":   {file: "~/prompts/gpt-oss.md"},
+			want: SystemPromptSettings{
+				Global: PromptSource{File: "prompts/global.md"},
+				Models: map[string]PromptSource{
+					"qwen2.5-coder": {Text: "code first, prose second"},
+					"gpt-oss-20b":   {File: "~/prompts/gpt-oss.md"},
 				},
 			},
 		},
 		{
 			name:       "no system-prompt key leaves the zero value — no prompt",
 			configYAML: "mode: plan\n",
-			want:       systemPromptSettings{},
+			want:       SystemPromptSettings{},
 		},
 	}
 	for _, tt := range tests {
@@ -1809,12 +1804,12 @@ system-prompt-models:
 			t.Parallel()
 			home := testConfigHome(t, "")
 			writeConfigHome(t, home, tt.configYAML)
-			opts := options{configDir: home}
-			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-				t.Fatalf("applyConfig: %v", err)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if !reflect.DeepEqual(opts.systemPrompt, tt.want) {
-				t.Errorf("opts.systemPrompt = %+v; want %+v", opts.systemPrompt, tt.want)
+			if !reflect.DeepEqual(opts.SystemPrompt, tt.want) {
+				t.Errorf("opts.systemPrompt = %+v; want %+v", opts.SystemPrompt, tt.want)
 			}
 		})
 	}
@@ -1828,40 +1823,40 @@ func TestSystemPromptSettingsValidate(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
-		sp   systemPromptSettings
+		sp   SystemPromptSettings
 		// wantErr are the substrings the message must carry; empty ⇒ the block must validate.
 		wantErr []string
 	}{
-		{name: "an inline prompt alone", sp: systemPromptSettings{global: promptSource{text: "hi"}}},
-		{name: "a file prompt alone", sp: systemPromptSettings{global: promptSource{file: "p.md"}}},
-		{name: "nothing configured at all", sp: systemPromptSettings{}},
+		{name: "an inline prompt alone", sp: SystemPromptSettings{Global: PromptSource{Text: "hi"}}},
+		{name: "a file prompt alone", sp: SystemPromptSettings{Global: PromptSource{File: "p.md"}}},
+		{name: "nothing configured at all", sp: SystemPromptSettings{}},
 		{
 			name:    "both spellings at the global level",
-			sp:      systemPromptSettings{global: promptSource{text: "hi", file: "p.md"}},
+			sp:      SystemPromptSettings{Global: PromptSource{Text: "hi", File: "p.md"}},
 			wantErr: []string{"system-prompt-text", "system-prompt-file", "both"},
 		},
 		{
 			name:    "both spellings in one model entry",
-			sp:      systemPromptSettings{models: map[string]promptSource{"qwen2.5-coder": {text: "hi", file: "p.md"}}},
+			sp:      SystemPromptSettings{Models: map[string]PromptSource{"qwen2.5-coder": {Text: "hi", File: "p.md"}}},
 			wantErr: []string{`system-prompt-models["qwen2.5-coder"]`, "system-prompt-text", "system-prompt-file"},
 		},
 		{
 			name:    "a model entry that sets neither spelling",
-			sp:      systemPromptSettings{models: map[string]promptSource{"qwen2.5-coder": {}}},
+			sp:      SystemPromptSettings{Models: map[string]PromptSource{"qwen2.5-coder": {}}},
 			wantErr: []string{`system-prompt-models["qwen2.5-coder"]`, "neither"},
 		},
 		{
 			name: "a well-formed model entry beside a global prompt",
-			sp: systemPromptSettings{
-				global: promptSource{text: "hi"},
-				models: map[string]promptSource{"qwen2.5-coder": {file: "p.md"}},
+			sp: SystemPromptSettings{
+				Global: PromptSource{Text: "hi"},
+				Models: map[string]PromptSource{"qwen2.5-coder": {File: "p.md"}},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			err := tt.sp.validate()
+			err := tt.sp.Validate()
 			if len(tt.wantErr) == 0 {
 				if err != nil {
 					t.Fatalf("validate: %v; want the block to validate", err)
@@ -1880,7 +1875,7 @@ func TestSystemPromptSettingsValidate(t *testing.T) {
 	}
 }
 
-// resolveSystemPrompt collapses the block into the ONE template this session runs with, for the
+// ResolveSystemPrompt collapses the block into the ONE template this session runs with, for the
 // RESOLVED model (ADR 0023): whole-entry replacement on an exact model match, an inert entry for
 // every other model, `~` and apogee-home-relative file paths, and the two checks that belong to
 // the selected source alone — the file must read and the placeholders must be the known three.
@@ -1908,78 +1903,78 @@ func TestResolveSystemPrompt(t *testing.T) {
 	const model = "gpt-oss-20b"
 	tests := []struct {
 		name string
-		sp   systemPromptSettings
+		sp   SystemPromptSettings
 		want string
 		// wantErr are the substrings the message must carry; empty ⇒ want must be returned.
 		wantErr []string
 	}{
 		{
 			name: "the global inline prompt is selected",
-			sp:   systemPromptSettings{global: promptSource{text: "hi {{workspace}}"}},
+			sp:   SystemPromptSettings{Global: PromptSource{Text: "hi {{workspace}}"}},
 			want: "hi {{workspace}}",
 		},
 		{
 			name: "a matching model entry replaces the global prompt",
-			sp: systemPromptSettings{
-				global: promptSource{text: "the global prompt"},
-				models: map[string]promptSource{model: {text: "the per-model prompt"}},
+			sp: SystemPromptSettings{
+				Global: PromptSource{Text: "the global prompt"},
+				Models: map[string]PromptSource{model: {Text: "the per-model prompt"}},
 			},
 			want: "the per-model prompt",
 		},
 		{
 			name: "a matching entry with only a file replaces a global text whole",
-			sp: systemPromptSettings{
-				global: promptSource{text: "the global prompt"},
-				models: map[string]promptSource{model: {file: "prompts/per-model.md"}},
+			sp: SystemPromptSettings{
+				Global: PromptSource{Text: "the global prompt"},
+				Models: map[string]PromptSource{model: {File: "prompts/per-model.md"}},
 			},
 			want: "the per-model file",
 		},
 		{
 			name: "an entry naming another model is inert and its file is never read",
-			sp: systemPromptSettings{
-				global: promptSource{text: "the global prompt"},
-				models: map[string]promptSource{"some-other-model": {file: "prompts/absent.md"}},
+			sp: SystemPromptSettings{
+				Global: PromptSource{Text: "the global prompt"},
+				Models: map[string]PromptSource{"some-other-model": {File: "prompts/absent.md"}},
 			},
 			want: "the global prompt",
 		},
-		{name: "no prompt configured anywhere", sp: systemPromptSettings{}, want: ""},
+		{name: "no prompt configured anywhere", sp: SystemPromptSettings{}, want: ""},
 		{
 			name: "an absolute file is read as written",
-			sp:   systemPromptSettings{global: promptSource{file: absFile}},
+			sp:   SystemPromptSettings{Global: PromptSource{File: absFile}},
 			want: "from an absolute path",
 		},
 		{
 			name: "a relative file resolves against the apogee home",
-			sp:   systemPromptSettings{global: promptSource{file: filepath.Join("prompts", "relative.md")}},
+			sp:   SystemPromptSettings{Global: PromptSource{File: filepath.Join("prompts", "relative.md")}},
 			want: "from the apogee home",
 		},
 		{
 			name: "a ~-prefixed file resolves against the user home",
-			sp:   systemPromptSettings{global: promptSource{file: "~/prompts/user.md"}},
+			sp:   SystemPromptSettings{Global: PromptSource{File: "~/prompts/user.md"}},
 			want: "from the user home",
 		},
 		{
 			name:    "an unreadable selected file names the key and the path",
-			sp:      systemPromptSettings{global: promptSource{file: filepath.Join("prompts", "absent.md")}},
+			sp:      SystemPromptSettings{Global: PromptSource{File: filepath.Join("prompts", "absent.md")}},
 			wantErr: []string{"system-prompt-file", filepath.Join(home, "prompts", "absent.md")},
 		},
 		{
 			name:    "an unknown placeholder names the source key and the known three",
-			sp:      systemPromptSettings{global: promptSource{text: "hi {{bogus}}"}},
+			sp:      SystemPromptSettings{Global: PromptSource{Text: "hi {{bogus}}"}},
 			wantErr: []string{"system-prompt-text", "{{bogus}}", "{{workspace}}", "{{datetime}}", "{{mode}}"},
 		},
 		{
 			name:    "an unknown placeholder in a model entry names that entry",
-			sp:      systemPromptSettings{models: map[string]promptSource{model: {text: "hi {{nope}}"}}},
+			sp:      SystemPromptSettings{Models: map[string]PromptSource{model: {Text: "hi {{nope}}"}}},
 			wantErr: []string{`system-prompt-models["` + model + `"]`, "{{nope}}", "{{workspace}}"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveSystemPrompt(tt.sp, model, home, readFile)
+			got, err := ResolveSystemPrompt(tt.sp, model, home, readFile)
 			if len(tt.wantErr) == 0 {
 				if err != nil {
-					t.Fatalf("resolveSystemPrompt: %v", err)
+					t.Fatalf("ResolveSystemPrompt: %v", err)
 				}
 				if got != tt.want {
 					t.Errorf("template = %q; want %q", got, tt.want)
@@ -1987,7 +1982,7 @@ func TestResolveSystemPrompt(t *testing.T) {
 				return
 			}
 			if err == nil {
-				t.Fatalf("resolveSystemPrompt = %q; want an error", got)
+				t.Fatalf("ResolveSystemPrompt = %q; want an error", got)
 			}
 			for _, want := range tt.wantErr {
 				if !strings.Contains(err.Error(), want) {
@@ -1999,7 +1994,7 @@ func TestResolveSystemPrompt(t *testing.T) {
 }
 
 // The context-files block parses into opts.contextFiles — the RESOLVED name list the composition
-// root folds into apogee.Config.ContextFiles. The table walks every shape of the block, including
+// root folds into domain.Config.ContextFiles. The table walks every shape of the block, including
 // the two spellings of "off" (which both collapse to nil, the engine's contract for the feature
 // being off) and the no-block default that is the whole point: a repo carrying an AGENTS.md works
 // with nothing configured.
@@ -2058,12 +2053,12 @@ func TestApplyConfigContextFiles(t *testing.T) {
 			if tt.configYAML != "" {
 				writeConfigHome(t, home, tt.configYAML)
 			}
-			opts := options{configDir: home}
-			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-				t.Fatalf("applyConfig: %v", err)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if !reflect.DeepEqual(opts.contextFiles, tt.want) {
-				t.Errorf("opts.contextFiles = %#v; want %#v", opts.contextFiles, tt.want)
+			if !reflect.DeepEqual(opts.ContextFiles, tt.want) {
+				t.Errorf("opts.contextFiles = %#v; want %#v", opts.ContextFiles, tt.want)
 			}
 		})
 	}
@@ -2148,10 +2143,10 @@ func TestApplyConfigContextFilesInvalidNames(t *testing.T) {
 			t.Parallel()
 			home := testConfigHome(t, "")
 			writeConfigHome(t, home, tt.configYAML)
-			opts := options{configDir: home}
-			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 			if err == nil {
-				t.Fatalf("applyConfig = nil error; want the name refused (opts.contextFiles = %#v)", opts.contextFiles)
+				t.Fatalf("ApplyConfig = nil error; want the name refused (opts.contextFiles = %#v)", opts.ContextFiles)
 			}
 			for _, want := range tt.wantErr {
 				if !strings.Contains(err.Error(), want) {
@@ -2170,14 +2165,14 @@ func TestApplyConfigContextFilesDoesNotRequireTheFilesToExist(t *testing.T) {
 	home := testConfigHome(t, "")
 	const configYAML = "context-files:\n  names: [AGENTS.md, docs/nothing-here.md]\n"
 	writeConfigHome(t, home, configYAML)
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
 	want := []string{"AGENTS.md", "docs/nothing-here.md"}
-	if !reflect.DeepEqual(opts.contextFiles, want) {
+	if !reflect.DeepEqual(opts.ContextFiles, want) {
 		t.Errorf("opts.contextFiles = %#v; want %#v (existence is the engine's question, not config's)",
-			opts.contextFiles, want)
+			opts.ContextFiles, want)
 	}
 }
 
@@ -2194,14 +2189,14 @@ func TestApplyConfigUI(t *testing.T) {
   color-scheme: light
 `
 	writeConfigHome(t, home, configYAML)
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
 
-	want := uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false, showScrollbar: false, colorScheme: "light"}
-	if opts.ui != want {
-		t.Errorf("opts.ui = %+v; want %+v", opts.ui, want)
+	want := UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "light"}
+	if opts.UI != want {
+		t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
 	}
 }
 
@@ -2214,13 +2209,13 @@ func TestApplyConfigUnknownColorSchemeIsNotAStartupError(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
 	writeConfigHome(t, home, "ui:\n  color-scheme: no-such-scheme\n")
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig refused an unknown colour scheme: %v", err)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig refused an unknown colour scheme: %v", err)
 	}
-	if opts.ui.colorScheme != "no-such-scheme" {
+	if opts.UI.ColorScheme != "no-such-scheme" {
 		t.Errorf("opts.ui.colorScheme = %q; want the name as written, for the resolver to warn about",
-			opts.ui.colorScheme)
+			opts.UI.ColorScheme)
 	}
 }
 
@@ -2234,34 +2229,34 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 	tests := []struct {
 		name string
 		yaml string
-		want uiSettings
+		want UISettings
 	}{
 		{
 			name: "only spinner: → the colour loop stays on and the bar stays shown",
 			yaml: "ui:\n  spinner: classic\n",
-			want: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true, showScrollbar: true, colorScheme: "dark"},
+			want: UISettings{Spinner: tui.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
 		},
 		{
 			name: "only spinner-color: false → the style stays the default and the bar stays shown",
 			yaml: "ui:\n  spinner-color: false\n",
-			want: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: false, showScrollbar: true, colorScheme: "dark"},
+			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark"},
 		},
 		{
 			name: "only show-scrollbar: false → the bar goes, the spinner keys stay put",
 			yaml: "ui:\n  show-scrollbar: false\n",
-			want: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: false, colorScheme: "dark"},
+			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark"},
 		},
 		{
 			// The explicit `true` and the absent key resolve alike — pinned so the pointer's
 			// present-and-true branch is exercised, not just its nil one.
 			name: "only show-scrollbar: true → the shipped default, said out loud",
 			yaml: "ui:\n  show-scrollbar: true\n",
-			want: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "dark"},
+			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
 		},
 		{
 			name: "only color-scheme: → the spinner keys and the bar stay put",
 			yaml: "ui:\n  color-scheme: light\n",
-			want: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "light"},
+			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light"},
 		},
 	}
 	for _, tt := range tests {
@@ -2269,12 +2264,12 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			t.Parallel()
 			home := testConfigHome(t, "")
 			writeConfigHome(t, home, tt.yaml)
-			opts := options{configDir: home}
-			if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-				t.Fatalf("applyConfig: %v", err)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if opts.ui != tt.want {
-				t.Errorf("opts.ui = %+v; want %+v", opts.ui, tt.want)
+			if opts.UI != tt.want {
+				t.Errorf("opts.ui = %+v; want %+v", opts.UI, tt.want)
 			}
 		})
 	}
@@ -2285,12 +2280,12 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 // nothing".
 func TestApplyConfigNoUIDefaults(t *testing.T) {
 	t.Parallel()
-	opts := options{configDir: testConfigHome(t, "")} // nothing but a startup server
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: testConfigHome(t, "")} // nothing but a startup server
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if opts.ui != wantUIDefault {
-		t.Errorf("opts.ui = %+v; want %+v (no block ⇒ the default style, colour loop on, bar shown)", opts.ui, wantUIDefault)
+	if opts.UI != wantUIDefault {
+		t.Errorf("opts.ui = %+v; want %+v (no block ⇒ the default style, colour loop on, bar shown)", opts.UI, wantUIDefault)
 	}
 }
 
@@ -2326,11 +2321,11 @@ func TestCursorShapeConfigParses(t *testing.T) {
 			if tt.yaml != "" {
 				writeConfigHome(t, home, tt.yaml)
 			}
-			opts := options{configDir: home}
-			err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 			if len(tt.wantErr) > 0 {
 				if err == nil {
-					t.Fatalf("applyConfig with %q: want an error, got nil", tt.yaml)
+					t.Fatalf("ApplyConfig with %q: want an error, got nil", tt.yaml)
 				}
 				for _, want := range tt.wantErr {
 					if !strings.Contains(err.Error(), want) {
@@ -2340,14 +2335,14 @@ func TestCursorShapeConfigParses(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("applyConfig: %v", err)
+				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if opts.cursorShape != tt.want {
-				t.Errorf("opts.cursorShape = %q; want %q", opts.cursorShape, tt.want)
+			if opts.CursorShape != tt.want {
+				t.Errorf("opts.cursorShape = %q; want %q", opts.CursorShape, tt.want)
 			}
 			// The renderer takes a shape, not a name: what the binary hands the TUI must parse.
-			if _, err := tui.ParseCursorShape(opts.cursorShape); err != nil {
-				t.Errorf("the resolved shape %q does not parse for the renderer: %v", opts.cursorShape, err)
+			if _, err := tui.ParseCursorShape(opts.CursorShape); err != nil {
+				t.Errorf("the resolved shape %q does not parse for the renderer: %v", opts.CursorShape, err)
 			}
 		})
 	}
@@ -2362,10 +2357,10 @@ func TestApplyConfigUIUnknownSpinnerErrors(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
 	writeConfigHome(t, home, "ui:\n  spinner: sparkle\n")
-	opts := options{configDir: home}
-	err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+	opts := Options{ConfigDir: home}
+	err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 	if err == nil {
-		t.Fatal("applyConfig with ui.spinner: sparkle: want an error, got nil")
+		t.Fatal("ApplyConfig with ui.spinner: sparkle: want an error, got nil")
 	}
 	for _, want := range []string{"ui.spinner", "sparkle", "snake", "glitter", "classic"} {
 		if !strings.Contains(err.Error(), want) {
@@ -2377,9 +2372,9 @@ func TestApplyConfigUIUnknownSpinnerErrors(t *testing.T) {
 	for _, style := range []tui.SpinnerStyle{tui.SpinnerSnake, tui.SpinnerGlitter, tui.SpinnerClassic} {
 		home := testConfigHome(t, "")
 		writeConfigHome(t, home, "ui:\n  spinner: "+string(style)+"\n")
-		opts := options{configDir: home}
-		if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-			t.Errorf("applyConfig with ui.spinner: %s: %v", style, err)
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+			t.Errorf("ApplyConfig with ui.spinner: %s: %v", style, err)
 		}
 	}
 }
@@ -2388,20 +2383,20 @@ func TestApplyConfigUIUnknownSpinnerErrors(t *testing.T) {
 // applies (≥ medium confidence) or is offered (low) without any config.
 func TestApplyConfigNoValidatedSetsDefaultsOn(t *testing.T) {
 	t.Parallel()
-	opts := options{configDir: testConfigHome(t, "")} // nothing but a startup server
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: testConfigHome(t, "")} // nothing but a startup server
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if !opts.validatedSetsEnable {
+	if !opts.ValidatedSetsEnable {
 		t.Errorf("opts.validatedSetsEnable = false; want true (default on)")
 	}
-	if opts.validatedSetsAlias != nil {
-		t.Errorf("opts.validatedSetsAlias = %+v; want nil", opts.validatedSetsAlias)
+	if opts.ValidatedSetsAlias != nil {
+		t.Errorf("opts.validatedSetsAlias = %+v; want nil", opts.ValidatedSetsAlias)
 	}
 }
 
 // The model-profile config block reaches opts.profile — which runRoot folds directly into
-// apogee.Config.Profile: a markdown-fenced tool-call format plus a <think> thinking block map
+// domain.Config.Profile: a markdown-fenced tool-call format plus a <think> thinking block map
 // across to the domain ModelProfile the loop translates to its parsers at the seam (item 1 has
 // no loop consumer yet; this proves the config surface lands end-to-end).
 func TestApplyConfigModelProfile(t *testing.T) {
@@ -2415,17 +2410,17 @@ func TestApplyConfigModelProfile(t *testing.T) {
     end: "</think>"
 `
 	writeConfigHome(t, home, configYAML)
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
 
-	want := apogee.ModelProfile{
-		ToolCallFormat: apogee.FormatMarkdownFenced,
-		Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>"},
+	want := domain.ModelProfile{
+		ToolCallFormat: domain.FormatMarkdownFenced,
+		Thinking:       domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
 	}
-	if !reflect.DeepEqual(opts.profile, want) {
-		t.Errorf("opts.profile = %+v; want %+v", opts.profile, want)
+	if !reflect.DeepEqual(opts.Profile, want) {
+		t.Errorf("opts.profile = %+v; want %+v", opts.Profile, want)
 	}
 }
 
@@ -2433,12 +2428,12 @@ func TestApplyConfigModelProfile(t *testing.T) {
 // inline thinking (today's behaviour), the byte-identical anchor this item must preserve.
 func TestApplyConfigNoProfileIsZero(t *testing.T) {
 	t.Parallel()
-	opts := options{configDir: testConfigHome(t, "")} // nothing but a startup server
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: testConfigHome(t, "")} // nothing but a startup server
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if (opts.profile != apogee.ModelProfile{}) {
-		t.Errorf("opts.profile = %+v; want the zero ModelProfile", opts.profile)
+	if (opts.Profile != domain.ModelProfile{}) {
+		t.Errorf("opts.profile = %+v; want the zero ModelProfile", opts.Profile)
 	}
 }
 
@@ -2451,26 +2446,26 @@ func TestApplyConfigEnvDirsAndFile(t *testing.T) {
 	ws := t.TempDir()
 	getenv := func(k string) string {
 		switch k {
-		case envConfig:
+		case EnvConfig:
 			return home
-		case envWorkspace:
+		case EnvWorkspace:
 			return ws
 		default:
 			return ""
 		}
 	}
-	opts := options{}
-	if err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if opts.configDir != home {
-		t.Errorf("configDir = %q; want the APOGEE_CONFIG value %q", opts.configDir, home)
+	if opts.ConfigDir != home {
+		t.Errorf("configDir = %q; want the APOGEE_CONFIG value %q", opts.ConfigDir, home)
 	}
-	if opts.workspace != ws {
-		t.Errorf("workspace = %q; want the APOGEE_WORKSPACE value %q", opts.workspace, ws)
+	if opts.Workspace != ws {
+		t.Errorf("workspace = %q; want the APOGEE_WORKSPACE value %q", opts.Workspace, ws)
 	}
-	if opts.cursorShape != "bar" {
-		t.Errorf("cursorShape = %q; want it read from the env-resolved config home", opts.cursorShape)
+	if opts.CursorShape != "bar" {
+		t.Errorf("cursorShape = %q; want it read from the env-resolved config home", opts.CursorShape)
 	}
 }
 
@@ -2479,18 +2474,18 @@ func TestApplyConfigFlagDirBeatsEnvDir(t *testing.T) {
 	t.Parallel()
 	flagHome := testConfigHome(t, "")
 	getenv := func(k string) string {
-		if k == envConfig {
+		if k == EnvConfig {
 			return filepath.Join(t.TempDir(), "ignored")
 		}
 		return ""
 	}
 	changed := func(name string) bool { return name == "config" }
-	opts := options{configDir: flagHome}
-	if err := applyConfig(&opts, changed, getenv, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	opts := Options{ConfigDir: flagHome}
+	if err := ApplyConfig(&opts, changed, getenv, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if opts.configDir != flagHome {
-		t.Errorf("configDir = %q; want the flag value %q (env must not overlay a set flag)", opts.configDir, flagHome)
+	if opts.ConfigDir != flagHome {
+		t.Errorf("configDir = %q; want the flag value %q (env must not overlay a set flag)", opts.ConfigDir, flagHome)
 	}
 }
 
@@ -2499,8 +2494,8 @@ func TestApplyConfigMalformedFileErrors(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
 	writeConfigHome(t, home, "endpoint: [not a string\n")
-	opts := options{configDir: home}
-	err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+	opts := Options{ConfigDir: home}
+	err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
 	if err == nil {
 		t.Fatal("malformed config: want an error, got nil")
 	}
@@ -2510,13 +2505,13 @@ func TestApplyConfigMalformedFileErrors(t *testing.T) {
 func TestApplyConfigBadBypassEnvErrors(t *testing.T) {
 	t.Parallel()
 	getenv := func(k string) string {
-		if k == envBypass {
+		if k == EnvBypass {
 			return "yes-please"
 		}
 		return ""
 	}
-	opts := options{configDir: t.TempDir()}
-	err := applyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify)
+	opts := Options{ConfigDir: t.TempDir()}
+	err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify)
 	if err == nil {
 		t.Fatal("invalid APOGEE_BYPASS: want an error, got nil")
 	}
@@ -2525,11 +2520,11 @@ func TestApplyConfigBadBypassEnvErrors(t *testing.T) {
 // An absent config file is not an error — a config file is optional.
 func TestLoadFileConfigAbsentIsEmpty(t *testing.T) {
 	t.Parallel()
-	l, err := loadFileConfig(filepath.Join(t.TempDir(), "config.yaml"), os.ReadFile, noNotify)
+	l, err := LoadFileConfig(filepath.Join(t.TempDir(), "config.yaml"), os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("absent config: unexpected error %v", err)
 	}
-	if !reflect.DeepEqual(l, layer{}) {
+	if !reflect.DeepEqual(l, Layer{}) {
 		t.Errorf("absent config produced a non-empty layer: %+v", l)
 	}
 }
@@ -2539,7 +2534,7 @@ func TestLoadFileConfigReadErrorPropagates(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("permission denied")
 	readFile := func(string) ([]byte, error) { return nil, boom }
-	_, err := loadFileConfig("/some/config.yaml", readFile, noNotify)
+	_, err := LoadFileConfig("/some/config.yaml", readFile, noNotify)
 	if err == nil || errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("read error = %v; want it propagated (not treated as absent)", err)
 	}
@@ -2561,41 +2556,41 @@ func TestOverrideSourcesNameTheWinningSource(t *testing.T) {
 		name    string
 		changed map[string]bool
 		env     map[string]string
-		want    map[string]configSource
+		want    map[string]Source
 	}{
 		{
 			name: "nothing set leaves every key on the file",
-			want: map[string]configSource{},
+			want: map[string]Source{},
 		},
 		{
 			name: "an environment variable beats the file",
-			env:  map[string]string{envServer: "workstation"},
-			want: map[string]configSource{"server": sourceEnv},
+			env:  map[string]string{EnvServer: "workstation"},
+			want: map[string]Source{"server": SourceEnv},
 		},
 		{
 			name:    "an explicitly-set flag beats its own variable",
 			changed: map[string]bool{"mode": true},
-			env:     map[string]string{envMode: "auto"},
-			want:    map[string]configSource{"mode": sourceFlag},
+			env:     map[string]string{EnvMode: "auto"},
+			want:    map[string]Source{"mode": SourceFlag},
 		},
 		{
 			name: "an empty variable is not a setting",
-			env:  map[string]string{envServer: ""},
-			want: map[string]configSource{},
+			env:  map[string]string{EnvServer: ""},
+			want: map[string]Source{},
 		},
 		{
 			// The raw startup overrides name no config key since ADR 0036, so nothing marks a row
 			// for them: a marker for a key the pane does not show would point at nothing.
 			name:    "the raw endpoint override marks no row",
 			changed: map[string]bool{"endpoint": true},
-			env:     map[string]string{envEndpoint: "http://box:1111", envAPIKey: "sk-token"},
-			want:    map[string]configSource{},
+			env:     map[string]string{EnvEndpoint: "http://box:1111", EnvAPIKey: "sk-token"},
+			want:    map[string]Source{},
 		},
 		{
 			name:    "several keys are marked independently",
 			changed: map[string]bool{"bypass": true},
-			env:     map[string]string{envServer: "workstation"},
-			want:    map[string]configSource{"bypass": sourceFlag, "server": sourceEnv},
+			env:     map[string]string{EnvServer: "workstation"},
+			want:    map[string]Source{"bypass": SourceFlag, "server": SourceEnv},
 		},
 	}
 
@@ -2613,25 +2608,25 @@ func TestOverrideSourcesNameTheWinningSource(t *testing.T) {
 	}
 }
 
-// applyConfig records the winning sources on the resolved options, because that is the only place
+// ApplyConfig records the winning sources on the resolved options, because that is the only place
 // the layers still exist: the /settings pane is handed the resolved options long after they have
 // been collapsed into single values.
 func TestApplyConfigRecordsOverrideSources(t *testing.T) {
 	t.Parallel()
 	getenv := func(name string) string {
-		if name == envServer {
+		if name == EnvServer {
 			return testServerName
 		}
 		return ""
 	}
-	opts := options{configDir: testConfigHome(t, ""), mode: "auto"}
+	opts := Options{ConfigDir: testConfigHome(t, ""), Mode: "auto"}
 	changed := func(name string) bool { return name == "mode" }
-	if err := applyConfig(&opts, changed, getenv, os.ReadFile, noNotify); err != nil {
-		t.Fatalf("applyConfig: %v", err)
+	if err := ApplyConfig(&opts, changed, getenv, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	want := map[string]configSource{"server": sourceEnv, "mode": sourceFlag}
-	if !reflect.DeepEqual(opts.overrides, want) {
-		t.Errorf("opts.overrides = %v; want %v", opts.overrides, want)
+	want := map[string]Source{"server": SourceEnv, "mode": SourceFlag}
+	if !reflect.DeepEqual(opts.Overrides, want) {
+		t.Errorf("opts.overrides = %v; want %v", opts.Overrides, want)
 	}
 }
 
@@ -2657,8 +2652,8 @@ func TestResolveParallelAgents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := resolveParallelAgents(tt.pinned, tt.discovered); got != tt.want {
-				t.Errorf("resolveParallelAgents(%d, %d) = %d, want %d", tt.pinned, tt.discovered, got, tt.want)
+			if got := ResolveParallelAgents(tt.pinned, tt.discovered); got != tt.want {
+				t.Errorf("ResolveParallelAgents(%d, %d) = %d, want %d", tt.pinned, tt.discovered, got, tt.want)
 			}
 		})
 	}

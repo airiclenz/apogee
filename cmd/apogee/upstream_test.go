@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -96,65 +97,65 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 func TestUpstreamChoicesAssembly(t *testing.T) {
 	t.Parallel()
 
-	remote := serverEntry{Name: "remote", Endpoint: "http://remote:8080", APIKey: "remote-key", Model: "remote-model"}
-	spare := serverEntry{Name: "spare", Endpoint: "http://spare:8080"}
+	remote := config.ServerEntry{Name: "remote", Endpoint: "http://remote:8080", APIKey: "remote-key", Model: "remote-model"}
+	spare := config.ServerEntry{Name: "spare", Endpoint: "http://spare:8080"}
 	// The configured entry a startup-by-name lands on: it is already a row, so nothing is added.
-	laptop := serverEntry{Name: "laptop", Endpoint: "http://local:1111", APIKey: "local-key", Model: "local-model"}
+	laptop := config.ServerEntry{Name: "laptop", Endpoint: "http://local:1111", APIKey: "local-key", Model: "local-model"}
 	// What an override run resolves to: the endpoint's host as the alias, no name in any file.
-	ephemeral := options{
-		endpoint:         "http://rented:8080",
-		model:            "rented-model",
-		apiKey:           "rented-key",
-		hostAlias:        "rented",
-		startupEphemeral: true,
+	ephemeral := config.Options{
+		Endpoint:         "http://rented:8080",
+		Model:            "rented-model",
+		APIKey:           "rented-key",
+		HostAlias:        "rented",
+		StartupEphemeral: true,
 	}
-	ephemeralRow := serverEntry{
+	ephemeralRow := config.ServerEntry{
 		Name: "rented", Endpoint: "http://rented:8080", APIKey: "rented-key", Model: "rented-model",
 	}
 
 	tests := []struct {
 		name    string
-		startup options
-		servers []serverEntry
-		want    []serverEntry
+		startup config.Options
+		servers []config.ServerEntry
+		want    []config.ServerEntry
 	}{
 		{
 			name: "a configured startup synthesizes nothing — it is already a row",
-			startup: options{
-				endpoint:  laptop.Endpoint,
-				model:     laptop.Model,
-				apiKey:    laptop.APIKey,
-				hostAlias: laptop.Name,
+			startup: config.Options{
+				Endpoint:  laptop.Endpoint,
+				Model:     laptop.Model,
+				APIKey:    laptop.APIKey,
+				HostAlias: laptop.Name,
 			},
-			servers: []serverEntry{remote, laptop, spare},
+			servers: []config.ServerEntry{remote, laptop, spare},
 			// File order, untouched: the startup entry is NOT hoisted to the front.
-			want: []serverEntry{remote, laptop, spare},
+			want: []config.ServerEntry{remote, laptop, spare},
 		},
 		{
 			name:    "an ephemeral startup is prepended, entries keep file order",
 			startup: ephemeral,
-			servers: []serverEntry{remote, spare},
-			want:    []serverEntry{ephemeralRow, remote, spare},
+			servers: []config.ServerEntry{remote, spare},
+			want:    []config.ServerEntry{ephemeralRow, remote, spare},
 		},
 		{
 			name:    "an ephemeral startup against an empty list ⇒ exactly one row",
 			startup: ephemeral,
-			want:    []serverEntry{ephemeralRow},
+			want:    []config.ServerEntry{ephemeralRow},
 		},
 		{
 			name: "an ephemeral endpoint a configured entry happens to share is still its own row",
 			// Endpoint equality no longer decides anything: the override run is on an unnamed
 			// server, and the row that says so is what makes the switch away reversible.
 			startup: ephemeral,
-			servers: []serverEntry{{Name: "same-box", Endpoint: ephemeral.endpoint}},
-			want:    []serverEntry{ephemeralRow, {Name: "same-box", Endpoint: ephemeral.endpoint}},
+			servers: []config.ServerEntry{{Name: "same-box", Endpoint: ephemeral.Endpoint}},
+			want:    []config.ServerEntry{ephemeralRow, {Name: "same-box", Endpoint: ephemeral.Endpoint}},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			opts := tt.startup
-			opts.servers = tt.servers
+			opts.Servers = tt.servers
 
 			got := upstreamChoices(opts)
 
@@ -175,7 +176,7 @@ func TestUpstreamChoicesAssembly(t *testing.T) {
 func TestServerChoicesCarryNoSecrets(t *testing.T) {
 	t.Parallel()
 
-	entries := []serverEntry{
+	entries := []config.ServerEntry{
 		{Name: "workstation", Endpoint: "http://local:1111", APIKey: "local-key", Model: "local-model"},
 		{Name: "remote", Endpoint: "http://remote:8080", APIKey: "remote-key", Model: "remote-model"},
 	}
@@ -201,7 +202,7 @@ func TestServerChoicesCarryNoSecrets(t *testing.T) {
 func TestFindServerUnknownNameNamesTheCandidates(t *testing.T) {
 	t.Parallel()
 
-	entries := []serverEntry{{Name: "workstation", Endpoint: "http://local:1111"}, {Name: "remote", Endpoint: "http://remote:8080"}}
+	entries := []config.ServerEntry{{Name: "workstation", Endpoint: "http://local:1111"}, {Name: "remote", Endpoint: "http://remote:8080"}}
 
 	if got, err := findServer(entries, "remote"); err != nil || got.Endpoint != "http://remote:8080" {
 		t.Fatalf("findServer(remote) = %+v, %v; want the remote entry and no error", got, err)
@@ -230,19 +231,19 @@ func TestRunRootSwitchServerRepointsTheSession(t *testing.T) {
 	configHome := t.TempDir()
 
 	rec := &recordingLauncher{}
-	opts := options{
-		endpoint:      first.URL,
-		model:         "model-a",
-		mode:          "ask-before",
-		hostAlias:     "workstation",
-		workspace:     t.TempDir(),
-		configDir:     configHome,
-		contextWindow: 16384, // the global pin, which a switch must not drop
-		autoCompact:   true,
-		servers:       []serverEntry{{Name: "second", Endpoint: second.URL, Model: "model-b", APIKey: "second-key"}},
+	opts := config.Options{
+		Endpoint:      first.URL,
+		Model:         "model-a",
+		Mode:          "ask-before",
+		HostAlias:     "workstation",
+		Workspace:     t.TempDir(),
+		ConfigDir:     configHome,
+		ContextWindow: 16384, // the global pin, which a switch must not drop
+		AutoCompact:   true,
+		Servers:       []config.ServerEntry{{Name: "second", Endpoint: second.URL, Model: "model-b", APIKey: "second-key"}},
 		// An override run: the session starts on an endpoint no entry names, which is the one case
 		// that still synthesizes a row — and the case that makes switching away reversible.
-		startupEphemeral: true,
+		StartupEphemeral: true,
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -318,16 +319,16 @@ func TestRunRootRecordServerChoiceWritesOnlyConfiguredNames(t *testing.T) {
 	configHome := t.TempDir()
 
 	rec := &recordingLauncher{}
-	opts := options{
-		endpoint:         first.URL,
-		model:            "model-a",
-		mode:             "ask-before",
-		hostAlias:        "workstation",
-		workspace:        t.TempDir(),
-		configDir:        configHome,
-		autoCompact:      true,
-		servers:          []serverEntry{{Name: "second", Endpoint: second.URL}},
-		startupEphemeral: true, // an override run, so "workstation" is the synthesized row's label
+	opts := config.Options{
+		Endpoint:         first.URL,
+		Model:            "model-a",
+		Mode:             "ask-before",
+		HostAlias:        "workstation",
+		Workspace:        t.TempDir(),
+		ConfigDir:        configHome,
+		AutoCompact:      true,
+		Servers:          []config.ServerEntry{{Name: "second", Endpoint: second.URL}},
+		StartupEphemeral: true, // an override run, so "workstation" is the synthesized row's label
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -381,16 +382,16 @@ func TestRunRootSwitchServerUnknownNameTouchesNothing(t *testing.T) {
 	second := upstreamServer(t, "model-b", 8192)
 
 	rec := &recordingLauncher{}
-	opts := options{
-		endpoint:         first.URL,
-		model:            "model-a",
-		mode:             "ask-before",
-		hostAlias:        "workstation",
-		workspace:        t.TempDir(),
-		configDir:        t.TempDir(),
-		autoCompact:      true,
-		servers:          []serverEntry{{Name: "second", Endpoint: second.URL}},
-		startupEphemeral: true, // an override run, so the startup row is synthesized and offered
+	opts := config.Options{
+		Endpoint:         first.URL,
+		Model:            "model-a",
+		Mode:             "ask-before",
+		HostAlias:        "workstation",
+		Workspace:        t.TempDir(),
+		ConfigDir:        t.TempDir(),
+		AutoCompact:      true,
+		Servers:          []config.ServerEntry{{Name: "second", Endpoint: second.URL}},
+		StartupEphemeral: true, // an override run, so the startup row is synthesized and offered
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -437,7 +438,7 @@ func TestParallelAgentsCapFollowsTheBoundServer(t *testing.T) {
 	spy := &parallelAgentsSpy{}
 	caps := newParallelAgentsCap(spy)
 
-	if got := caps.follow(serverEntry{Name: "pinned", ParallelAgents: 4}); got != 4 {
+	if got := caps.follow(config.ServerEntry{Name: "pinned", ParallelAgents: 4}); got != 4 {
 		t.Errorf("follow(pinned 4) = %d, want the pin", got)
 	}
 	if spy.last() != 4 {
@@ -450,7 +451,7 @@ func TestParallelAgentsCapFollowsTheBoundServer(t *testing.T) {
 
 	// Onto an unpinned server: nothing is claimed, so the floor is serial — and the 2 slots the
 	// previous server reported must play no part in it.
-	if got := caps.follow(serverEntry{Name: "open"}); got != 1 {
+	if got := caps.follow(config.ServerEntry{Name: "open"}); got != 1 {
 		t.Errorf("follow(unpinned) = %d, want 1 — an unknown server runs one agent at a time", got)
 	}
 	// …until its own first beat says how wide it is.
@@ -472,18 +473,18 @@ func TestParallelAgentsCapRelistMovesThePinInPlace(t *testing.T) {
 
 	spy := &parallelAgentsSpy{}
 	caps := newParallelAgentsCap(spy)
-	caps.follow(serverEntry{Name: "here", ParallelAgents: 2})
+	caps.follow(config.ServerEntry{Name: "here", ParallelAgents: 2})
 	caps.observe(6)
 
-	if got := caps.relist([]serverEntry{{Name: "here", ParallelAgents: 5}, {Name: "there", ParallelAgents: 9}}); got != 5 {
+	if got := caps.relist([]config.ServerEntry{{Name: "here", ParallelAgents: 5}, {Name: "there", ParallelAgents: 9}}); got != 5 {
 		t.Errorf("relist = %d, want the edited pin 5 — and never another entry's 9", got)
 	}
 	// A cleared pin hands the width back to what the server itself advertised, exactly as clearing
 	// `context-window:` hands the window back.
-	if got := caps.relist([]serverEntry{{Name: "here"}}); got != 6 {
+	if got := caps.relist([]config.ServerEntry{{Name: "here"}}); got != 6 {
 		t.Errorf("relist with the pin removed = %d, want the observed 6", got)
 	}
-	if got := caps.relist([]serverEntry{{Name: "elsewhere", ParallelAgents: 8}}); got != 6 {
+	if got := caps.relist([]config.ServerEntry{{Name: "elsewhere", ParallelAgents: 8}}); got != 6 {
 		t.Errorf("relist without this session's server = %d, want 6 unchanged", got)
 	}
 	if spy.last() != 6 {
@@ -509,7 +510,7 @@ func TestParallelAgentsCapCurrentReadsWithoutInstalling(t *testing.T) {
 		t.Errorf("current() installed %v; a read must push nothing at the engine", spy.widths)
 	}
 
-	caps.follow(serverEntry{Name: "open"})
+	caps.follow(config.ServerEntry{Name: "open"})
 	caps.observe(3)
 	installed := len(spy.widths)
 
@@ -518,7 +519,7 @@ func TestParallelAgentsCapCurrentReadsWithoutInstalling(t *testing.T) {
 	}
 	// A pin edited into the list mid-session moves what current reports, exactly as it moves what is
 	// installed: one resolution, read through two doors.
-	caps.relist([]serverEntry{{Name: "open", ParallelAgents: 5}})
+	caps.relist([]config.ServerEntry{{Name: "open", ParallelAgents: 5}})
 	if got := caps.current(); got != 5 {
 		t.Errorf("current() after the pin was edited in = %d, want the pin 5", got)
 	}
@@ -534,10 +535,10 @@ func TestParallelAgentsCapCurrentReadsWithoutInstalling(t *testing.T) {
 func TestStartupEntryCarriesTheParallelAgentsPin(t *testing.T) {
 	t.Parallel()
 
-	entry := startupEntry(options{
-		hostAlias:             "here",
-		endpoint:              "http://127.0.0.1:1111",
-		startupParallelAgents: 4,
+	entry := startupEntry(config.Options{
+		HostAlias:             "here",
+		Endpoint:              "http://127.0.0.1:1111",
+		StartupParallelAgents: 4,
 	})
 	if entry.ParallelAgents != 4 {
 		t.Errorf("startupEntry().ParallelAgents = %d, want the resolved startup entry's 4", entry.ParallelAgents)

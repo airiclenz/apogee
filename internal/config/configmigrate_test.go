@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -458,8 +458,8 @@ func TestApplyConfigRefusesTheRetiredLauncherKey(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(given), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	opts := options{configDir: home}
-	err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+	opts := Options{ConfigDir: home}
+	err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
 		os.ReadFile, func(msg string) { t.Errorf("a refused config announced %q", msg) })
 	if err == nil {
 		t.Fatal("a config still setting the retired top-level llama-launcher: key started a session")
@@ -481,31 +481,31 @@ func TestApplyConfigMigratesTheRetiredKeys(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 	var notes []string
-	opts := options{configDir: home}
-	if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
 		os.ReadFile, func(msg string) { notes = append(notes, msg) }); err != nil {
 		t.Fatalf("a legacy config was refused instead of migrated: %v", err)
 	}
-	if opts.endpoint != "http://box:1111" || opts.apiKey != "sk-secret" || opts.model != "qwen" {
-		t.Errorf("upstream = %q/%q/%q; want the migrated entry's values", opts.endpoint, opts.apiKey, opts.model)
+	if opts.Endpoint != "http://box:1111" || opts.APIKey != "sk-secret" || opts.Model != "qwen" {
+		t.Errorf("upstream = %q/%q/%q; want the migrated entry's values", opts.Endpoint, opts.APIKey, opts.Model)
 	}
-	if opts.hostAlias != "the-box" || opts.startupServer != "the-box" {
-		t.Errorf("alias/startup server = %q/%q; want %q for both", opts.hostAlias, opts.startupServer, "the-box")
+	if opts.HostAlias != "the-box" || opts.StartupServer != "the-box" {
+		t.Errorf("alias/startup server = %q/%q; want %q for both", opts.HostAlias, opts.StartupServer, "the-box")
 	}
-	if opts.startupEphemeral {
+	if opts.StartupEphemeral {
 		t.Error("the migrated entry was taken for an ephemeral override; it is a configured entry")
 	}
 	if len(notes) != 1 || !strings.Contains(notes[0], "migrated") {
 		t.Errorf("startup notices = %q; want exactly the one migration line", notes)
 	}
 	// And the second launch reads the migrated file back without migrating anything again.
-	second := options{configDir: home}
-	if err := applyConfig(&second, func(string) bool { return false }, func(string) string { return "" },
+	second := Options{ConfigDir: home}
+	if err := ApplyConfig(&second, func(string) bool { return false }, func(string) string { return "" },
 		os.ReadFile, func(msg string) { t.Errorf("the second launch announced %q", msg) }); err != nil {
 		t.Fatalf("the migrated config was refused on the next launch: %v", err)
 	}
-	if second.endpoint != opts.endpoint || second.startupServer != opts.startupServer {
+	if second.Endpoint != opts.Endpoint || second.StartupServer != opts.StartupServer {
 		t.Errorf("the second launch resolved %q/%q; want the first launch's %q/%q",
-			second.endpoint, second.startupServer, opts.endpoint, opts.startupServer)
+			second.Endpoint, second.StartupServer, opts.Endpoint, opts.StartupServer)
 	}
 }

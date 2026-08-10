@@ -13,6 +13,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/mechanisms"
@@ -94,7 +96,7 @@ var runOnce = run.Once
 // later beat to widen on, so it asks once and takes what comes.
 //
 // It never reports an error. A server without /props, an unreachable one, a cancelled context — all
-// of them are "nothing observed", which is 0, which resolveParallelAgents turns into the serial floor
+// of them are "nothing observed", which is 0, which ResolveParallelAgents turns into the serial floor
 // a run with no signal has always had. Failing a prompt over a number nobody configured would be a
 // worse answer than running it one delegation at a time.
 var discoverSlots = func(ctx context.Context, endpoint, model, apiKey string) int {
@@ -123,7 +125,7 @@ var errHeadlessNoPrompt = errors.New(
 // state carried between runs. What is left for the CLI is exactly what a CLI owns: which prompt,
 // which binding, which mode, whether to save, and what the shell learns from the exit status.
 func newHeadlessCommand() *cobra.Command {
-	var opts options
+	var opts config.Options
 	var noSave bool
 
 	cmd := &cobra.Command{
@@ -168,13 +170,13 @@ func newHeadlessCommand() *cobra.Command {
 	})
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.endpoint, "endpoint", "", "OpenAI-compatible LLM server URL")
-	flags.StringVar(&opts.model, "model", "", "model name to request (default: the configured model)")
-	flags.StringVar(&opts.mode, "mode", string(modePlan),
+	flags.StringVar(&opts.Endpoint, "endpoint", "", "OpenAI-compatible LLM server URL")
+	flags.StringVar(&opts.Model, "model", "", "model name to request (default: the configured model)")
+	flags.StringVar(&opts.Mode, "mode", string(domain.ModePlan),
 		"autonomy mode for the run: plan | auto (an unattended run has nobody to ask)")
-	flags.StringVar(&opts.workspace, "workspace", "",
+	flags.StringVar(&opts.Workspace, "workspace", "",
 		"workspace root the file tools are scoped to (default: current directory)")
-	flags.StringVar(&opts.configDir, "config", "",
+	flags.StringVar(&opts.ConfigDir, "config", "",
 		"apogee home directory for config/library/sessions (default: ~/.apogee)")
 	flags.BoolVar(&noSave, "no-save", false,
 		"run the prompt and print the answer, but record no session")
@@ -203,7 +205,7 @@ func headlessArgs(cmd *cobra.Command, args []string) error {
 // system prompt keys on the model — ADR 0023 — and so does the validated Mechanism set — ADR
 // 0016), the delegates that assume a human are left nil for run.Once to pin, and no MCP tools are
 // wired at all.
-func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) error {
+func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave bool) error {
 	// Before anything is resolved or constructed: with no prompt there is no run to configure.
 	prompt, err := resolveHeadlessPrompt(args, cmd.InOrStdin())
 	if err != nil {
@@ -212,31 +214,31 @@ func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) 
 
 	// The same resolution a session performs (flag > env > file > default), so a headless run
 	// talks to the server, and runs with the Mechanisms, a session on this host would.
-	if err := applyConfig(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
+	if err := config.ApplyConfig(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
 		return notStarted(err)
 	}
-	// This command's own BOTTOM layer is plan. applyConfig's is the interactive ladder's
+	// This command's own BOTTOM layer is plan. ApplyConfig's is the interactive ladder's
 	// ask-before — a mode that consults a human — so leaving it in place would make the bare
 	// `apogee headless "..."` a refusal on any host that has not spelled a mode out. An explicit
 	// --mode still wins (it is refused below, loudly, if it names a mode with nobody to ask), and
 	// so does an APOGEE_MODE or a `mode:` naming plan or auto.
-	if !cmd.Flags().Changed("mode") && opts.mode == string(modeAskBefore) {
-		opts.mode = string(modePlan)
+	if !cmd.Flags().Changed("mode") && opts.Mode == string(domain.ModeAskBefore) {
+		opts.Mode = string(domain.ModePlan)
 	}
-	mode, err := parseMode(opts.mode)
+	mode, err := domain.ParseMode(opts.Mode)
 	if err != nil {
 		return notStarted(err)
 	}
 	// The refusal happens HERE, before a Confiner is built or a model is bound: run.Once's own
 	// ErrMode is the library's backstop, and a CLI that let the composition run first would spend
 	// the work only to report a decision it could have made from the flag alone.
-	if mode != modePlan && mode != modeAuto {
+	if mode != domain.ModePlan && mode != domain.ModeAuto {
 		return notStarted(fmt.Errorf(
 			"apogee headless: --mode %s consults a human and an unattended run has none "+
 				"(use --mode plan or --mode auto)", mode))
 	}
 
-	roots, err := resolveRoots(opts.configDir, opts.workspace)
+	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
 	if err != nil {
 		return notStarted(err)
 	}
@@ -266,9 +268,9 @@ func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) 
 	// name that fails loudly at every write — after the model has been paid for the attempt. The
 	// refusal happens before the Config is composed for that reason: nothing is sent, and exit 2
 	// tells the script this is an invocation to fix rather than an outcome to read.
-	if mode == modeAuto {
+	if mode == domain.ModeAuto {
 		if blocked := autoUnattendedBlocked(
-			"a headless run", probe.BackendName(confiner), confiner.Capabilities(), opts.confineToWorkspace); blocked != "" {
+			"a headless run", probe.BackendName(confiner), confiner.Capabilities(), opts.ConfineToWorkspace); blocked != "" {
 			return notStarted(fmt.Errorf(
 				"apogee headless: --mode auto cannot run on this host — %s (use --mode plan, or "+
 					"run unconfined with `confine-to-workspace: false` in ~/.apogee/config.yaml, "+
@@ -278,7 +280,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) 
 		// acknowledgement. That is not blocked — a headless run is never held to a stricter bar
 		// than a launch — but it is the one blanket loosen in the system, so it says so, in the
 		// launch's own words and on stderr, where it cannot contaminate the answer.
-		if !opts.confineToWorkspace {
+		if !opts.ConfineToWorkspace {
 			cmd.PrintErrln(unconfinedAutoWarning)
 		}
 		// probe.DegradedNotice is deliberately NOT printed here, though runRoot prints it at this
@@ -292,7 +294,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) 
 	// Every `mechanisms:` key is validated here — enabled AND disabled — exactly as startup
 	// validates them: the engine only ever sees the enabled IDs, so a typo'd disabled key would
 	// otherwise never be reported at all (ADR 0015 §1).
-	manualIDs, err := mechanismIDs(opts.mechanisms, mechanisms.KnownIDs())
+	manualIDs, err := mechanismIDs(opts.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
 		return notStarted(err)
 	}
@@ -301,7 +303,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) 
 	// rule applied. The observed window is passed as unknown — nothing beats here to observe one —
 	// so a `context-window:` pin binds the Budget and an unpinned run leaves it inactive, which
 	// for one bounded prompt is the honest degrade rather than a guess.
-	spec, notices, err := rebindSpecFor(*opts, roots, manualIDs, opts.model, 0, opts.contextWindow)
+	spec, notices, err := rebindSpecFor(*opts, roots, manualIDs, opts.Model, 0, opts.ContextWindow)
 	if err != nil {
 		return notStarted(err)
 	}
@@ -310,11 +312,11 @@ func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) 
 	}
 
 	cfg := apogee.Config{
-		Endpoint:     opts.endpoint,
+		Endpoint:     opts.Endpoint,
 		Model:        spec.Model,
-		APIKey:       opts.apiKey,
+		APIKey:       opts.APIKey,
 		Mode:         mode,
-		Bypass:       opts.bypass,
+		Bypass:       opts.Bypass,
 		ConfigDir:    roots.config,
 		LibraryDir:   roots.library,
 		SessionsDir:  roots.sessions,
@@ -323,24 +325,24 @@ func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) 
 		// an Auto session would be. Whether this host may run Auto unattended at all is the
 		// eligibility gate, which belongs to the surface that offers the mode.
 		Confiner:           confiner,
-		ConfineToWorkspace: opts.confineToWorkspace,
-		WebSearchEndpoint:  opts.webSearchEndpoint,
+		ConfineToWorkspace: opts.ConfineToWorkspace,
+		WebSearchEndpoint:  opts.WebSearchEndpoint,
 		// The `tools.disabled:` roster switch, honoured here for the reason every other file-only
 		// key is: it is one configuration, and a headless run of it must offer the model the same
 		// tools an interactive session would.
-		DisabledTools: opts.toolsDisabled,
-		Profile:       opts.profile,
+		DisabledTools: opts.ToolsDisabled,
+		Profile:       opts.Profile,
 		SystemPrompt:  spec.SystemPrompt,
-		ContextFiles:  opts.contextFiles,
+		ContextFiles:  opts.ContextFiles,
 		Skills: skills.NewProvider(skills.Sources{
 			Home:             roots.config,
 			Workspace:        roots.workspace,
-			UseProjectSkills: opts.useProjectSkills,
+			UseProjectSkills: opts.UseProjectSkills,
 		}),
 		EnableMechanisms: spec.EnableMechanisms,
 		Context: apogee.ContextConfig{
 			MaxContextTokens:  spec.MaxContextTokens,
-			CompactionEnabled: opts.autoCompact,
+			CompactionEnabled: opts.AutoCompact,
 		},
 		// Tools stays nil: a headless run reaches no external MCP server (the Firing posture,
 		// ADR 0034), so the engine builds its own registry. Events, Approver, Asker and Presenter
@@ -354,15 +356,15 @@ func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) 
 	// off the startup entry the way every other per-entry fact is; the discovery half is the one-shot
 	// probe above, standing in for the beat an unattended run does not have.
 	//
-	// A pin skips the probe outright. resolveParallelAgents never lets discovery overrule a pin, so
+	// A pin skips the probe outright. ResolveParallelAgents never lets discovery overrule a pin, so
 	// the round trip could not change the answer — it could only spend an unattended run's latency on
 	// a question already settled.
 	pin := startupEntry(*opts).ParallelAgents
 	slots := 0
 	if pin < 1 {
-		slots = discoverSlots(cmd.Context(), opts.endpoint, spec.Model, opts.apiKey)
+		slots = discoverSlots(cmd.Context(), opts.Endpoint, spec.Model, opts.APIKey)
 	}
-	cfg.ParallelAgents = resolveParallelAgents(pin, slots)
+	cfg.ParallelAgents = config.ResolveParallelAgents(pin, slots)
 
 	// The store the record lands in: the shared sessions store, so a headless run is browsable in
 	// /sessions beside the conversations it ran beside. --no-save leaves it nil, which is

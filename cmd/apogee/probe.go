@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 )
@@ -55,7 +56,7 @@ func newProbeCommand() *cobra.Command {
 // subcommand declares what it needs), and --mode/--bypass/--resume would be noise on a command
 // that starts no session.
 func probeHostCommand(use, short, long string) *cobra.Command {
-	var opts options
+	var opts config.Options
 
 	cmd := &cobra.Command{
 		Use:           use,
@@ -70,10 +71,10 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 			// confine-to-workspace reported below is the one Auto would actually run with here
 			// (ADR 0012's 2026-07-21 amendment), not what the file literally says. It reads
 			// only; unlike the root's RunE, no starter config is seeded.
-			if err := applyConfig(&opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
+			if err := config.ApplyConfig(&opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
 				return err
 			}
-			roots, err := resolveRoots(opts.configDir, opts.workspace)
+			roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
 			if err != nil {
 				return err
 			}
@@ -101,14 +102,14 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 				HostID:     platform.HostID(),
 				Workspace:  roots.workspace,
 				ConfigHome: roots.config,
-				Endpoint:   opts.endpoint,
+				Endpoint:   opts.Endpoint,
 				// The resolved bearer token (the startup `servers:` entry's own `api-key`,
 				// which APOGEE_API_KEY overlays; no flag): the
 				// probe must authenticate exactly as a session would, or a keyed server
 				// would be reported unreachable here and perfectly fine in a session. The
 				// report states its PRESENCE only; the value never reaches Host.
-				APIKey:             opts.apiKey,
-				ConfineToWorkspace: opts.confineToWorkspace,
+				APIKey:             opts.APIKey,
+				ConfineToWorkspace: opts.ConfineToWorkspace,
 				Residue:            residue,
 			})
 			// The report is this command's PRODUCT, so it goes to real stdout: Cobra's whole
@@ -123,10 +124,10 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.endpoint, "endpoint", "", "OpenAI-compatible LLM server URL to probe")
-	flags.StringVar(&opts.workspace, "workspace", "",
+	flags.StringVar(&opts.Endpoint, "endpoint", "", "OpenAI-compatible LLM server URL to probe")
+	flags.StringVar(&opts.Workspace, "workspace", "",
 		"workspace root to report (default: current directory)")
-	flags.StringVar(&opts.configDir, "config", "",
+	flags.StringVar(&opts.ConfigDir, "config", "",
 		"apogee home directory for config/library/sessions (default: ~/.apogee)")
 
 	return cmd

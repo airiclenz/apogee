@@ -17,8 +17,8 @@ Status: accepted
 ## Context
 
 `~/.apogee/config.yaml` is a **documented, hand-edited document the user owns**: seeded once from
-the embedded template (`cmd/apogee/defaults/config.yaml`) and never overwritten again — an
-invariant pinned by a test (`cmd/apogee/defaults_test.go:45`) and restated as a promise in the
+the embedded template (`internal/config/defaults/config.yaml`) and never overwritten again — an
+invariant pinned by a test (`internal/config/defaults_test.go:45`) and restated as a promise in the
 README ("an upgrade never touches it") and in
 [ADR 0023](0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) §8. Two more
 records draw the same line from the other side:
@@ -30,7 +30,7 @@ distinct affirmative user act; [ADR 0021](0021-probe-is-two-halves-the-host-repo
 
 Against that, the config surface has outgrown a text editor: roughly forty leaf keys across three
 resolution sources (flag over `APOGEE_*` env over file over built-in default), a schema whose
-source metadata lives as parallel string literals inside `resolveSettings` (`cmd/apogee/config.go`),
+source metadata lives as parallel string literals inside `resolveSettings` (`internal/config/config.go`),
 and a file that — because seeding never re-runs — is missing every key added after the day it was
 written. `ISSUES.md` carried the request ("a full screen menu for all available settings when
 running the slash command `/settings`. This needs grilling."). A 2026-08-05 grill settled that

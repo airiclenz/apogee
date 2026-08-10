@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/title"
 )
@@ -380,12 +381,12 @@ func TestRunRootWiresTheTitleSeam(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			rec := &recordingLauncher{}
-			opts := options{
-				endpoint:  "http://127.0.0.1:1111",
-				model:     "fake",
-				mode:      "ask-before",
-				workspace: t.TempDir(),
-				autoTitle: tc.autoTitle,
+			opts := config.Options{
+				Endpoint:  "http://127.0.0.1:1111",
+				Model:     "fake",
+				Mode:      "ask-before",
+				Workspace: t.TempDir(),
+				AutoTitle: tc.autoTitle,
 			}
 
 			if err := runRoot(context.Background(), opts, rec.launch); err != nil {

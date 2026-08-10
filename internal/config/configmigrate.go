@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"errors"
@@ -115,13 +115,13 @@ func migrateLegacyConfig(path string, data []byte, now time.Time) ([]byte, strin
 // either collide with that entry or silently rename this one). A file that already sets `server:`
 // is refused for the same reason: the pointer this writes would replace a startup choice the user
 // made deliberately.
-func foldLegacyKeys(data []byte, lc legacyFileConfig) ([]byte, serverEntry, error) {
+func foldLegacyKeys(data []byte, lc legacyFileConfig) ([]byte, ServerEntry, error) {
 	var before fileConfig
 	if err := yaml.Unmarshal(data, &before); err != nil {
-		return nil, serverEntry{}, fmt.Errorf("the rest of it does not parse into settings apogee can "+
+		return nil, ServerEntry{}, fmt.Errorf("the rest of it does not parse into settings apogee can "+
 			"read (%v)", err)
 	}
-	entry := serverEntry{
+	entry := ServerEntry{
 		Name:     lc.name(),
 		Endpoint: strings.TrimSpace(lc.Endpoint),
 		APIKey:   strings.TrimSpace(lc.APIKey),
@@ -131,7 +131,7 @@ func foldLegacyKeys(data []byte, lc legacyFileConfig) ([]byte, serverEntry, erro
 	case entry.Endpoint == "":
 		return nil, entry, errors.New("there is no endpoint: among them, and a server is its endpoint — " +
 			"the entry they would fold into could never be talked to")
-	case slices.ContainsFunc(before.Servers, func(s serverEntry) bool { return s.Name == entry.Name }):
+	case slices.ContainsFunc(before.Servers, func(s ServerEntry) bool { return s.Name == entry.Name }):
 		return nil, entry, fmt.Errorf("its servers: list already has an entry called %q, and one name names "+
 			"one server", entry.Name)
 	case strings.TrimSpace(before.Server) != "":
@@ -139,7 +139,7 @@ func foldLegacyKeys(data []byte, lc legacyFileConfig) ([]byte, serverEntry, erro
 			"repoint at the migrated entry", before.Server)
 	}
 
-	doc, err := configDocument(data)
+	doc, err := Document(data)
 	if err != nil {
 		return nil, entry, err
 	}
@@ -150,7 +150,7 @@ func foldLegacyKeys(data []byte, lc legacyFileConfig) ([]byte, serverEntry, erro
 	if root == nil {
 		return nil, entry, errors.New("it holds no settings at all, so the keys are not where the parser found them")
 	}
-	lines := splitConfigLines(data)
+	lines := SplitConfigLines(data)
 	drop, err := legacyKeyLines(root, lines)
 	if err != nil {
 		return nil, entry, err
@@ -165,7 +165,7 @@ func foldLegacyKeys(data []byte, lc legacyFileConfig) ([]byte, serverEntry, erro
 	}
 	// The pointer rides the ordinary scalar writer: it is one `server: <name>` line, which is
 	// exactly what that writer places (below the key's commented example, ADR 0035) and verifies.
-	k, ok := lookupKey(serverKey)
+	k, ok := LookupKey(serverKey)
 	if !ok {
 		return nil, entry, errors.New("apogee has no server: setting to point at the entry")
 	}
@@ -187,7 +187,7 @@ func foldLegacyKeys(data []byte, lc legacyFileConfig) ([]byte, serverEntry, erro
 // this entry with `server:` naming it, and must agree with the original on every OTHER setting. It
 // is the whole-file statement of "the original with exactly the quadruple folded" — the two splices
 // that produced it each verified their own step, and this asks the question of their composition.
-func verifyFold(data, updated []byte, entry serverEntry) error {
+func verifyFold(data, updated []byte, entry ServerEntry) error {
 	var before, after fileConfig
 	if err := yaml.Unmarshal(data, &before); err != nil {
 		return err
@@ -214,7 +214,7 @@ func verifyFold(data, updated []byte, entry serverEntry) error {
 
 // serversAppended reports whether after is exactly before plus entry, appended last — the only
 // shape the fold may produce (hostsAppended's rule, one list over).
-func serversAppended(before, after []serverEntry, entry serverEntry) bool {
+func serversAppended(before, after []ServerEntry, entry ServerEntry) bool {
 	return len(after) == len(before)+1 &&
 		slices.Equal(before, after[:len(before)]) &&
 		after[len(after)-1] == entry
@@ -234,7 +234,7 @@ func legacyKeyLines(root *yaml.Node, lines []string) ([]int, error) {
 		if keyNode == nil {
 			continue
 		}
-		t := scalarTarget{key: legacy.name, keyNode: keyNode, valueNode: valueNode}
+		t := ScalarTarget{Key: legacy.name, KeyNode: keyNode, ValueNode: valueNode}
 		if _, _, _, err := scalarLineParts(lines, t); err != nil {
 			return nil, err
 		}
@@ -255,7 +255,7 @@ func legacyKeyLines(root *yaml.Node, lines []string) ([]int, error) {
 // The example is measured to its END (commentedExampleBlockEnd, the same call a nested key's absent
 // block makes) because a `servers:` example is several lines of commented list: landing the real
 // block after the example's first line would wedge it into the middle of its own documentation.
-func serversInsertion(root *yaml.Node, lines []string, entry serverEntry) ([]string, int, error) {
+func serversInsertion(root *yaml.Node, lines []string, entry ServerEntry) ([]string, int, error) {
 	keyNode, value := mappingEntry(root, serversKey)
 	switch {
 	case keyNode == nil:
@@ -291,9 +291,9 @@ func serversInsertion(root *yaml.Node, lines []string, entry serverEntry) ([]str
 // renderServerEntry renders the entry as one list item through the YAML marshaller — which owns the
 // quoting, so no endpoint or api key can smuggle a syntax break into the file — indented to the
 // given column. The optional fields are omitted when the legacy config did not set them
-// (serverEntry's omitempty tags), so the migrated entry says exactly what the four keys said.
-func renderServerEntry(entry serverEntry, indent int) ([]string, error) {
-	out, err := yaml.Marshal([]serverEntry{entry})
+// (ServerEntry's omitempty tags), so the migrated entry says exactly what the four keys said.
+func renderServerEntry(entry ServerEntry, indent int) ([]string, error) {
+	out, err := yaml.Marshal([]ServerEntry{entry})
 	if err != nil {
 		return nil, fmt.Errorf("render the migrated server entry: %w", err)
 	}
@@ -367,7 +367,7 @@ func backUpConfig(path string, data []byte, now time.Time) (string, error) {
 // what the entry they became is called, and where the file as it was is kept. It is the user's
 // only notice that a file they own was rewritten, so it names the backup in full — that is the
 // path they need if they disagree with any of it.
-func migrationNote(path, backup string, entry serverEntry, lc legacyFileConfig) string {
+func migrationNote(path, backup string, entry ServerEntry, lc legacyFileConfig) string {
 	var moved []string
 	for _, legacy := range legacyKeys {
 		if strings.TrimSpace(legacy.value(lc)) != "" {
@@ -396,7 +396,7 @@ func legacyRefusal(path string, lc legacyFileConfig, why error) error {
 //
 // The launcher used to be one global setting: a top-level `llama-launcher:` key that turned the
 // integration on for the whole session, whatever server it was talking to. It now belongs to the
-// `servers:` entry the launcher fronts (serverEntry.LlamaLauncher), so /model offers launch
+// `servers:` entry the launcher fronts (ServerEntry.LlamaLauncher), so /model offers launch
 // profiles only while the session is ON that server and every other entry keeps the models it
 // advertises.
 //
@@ -407,7 +407,7 @@ func legacyRefusal(path string, lc legacyFileConfig, why error) error {
 // would answer "not configured" on a machine whose config still asks for them (ADR 0036's
 // refusal-over-silence posture, one key over).
 
-// retiredLauncherKey is that key, spelled as the retired schema spelled it — and as serverEntry
+// retiredLauncherKey is that key, spelled as the retired schema spelled it — and as ServerEntry
 // tags it one level down, which is the whole of what changed.
 const retiredLauncherKey = "llama-launcher"
 
@@ -439,7 +439,7 @@ func refuseRetiredLauncherKey(path string, data []byte) error {
 		where = fmt.Sprintf(" on line %d", line)
 	}
 	// `off` was the old key's disabled spelling, and the per-entry key has no such value: absent IS
-	// the off state (validateServers refuses one). So that config's fix is the deletion alone —
+	// the off state (ValidateServers refuses one). So that config's fix is the deletion alone —
 	// pasting the value back would hand the user a config the next launch refuses.
 	if strings.EqualFold(value, "off") {
 		return fmt.Errorf("apogee: %s still sets the retired top-level llama-launcher: key%s — the "+
@@ -465,7 +465,7 @@ func refuseRetiredLauncherKey(path string, data []byte) error {
 // with 0 for "the line cannot be named". Only the line is lost to the fallback; whether the key is
 // set decides a refusal, and that must not depend on the shape of the rest of the file.
 func retiredLauncherSetting(data []byte) (value string, line int, set bool) {
-	if doc, err := configDocument(data); err == nil {
+	if doc, err := Document(data); err == nil {
 		if root, err := rootMapping(doc); err == nil && root != nil {
 			keyNode, valueNode := mappingEntry(root, retiredLauncherKey)
 			if keyNode == nil {
@@ -497,7 +497,7 @@ func launcherEntryBlock(value string) string {
 	if value == "" {
 		value = "auto"
 	}
-	entry := serverEntry{Name: "workstation", Endpoint: "http://192.168.64.1:1111", LlamaLauncher: value}
+	entry := ServerEntry{Name: "workstation", Endpoint: "http://192.168.64.1:1111", LlamaLauncher: value}
 	item, err := renderServerEntry(entry, listIndent)
 	if err != nil {
 		// Three strings cannot fail to marshal; if they ever do, the refusal still has to say what

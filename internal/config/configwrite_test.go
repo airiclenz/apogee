@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -68,7 +68,7 @@ func TestSaveHostAcknowledgement_SeedsAbsentConfigThenAppends(t *testing.T) {
 	if written != path {
 		t.Errorf("written path = %q, want %q", written, path)
 	}
-	want := unconfinedHost{ID: savedHostID, Acknowledged: "2026-07-21", Note: hostAcknowledgementNote}
+	want := UnconfinedHost{ID: savedHostID, Acknowledged: "2026-07-21", Note: hostAcknowledgementNote}
 	if entry != want {
 		t.Errorf("entry = %+v, want %+v", entry, want)
 	}
@@ -350,7 +350,7 @@ func TestHostAcknowledgementSaver(t *testing.T) {
 	t.Parallel()
 	path := writeTestConfig(t, "model: qwen2.5-coder\n")
 
-	written, err := hostAcknowledgementSaver(path, savedHostID)()
+	written, err := HostAcknowledgementSaver(path, savedHostID)()
 	if err != nil {
 		t.Fatalf("saver: %v", err)
 	}

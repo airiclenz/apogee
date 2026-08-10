@@ -10,6 +10,7 @@ import (
 	"context"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/session"
 )
@@ -17,19 +18,19 @@ import (
 // startupEntry re-assembles the server selection resolved (ADR 0036) from the flattened fields it
 // left on options: the endpoint, the key, the discovery hint, the fan-out pin, and the alias —
 // which for a configured entry IS its `servers:` name and for the ephemeral override entry is the
-// endpoint's host. It exists so the bind step below has ONE input shape, the serverEntry, whether it
+// endpoint's host. It exists so the bind step below has ONE input shape, the ServerEntry, whether it
 // is binding the startup server or the one a human picked out of the list.
-func startupEntry(opts options) serverEntry {
-	return serverEntry{
-		Name:           opts.hostAlias,
-		Endpoint:       opts.endpoint,
-		APIKey:         opts.apiKey,
-		Model:          opts.model,
-		ParallelAgents: opts.startupParallelAgents,
+func startupEntry(opts config.Options) config.ServerEntry {
+	return config.ServerEntry{
+		Name:           opts.HostAlias,
+		Endpoint:       opts.Endpoint,
+		APIKey:         opts.APIKey,
+		Model:          opts.Model,
+		ParallelAgents: opts.StartupParallelAgents,
 	}
 }
 
-// serverBinder is the one step that turns a serverEntry into a running session: the Agent
+// serverBinder is the one step that turns a ServerEntry into a running session: the Agent
 // constructed against that server, the Monitor that observes it, and the binding the out-of-band
 // calls (naming, Firings) read. It is a step rather than inline wiring because it now runs at two
 // different times — before the TUI starts when a startup server was determined, and on the human's
@@ -61,7 +62,7 @@ type serverBinder struct {
 // A second bind is refused before anything is constructed (lateEngine.Bind), because the holder can
 // only release one Agent at shutdown: a session that already has an engine moves with
 // sessionMover.move, which switches the one it has.
-func (b serverBinder) bind(entry serverEntry) error {
+func (b serverBinder) bind(entry config.ServerEntry) error {
 	cfg := b.cfg
 	cfg.Endpoint = entry.Endpoint
 	cfg.Model = entry.Model
@@ -94,7 +95,7 @@ func (b serverBinder) bind(entry serverEntry) error {
 // done (a quit, which must not leave a goroutine parked on a channel until teardown reaches the
 // watcher), or the watch itself has been stopped and closed its channel. Either way there will never
 // be another report, and the chain retires.
-func awaitConfigChangeOn(w *configWatcher) func(context.Context) bool {
+func awaitConfigChangeOn(w *config.Watcher) func(context.Context) bool {
 	return func(ctx context.Context) bool {
 		select {
 		case <-ctx.Done():

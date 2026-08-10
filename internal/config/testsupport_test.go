@@ -1,8 +1,12 @@
-package main
+package config
 
-// Shared test fixtures for the cmd/apogee suite: the apogee-home builders and assertions that
+// Shared test fixtures for the internal/config suite: the apogee-home builders and assertions that
 // more than one test file leans on. They live here rather than in any one subject's test file so
 // no file owns another file's scaffolding.
+//
+// The cmd/apogee suite carries its own copy of the same handful of builders (testsupport_test.go
+// there): a _test.go file is not importable, and both suites have to write a valid apogee home to
+// say anything at all since ADR 0036 made the `servers:` block the single definition of an upstream.
 
 import (
 	"os"
@@ -74,22 +78,4 @@ func assertHomeHoldsOnlyConfig(t *testing.T, home, what string) {
 			t.Errorf("%s wrote %q into the apogee home; it must write nothing", what, e.Name())
 		}
 	}
-}
-
-// upstreamHome writes an apogee home whose ONE configured server is endpoint — with the first
-// modelHint, if any, as that server's discovery hint — and returns the home. Since ADR 0036 the
-// `servers:` list is the single definition of what a command can talk to, so this is how a test
-// points a command at its own httptest upstream.
-func upstreamHome(t *testing.T, endpoint string, modelHint ...string) string {
-	t.Helper()
-	entry := "servers:\n  - name: probe-target\n    endpoint: " + endpoint + "\n"
-	if len(modelHint) > 0 && modelHint[0] != "" {
-		entry += "    model: " + modelHint[0] + "\n"
-	}
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"),
-		[]byte(entry+"server: probe-target\n"), 0o600); err != nil {
-		t.Fatalf("write config.yaml: %v", err)
-	}
-	return dir
 }

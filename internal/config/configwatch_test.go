@@ -1,4 +1,4 @@
-package main
+package config
 
 // The config file watcher (ADR 0041 decision 3): what counts as a change, how a save's burst of
 // writes becomes one report, and what Stop guarantees. Every test drives a real watcher over a real
@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// The cadence the tests run the watcher at. The settle window is generously wider than the interval
+// The cadence the tests run the watcher at. The Settle window is generously wider than the Interval
 // so that a burst of writes coalesces even on a loaded machine under -race, and the deadline is wide
 // enough that a missed report is a failure of the watcher rather than of the box it runs on.
 const (
@@ -23,11 +23,11 @@ const (
 )
 
 // startConfigWatcher starts a watcher over path at the test cadence and stops it with the test.
-func startConfigWatcher(t *testing.T, path string) *configWatcher {
+func startConfigWatcher(t *testing.T, path string) *Watcher {
 	t.Helper()
-	w := newConfigWatcher(path)
-	w.interval = configWatchTestInterval
-	w.settle = configWatchTestSettle
+	w := NewWatcher(path)
+	w.Interval = configWatchTestInterval
+	w.Settle = configWatchTestSettle
 	w.Start()
 	t.Cleanup(w.Stop)
 	return w
@@ -42,7 +42,7 @@ func writeWatchedFile(t *testing.T, path, content string) {
 }
 
 // awaitConfigChange waits for one report, failing the test with why if none arrives.
-func awaitConfigChange(t *testing.T, w *configWatcher, why string) {
+func awaitConfigChange(t *testing.T, w *Watcher, why string) {
 	t.Helper()
 	select {
 	case _, ok := <-w.Changes():
@@ -55,7 +55,7 @@ func awaitConfigChange(t *testing.T, w *configWatcher, why string) {
 }
 
 // expectNoConfigChange asserts that nothing is reported for the given window.
-func expectNoConfigChange(t *testing.T, w *configWatcher, window time.Duration, why string) {
+func expectNoConfigChange(t *testing.T, w *Watcher, window time.Duration, why string) {
 	t.Helper()
 	select {
 	case _, ok := <-w.Changes():
@@ -84,7 +84,7 @@ func TestConfigWatchReportsAWriteOnce(t *testing.T) {
 }
 
 // An editor saving is a burst — write, truncate, rename — and each of those is a distinct file state
-// a poll can land on. The settle delay exists so the burst is one apply, not three, the last two of
+// a poll can land on. The Settle delay exists so the burst is one apply, not three, the last two of
 // which would be against a half-written document.
 func TestConfigWatchCoalescesABurstIntoOneReport(t *testing.T) {
 	t.Parallel()
@@ -208,9 +208,9 @@ func TestConfigWatchStopReturnsWithNobodyDraining(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeWatchedFile(t, path, "auto-title: false\n")
 
-	w := newConfigWatcher(path)
-	w.interval = configWatchTestInterval
-	w.settle = configWatchTestSettle
+	w := NewWatcher(path)
+	w.Interval = configWatchTestInterval
+	w.Settle = configWatchTestSettle
 	w.Start()
 
 	writeWatchedFile(t, path, "auto-title: true\n# never read\n")

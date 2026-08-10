@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/validated"
 )
 
@@ -16,18 +17,18 @@ import (
 // testing against it also exercises exactly what a user's startup exercises.
 const gemmaKey = "gemma-4-e4b-it-qat"
 
-func baseOpts(model string) options {
-	return options{model: model, validatedSetsEnable: true}
+func baseOpts(model string) config.Options {
+	return config.Options{Model: model, ValidatedSetsEnable: true}
 }
 
 func TestResolveValidatedSet_OffSwitches(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
 		name string
-		opts options
+		opts config.Options
 	}{
-		{"bypass suppresses everything", options{model: gemmaKey, validatedSetsEnable: true, bypass: true}},
-		{"enable false suppresses everything", options{model: gemmaKey, validatedSetsEnable: false}},
+		{"bypass suppresses everything", config.Options{Model: gemmaKey, ValidatedSetsEnable: true, Bypass: true}},
+		{"enable false suppresses everything", config.Options{Model: gemmaKey, ValidatedSetsEnable: false}},
 		{"no model resolves nothing", baseOpts("")},
 		{"unknown model matches nothing", baseOpts("some-unknown-model")},
 	} {
@@ -61,7 +62,7 @@ func TestResolveValidatedSet_DirectLowMatchOffers(t *testing.T) {
 func TestResolveValidatedSet_IdentityAliasApplies(t *testing.T) {
 	t.Parallel()
 	opts := baseOpts(gemmaKey)
-	opts.validatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
+	opts.ValidatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
 
 	set, notices, err := resolveValidatedSet(opts, t.TempDir(), t.TempDir())
 	if err != nil {
@@ -84,8 +85,8 @@ func TestResolveValidatedSet_IdentityAliasApplies(t *testing.T) {
 func TestResolveValidatedSet_ManualControlSuppresses(t *testing.T) {
 	t.Parallel()
 	opts := baseOpts(gemmaKey)
-	opts.validatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
-	opts.mechanisms = map[string]bool{"validate": true} // any non-empty block = manual control
+	opts.ValidatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
+	opts.Mechanisms = map[string]bool{"validate": true} // any non-empty block = manual control
 
 	set, notices, err := resolveValidatedSet(opts, t.TempDir(), t.TempDir())
 	if err != nil {
@@ -102,7 +103,7 @@ func TestResolveValidatedSet_ManualControlSuppresses(t *testing.T) {
 func TestResolveValidatedSet_DanglingAliasIsLoud(t *testing.T) {
 	t.Parallel()
 	opts := baseOpts("my-model")
-	opts.validatedSetsAlias = map[string]string{"my-model": "no-such-entry"}
+	opts.ValidatedSetsAlias = map[string]string{"my-model": "no-such-entry"}
 
 	_, _, err := resolveValidatedSet(opts, t.TempDir(), t.TempDir())
 	var dangling *validated.DanglingAliasError
@@ -121,7 +122,7 @@ func TestResolveValidatedSet_UserEntryWinsAndSorts(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts := baseOpts(gemmaKey)
-	opts.validatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
+	opts.ValidatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
 
 	set, notices, err := resolveValidatedSet(opts, dir, t.TempDir())
 	if err != nil {
@@ -147,7 +148,7 @@ func TestResolveValidatedSet_DefectiveEntrySkipsSoft(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts := baseOpts("mystery-model")
-	opts.validatedSetsAlias = map[string]string{"mystery-model": "mystery-model"}
+	opts.ValidatedSetsAlias = map[string]string{"mystery-model": "mystery-model"}
 
 	set, notices, err := resolveValidatedSet(opts, dir, t.TempDir())
 	if err != nil {

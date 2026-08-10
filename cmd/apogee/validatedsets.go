@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/mechanisms"
@@ -84,13 +85,13 @@ type setDecision struct {
 //   - A non-empty explicit `mechanisms:` block means manual control: whatever matched, the
 //     set is not applied.
 //   - An applying entry is validated whole against the live catalogue; a defect skips it.
-func startupSetDecision(opts options, userDir, probeDir string) setDecision {
-	if opts.bypass || !opts.validatedSetsEnable {
-		return setDecision{kind: setSurfaceOff, bypass: opts.bypass}
+func startupSetDecision(opts config.Options, userDir, probeDir string) setDecision {
+	if opts.Bypass || !opts.ValidatedSetsEnable {
+		return setDecision{kind: setSurfaceOff, bypass: opts.Bypass}
 	}
 	fp := library.ResolveFingerprintFrom(library.Sources{
-		ModelID:  opts.model,
-		Endpoint: opts.endpoint,
+		ModelID:  opts.Model,
+		Endpoint: opts.Endpoint,
 		ProbeDir: probeDir,
 	})
 	if fp.IsZero() {
@@ -108,7 +109,7 @@ func startupSetDecision(opts options, userDir, probeDir string) setDecision {
 	entries, mergeWarns := validated.Merge(shipped, user)
 	out.loadNotices = append(out.loadNotices, append(warns, mergeWarns...)...)
 
-	match, err := validated.Match(fp.Label, fp.Confidence, opts.validatedSetsAlias, entries)
+	match, err := validated.Match(fp.Label, fp.Confidence, opts.ValidatedSetsAlias, entries)
 	if err != nil {
 		out.aliasErr = err
 		return out
@@ -117,7 +118,7 @@ func startupSetDecision(opts options, userDir, probeDir string) setDecision {
 
 	switch match.Kind {
 	case validated.KindApplied, validated.KindOffered:
-		if len(opts.mechanisms) > 0 {
+		if len(opts.Mechanisms) > 0 {
 			out.kind = setSuppressed
 			return out
 		}
@@ -151,7 +152,7 @@ func startupSetDecision(opts options, userDir, probeDir string) setDecision {
 //
 // The decision itself is startupSetDecision's; this function only renders it in the
 // startup voice and enacts the one applying case.
-func resolveValidatedSet(opts options, userDir, probeDir string) (set []apogee.MechanismID, notices []string, err error) {
+func resolveValidatedSet(opts config.Options, userDir, probeDir string) (set []apogee.MechanismID, notices []string, err error) {
 	d := startupSetDecision(opts, userDir, probeDir)
 	for _, w := range d.loadNotices {
 		notices = append(notices, "apogee: "+w)

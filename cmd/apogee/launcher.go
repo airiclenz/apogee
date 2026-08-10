@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/tui"
 	llamalauncher "github.com/airiclenz/llama-launcher/launcher"
 )
@@ -99,13 +100,13 @@ func (realLauncher) unload(backend, addr string) (*llamalauncher.StopResult, err
 	return llamalauncher.Unload(backend, addr)
 }
 
-// entryLauncherPath resolves a `servers:` entry's own `llama-launcher:` value (serverEntry) into the
+// entryLauncherPath resolves a `servers:` entry's own `llama-launcher:` value (ServerEntry) into the
 // one question the rest of the program asks — is the integration on for the session's server, and
 // which config file does it read. It lands HERE rather than in config resolution because only the
 // composition root knows the launcher, so only the root can ask where its default config lives.
 //
 //   - trimmed empty (the key absent) ⇒ off for that server. There is no `off` spelling to handle:
-//     validateServers refuses one, because absent already IS the off state.
+//     ValidateServers refuses one, because absent already IS the off state.
 //   - `auto` (any casing, surrounding space ignored — the sentinel posture the old key's `off` had)
 //     ⇒ the launcher's own default config path, taken VERBATIM: no os.Stat, no absoluteness check.
 //     The old empty-key auto-detect stat-gated because it lit up silently on any machine that
@@ -126,7 +127,7 @@ func entryLauncherPath(value string) (string, bool) {
 	if strings.EqualFold(v, "auto") {
 		return llamalauncher.DefaultConfigPath(), true
 	}
-	path, err := expandUserPath(v)
+	path, err := config.ExpandUserPath(v)
 	if err != nil {
 		// No home to expand against is not a reason to hide a configured integration: keep the
 		// value as written so the first verb fails naming the path the user typed.
@@ -183,7 +184,7 @@ func (p *launcherPath) set(path string) {
 // a Launch profile load can move the session too, possibly to an endpoint no entry names, and that
 // move must leave the integration as it found it — the session that just used the launcher still
 // has it. Routing the install through the entry rather than the move is what keeps the two apart.
-func (p *launcherPath) follow(entry serverEntry) {
+func (p *launcherPath) follow(entry config.ServerEntry) {
 	path, _ := entryLauncherPath(entry.LlamaLauncher)
 	p.set(path)
 }

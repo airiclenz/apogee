@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -69,16 +69,16 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 	if err := os.WriteFile(path, defaultConfigYAML, 0o600); err != nil {
 		t.Fatalf("write embedded: %v", err)
 	}
-	l, err := loadFileConfig(path, os.ReadFile, noNotify)
+	l, err := LoadFileConfig(path, os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("embedded default config does not parse: %v", err)
 	}
 
 	// The one active key: an inline global prompt, no file, no per-model entries.
-	if l.systemPrompt == nil {
+	if l.SystemPrompt == nil {
 		t.Fatal("embedded default config carries no system prompt; the shipped default must be active")
 	}
-	text := l.systemPrompt.global.text
+	text := l.SystemPrompt.Global.Text
 	for _, want := range []string{
 		"You are apogee",
 		prompt.PlaceholderWorkspace,
@@ -89,26 +89,26 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 			t.Errorf("shipped system prompt does not contain %q:\n%s", want, text)
 		}
 	}
-	if l.systemPrompt.global.file != "" {
+	if l.SystemPrompt.Global.File != "" {
 		t.Errorf("shipped system-prompt-file = %q; want empty — the file key stays a commented example",
-			l.systemPrompt.global.file)
+			l.SystemPrompt.Global.File)
 	}
-	if l.systemPrompt.models != nil {
+	if l.SystemPrompt.Models != nil {
 		t.Errorf("shipped system-prompt-models = %+v; want none — the per-model block stays a commented example",
-			l.systemPrompt.models)
+			l.SystemPrompt.Models)
 	}
 
 	// The shipped prompt must survive both gates a user's own prompt faces.
 	if err := prompt.Validate(text); err != nil {
 		t.Errorf("shipped system prompt fails prompt.Validate: %v", err)
 	}
-	if err := l.systemPrompt.validate(); err != nil {
+	if err := l.SystemPrompt.Validate(); err != nil {
 		t.Errorf("shipped system-prompt block fails validate: %v", err)
 	}
 
 	// Everything else still parses to nothing — the surviving half of the old invariant.
-	l.systemPrompt = nil
-	if !reflect.DeepEqual(l, layer{}) {
+	l.SystemPrompt = nil
+	if !reflect.DeepEqual(l, Layer{}) {
 		t.Errorf("embedded default config sets values beyond the system prompt: %+v", l)
 	}
 }
@@ -141,7 +141,7 @@ func TestEmbeddedDefaultConfigDocumentsTheAPIKey(t *testing.T) {
 // and a second example of either surviving key would leave the writer with no one place to write.
 func TestEmbeddedDefaultConfigTeachesTheServersSchema(t *testing.T) {
 	t.Parallel()
-	lines := splitConfigLines(defaultConfigYAML)
+	lines := SplitConfigLines(defaultConfigYAML)
 	retired := map[string]bool{"endpoint": true, "api-key": true, "host-alias": true, "model": true}
 	for i, line := range lines {
 		indent, name, ok := commentedKey(line)
@@ -149,9 +149,9 @@ func TestEmbeddedDefaultConfigTeachesTheServersSchema(t *testing.T) {
 			t.Errorf("line %d still offers the retired top-level %s: — %q", i+1, name, line)
 		}
 	}
-	// Each surviving key is documented exactly once (commentedExampleLine refuses a second one),
+	// Each surviving key is documented exactly once (CommentedExampleLine refuses a second one),
 	// and the line it reports is where a first write of that key lands.
-	at, err := commentedExampleLine(lines, "server")
+	at, err := CommentedExampleLine(lines, "server")
 	if err != nil || at == 0 {
 		t.Fatalf("the template documents no single `# server:` example (line %d, err %v); a recorded "+
 			"choice would be appended at the end of the file instead", at, err)
@@ -167,16 +167,16 @@ func TestEmbeddedDefaultConfigTeachesTheServersSchema(t *testing.T) {
 	}
 }
 
-// seedDefaultConfig honours an explicit --config home and seeds the embedded template there.
+// SeedDefaultConfig honours an explicit --config home and seeds the embedded template there.
 func TestSeedDefaultConfigHonoursConfigFlag(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	flagSet := func(name string) bool { return name == "config" }
 	noEnv := func(string) string { return "" }
 
-	created, path, err := seedDefaultConfig(options{configDir: home}, flagSet, noEnv)
+	created, path, err := SeedDefaultConfig(Options{ConfigDir: home}, flagSet, noEnv)
 	if err != nil {
-		t.Fatalf("seedDefaultConfig: %v", err)
+		t.Fatalf("SeedDefaultConfig: %v", err)
 	}
 	if !created {
 		t.Fatal("created = false; want true on first run")
@@ -186,28 +186,28 @@ func TestSeedDefaultConfigHonoursConfigFlag(t *testing.T) {
 	}
 
 	// A second run finds the file and does not recreate it.
-	created2, _, err := seedDefaultConfig(options{configDir: home}, flagSet, noEnv)
+	created2, _, err := SeedDefaultConfig(Options{ConfigDir: home}, flagSet, noEnv)
 	if err != nil {
-		t.Fatalf("seedDefaultConfig (second run): %v", err)
+		t.Fatalf("SeedDefaultConfig (second run): %v", err)
 	}
 	if created2 {
 		t.Error("created = true on the second run; the existing config should be left alone")
 	}
 }
 
-// seedDefaultConfig honours APOGEE_CONFIG when --config is not set.
+// SeedDefaultConfig honours APOGEE_CONFIG when --config is not set.
 func TestSeedDefaultConfigHonoursConfigEnv(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	getenv := func(k string) string {
-		if k == envConfig {
+		if k == EnvConfig {
 			return home
 		}
 		return ""
 	}
-	created, path, err := seedDefaultConfig(options{}, func(string) bool { return false }, getenv)
+	created, path, err := SeedDefaultConfig(Options{}, func(string) bool { return false }, getenv)
 	if err != nil {
-		t.Fatalf("seedDefaultConfig: %v", err)
+		t.Fatalf("SeedDefaultConfig: %v", err)
 	}
 	if !created || filepath.Dir(path) != home {
 		t.Errorf("created=%v path=%q; want a new file under the APOGEE_CONFIG home %q", created, path, home)

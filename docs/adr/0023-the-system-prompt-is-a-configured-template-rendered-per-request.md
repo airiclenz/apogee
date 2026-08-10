@@ -130,7 +130,7 @@ summariser told "you are a coding agent, use tools" writes a worse summary
 draws the same line for the battery).
 
 **8. The shipped template goes one key ACTIVE, and that ends its "changes nothing" invariant.**
-`cmd/apogee/defaults/config.yaml` carries an uncommented `system-prompt-text:` — a ~5-line persona
+`internal/config/defaults/config.yaml` carries an uncommented `system-prompt-text:` — a ~5-line persona
 and context frame — so a **fresh install** gets a system prompt, while an **existing** seeded config
 (which `seedConfig` never overwrites) has no such key and keeps today's promptless behaviour byte
 for byte. There is deliberately **no compiled-in fallback**: the default lives in the file the user

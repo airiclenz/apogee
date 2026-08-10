@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -27,7 +28,7 @@ func TestRegistryIsBijectionWithFileConfig(t *testing.T) {
 	described := map[string]bool{}
 	walkSchema(t, reflect.TypeOf(fileConfig{}), "", described)
 
-	for _, k := range keyRegistry {
+	for _, k := range KeyRegistry {
 		if !described[k.Path] {
 			t.Errorf("registry row %q names a path fileConfig does not have (renamed or removed key?)", k.Path)
 		}
@@ -49,7 +50,7 @@ func walkSchema(t *testing.T, typ reflect.Type, prefix string, described map[str
 		if prefix != "" {
 			path = prefix + "." + name
 		}
-		if row, ok := lookupKey(path); ok {
+		if row, ok := LookupKey(path); ok {
 			described[path] = true
 			if !kindMatchesType(row.Kind, field.Type) {
 				t.Errorf("registry row %q is kind %q but %s.%s is a %s", path, row.Kind, typ.Name(), field.Name,
@@ -72,22 +73,22 @@ func walkSchema(t *testing.T, typ reflect.Type, prefix string, described map[str
 // the schema's way of distinguishing an explicit `false` from an absent key), and kind
 // structured accepts a plain string as well as the composite types, because the Go type of a
 // value is not what makes it structured — what makes it structured is that no field edits it.
-// kindText is the string whose value is multi-line prose: the same Go type as kindString and a
+// KindText is the string whose value is multi-line prose: the same Go type as KindString and a
 // different editor, which is the distinction the surface acts on. A string LIST is a slice, and
 // the one kind whose Go type says nothing about its ELEMENTS — that a name list holds names and
-// not blocks is what kindStringList asserts, and what the writer's own round-trip proves.
-func kindMatchesType(kind configKind, typ reflect.Type) bool {
+// not blocks is what KindStringList asserts, and what the writer's own round-trip proves.
+func kindMatchesType(kind Kind, typ reflect.Type) bool {
 	typ = derefType(typ)
 	switch kind {
-	case kindBool:
+	case KindBool:
 		return typ.Kind() == reflect.Bool
-	case kindInt:
+	case KindInt:
 		return typ.Kind() == reflect.Int
-	case kindString, kindEnum, kindServer, kindScheme, kindText:
+	case KindString, KindEnum, KindServer, KindScheme, KindText:
 		return typ.Kind() == reflect.String
-	case kindStringList:
+	case KindStringList:
 		return typ.Kind() == reflect.Slice && derefType(typ.Elem()).Kind() == reflect.String
-	case kindStructured:
+	case KindStructured:
 		switch typ.Kind() {
 		case reflect.Slice, reflect.Map, reflect.Struct, reflect.String:
 			return true
@@ -120,12 +121,12 @@ func TestRegistryEnumValuesMatchParseSites(t *testing.T) {
 		t.Parallel()
 		values := enumValues(t, "mode")
 		for _, v := range values {
-			if _, err := parseMode(v); err != nil {
-				t.Errorf("registry offers mode %q but parseMode rejects it: %v", v, err)
+			if _, err := domain.ParseMode(v); err != nil {
+				t.Errorf("registry offers mode %q but domain.ParseMode rejects it: %v", v, err)
 			}
 		}
 		// Completeness against the ladder constants the parser switches on.
-		for _, m := range []string{string(modePlan), string(modeAskBefore), string(modeAllowEdits), string(modeAuto)} {
+		for _, m := range []string{string(domain.ModePlan), string(domain.ModeAskBefore), string(domain.ModeAllowEdits), string(domain.ModeAuto)} {
 			if !slices.Contains(values, m) {
 				t.Errorf("mode %q is a known autonomy mode but the registry does not offer it", m)
 			}
@@ -169,12 +170,12 @@ func TestRegistryEnumValuesMatchParseSites(t *testing.T) {
 // not an enum at all — so a kind change is reported here rather than as an empty loop.
 func enumValues(t *testing.T, path string) []string {
 	t.Helper()
-	row, ok := lookupKey(path)
+	row, ok := LookupKey(path)
 	if !ok {
 		t.Fatalf("no registry row for %q", path)
 	}
-	if row.Kind != kindEnum {
-		t.Fatalf("registry row %q is kind %q, want %q", path, row.Kind, kindEnum)
+	if row.Kind != KindEnum {
+		t.Fatalf("registry row %q is kind %q, want %q", path, row.Kind, KindEnum)
 	}
 	if len(row.EnumValues) == 0 {
 		t.Fatalf("registry row %q is an enum with no values", path)
@@ -214,7 +215,7 @@ func TestRegistryRowInvariants(t *testing.T) {
 	t.Parallel()
 
 	seen := map[string]bool{}
-	for _, k := range keyRegistry {
+	for _, k := range KeyRegistry {
 		if seen[k.Path] {
 			t.Errorf("duplicate registry row for %q", k.Path)
 		}
@@ -223,7 +224,7 @@ func TestRegistryRowInvariants(t *testing.T) {
 		if strings.TrimSpace(k.Desc) == "" {
 			t.Errorf("registry row %q has no description — /settings would show a blank line", k.Path)
 		}
-		if k.Editable && k.Kind == kindStructured {
+		if k.Editable && k.Kind == KindStructured {
 			t.Errorf("registry row %q is editable but structured — v1 has no editor for a block", k.Path)
 		}
 		// No row is masked since ADR 0036 retired the top-level `api-key:`: the schema's one secret
@@ -233,7 +234,7 @@ func TestRegistryRowInvariants(t *testing.T) {
 			t.Errorf("registry row %q is masked; no top-level key carries a secret any more", k.Path)
 		}
 		switch k.Kind {
-		case kindEnum:
+		case KindEnum:
 			if len(k.EnumValues) == 0 {
 				t.Errorf("registry row %q is an enum with no values", k.Path)
 			}
@@ -252,9 +253,9 @@ func TestRegistryRowInvariants(t *testing.T) {
 	}
 }
 
-// TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse pins each row's validate hook (configKey.Validate
+// TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse pins each row's validate hook (Key.Validate
 // — the write path's guard) to one value it must refuse. It calls the hooks directly rather than through
-// saveConfigSetting because three of them cannot be reached from there: an enum's vocabulary is checked
+// SaveConfigSetting because three of them cannot be reached from there: an enum's vocabulary is checked
 // by the kind first, so the mode, spinner and cursor hooks only ever fire on DRIFT between this table's
 // EnumValues and the parse site behind them — which is exactly the case worth having a test for.
 func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
@@ -311,7 +312,7 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		{"context-window", "32768"},
 		{"present.port", "0"},
 		{"present.port", "8080"},
-		{"mode", string(modeAuto)},
+		{"mode", string(domain.ModeAuto)},
 		{"ui.spinner", "glitter"},
 		{"cursor-shape", "bar"},
 		{"ui.color-scheme", "light"},
@@ -389,11 +390,11 @@ func TestRegistryValidateHooksSitOnEditableKeys(t *testing.T) {
 		"server": true, "present.command": true, "present.host": true, "editor": true,
 		"tools.disabled": true,
 	}
-	for _, k := range keyRegistry {
+	for _, k := range KeyRegistry {
 		switch {
 		case k.Validate != nil && !k.Editable:
 			t.Errorf("registry row %q has a validate hook but is not editable; nothing would run it", k.Path)
-		case k.Validate == nil && k.Editable && k.Kind != kindBool && !unchecked[k.Path]:
+		case k.Validate == nil && k.Editable && k.Kind != KindBool && !unchecked[k.Path]:
 			t.Errorf("registry row %q is editable and has no validate hook — give it one, or list it "+
 				"in this test's unchecked set with the reason its kind is the whole contract", k.Path)
 		case k.Validate != nil && unchecked[k.Path]:

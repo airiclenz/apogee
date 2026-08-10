@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/probe"
@@ -417,7 +418,7 @@ func TestProbeModelPromotesAnOfferedValidatedSet(t *testing.T) {
 		t.Fatalf("resolve roots: %v", err)
 	}
 	opts := baseOpts(gemmaKey)
-	opts.endpoint = srv.URL
+	opts.Endpoint = srv.URL
 
 	before, offerNotices, err := resolveValidatedSet(opts, roots.validated, roots.probe)
 	if err != nil {
@@ -455,7 +456,7 @@ func TestProbeModelKeepsAnAliasedSetApplying(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
 	configHome := t.TempDir()
-	writeProbeConfig(t, configHome, serverEntry{Name: "probe-target", Endpoint: srv.URL, Model: gemmaKey},
+	writeProbeConfig(t, configHome, config.ServerEntry{Name: "probe-target", Endpoint: srv.URL, Model: gemmaKey},
 		"validated-sets:\n  alias:\n    "+gemmaKey+": "+gemmaKey+"\n")
 
 	roots, err := resolveRoots(configHome, t.TempDir())
@@ -463,8 +464,8 @@ func TestProbeModelKeepsAnAliasedSetApplying(t *testing.T) {
 		t.Fatalf("resolve roots: %v", err)
 	}
 	opts := baseOpts(gemmaKey)
-	opts.endpoint = srv.URL
-	opts.validatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
+	opts.Endpoint = srv.URL
+	opts.ValidatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
 
 	before, _, err := resolveValidatedSet(opts, roots.validated, roots.probe)
 	if err != nil || len(before) == 0 {
@@ -521,7 +522,7 @@ func TestProbeModelDoesNotClaimAnEntryStartupWillSkip(t *testing.T) {
 	// named. The probe run above left its record in roots.probe, so the seam resolves the same
 	// medium-confidence identity the next session start will.
 	opts := baseOpts(key)
-	opts.endpoint = srv.URL
+	opts.Endpoint = srv.URL
 	keys, promoted, suppressed := autoApplyKeys(probe.Model{
 		Endpoint:    srv.URL,
 		Model:       key,
@@ -547,7 +548,7 @@ func TestResolveValidatedSetAppliesOnAStoredProbeRecord(t *testing.T) {
 		t.Fatalf("resolve roots: %v", err)
 	}
 	opts := baseOpts(gemmaKey)
-	opts.endpoint = endpoint
+	opts.Endpoint = endpoint
 
 	if _, err := library.SaveProbeRecord(roots.probe, library.ProbeRecord{
 		Endpoint:   endpoint,
@@ -636,22 +637,22 @@ func TestAutoApplyKeysNamesEverySessionOffSwitch(t *testing.T) {
 
 	cases := []struct {
 		name   string
-		mutate func(*options)
+		mutate func(*config.Options)
 		want   string
 	}{
 		{
 			name:   "bypass",
-			mutate: func(o *options) { o.bypass = true },
+			mutate: func(o *config.Options) { o.Bypass = true },
 			want:   "Bypass suppresses the Validated-set surface",
 		},
 		{
 			name:   "validated-sets disabled",
-			mutate: func(o *options) { o.validatedSetsEnable = false },
+			mutate: func(o *config.Options) { o.ValidatedSetsEnable = false },
 			want:   "`validated-sets: enable: false` turns the surface off",
 		},
 		{
 			name:   "explicit mechanisms block",
-			mutate: func(o *options) { o.mechanisms = map[string]bool{"validate": true} },
+			mutate: func(o *config.Options) { o.Mechanisms = map[string]bool{"validate": true} },
 			want:   "explicit mechanisms: config takes precedence",
 		},
 	}
@@ -668,7 +669,7 @@ func TestAutoApplyKeysNamesEverySessionOffSwitch(t *testing.T) {
 				t.Fatalf("save probe record: %v", err)
 			}
 			opts := baseOpts(gemmaKey)
-			opts.endpoint = endpoint
+			opts.Endpoint = endpoint
 			tc.mutate(&opts)
 
 			keys, promoted, suppressed := autoApplyKeys(probe.Model{Endpoint: endpoint, Model: gemmaKey},
@@ -697,7 +698,7 @@ func writeUserValidatedEntry(t *testing.T, validatedDir, name, body string) {
 // writeProbeConfig seeds a config.yaml in a hermetic apogee home so the command under test
 // resolves the same options a real session would: the caller's own keys, plus the one configured
 // server the probe talks to (ADR 0036 — a config that names no server has nothing to probe).
-func writeProbeConfig(t *testing.T, configHome string, upstream serverEntry, body string) {
+func writeProbeConfig(t *testing.T, configHome string, upstream config.ServerEntry, body string) {
 	t.Helper()
 	if err := os.MkdirAll(configHome, 0o700); err != nil {
 		t.Fatalf("mkdir config home: %v", err)
@@ -735,7 +736,7 @@ func TestProbeModelSendsTheConfiguredAPIKey(t *testing.T) {
 	auth := &authLog{}
 	srv := modelUpstreamRecording(t, "battery-model", auth)
 	configHome := t.TempDir()
-	writeProbeConfig(t, configHome, serverEntry{Name: "probe-target", Endpoint: srv.URL, APIKey: "probe-token"}, "")
+	writeProbeConfig(t, configHome, config.ServerEntry{Name: "probe-target", Endpoint: srv.URL, APIKey: "probe-token"}, "")
 
 	// No --model, so the label discovery client runs too — the request that would 401 first
 	// on a keyed server.

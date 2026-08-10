@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/mcp"
@@ -45,12 +47,12 @@ func TestShouldPrewarmLabelWalk(t *testing.T) {
 		fsWrite     bool
 		wantPrewarm bool
 	}{
-		{name: "auto + confine + fs-write → pre-warm", mode: modeAuto, confine: true, fsWrite: true, wantPrewarm: true},
-		{name: "auto + confine + no fs-write → off (degradation's territory)", mode: modeAuto, confine: true, fsWrite: false, wantPrewarm: false},
-		{name: "auto UNCONFINED → off", mode: modeAuto, confine: false, fsWrite: true, wantPrewarm: false},
-		{name: "ask-before + confine + fs-write → off (not Auto)", mode: modeAskBefore, confine: true, fsWrite: true, wantPrewarm: false},
-		{name: "allow-edits + confine + fs-write → off (not Auto)", mode: modeAllowEdits, confine: true, fsWrite: true, wantPrewarm: false},
-		{name: "plan + confine + fs-write → off (not Auto)", mode: modePlan, confine: true, fsWrite: true, wantPrewarm: false},
+		{name: "auto + confine + fs-write → pre-warm", mode: domain.ModeAuto, confine: true, fsWrite: true, wantPrewarm: true},
+		{name: "auto + confine + no fs-write → off (degradation's territory)", mode: domain.ModeAuto, confine: true, fsWrite: false, wantPrewarm: false},
+		{name: "auto UNCONFINED → off", mode: domain.ModeAuto, confine: false, fsWrite: true, wantPrewarm: false},
+		{name: "ask-before + confine + fs-write → off (not Auto)", mode: domain.ModeAskBefore, confine: true, fsWrite: true, wantPrewarm: false},
+		{name: "allow-edits + confine + fs-write → off (not Auto)", mode: domain.ModeAllowEdits, confine: true, fsWrite: true, wantPrewarm: false},
+		{name: "plan + confine + fs-write → off (not Auto)", mode: domain.ModePlan, confine: true, fsWrite: true, wantPrewarm: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -109,13 +111,13 @@ func TestRunRootThreadsContextWindow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			rec := &recordingLauncher{}
-			opts := options{
-				endpoint:      "http://127.0.0.1:1111",
-				model:         "fake",
-				mode:          "ask-before",
-				workspace:     t.TempDir(),
-				contextWindow: tt.contextWindow,
-				autoCompact:   true,
+			opts := config.Options{
+				Endpoint:      "http://127.0.0.1:1111",
+				Model:         "fake",
+				Mode:          "ask-before",
+				Workspace:     t.TempDir(),
+				ContextWindow: tt.contextWindow,
+				AutoCompact:   true,
 			}
 
 			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -152,15 +154,15 @@ func TestRunRootThreadsContextWindow(t *testing.T) {
 func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 	t.Parallel()
 
-	prompts := systemPromptSettings{
-		global: promptSource{text: "the global prompt"},
-		models: map[string]promptSource{"model-b": {text: "the model-b prompt"}},
+	prompts := config.SystemPromptSettings{
+		Global: config.PromptSource{Text: "the global prompt"},
+		Models: map[string]config.PromptSource{"model-b": {Text: "the model-b prompt"}},
 	}
 	manual := []apogee.MechanismID{"validate"}
 
 	tests := []struct {
 		name         string
-		opts         options
+		opts         config.Options
 		manualIDs    []apogee.MechanismID
 		model        string
 		window       int
@@ -171,7 +173,7 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 	}{
 		{
 			name:       "the per-model prompt entry is selected for the model being bound",
-			opts:       options{systemPrompt: prompts},
+			opts:       config.Options{SystemPrompt: prompts},
 			model:      "model-b",
 			window:     32768,
 			wantPrompt: "the model-b prompt",
@@ -179,7 +181,7 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 		},
 		{
 			name:       "a model with no entry of its own falls back to the global prompt",
-			opts:       options{systemPrompt: prompts},
+			opts:       config.Options{SystemPrompt: prompts},
 			model:      "model-a",
 			window:     32768,
 			wantPrompt: "the global prompt",
@@ -187,9 +189,9 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 		},
 		{
 			name: "a validated set matching the new model applies when no manual list was configured",
-			opts: options{
-				validatedSetsEnable: true,
-				validatedSetsAlias:  map[string]string{gemmaKey: gemmaKey}, // the §3 human decision
+			opts: config.Options{
+				ValidatedSetsEnable: true,
+				ValidatedSetsAlias:  map[string]string{gemmaKey: gemmaKey}, // the §3 human decision
 			},
 			model:      gemmaKey,
 			window:     8192,
@@ -203,10 +205,10 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 		},
 		{
 			name: "an explicit mechanisms: block is manual control and suppresses the matched set",
-			opts: options{
-				validatedSetsEnable: true,
-				validatedSetsAlias:  map[string]string{gemmaKey: gemmaKey},
-				mechanisms:          map[string]bool{"validate": true},
+			opts: config.Options{
+				ValidatedSetsEnable: true,
+				ValidatedSetsAlias:  map[string]string{gemmaKey: gemmaKey},
+				Mechanisms:          map[string]bool{"validate": true},
 			},
 			manualIDs:  manual,
 			model:      gemmaKey,
@@ -221,7 +223,7 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 		},
 		{
 			name:         "a context-window: pin outranks the observed window",
-			opts:         options{},
+			opts:         config.Options{},
 			model:        "model-a",
 			window:       131072,
 			pinnedWindow: 16384,
@@ -229,14 +231,14 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 		},
 		{
 			name:       "an unpinned session adopts the observed window",
-			opts:       options{},
+			opts:       config.Options{},
 			model:      "model-a",
 			window:     131072,
 			wantWindow: 131072,
 		},
 		{
 			name:       "an observation with no window binds an unknown one rather than inventing it",
-			opts:       options{},
+			opts:       config.Options{},
 			model:      "model-a",
 			wantWindow: 0,
 		},
@@ -273,18 +275,18 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 // server since launch re-resolves against where it is now.
 func TestRebindInputsOverlayTheBoundUpstream(t *testing.T) {
 	t.Parallel()
-	launchOpts := options{endpoint: "http://launch.invalid", apiKey: "launch-key"}
+	launchOpts := config.Options{Endpoint: "http://launch.invalid", APIKey: "launch-key"}
 	live := newLiveSettings(launchOpts, nil)
 	bound := upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model", APIKey: "bound-key"}
 
 	base, _, _ := live.rebindInputs(launchOpts, bound)
 
-	if base.endpoint != bound.Endpoint {
-		t.Errorf("endpoint = %q; want the bound %q, not the launch snapshot's", base.endpoint, bound.Endpoint)
+	if base.Endpoint != bound.Endpoint {
+		t.Errorf("endpoint = %q; want the bound %q, not the launch snapshot's", base.Endpoint, bound.Endpoint)
 	}
-	if base.apiKey != bound.APIKey {
+	if base.APIKey != bound.APIKey {
 		t.Errorf("apiKey = %q; want the bound %q — a key from before a switch opens the wrong server",
-			base.apiKey, bound.APIKey)
+			base.APIKey, bound.APIKey)
 	}
 }
 
@@ -310,7 +312,7 @@ func TestRebindResolutionKeysOnTheBoundEndpoint(t *testing.T) {
 	}
 
 	// The launch snapshot names a server this session has since left.
-	launchOpts := options{endpoint: "http://launch.invalid", validatedSetsEnable: true}
+	launchOpts := config.Options{Endpoint: "http://launch.invalid", ValidatedSetsEnable: true}
 	live := newLiveSettings(launchOpts, nil)
 
 	// The rebind closure the composition root wires, reconstructed as the other rebind tests do.
@@ -352,18 +354,18 @@ func TestRunRootSystemPromptResolutionFails(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
-		sp   systemPromptSettings
+		sp   config.SystemPromptSettings
 		// wantErr are the substrings the surfaced error must carry.
 		wantErr []string
 	}{
 		{
 			name:    "an unreadable global file",
-			sp:      systemPromptSettings{global: promptSource{file: filepath.Join("prompts", "absent-prompt.md")}},
+			sp:      config.SystemPromptSettings{Global: config.PromptSource{File: filepath.Join("prompts", "absent-prompt.md")}},
 			wantErr: []string{"system-prompt-file", "absent-prompt.md"},
 		},
 		{
 			name:    "an unknown placeholder in the inline prompt",
-			sp:      systemPromptSettings{global: promptSource{text: "hi {{bogus}}"}},
+			sp:      config.SystemPromptSettings{Global: config.PromptSource{Text: "hi {{bogus}}"}},
 			wantErr: []string{"system-prompt-text", "{{bogus}}", "{{workspace}}"},
 		},
 	}
@@ -371,13 +373,13 @@ func TestRunRootSystemPromptResolutionFails(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			rec := &recordingLauncher{}
-			opts := options{
-				endpoint:     "http://127.0.0.1:1111",
-				model:        "fake",
-				mode:         "ask-before",
-				workspace:    t.TempDir(),
-				configDir:    t.TempDir(), // the apogee home a relative prompt path resolves against
-				systemPrompt: tt.sp,
+			opts := config.Options{
+				Endpoint:     "http://127.0.0.1:1111",
+				Model:        "fake",
+				Mode:         "ask-before",
+				Workspace:    t.TempDir(),
+				ConfigDir:    t.TempDir(), // the apogee home a relative prompt path resolves against
+				SystemPrompt: tt.sp,
 			}
 
 			err := runRoot(context.Background(), opts, rec.launch)
@@ -411,13 +413,13 @@ func TestRunRootThreadsContextFiles(t *testing.T) {
 			t.Fatalf("write AGENTS.md: %v", err)
 		}
 		rec := &recordingLauncher{}
-		opts := options{
-			endpoint:     "http://127.0.0.1:1111",
-			model:        "fake",
-			mode:         "ask-before",
-			workspace:    workspace,
-			configDir:    t.TempDir(),
-			contextFiles: []string{"AGENTS.md", "docs/absent.md"},
+		opts := config.Options{
+			Endpoint:     "http://127.0.0.1:1111",
+			Model:        "fake",
+			Mode:         "ask-before",
+			Workspace:    workspace,
+			ConfigDir:    t.TempDir(),
+			ContextFiles: []string{"AGENTS.md", "docs/absent.md"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
@@ -430,13 +432,13 @@ func TestRunRootThreadsContextFiles(t *testing.T) {
 	t.Run("a name reaching outside the workspace fails startup before launch", func(t *testing.T) {
 		t.Parallel()
 		rec := &recordingLauncher{}
-		opts := options{
-			endpoint:     "http://127.0.0.1:1111",
-			model:        "fake",
-			mode:         "ask-before",
-			workspace:    t.TempDir(),
-			configDir:    t.TempDir(),
-			contextFiles: []string{filepath.Join("..", "outside.md")},
+		opts := config.Options{
+			Endpoint:     "http://127.0.0.1:1111",
+			Model:        "fake",
+			Mode:         "ask-before",
+			Workspace:    t.TempDir(),
+			ConfigDir:    t.TempDir(),
+			ContextFiles: []string{filepath.Join("..", "outside.md")},
 		}
 		err := runRoot(context.Background(), opts, rec.launch)
 		if err == nil {
@@ -463,31 +465,31 @@ func TestRunRootThreadsSpinnerOptions(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
-		ui   uiSettings
+		ui   config.UISettings
 	}{
-		{name: "the resolved default: snake with the colour loop on", ui: uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "dark"}},
-		{name: "a named style with the loop off travels as both", ui: uiSettings{spinner: tui.SpinnerGlitter, spinnerColor: false, showScrollbar: true, colorScheme: "dark"}},
-		{name: "classic with the loop on — the old glyphs, the new colours", ui: uiSettings{spinner: tui.SpinnerClassic, spinnerColor: true, showScrollbar: true, colorScheme: "dark"}},
+		{name: "the resolved default: snake with the colour loop on", ui: config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"}},
+		{name: "a named style with the loop off travels as both", ui: config.UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark"}},
+		{name: "classic with the loop on — the old glyphs, the new colours", ui: config.UISettings{Spinner: tui.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			rec := &recordingLauncher{}
-			opts := options{
-				endpoint:  "http://127.0.0.1:1111",
-				model:     "fake",
-				mode:      "ask-before",
-				workspace: t.TempDir(),
-				ui:        tt.ui,
+			opts := config.Options{
+				Endpoint:  "http://127.0.0.1:1111",
+				Model:     "fake",
+				Mode:      "ask-before",
+				Workspace: t.TempDir(),
+				UI:        tt.ui,
 			}
 			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 				t.Fatalf("runRoot: %v", err)
 			}
-			if rec.opts.Spinner != tt.ui.spinner {
-				t.Errorf("tui.Options.Spinner = %q; want the resolved %q", rec.opts.Spinner, tt.ui.spinner)
+			if rec.opts.Spinner != tt.ui.Spinner {
+				t.Errorf("tui.Options.Spinner = %q; want the resolved %q", rec.opts.Spinner, tt.ui.Spinner)
 			}
-			if rec.opts.SpinnerColor != tt.ui.spinnerColor {
-				t.Errorf("tui.Options.SpinnerColor = %v; want the resolved %v", rec.opts.SpinnerColor, tt.ui.spinnerColor)
+			if rec.opts.SpinnerColor != tt.ui.SpinnerColor {
+				t.Errorf("tui.Options.SpinnerColor = %v; want the resolved %v", rec.opts.SpinnerColor, tt.ui.SpinnerColor)
 			}
 		})
 	}
@@ -516,13 +518,13 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 		}
 
 		rec := &recordingLauncher{}
-		opts := options{
-			endpoint:  "http://127.0.0.1:1111",
-			model:     "fake",
-			mode:      "ask-before",
-			configDir: home,
-			workspace: t.TempDir(),
-			ui:        uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "dark"},
+		opts := config.Options{
+			Endpoint:  "http://127.0.0.1:1111",
+			Model:     "fake",
+			Mode:      "ask-before",
+			ConfigDir: home,
+			Workspace: t.TempDir(),
+			UI:        config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
@@ -546,13 +548,13 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 	t.Run("an unknown name keeps the default palette and says so", func(t *testing.T) {
 		t.Parallel()
 		rec := &recordingLauncher{}
-		opts := options{
-			endpoint:  "http://127.0.0.1:1111",
-			model:     "fake",
-			mode:      "ask-before",
-			configDir: t.TempDir(),
-			workspace: t.TempDir(),
-			ui:        uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "no-such-scheme"},
+		opts := config.Options{
+			Endpoint:  "http://127.0.0.1:1111",
+			Model:     "fake",
+			Mode:      "ask-before",
+			ConfigDir: t.TempDir(),
+			Workspace: t.TempDir(),
+			UI:        config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "no-such-scheme"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot refused an unknown colour scheme: %v", err)
@@ -576,13 +578,13 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 		t.Parallel()
 		home := t.TempDir()
 		rec := &recordingLauncher{}
-		opts := options{
-			endpoint:  "http://127.0.0.1:1111",
-			model:     "fake",
-			mode:      "ask-before",
-			configDir: home,
-			workspace: t.TempDir(),
-			ui:        uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "dark"},
+		opts := config.Options{
+			Endpoint:  "http://127.0.0.1:1111",
+			Model:     "fake",
+			Mode:      "ask-before",
+			ConfigDir: home,
+			Workspace: t.TempDir(),
+			UI:        config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
@@ -625,13 +627,13 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 		t.Parallel()
 		home := t.TempDir()
 		rec := &recordingLauncher{}
-		opts := options{
-			endpoint:  "http://127.0.0.1:1111",
-			model:     "fake",
-			mode:      "ask-before",
-			configDir: home,
-			workspace: t.TempDir(),
-			ui:        uiSettings{spinner: tui.SpinnerSnake, spinnerColor: true, showScrollbar: true, colorScheme: "dark"},
+		opts := config.Options{
+			Endpoint:  "http://127.0.0.1:1111",
+			Model:     "fake",
+			Mode:      "ask-before",
+			ConfigDir: home,
+			Workspace: t.TempDir(),
+			UI:        config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
@@ -684,12 +686,12 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := &recordingLauncher{}
-			opts := options{
-				endpoint:           "http://127.0.0.1:1111",
-				model:              "fake",
-				mode:               tt.mode,
-				workspace:          t.TempDir(),
-				confineToWorkspace: tt.confine,
+			opts := config.Options{
+				Endpoint:           "http://127.0.0.1:1111",
+				Model:              "fake",
+				Mode:               tt.mode,
+				Workspace:          t.TempDir(),
+				ConfineToWorkspace: tt.confine,
 			}
 
 			var runErr error
@@ -724,7 +726,7 @@ func TestPresentationRungs(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		cfg        presentSettings
+		cfg        config.PresentSettings
 		env        map[string]string
 		wantLocal  bool
 		wantOpener bool
@@ -734,24 +736,24 @@ func TestPresentationRungs(t *testing.T) {
 	}{
 		{
 			name:       "local desktop + auto-open → the opener, no server",
-			cfg:        presentSettings{autoOpen: true},
+			cfg:        config.PresentSettings{AutoOpen: true},
 			wantLocal:  true,
 			wantOpener: true,
 		},
 		{
 			name:       "local + a command override → the opener carries the template",
-			cfg:        presentSettings{autoOpen: true, command: "zed {path}"},
+			cfg:        config.PresentSettings{AutoOpen: true, Command: "zed {path}"},
 			wantLocal:  true,
 			wantOpener: true,
 		},
 		{
 			name:      "local + auto-open off → no mechanism at all (rung 0 still runs)",
-			cfg:       presentSettings{autoOpen: false, command: "zed {path}"},
+			cfg:       config.PresentSettings{AutoOpen: false, Command: "zed {path}"},
 			wantLocal: true,
 		},
 		{
 			name:     "remote → the doc server, advertising the SSH server IP; never an opener",
-			cfg:      presentSettings{autoOpen: true, port: 8934},
+			cfg:      config.PresentSettings{AutoOpen: true, Port: 8934},
 			env:      map[string]string{"SSH_CONNECTION": devboxSSH},
 			wantDocs: true,
 			wantHost: "192.168.64.2",
@@ -759,7 +761,7 @@ func TestPresentationRungs(t *testing.T) {
 		},
 		{
 			name:     "remote with no SSH_CONNECTION → present.host answers instead",
-			cfg:      presentSettings{autoOpen: true, host: "devbox.internal"},
+			cfg:      config.PresentSettings{AutoOpen: true, Host: "devbox.internal"},
 			env:      map[string]string{"SSH_TTY": "/dev/pts/3"},
 			wantDocs: true,
 			wantHost: "devbox.internal",
@@ -781,8 +783,8 @@ func TestPresentationRungs(t *testing.T) {
 			if (rungs.Docs != nil) != tt.wantDocs {
 				t.Errorf("Docs wired = %v; want %v", rungs.Docs != nil, tt.wantDocs)
 			}
-			if rungs.Opener != nil && rungs.Opener.CommandOverride != tt.cfg.command {
-				t.Errorf("Opener.CommandOverride = %q; want the configured %q", rungs.Opener.CommandOverride, tt.cfg.command)
+			if rungs.Opener != nil && rungs.Opener.CommandOverride != tt.cfg.Command {
+				t.Errorf("Opener.CommandOverride = %q; want the configured %q", rungs.Opener.CommandOverride, tt.cfg.Command)
 			}
 			if rungs.Docs == nil {
 				return
@@ -812,12 +814,12 @@ func TestRunRootInstallsPresenter(t *testing.T) {
 	t.Parallel()
 	rec := &recordingLauncher{}
 	workspace := t.TempDir()
-	opts := options{
-		endpoint:  "http://127.0.0.1:1111",
-		model:     "fake",
-		mode:      "ask-before",
-		workspace: workspace,
-		present:   presentSettings{autoOpen: true},
+	opts := config.Options{
+		Endpoint:  "http://127.0.0.1:1111",
+		Model:     "fake",
+		Mode:      "ask-before",
+		Workspace: workspace,
+		Present:   config.PresentSettings{AutoOpen: true},
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -966,18 +968,18 @@ func TestParseMode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := parseMode(tt.in)
+			got, err := domain.ParseMode(tt.in)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("parseMode(%q) = %q, nil; want error", tt.in, got)
+					t.Fatalf("domain.ParseMode(%q) = %q, nil; want error", tt.in, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("parseMode(%q) unexpected error: %v", tt.in, err)
+				t.Fatalf("domain.ParseMode(%q) unexpected error: %v", tt.in, err)
 			}
 			if got != tt.want {
-				t.Fatalf("parseMode(%q) = %q; want %q", tt.in, got, tt.want)
+				t.Fatalf("domain.ParseMode(%q) = %q; want %q", tt.in, got, tt.want)
 			}
 		})
 	}
@@ -1119,13 +1121,13 @@ func TestRunRootBindsADeterminedStartupBeforeLaunch(t *testing.T) {
 	t.Parallel()
 	srv := upstreamServer(t, "model-a", 4096)
 	rec := &recordingLauncher{}
-	opts := options{
-		endpoint:  srv.URL,
-		model:     "model-a",
-		mode:      "ask-before",
-		hostAlias: "workstation",
-		workspace: t.TempDir(),
-		configDir: t.TempDir(),
+	opts := config.Options{
+		Endpoint:  srv.URL,
+		Model:     "model-a",
+		Mode:      "ask-before",
+		HostAlias: "workstation",
+		Workspace: t.TempDir(),
+		ConfigDir: t.TempDir(),
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -1151,17 +1153,17 @@ func TestRunRootStartsPreboundWithoutAnEngine(t *testing.T) {
 	tests := []struct {
 		name     string
 		prebound tui.PreboundStart
-		servers  []serverEntry
+		servers  []config.ServerEntry
 	}{
 		{
 			name:     "first boot, with servers to choose from",
 			prebound: tui.PreboundStart{Reason: tui.PreboundFirstBoot},
-			servers:  []serverEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}},
+			servers:  []config.ServerEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}},
 		},
 		{
 			name:     "a recorded choice no entry carries any more",
 			prebound: tui.PreboundStart{Reason: tui.PreboundStaleChoice, Name: "the-old-name"},
-			servers:  []serverEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}},
+			servers:  []config.ServerEntry{{Name: "laptop", Endpoint: "http://127.0.0.1:1111"}},
 		},
 		{
 			name:     "nothing configured at all",
@@ -1172,12 +1174,12 @@ func TestRunRootStartsPreboundWithoutAnEngine(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			rec := &recordingLauncher{}
-			opts := options{
-				mode:      "ask-before",
-				workspace: t.TempDir(),
-				configDir: t.TempDir(),
-				servers:   tt.servers,
-				prebound:  tt.prebound,
+			opts := config.Options{
+				Mode:      "ask-before",
+				Workspace: t.TempDir(),
+				ConfigDir: t.TempDir(),
+				Servers:   tt.servers,
+				Prebound:  tt.prebound,
 			}
 
 			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -1224,16 +1226,16 @@ func TestBindServerConstructsOnceAndFlipsBothSeams(t *testing.T) {
 	first := upstreamServer(t, "model-a", 4096)
 	second := upstreamServer(t, "model-b", 8192)
 	rec := &recordingLauncher{}
-	opts := options{
-		mode:          "ask-before",
-		workspace:     t.TempDir(),
-		configDir:     t.TempDir(),
-		contextWindow: 16384, // the global pin, which a first binding adopts like a switch does
-		servers: []serverEntry{
+	opts := config.Options{
+		Mode:          "ask-before",
+		Workspace:     t.TempDir(),
+		ConfigDir:     t.TempDir(),
+		ContextWindow: 16384, // the global pin, which a first binding adopts like a switch does
+		Servers: []config.ServerEntry{
 			{Name: "laptop", Endpoint: first.URL, Model: "model-a", APIKey: "laptop-key"},
 			{Name: "workstation", Endpoint: second.URL, Model: "model-b"},
 		},
-		prebound: tui.PreboundStart{Reason: tui.PreboundFirstBoot},
+		Prebound: tui.PreboundStart{Reason: tui.PreboundFirstBoot},
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -1289,21 +1291,21 @@ func TestBindServerConstructsOnceAndFlipsBothSeams(t *testing.T) {
 // finally constructed: the footer showed them, so the engine has to be born with them.
 func TestLateEngineAppliesPreBindSettingsOnBind(t *testing.T) {
 	t.Parallel()
-	engine := newLateEngine(modeAskBefore, true)
+	engine := newLateEngine(domain.ModeAskBefore, true)
 	t.Cleanup(func() { _ = engine.Close() })
 
 	// Unbound, the reads answer what a bind would install.
 	if !engine.ConfineToWorkspace() {
 		t.Error("ConfineToWorkspace = false before a bind; want the resolved value")
 	}
-	engine.SetMode(modePlan)
+	engine.SetMode(domain.ModePlan)
 	engine.SetConfineToWorkspace(false)
 	if engine.ConfineToWorkspace() {
 		t.Error("ConfineToWorkspace = true after SetConfineToWorkspace(false) while unbound")
 	}
 
 	cfg := validCfg(t)
-	cfg.Mode = modeAskBefore
+	cfg.Mode = domain.ModeAskBefore
 	cfg.ConfineToWorkspace = true
 	var bound *apogee.Agent
 	if err := engine.Bind(func() (*apogee.Agent, error) {
@@ -1316,9 +1318,9 @@ func TestLateEngineAppliesPreBindSettingsOnBind(t *testing.T) {
 	if engine.ConfineToWorkspace() {
 		t.Error("the bound Agent kept the launch blast radius; the pre-bind change was dropped")
 	}
-	if bound.Mode() != modePlan {
+	if bound.Mode() != domain.ModePlan {
 		t.Errorf("the bound Agent's mode = %q; want the %q the human cycled to before the bind",
-			bound.Mode(), modePlan)
+			bound.Mode(), domain.ModePlan)
 	}
 	// Exactly one Agent per session: a second Bind is refused before the constructor runs, so the
 	// one this holder closes at shutdown is the only one that was ever built.
@@ -1917,7 +1919,7 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 	wiring := launcherWiring{
 		sessionMover: sessionMover{
 			agent: agent, holder: holder, host: host,
-			live: newLiveSettings(options{contextWindow: 16384}, nil),
+			live: newLiveSettings(config.Options{ContextWindow: 16384}, nil),
 		},
 		ops:  ops,
 		path: newLauncherPath("/etc/llama-launcher/config.yaml"),
@@ -2521,13 +2523,13 @@ func TestRunRootWiresTheLauncherSeamsForTheWholeSession(t *testing.T) {
 
 			upstream := upstreamServer(t, "model-a", 4096)
 			rec := &recordingLauncher{}
-			opts := options{
-				endpoint:        upstream.URL,
-				mode:            "ask-before",
-				workspace:       t.TempDir(),
-				configDir:       t.TempDir(),
-				autoCompact:     true,
-				startupLauncher: tt.key,
+			opts := config.Options{
+				Endpoint:        upstream.URL,
+				Mode:            "ask-before",
+				Workspace:       t.TempDir(),
+				ConfigDir:       t.TempDir(),
+				AutoCompact:     true,
+				StartupLauncher: tt.key,
 			}
 			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 				t.Fatalf("runRoot: %v", err)
@@ -2580,16 +2582,16 @@ func TestSwitchServerFollowsTheEntrysLauncher(t *testing.T) {
 	remote := upstreamServer(t, "model-b", 8192)
 	launcherYAML := filepath.Join(t.TempDir(), "launcher.yaml")
 	rec := &recordingLauncher{}
-	opts := options{
+	opts := config.Options{
 		// The session starts on the plain entry, so it starts with the integration off.
-		endpoint:      remote.URL,
-		hostAlias:     "remote",
-		startupServer: "remote",
-		mode:          "ask-before",
-		workspace:     t.TempDir(),
-		configDir:     t.TempDir(),
-		autoCompact:   true,
-		servers: []serverEntry{
+		Endpoint:      remote.URL,
+		HostAlias:     "remote",
+		StartupServer: "remote",
+		Mode:          "ask-before",
+		Workspace:     t.TempDir(),
+		ConfigDir:     t.TempDir(),
+		AutoCompact:   true,
+		Servers: []config.ServerEntry{
 			{Name: "local", Endpoint: local.URL, Model: "model-a", LlamaLauncher: launcherYAML},
 			{Name: "remote", Endpoint: remote.URL, Model: "model-b"},
 		},
@@ -2643,15 +2645,15 @@ func TestBindServerInstallsTheEntrysLauncher(t *testing.T) {
 	local := upstreamServer(t, "model-a", 4096)
 	launcherYAML := filepath.Join(t.TempDir(), "launcher.yaml")
 	rec := &recordingLauncher{}
-	opts := options{
-		mode:        "ask-before",
-		workspace:   t.TempDir(),
-		configDir:   t.TempDir(),
-		autoCompact: true,
-		servers: []serverEntry{
+	opts := config.Options{
+		Mode:        "ask-before",
+		Workspace:   t.TempDir(),
+		ConfigDir:   t.TempDir(),
+		AutoCompact: true,
+		Servers: []config.ServerEntry{
 			{Name: "local", Endpoint: local.URL, Model: "model-a", LlamaLauncher: launcherYAML},
 		},
-		prebound: tui.PreboundStart{Reason: tui.PreboundFirstBoot},
+		Prebound: tui.PreboundStart{Reason: tui.PreboundFirstBoot},
 	}
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 		t.Fatalf("runRoot: %v", err)
@@ -2773,7 +2775,7 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 			name: "mode", key: "mode", value: "allow-edits",
 			check: func(t *testing.T, spy *applySettingSpy) {
 				t.Helper()
-				if want := []apogee.Mode{modeAllowEdits}; !slices.Equal(spy.modes, want) {
+				if want := []apogee.Mode{domain.ModeAllowEdits}; !slices.Equal(spy.modes, want) {
 					t.Errorf("SetMode = %v, want %v", spy.modes, want)
 				}
 			},
@@ -2838,7 +2840,7 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			spy := &applySettingSpy{}
-			live := newLiveSettings(options{contextFiles: names}, nil)
+			live := newLiveSettings(config.Options{ContextFiles: names}, nil)
 			note, err := applySettingFor(settingsApplier{engine: spy, live: live})(tt.key, tt.value)
 			if err != nil {
 				t.Fatalf("apply %s=%s: %v", tt.key, tt.value, err)
@@ -2859,7 +2861,7 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 func TestApplySettingCarriesTheOtherHalfOfTheContextFilesBlock(t *testing.T) {
 	t.Parallel()
 	spy := &applySettingSpy{}
-	live := newLiveSettings(options{}, nil) // a session that launched with the block off
+	live := newLiveSettings(config.Options{}, nil) // a session that launched with the block off
 	apply := applySettingFor(settingsApplier{engine: spy, live: live})
 
 	if _, err := apply("context-files.enable", "true"); err != nil {
@@ -2962,7 +2964,7 @@ func TestApplySettingAcceptsTheEditorKey(t *testing.T) {
 func TestApplySettingRefusesEveryKeyItCannotReach(t *testing.T) {
 	t.Parallel()
 	apply := applySettingFor(settingsApplier{})
-	for _, k := range keyRegistry {
+	for _, k := range config.KeyRegistry {
 		if k.Path == "editor" {
 			// The one exception, and the only shape that can be one: a key whose apply reaches no
 			// member at all, so there is nothing a Driver could be composed without. It is in force
@@ -3017,7 +3019,7 @@ func (p *rebindProbe) rebind(model string, window int) (tui.RebindResult, error)
 // beat reported, which is what keeps `0` meaning discover-live (ADR 0024) rather than "unknown".
 func TestApplySettingContextWindowPinRidesTheRebind(t *testing.T) {
 	t.Parallel()
-	live := newLiveSettings(options{contextWindow: 4096}, nil)
+	live := newLiveSettings(config.Options{ContextWindow: 4096}, nil)
 	live.observe(8192) // what the last landed beat could name about the server's own window
 	probe := &rebindProbe{}
 	spy := &applySettingSpy{}
@@ -3061,7 +3063,7 @@ func TestApplySettingContextWindowPinRidesTheRebind(t *testing.T) {
 // it in — and the row is told nothing, because nothing failed.
 func TestApplySettingRideIsSilentBeforeAServerIsBound(t *testing.T) {
 	t.Parallel()
-	live := newLiveSettings(options{}, nil)
+	live := newLiveSettings(config.Options{}, nil)
 	probe := &rebindProbe{}
 	apply := applySettingFor(settingsApplier{
 		engine:  &applySettingSpy{},
@@ -3087,7 +3089,7 @@ func TestApplySettingRideIsSilentBeforeAServerIsBound(t *testing.T) {
 // taken it yet. The holder keeps the edit, which is what makes a re-committed edit a retry.
 func TestApplySettingReportsARefusedRebind(t *testing.T) {
 	t.Parallel()
-	live := newLiveSettings(options{}, nil)
+	live := newLiveSettings(config.Options{}, nil)
 	probe := &rebindProbe{err: errors.New("input pending")}
 	apply := applySettingFor(settingsApplier{
 		engine:  &applySettingSpy{},
@@ -3116,8 +3118,8 @@ func TestApplySettingSystemPromptReResolvesFromTheFile(t *testing.T) {
 		t.Fatalf("resolveRoots: %v", err)
 	}
 	path := filepath.Join(roots.config, "config.yaml")
-	launchOpts := options{systemPrompt: systemPromptSettings{
-		global: promptSource{text: "the launch prompt"},
+	launchOpts := config.Options{SystemPrompt: config.SystemPromptSettings{
+		Global: config.PromptSource{Text: "the launch prompt"},
 	}}
 	live := newLiveSettings(launchOpts, nil)
 
@@ -3589,7 +3591,7 @@ func TestApplySettingPresentRebuildsTheLadder(t *testing.T) {
 	t.Parallel()
 	var installed []tui.Presentation
 	live := newLivePresentation(
-		presentSettings{autoOpen: true}, t.TempDir(), "darwin",
+		config.PresentSettings{AutoOpen: true}, t.TempDir(), "darwin",
 		func(string) string { return "" }, // no SSH: a local session, so rungs 1/3
 		func(p tui.Presentation) { installed = append(installed, p) })
 	apply := applySettingFor(settingsApplier{present: live})
@@ -3637,7 +3639,7 @@ func TestPresentPortEditRebindsTheDocServer(t *testing.T) {
 
 	var installed []tui.Presentation
 	live := newLivePresentation(
-		presentSettings{autoOpen: true}, workspace, "linux",
+		config.PresentSettings{AutoOpen: true}, workspace, "linux",
 		// An SSH session: remote, so the ladder wires rung 2 and advertises the server-side address.
 		func(name string) string {
 			if name == "SSH_CONNECTION" {
@@ -3720,13 +3722,13 @@ func writeSkillFixture(t *testing.T, dir, content string) {
 func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	t.Parallel()
 	rec := &recordingLauncher{}
-	opts := options{
-		endpoint:     "http://127.0.0.1:1111",
-		model:        "fake",
-		mode:         "ask-before",
-		workspace:    t.TempDir(),
-		configDir:    t.TempDir(),
-		contextFiles: []string{"AGENTS.md"},
+	opts := config.Options{
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		Mode:         "ask-before",
+		Workspace:    t.TempDir(),
+		ConfigDir:    t.TempDir(),
+		ContextFiles: []string{"AGENTS.md"},
 	}
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 		t.Fatalf("runRoot: %v", err)
@@ -3773,7 +3775,7 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 // A key never moved here leaves the Agent on the seed its Config carried.
 func TestLateEngineRemembersSettingsMovedBeforeTheBind(t *testing.T) {
 	t.Parallel()
-	e := newLateEngine(modeAskBefore, true)
+	e := newLateEngine(domain.ModeAskBefore, true)
 
 	e.SetBypass(true)
 	e.SetCompactionEnabled(false)
@@ -3803,7 +3805,7 @@ func TestLateEngineRemembersSettingsMovedBeforeTheBind(t *testing.T) {
 	}
 
 	// A holder nothing moved holds nothing: the Agent is then constructed from its Config alone.
-	fresh := newLateEngine(modeAskBefore, true)
+	fresh := newLateEngine(domain.ModeAskBefore, true)
 	if fresh.pendingBypass != nil || fresh.pendingCompaction != nil || fresh.pendingContextFiles != nil ||
 		fresh.pendingProfile != nil {
 		t.Errorf("a fresh holder already carries overrides: %+v", fresh)
@@ -3817,7 +3819,7 @@ func TestLateEngineRemembersSettingsMovedBeforeTheBind(t *testing.T) {
 // does not have.
 func TestLateEngineBindRefusesAProfileItCannotParse(t *testing.T) {
 	t.Parallel()
-	engine := newLateEngine(modeAskBefore, true)
+	engine := newLateEngine(domain.ModeAskBefore, true)
 	t.Cleanup(func() { _ = engine.Close() })
 	cfg := validCfg(t)
 
@@ -3857,12 +3859,12 @@ func TestApplySettingServersReResolvesTheParallelAgentsCap(t *testing.T) {
 
 	spy := &parallelAgentsSpy{}
 	caps := newParallelAgentsCap(spy)
-	caps.follow(serverEntry{Name: "here", Endpoint: "http://127.0.0.1:1111", ParallelAgents: 2})
+	caps.follow(config.ServerEntry{Name: "here", Endpoint: "http://127.0.0.1:1111", ParallelAgents: 2})
 	caps.observe(6) // what this server's own beat reported, which the pin outranks
 
 	apply := applySettingFor(settingsApplier{
 		engine:     &applySettingSpy{},
-		live:       newLiveSettings(options{}, nil),
+		live:       newLiveSettings(config.Options{}, nil),
 		configPath: path,
 		caps:       caps,
 	})

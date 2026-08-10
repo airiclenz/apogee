@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"errors"
@@ -52,7 +52,7 @@ func compareGolden(t *testing.T, name, got string) {
 // that matters more than the bytes: a comment-preserving writer adds lines and changes none.
 func splicedInsertion(t *testing.T, before, after string) (int, []string) {
 	t.Helper()
-	b, a := splitConfigLines([]byte(before)), splitConfigLines([]byte(after))
+	b, a := SplitConfigLines([]byte(before)), SplitConfigLines([]byte(after))
 	if len(a) <= len(b) {
 		t.Fatalf("want an insertion, got %d lines from %d", len(a), len(b))
 	}
@@ -177,7 +177,7 @@ func TestSpliceScalarSettingInsertsBelowTheTemplateExample(t *testing.T) {
 			if !slices.Equal(added, tt.want) {
 				t.Errorf("inserted %q, want %q", added, tt.want)
 			}
-			lines := splitConfigLines([]byte(template))
+			lines := SplitConfigLines([]byte(template))
 			if above := lines[at-2]; !isCommentLine(above) {
 				t.Fatalf("the setting landed under %q, which is not part of its commented example", above)
 			}
@@ -222,7 +222,7 @@ func TestSpliceScalarSettingRoundTripsEveryEditableKey(t *testing.T) {
 			if name != "the seeded template" {
 				input = readFixture(t, name)
 			}
-			for _, k := range keyRegistry {
+			for _, k := range KeyRegistry {
 				if !k.Editable {
 					continue
 				}
@@ -312,7 +312,7 @@ func TestSpliceTextBlockRewritesTheTemplatesPrompt(t *testing.T) {
 			if read, ok, err := scalarAtPath(updated, key); err != nil || !ok || read != tt.value {
 				t.Errorf("the file reads back %q (set=%v, err=%v), want %q", read, ok, err, tt.value)
 			}
-			lines := splitConfigLines(updated)
+			lines := SplitConfigLines(updated)
 			at := slices.Index(lines, tt.wantHeader)
 			if at < 0 {
 				t.Fatalf("no %q header line in:\n%s", tt.wantHeader, got)
@@ -361,7 +361,7 @@ func assertCommentsSurvive(t *testing.T, before, after string) {
 	t.Helper()
 	comments := func(text string) []string {
 		var out []string
-		for _, line := range splitConfigLines([]byte(text)) {
+		for _, line := range SplitConfigLines([]byte(text)) {
 			if isCommentLine(line) {
 				out = append(out, line)
 			}
@@ -378,23 +378,23 @@ func assertCommentsSurvive(t *testing.T, before, after string) {
 // the file: the first of an enum's vocabulary, and a fixed literal for everything else. A list's
 // literal is spelled the way the file spells one, which is also what the sweep reads back — a value
 // written and re-read has to come back the same string or the writer's round-trip means nothing.
-func plausibleValue(t *testing.T, k configKey) string {
+func plausibleValue(t *testing.T, k Key) string {
 	t.Helper()
 	switch k.Kind {
-	case kindBool:
+	case KindBool:
 		return "false"
-	case kindInt:
+	case KindInt:
 		return "4096"
-	case kindEnum:
+	case KindEnum:
 		if len(k.EnumValues) == 0 {
 			t.Fatalf("%s is an enum with no vocabulary", k.Path)
 		}
 		return k.EnumValues[0]
-	case kindString, kindServer, kindScheme:
+	case KindString, KindServer, KindScheme:
 		return "apogee-test-value"
-	case kindStringList:
+	case KindStringList:
 		return "[apogee-test.md, docs/apogee-test.md]"
-	case kindText:
+	case KindText:
 		// Written the way a reader takes it back out of a clip-chomped block: several lines, a blank
 		// one among them, and exactly one trailing newline — the canonical spelling renderSettingValue
 		// normalizes to, so the sweep's read-back comparison is against the value as offered.
@@ -440,7 +440,7 @@ func TestSpliceScalarSettingWritesAListOnOneLine(t *testing.T) {
 	}
 	// The block lands under the commented example that documents it, not at the end of the file
 	// (ADR 0035's insert-below-example call).
-	if lines := splitConfigLines([]byte(template)); at >= len(lines) {
+	if lines := SplitConfigLines([]byte(template)); at >= len(lines) {
 		t.Errorf("the block was appended at line %d of %d, want it below the commented example", at, len(lines))
 	}
 	if got, ok, err := scalarAtPath(created, k.Path); err != nil || !ok || got != "[NOTES.md, docs/HOWTO.md]" {
@@ -453,7 +453,7 @@ func TestSpliceScalarSettingWritesAListOnOneLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rewrite the list: %v", err)
 	}
-	if before, after := len(splitConfigLines(created)), len(splitConfigLines(updated)); before != after {
+	if before, after := len(SplitConfigLines(created)), len(SplitConfigLines(updated)); before != after {
 		t.Errorf("the rewrite changed the line count from %d to %d", before, after)
 	}
 	if got, ok, err := scalarAtPath(updated, k.Path); err != nil || !ok || got != "[AGENTS.md]" {
@@ -474,7 +474,7 @@ func TestSpliceScalarSettingWritesAListOnOneLine(t *testing.T) {
 
 // A file shape the line arithmetic would have to guess at is refused, loudly, with nothing written:
 // the writer's whole posture is that a config it cannot read confidently is one the user edits by
-// hand. Each case runs through saveConfigSetting, so the file on disk is checked too.
+// hand. Each case runs through SaveConfigSetting, so the file on disk is checked too.
 func TestConfigWriteSettingRefusals(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
@@ -634,9 +634,9 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 			path := writeTestConfig(t, tt.content)
 			var err error
 			if tt.reset {
-				err = resetConfigSetting(path, tt.path)
+				err = ResetConfigSetting(path, tt.path)
 			} else {
-				err = saveConfigSetting(path, tt.path, tt.value)
+				err = SaveConfigSetting(path, tt.path, tt.value)
 			}
 			if err == nil {
 				t.Fatalf("want an error, got a written file:\n%s", readTestConfig(t, path))
@@ -657,7 +657,7 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 func TestConfigWriteSettingSeedsAnAbsentConfig(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := saveConfigSetting(path, "ui.spinner", "glitter"); err != nil {
+	if err := SaveConfigSetting(path, "ui.spinner", "glitter"); err != nil {
 		t.Fatalf("save into an absent config: %v", err)
 	}
 	written := readTestConfig(t, path)
@@ -701,9 +701,9 @@ func TestConfigWriteSettingWritesNothingWhenTheFileAlreadyAgrees(t *testing.T) {
 			path := writeTestConfig(t, content)
 			var err error
 			if tt.reset {
-				err = resetConfigSetting(path, tt.path)
+				err = ResetConfigSetting(path, tt.path)
 			} else {
-				err = saveConfigSetting(path, tt.path, tt.value)
+				err = SaveConfigSetting(path, tt.path, tt.value)
 			}
 			if err != nil {
 				t.Fatalf("write %s: %v", tt.path, err)
@@ -847,7 +847,7 @@ func TestSpliceScalarSettingQuotesValuesThatNeedIt(t *testing.T) {
 			if err != nil {
 				t.Fatalf("splice %s = %q: %v", tt.path, tt.value, err)
 			}
-			if !slices.Contains(splitConfigLines(updated), tt.want) {
+			if !slices.Contains(SplitConfigLines(updated), tt.want) {
 				t.Errorf("spliced:\n%s\nwant a line %q", updated, tt.want)
 			}
 			if got, ok, err := scalarAtPath(updated, tt.path); err != nil || !ok || got != strings.TrimSpace(tt.value) {

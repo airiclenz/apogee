@@ -225,7 +225,7 @@ type Options struct {
 	HostAlias string
 
 	// Spinner is the status-line animation the `ui.spinner` config key selected. It is a SELECTION,
-	// already validated by the binary (cmd/apogee's uiSettings.validate calls ParseSpinnerStyle), so
+	// already validated by the binary (internal/config's UISettings.Validate calls ParseSpinnerStyle), so
 	// the renderer never parses a name. The zero value is not one of the styles: it resolves to
 	// classic, the animation with no registry entry falls back to (spinnerAnim.spec). cmd/apogee
 	// always sets a real style, so the zero value only reaches hand-built test Options — where the
@@ -254,7 +254,7 @@ type Options struct {
 	// program NAMES a cursor shape on every frame and never emits the DECSCUSR reset while it runs,
 	// so "inherit the shape this terminal is configured with" is not expressible and this key is
 	// the honest substitute for it. Like Spinner it is a SELECTION, already validated by the binary
-	// (cmd/apogee's applyConfig calls ParseCursorShape), so the renderer never parses a name. The
+	// (internal/config's ApplyConfig calls ParseCursorShape), so the renderer never parses a name. The
 	// zero value is tea.CursorBlock — also the configured default — so hand-built test Options and
 	// an unset key agree.
 	CursorShape tea.CursorShape

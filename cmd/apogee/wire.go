@@ -30,6 +30,8 @@ import (
 	"runtime"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/mcp"
@@ -48,16 +50,6 @@ import (
 // (phase-2 detail plan §3 C5): cmd dogfoods apogee.New, and *apogee.Agent (= *agent.Agent)
 // is exactly what internal/tui drives — without internal/tui ever importing the root path.
 var _ tui.Engine = (*apogee.Agent)(nil)
-
-// The known autonomy modes, named locally so the flag default and parser reference a
-// symbol rather than a bare string. The order is the privilege ladder:
-// Plan → Ask-Before → Allow-Edits → Auto.
-const (
-	modePlan       = apogee.ModePlan
-	modeAskBefore  = apogee.ModeAskBefore
-	modeAllowEdits = apogee.ModeAllowEdits
-	modeAuto       = apogee.ModeAuto
-)
 
 // The confinement backend label and the Auto-degradation notice used below live in
 // internal/probe: `apogee probe` reports the same verdict off-session and the TUI's
@@ -83,7 +75,7 @@ const unconfinedAutoWarning = "apogee: WARNING — auto mode is running UNCONFIN
 // the Windows-tagged labelBox pays a walk — so the Windows-vs-not distinction lives in that seam,
 // not here. Pure so the decision is table-testable off Windows (the DegradedNotice seam pattern).
 func shouldPrewarmLabelWalk(mode apogee.Mode, confineToWorkspace, fsWrite bool) bool {
-	return mode == modeAuto && confineToWorkspace && fsWrite
+	return mode == domain.ModeAuto && confineToWorkspace && fsWrite
 }
 
 // ----------------------------------------------------------------------------
@@ -92,13 +84,13 @@ func shouldPrewarmLabelWalk(mode apogee.Mode, confineToWorkspace, fsWrite bool) 
 
 // runRoot is the root command's body: parse the mode, resolve the state roots, build a
 // Config, construct (or resume) the Agent through the public surface, and launch the UI.
-func runRoot(ctx context.Context, opts options, launch launcher) error {
-	mode, err := parseMode(opts.mode)
+func runRoot(ctx context.Context, opts config.Options, launch launcher) error {
+	mode, err := domain.ParseMode(opts.Mode)
 	if err != nil {
 		return err
 	}
 
-	roots, err := resolveRoots(opts.configDir, opts.workspace)
+	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
 	if err != nil {
 		return err
 	}
@@ -115,7 +107,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	skillProvider := skills.NewProvider(skills.Sources{
 		Home:             roots.config,
 		Workspace:        roots.workspace,
-		UseProjectSkills: opts.useProjectSkills,
+		UseProjectSkills: opts.UseProjectSkills,
 	})
 
 	// The Bridge late-binds the event sink and approval gate to the Bubble Tea program
@@ -133,7 +125,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// `/settings` pane and apply to the running session (ADR 0037): the holder rebuilds the ladder
 	// from the new block and re-installs it on the presenter the engine already captured.
 	presentation := newLivePresentation(
-		opts.present, roots.workspace, runtime.GOOS, os.Getenv, bridge.SetPresentation)
+		opts.Present, roots.workspace, runtime.GOOS, os.Getenv, bridge.SetPresentation)
 	// The doc server's listener is owned by the app: it binds lazily on the first served
 	// presentation and closes with the session, like the MCP connections and the Agent below.
 	// Closing through the holder closes whichever server is current, which after a `present.port`
@@ -168,20 +160,20 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// exactly this call with the observed model). A selected file that cannot be read, or a
 	// template carrying an unknown placeholder, fails startup naming the config key — the prompt is
 	// structural configuration, not something to degrade quietly around.
-	sysPrompt, err := resolveSystemPrompt(opts.systemPrompt, opts.model, roots.config, os.ReadFile)
+	sysPrompt, err := config.ResolveSystemPrompt(opts.SystemPrompt, opts.Model, roots.config, os.ReadFile)
 	if err != nil {
 		return err
 	}
 
 	cfg := apogee.Config{
-		Endpoint: opts.endpoint,
-		Model:    opts.model,
+		Endpoint: opts.Endpoint,
+		Model:    opts.Model,
 		// The upstream bearer token, resolved from the startup `servers:` entry's own `api-key`,
 		// which APOGEE_API_KEY overlays. Empty — the keyless local default — sends no
 		// Authorization header at all.
-		APIKey:       opts.apiKey,
+		APIKey:       opts.APIKey,
 		Mode:         mode,
-		Bypass:       opts.bypass,
+		Bypass:       opts.Bypass,
 		Events:       bridge.Sink(),
 		Approver:     bridge.Approver(),
 		Asker:        bridge.Asker(),
@@ -195,17 +187,17 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// denyConfiner, so --mode auto WORKS where fs-confinement exists and gates the
 		// subprocess surface where it does not (rather than refusing Auto).
 		Confiner:           confiner,
-		ConfineToWorkspace: opts.confineToWorkspace,
-		WebSearchEndpoint:  opts.webSearchEndpoint,
+		ConfineToWorkspace: opts.ConfineToWorkspace,
+		WebSearchEndpoint:  opts.WebSearchEndpoint,
 		// The `tools.disabled:` roster switch: the built-in tools this config takes off the menu.
 		// Empty ⇒ the whole roster, exactly the set built before the key existed. It is carried on
 		// Config rather than passed to the assembly alone so every Driver — this session, a headless
 		// run, an embedder — prunes the same roster from the same value.
-		DisabledTools: opts.toolsDisabled,
+		DisabledTools: opts.ToolsDisabled,
 		// The model profile (CONTEXT: Model profile) — tool-call format + thinking channel —
 		// resolved from config.yaml (file-only). A zero profile is native tool calls with no
 		// inline thinking, so an unconfigured model behaves exactly as today.
-		Profile: opts.profile,
+		Profile: opts.Profile,
 		// The configured system-prompt TEMPLATE (ADR 0023), which the loop renders fresh per
 		// request and seeds as the first system message. Empty ⇒ no prompt: the request opens with
 		// the user's own message, exactly as it did before this key existed.
@@ -214,7 +206,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// in the workspace root at every session boundary, whose content rides the same first system
 		// message as the prompt above — verbatim, never as a template. Nil ⇒ the feature is off, and
 		// the request is exactly what it was before the key existed.
-		ContextFiles: opts.contextFiles,
+		ContextFiles: opts.ContextFiles,
 		Skills:       skillProvider,
 		// The `context-window:` PIN (0 when unpinned — nothing probes at startup any more). It is
 		// the budget /compact and the automatic Compaction trigger bound their summary request
@@ -223,12 +215,12 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// first heartbeat rebind binds the observed window. CompactionEnabled carries the
 		// `auto-compact` key (default on) — the budget-driven automatic trigger (item 9); the
 		// on-demand /compact runs regardless of it.
-		Context: apogee.ContextConfig{MaxContextTokens: opts.contextWindow, CompactionEnabled: opts.autoCompact},
+		Context: apogee.ContextConfig{MaxContextTokens: opts.ContextWindow, CompactionEnabled: opts.AutoCompact},
 	}
 
 	// A per-session startup warning whenever Auto runs unconfined (ADR 0012): confine=false
 	// is safe only inside a VM, and it is the only blanket loosen in the system.
-	if mode == modeAuto && !opts.confineToWorkspace {
+	if mode == domain.ModeAuto && !opts.ConfineToWorkspace {
 		fmt.Fprintln(os.Stderr, unconfinedAutoWarning)
 	}
 
@@ -236,7 +228,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// enforce it. The ladder gates every terminal command instead — correct, but silent until
 	// now, which is what made Auto look broken (ISSUES.md, 2026-07-21). Say it once, name the
 	// backend, and point at /confine.
-	if notice := probe.DegradedNotice(probe.BackendName(confiner), confiner.Capabilities(), mode, opts.confineToWorkspace); notice != "" {
+	if notice := probe.DegradedNotice(probe.BackendName(confiner), confiner.Capabilities(), mode, opts.ConfineToWorkspace); notice != "" {
 		fmt.Fprintln(os.Stderr, notice)
 	}
 
@@ -256,7 +248,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// consistent with the owner's "keep semantics". It is a genuine no-op on every other host:
 	// PrewarmLabelWalk is empty off Windows, and the Windows backend refuses when FSWrite is false —
 	// the same host probe.DegradedNotice above speaks for.
-	if shouldPrewarmLabelWalk(mode, opts.confineToWorkspace, confiner.Capabilities().FSWrite) {
+	if shouldPrewarmLabelWalk(mode, opts.ConfineToWorkspace, confiner.Capabilities().FSWrite) {
 		platform.PrewarmLabelWalk(confiner, roots.workspace, os.Stderr)
 	}
 
@@ -265,7 +257,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// On resume the connection is established FRESH here — no server-side state is restored
 	// (ADR 0008). An MCP connect failure is fatal: a configured server that cannot be reached is
 	// a misconfiguration the user should see, not a silently-dropped capability.
-	mcpClient, err := mcp.Connect(ctx, opts.mcpServers, security.URLGuard{})
+	mcpClient, err := mcp.Connect(ctx, opts.MCPServers, security.URLGuard{})
 	if err != nil {
 		return fmt.Errorf("apogee: connect MCP servers: %w", err)
 	}
@@ -286,7 +278,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// registry the engine built privately, and with no MCP server configured the two builds are the
 	// same tools in the same order, so this changes what the root HOLDS, never what the Agent runs.
 	cfg.Tools = registryWithMCP(roots.workspace, cfg, mcpSet.tools())
-	toolSet := newLiveTools(cfg.Tools, cfg.WebSearchEndpoint, opts.toolsDisabled,
+	toolSet := newLiveTools(cfg.Tools, cfg.WebSearchEndpoint, opts.ToolsDisabled,
 		func(endpoint string, disabled []string) *apogee.ToolRegistry {
 			// The set as this session would have built it with another search endpoint and another
 			// roster: the MCP tools are re-folded from the holder rather than remembered, so a
@@ -312,7 +304,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// choice, model-independent by construction, and the rebind closure below re-runs the
 	// "an explicit mechanisms: block suppresses a validated set" rule against it for every new
 	// model — so it must survive the validated-set overwrite two blocks down.
-	manualIDs, err := mechanismIDs(opts.mechanisms, mechanisms.KnownIDs())
+	manualIDs, err := mechanismIDs(opts.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
 		return err
 	}
@@ -341,7 +333,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// ACTIVE on that record — continuing its file in place rather than forking a new session — and
 	// the Agent resume off rec.Session below.
 	store := session.NewStore(roots.sessions)
-	resumed, err := resolveResume(store, opts.resume, opts.continueSession, roots.workspace)
+	resumed, err := resolveResume(store, opts.Resume, opts.ContinueSession, roots.workspace)
 	if err != nil {
 		return err
 	}
@@ -351,7 +343,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// determined the TUI opens pre-bound and the engine arrives with the human's first pick (ADR
 	// 0036 decision 3). Everything below this line wires against the holder and never learns which
 	// of the two happened — the seams are identical, and the engine is behind them either way.
-	engine := newLateEngine(mode, opts.confineToWorkspace)
+	engine := newLateEngine(mode, opts.ConfineToWorkspace)
 	defer engine.Close()
 
 	// The store-backed session host: it persists the active session (per-Turn, at idle, and on
@@ -359,7 +351,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// facts only the binary knows (workspace root, resolved model) — so the renderer stays free of
 	// file I/O (phase-2 detail plan §3 C5). Seeded active on a resumed record, it updates that
 	// session's file rather than starting a new one.
-	host := newSessionHost(store, roots.workspace, opts.model, resumed)
+	host := newSessionHost(store, roots.workspace, opts.Model, resumed)
 
 	// The upstream monitor: one beat every heartbeat.Interval, from inside the running TUI. The
 	// configured model id travels with it as the discovery HINT (decision 10) — while the server
@@ -377,7 +369,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// for the same reason the engine holder above does — the bind step is what fills both.
 	holder := newUpstreamHolder()
 
-	// The bind step: the one place a serverEntry becomes a running session (the Agent, the Monitor,
+	// The bind step: the one place a ServerEntry becomes a running session (the Agent, the Monitor,
 	// and the binding the out-of-band calls read). A determined startup binds HERE, before the TUI
 	// starts, which is what keeps the ordinary path exactly what it was; an undetermined one leaves
 	// both holders empty and binds through the seam handed to the renderer below.
@@ -389,7 +381,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	caps := newParallelAgentsCap(engine)
 
 	binder := serverBinder{cfg: cfg, resumed: resumed, engine: engine, holder: holder, caps: caps}
-	if opts.prebound.Reason == "" {
+	if opts.Prebound.Reason == "" {
 		if err := binder.bind(startupEntry(opts)); err != nil {
 			return err
 		}
@@ -422,8 +414,8 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// against, and stopped below with the run's other closers.
 	//
 	// The path is the one this session resolved, which is the same file every seam in the block below
-	// writes; the watcher reads no YAML and holds no projection of its own (configwatch.go).
-	configWatch := newConfigWatcher(configFilePath(opts.configDir))
+	// writes; the watcher reads no YAML and holds no projection of its own (internal/config/configwatch.go).
+	configWatch := config.NewWatcher(config.FilePath(opts.ConfigDir))
 	configWatch.Start()
 	// Registered after the Agent's own Close, so it runs BEFORE it (the schedules' posture, and for
 	// the schedules' reason): the poll ends while everything it reported into is still standing. Stop
@@ -496,7 +488,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// key is what the session begins with, and a `/server` switch or a first bind replaces it. A
 	// pre-bound start therefore begins empty — the verbs answer tui.ErrNoLauncher until a bind
 	// installs a value — and so does a run on the ephemeral `--endpoint` entry, which names no key.
-	startPath, _ := entryLauncherPath(opts.startupLauncher)
+	startPath, _ := entryLauncherPath(opts.StartupLauncher)
 	launcher := newLauncherPath(startPath)
 
 	// The server-switch closure: the composition root's half of `/server`. The TUI decides WHEN
@@ -549,7 +541,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		if !configuredServer(live.serverList(), name) {
 			return false, nil
 		}
-		if err := saveConfigSetting(filepath.Join(roots.config, "config.yaml"), "server", name); err != nil {
+		if err := config.SaveConfigSetting(filepath.Join(roots.config, "config.yaml"), "server", name); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -631,10 +623,10 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// composed from still stands.
 	defer schedules.Close()
 
-	// The prompt caret's shape. applyConfig already refused a name this build does not know, so the
+	// The prompt caret's shape. ApplyConfig already refused a name this build does not know, so the
 	// error here cannot fire; ignoring it keeps the parse a single expression, and ParseCursorShape
 	// answers an unknown name with the default anyway — a caret is drawn either way.
-	cursorShape, _ := tui.ParseCursorShape(opts.cursorShape)
+	cursorShape, _ := tui.ParseCursorShape(opts.CursorShape)
 
 	// The colour scheme, resolved HERE rather than in the renderer: reading a file is the
 	// composition root's job, so the TUI is handed a palette and never a path (ADR 0031's
@@ -647,24 +639,24 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// picker asks what schemes exist when the human opens it, and the switch resolves the chosen one
 	// again from disk — which is what makes an edited scheme file land on the next switch without a
 	// restart, and why neither is a value captured here.
-	colorScheme, colorSchemeWarnings := resolveColorScheme(opts.ui.colorScheme, roots.schemes)
+	colorScheme, colorSchemeWarnings := resolveColorScheme(opts.UI.ColorScheme, roots.schemes)
 
 	err = launch(ctx, engine, bridge, tui.Options{
 		// Both upstream facts are now honestly launch-time-only: Model is the configured pin ("" on
 		// a cold start, where the footer says "connecting…" until the first beat binds one), and
 		// ContextWindow is the `context-window:` pin (0 when unpinned). Neither is a discovery
 		// result any more — the heartbeat and the rebind closure below own everything after launch.
-		Model:     opts.model,
-		Endpoint:  opts.endpoint,
+		Model:     opts.Model,
+		Endpoint:  opts.Endpoint,
 		Mode:      mode,
-		Bypass:    opts.bypass,
+		Bypass:    opts.Bypass,
 		Workspace: roots.workspace,
 		// The apogee home THIS run resolved (--config / APOGEE_CONFIG included), so a report that
 		// names a path — /skills telling an empty catalog where discovery looked — names the folder
 		// the run actually walks rather than the ~/.apogee default it may not be using.
 		ConfigHome:    roots.config,
-		ContextWindow: opts.contextWindow,
-		HostAlias:     opts.hostAlias,
+		ContextWindow: opts.ContextWindow,
+		HostAlias:     opts.HostAlias,
 		// The two upstream seams (ADR 0024): the monitor observes on the TUI's cadence, and the
 		// closure applies what the observation implies. Wiring both is what makes the display live.
 		// Heartbeat goes through the holder, so the observation follows the session onto another
@@ -690,7 +682,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// configured at all — and the seam that ends it. Both are always wired; on the ordinary start Prebound
 		// is the zero value, which says the engine was constructed before the program began and
 		// leaves every flow below exactly as it was.
-		Prebound:   opts.prebound,
+		Prebound:   opts.Prebound,
 		BindServer: bindServer,
 		// The persistence half of both verbs (ADR 0036 decision 2): every deliberate move onto a
 		// configured entry — the first-boot choice included — records that entry as the one the next
@@ -713,17 +705,17 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		LauncherEnabled: launcherSeams.on,
 		// The resolved `ui:` block: which animation paints the status-line spinner, whether its
 		// colour loop runs, and whether the transcript's scroll bar is painted at all. Independent
-		// values, resolved and validated by applyConfig, so the renderer selects rather than parses.
+		// values, resolved and validated by ApplyConfig, so the renderer selects rather than parses.
 		// The scroll bar is the one key whose polarity flips here — the config says show, the
 		// renderer's option says hide, so its zero value is the shown default (see tui.Options).
-		Spinner:       opts.ui.spinner,
-		SpinnerColor:  opts.ui.spinnerColor,
-		HideScrollbar: !opts.ui.showScrollbar,
+		Spinner:       opts.UI.Spinner,
+		SpinnerColor:  opts.UI.SpinnerColor,
+		HideScrollbar: !opts.UI.ShowScrollbar,
 		// The `ui.color-scheme:` key, already resolved to the palette itself (above): the name so the
 		// renderer can say which scheme is in force, and the warnings the resolve produced so it can
 		// tell the human why the screen is not the one they asked for.
 		ColorScheme:         colorScheme,
-		ColorSchemeName:     opts.ui.colorScheme,
+		ColorSchemeName:     opts.UI.ColorScheme,
 		ColorSchemeWarnings: colorSchemeWarnings,
 		// And the two that keep the scheme switchable from inside the program: what the picker
 		// offers, and the resolve behind an answer to it. Both read the folder on every ask, so a
@@ -742,8 +734,8 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// The two hidden rendering-diagnostic seams (--tui-trace / --tui-diag), passed through as
 		// the paths they are: empty on every ordinary run, and the renderer decides what a named
 		// one means and when it goes live.
-		TracePath: opts.tuiTrace,
-		DiagPath:  opts.tuiDiag,
+		TracePath: opts.TUITrace,
+		DiagPath:  opts.TUIDiag,
 		// The single source of truth (the embedded top-level VERSION file). Version carries the
 		// full string (provenance included) that /version prints and --version mirrors; BaseVersion
 		// is the release version alone (no provenance), the clean value the start-up box displays.
@@ -758,10 +750,10 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 			HostID:  platform.HostID(),
 		},
 		// The `--save` half of `/confine off --save`: record THIS host in the same config.yaml
-		// applyConfig read at startup, so the next run resolves unconfined here without the claim
+		// ApplyConfig read at startup, so the next run resolves unconfined here without the claim
 		// following the file onto any other machine. The renderer learns only the path written —
 		// the on-disk format is the binary's business, like the session Save seam below.
-		SaveHostAcknowledgement: hostAcknowledgementSaver(
+		SaveHostAcknowledgement: config.HostAcknowledgementSaver(
 			filepath.Join(roots.config, "config.yaml"), platform.HostID()),
 		// The `/settings` pane's rows: every key the registry describes, with the value THIS run
 		// resolved and the marker for a key an environment variable or a flag overrode
@@ -772,7 +764,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		SettingsRows: func() []tui.SettingRow { return settingsRows(opts) },
 		// The pane's write half: one key per deliberate edit, spliced into the same config.yaml the
 		// acknowledgement above records a host in (ADR 0035). The registry decides what may be
-		// written and the splice writer owns the file (configwrite.go) — the renderer hands over a
+		// written and the splice writer owns the file (internal/config/configwrite.go) — the renderer hands over a
 		// path and the value as the file spells it, and learns only whether it landed.
 		//
 		// Every landed write re-takes the external edit's baseline (ADR 0041 decision 8). The pane
@@ -781,7 +773,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// as somebody's edit and applies twice — which for `mcp-servers:` is a second dial of every
 		// server. A write that FAILED changed no file and refreshes nothing.
 		WriteSetting: func(key, value string) error {
-			if err := saveConfigSetting(filepath.Join(roots.config, "config.yaml"), key, value); err != nil {
+			if err := config.SaveConfigSetting(filepath.Join(roots.config, "config.yaml"), key, value); err != nil {
 				return err
 			}
 			externalEdits.refresh()
@@ -791,7 +783,7 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// back to the binary's default rather than being pinned to today's spelling of it. It refreshes
 		// the same baseline for the same reason — a removed line is a change to the file like any other.
 		ResetSetting: func(key string) error {
-			if err := resetConfigSetting(filepath.Join(roots.config, "config.yaml"), key); err != nil {
+			if err := config.ResetConfigSetting(filepath.Join(roots.config, "config.yaml"), key); err != nil {
 				return err
 			}
 			externalEdits.refresh()
@@ -846,14 +838,14 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		// The seam is wired either way — the key is a preference about automatism, not a ban on the
 		// call — so `/rename` regenerates on demand regardless.
 		GenerateTitle: titles.generate,
-		AutoTitle:     opts.autoTitle,
+		AutoTitle:     opts.AutoTitle,
 		// The scheduler surface (ADR 0033): the seam /schedule and /schedule-stop drive, the reason
 		// auto is unavailable on this host (empty ⇒ it is available, and the picker offers it), and
 		// the activity report the Gate above releases a due Firing on. All three are wired together
 		// or not at all — the renderer's nil check on the seam speaks for the set.
 		Schedules: schedules,
 		ScheduleAutoBlocked: scheduleAutoBlocked(
-			probe.BackendName(confiner), confiner.Capabilities(), opts.confineToWorkspace),
+			probe.BackendName(confiner), confiner.Capabilities(), opts.ConfineToWorkspace),
 		ReportActivity: gate.report,
 		// engine.InExchange() reads the resumed Agent's open-Exchange state (false on a fresh start,
 		// or a cleanly-closed resume; true only when the stored snapshot died mid-task), so newModel
@@ -927,24 +919,6 @@ const contextFileNote = "applies at next clear"
 const toolRosterNote = "applies to the next request"
 
 // ----------------------------------------------------------------------------
-// Flag parsing (the mode ladder)
-// ----------------------------------------------------------------------------
-
-// parseMode validates the --mode flag against the known autonomy modes (the ladder
-// Plan → Ask-Before → Allow-Edits → Auto). Auto parses successfully here; whether it can
-// run depends on the host's fs-confinement (ADR 0012 — Auto needs landlock ABI ≥1 on
-// Linux, or is refused only when no fs-confinement exists). friendlyConstructErr surfaces
-// an unavailable-Auto as an actionable message.
-func parseMode(s string) (apogee.Mode, error) {
-	switch apogee.Mode(s) {
-	case modePlan, modeAskBefore, modeAllowEdits, modeAuto:
-		return apogee.Mode(s), nil
-	default:
-		return "", fmt.Errorf("apogee: invalid --mode %q (want plan, ask-before, allow-edits, or auto)", s)
-	}
-}
-
-// ----------------------------------------------------------------------------
 // State-root resolution (phase-2 detail plan §3 C7)
 // ----------------------------------------------------------------------------
 
@@ -979,28 +953,12 @@ func resolveColorScheme(name, schemesDir string) (scheme.Scheme, []string) {
 	return s, lines
 }
 
-// apogeeHome resolves the absolute apogee home directory: the configDir override when
-// set, else ~/.apogee (the single uniform dotdir on every OS — owner decision, not XDG).
-// It is shared by resolveRoots (the state roots) and configFilePath (where config.yaml
-// lives), so both agree on the home.
-func apogeeHome(configDir string) (string, error) {
-	home := configDir
-	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("apogee: resolve home directory: %w", err)
-		}
-		home = filepath.Join(userHome, ".apogee")
-	}
-	return filepath.Abs(home)
-}
-
 // resolveRoots computes the state roots the library refuses to assume (ADR 0001): the
 // apogee home (configDir override, else ~/.apogee) holds config/library/sessions, and the
 // workspace (workspace override, else the current directory) scopes the file tools. It
 // computes paths only — directory creation is deferred to the writer that needs them (P2.5).
 func resolveRoots(configDir, workspace string) (stateRoots, error) {
-	absHome, err := apogeeHome(configDir)
+	absHome, err := config.ApogeeHome(configDir)
 	if err != nil {
 		return stateRoots{}, err
 	}

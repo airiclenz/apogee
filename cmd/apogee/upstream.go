@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -252,24 +252,24 @@ func (m sessionMover) move(endpoint, alias, hint, apiKey string) (tui.ServerSwit
 // Deriving the synthesized row from the ephemeral case alone is also what dissolves the edge the
 // endpoint-equality test used to leave open: a configured startup can no longer be offered twice
 // under two labels, and a synthesized label can no longer collide with a configured `name`.
-func upstreamChoices(opts options) []serverEntry {
-	entries := make([]serverEntry, 0, len(opts.servers)+1)
-	if opts.startupEphemeral {
-		entries = append(entries, serverEntry{
-			Name:     opts.hostAlias,
-			Endpoint: opts.endpoint,
-			APIKey:   opts.apiKey,
-			Model:    opts.model,
+func upstreamChoices(opts config.Options) []config.ServerEntry {
+	entries := make([]config.ServerEntry, 0, len(opts.Servers)+1)
+	if opts.StartupEphemeral {
+		entries = append(entries, config.ServerEntry{
+			Name:     opts.HostAlias,
+			Endpoint: opts.Endpoint,
+			APIKey:   opts.APIKey,
+			Model:    opts.Model,
 		})
 	}
-	return append(entries, opts.servers...)
+	return append(entries, opts.Servers...)
 }
 
 // serverChoices projects the assembled entries onto the renderer's view of them: the name and the
 // endpoint, which is display and identity and nothing else. The per-server api key and discovery
 // hint deliberately stop here — they are what the SWITCH needs, and the switch is the binary's half
 // of the seam, so the renderer never holds a credential it has no use for.
-func serverChoices(entries []serverEntry) []tui.ServerChoice {
+func serverChoices(entries []config.ServerEntry) []tui.ServerChoice {
 	choices := make([]tui.ServerChoice, len(entries))
 	for i, e := range entries {
 		choices[i] = tui.ServerChoice{Name: e.Name, Endpoint: e.Endpoint}
@@ -281,13 +281,13 @@ func serverChoices(entries []serverEntry) []tui.ServerChoice {
 // picks from the very list serverChoices projected, so an unknown name is a backstop rather than an
 // expected path — but it is answered with the candidates all the same, because the one surface this
 // error can reach is a transcript note the user reads.
-func findServer(entries []serverEntry, name string) (serverEntry, error) {
+func findServer(entries []config.ServerEntry, name string) (config.ServerEntry, error) {
 	for _, e := range entries {
 		if e.Name == name {
 			return e, nil
 		}
 	}
-	return serverEntry{}, fmt.Errorf("unknown server %q — configured: %s", name, serverNameList(entries))
+	return config.ServerEntry{}, fmt.Errorf("unknown server %q — configured: %s", name, config.ServerNameList(entries))
 }
 
 // configuredServer reports whether name labels an entry of the `servers:` list — the question the
@@ -295,26 +295,13 @@ func findServer(entries []serverEntry, name string) (serverEntry, error) {
 // different question from findServer's: that one resolves against the SWITCHABLE rows, which include
 // the synthesized ephemeral startup, while only a row the file actually holds is a choice a next
 // session could start on.
-func configuredServer(entries []serverEntry, name string) bool {
+func configuredServer(entries []config.ServerEntry, name string) bool {
 	for _, e := range entries {
 		if e.Name == name {
 			return true
 		}
 	}
 	return false
-}
-
-// serverNameList renders the switchable names for findServer's error (an empty list renders
-// "(none)", matching knownMechanismList's shape for the same job).
-func serverNameList(entries []serverEntry) string {
-	if len(entries) == 0 {
-		return "(none)"
-	}
-	names := make([]string, len(entries))
-	for i, e := range entries {
-		names[i] = e.Name
-	}
-	return strings.Join(names, ", ")
 }
 
 // ----------------------------------------------------------------------------
@@ -335,7 +322,7 @@ type parallelAgentsSetter interface {
 // server's own `total_slots`, which only a landed beat can report. Holding them apart and resolving
 // at the point of install is what lets either arrive first — a pinned entry is capped before the
 // first beat, an unpinned one the moment discovery answers — without a second, subtly different
-// resolution growing beside resolveParallelAgents.
+// resolution growing beside ResolveParallelAgents.
 //
 // It remembers the bound entry's NAME for one job: a `servers:` list the human edits mid-session
 // (ADR 0037) has to be able to move the cap of the server the session is ALREADY on, and a name is
@@ -379,10 +366,10 @@ func newParallelAgentsCap(engine parallelAgentsSetter) *parallelAgentsCap {
 // The return value is what makes the bind path work without a second call: an Agent that does not
 // exist yet cannot be pushed at, so the binder seeds its Config with this number and the push is the
 // no-op an unbound engine answers with.
-func (c *parallelAgentsCap) follow(entry serverEntry) int {
+func (c *parallelAgentsCap) follow(entry config.ServerEntry) int {
 	c.mu.Lock()
 	c.name, c.pinned, c.observed = entry.Name, entry.ParallelAgents, 0
-	width := resolveParallelAgents(c.pinned, c.observed)
+	width := config.ResolveParallelAgents(c.pinned, c.observed)
 	c.mu.Unlock()
 	c.engine.SetParallelAgents(width)
 	return width
@@ -401,7 +388,7 @@ func (c *parallelAgentsCap) observe(slots int) int {
 	if slots > 0 {
 		c.observed = slots
 	}
-	width := resolveParallelAgents(c.pinned, c.observed)
+	width := config.ResolveParallelAgents(c.pinned, c.observed)
 	c.mu.Unlock()
 	c.engine.SetParallelAgents(width)
 	return width
@@ -421,7 +408,7 @@ func (c *parallelAgentsCap) observe(slots int) int {
 func (c *parallelAgentsCap) current() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return resolveParallelAgents(c.pinned, c.observed)
+	return config.ResolveParallelAgents(c.pinned, c.observed)
 }
 
 // relist re-resolves the cap from a re-read `servers:` list (ADR 0037's live apply): the entry that
@@ -429,7 +416,7 @@ func (c *parallelAgentsCap) current() int {
 // nothing about the server changed, only what the file says about it. A list that no longer names
 // this session's server leaves the cap exactly where it was, which is the same posture the switch
 // list takes toward an entry the human deleted while the session was on it.
-func (c *parallelAgentsCap) relist(entries []serverEntry) int {
+func (c *parallelAgentsCap) relist(entries []config.ServerEntry) int {
 	c.mu.Lock()
 	for _, e := range entries {
 		if e.Name != "" && e.Name == c.name {
@@ -437,7 +424,7 @@ func (c *parallelAgentsCap) relist(entries []serverEntry) int {
 			break
 		}
 	}
-	width := resolveParallelAgents(c.pinned, c.observed)
+	width := config.ResolveParallelAgents(c.pinned, c.observed)
 	c.mu.Unlock()
 	c.engine.SetParallelAgents(width)
 	return width

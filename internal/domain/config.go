@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // ----------------------------------------------------------------------------
 // Construction surface (ADR 0001)
@@ -288,6 +291,22 @@ const (
 	// unavailable, the subprocess surface gates ("confine if you can, gate if you can't").
 	ModeAuto Mode = "auto"
 )
+
+// ParseMode validates a mode spelling against the known autonomy modes (the ladder
+// Plan → Ask-Before → Allow-Edits → Auto) — the `--mode` flag, `APOGEE_MODE`, and the
+// config file's `mode:` key all name a rung with the same four words, so they all read
+// the ladder from here rather than each restating it. Auto parses successfully; whether
+// it can RUN depends on the host's fs-confinement (ADR 0012 — Auto needs landlock ABI ≥1
+// on Linux, or is refused only when no fs-confinement exists), which is a construction
+// question and not a spelling one.
+func ParseMode(s string) (Mode, error) {
+	switch Mode(s) {
+	case ModePlan, ModeAskBefore, ModeAllowEdits, ModeAuto:
+		return Mode(s), nil
+	default:
+		return "", fmt.Errorf("apogee: invalid --mode %q (want plan, ask-before, allow-edits, or auto)", s)
+	}
+}
 
 // modeLadder is the autonomy privilege ladder in cycle order (least to most autonomous);
 // the cycle wraps Auto → Plan. It is the single source of truth for Shift+Tab mode cycling.

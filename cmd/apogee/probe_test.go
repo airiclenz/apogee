@@ -183,7 +183,7 @@ func TestProbeReportsConfinementResidueWithoutHealingIt(t *testing.T) {
 }
 
 // The reported settings are the ones a SESSION would run with on this host: the probe resolves
-// config.yaml exactly as applyConfig does, including the effective confine-to-workspace after a
+// config.yaml exactly as ApplyConfig does, including the effective confine-to-workspace after a
 // Host acknowledgement — which is the fact the whole report exists to make diagnosable.
 func TestProbeCommandReadsTheConfigFile(t *testing.T) {
 	t.Parallel()

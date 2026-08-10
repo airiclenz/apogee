@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/probe"
@@ -23,8 +24,8 @@ const batteryRequestTimeout = 60 * time.Second
 
 // errProbeModelNeedsEndpoint is the refusal when resolution left this command with nothing to
 // call. Selection itself refuses first since ADR 0036 — a config that names no startup server
-// never gets past applyConfig, and every entry it could select carries an endpoint
-// (validateServers) — so this is the belt-and-braces answer, kept because the command that spends
+// never gets past ApplyConfig, and every entry it could select carries an endpoint
+// (ValidateServers) — so this is the belt-and-braces answer, kept because the command that spends
 // tokens must never take an empty endpoint as permission to start. The model half cannot degrade
 // to a partial answer the way the host half can: with nothing to call there is no battery, and
 // inventing a "model unreachable" fingerprint would be exactly the identity-from-absent-evidence
@@ -51,7 +52,7 @@ var errProbeModelNeedsLabel = errors.New(
 // It never runs as a side effect of anything. `apogee probe` reports the host and stops, even
 // with a perfectly reachable endpoint sitting in the config — the whole point of the split.
 func probeModelCommand() *cobra.Command {
-	var opts options
+	var opts config.Options
 	var noSave bool
 
 	cmd := &cobra.Command{
@@ -79,18 +80,18 @@ func probeModelCommand() *cobra.Command {
 			// The same resolution a session performs (flag > env > file > default) — so the
 			// model this battery measures is the model a session on this host would talk to.
 			// It reads only; the host half's no-seeding rule holds here too.
-			if err := applyConfig(&opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
+			if err := config.ApplyConfig(&opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
 				return err
 			}
 			// The workspace argument is deliberately empty: the model path reads only the
 			// home-derived roots (probe records, validated entries), so there is no
 			// --workspace flag here — the probe commands admit only flags that CHANGE what
 			// is reported (probe.go), and a workspace never changed this report.
-			roots, err := resolveRoots(opts.configDir, "")
+			roots, err := resolveRoots(opts.ConfigDir, "")
 			if err != nil {
 				return err
 			}
-			if opts.endpoint == "" {
+			if opts.Endpoint == "" {
 				return errProbeModelNeedsEndpoint
 			}
 
@@ -101,10 +102,10 @@ func probeModelCommand() *cobra.Command {
 			// The advertised label the record is keyed on: the pinned --model when there is
 			// one, else what the server says its active model is — because that label is what
 			// a later OFFLINE session has in hand when it resolves identity.
-			label := opts.model
+			label := opts.Model
 			if label == "" {
-				info, derr := provider.NewClient(opts.endpoint, "",
-					provider.WithAPIKey(opts.apiKey)).Discover(cmd.Context())
+				info, derr := provider.NewClient(opts.Endpoint, "",
+					provider.WithAPIKey(opts.APIKey)).Discover(cmd.Context())
 				if derr != nil {
 					return derr
 				}
@@ -123,10 +124,10 @@ func probeModelCommand() *cobra.Command {
 			// APOGEE_API_KEY overlays; no flag — a secret does not belong in shell history).
 			// Both of this command's clients are keyed, so a keyed
 			// Upstream cannot refuse the probe while a session against it works.
-			client := provider.NewClient(opts.endpoint, label,
-				provider.WithRequestTimeout(batteryRequestTimeout), provider.WithAPIKey(opts.apiKey))
+			client := provider.NewClient(opts.Endpoint, label,
+				provider.WithRequestTimeout(batteryRequestTimeout), provider.WithAPIKey(opts.APIKey))
 			result := probe.GatherModel(cmd.Context(), probe.ModelInputs{
-				Endpoint: opts.endpoint,
+				Endpoint: opts.Endpoint,
 				Model:    label,
 				Chat: func(ctx context.Context, req provider.Request) (provider.RawResponse, error) {
 					return client.Respond(ctx, req)
@@ -146,10 +147,10 @@ func probeModelCommand() *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.endpoint, "endpoint", "", "OpenAI-compatible LLM server URL to probe")
-	flags.StringVar(&opts.model, "model", "",
+	flags.StringVar(&opts.Endpoint, "endpoint", "", "OpenAI-compatible LLM server URL to probe")
+	flags.StringVar(&opts.Model, "model", "",
 		"model to probe (default: ask the server for its active model)")
-	flags.StringVar(&opts.configDir, "config", "",
+	flags.StringVar(&opts.ConfigDir, "config", "",
 		"apogee home directory for config/library/sessions (default: ~/.apogee)")
 	flags.BoolVar(&noSave, "no-save", false,
 		"run the full battery and print the report, but record no fingerprint (ADR 0021's off-switch)")
@@ -173,7 +174,7 @@ func probeModelCommand() *cobra.Command {
 // home as the next session start will actually find it. A record that was not written (--no-save,
 // a failed write) has no NEW effect to claim; the report's effect line says so, naming any
 // earlier record that survives and therefore continues to apply.
-func recordProbeFingerprint(m probe.Model, roots stateRoots, opts options, save bool, printErr func(string)) probe.SaveOutcome {
+func recordProbeFingerprint(m probe.Model, roots stateRoots, opts config.Options, save bool, printErr func(string)) probe.SaveOutcome {
 	out := probe.SaveOutcome{Requested: save}
 	if m.Fingerprint.IsZero() {
 		return out
@@ -243,7 +244,7 @@ func recordProbeFingerprint(m probe.Model, roots stateRoots, opts options, save 
 // defect stays silent here: this is a courtesy line in a report, and a broken user file is
 // already loud at the startup path that owns it. A catalogue defect in the entry that would
 // otherwise apply is named instead of dropped, because that one changes the answer.
-func autoApplyKeys(m probe.Model, opts options, validatedDir, probeDir string) (keys []string, promoted bool, suppressed string) {
+func autoApplyKeys(m probe.Model, opts config.Options, validatedDir, probeDir string) (keys []string, promoted bool, suppressed string) {
 	with := startupSetDecision(opts, validatedDir, probeDir)
 	switch {
 	// The session-level off-switches startup checks first. They hold whatever the record

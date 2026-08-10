@@ -20,6 +20,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -153,7 +155,7 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	// a tool of its own. If fire() inherited either, this run would fail rather than pass — the mode
 	// is refused by run.Once, and the tool would show up on the menu below.
 	base := apogee.Config{
-		Mode:         modeAskBefore,
+		Mode:         domain.ModeAskBefore,
 		WorkspaceDir: roots.workspace,
 		ConfigDir:    roots.config,
 		LibraryDir:   roots.library,
@@ -161,8 +163,8 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	}
 	base.Tools = registryWithMCP(roots.workspace, base, []apogee.Tool{sessionOnlyTool{}})
 
-	launchOpts := options{
-		endpoint: "http://launch.invalid", model: "launch-model", validatedSetsEnable: true,
+	launchOpts := config.Options{
+		Endpoint: "http://launch.invalid", Model: "launch-model", ValidatedSetsEnable: true,
 	}
 	w := scheduleWiring{
 		base:  base,
@@ -180,7 +182,7 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 		ScheduleID:   "sch-1-abcd",
 		ScheduleName: "Nightly build",
 		Prompt:       firingStepPrompt,
-		Mode:         modePlan,
+		Mode:         domain.ModePlan,
 	})
 	if err != nil {
 		t.Fatalf("fire: %v", err)
@@ -252,8 +254,8 @@ func TestScheduleFiringReportsAPerModelResolutionFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
-	launchOpts := options{systemPrompt: systemPromptSettings{
-		models: map[string]promptSource{"bound-model": {file: "no-such-prompt.md"}},
+	launchOpts := config.Options{SystemPrompt: config.SystemPromptSettings{
+		Models: map[string]config.PromptSource{"bound-model": {File: "no-such-prompt.md"}},
 	}}
 	w := scheduleWiring{
 		base:  apogee.Config{WorkspaceDir: roots.workspace},
@@ -266,7 +268,7 @@ func TestScheduleFiringReportsAPerModelResolutionFailure(t *testing.T) {
 		width: func() int { return 1 },
 	}
 
-	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check", Mode: modePlan}); err == nil {
+	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check", Mode: domain.ModePlan}); err == nil {
 		t.Fatal("fire returned nil for a model whose system prompt cannot be read; want the failure")
 	}
 }
@@ -294,12 +296,12 @@ func TestScheduleFiringCarriesTheParallelAgentsWidth(t *testing.T) {
 		// startup bind, so it pins no width at all.
 		base:    apogee.Config{WorkspaceDir: roots.workspace},
 		roots:   roots,
-		live:    newLiveSettings(options{}, nil),
+		live:    newLiveSettings(config.Options{}, nil),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
 		width:   func() int { return 6 },
 	}
 
-	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: modePlan}); err != nil {
+	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan}); err != nil {
 		t.Fatalf("fire: %v", err)
 	}
 	if !stub.called {
@@ -387,7 +389,7 @@ func newScheduleHarness(t *testing.T, endpoint string) *scheduleHarness {
 			SessionsDir:  roots.sessions,
 		},
 		roots:   roots,
-		live:    newLiveSettings(options{}, nil),
+		live:    newLiveSettings(config.Options{}, nil),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: endpoint, Model: "bound-model"} },
 		width:   func() int { return 1 },
 		store:   store,
@@ -418,7 +420,7 @@ func (h *scheduleHarness) fire(t *testing.T) {
 		Name:   "Nightly build",
 		Cycle:  time.Hour,
 		Prompt: "check the build",
-		Mode:   modePlan,
+		Mode:   domain.ModePlan,
 	}); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -648,19 +650,19 @@ func TestRunRootWiresTheSchedulerAndClosesItWithTheTUI(t *testing.T) {
 			Name:   "Nightly build",
 			Cycle:  time.Hour,
 			Prompt: "check the build",
-			Mode:   modePlan,
+			Mode:   domain.ModePlan,
 		})
 		live = len(o.Schedules.List())
 		return nil
 	}
 
-	err := runRoot(context.Background(), options{
-		endpoint:           "http://127.0.0.1:1111",
-		model:              "fake",
-		mode:               "ask-before",
-		workspace:          t.TempDir(),
-		configDir:          t.TempDir(),
-		confineToWorkspace: false, // the one ladder cell that is the same on every host
+	err := runRoot(context.Background(), config.Options{
+		Endpoint:           "http://127.0.0.1:1111",
+		Model:              "fake",
+		Mode:               "ask-before",
+		Workspace:          t.TempDir(),
+		ConfigDir:          t.TempDir(),
+		ConfineToWorkspace: false, // the one ladder cell that is the same on every host
 	}, launch)
 	if err != nil {
 		t.Fatalf("runRoot: %v", err)
@@ -687,7 +689,7 @@ func TestRunRootWiresTheSchedulerAndClosesItWithTheTUI(t *testing.T) {
 	// holds nothing. Close also joins every goroutine it started, which is what keeps this test
 	// meaningful under -race.
 	if _, err := opts.Schedules.Add(schedule.Spec{
-		Cycle: time.Hour, Prompt: "after the tui", Mode: modePlan,
+		Cycle: time.Hour, Prompt: "after the tui", Mode: domain.ModePlan,
 	}); !errors.Is(err, schedule.ErrClosed) {
 		t.Errorf("Add after the TUI returned = %v, want ErrClosed — the schedules outlived their driver", err)
 	}
@@ -753,7 +755,7 @@ func TestCreatingAScheduleFromTheUpdateLoopDoesNotHangTheProgram(t *testing.T) {
 	done := make(chan result, 1)
 	go func() {
 		id, addErr := schedules.Add(schedule.Spec{
-			Cycle: 10 * time.Minute, Prompt: "What time is it?", Mode: modePlan,
+			Cycle: 10 * time.Minute, Prompt: "What time is it?", Mode: domain.ModePlan,
 		})
 		done <- result{id, addErr}
 	}()

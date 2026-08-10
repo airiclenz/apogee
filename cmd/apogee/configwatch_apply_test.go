@@ -11,11 +11,34 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	apogee "github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/tui"
 )
+
+// The cadence this file drives a real watcher at. The production poll is a second, which no test
+// should wait out; internal/config's Watcher exposes Interval and Settle so a Driver-side test can
+// tune them before Start, and configwatch_test.go's own copies of these numbers cover the watcher
+// in isolation.
+const (
+	configWatchTestInterval = 10 * time.Millisecond
+	configWatchTestSettle   = 150 * time.Millisecond
+	configWatchTestDeadline = 3 * time.Second
+)
+
+// startConfigWatcher starts a watcher over path at the test cadence and stops it with the test.
+func startConfigWatcher(t *testing.T, path string) *config.Watcher {
+	t.Helper()
+	w := config.NewWatcher(path)
+	w.Interval = configWatchTestInterval
+	w.Settle = configWatchTestSettle
+	w.Start()
+	t.Cleanup(w.Stop)
+	return w
+}
 
 // watchedConfig is the chain the composition root wires, composed over one temp file: the poll, the
 // baseline the diff is made against, and the seam the renderer parks a wait on.
@@ -33,7 +56,7 @@ func newWatchedConfig(t *testing.T, body string) *watchedConfig {
 	writeSettingsFixture(t, path, body)
 	return &watchedConfig{
 		path:  path,
-		edits: newExternalEdit(options{configDir: home}, func(string) string { return "" }),
+		edits: newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" }),
 		await: awaitConfigChangeOn(startConfigWatcher(t, path)),
 	}
 }
@@ -102,8 +125,8 @@ func TestWatchedConfigReportsNothingForApogeesOwnWrite(t *testing.T) {
 	t.Parallel()
 	c := newWatchedConfig(t, "auto-title: true\n")
 
-	if err := saveConfigSetting(c.path, "auto-title", "false"); err != nil {
-		t.Fatalf("saveConfigSetting: %v", err)
+	if err := config.SaveConfigSetting(c.path, "auto-title", "false"); err != nil {
+		t.Fatalf("SaveConfigSetting: %v", err)
 	}
 	c.edits.refresh() // what tui.Options.WriteSetting does the moment the write lands
 
@@ -131,12 +154,12 @@ func TestRunRootWiresTheConfigWatch(t *testing.T) {
 	}
 	writeSettingsFixture(t, filepath.Join(home, "config.yaml"),
 		"editor: "+self+"\nmode: ask-before\nauto-title: true\n")
-	opts := options{
-		endpoint:  "http://127.0.0.1:1111",
-		model:     "fake",
-		mode:      "ask-before",
-		workspace: t.TempDir(),
-		configDir: home,
+	opts := config.Options{
+		Endpoint:  "http://127.0.0.1:1111",
+		Model:     "fake",
+		Mode:      "ask-before",
+		Workspace: t.TempDir(),
+		ConfigDir: home,
 	}
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 		t.Fatalf("runRoot: %v", err)

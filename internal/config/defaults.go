@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	_ "embed"
@@ -24,13 +24,13 @@ import (
 //go:embed defaults/config.yaml
 var defaultConfigYAML []byte
 
-// seedDefaultConfig writes the embedded starter config to <home>/config.yaml on first run
+// SeedDefaultConfig writes the embedded starter config to <home>/config.yaml on first run
 // — when no config file exists there yet — creating the home directory. It honours
 // --config / APOGEE_CONFIG (resolveConfigDir) so the template lands in the same home
-// applyConfig later reads. It returns whether it created the file and the path, so the
+// ApplyConfig later reads. It returns whether it created the file and the path, so the
 // caller can show a one-time notice. An existing config is never touched.
-func seedDefaultConfig(opts options, changed func(string) bool, getenv func(string) string) (bool, string, error) {
-	home, err := apogeeHome(resolveConfigDir(opts.configDir, changed, getenv))
+func SeedDefaultConfig(opts Options, changed func(string) bool, getenv func(string) string) (bool, string, error) {
+	home, err := ApogeeHome(resolveConfigDir(opts.ConfigDir, changed, getenv))
 	if err != nil {
 		return false, "", err
 	}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -129,7 +130,7 @@ func TestExternalEditPassesTheLineJumpOnlyToEditorsThatTakeOne(t *testing.T) {
 // which editors the machine running the test has installed.
 func specFor(t *testing.T, home string, env map[string]string, key string) tui.EditorCommand {
 	t.Helper()
-	e := newExternalEdit(options{configDir: home}, func(k string) string { return env[k] })
+	e := newExternalEdit(config.Options{ConfigDir: home}, func(k string) string { return env[k] })
 	e.goos = "linux"
 	e.look = editorAlwaysFound
 	launch, err := e.spec(key)
@@ -154,7 +155,7 @@ func TestExternalEditReloadReportsTheKeysTheFileChanged(t *testing.T) {
 	writeSettingsFixture(t, path, "server: local\nmode: ask-before\nservers:\n"+
 		"  - name: local\n    endpoint: http://127.0.0.1:1111\n")
 
-	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
 	e.look = editorAlwaysFound                   // the subject is the return trip, not this machine's editors
 	if _, err := e.spec("servers"); err != nil { // the baseline the return trip diffs against
 		t.Fatalf("spec: %v", err)
@@ -201,7 +202,7 @@ func TestExternalEditReloadCarriesProseForATextKey(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "system-prompt-text: one\n")
-	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
 	writeSettingsFixture(t, path, "system-prompt-text: |\n  first line\n  second line\n")
 
 	applied, err := e.changed()
@@ -226,7 +227,7 @@ func TestExternalEditReloadReportsAnMCPServerRepointedUnderTheSameSummary(t *tes
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "mcp-servers:\n  - name: files\n    transport: streamable-http\n"+
 		"    endpoint: http://127.0.0.1:7331/mcp\n")
-	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
 
 	writeSettingsFixture(t, path, "mcp-servers:\n  - name: files\n    transport: streamable-http\n"+
 		"    endpoint: http://192.0.2.1:7331/mcp\n")
@@ -259,7 +260,7 @@ func TestExternalEditReloadReportsThinkingDelimitersUnderTheSameSummary(t *testi
 			"    start: \"" + start + "\"\n    end: \"" + end + "\"\n"
 	}
 	writeSettingsFixture(t, path, profile("<think>", "</think>"))
-	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
 
 	writeSettingsFixture(t, path, profile("<|channel|>", "<|message|>"))
 	applied, err := e.changed()
@@ -279,13 +280,13 @@ func TestExternalEditReloadReportsThinkingDelimitersUnderTheSameSummary(t *testi
 // whose edits would silently fail to apply.
 func TestSettingStructuresCoverEveryStructuredKey(t *testing.T) {
 	t.Parallel()
-	for _, k := range keyRegistry {
+	for _, k := range config.KeyRegistry {
 		_, described := settingStructures[k.Path]
 		switch {
-		case k.Kind == kindStructured && !described:
+		case k.Kind == config.KindStructured && !described:
 			t.Errorf("structured key %q has no entry in settingStructures, so a reload would diff it "+
 				"by its row summary and miss any change that summarizes alike", k.Path)
-		case k.Kind != kindStructured && described:
+		case k.Kind != config.KindStructured && described:
 			t.Errorf("key %q is kind %q, whose row shows its whole value; a structure projection for it "+
 				"is a second answer to a question the row already answers", k.Path, k.Kind)
 		}
@@ -300,7 +301,7 @@ func TestExternalEditReloadRefusesAConfigItCannotResolve(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "mode: ask-before\n")
-	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
 
 	writeSettingsFixture(t, path, "mode: [this is not a mode]\n")
 	applied, err := e.changed()
@@ -329,7 +330,7 @@ func TestExternalEditReloadAcceptsAConfigWithNoStartupServer(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "mode: ask-before\n")
-	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
 
 	writeSettingsFixture(t, path, "mode: ask-before\nauto-compact: false\n")
 	applied, err := e.changed()
@@ -348,7 +349,7 @@ func TestApplySettingServersInstallsTheReReadList(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
-	launchOpts := options{servers: []serverEntry{{Name: "local", Endpoint: "http://127.0.0.1:1111"}}}
+	launchOpts := config.Options{Servers: []config.ServerEntry{{Name: "local", Endpoint: "http://127.0.0.1:1111"}}}
 	live := newLiveSettings(launchOpts, nil)
 	apply := applySettingFor(settingsApplier{engine: &applySettingSpy{}, live: live, configPath: path})
 
@@ -383,7 +384,7 @@ func TestApplySettingMechanismBlocksRideTheRebind(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
-	live := newLiveSettings(options{validatedSetsEnable: true}, nil)
+	live := newLiveSettings(config.Options{ValidatedSetsEnable: true}, nil)
 	probe := &rebindProbe{}
 	apply := applySettingFor(settingsApplier{
 		engine:     &applySettingSpy{},
@@ -397,8 +398,8 @@ func TestApplySettingMechanismBlocksRideTheRebind(t *testing.T) {
 	if _, err := apply("validated-sets", "off"); err != nil {
 		t.Fatalf("apply validated-sets: %v", err)
 	}
-	base, _, _ := live.rebindInputs(options{}, upstreamBinding{})
-	if base.validatedSetsEnable {
+	base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
+	if base.ValidatedSetsEnable {
 		t.Error("validated-sets stayed on; the re-read block must reach the resolution inputs")
 	}
 	if len(probe.calls) != 1 {
@@ -429,12 +430,12 @@ func TestRunRootWiresTheExternalEditSeams(t *testing.T) {
 		t.Fatalf("os.Executable: %v", err)
 	}
 	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "editor: "+self+"\nmode: ask-before\n")
-	opts := options{
-		endpoint:  "http://127.0.0.1:1111",
-		model:     "fake",
-		mode:      "ask-before",
-		workspace: t.TempDir(),
-		configDir: home,
+	opts := config.Options{
+		Endpoint:  "http://127.0.0.1:1111",
+		Model:     "fake",
+		Mode:      "ask-before",
+		Workspace: t.TempDir(),
+		ConfigDir: home,
 	}
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 		t.Fatalf("runRoot: %v", err)
@@ -508,7 +509,7 @@ func TestExternalEditBaselineIsTheFileNotTheResolution(t *testing.T) {
 	home := t.TempDir()
 	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "mode: plan\n")
 	// The session resolved `auto` (an APOGEE_MODE override would do this); the file still says plan.
-	e := newExternalEdit(options{configDir: home, mode: "auto"}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home, Mode: "auto"}, func(string) string { return "" })
 
 	applied, err := e.changed()
 	if err != nil {
@@ -527,7 +528,7 @@ func TestExternalEditSpecReadsTheEditorTheFileNamesNow(t *testing.T) {
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "mode: auto\n")
 	// The startup snapshot names an editor the file no longer does; it must not be consulted.
-	e := newExternalEdit(options{configDir: home, editor: "stale-editor"}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home, Editor: "stale-editor"}, func(string) string { return "" })
 	e.goos = "linux"
 	e.look = editorAlwaysFound
 
@@ -588,7 +589,7 @@ func TestExternalEditSpecRefusesAnEditorThisMachineCannotRun(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "mode: auto\n")
-	e := newExternalEdit(options{configDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
 	e.goos = "linux"
 	e.look = func(string) (string, error) { return "", errors.New("executable file not found in $PATH") }
 

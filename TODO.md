@@ -37,7 +37,7 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
     keep the two "profile" namespaces from colliding in the UX. Note the producer already exists
     with no switchable consumer: `apogee probe model` prints a suggested `model-profile:` block as
     paste-ready YAML ([ADR 0021](docs/adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md)),
-    and `modelProfileConfig` (`cmd/apogee/config.go`) reads one static block today — `tool-call-format`,
+    and `modelProfileConfig` (`internal/config/config.go`) reads one static block today — `tool-call-format`,
     `tool-call-pattern`, `thinking`, and nothing else. Two ADRs already lean on the layer this item
     would build: [ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md)
     pins "global, not per-model" into the rebind contract, and

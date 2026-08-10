@@ -37,6 +37,8 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -82,7 +84,7 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 	// 1. Auto on an incapable backend: the terminal call gates, and the notice is produced.
 	// ------------------------------------------------------------------
 
-	notice := probe.DegradedNotice(probe.BackendName(confiner), confiner.Capabilities(), modeAuto, true)
+	notice := probe.DegradedNotice(probe.BackendName(confiner), confiner.Capabilities(), domain.ModeAuto, true)
 	if notice == "" {
 		t.Fatal("no degradation notice for auto + confine-to-workspace on a backend that cannot fence; " +
 			"the silence this whole plan exists to fix is back")
@@ -135,13 +137,13 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 	// facts and the writer seam the /confine command uses, so this covers wire.go's wiring as
 	// well as the writer itself.
 	rec := &recordingLauncher{}
-	launched := options{
-		endpoint:           srv.URL,
-		model:              "fake",
-		mode:               "auto",
-		workspace:          workspace,
-		configDir:          configHome,
-		confineToWorkspace: true,
+	launched := config.Options{
+		Endpoint:           srv.URL,
+		Model:              "fake",
+		Mode:               "auto",
+		Workspace:          workspace,
+		ConfigDir:          configHome,
+		ConfineToWorkspace: true,
 	}
 	// Its startup notices are captured rather than asserted: which of them fires depends on
 	// whether the REAL host can fence, and TestRunRootConfinementStartupNotices already owns
@@ -183,44 +185,44 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 	// 4. A fresh resolution over that config: unconfined here, confined anywhere else.
 	// ------------------------------------------------------------------
 
-	file, err := loadFileConfig(configPath, os.ReadFile, noNotify)
+	file, err := config.LoadFileConfig(configPath, os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("re-read the saved config: %v", err)
 	}
 
-	here, notices := resolveSettings(file, layer{}, layer{}, hostID)
-	if here.confineToWorkspace {
+	here, notices := config.ResolveSettings(file, config.Layer{}, config.Layer{}, hostID)
+	if here.ConfineToWorkspace {
 		t.Errorf("a fresh resolution on the acknowledged host %q resolves confined; want unconfined — "+
 			"the saved acknowledgement did not survive the round trip", hostID)
 	}
 	if len(notices) != 0 {
 		t.Errorf("resolution notices = %v; want none (the writer produced a well-formed entry)", notices)
 	}
-	if got := probe.DegradedNotice(probe.BackendName(confiner), confiner.Capabilities(), modeAuto, here.confineToWorkspace); got != "" {
+	if got := probe.DegradedNotice(probe.BackendName(confiner), confiner.Capabilities(), domain.ModeAuto, here.ConfineToWorkspace); got != "" {
 		t.Errorf("the degradation notice still fires on the acknowledged host:\n%s", got)
 	}
 
 	// The load-bearing assertion for the host-scoped design: the very same config file, read on
 	// a DIFFERENT machine, confines again and says why. A global flag flip could not do this.
-	elsewhere, _ := resolveSettings(file, layer{}, layer{}, hostID+"-some-other-machine")
-	if !elsewhere.confineToWorkspace {
+	elsewhere, _ := config.ResolveSettings(file, config.Layer{}, config.Layer{}, hostID+"-some-other-machine")
+	if !elsewhere.ConfineToWorkspace {
 		t.Error("the acknowledgement written on this host also unconfines a different host id; " +
 			"it must not travel with the config file")
 	}
-	if got := probe.DegradedNotice(probe.BackendName(confiner), confiner.Capabilities(), modeAuto, elsewhere.confineToWorkspace); got == "" {
+	if got := probe.DegradedNotice(probe.BackendName(confiner), confiner.Capabilities(), domain.ModeAuto, elsewhere.ConfineToWorkspace); got == "" {
 		t.Error("no degradation notice on the unacknowledged host; the other machine would be silently gated again")
 	}
 
 	// The production resolution path (which reads platform.HostID() itself, not an injected id)
 	// agrees: on this machine, the saved acknowledgement is what startup resolves.
-	resolved := options{configDir: configHome}
+	resolved := config.Options{ConfigDir: configHome}
 	changed := func(name string) bool { return name == "config" }
 	getenv := func(string) string { return "" }
-	if err := applyConfig(&resolved, changed, getenv, os.ReadFile, func(string) {}); err != nil {
-		t.Fatalf("applyConfig over the saved config: %v", err)
+	if err := config.ApplyConfig(&resolved, changed, getenv, os.ReadFile, func(string) {}); err != nil {
+		t.Fatalf("ApplyConfig over the saved config: %v", err)
 	}
-	if resolved.confineToWorkspace {
-		t.Error("applyConfig resolves confined on the acknowledged host; startup would keep gating " +
+	if resolved.ConfineToWorkspace {
+		t.Error("ApplyConfig resolves confined on the acknowledged host; startup would keep gating " +
 			"every terminal command despite the saved acknowledgement")
 	}
 }
@@ -238,7 +240,7 @@ func newIncapableHostAgent(t *testing.T, endpoint, workspace string, confiner ap
 	agent, err := apogee.New(apogee.Config{
 		Endpoint:           endpoint,
 		Model:              "fake",
-		Mode:               modeAuto,
+		Mode:               domain.ModeAuto,
 		Events:             sink,
 		Approver:           approver,
 		Tools:              tools.NewDefaultRegistry(workspace),

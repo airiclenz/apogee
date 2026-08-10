@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -37,11 +38,11 @@ func (r *recordingLauncher) launch(_ context.Context, eng tui.Engine, br *tui.Br
 func TestRunRootConstructsAndLaunches(t *testing.T) {
 	t.Parallel()
 	rec := &recordingLauncher{}
-	opts := options{
-		endpoint:  "http://127.0.0.1:1111",
-		model:     "fake",
-		mode:      "ask-before",
-		workspace: t.TempDir(),
+	opts := config.Options{
+		Endpoint:  "http://127.0.0.1:1111",
+		Model:     "fake",
+		Mode:      "ask-before",
+		Workspace: t.TempDir(),
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -62,8 +63,8 @@ func TestRunRootConstructsAndLaunches(t *testing.T) {
 	if rec.opts.Mode != apogee.ModeAskBefore {
 		t.Errorf("opts.Mode = %q; want %q", rec.opts.Mode, apogee.ModeAskBefore)
 	}
-	if rec.opts.Workspace != opts.workspace {
-		t.Errorf("opts.Workspace = %q; want %q", rec.opts.Workspace, opts.workspace)
+	if rec.opts.Workspace != opts.Workspace {
+		t.Errorf("opts.Workspace = %q; want %q", rec.opts.Workspace, opts.Workspace)
 	}
 }
 
@@ -76,11 +77,11 @@ func TestRunRootConstructsAndLaunches(t *testing.T) {
 func TestRunRootAutoConstructs(t *testing.T) {
 	t.Parallel()
 	rec := &recordingLauncher{}
-	opts := options{
-		endpoint:           "http://127.0.0.1:1111",
-		model:              "fake",
-		mode:               "auto",
-		confineToWorkspace: true,
+	opts := config.Options{
+		Endpoint:           "http://127.0.0.1:1111",
+		Model:              "fake",
+		Mode:               "auto",
+		ConfineToWorkspace: true,
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -97,7 +98,7 @@ func TestRunRootAutoConstructs(t *testing.T) {
 func TestRunRootInvalidMode(t *testing.T) {
 	t.Parallel()
 	rec := &recordingLauncher{}
-	err := runRoot(context.Background(), options{mode: "bogus"}, rec.launch)
+	err := runRoot(context.Background(), config.Options{Mode: "bogus"}, rec.launch)
 	if err == nil {
 		t.Fatal("runRoot --mode bogus: want error, got nil")
 	}
@@ -199,8 +200,8 @@ func TestRootStartsWithNoModelAndNoServer(t *testing.T) {
 // because the conversion from refusal to reason lives in RunE and nowhere else.
 func TestRootStartsPreboundWhenNothingIsChosen(t *testing.T) {
 	// The host's own environment must not choose a server the test is asserting nobody chose.
-	t.Setenv(envServer, "")
-	t.Setenv(envEndpoint, "")
+	t.Setenv(config.EnvServer, "")
+	t.Setenv(config.EnvEndpoint, "")
 
 	home := t.TempDir()
 	const listWithoutAChoice = "servers:\n  - name: laptop\n    endpoint: http://127.0.0.1:1111\n"
@@ -428,23 +429,23 @@ func TestRootCommandTUIDiagnosticFlagsAreHiddenAndDefaultOff(t *testing.T) {
 func TestRunRootWiresTheTUIDiagnosticFlags(t *testing.T) {
 	t.Parallel()
 	rec := &recordingLauncher{}
-	opts := options{
-		endpoint:  "http://127.0.0.1:1111",
-		model:     "fake",
-		mode:      "ask-before",
-		workspace: t.TempDir(),
-		tuiTrace:  filepath.Join(t.TempDir(), "trace.txt"),
-		tuiDiag:   filepath.Join(t.TempDir(), "diag.txt"),
+	opts := config.Options{
+		Endpoint:  "http://127.0.0.1:1111",
+		Model:     "fake",
+		Mode:      "ask-before",
+		Workspace: t.TempDir(),
+		TUITrace:  filepath.Join(t.TempDir(), "trace.txt"),
+		TUIDiag:   filepath.Join(t.TempDir(), "diag.txt"),
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 		t.Fatalf("runRoot: %v", err)
 	}
-	if rec.opts.TracePath != opts.tuiTrace {
-		t.Errorf("opts.TracePath = %q; want %q", rec.opts.TracePath, opts.tuiTrace)
+	if rec.opts.TracePath != opts.TUITrace {
+		t.Errorf("opts.TracePath = %q; want %q", rec.opts.TracePath, opts.TUITrace)
 	}
-	if rec.opts.DiagPath != opts.tuiDiag {
-		t.Errorf("opts.DiagPath = %q; want %q", rec.opts.DiagPath, opts.tuiDiag)
+	if rec.opts.DiagPath != opts.TUIDiag {
+		t.Errorf("opts.DiagPath = %q; want %q", rec.opts.DiagPath, opts.TUIDiag)
 	}
 }
 
@@ -454,11 +455,11 @@ func TestRunRootWiresTheTUIDiagnosticFlags(t *testing.T) {
 func TestRunRootLeavesTheTUIDiagnosticFlagsOffByDefault(t *testing.T) {
 	t.Parallel()
 	rec := &recordingLauncher{}
-	opts := options{
-		endpoint:  "http://127.0.0.1:1111",
-		model:     "fake",
-		mode:      "ask-before",
-		workspace: t.TempDir(),
+	opts := config.Options{
+		Endpoint:  "http://127.0.0.1:1111",
+		Model:     "fake",
+		Mode:      "ask-before",
+		Workspace: t.TempDir(),
 	}
 
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
@@ -467,5 +468,20 @@ func TestRunRootLeavesTheTUIDiagnosticFlagsOffByDefault(t *testing.T) {
 	if rec.opts.TracePath != "" || rec.opts.DiagPath != "" {
 		t.Errorf("opts.TracePath = %q and opts.DiagPath = %q; want both empty",
 			rec.opts.TracePath, rec.opts.DiagPath)
+	}
+}
+
+// The Driver half of internal/config's startup-override guard: resolution asks this command's flag
+// set whether each override flag was set, so a name the table advertises and the root command never
+// registers is a question cobra answers with "no such flag" forever — the override would silently
+// stop reading the command line. Walking the exported list keeps the two sides from drifting
+// without either restating the other's names.
+func TestRootCommandRegistersTheStartupOverrideFlags(t *testing.T) {
+	t.Parallel()
+	flags := newRootCommand((&recordingLauncher{}).launch).Flags()
+	for _, name := range config.StartupOverrideFlags() {
+		if flags.Lookup(name) == nil {
+			t.Errorf("startup-override resolution reads --%s, which the root command does not register", name)
+		}
 	}
 }
