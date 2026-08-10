@@ -61,9 +61,14 @@ func TestTickDuringAFiringIsSkippedAndTheNextTickFires(t *testing.T) {
 
 	clk, rec := newFakeClock(), newRecorder()
 	release := make(chan struct{})
+	started := make(chan struct{}, 1)
 	var runs atomic.Int32
 	fire := func(ctx context.Context, f Firing) (Outcome, error) {
 		runs.Add(1)
+		select {
+		case started <- struct{}{}:
+		default:
+		}
 		select {
 		case <-release:
 			return Outcome{RecordID: "rec-1", Title: f.ScheduleName + " — 09:01"}, nil
@@ -81,6 +86,11 @@ func TestTickDuringAFiringIsSkippedAndTheNextTickFires(t *testing.T) {
 
 	clk.tick(t, 0)
 	rec.next(t, EventFired)
+	// EventFired is emitted just BEFORE the runner is entered, so the event alone does not
+	// settle the runs counter. Wait for the runner itself: only then is the Schedule genuinely
+	// busy, which is the precondition this test is about, and only then is a runs sample below
+	// a fact rather than a timing accident.
+	signalled(t, started, "the first firing to start")
 
 	// The tick that lands on the busy Schedule.
 	clk.tick(t, 0)
