@@ -339,6 +339,13 @@ point is a **minor** bump, not a breaking change.
   value moved: the marker keeps its own role, its no-background, no-bold-weight treatment and its
   one-click open, the `light` scheme keeps its blue, and a scheme of your own that sets
   `tool-marker` still overrides whatever ships.
+- **Docs housekeeping: superseded docs move to their `archived/` homes, and skill-run scaffolding
+  leaves the repo.** The `2026-08-03 - 00 - readme-drift-fix` handoff (both spots it named were
+  fixed in the 2026-08-05 README rework) is now under `docs/handoffs/archived/`, and the
+  `prompt-box-layout.md` mockup — fully redundant with `layout.md` — under a new
+  `docs/layout/archived/`. `docs/skill-runs/` is gitignored: the per-run prompt copies and ledgers
+  the orchestrator skills write are machine junk with a run's lifetime, so a finished run's dir is
+  deleted rather than committed.
 
 ### Fixed
 

@@ -27,7 +27,7 @@ and file:line cites live there; items below carry the operative subset).
 - CHANGELOG: each item adds its line under `[Unreleased]` per house practice;
   no release headings, no VERSION change.
 
-## 1. Archive superseded docs and stop tracking skill runs
+## 1. Archive superseded docs and stop tracking skill runs — ✅ DONE (2026-08-10)
 
 What: `git mv "docs/handoffs/2026-08-03 - 00 - readme-drift-fix.md"` to
 `docs/handoffs/archived/`. Create `docs/layout/archived/` and `git mv`
@@ -49,6 +49,20 @@ writes files; the two moved docs exist only under their `archived/` homes;
 the live 2026-08-10 ledger is still tracked; `make check` green.
 
 Commit: `chore(docs): archive superseded docs and stop tracking skill runs`
+
+NOTES (2026-08-10): the tree contradicted two of this item's assumptions, so
+the end state was reached differently. (a) Nothing under `docs/skill-runs/` was
+ever tracked — an untracked `docs/skill-runs/.gitignore` holding `*` was
+already suppressing the whole tree — so `git rm -r` had no index entries to
+remove and the five finished run dirs were deleted with `rm -rf`. The root
+`.gitignore` gains `/docs/skill-runs/` (anchored, matching the file's style) so
+the rule is checked in rather than living in an untracked file; the redundant
+nested `.gitignore` was left alone as untracked machine-local state. (b)
+`implement-plan/2026-08-10_-_00_-_tool-surface-improvements-plan/` does not
+exist (that plan was archived in `94d63d5`), so there was no live ledger to
+keep tracked; the only live run dir is this plan's own
+`2026-08-10_-_01_-_doc-landscape-cleanup-plan/`, kept on disk and untracked
+like the rest.
 
 ## 2. AGENTS.md and README truth pass
 

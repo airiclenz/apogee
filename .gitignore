@@ -15,6 +15,12 @@
 /CLAUDE.md
 live-config.yaml
 
+# Per-run scaffolding written by the orchestrator skills (prompt copies, ledgers). It is machine
+# junk with a run's lifetime, not a repo doc: a finished run's dir is deleted, and nothing here
+# needs to reach a clone. Track a live run's ledger deliberately with `git add -f` if a hand-off
+# ever needs it.
+/docs/skill-runs/
+
 # Local cross-repo development against a sibling checkout (llama-launcher — ADR 0029 D7).
 # The module graph must only ever record a TAGGED requirement, so the workspace file that
 # overrides it stays in the developer's tree and never reaches a clone.
