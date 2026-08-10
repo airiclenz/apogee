@@ -409,6 +409,20 @@ point is a **minor** bump, not a breaking change.
   contracts that are still binding: the confinement execution contract, the MCP client, and the
   Mechanism catalogue. Live citations (`TODO.md`, four in the catalogue) point at the new paths;
   code comments citing section numbers are left as the history references they are.
+- **`TODO.md` is live work again, and `ISSUES.md` carries one new gap.** The `/server` persistence
+  bullet is gone — its three non-goals were subsumed, not added, when the `servers:` list became the
+  single definition (ADR 0036) — and the four struck-through width-authority narratives are
+  compressed to closed-trail one-liners that keep their standing constraints (the surviving
+  `lipgloss.Style.Width` site is ADR 0030 §6's widget-mirror exception; the widget mirror's taller
+  counts need no clamping change). Stale code references are refreshed: `Request.InjectContext` and
+  `AppendToSystem` in `internal/domain/hooks.go`, `ConfineWritablePaths`' two readers in
+  `internal/agent/dispatch.go`, `domain.AskRequest`'s depth gap (ADR 0039 gave it the delegation's
+  task and name, still not its depth), and the parked `schedule` tool's daemon trigger, which now
+  has a shape to build against (ADR 0034). `ISSUES.md` loses its one closed line and gains the gap
+  the doc-landscape audit surfaced: an *approved* out-of-workspace write reaches the Gate but still
+  errors at Execute, because the write tool's os.Root fence never learned to honour an approval —
+  the confinement contract's §4 "unreachable row" is only half true, and closing it either way is an
+  owner decision.
 
 ### Fixed
 

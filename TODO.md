@@ -43,9 +43,6 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
     pins "global, not per-model" into the rebind contract, and
     [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md) §6 defers the
     user-after-tool wire risk to it by name.
-  - Deliberate non-goals of the 2026-07-28 work, additive later if wanted: a `--save` form for
-    `/server`, a `server:` startup key selecting a named entry, and persisting a switched endpoint
-    in the session record (`--resume` returns to the configured one).
 
 - **[P2] Inspector / raw-protocol view** — apogee-code's "Show Code"/Inspector (advanced mode)
   shows wire-level request/response JSON. apogee has only a hidden, non-toggleable debug field in
@@ -124,6 +121,12 @@ disposition table but no user-facing override. See *Configurable tool × mode se
   `docs/plans/archived/2026-08-03 - 08 - scheduler-library-plan.md`. It settles all four branch
   points this bullet parked (overlap, which modes, `Meta`, fresh-vs-resumed) and leaves durability
   to the future daemon over the *same* library, which is the layering the enrichment asked for.
+- **Server persistence** — the three non-goals this entry parked (`/server --save`, a `server:`
+  startup key, a switched endpoint surviving into the session record) were subsumed rather than
+  added: the `servers:` list is the single definition and the last switch *is* the startup choice —
+  2026-08-05,
+  [ADR 0036](docs/adr/0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-the-startup-choice.md) +
+  `docs/plans/archived/2026-08-05 - 05 - servers-single-definition-plan.md`.
 
 ---
 
@@ -331,7 +334,7 @@ below is doing its job. Full card:
 encodes *chat-template role-safety policy*, while the engine / `internal/context` layer is where
 role-alternation is otherwise owned. Which layer should own the placement decision?
 
-**What the code does today** (`internal/domain/hooks.go:391–422`) — recorded so the grill starts from
+**What the code does today** (`internal/domain/hooks.go:504–529`) — recorded so the grill starts from
 behaviour rather than re-reading it. `InjectContext(text)` picks the landing spot with a three-branch
 ladder:
 
@@ -344,7 +347,7 @@ ladder:
    boundary must advance with it;
 
 with no user message present at all, it appends at the end. Sibling for contrast: `AppendToSystem`
-(same file, `:378`) is the marker-idempotent system-prompt inject; `InjectContext` carries **no**
+(same file, `:481`) is the marker-idempotent system-prompt inject; `InjectContext` carries **no**
 marker of its own (noted at `internal/mechanisms/filehint.go:44`).
 
 **The tension.** Strict-template alternation is otherwise the engine/context layer's business:
@@ -475,7 +478,9 @@ depth-0 presentation inside a sub-agent run splits that run and the label is ann
 after it. Not presentation-specific: any depth-0 entry between two nested blocks does the same
 (a `· cancelled` note already can). The fix is to carry the Step's depth on `PresentRequest` and
 render the entry at it, which is a domain-seam change and wants its own decision — the loop's
-depth is not currently exposed to a host delegate at all (`domain.AskRequest` has the same gap).
+depth is not currently exposed to a host delegate at all (`domain.AskRequest` has the same gap:
+ADR 0039 gave it `SubAgentTask` and `SubAgentName`, so a delegate now learns *which* child is
+asking, but still not *how deep* it sits).
 
 ---
 
@@ -597,8 +602,9 @@ fails outright — not with a partial result, but at the first write to its cach
 workspace-scoped writes the fence does cover work fine; toolchain work under Auto does not.
 
 **Why nothing bridges it today.** The box field that would carry those dirs,
-`domain.Config.ConfineWritablePaths`, has exactly **one reader** —
-`internal/agent/dispatch.go:121–125`, which copies it into `domain.ConfinementBox.WritablePaths` —
+`domain.Config.ConfineWritablePaths`, has only **readers** —
+`internal/agent/dispatch.go:365` and `:405`, which copy it into
+`domain.ConfinementBox.WritablePaths` for a tool call and for a hook-time subprocess respectively —
 and, repo-wide, **no writer**: nothing probes for toolchain caches and nothing surfaces the field in
 config, so it is always empty. Contract §7's own recommendation ("seed `WritablePaths` with the
 detected toolchain cache + temp dirs by default, probed, not hard-coded") was never implemented on
@@ -632,81 +638,24 @@ one it uncovered: the boxed surfaces composed by `lipgloss.Style.Width`, which t
 sites rather than the one the entry named. What is still open here is the two width entries at the
 end: the widget mirrors' tab handling, and `hangingPrefixes` at block width 1–2.
 
-**~~The four sites the plan could not touch~~ — FIXED 2026-08-03.** `popup.go` and `interject.go`
-measured with `ansi.StringWidth`, and `truncateToWidth` (`popup.go`) both measured and cut in it.
-They were left because plan `2026-07-31 - 01 - popup-column-alignment-plan.md` owned those files
-while it was live; that plan is archived, so the rename was made — `popupColumnWidths`,
-`layoutPopupRow`, `popupElisionMarkerFitting`, `popupTitleLine` and `truncateToWidth` now take
-`th theme` and measure (and truncate) with `th.measure`, and `Model.queuedRow` (`interject.go`)
-does the same. The drift they left possible — a popup column landing a cell off, and the staged-row
-band one column short of the window, on a row carrying VARIATION SELECTOR-16 — is pinned under both
-width methods by `TestPaintedPopupColumnsHoldOneOffset`, `TestPopupTruncationFollowsThePainter` and
-`TestPaintedQueuedBandFillsTheWindow` (`paint_test.go`).
+**~~The four sites the plan could not touch~~** — FIXED 2026-08-03: `popup.go`'s four helpers and
+`interject.go`'s `queuedRow` measure and cut with `th.measure` now, pinned in `paint_test.go` under
+both width methods.
 
-**~~`wrapText` still wraps with `ansi.Wrap`~~ — FIXED 2026-08-03** (`render.go`). It breaks with
-`th.measure.Wrap` now, so the break is CHOSEN in the same measure the cap enforcement holds and the
-painter draws in; `render.go` imports no hard-wired `x/ansi` helper at all any more. The re-baselining
-the entry expected did not materialise — on content the two measures agree about the two wraps are
-identical, so no existing test moved — and what the move buys back is the cell the wrap used to give
-away on a line carrying VARIATION SELECTOR-16 under the WcWidth painter.
-`TestWrapTextBreaksInThePaintersMeasure` and `TestWrappedSurfacesBreakInThePaintersMeasure`
-(`render_test.go`) pin it under both width methods.
+**~~`wrapText` still wraps with `ansi.Wrap`~~** — FIXED 2026-08-03 (`render.go`): it breaks with
+`th.measure.Wrap`, and `renderUserBlock`'s rows are `squareLine`d to match (`render_test.go`,
+`TestUserBlockRowsAreOneSquareLineEach`).
 
-The **user block's rows had to move with it** (`render.go`, `renderUserBlock`): they were padded to
-the block width by `th.userBlock.Width(width)`, and a lipgloss `Width` style does not merely pad in
-GraphemeWidth — past its width it *wraps*. Once the wrap takes its break in the painter's measure, a
-prompt line the authority calls exactly the block width can measure wider to lipgloss, and the style
-folded it in two, smuggling a `"\n"` into ONE element of the `[]string` the whole line-oriented
-renderer counts rows with (the viewport height, the sticky offsets and the `userBlocks` ranges all
-count off it). They are squared with `squareLine` now — the painter's measure, the way
-`promptMarkerRow` already padded its own row. `TestUserBlockRowsAreOneSquareLineEach` pins it.
+**~~The pop-up pane is composed in lipgloss's measure~~** — FIXED 2026-08-03: the pane and the
+start-up card were one class at two sites; both are drawn by `drawBox` (`model.go`) now, pinned by
+`TestPaintedBoxRowsAreNotFolded`. **Standing:** the one `lipgloss.Style.Width` left — the prompt box
+framing a widget that wraps in GraphemeWidth itself — is ADR 0030 §6's widget-mirror exception, so
+do not re-file it, and never put a `Width` style on a *bordered* surface (§5).
 
-**~~The pop-up pane is composed in lipgloss's measure~~ — FIXED 2026-08-03** (`popup.go`,
-`render.go`, `model.go`). `blackFill` (`lipgloss.NewStyle()…Width(inner)`), `th.userBlock.Width(inner)`
-on the selected row and `th.popupBorder.Width(width)` on the whole box all padded — and past their
-width *wrapped* — in GraphemeWidth whatever the painter was doing, so a pane line the authority
-called exactly `inner` cells wide was folded into two pane rows and the box outgrew the row budget
-`popupBudget` granted it (a single row of `"⚠️ "`×6 at width 20 painted a five-row pane where the
-pane composed four). It was pre-existing and independent of the wrap — reachable through pop-up
-ROWS, which never touch `wrapText`.
-
-**The start-up card was the same defect at a second site**, and this is what closing the entry
-turned up: `th.startupBorder.Width(width)` (`render.go`, both layouts) folded a VS16-carrying info
-row the same way — seven painted lines from six composed, with the fold splitting the model name
-across two rows. One class, two instances, one fix.
-
-The fix is `drawBox` (`model.go`, beside `squareLine`): the box's own rows are **drawn** — border
-glyphs, padding and the squaring pad emitted as separately styled runs, the content squared to the
-inner width with `th.measure` — rather than delegated to `lipgloss.Style.Width`, which ADR 0030 §5's
-reasoning rules out for a bordered surface. `lipgloss.JoinVertical` went with it, being the same
-GraphemeWidth pad one level in. `TestPaintedBoxRowsAreNotFolded` (`paint_test.go`) pins
-composed-rows == painted-rows, and every row's right border, for both surfaces under both width
-methods. Both `lipgloss.Style.Width` sites that remain are correct where they stand: the prompt box
-(`inputView`) frames a widget that wraps in GraphemeWidth itself — the widget-mirror exception of
-ADR 0030 §6 — and nothing else in the package sets a `Width`.
-
-**~~`inputContentRows` is an unfaithful widget mirror~~ — FIXED 2026-07-31** (`render.go`). It sized
-the prompt box to the rows it *thought* the textarea drew, and it was measurably wrong: against a
-real textarea's `LineInfo.Height` it said three rows for `"hello world"` at width 5 where the widget
-draws four, two for `"a b  c"` at 3 where the widget draws three, four for `"a-b-c-d"` at 3 where
-the widget draws three, and it differed on ~41% of 4000 random prompt-shaped inputs — under-counting,
-which is the box-one-row-short failure its own docstring describes. It is now
-`Σ len(wrapRowStarts(line, w))`, so the box's height and the rows the accent pass paints on come off
-one ruler instead of two derivations of the same wrap.
-`TestInputContentRowsMirrorsTheWidget` pins it to the
-widget itself — `DynamicHeight` makes a real textarea publish its own `totalVisualLines` as its
-height, which is the whole-value counterpart of the per-line `LineInfo.Height` oracle
-`wrapRowStarts` is pinned to — over the three cases above plus 2100 generated drafts.
-
-NOTES (2026-07-31): **no clamping adjustment was needed** for the taller counts the fix can now
-return. `promptEditor.rows` already holds the count to `[minInputRows, maxInputRows]` and `layout()`
-sizes the viewport from the *clamped* box height, so a larger raw count only means the box reaches
-its 10-row cap sooner and the widget scrolls internally from there;
-`TestPromptEditorRowsClampsTheWidgetCount` pins that the editor's height is exactly the clamp of the
-unclamped count. Two stale test comments claiming `inputContentRows` deliberately disagrees with the
-widget (`prompteditor_test.go`'s `wrappedRowsOf`, `skill_test.go`'s wrapped-first-line premise) were
-corrected in the same change — both oracles still ask bubbles rather than the mirror, which is now
-the reason rather than the disagreement.
+**~~`inputContentRows` is an unfaithful widget mirror~~** — FIXED 2026-07-31 (`render.go`): it is
+`Σ len(wrapRowStarts(line, w))` now, pinned to a real textarea by
+`TestInputContentRowsMirrorsTheWidget`. **Standing:** its taller counts need no clamping change —
+`promptEditor.rows` and `layout()` already clamp (`TestPromptEditorRowsClampsTheWidgetCount`).
 
 **What is left of this entry:** both mirrors are still wrong on **tabs**, which the widget's input
 sanitizer expands and neither mirror does. Fixing it means expanding tabs the same way before
@@ -751,7 +700,11 @@ model-creatable schedules at Plan. Sub-agents don't inherit it (ADR 0005).
 **The trigger to pick it up: the daemon.** Durable schedules that survive quit are where a model
 setting up its own monitoring has real value, and the companion feature is the cross-session
 approval surface ADR 0033 already named when it rejected Ask-Before schedules. Build the tool once,
-at that layer; the TUI still never has to register it. **Not the vehicle:** MCP — schedules are
+at that layer; the TUI still never has to register it. The daemon's shape has since been settled —
+[ADR 0034](docs/adr/0034-the-daemon-is-an-in-repo-subcommand-over-a-declarative-trigger-action-file.md),
+an in-repo subcommand over a declarative trigger-action file — so the trigger is now a dated record
+to build against rather than an open question, but the daemon itself is unbuilt and this entry stays
+parked until it exists. **Not the vehicle:** MCP — schedules are
 in-process driver state, Firings run without MCP, and ADR 0031 forbids first-party connectors.
 
 ---

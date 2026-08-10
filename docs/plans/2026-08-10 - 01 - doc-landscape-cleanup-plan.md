@@ -251,7 +251,7 @@ points.
 
 Commit: `docs(design): amend confinement contract and mcp-client to current truth`
 
-## 9. TODO.md / ISSUES.md prune, refresh, and the new confinement gap
+## 9. TODO.md / ISSUES.md prune, refresh, and the new confinement gap — ✅ DONE (2026-08-10)
 
 What: delete the OBSOLETE `/server` persistence bullet (`:46–48`, shipped via
 ADR 0036); compress the four struck-through FIXED width narratives
@@ -272,6 +272,25 @@ entry cites the contract §4 and both code sites; file shrinks by roughly the
 audited 9–15%.
 
 Commit: `docs(todo): prune shipped items, refresh stale refs, record the confinement execute gap`
+
+NOTES (2026-08-10): four departures plus one acceptance number that cannot be met
+as written. (a) The deleted `/server` persistence bullet was replaced by a
+one-line entry in its parent's "Shipped since parking" ledger — TODO.md's own
+header rule says a deferral trail never becomes a silent drop, and that ledger,
+not the bottom **Closed entries** list, is where a sub-bullet of a still-live
+entry closes. (b) The `AppendToSystem` sibling ref in the same paragraph as the
+`InjectContext` one was refreshed with it (`:378` → `:481`) — the same file's
+same drift, one sentence apart. (c) `ConfineWritablePaths` now has *two* readers
+(`dispatch.go:365` tool call, `:405` hook-time subprocess), so the entry's
+"exactly **one** reader" claim was reworded rather than renumbered; its
+load-bearing "no writer" half still holds. (d) The new ISSUES entry cites
+`workspace_scoped.go:102`, the `resolveTargetUnbounded` *definition*, where the
+audit cited `:77`, one of its two call sites. (e) The 9–15% shrink is
+arithmetically unreachable: the audit measured TODO.md at 854 lines, and the
+2026-08-10 tool-surface section has since taken it to 910, so even deleting every
+audited prunable line (3 + 75 = 78) is 8.6% — and this item also *adds* required
+lines (the trail entry, two refreshed parentheticals, the ADR 0034 note).
+Actual: 910 → 863 (−5.2%), with all the audited prunable content gone.
 
 ## 10. cmd/apogee package map
 
