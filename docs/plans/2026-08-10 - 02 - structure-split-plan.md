@@ -48,7 +48,7 @@
   `docs/layout/tool-layout.md` rendering redesign; items of the doc-landscape cleanup
   plan (`2026-08-10 - 01`); version bumps.
 
-## 1. Verify the tool-surface plan is archived
+## 1. Verify the tool-surface plan is archived — ✅ DONE (2026-08-10)
 
 **What:** This plan touches `internal/tools` (item 14) and `cmd/apogee` files that the
 in-flight plan `docs/plans/2026-08-10 - 00 - tool-surface-improvements-plan.md` borders.
