@@ -542,9 +542,10 @@ point is a **minor** bump, not a breaking change.
   once per child, which is precisely the prompt fatigue the choice exists to end. The memory is now
   the **Session's** — one cache on the approver queueing seam, the single object a parent and all
   its descendants already share — so "allow for session" means the Session and not the one Agent
-  that happened to ask. An allow granted anywhere in the tree clears that prompt everywhere, including for the parent and for siblings started later, and it outlives the child
-  that earned it. It stays in memory only: a restored session starts with an empty memory, which
-  errs toward a prompt too many rather than an unapproved call.
+  that happened to ask. An allow granted anywhere in the tree clears that prompt everywhere,
+  including for the parent and for siblings started later, and it outlives the child that earned
+  it. It stays in memory only: a restored session starts with an empty memory, which errs toward a
+  prompt too many rather than an unapproved call.
   - **A duplicate approval queued behind the one that answered it auto-clears instead of asking
     twice.** Siblings in a fan-out reach a gate at the same instant (ADR 0039), so the second one
     has already checked the memory — and found nothing — by the time the human allows the first.
