@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
@@ -37,7 +36,7 @@ import (
 // an environment, or a real file (the P2.5 acceptance).
 
 // settings is the resolved configuration after precedence is applied: the values the
-// composition root feeds into the apogee.Config and the TUI Options.
+// composition root feeds into the domain.Config and the TUI Options.
 type settings struct {
 	mode   string
 	bypass bool
@@ -128,13 +127,13 @@ type settings struct {
 	// inline thinking-channel style — file-only (a per-model concern, like mcpServers, with no
 	// flag/env). A zero ModelProfile is native tool calls with no inline thinking (today's
 	// behaviour), so an absent profile block leaves it unchanged.
-	profile apogee.ModelProfile
+	profile domain.ModelProfile
 
 	// mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4), file-only
 	// (a per-model tuning concern, like mcpServers, with no flag/env) and default-empty. All
 	// Mechanisms ship OFF (D1 — default-off until bench-proven); a `true` entry turns one on. The
 	// composition root validates every key against the catalogue and hands the enabled IDs to
-	// apogee.Config.EnableMechanisms, which the engine builds catalogue rows from (ADR 0015 §1); an
+	// domain.Config.EnableMechanisms, which the engine builds catalogue rows from (ADR 0015 §1); an
 	// unknown ID is a loud startup error. Bypass still wins (an enabled non-off-ramp Mechanism is
 	// not dispatched under bypass — ADR 0006 / item 2's gate).
 	mechanisms map[string]bool
@@ -160,7 +159,7 @@ type settings struct {
 	// systemPrompt is the resolved system-prompt block (ADR 0023): the global prompt (inline or
 	// a file) and the per-model overrides. File-only (no flag/env, like present above), and its
 	// zero value is no prompt at all — the promptless request apogee sent before ADR 0023. The
-	// composition root collapses it into the ONE template apogee.Config carries, with
+	// composition root collapses it into the ONE template domain.Config carries, with
 	// resolveSystemPrompt, AFTER model resolution: which entry applies is not known until then.
 	systemPrompt systemPromptSettings
 
@@ -168,7 +167,7 @@ type settings struct {
 	// joins the standing system content (the AGENTS.md / CLAUDE.md behaviour). File-only (no
 	// flag/env, like the system-prompt keys it sits beside) and its default is ON with the one
 	// name AGENTS.md, so a repo carrying that file works with no configuration at all. The
-	// composition root collapses it into the name list apogee.Config.ContextFiles carries.
+	// composition root collapses it into the name list domain.Config.ContextFiles carries.
 	contextFiles contextFilesSettings
 
 	// ui is the resolved `ui:` block: how the terminal UI presents itself — today the status-line
@@ -240,7 +239,7 @@ type promptSource struct {
 // keys on too). It is one struct rather than three fields on settings for the same reason
 // presentSettings is: the keys describe ONE subsystem and travel together, from the on-disk block
 // through resolution to the composition root, where resolveSystemPrompt collapses them into the
-// single template apogee.Config carries.
+// single template domain.Config carries.
 //
 // Selection is WHOLE-ENTRY replacement: an entry whose key is this session's model replaces the
 // global prompt entirely, so a per-model `system-prompt-file` does not inherit a global
@@ -294,7 +293,7 @@ const defaultContextFileName = "AGENTS.md"
 // root, in inclusion order. It is one struct rather than two fields on settings for the same
 // reason presentSettings is: the keys describe ONE subsystem and travel together, from the on-disk
 // block through resolution to the composition root, where resolved() collapses them into the
-// single name list apogee.Config carries.
+// single name list domain.Config carries.
 //
 // The list is an INCLUSION set, not a priority chain — every listed name that EXISTS is included —
 // and whether any of them exists is deliberately not a config-time question: discovery is the
@@ -360,7 +359,7 @@ func (cf contextFilesSettings) validate() error {
 	return nil
 }
 
-// resolved collapses the block into the list apogee.Config.ContextFiles carries: nil — the feature
+// resolved collapses the block into the list domain.Config.ContextFiles carries: nil — the feature
 // off — when the switch is off or the list resolved empty, and otherwise the names in list order.
 // The two spellings of "off" are deliberately one value downstream: the engine's contract is that
 // an empty list IS the feature being off, so nothing below has to know which spelling was used.
@@ -506,7 +505,7 @@ type layer struct {
 	// profile is set only by the FILE layer (the model profile is config'd, default-zero, with no
 	// flag/env). A nil pointer means the source does not configure a profile, so resolution falls
 	// through to the zero/native default.
-	profile *apogee.ModelProfile
+	profile *domain.ModelProfile
 
 	// mechanisms is set only by the FILE layer (Mechanisms are config'd, default-empty, with no
 	// flag/env — like mcpServers). A nil map means the source does not enable any Mechanism (fall
@@ -1300,7 +1299,7 @@ func (m mcpServerConfig) toServerConfig() mcp.ServerConfig {
 }
 
 // modelProfileConfig is the on-disk schema for the model profile (CONTEXT: Model profile). It
-// mirrors apogee.ModelProfile with yaml tags; toModelProfile maps it across so the on-disk shape
+// mirrors domain.ModelProfile with yaml tags; toModelProfile maps it across so the on-disk shape
 // and the value type stay independently evolvable (as mcpServerConfig does for mcp.ServerConfig).
 type modelProfileConfig struct {
 	ToolCallFormat  string         `yaml:"tool-call-format"`
@@ -1309,22 +1308,22 @@ type modelProfileConfig struct {
 }
 
 // thinkingConfig is the on-disk schema for a model's inline thinking channel (part of the model
-// profile). It mirrors apogee.ThinkingProfile with yaml tags.
+// profile). It mirrors domain.ThinkingProfile with yaml tags.
 type thinkingConfig struct {
 	Style string `yaml:"style"`
 	Start string `yaml:"start"`
 	End   string `yaml:"end"`
 }
 
-// toModelProfile maps the on-disk model-profile schema onto the apogee.ModelProfile value the
+// toModelProfile maps the on-disk model-profile schema onto the domain.ModelProfile value the
 // loop translates to its parsers at the seam. An empty tool-call-format / thinking style resolves
 // to the native, no-inline-thinking default downstream.
-func (p modelProfileConfig) toModelProfile() apogee.ModelProfile {
-	return apogee.ModelProfile{
-		ToolCallFormat: apogee.ToolCallFormat(p.ToolCallFormat),
+func (p modelProfileConfig) toModelProfile() domain.ModelProfile {
+	return domain.ModelProfile{
+		ToolCallFormat: domain.ToolCallFormat(p.ToolCallFormat),
 		Pattern:        p.ToolCallPattern,
-		Thinking: apogee.ThinkingProfile{
-			Style: apogee.ThinkingStyle(p.Thinking.Style),
+		Thinking: domain.ThinkingProfile{
+			Style: domain.ThinkingStyle(p.Thinking.Style),
 			Start: p.Thinking.Start,
 			End:   p.Thinking.End,
 		},
@@ -2036,7 +2035,7 @@ func configFilePath(configDir string) string {
 // ----------------------------------------------------------------------------
 
 // resolveSystemPrompt collapses the resolved system-prompt block into the ONE template
-// apogee.Config.SystemPrompt carries for the model this session is BOUND to. The composition root
+// domain.Config.SystemPrompt carries for the model this session is BOUND to. The composition root
 // calls it AFTER model resolution, with the model as configured — which on a cold start is no
 // model at all, so the global template is selected — and rebindSpecFor re-runs exactly this call
 // with the model the first beat observes, so the per-model entry lands the moment a model is

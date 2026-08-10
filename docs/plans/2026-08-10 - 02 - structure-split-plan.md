@@ -240,7 +240,21 @@ map comment naming every `wire_<seam>.go` with a one-line description of its sea
 
 **Commit:** `refactor(cmd): split wire.go hosts, engine, and server seams; add file-top map`
 
-## 8. Config move prep — retype onto internal/domain, extract shared test fixtures
+## 8. Config move prep — retype onto internal/domain, extract shared test fixtures — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): three deviations from the literal item text. (a) `apogee.Config` never appears
+as a *code* reference in `config.go` — only in prose. The retype therefore covered all 18
+`apogee.X` occurrences (7 code, 11 comment; the audit's "~18 uses" only reconciles by counting
+comments), so the file carries no root-module mention at all when it moves in item 10. (b) The
+fixture extraction carries more than the four named helpers, or `testsupport_test.go` would not
+stand alone once `config_test.go` leaves: `testConfigHome`'s transitive deps `writeConfigHome`,
+`namesServersBlock` and `startupServerYAML`, plus the `testServerName`/`testServerEndpoint` const
+pair (`testServerEndpoint` is read by the named consumer `headless_test.go`; its documented twin
+moved with it rather than splitting the pair). Item 10's "minus the fixtures extracted in item 8"
+therefore excludes those too. (c) `noNotify`'s doc comment said "the tests below"; reworded to "its
+callers" since it no longer sits above them. No CHANGELOG entry and no `doc.go` map change — the
+map names production files only and no production file was added or renamed; per items 3–7's
+precedent for a behaviour-preserving move.
 
 **What:** (a) In `cmd/apogee/config.go`, replace the five root-package type references
 (`apogee.Config`, `apogee.ModelProfile`, `apogee.ThinkingProfile`,
