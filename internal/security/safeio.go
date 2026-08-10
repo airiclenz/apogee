@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -250,6 +251,153 @@ func SafeOpen(root, input string) (*os.File, error) {
 		return nil, mapRootEscape(err)
 	}
 	return f, nil
+}
+
+// SafeCopyFile copies the regular file at srcInput to dstInput — both relative to root, or
+// absolute-inside-root — with the workspace fence enforced at COPY time through a single
+// os.Root pinned at root. Either path escaping the root (by traversal, by an absolute target
+// outside it, or by a symlinked component pointing outside, including one swapped in
+// concurrently) returns an error wrapping ErrPathEscape, and nothing is written.
+//
+// The destination is written with SafeWriteFile's guarantees: parent directories are created
+// inside the fence, the bytes are staged in the destination's own parent and renamed over it,
+// and the staging file is removed on any failure after it is created. So the destination name
+// is never seen half-copied, and — the rename being the last step — an in-root symlink AT that
+// name is replaced by a regular file rather than written through.
+//
+// Mode: the destination lands with the SOURCE's mode, whether or not it already existed. That
+// is what distinguishes a copy from a write: the point of copying a 0755 script is to end up
+// with a 0755 script. A source that is not a regular file (a directory, a device) is refused —
+// the caller's own "not a file" wording is the model-facing one, this is the backstop.
+//
+// The content is streamed, so a copy costs no more memory than its buffer however large the
+// file is; there is no fsync, for the same reason SafeWriteFile has none.
+func SafeCopyFile(root, srcInput, dstInput string) error {
+	srcRel, err := rootRelative(srcInput, root)
+	if err != nil {
+		return err
+	}
+	dstRel, err := rootRelative(dstInput, root)
+	if err != nil {
+		return err
+	}
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrPathEscape, err)
+	}
+	defer r.Close()
+
+	src, err := r.Open(srcRel)
+	if err != nil {
+		return mapRootEscape(err)
+	}
+	defer src.Close()
+
+	// The mode comes from the very descriptor the bytes are read through, so the copy cannot
+	// take its permissions from one file and its content from another.
+	info, err := src.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("not a regular file: %s", srcInput)
+	}
+
+	dir := filepath.Dir(dstRel)
+	if dir != "." {
+		// Same reasoning as SafeWriteFile's parent creation: an ESCAPE here is fatal, any other
+		// error defers to the staging open, which os.Root refuses if resolution would leave the
+		// root.
+		if err := r.MkdirAll(dir, 0o755); err != nil && isRootEscapeError(err) {
+			return mapRootEscape(err)
+		}
+	}
+	staged, dst, err := createStagingFile(r, dir, info.Mode().Perm())
+	if err != nil {
+		return mapRootEscape(err)
+	}
+	if err := copyAndClose(dst, src, info.Mode().Perm()); err != nil {
+		_ = r.Remove(staged)
+		return err
+	}
+	if err := r.Rename(staged, dstRel); err != nil {
+		_ = r.Remove(staged)
+		return mapRootEscape(err)
+	}
+	return nil
+}
+
+// copyAndClose streams src into the staging handle, applies mode explicitly (the creating open
+// is subject to the process umask, which would otherwise drop bits the source had), and closes
+// the handle — always, including on error, so a failed copy never leaks a descriptor.
+func copyAndClose(dst *os.File, src io.Reader, mode os.FileMode) error {
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		return err
+	}
+	if err := dst.Chmod(mode); err != nil {
+		dst.Close()
+		return err
+	}
+	return dst.Close()
+}
+
+// SafeRename renames oldInput to newInput — both relative to root, or absolute-inside-root —
+// through a single os.Root pinned at root, so BOTH ends of the rename are fenced: a path that
+// escapes the root at either end returns an error wrapping ErrPathEscape and nothing moves.
+// Parent directories of the destination are created inside the fence, as SafeWriteFile creates
+// them for its target.
+//
+// The rename is the filesystem's own: atomic, and it replaces an existing destination NAME
+// (including a symlink at that name) without following it. Deciding whether replacing that name
+// is allowed is the caller's policy, not this primitive's.
+func SafeRename(root, oldInput, newInput string) error {
+	oldRel, err := rootRelative(oldInput, root)
+	if err != nil {
+		return err
+	}
+	newRel, err := rootRelative(newInput, root)
+	if err != nil {
+		return err
+	}
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrPathEscape, err)
+	}
+	defer r.Close()
+
+	if dir := filepath.Dir(newRel); dir != "." {
+		if err := r.MkdirAll(dir, 0o755); err != nil && isRootEscapeError(err) {
+			return mapRootEscape(err)
+		}
+	}
+	if err := r.Rename(oldRel, newRel); err != nil {
+		return mapRootEscape(err)
+	}
+	return nil
+}
+
+// SafeRemove removes the name input (relative to root, or absolute-inside-root) through an
+// os.Root pinned at root, so a path escaping the root is refused rather than followed. It
+// removes THE NAME: a symlink is unlinked, never the file it points at.
+//
+// It is os.Remove's contract otherwise — a non-empty directory is refused by the filesystem —
+// and a missing name returns an error satisfying errors.Is(err, os.ErrNotExist).
+func SafeRemove(root, input string) error {
+	rel, err := rootRelative(input, root)
+	if err != nil {
+		return err
+	}
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrPathEscape, err)
+	}
+	defer r.Close()
+
+	if err := r.Remove(rel); err != nil {
+		return mapRootEscape(err)
+	}
+	return nil
 }
 
 // rootRelative validates that input stays within root (the same containment property

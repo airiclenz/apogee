@@ -73,6 +73,28 @@ func pathArgWriteTarget(call domain.ToolCall, root string) (string, bool) {
 	return resolveTargetUnbounded(args.Path, root)
 }
 
+// destinationArgWriteTarget is pathArgWriteTarget's twin for the two-path writers (copy_file,
+// move_file): what they WRITE is the destination, so that — not the source — is the target
+// dispatch classifies. The source is left out deliberately rather than forgotten: it is read
+// (or, for a move, removed) through the same os.Root-pinned fence at operation time, which
+// refuses an out-of-workspace source outright, so there is no reachable call in which the source
+// lands outside the blast radius the destination already described.
+//
+// Like pathArgWriteTarget it decodes a minimal one-field struct rather than fileOpsArgs, and for
+// the same reason: classification asks only where the write would land, so a malformed sibling
+// argument still yields a target for dispatch to judge. TestWriteToolsDeclarePathArgument and
+// TestWriteTargetsAgreeOnPath drive both bodies from the tools' own surfaces, so a renamed json
+// tag fails there instead of blinding the fence.
+func destinationArgWriteTarget(call domain.ToolCall, root string) (string, bool) {
+	var args struct {
+		Destination string `json:"destination"`
+	}
+	if err := decodeArgs(call.Arguments, &args); err != nil {
+		return "", false
+	}
+	return resolveTargetUnbounded(args.Destination, root)
+}
+
 // resolveTargetUnbounded resolves input (relative to root, or absolute) to an absolute
 // real path WITHOUT the containment check ResolveInRoot enforces — the path-resolution
 // half of the path-safety logic, used only to classify a write target as in- or

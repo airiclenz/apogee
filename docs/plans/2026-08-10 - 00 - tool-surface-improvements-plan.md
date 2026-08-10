@@ -262,7 +262,31 @@ passes.
 
 **Commit:** `feat(tools): add git_log tool`
 
-## 7. New `copy_file` and `move_file` tools
+## 7. New `copy_file` and `move_file` tools — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): no CHANGELOG entry was written for this item — the owner ratified that NO item
+in this plan touches CHANGELOG.md. Four things beyond the item's literal text. (a) The fenced
+operations these tools need had NO primitive: `internal/tools` cannot rename inside the pinned
+`os.Root`, and doing it on a resolved path STRING is exactly the TOCTOU gap item 2 closed — so
+`internal/security/safeio.go` gained `SafeCopyFile` (staged + renamed like `SafeWriteFile`,
+streamed so a large copy costs no memory, landing the SOURCE's mode because a 0755 script copied
+0644 is a broken copy), `SafeRename` and `SafeRemove`, each fencing BOTH ends at operation time,
+with tests. (b) `workspace_scoped.go` gained `destinationArgWriteTarget`: the existing marker
+tests require every carrier to declare a REQUIRED `path` argument, which these two do not have,
+so the probe table now carries the target key per writer (`pathField`/`callArgs` take it as a
+parameter) rather than assuming one spelling — the fence's rename guard stays exhaustive for both
+shapes. (c) The roster-facing set items 3/5/6 established was updated so it stays true of the
+shipped suite: registration in `internal/tools/registry.go` (which necessarily moved the registry
+tests' name lists, ordering and counts), `internal/tools/doc.go`, two card entries in
+`internal/tui/toolpresent.go` (with a `sourceDestinationTarget` extractor rendering
+`source → destination`, since a row naming one half cannot say what the call did), and the
+tool-suite counts in `docs/design/technical-design.md` (24 → 26, in both places). (d) Neither tool
+attaches a `domain.ToolSummary`, for item 3's reason: that sum type is sealed and its seven
+carriers are pinned by name in three places. Two shape calls the item left open: a DIRECTORY
+destination is refused outright (a model with `cp foo bar/` habits would otherwise create a file
+named after the directory), and the copy-then-remove fallback is not retried after a fence
+refusal — the fallback would refuse identically, and reporting the escape once is what tells the
+model the truth.
 
 **What:** New file `internal/tools/file_ops.go`: two write tools. Both take `source`,
 `destination`, and optional `overwrite` (default false). Both paths must resolve inside

@@ -69,9 +69,11 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // so a caller can register a subset, or add them to a registry that already holds
 // host-supplied tools. find_files sits beside grep in the base set — the two halves of
 // discovery, by NAME and by CONTENT — and is read-only like it. The file-editing family
-// (P3.7) follows the base set; the write
-// tools among them (find-replace, edit_existing_file) carry the workspaceScopedWriter
-// marker so the dispatch disposition path-bounds rather than confines them (ADR 0012 D1).
+// (P3.7) follows the base set, closed since 2026-08-10 by the file-operation pair (copy_file,
+// move_file — the same family's move-bytes-that-exist half); the write
+// tools among them (find-replace, edit_existing_file, copy_file, move_file) carry the
+// workspaceScopedWriter marker so the dispatch disposition path-bounds rather than confines
+// them (ADR 0012 D1).
 // The execution tools (P3.8 — terminal, python_exec) and the git tools (P3.9 —
 // git_branch, git_commit, git_diff_range, joined 2026-08-10 by git_status and git_log)
 // follow; they are SubprocessTools the
@@ -116,6 +118,8 @@ func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 		NewEditExistingFile(root),
 		NewViewDiff(root),
 		NewOpenFile(root),
+		NewCopyFile(root),
+		NewMoveFile(root),
 		NewTerminal(root),
 		NewPythonExec(root),
 		NewGitBranch(root),

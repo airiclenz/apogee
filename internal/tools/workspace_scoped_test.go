@@ -58,14 +58,20 @@ func TestMarkerAccessors_MarkerTool(t *testing.T) {
 	}
 }
 
-// pathArgKey is the json name pathArgWriteTarget decodes — the one argument spelling the
-// blast-radius fence can see. TestMarkerAccessors_MarkerTool's hand-written call pins it to
-// the fence's real behaviour; the tests below pin every write tool's own surface to it.
+// pathArgKey is the json name pathArgWriteTarget decodes — the argument spelling the
+// blast-radius fence can see for a writer that names ONE file. TestMarkerAccessors_MarkerTool's
+// hand-written call pins it to the fence's real behaviour; the tests below pin every such write
+// tool's own surface to it.
 const pathArgKey = "path"
 
+// destinationArgKey is pathArgKey's twin for the two-path writers, whose write lands at the
+// destination — the key destinationArgWriteTarget decodes.
+const destinationArgKey = "destination"
+
 // writeTargetProbe pairs a workspace-scoped writer with a zero value of the args struct
-// its OWN Execute decodes. Every call these tests feed the fence is marshalled from that
-// struct, so the json key that reaches pathArgWriteTarget is whatever tag the tool itself
+// its OWN Execute decodes, and with the json key its workspaceWriteTarget resolves the write
+// through. Every call these tests feed the fence is marshalled from that
+// struct, so the json key that reaches the fence is whatever tag the tool itself
 // declares — never a literal written in this file. That is what makes the shared decode
 // guarded rather than merely asserted: rename one writer's json:"path" tag and its calls
 // stop naming a key the fence reads, which fails here instead of silently classifying an
@@ -73,16 +79,22 @@ const pathArgKey = "path"
 type writeTargetProbe struct {
 	tool domain.Tool
 	args any
+	// targetKey is the argument the tool's own workspaceWriteTarget decodes: pathArgKey for the
+	// writers that name one file, destinationArgKey for the copy/move pair (their source is
+	// fenced at operation time, never classified — destinationArgWriteTarget says why).
+	targetKey string
 }
 
 // writeTargetProbes returns one probe per workspace-scoped writer, each scoped to root.
 // TestWriteTargetProbesCoverEveryWriter keeps the list complete.
 func writeTargetProbes(root string) []writeTargetProbe {
 	return []writeTargetProbe{
-		{tool: NewWriteFile(root), args: writeFileArgs{}},
-		{tool: NewSingleFindReplace(root), args: singleFindReplaceArgs{}},
-		{tool: NewMultiFindReplace(root), args: multiFindReplaceArgs{}},
-		{tool: NewEditExistingFile(root), args: fileEditArgs{}},
+		{tool: NewWriteFile(root), args: writeFileArgs{}, targetKey: pathArgKey},
+		{tool: NewSingleFindReplace(root), args: singleFindReplaceArgs{}, targetKey: pathArgKey},
+		{tool: NewMultiFindReplace(root), args: multiFindReplaceArgs{}, targetKey: pathArgKey},
+		{tool: NewEditExistingFile(root), args: fileEditArgs{}, targetKey: pathArgKey},
+		{tool: NewCopyFile(root), args: fileOpsArgs{}, targetKey: destinationArgKey},
+		{tool: NewMoveFile(root), args: fileOpsArgs{}, targetKey: destinationArgKey},
 	}
 }
 
@@ -114,9 +126,9 @@ func TestWriteTargetProbesCoverEveryWriter(t *testing.T) {
 	}
 }
 
-// TestWriteToolsDeclarePathArgument pins both halves of every writer's path argument to the
-// key pathArgWriteTarget decodes: the schema the MODEL is told to fill, and the args struct
-// EXECUTE decodes. The fence reads one minimal {"path":…} struct for every writer, so a
+// TestWriteToolsDeclarePathArgument pins both halves of every writer's target argument to the
+// key that writer's fence body decodes: the schema the MODEL is told to fill, and the args struct
+// EXECUTE decodes. The fence reads one minimal one-field struct per writer, so a
 // writer that renames the argument on either side alone stays internally plausible while
 // the fence silently stops seeing its write target — this fails first instead.
 func TestWriteToolsDeclarePathArgument(t *testing.T) {
@@ -135,22 +147,22 @@ func TestWriteToolsDeclarePathArgument(t *testing.T) {
 				t.Fatalf("schema is not valid JSON: %v", err)
 			}
 
-			property, ok := schema.Properties[pathArgKey]
+			property, ok := schema.Properties[p.targetKey]
 			if !ok {
 				t.Fatalf("schema declares properties %v, none named %q — the model would name this tool's write target something the fence never reads",
-					propertyNames(schema.Properties), pathArgKey)
+					propertyNames(schema.Properties), p.targetKey)
 			}
 			if property["type"] != "string" {
-				t.Errorf("schema %q type = %v, want string (the fence decodes it as one)", pathArgKey, property["type"])
+				t.Errorf("schema %q type = %v, want string (the fence decodes it as one)", p.targetKey, property["type"])
 			}
-			if !slices.Contains(schema.Required, pathArgKey) {
+			if !slices.Contains(schema.Required, p.targetKey) {
 				t.Errorf("schema required = %v, want it to include %q — an optional target is a write the fence cannot classify",
-					schema.Required, pathArgKey)
+					schema.Required, p.targetKey)
 			}
 
-			// The struct Execute decodes must tag its path field with the same key...
+			// The struct Execute decodes must tag its target field with the same key...
 			argsType := reflect.TypeOf(p.args)
-			pathField(t, argsType)
+			pathField(t, argsType, p.targetKey)
 
 			// ...and name exactly the arguments the schema does, so neither surface can be
 			// renamed without the other.
@@ -163,10 +175,11 @@ func TestWriteToolsDeclarePathArgument(t *testing.T) {
 	}
 }
 
-// TestWriteTargetsAgreeOnPath is what makes the shared decode safe. All four
-// workspace-scoped writers resolve their target through one body (pathArgWriteTarget),
-// which decodes a minimal {"path":…} struct rather than each tool's own args type — sound
-// only while every write tool spells the argument that way. Each call below is marshalled
+// TestWriteTargetsAgreeOnPath is what makes the shared decode safe. Every
+// workspace-scoped writer resolves its target through one of two shared bodies
+// (pathArgWriteTarget, destinationArgWriteTarget), each decoding a minimal one-field struct
+// rather than the tool's own args type — sound only while every write tool spells its target
+// argument the way its body reads it. Each call below is marshalled
 // from the tool's OWN args struct, so either side drifting (a renamed tag, a fence that
 // decodes some other key) leaves the call naming a key the other cannot read and this fails
 // first, instead of dispatch mis-classifying an out-of-workspace write as in-bounds. The
@@ -199,12 +212,12 @@ func TestWriteTargetsAgreeOnPath(t *testing.T) {
 			wantOK  bool
 		}{
 			{
-				name:    "path resolves against the root",
-				args:    callArgs(t, p.args, filepath.Join("sub", "f.txt")),
+				name:    "target resolves against the root",
+				args:    callArgs(t, p.args, p.targetKey, filepath.Join("sub", "f.txt")),
 				wantAbs: want,
 				wantOK:  true,
 			},
-			{name: "empty path", args: callArgs(t, p.args, ""), wantAbs: "", wantOK: false},
+			{name: "empty target", args: callArgs(t, p.args, p.targetKey, ""), wantAbs: "", wantOK: false},
 			{name: "undecodable arguments", args: json.RawMessage("{"), wantAbs: "", wantOK: false},
 		}
 
@@ -223,15 +236,15 @@ func TestWriteTargetsAgreeOnPath(t *testing.T) {
 	}
 }
 
-// callArgs marshals a call payload from the tool's own args struct with its path field set
-// to path, so the json key the fence receives is the one that struct declares. Sibling
-// arguments stay zero — classification asks only where the write would land.
-func callArgs(t *testing.T, args any, path string) json.RawMessage {
+// callArgs marshals a call payload from the tool's own args struct with its target field (the
+// one tagged key) set to path, so the json key the fence receives is the one that struct
+// declares. Sibling arguments stay zero — classification asks only where the write would land.
+func callArgs(t *testing.T, args any, key, path string) json.RawMessage {
 	t.Helper()
 
 	argsType := reflect.TypeOf(args)
 	value := reflect.New(argsType).Elem()
-	value.FieldByIndex(pathField(t, argsType).Index).SetString(path)
+	value.FieldByIndex(pathField(t, argsType, key).Index).SetString(path)
 
 	raw, err := json.Marshal(value.Interface())
 	if err != nil {
@@ -240,20 +253,20 @@ func callArgs(t *testing.T, args any, path string) json.RawMessage {
 	return raw
 }
 
-// pathField returns the field of a writer's args struct tagged with pathArgKey — the only
-// field pathArgWriteTarget can see. A missing or non-string field fails the test, because
+// pathField returns the field of a writer's args struct tagged with key — the only
+// field that writer's fence body can see. A missing or non-string field fails the test, because
 // that is precisely the drift the fence cannot survive: the tool would keep writing while
 // dispatch resolved no target and treated every one of its writes as in-bounds.
-func pathField(t *testing.T, argsType reflect.Type) reflect.StructField {
+func pathField(t *testing.T, argsType reflect.Type, key string) reflect.StructField {
 	t.Helper()
 
 	for i := 0; i < argsType.NumField(); i++ {
-		if field := argsType.Field(i); jsonName(field) == pathArgKey && field.Type.Kind() == reflect.String {
+		if field := argsType.Field(i); jsonName(field) == key && field.Type.Kind() == reflect.String {
 			return field
 		}
 	}
-	t.Fatalf("%s declares json arguments %v — no string field tagged %q, which is the only key pathArgWriteTarget decodes",
-		argsType.Name(), argJSONNames(argsType), pathArgKey)
+	t.Fatalf("%s declares json arguments %v — no string field tagged %q, which is the only key its write-target body decodes",
+		argsType.Name(), argJSONNames(argsType), key)
 	return reflect.StructField{}
 }
 

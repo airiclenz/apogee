@@ -435,3 +435,168 @@ func TestSafeOpen_HandleSurvivesRename(t *testing.T) {
 		t.Errorf("content after rename = %q, want %q (the originally-opened file)", got, "original A")
 	}
 }
+
+// TestSafeCopyFile_CopiesContentAndSourceMode is the copy primitive's positive control and its
+// one departure from SafeWriteFile's mode rule: the destination takes the SOURCE's mode even
+// when it already existed with another, because copying a 0755 script that lands 0644 is a
+// broken copy. Parents are created inside the fence and no staging file survives.
+func TestSafeCopyFile_CopiesContentAndSourceMode(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	src := filepath.Join(root, "run.sh")
+	if err := os.WriteFile(src, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Chmod(src, 0o755); err != nil {
+		t.Fatalf("setup chmod: %v", err)
+	}
+
+	if err := SafeCopyFile(root, "run.sh", "bin/run.sh"); err != nil {
+		t.Fatalf("SafeCopyFile: %v", err)
+	}
+
+	dst := filepath.Join(root, "bin", "run.sh")
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("destination missing: %v", err)
+	}
+	if string(got) != "#!/bin/sh\n" {
+		t.Errorf("destination content = %q, want the source's", got)
+	}
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("stat destination: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o755 {
+		t.Errorf("destination mode = %v, want the source's 0755", perm)
+	}
+	assertNoStagingLeftovers(t, root)
+}
+
+// TestSafeCopyFile_RefusesEscapes drives the fence from both ends — a source outside the root may
+// not be read out of it, a destination outside it may not be written — and proves the refusal is
+// total: nothing lands inside the workspace, nothing (not even a staging file) outside it.
+func TestSafeCopyFile_RefusesEscapes(t *testing.T) {
+	t.Parallel()
+
+	outside := t.TempDir()
+	root := filepath.Join(outside, "workspace")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("classified"), 0o600); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "inside.txt"), []byte("ours"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	if err := SafeCopyFile(root, "../secret.txt", "stolen.txt"); !errors.Is(err, ErrPathEscape) {
+		t.Errorf("escaping source error = %v, want ErrPathEscape", err)
+	}
+	if err := SafeCopyFile(root, "inside.txt", "../leaked.txt"); !errors.Is(err, ErrPathEscape) {
+		t.Errorf("escaping destination error = %v, want ErrPathEscape", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "stolen.txt")); err == nil {
+		t.Error("a refused copy wrote the outside file into the workspace")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "leaked.txt")); err == nil {
+		t.Error("a refused copy wrote outside the workspace")
+	}
+	assertNoStagingLeftovers(t, outside)
+}
+
+// TestSafeCopyFile_RefusesNonRegularSource: the primitive copies FILES. A directory source is
+// refused before anything is staged, rather than producing whatever io.Copy makes of a directory
+// descriptor on the running platform.
+func TestSafeCopyFile_RefusesNonRegularSource(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "dir"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	err := SafeCopyFile(root, "dir", "copy")
+	if err == nil {
+		t.Fatal("copying a directory must fail")
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Errorf("error = %v, want it to name the non-regular source", err)
+	}
+	assertNoStagingLeftovers(t, root)
+}
+
+// TestSafeRename_MovesWithinRootAndRefusesEscapes: the rename primitive fences BOTH names — the
+// half a one-path fence would miss is renaming an in-workspace file out of the workspace — and
+// creates the destination's parents the way SafeWriteFile creates its target's.
+func TestSafeRename_MovesWithinRootAndRefusesEscapes(t *testing.T) {
+	t.Parallel()
+
+	outside := t.TempDir()
+	root := filepath.Join(outside, "workspace")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("payload"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	if err := SafeRename(root, "a.txt", "sub/b.txt"); err != nil {
+		t.Fatalf("SafeRename: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "sub", "b.txt")); err != nil || string(got) != "payload" {
+		t.Fatalf("destination = (%q, %v), want the moved payload", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "a.txt")); !os.IsNotExist(err) {
+		t.Errorf("source survived the rename, stat error = %v", err)
+	}
+
+	if err := SafeRename(root, "sub/b.txt", "../escaped.txt"); !errors.Is(err, ErrPathEscape) {
+		t.Errorf("escaping destination error = %v, want ErrPathEscape", err)
+	}
+	if err := SafeRename(root, "../nothing.txt", "pulled.txt"); !errors.Is(err, ErrPathEscape) {
+		t.Errorf("escaping source error = %v, want ErrPathEscape", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "escaped.txt")); err == nil {
+		t.Error("a refused rename moved a file out of the workspace")
+	}
+}
+
+// TestSafeRemove_RemovesWithinRootAndRefusesEscapes: removal is the one operation whose mistakes
+// cannot be undone, so its fence gets the same both-ends proof — an in-root name goes, an
+// out-of-root name is refused with the file left standing.
+func TestSafeRemove_RemovesWithinRootAndRefusesEscapes(t *testing.T) {
+	t.Parallel()
+
+	outside := t.TempDir()
+	root := filepath.Join(outside, "workspace")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "gone.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "kept.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	if err := SafeRemove(root, "gone.txt"); err != nil {
+		t.Fatalf("SafeRemove: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "gone.txt")); !os.IsNotExist(err) {
+		t.Errorf("file survived removal, stat error = %v", err)
+	}
+
+	if err := SafeRemove(root, "../kept.txt"); !errors.Is(err, ErrPathEscape) {
+		t.Errorf("escaping removal error = %v, want ErrPathEscape", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "kept.txt")); err != nil {
+		t.Errorf("a refused removal deleted a file outside the workspace: %v", err)
+	}
+
+	if err := SafeRemove(root, "never-existed.txt"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("removing a missing name = %v, want an os.ErrNotExist error", err)
+	}
+}

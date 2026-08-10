@@ -405,6 +405,18 @@ var toolRegistry = map[string]toolPresenter{
 		target: stringArg("path"),
 		detail: firstLineDetail, // floor; the locate report comes from domain.OpenedFile
 	},
+	"copy_file": {
+		label:  "Copy File",
+		verb:   "copying",
+		target: sourceDestinationTarget,
+		detail: firstLineDetail, // "copied a.txt to b.txt"
+	},
+	"move_file": {
+		label:  "Move File",
+		verb:   "moving",
+		target: sourceDestinationTarget,
+		detail: firstLineDetail, // "moved a.txt to b.txt"
+	},
 	"terminal": {
 		label:  "Run",
 		verb:   "running",
@@ -828,6 +840,22 @@ func gitLogTarget(args map[string]any) string {
 		return "HEAD"
 	}
 	return ref
+}
+
+// sourceDestinationTarget renders the file-operation pair's target as "source → destination":
+// both halves are the point of a copy or a move, and a row naming only one of them would leave
+// the reader unable to tell what the call did. A call missing one half still shows the other,
+// so a malformed call reads as the partial thing it is rather than as nothing.
+func sourceDestinationTarget(args map[string]any) string {
+	source, _ := args["source"].(string)
+	destination, _ := args["destination"].(string)
+	switch {
+	case source == "":
+		return destination
+	case destination == "":
+		return source
+	}
+	return source + " → " + destination
 }
 
 // methodURLTarget renders http_request's target as "METHOD url" (method defaults to GET,
