@@ -40,7 +40,7 @@
   allow-for-session concept); the other ISSUES.md items (keyboard collapse mode,
   out-of-workspace write reconciliation).
 
-## 1. Session allow-cache in the approval queue seam, with twin coalescing
+## 1. Session allow-cache in the approval queue seam, with twin coalescing — ✅ DONE (2026-08-10)
 
 **What:**
 - `internal/domain/approval.go`: add `CacheKey string` to `ApprovalRequest` (design

@@ -177,9 +177,16 @@ func serializedEvents(sink domain.EventSink) domain.EventSink {
 // will ever see, and the cancellation, not the verdict, is what ends the Turn. Why the wait is
 // ctx-aware at all, and why the slot is held for the human's whole deliberation, are properties of
 // domain.PromptSlot — documented there, where both kinds of prompt inherit them.
+//
+// The seam is also where the Session's allow-for-session memory lives (approvalCache), for the same
+// reason the queue does: it is the one object the WHOLE tree shares, so a memory kept here is the
+// Session's rather than one Agent's. It owns every WRITE to that memory — an inner Approver
+// answering ApprovalAllowForSession seeds the key on the way back out — and one read of its own,
+// the twin re-check below.
 type queuedApprover struct {
 	slot  *domain.PromptSlot // this seam's own surface; the context's wins where one is designated
 	inner domain.Approver
+	cache *approvalCache // the Session's allow-for-session memory, shared by the whole agent tree
 }
 
 func (q *queuedApprover) Approve(ctx context.Context, req domain.ApprovalRequest) (domain.ApprovalDecision, error) {
@@ -188,7 +195,25 @@ func (q *queuedApprover) Approve(ctx context.Context, req domain.ApprovalRequest
 		return domain.ApprovalDeny, err
 	}
 	defer slot.Release()
-	return q.inner.Approve(ctx, req)
+
+	// The TWIN: a request that was queued behind the very prompt whose answer allowed its key.
+	// Its caller checked the memory before queueing, when the key was not yet allowed, so without
+	// this second check the human would be asked again for something they just allowed — the one
+	// duplicate a session-wide memory cannot prevent by reading early alone. Re-checking here, on
+	// the far side of the wait, coalesces it away. The caller emits its usual ApprovalEvent for
+	// the verdict, which is what leaves a visible trace of the prompt that never appeared.
+	if req.CacheKey != "" && q.cache.Allowed(req.CacheKey) {
+		return domain.ApprovalAllowForSession, nil
+	}
+
+	decision, err := q.inner.Approve(ctx, req)
+	// Only an ANSWERED allow-for-session is remembered: an errored call is not a decision (the
+	// caller discards the verdict with it), and an empty key is a request whose answer may never be
+	// remembered at all — a forced gate, which authorises its own call and nothing later.
+	if err == nil && decision == domain.ApprovalAllowForSession && req.CacheKey != "" {
+		q.cache.Allow(req.CacheKey)
+	}
+	return decision, err
 }
 
 // queuedApprovals wraps ap in the queueing seam, unless it already IS one. The idempotence keeps a
@@ -197,6 +222,10 @@ func (q *queuedApprover) Approve(ctx context.Context, req domain.ApprovalRequest
 // of stacking a private one at every depth. What actually keeps a whole tree in ONE queue is the
 // designated prompt slot, which rides the context a child inherits from its parent
 // (domain.WithPromptSlot) and therefore also holds for the ask_user questions the children raise.
+//
+// That same idempotence is what gives the tree ONE allow-for-session memory: the cache is created
+// here, with the wrapper, so re-using a parent's wrapper re-uses its memory — a child neither
+// inherits a copy nor starts empty, it reads and writes the very map its parent does.
 //
 // A nil Approver stays nil. "No Approver configured" is a FACT the resolver reads
 // (resolutionInput.approverPresent — a Gate with no Approver folds to a Refuse, Resolution D5), so
@@ -208,7 +237,7 @@ func queuedApprovals(ap domain.Approver) domain.Approver {
 	if _, already := ap.(*queuedApprover); already {
 		return ap
 	}
-	return &queuedApprover{slot: domain.NewPromptSlot(), inner: ap}
+	return &queuedApprover{slot: domain.NewPromptSlot(), inner: ap, cache: &approvalCache{}}
 }
 
 // buildEnabledMechanisms builds each Mechanism named on cfg.EnableMechanisms and Adds it into

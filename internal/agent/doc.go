@@ -15,7 +15,7 @@
 //
 // # The files, one line each
 //
-// Eighteen files: the handle and its lifecycle, the loop proper, the tool path, and the
+// Nineteen files: the handle and its lifecycle, the loop proper, the tool path, and the
 // mid-session doors a host opens without tearing the session down.
 //
 // The handle. agent.go is the Agent type and the surface a Driver holds — New, Resume, Close,
@@ -46,7 +46,9 @@
 // dispatch.go executes it: the serial and depth-0 fan-out paths, the run/gate/confine/delegate/
 // refuse arms, Approval, result clamping, and the audit records. subagent.go is the sub-agent
 // orchestrator — a nested Agent whose privileges are the parent's verbatim or stricter, with a
-// tool set that is a subset and never an expansion (ADR 0013).
+// tool set that is a subset and never an expansion (ADR 0013). approvalcache.go is the Session's
+// allow-for-session memory: the guarded set of cleared keys the approver seam in construct.go owns,
+// one per agent tree, so an allow granted anywhere in it is remembered everywhere.
 //
 // The mid-session doors. interject.go commits the human's remark into the OPEN Exchange at a
 // between-Steps boundary. rebind.go swaps every per-model binding together when the Upstream's

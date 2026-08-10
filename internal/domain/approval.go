@@ -52,6 +52,17 @@ type ApprovalRequest struct {
 	// signal to fall back to SubAgentTask — so a Driver needs no second flag to know which of
 	// the two to paint.
 	SubAgentName string
+	// CacheKey is the allow-for-session IDENTITY of this request: the key an
+	// ApprovalAllowForSession verdict is remembered under for the rest of the Session, so a later
+	// call resolving to the same key raises no second prompt — anywhere in the agent tree, since
+	// the memory is the Session's rather than one Agent's.
+	//
+	// An EMPTY key means this decision can never be remembered: the request is a forced gate (a
+	// Tier-2 speed-bump, a runtime demote), where "allow for session" authorises this one call and
+	// nothing more. The engine populates the field; a host may read it — to grey out an affordance
+	// that would not be honoured, say — but is free to ignore it, because it is the engine and not
+	// the host that keeps the memory.
+	CacheKey string
 }
 
 // ApprovalDecision is the Approver's verdict.
