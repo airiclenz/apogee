@@ -378,8 +378,8 @@ engine's reducers — which is the whole of the observation.
 
 **Blast radius, so it is known before the grill, not during.** Five non-test callers:
 `internal/agent/loop.go:333` (the retry correction) and `:560` (the deferred-correction drain), and
-the Mechanisms `readloop.go:89`, `filehint.go:111`, `guided_decomposition.go:156`. Several Mechanisms
-additionally *reason about* where the inject lands — `guided_decomposition.go` (`:175`, `:196`,
+the Mechanisms `readloop.go:89`, `filehint.go:111`, `guideddecomposition.go:156`. Several Mechanisms
+additionally *reason about* where the inject lands — `guideddecomposition.go` (`:175`, `:196`,
 `:373`, `:516`) keys its idempotency and boundary logic on the roles `InjectContext` writes — so the
 ladder's behaviour is depended on beyond the call itself.
 

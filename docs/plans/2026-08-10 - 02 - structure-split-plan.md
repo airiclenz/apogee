@@ -418,7 +418,19 @@ finds nothing.
 
 **Commit:** `refactor(cmd): drop the config bridge; call internal/config directly`
 
-## 12. Mechanisms tidy — compact naming, syntax pair, real doc.go
+## 12. Mechanisms tidy — compact naming, syntax pair, real doc.go — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): three additions beyond the item's literal text, all mechanical consequences of
+the renames. (i) `syntaxcheck_test.go` → `syntaxengine_test.go`: the item names only the production
+half of the pair, but leaving the twin behind would recreate the confusable naming the item exists
+to cure. (ii) `doc.go` KEEPS its existing package prose (the catalogue/ADR-0003 paragraphs) and
+gains the file map beneath it, matching `internal/config/doc.go`'s shape — "replace the stub" is
+read as "the stub gains a real map", not "discard accurate prose". (iii) Two live docs that cited a
+renamed path were updated in the same commit: `TODO.md` (3 `guided_decomposition.go:NNN` anchors)
+and `docs/design/mechanism-catalogue.md` (the guided_decomposition catalogue row's source link).
+ADRs, archived plans, this plan and the handoff keep the old names — they record the pre-rename
+state. No CHANGELOG entry: items 3–11 of this plan set the precedent that a behaviour-preserving
+refactor gets none.
 
 **What:** In `internal/mechanisms`: (a) `git mv` the five snake_case production files
 to compact names — `empty_response.go` → `emptyresponse.go`,

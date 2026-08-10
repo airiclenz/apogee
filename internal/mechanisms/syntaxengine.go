@@ -1,5 +1,10 @@
 package mechanisms
 
+// The syntax-check ENGINE: a pure checker over a write payload, no catalogue row, no Mechanism.
+// It registers nothing and decides nothing about the loop — syntax.go owns the Mechanism that
+// calls in here and acts on the verdict. Named `syntaxcheck.go` until ADR 0043, which cured the
+// pair: `syntax.go` is the Mechanism (matching validate.go / autofix.go), this is its engine.
+
 import (
 	"fmt"
 	"go/parser"

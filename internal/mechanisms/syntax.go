@@ -1,5 +1,14 @@
 package mechanisms
 
+// The syntax-check MECHANISM: its catalogue row, hook, and the correction it asks for — the
+// same file shape as validate.go / autofix.go, one file per registered Mechanism.
+//
+// The checker it calls is not here. syntaxengine.go holds the pure engine (parse a payload,
+// report breakage) with no catalogue row and no Mechanism of its own; this file is the only
+// thing that decides WHEN that engine runs and what the loop does with its verdict. The pair
+// was `syntax.go` / `syntaxcheck.go` until ADR 0043 — two names that said nothing about which
+// half was which.
+
 import (
 	"context"
 	"fmt"
