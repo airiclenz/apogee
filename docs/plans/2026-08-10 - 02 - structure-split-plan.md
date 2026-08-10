@@ -144,7 +144,13 @@ Update `doc.go`'s map in the same commit.
 
 **Commit:** `refactor(tui): lift approval keys and approval prompt rendering into approval.go`
 
-## 5. Lift command-running/refusal into internal/tui/commandrun.go
+## 5. Lift command-running/refusal into internal/tui/commandrun.go — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): line anchors had drifted after items 3–4 — the cluster sat at 1313–1654 in the
+post-item-4 tree, not ~1406–1747 — so the member-name list governed per the standing requirement.
+The six named funcs were contiguous with nothing else interleaved, so the move carries exactly the
+named members and their doc comments; nothing extra, nothing left behind. No CHANGELOG entry, per
+items 3–4's precedent for a behaviour-preserving move.
 
 **What:** Pure same-package move out of `model.go` (~1406–1747) into a new
 `internal/tui/commandrun.go` (`command.go` already exists — do not touch it):

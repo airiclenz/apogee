@@ -492,7 +492,12 @@
 // [Model.resolveApproval], [Model.sendApproval]) and the pane that paints it
 // ([Model.approvalPrompt] with its Sub-agent identity line and its argument block), so a row can
 // never be paintable and unreachable (the Model still owns the pending request and the menu
-// selection); theme.go the palette, the
+// selection); commandrun.go the third cluster lifted out of model.go (ADR 0043) — what a
+// recognised /command DOES ([Model.runCommand]'s switchboard, [Model.startNewSession]'s session
+// reset, [Model.launchExchange]'s worker start) beside the refusals an unrunnable line meets
+// ([Model.refuseUnknownSlash], [Model.refuseIdleOnlyCommand]) and the [Model.commandRunnable] gate
+// both invocation routes share, while the parse that classifies the line stays in command.go and
+// [Model.submit] stays with the input concern; theme.go the palette, the
 // marker glyphs, and the
 // lipgloss styles; width.go the display-width authority the theme carries — one measure for the
 // whole TUI, and it is whichever one the painter itself is using; inputaccent.go the
