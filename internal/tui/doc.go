@@ -483,7 +483,11 @@
 // into Update; approver.go and asker.go the two cross-goroutine rendezvous that park a Step on a
 // human ([uiApprover] on an approval decision, [uiAsker] on a typed answer); worker.go the
 // cancellable engine driver; model.go the [Model] itself — the lifecycle state machine, the
-// layout, the status line and the footer; theme.go the palette, the marker glyphs, and the
+// layout, the status line and the footer; sessionsave.go the record-write cluster lifted out of
+// model.go (ADR 0043) — the assembled [savePayload], the per-Turn and idle saves, and the
+// single-flight queue that orders every Save, Rename, Delete, Rotate and Activate against one
+// another (the Model still owns the three fields it latches on); theme.go the palette, the
+// marker glyphs, and the
 // lipgloss styles; width.go the display-width authority the theme carries — one measure for the
 // whole TUI, and it is whichever one the painter itself is using; inputaccent.go the
 // resolve-gated inline accents the prompt box paints its

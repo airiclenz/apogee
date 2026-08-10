@@ -93,7 +93,7 @@ map. Record what does NOT change: ADR 0010 layering (the moved package imports
 
 **Commit:** `docs(adr): ADR 0042 — file-level structure rules and internal/config`
 
-## 3. Lift the session-save write queue into internal/tui/sessionsave.go
+## 3. Lift the session-save write queue into internal/tui/sessionsave.go — ✅ DONE (2026-08-10)
 
 **What:** Pure same-package move out of `model.go` (~lines 1957–2331) into a new
 `internal/tui/sessionsave.go`: `savePayload`, `Model.snapshotPayload`, `Model.persist`,
