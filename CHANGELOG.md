@@ -378,6 +378,16 @@ point is a **minor** bump, not a breaking change.
   the multi-option mockup, and lowercases the approval body's `command:` label. The two renderer
   comments riding the same drift — `internal/tui/theme.go`'s `bodyRightGutter` and
   `internal/tui/autocomplete.go`'s accept-behaviour note — are corrected with them.
+- **The Mechanism catalogue lists all 21 Mechanisms again.** `guided_decomposition` had been
+  registered in code since 2026-07-05 without a row in `docs/design/mechanism-catalogue.md`, so the
+  authoritative map listed twenty while the code built twenty-one and the README promised that many.
+  It now carries its Table A identity row (pre-request steer plus post-response fan-out
+  follow-through, `After toolfilter`, `Requires tool_result_cap`, incompatible with `decompose` and
+  `truncate_history`, depth-0 and once-per-Exchange gates), a Table B verdict marking it the first
+  catalogue row that is *not* a port, and a ledger line whose bench validation is the ADR 0009 gate
+  over the `guided_decomposition` + `tool_result_cap` stack. The `truncate_history` row's F7 note no
+  longer reads as a half-recorded edge: the declaration lives on one descriptor, but either side
+  naming the other fails start-up, so the two can never be enabled together whichever row you read.
 
 ### Fixed
 

@@ -119,7 +119,7 @@ consolidate or rename.
 | `syntax` | (untracked analyzer) | `internal/syntax/{syntax,go_check,generic_check}.go` | post-response | response-repair | strikes-3 | After `validate`,`autofix` (corrects the post-repair remainder); own per-Session syntax-fail counter |
 | `autofix` | (untracked analyzer) | `internal/autofix/{autofix,formatters}.go` | post-response | response-repair | strikes-3 | After `validate`; Before `syntax` (repair precedes correction — sim `response_analysis.go:72-88`; in-process gofmt tail always, spawning nothing; the external formatters — goimports / black / rustfmt, LookPath-cached at construction — spawn ONLY under a hook-time `domain.SubprocessPermit` (post-response in Auto; confinement-execution-contract §10), confined to the permit's box when it carries one. The JS/TS rungs were dropped 2026-08-03: that formatter `require()`s repo-authored code to decide how to format, which no silent repair step may do) |
 | `correct_tool_result` | `correct_tool_result` (lab-only) | `internal/sim/intervention.go:22,94` | post-tool-result | response-repair | strikes-3 | none — **DEFERRED (owner-ratified 2026-07-04): not ported — no production trigger in the source; the bench experiments via an experimental post-tool-result hook (see Table B)** |
-| `truncate_history` | `truncate_history` (lab-only) | `internal/sim/intervention.go:23,99` | history-rewrite | proactive-nudge² | strikes-3 | IncompatibleWith `guided_decomposition` (F7 — a mid-Exchange truncation longer than its keep window can drop the enumeration message the fan-out cursor re-derives from; post-v1.3.0 review-fixes item 8, declared one-sided on the `guided_decomposition` descriptor, 2026-07-06); otherwise none — cut only at `AssistantBoundaries()`, never `PrefixEnd()` |
+| `truncate_history` | `truncate_history` (lab-only) | `internal/sim/intervention.go:23,99` | history-rewrite | proactive-nudge² | strikes-3 | IncompatibleWith `guided_decomposition` (F7 — a mid-Exchange truncation longer than its keep window can drop the enumeration message the fan-out cursor re-derives from; post-v1.3.0 review-fixes item 8, 2026-07-06). The edge is **declared once**, on the `guided_decomposition` descriptor (`IncompatibleWith: [decompose, truncate_history]`), and nothing declares it back here — a declaration is directional in the data but **symmetric in effect**: either side naming the other trips `ErrIncompatibleMechanisms` at start-up (`internal/domain/registry.go:203-208`), so enabling the two together fails loudly whichever row you read from. See the `guided_decomposition` row for the coupling's other half. Otherwise none — cut only at `AssistantBoundaries()`, never `PrefixEnd()` |
 | `tool_result_cap` | `context_compression` (cap half) | `internal/compress/compress.go` (`capToolResults` `:428/431`) | pre-request | proactive-nudge² | strikes-3 | After `decompose` — runs last among pre-request shapers (ratified 2026-07-04, review-fixes item 11 / option A; was "none" — §Ordering seed now declared, D7 amendment rule); protects the most-recent Turn; per-result 40%-budget cap |
 | `toolfilter` | `tool_filtering` | `internal/toolfilter/toolfilter.go:33,70` | pre-request | proactive-nudge | strikes-3³ | Before `decompose` (trim menu before user-msg rewrite) |
 | `filehint` | `file_hint` | `internal/filehint/filehint.go`; `internal/proxy/file_hint_detector.go`; desc `descriptor.go:130` | pre-request | proactive-nudge | strikes-3 | none (greenfield-suppressed internally) |
@@ -132,6 +132,7 @@ consolidate or rename.
 | `list_nudge` | `list_nudge` | `internal/cot/cot.go`; desc `descriptor.go:70` | pre-request | proactive-nudge | strikes-3 | Before `toolfilter` (ratified 2026-07-04, review-fixes item 11 / option A; was "none" — §Ordering seed now declared, D7 amendment rule); IncompatibleWith `stall_nudge`; 3-nudge cap |
 | `tool_use_directive` | `tool_use_directive` | `internal/cot/cot.go`; desc `descriptor.go:77` | pre-request | proactive-nudge | strikes-3 | Before `toolfilter` (ratified 2026-07-04, review-fixes item 11 / option A; was "none" — §Ordering seed now declared, D7 amendment rule); fires only before first tool use |
 | `library` | `library_injection` + observer | `internal/library/{transform,observer,store}.go` | pre-request (inject); **post-response (observe)** — hook point decided 2026-07-04, item 14 | proactive-nudge | strikes-3⁴ | Before `toolfilter` (inject) — ratified 2026-07-04, review-fixes item 11 / option A; was "none" — §Ordering seed now declared, D7 amendment rule; confidence gates injection; fully inert in Bypass (inject **and** observe) |
+| `guided_decomposition` | — (apogee-native⁵) | `internal/mechanisms/guided_decomposition.go`; ADR 0014 | pre-request (enumeration steer); **post-response (batched fan-out follow-through)** | proactive-nudge | strikes-3 | After `toolfilter` — the `sub_agent`-presence gate must read the FINAL menu, which `toolfilter` narrows earlier in the pass. **Requires `tool_result_cap`** (enable-time dependency, ADR 0014 §4 / locked decision 3: a lone `guided_decomposition:` key is a start-up `ErrMissingRequirement`, and the bench evaluates the stack as a unit). IncompatibleWith `decompose` (both steer the same "task too big" symptom through different means — delegation vs prompt wording — and must not stack, locked decision 2) and `truncate_history` (F7, see that row). Fires only at **Depth 0** (the primary call, never a nested delegation it set up itself), only on a known window (`Budget.ContextLimit > 0`), and at most **once per Exchange** (committed-evidence guard) |
 
 ¹ The sim tracks `validate` indirectly: validation itself is untracked, but its **streaming
 deferred correction** is the exempt `feed_forward_correction` Mechanism. apogee folds that path
@@ -147,6 +148,12 @@ Mechanisms so they self-regulate uniformly. Noted per-row so the divergence is e
 sim). apogee registers it as a catalogued Mechanism (D1 default-off, Bypass-inert); its
 injection gate remains confidence-driven, with `strikes-3` as the uniform self-regulation
 backstop.
+⁵ `guided_decomposition` is the first catalogue row that is **not a port**: it was born in
+apogee (ADR 0014, ratified and shipped 2026-07-05, amended 2026-08-07), so the sim columns are
+empty by construction and there is no `@pin` to cite. Row added 2026-08-10 under the D7
+amendment rule — the Mechanism had been registered in code since 2026-07-05 while this map
+still listed only the ported twenty. The catalogue remains the authoritative map: a native
+Mechanism earns a row here the same way a ported one does.
 
 **Library observe hook point — decided 2026-07-04 (item 14):** the observer half is a
 **post-response** hook. The sim's observer runs on the completed request-response cycle; apogee's
@@ -184,6 +191,7 @@ low-confidence metadata label does not inject); observe records on any identifie
 | `list_nudge` | Wave 4 — **item 12** | PORT — completion nudge (C4); list-without-read → read | `catalogue.md` §list_nudge (threshold 2, cap 3) | pending |
 | `tool_use_directive` | Wave 4 — **item 12** | PORT — completion nudge (C4); action-intent + no tool use → use tools | `catalogue.md` §tool_use_directive (de-exempted 2026-05-23) | pending |
 | `library` | Library — **item 14** | PORT — cross-session learning; observe + confidence-gated inject | `catalogue.md` §library + ADR 0009 sim (Bayesian `(obs-succ+1)/(obs+2)`, gate 0.5/2 obs) | pending (longitudinal: improves-over-sessions AND never-below-baseline) |
+| `guided_decomposition` | — not a port; post-`v1.0.0` catalogue extension (`docs/plans/archived/guided-decomposition-plan.md`, 2026-07-05) | **NEW (apogee-native⁵)** — ADR 0014: steer the oversized primary call to enumerate self-contained subtasks, then pace the fan-out at one batch per Turn through the `sub_agent` recursion point; ships default-off (D1) like every Mechanism | none from the sim — no counterpart exists there, so no prior A/B figures carry over; ADR 0014 (grill 2026-07-05, amendment 2026-08-07) is the whole evidence trail | pending — the ADR 0009 non-inferiority gate is run over the **`guided_decomposition` + `tool_result_cap` stack**, never the Mechanism alone (Requires coupling); the 2026-08-07 batch amendment obliges a re-pass before any default flip |
 
 ---
 
@@ -263,7 +271,10 @@ this plan (D1/D8); flips are one-line follow-ups gated on the bench A/B campaign
 `docs/handoffs/2026-07-04 - 00 - phase-4-complete-bench-campaign-next.md` handoff). "Shipped in
 item N" was filled as each wave landed; **the ledger is closed here (item 16, 2026-07-04)** —
 every ported Mechanism carries its shipping item and a **pending** bench validation, and every
-DROP / FOLD / SPLIT / DEFER row carries its verdict. Nothing remains porting-undecided.
+DROP / FOLD / SPLIT / DEFER row carries its verdict. Nothing remains porting-undecided. Closed
+means *the porting question is settled*, not that the table is frozen: a Mechanism born in
+apogee rather than ported still lands a line here when it ships (so far one —
+`guided_decomposition`, ADR 0014).
 
 | apogee ID | Shipped in item | Bench validation |
 |---|---|---|
@@ -276,6 +287,7 @@ DROP / FOLD / SPLIT / DEFER row carries its verdict. Nothing remains porting-und
 | `error_enrichment`, `read_loop`, `read_repeat`, `tool_loop_interceptor`, `cached_content_intercept` | 11 | pending |
 | `decompose`, `stall_nudge`, `list_nudge`, `tool_use_directive` | 12 | pending |
 | `library` | 14 | pending |
+| `guided_decomposition` | — (not a port: shipped 2026-07-05 via ADR 0014 and its own plan, after this ledger closed) | pending (gate runs over the `guided_decomposition` + `tool_result_cap` stack; re-pass owed after the 2026-08-07 batch amendment) |
 | `codeinfo` | — (DROP, C7) | n/a |
 | `intent` | — (FOLD helper, C6) | n/a |
 | `feed_forward_correction` | — (FOLD into `validate`, C5) | n/a |

@@ -136,7 +136,7 @@ sketch's `[1]/[2]/[3]` cells are not painted, rather than the cells being erased
 from the owner's pinned mockup. Left alone as out of scope: the file's `:2`
 Status blockquote still cites the pre-archive path of the 2026-08-04 - 03 plan.
 
-## 5. mechanism-catalogue: add the missing guided_decomposition row
+## 5. mechanism-catalogue: add the missing guided_decomposition row — ✅ DONE (2026-08-10)
 
 What: add the `guided_decomposition` row to Table A (sourced from ADR 0014 and
 `internal/mechanisms/guided_decomposition.go`: proactive-nudge capability,
@@ -153,6 +153,20 @@ Acceptance: Table A row count equals the code catalogue's 21 registrations;
 README's ":21 mechanisms → see the catalogue" promise is honest.
 
 Commit: `docs(catalogue): add the guided_decomposition row (ADR 0014)`
+
+NOTES (2026-08-10): acceptance arithmetic, stated exactly. Table A now holds 22
+physical rows: the 21 code registrations plus the `correct_tool_result` DEFER
+row, which has never been a registration (owner-ratified 2026-07-04, not
+ported). So "Table A row count equals the code catalogue's 21 registrations"
+holds on registered rows — the count the audit used when it read Table A as
+listing 20. Two additions beyond the item's literal text, both to keep the
+surrounding text true once the row exists: a footnote ⁵ marking
+`guided_decomposition` as the first catalogue row that is not a port (the Sim
+columns are empty by construction and the table's header prose otherwise
+promises a sim spelling for every row), and one sentence in the ledger preamble
+saying "closed" means the porting question is settled, not that the table is
+frozen — the preamble declared the ledger closed 2026-07-04 and a new line
+under it would otherwise read as a contradiction.
 
 ## 6. Salvage orphaned "why"s into ADRs
 
