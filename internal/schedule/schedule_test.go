@@ -107,6 +107,11 @@ func TestTickDuringAFiringIsSkippedAndTheNextTickFires(t *testing.T) {
 		t.Errorf("completed event carried %+v, want the runner's outcome", done.Outcome)
 	}
 
+	// EventCompleted is emitted just BEFORE the deferred landed() reopens the Schedule, so the
+	// event alone does not settle the in-flight flag. Wait for the flag: a tick delivered ahead
+	// of it is a legitimate skip, and the assertion below is about the RECOVERED cadence.
+	eventually(t, "the in-flight flag to clear", func() bool { return !s.List()[0].InFlight })
+
 	// The cadence recovered: the next tick fires normally.
 	clk.tick(t, 0)
 	rec.next(t, EventFired)
@@ -493,6 +498,11 @@ func TestAFailingRunnerIsReportedAndTheCadenceSurvives(t *testing.T) {
 	if got := rec.next(t, EventFailed); !errors.Is(got.Err, boom) {
 		t.Errorf("failed event carried %v, want %v", got.Err, boom)
 	}
+
+	// Same ordering as the overlap-policy test: the failure Event goes out before the deferred
+	// landed() reopens the Schedule, so the tick that proves the cadence SURVIVED has to wait
+	// for the flag — otherwise it would be a skip, which proves nothing about survival.
+	eventually(t, "the in-flight flag to clear", func() bool { return !s.List()[0].InFlight })
 
 	clk.tick(t, 0)
 	rec.next(t, EventFired)
