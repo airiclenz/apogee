@@ -28,4 +28,36 @@
 // The capability tier the model report carries is a REPORTED SIGNAL ONLY — nothing reads it.
 // Adaptive prompt complexity, the transform that would, is a recorded TODO.md follow-on: a
 // model-facing transform owes the catalogue a bench campaign first (ADR 0009).
+//
+// # The files, one line each
+//
+// The host half. host.go is that report: the injected Inputs the composition root has already
+// resolved, GatherHost, and the rendering of every line it states — the Auto verdict, the
+// confined-roots line, the upstream lines, the API-key line. discovery.go is the one thing this
+// half asks the network, and it asks read-only: GET /v1/models plus llama.cpp's GET /props, with a
+// zero Discovery meaning "no endpoint was configured", which is a report and not a failure.
+// confinement.go is the shared confinement wording — BackendName, CapabilityLine, DegradedNotice —
+// rendered once here and quoted by the CLI report, the TUI's /confine status and startup, so three
+// surfaces cannot tell a user three stories about one verdict.
+//
+// The model half, the part that spends tokens. battery.go is the live suite: the Capability slugs
+// (stable, because they are folded into the fingerprint), the Chat seam it calls the Upstream
+// through, the probes themselves — native tool call, structured JSON, multi-step chain, and the
+// one-token candidate distribution — the thinking observation, and BatteryVersion, which stamps
+// every record because a label earned under one battery is not comparable to one earned under
+// another. modelfingerprint.go is what a run is turned INTO: the ordinal Tier, the
+// domain.ModelFingerprint, the BehaviorSignature (a fuzzy feature match, never a hash of a
+// response, which sampling alone would move), and the suggested ModelProfile with its YAML
+// rendering. model.go is the model report — ModelInputs, GatherModel, the SaveOutcome the
+// composition root fills in after it persists, and the report sections.
+//
+// The terminal half. terminal.go is `apogee probe terminal` whole: the alternate-screen
+// measurement session (DSR-CPR read-back, mode reports, glyph widths, tab stops, the last-column
+// wrap, the cursor-addressing capability set) and the table that sets each observation beside what
+// apogee's renderer assumes. terminal_windows.go is the one measurement no escape sequence can
+// make — reading what is IN a cell, out of the console's own screen buffer — and terminal_other.go
+// is the twin that answers "unverified" everywhere else, so all six release targets compile the
+// probe rather than guessing.
+//
+// And doc.go this map.
 package probe

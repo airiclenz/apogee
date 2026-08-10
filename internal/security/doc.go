@@ -35,4 +35,45 @@
 // (D2) — inherit them. The package imports only internal/domain and the standard
 // library (ADR 0010): it is imported BY internal/tools and internal/agent, never the
 // other way, so there is no cycle.
+//
+// # The files, one line each
+//
+// The executor bundle. guard.go is Guards itself — the always-on set the tool executor threads
+// around every call (PreExecute, RecordExecution, RecordBlocked) — plus ForSubAgent, the split
+// that hands a sub-agent its own breaker and its own audit trail while keeping the
+// dangerous-action floor shared and read-only, which is the floor it must not be able to
+// re-derive (ADR 0013).
+//
+// The dangerous-action guard, in two files so the ruleset reads as a list rather than as
+// machinery. dangerous.go is the mechanism: the two Tiers, the Rule and Decision types, Inspect,
+// and the inspectable-text derivation that reads a call's ACTION — tool name, target paths,
+// command lines, code — while skipping the payload keys a write carries, so a document that
+// merely quotes a guarded path is not an action. rules.go is the content: DefaultDangerousRules,
+// the narrow precision-over-recall built-in floor with a comment per rule saying where its
+// boundary is, and MergeDangerousRules, which encodes who may loosen it (global may add or
+// remove, project may only add — ADR 0012).
+//
+// The runaway halt and the trail. circuitbreaker.go trips after DefaultCircuitBreakerThreshold
+// consecutive identical FAILING calls, keyed by a (tool, arguments) signature that any success
+// clears. audit.go is the append-only call / decision / result record: the AuditDecision
+// vocabulary, the capped ring that counts what it drops rather than silently forgetting, and the
+// result truncation that keeps one record bounded.
+//
+// The filesystem boundary, split check-from-use because the gap between them is the race.
+// pathsafety.go is the CHECK — ResolveInRoot (symlink-aware, traversal-rejecting, validating a
+// not-yet-existing write target against its nearest existing ancestor), ErrPathEscape, and the
+// EvalRealPath / WorkspaceRelative helpers every surface that prints a path goes through.
+// safeio.go is the USE — SafeReadFile, SafeWriteFile, SafeOpen, SafeCopyFile, SafeRename and
+// SafeRemove, each performed through an os.Root pinned at the workspace root so the validated
+// path IS the path touched (H1), with the same-directory staging file and rename that makes a
+// write atomic at the target name.
+//
+// The network boundary, likewise in two layers. urlsafety.go is URLGuard, judged on the URL as
+// WRITTEN: scheme and host allow-deny with deny-first precedence, plus NormalizeURL and its
+// IDNA / non-ASCII handling. ssrf.go is the floor beneath it, judged on the RESOLVED IP instead —
+// the denied v4 and v6 ranges, the NAT64-embedded decode, and the dial-time SafeDialControl /
+// PinnedDialControl that re-check the address the connection actually goes to, so a name that
+// rebinds between the check and the connect cannot walk past it.
+//
+// And doc.go this map.
 package security

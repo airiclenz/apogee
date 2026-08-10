@@ -40,4 +40,36 @@
 //
 // The package depends only on internal/domain (+ stdlib): the loop adapts provider wire
 // tool calls into NativeToolCall at the seam, so wire types stay provider-local (ADR 0010).
+//
+// # The files, one line each
+//
+// The seams. parser.go declares ToolCallParser — parse a call out of the visible content, strip
+// its markup back out — and nothing else, because the interface is what internal/agent is written
+// against. parserfor.go is the loop-facing selector: the ContentStripper interface, ParserFor
+// turning a declarative domain.ModelProfile into the concrete parser/stripper pair, and the three
+// strippers themselves (none, delimited, harmony), each a thin adapter over an engine below.
+// factory.go is the parser half of that selection, kept in the oracle's own shape — ToolCallFormat,
+// the frozen ToolCallingConfig, NewToolCallParser, and the native text parser that deliberately
+// finds nothing, since ParseNativeToolCalls already owns the structured path.
+//
+// The tool-call formats, one file each. toolcall.go is the native/JSON shape: NativeToolCall as an
+// OpenAI-compatible server delivers it, ParseNativeToolCalls, and ErrMalformedToolCall — the
+// sentinel a bad call degrades to a tool-error path through instead of failing the Turn.
+// markdown_fenced.go is the fenced tool block: its config defaults, the strict fence parse, and the
+// marker-based fallback for a model that emitted the markers but forgot the fence. custom_regex.go
+// is the user-supplied named-group regex escape hatch, including the JavaScript (?<name>…) → Go
+// (?P<name>…) rewrite and the never-match parser an invalid pattern degrades to. args.go is what
+// those two share: value coercion (valid JSON kept as a JSON value, anything else a JSON string)
+// and sorted-key argument marshalling, so an encoding is deterministic rather than map-ordered.
+//
+// The thinking channels. thinking.go is the delimited pair — ThinkingConfig, StripThinking, and
+// the IsThinking mid-span guard a streaming consumer holds emission on. harmony.go is the gpt-oss
+// channel set: the analysis / commentary / final routing, the <|end|> / <|call|> / <|return|>
+// terminators, the still-streaming unterminated case, and IsHarmonyThinking.
+//
+// The emit side. instructions.go renders what we TELL a non-native model — the text tool menu and
+// the format-specific markup instructions, with the example call picked out of the menu — from the
+// same profile knobs and defaults the parsers read, so the two halves of the contract cannot drift.
+//
+// And doc.go this map.
 package processing

@@ -521,7 +521,20 @@ green; `make check` green; each doc.go names every non-test file in its package.
 
 **Commit:** `docs(structure): file maps and guard tests for tools, domain, platform, agent`
 
-## 15. File maps wave 3 — processing, security, probe
+## 15. File maps wave 3 — processing, security, probe — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): **no count discrepancy** — following item 14's precedent the counts were taken
+at head rather than trusted from the item text, and all three matched exactly: `internal/processing`
+11 non-test files, `internal/security` 10, `internal/probe` 10. One departure from the literal text,
+also item 14's: each map is grouped by concern with short paragraph headings under a
+`# The files, one line each` heading (the seams / the tool-call formats / the thinking channels /
+the emit side; the executor bundle / the dangerous-action guard / the runaway halt and the trail /
+the filesystem boundary / the network boundary; the host half / the model half / the terminal half)
+rather than one flat run, following `internal/mechanisms/doc.go`'s shape — the grouping is what
+makes a map worth reading, and the guard only checks that a name appears. Existing doc.go prose was
+kept above each map untouched. No CHANGELOG entry, per items 3–14's precedent for a
+behaviour-preserving structure change; no production code changed (comments and three new test
+files only).
 
 Depends on item 13.
 
