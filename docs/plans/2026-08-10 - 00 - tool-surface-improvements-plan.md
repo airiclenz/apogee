@@ -405,7 +405,16 @@ passes.
 
 **Commit:** `feat(tools): add run_tests with runner auto-detection and condensed output`
 
-## 10. TODO.md records the deferred and denied tool-surface findings
+## 10. TODO.md records the deferred and denied tool-surface findings — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): no CHANGELOG entry — the owner ratified that NO item in this plan touches
+CHANGELOG.md. Beyond the item's literal lists, whose content is carried verbatim in substance, the
+new section is written in TODO.md's house shape — a leading `**Status:**` paragraph naming the
+round, the four polled models and the plan that shipped the acted-on half, and the file's standing
+"none of it is a live gap" framing — because a bare list of fragments in a file whose every entry
+records *enough design that we don't re-derive it* would be the one entry a later reader cannot
+place. The section lands last among the live entries, immediately above **Closed entries**, which
+the file's own intro reserves as the trailing section.
 
 **What:** Add a `## Tool-surface findings (4-poll round, 2026-08-10)` section to
 `TODO.md` with these lists, content binding:

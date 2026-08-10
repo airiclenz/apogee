@@ -795,6 +795,62 @@ repo does yet — settle that first.
 
 ---
 
+## Tool-surface findings (4-poll round, 2026-08-10)
+
+**Status:** recorded 2026-08-10 at the close of the tool-surface plan (`2026-08-10 - 00`, under
+`docs/plans/`, archived on completion). Four polls of the target class — Qwen3.6-35B-A3B ×2,
+Gemma-4-26B-A4B, Gemma-4-E4B — were asked what they wanted from apogee's tool surface. The plan
+shipped the uncontested improvements and the promoted new tools (`find_files`, `git_status`,
+`git_log`, `copy_file`/`move_file`/`delete_file`, `run_tests`) plus the global `tools.disabled`
+switch; everything the round raised that did **not** ship is recorded here, so a deferral or a
+denial never becomes a silent drop. **None of it is a live gap.**
+
+**Bench experiments required before any tool removal.** Models are unreliable narrators about their
+own tooling: the E4B poll preferred patch-only editing — the format small models are measurably
+worst at — and a repeat Qwen poll returned a substantially different list, so only REPLICATED
+findings count. Nothing leaves the roster on poll evidence alone; each arm below is a bench
+experiment, not a decision:
+
+- **(a)** remove `single_find_and_replace` — flagged in all four polls.
+- **(b)** patch-only vs find-replace editing — Qwen vs both Gemmas, a falsifiable disagreement.
+- **(c)** `open_file`/`read_file` merge — lean: keep `read_file`, add a `locate` parameter (Qwen
+  chose `read_file` as the survivor in both sessions).
+- **(d)** measure whether sub-35B models use `view_diff` at all.
+- **(e)** `web_fetch` → `http_request` merge — the real question is whether sub-35B models
+  distinguish GET from POST; if they don't, the separate named GET tool earns its slot. Both are
+  ExternalEffect-classified, so gating doesn't decide it.
+- **(f)** do sub-35B models ever discover `edit_existing_file`'s patch mode unprompted? — a
+  discovery experiment feeding the explicit-patch-param idea.
+
+**Needs a grill session:** per-profile tool rosters (builds on the `tools.disabled` key this plan
+shipped); a unified `git` tool with subcommands vs the growing `git_*` family.
+
+**Deferred candidates:** env-var parameters on `terminal`/`python_exec` (stable across both Qwen
+sessions); `directory_create`/`directory_delete`; `git_stash`; `git_tag`; `file_metadata`; batch
+rename/replace operations; `workspace_summary`.
+
+**Engine-level notes (not tools):** context-window introspection for the model (Mechanism
+territory); streaming/progress for long-running tools; structured JSON tool outputs.
+
+**Denied, with reasons** (do not re-file as gaps):
+
+- `database_query` — [ADR 0031](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md):
+  no first-party connectors, that is MCP's job.
+- standalone `apply_patch` — it already exists inside `edit_existing_file`; models missing it is a
+  *discovery* problem, tracked as the explicit-patch-param idea in (f) above.
+- concurrent `terminal` — parallelism lands at the sub-agent layer
+  ([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)).
+- `inspect_environment` — `terminal` covers it.
+
+**Method lessons** (they generalise past this round):
+
+1. Models reliably converge on **problems** but not on **solutions** — removals need measurement.
+2. Models discover capabilities by tool **name**, not by parameters — three sightings in one round:
+   `list_dir`'s `recursive` missed twice, `edit_existing_file`'s patch mode missed once. Naming and
+   descriptions are the discovery surface.
+
+---
+
 ## Closed entries — the one-line trail
 
 Full records live in the named docs; a line here keeps the deferral trail deliberate and carries
