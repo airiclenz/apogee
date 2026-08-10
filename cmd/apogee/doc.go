@@ -22,11 +22,21 @@
 // the root command itself, its flag set, the [config.Options] value the flags bind to,
 // and the `launcher` seam main backs with tui.Run; subcommands.go the one registration seam
 // naming the children the shipped binary carries; wire.go the composition proper —
-// runRoot assembling roots, config, tools, MCP, sessions, recall and engine into a
-// running TUI, the state-root resolution behind it, the narrow surfaces its seam files
-// share, and the map naming them all.
+// runRoot walking four named phases over one wiring value, that wiring and the single
+// teardown that ends it, the state-root resolution behind it, the narrow surfaces its
+// seam files share, and the map naming them all.
 //
-// The seams split off wire.go by concern (ADR 0043): wire_settings.go the
+// The phases runRoot walks, one file each (ADR 0043): wire_boot.go the facilities one
+// run owns before a session exists — skills, Bridge, presentation ladder, Confiner —
+// the base Config built from them, and what this host's confinement posture says for
+// itself on stderr; wire_live.go the live-session assembly, from the MCP connections
+// and the tool registry through the engine and Upstream holders and the bind that fills
+// them to the config watcher and the out-of-band work; wire_verbs.go the composition
+// root's own verbs — the rebind, the beat wrapper, and the three ways a session arrives
+// on or records an Upstream; wire_options.go the projection of all of it onto
+// tui.Options, the renderer's whole view of this host.
+//
+// The seams those phases build, split off by concern (ADR 0043): wire_settings.go the
 // live settings holder, the dispatcher a committed /settings key is applied through,
 // and the per-model re-resolution a heartbeat rebind drives; wire_tools.go the live
 // tool registry and the builders that assemble one — built-ins plus MCP — and validate
