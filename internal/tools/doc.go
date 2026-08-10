@@ -64,6 +64,15 @@
 // (NewDefaultRegistryWithHost threads the URLGuard, search endpoint, and Asker from Config).
 // The MCP tools land in P3.15.
 //
+// find_files (2026-08-10) is the NAME half of discovery, beside grep's content half: a
+// read-only walk returning workspace-relative paths whose BASE NAME matches a comma-separated
+// glob list — grep's own include syntax, parsed by grep's own parser, so the two tools cannot
+// drift on what a glob means or on a malformed one matching nothing. It is always recursive
+// (a capability a model must not have to find in a parameter — list_dir's recursive flag was
+// missed by two independent polls, which is why this is a named tool and list_dir is
+// untouched), skips grepExcludeDirs, and paginates like grep. It attaches no ToolSummary: what
+// it reports IS the list of names, and its header states the count in prose.
+//
 // present_document (ADR 0019) is the Asker pattern applied to showing a finished document:
 // the model names a deliverable it has written and the HOST picks the mechanism (the
 // presentation ladder — the transcript baseline always, the OS opener on a local desktop, a

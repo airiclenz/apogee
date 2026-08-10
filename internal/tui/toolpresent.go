@@ -365,6 +365,12 @@ var toolRegistry = map[string]toolPresenter{
 		target: stringArg("pattern"),
 		detail: firstLineDetail, // floor; the count comes from domain.MatchedLines
 	},
+	"find_files": {
+		label:  "Find Files",
+		verb:   "finding",
+		target: stringArg("pattern"),
+		detail: firstLineDetail, // the tool's own header: "[N files found, showing …]"
+	},
 	"single_find_and_replace": {
 		label:   "Edit File",
 		verb:    "editing",

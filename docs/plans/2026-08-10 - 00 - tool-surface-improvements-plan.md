@@ -115,7 +115,19 @@ target name is replaced by a regular file (not written through).
 
 **Commit:** `feat(security): SafeWriteFile writes atomically via temp+rename`
 
-## 3. New `find_files` tool — glob discovery by name
+## 3. New `find_files` tool — glob discovery by name — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): no CHANGELOG entry was written for this item — the owner ratified that NO
+item in this plan touches CHANGELOG.md. Beyond the item's literal text (new tool + registry
+registration), three roster-facing places were updated so they stay true of the shipped set:
+`internal/tools/doc.go` (the package's tool narrative), `internal/tui/toolpresent.go` (its
+`toolRegistry` documents itself as covering the full built-in set, so the new tool gets a card
+entry — six lines, no renderer change), and the tool-suite counts in
+`docs/design/technical-design.md` (21 → 22). The tool attaches NO `domain.ToolSummary`: that sum
+type is sealed and its seven carriers are pinned by name in `CONTEXT.md`, `doc.go` and a TUI pin
+test, so adding an eighth is a change this item does not own — the header prose carries the
+count instead. Registry-roster test expectations (names, ordering, counts, the read-only table)
+were updated because the new registration necessarily changes them.
 
 **What:** New file `internal/tools/find_files.go`: a read-only tool `find_files` that
 walks the workspace (or an optional `path` subtree) and returns workspace-relative

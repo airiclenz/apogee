@@ -16,7 +16,7 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 	registry := NewDefaultRegistry(t.TempDir())
 
 	for _, name := range []string{
-		"read_file", "write_file", "list_dir", "grep",
+		"read_file", "write_file", "list_dir", "grep", "find_files",
 		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
 		"view_diff", "open_file",
 		"terminal", "python_exec",
@@ -31,10 +31,10 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 	}
 
 	// ask_user (no Asker) and present_document (no Presenter) are omitted when NewDefaultRegistry
-	// uses a zero HostTools, so the default set is 19 (15 base/exec/git/diag + 3 network +
+	// uses a zero HostTools, so the default set is 20 (16 base/exec/git/diag + 3 network +
 	// sub_agent).
-	if got := len(registry.All()); got != 19 {
-		t.Errorf("default registry holds %d tools, want 19", got)
+	if got := len(registry.All()); got != 20 {
+		t.Errorf("default registry holds %d tools, want 20", got)
 	}
 	if _, ok := registry.Lookup("ask_user"); ok {
 		t.Error("ask_user must NOT be registered without an Asker")
@@ -50,7 +50,7 @@ func TestNewDefaultRegistry_MenuOrderIsDeterministic(t *testing.T) {
 	registry := NewDefaultRegistry(t.TempDir())
 
 	want := []string{
-		"read_file", "write_file", "list_dir", "grep",
+		"read_file", "write_file", "list_dir", "grep", "find_files",
 		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
 		"view_diff", "open_file",
 		"terminal", "python_exec",
@@ -83,8 +83,8 @@ func TestNewDefaultRegistryWithHost_RegistersAskUserOnlyWithAsker(t *testing.T) 
 	if got := all[len(all)-1].Name(); got != "ask_user" {
 		t.Errorf("ask_user should be last in the menu, got last = %q", got)
 	}
-	if got := len(all); got != 20 {
-		t.Errorf("registry with Asker holds %d tools, want 20", got)
+	if got := len(all); got != 21 {
+		t.Errorf("registry with Asker holds %d tools, want 21", got)
 	}
 }
 
@@ -106,14 +106,14 @@ func TestNewDefaultRegistryWithHost_RegistersPresentDocumentOnlyWithPresenter(t 
 	if _, ok := reg.Lookup("ask_user"); ok {
 		t.Error("ask_user must stay absent when only a Presenter is configured")
 	}
-	if got := len(reg.All()); got != 20 {
-		t.Errorf("registry with a Presenter holds %d tools, want 20", got)
+	if got := len(reg.All()); got != 21 {
+		t.Errorf("registry with a Presenter holds %d tools, want 21", got)
 	}
 
 	// Both delegates ⇒ both tools, present_document last in the menu.
 	both := NewDefaultRegistryWithHost(t.TempDir(), HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}}).All()
-	if got := len(both); got != 21 {
-		t.Errorf("registry with both delegates holds %d tools, want 21", got)
+	if got := len(both); got != 22 {
+		t.Errorf("registry with both delegates holds %d tools, want 22", got)
 	}
 	if got := both[len(both)-1].Name(); got != "present_document" {
 		t.Errorf("present_document should be last in the menu, got last = %q", got)
@@ -216,6 +216,7 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 		"read_file":  true,
 		"list_dir":   true,
 		"grep":       true,
+		"find_files": true,  // naming files is a read, like grep's reading of them
 		"write_file": false, // the lone write tool: must gate through Approval (P1.2)
 		// File-editing family (P3.7): writers gate, diff/open-file read.
 		"single_find_and_replace": false,
