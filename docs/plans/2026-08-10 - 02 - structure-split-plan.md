@@ -204,7 +204,18 @@ four files exist; none of the moved identifiers remain defined in `wire.go`.
 
 **Commit:** `refactor(cmd): split wire.go live-apply seams into wire_settings, wire_tools, wire_mcp, wire_present`
 
-## 7. Split wire.go — hosts, engine, server; add the file-top map
+## 7. Split wire.go — hosts, engine, server; add the file-top map — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): three deviations from the literal member lists, all following item 6's precedent.
+(a) Each holder's TYPE declaration and its compile-time seam assertion moved with its constructor and
+methods — `sessionHost`/`activeSession` + `var _ tui.SessionHost`, `recallHost` + `var _
+tui.RecallHost`, `lateEngine`/`contextFileChoice` + its sentinel error vars (`errNoServerBound`,
+`errAlreadyBound`, `errAutoUnavailable`, the mode-set var block), `serverBinder` — since a
+constructor and its method set cannot live apart from the type. (b) A short "Flag parsing (the mode
+ladder)" banner was added above `parseMode`, which the removals left sitting under the live-apply
+seams banner; nothing was reordered. (c) `cmd/apogee/doc.go`'s file map gained the three new files
+and dropped its now-false "the lateEngine that stands in" clause for `wire.go`, per the plan's
+standing doc.go requirement.
 
 Depends on item 6.
 

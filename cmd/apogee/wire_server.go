@@ -1,0 +1,106 @@
+package main
+
+// The server-bind seam of the composition root, lifted out of wire.go by concern (ADR 0043).
+//
+// Which server this session runs on and when the wiring hears that something changed: the entry a
+// startup selection collapses to, the single step that turns any entry — startup or human-picked —
+// into a bound session, and the wait the renderer's config-reload chain parks on.
+
+import (
+	"context"
+
+	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/session"
+)
+
+// startupEntry re-assembles the server selection resolved (ADR 0036) from the flattened fields it
+// left on options: the endpoint, the key, the discovery hint, the fan-out pin, and the alias —
+// which for a configured entry IS its `servers:` name and for the ephemeral override entry is the
+// endpoint's host. It exists so the bind step below has ONE input shape, the serverEntry, whether it
+// is binding the startup server or the one a human picked out of the list.
+func startupEntry(opts options) serverEntry {
+	return serverEntry{
+		Name:           opts.hostAlias,
+		Endpoint:       opts.endpoint,
+		APIKey:         opts.apiKey,
+		Model:          opts.model,
+		ParallelAgents: opts.startupParallelAgents,
+	}
+}
+
+// serverBinder is the one step that turns a serverEntry into a running session: the Agent
+// constructed against that server, the Monitor that observes it, and the binding the out-of-band
+// calls (naming, Firings) read. It is a step rather than inline wiring because it now runs at two
+// different times — before the TUI starts when a startup server was determined, and on the human's
+// first pick when it was not (ADR 0036 decision 3) — and both must produce the same session.
+//
+// What it does NOT do is re-resolve the per-model bindings for the entry's `model:` hint. Those
+// belong to the rebind path (rebindSpecFor), which the first beat of the Monitor installed here
+// runs within seconds, for a late bind exactly as it does for the cold start a launch-time bind
+// with no model already is.
+type serverBinder struct {
+	// cfg is everything about the session the server does not decide. The four fields it does —
+	// endpoint, key, model hint, fan-out width — are overwritten from the entry, so nothing that
+	// reached this struct can contradict the server being bound.
+	cfg     apogee.Config
+	resumed *session.Record
+	engine  *lateEngine
+	holder  *upstreamHolder
+	// caps is the session's Parallel agents cap (ADR 0039). The bind is where it FOLLOWS the entry:
+	// the resolved width seeds the Config the Agent is constructed from, so a session is capped from
+	// its first Turn rather than from its first beat.
+	caps *parallelAgentsCap
+}
+
+// bind constructs the engine for entry and points both holders at it. The engine is constructed
+// FIRST and the Monitor installed only once that succeeded, so a refused construction (Auto on a
+// host without confinement, a future-version snapshot) leaves the session exactly as unbound as it
+// was rather than half-wired to a server it cannot talk to.
+//
+// A second bind is refused before anything is constructed (lateEngine.Bind), because the holder can
+// only release one Agent at shutdown: a session that already has an engine moves with
+// sessionMover.move, which switches the one it has.
+func (b serverBinder) bind(entry serverEntry) error {
+	cfg := b.cfg
+	cfg.Endpoint = entry.Endpoint
+	cfg.Model = entry.Model
+	cfg.APIKey = entry.APIKey
+	// The fourth field the server decides, and the one that cannot be pushed after the fact here:
+	// the Agent does not exist yet, so the resolved cap goes in through the Config it is built from.
+	// follow's own push at the still-unbound engine is the no-op that says so.
+	cfg.ParallelAgents = b.caps.follow(entry)
+
+	if err := b.engine.Bind(func() (*apogee.Agent, error) {
+		agent, err := buildAgent(cfg, b.resumed)
+		if err != nil {
+			return nil, friendlyConstructErr(err)
+		}
+		return agent, nil
+	}); err != nil {
+		return err
+	}
+	b.holder.Bind(entry.Endpoint, entry.APIKey, entry.Model,
+		heartbeat.NewMonitor(entry.Endpoint, entry.Model, entry.APIKey))
+	return nil
+}
+
+// awaitConfigChangeOn adapts the polling watcher to [tui.Options.AwaitConfigChange]: one wait, one
+// answer, and nothing about files or YAML crossing the seam (ADR 0041 decision 3). The renderer
+// re-reads through [tui.Options.ReloadConfig] when this returns true, which is the same call an
+// editor's exit makes — one apply path, two triggers.
+//
+// It answers false on two ends, and they mean the same thing to the caller: the program's context is
+// done (a quit, which must not leave a goroutine parked on a channel until teardown reaches the
+// watcher), or the watch itself has been stopped and closed its channel. Either way there will never
+// be another report, and the chain retires.
+func awaitConfigChangeOn(w *configWatcher) func(context.Context) bool {
+	return func(ctx context.Context) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		case _, ok := <-w.Changes():
+			return ok
+		}
+	}
+}
