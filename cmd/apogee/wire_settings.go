@@ -35,7 +35,7 @@ import (
 // is it: one place, one mutex, seeded from opts so a session nobody edits behaves exactly as before.
 //
 // What lives here is the exception list, not a second configuration path. Everything else about a run
-// stays in the immutable `options` snapshot the closures still carry, and a value only earns a field
+// stays in the immutable `config.Options` snapshot the closures still carry, and a value only earns a field
 // here once a seam puts it into effect (ADR 0031: no value the human can move without the engine
 // hearing about it).
 //

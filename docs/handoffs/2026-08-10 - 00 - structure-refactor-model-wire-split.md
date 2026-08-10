@@ -47,8 +47,12 @@ here:
   in doc.go (pattern to copy: `TestFoldEventCoversEveryEventVariant`).
   Any model.go split must update the doc.go map in the same commit.
 - Minor, bundle if convenient: `internal/mechanisms` mixes snake_case and
-  compact file naming and has a confusable `syntax.go`/`syntaxcheck.go`
+  compact file naming and has a confusable syntax Mechanism/engine file
   pair; `internal/mechanisms/doc.go` is a 14-line stub for 27 files.
+  (Landed 2026-08-10 in `d862d0d`: file names are compact throughout, the
+  pair is now `internal/mechanisms/syntax.go` — the Mechanism — and
+  `internal/mechanisms/syntaxengine.go` — the pure checker — and
+  `internal/mechanisms/doc.go` carries a real file map.)
 - Findability probes passed 5/5 at package level; the failures are one
   level down ("where is the session-save queue" → model.go; "where is X
   built" → wire.go). That is the disease being treated.
