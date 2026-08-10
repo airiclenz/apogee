@@ -462,14 +462,19 @@ fallback is a **`Refuse`** ("subprocess could not be confined and approval was n
 fallback never carries its own fallback — the demote is a single bounded step, and the executor follows
 it without re-deciding.
 
-> **v1 realisation gap to close in P3.7 (flagged, not silent).** The "WS-write, target out of workspace →
-> gate" row needs the write tool to actually *perform* an approved out-of-workspace write — today
-> `resolveInRoot` hard-rejects any escape at `Execute`, so an approved write would still error. P3.7
-> reconciles this: the write tool resolves against `WorkspaceRoot ∪ box.WritablePaths` and honours a
-> dispatch-approved target. Until P3.7 lands that, the honest v1 fallback is that Apogee write tools stay
-> strictly workspace-bounded and the "out-of-workspace" row is unreachable (the target is always in-root
-> or an error result). The marker's `workspaceWriteTarget` seam (§3.2) is what makes the richer behaviour
-> a later additive change, not a rework.
+> **Realisation gap — half-landed (updated 2026-08-10; flagged, not silent).** The "WS-write, target out
+> of workspace → gate" row needs the write tool to actually *perform* an approved out-of-workspace write.
+> The **classification half has landed**: dispatch resolves the target with `resolveTargetUnbounded`
+> (`internal/tools/workspace_scoped.go:102`), so an out-of-workspace write now **reaches the Gate**
+> instead of being pre-rejected — the row is no longer unreachable, as this paragraph used to say. The
+> **`Execute` half is still open**: `internal/tools/write_file.go:82` writes through an `os.Root` fence
+> pinned at the workspace root, which refuses the escape whatever the verdict was, so the human approves
+> and then gets an error result. Closing it either way is an owner call — land the P3.7 reconciliation
+> (the write tool resolves against `WorkspaceRoot ∪ box.WritablePaths` and honours a dispatch-approved
+> target) or ratify strict fencing as the permanent answer and amend this row to say the Gate's allow is
+> advisory for writes — and it is tracked as the open `ISSUES.md` entry "an *approved* out-of-workspace
+> write still errors at `Execute`". The marker's `workspaceWriteTarget` seam (§3.2) is what makes the
+> richer behaviour a later additive change, not a rework.
 
 `AutoEligible()` becomes `FSWrite`-only (§5), so `ErrAutoUnavailable` is now **conditional** — a host
 with no fs-confinement does not refuse Auto; it lands in the "subproc, caps insufficient → gate" row.
@@ -517,26 +522,32 @@ unaffected.** P3.1 pins the harness so the two backend tests differ only in whic
 // asserts OS denial — so "confined" means the same thing on landlock and seatbelt.
 package confinetest
 
-// Probe drives c through the full escape battery (§6.2) under a box rooted at a fresh
-// temp dir. The caller (a backend's _test.go) passes the OS-specific backend; the
-// battery and its assertions are identical across backends.
+// Probe drives c through the full escape battery (§6.2) under a box rooted at fresh
+// temp dirs the harness itself owns (so cleanup is automatic). The caller (a backend's
+// _test.go) passes the OS-specific backend and the platform shell; the battery and its
+// assertions are identical across backends.
 //
 //   t   – the test
-//   c   – the backend under test (landlock on Linux, seatbelt on macOS)
-//   new – constructs the box's WorkspaceRoot/WritablePaths under t.TempDir(); the
-//         harness owns the temp dirs so cleanup is automatic
-func Probe(t *testing.T, c domain.Confiner)
+//   c   – the backend under test (landlock on Linux, seatbelt on macOS, token on Windows)
+//   sh  – the platform shell the probes run through (`platform.Current()`), taken from the
+//         caller so the battery runs natively on Windows; redeclared as a local three-method
+//         interface rather than imported, because internal/platform's own tests are in
+//         package platform and importing it here would be a cycle
+func Probe(t *testing.T, c domain.Confiner, sh Shell)
 
 // ProbeNetwork runs the network arm separately (it needs a listener and is skipped
 // when the backend reports NetworkEgress=false). Split out so the fs battery runs on
 // every Auto-eligible host while the net arm runs only where it is enforceable.
-func ProbeNetwork(t *testing.T, c domain.Confiner)
+func ProbeNetwork(t *testing.T, c domain.Confiner, sh Shell)
 ```
 
-The confined child is a real subprocess (confinement wraps subprocesses, §2): the fs battery runs
-`sh -c 'printf x > <path>'` (POSIX, identical on both OSes); the network battery re-execs a tiny Go
-helper (the standard `TestHelperProcess` idiom) that `net.Dial`s a target. Each is built as a normal
-`*exec.Cmd`, handed to `c.Confine(ctx, box, cmd)`, then run; the harness asserts on exit status / error.
+The confined child is a real subprocess (confinement wraps subprocesses, §2): the fs battery runs a
+one-byte write through the caller's `Shell` — `printf x > <path>` on POSIX, `echo x> "<path>"` under
+`cmd.exe` — with those dialect spellings kept per OS in `confinetest/lines_other.go` and
+`confinetest/lines_windows.go`; the network battery opens a TCP connection from the shell
+(`bash -c 'exec 3<>/dev/tcp/<host>/<port>'`, POSIX-only — it runs only where the backend enforces
+egress). Each is built as a normal `*exec.Cmd`, handed to `c.Confine(ctx, box, cmd)`, then run; the
+harness asserts on exit status / error.
 
 ### 6.2 The battery and assertions
 
@@ -563,8 +574,10 @@ wrapper; #7/#8 encode ADR 0012's network-open default with deny as a tightening.
 > descendants" is exactly as load-bearing as landlock's `execve` claim, and exactly as unproven until
 > asserted, so it is **asserted, not assumed**. Rows #7/#8 **skip** on Windows (`ProbeNetwork` guards
 > on `NetworkEgress`, which is false there by §9); #5 is free (the restricted token is a copy, so the
-> parent's own token is never touched). The harness itself is POSIX-shaped — `sh -c` at
-> `confinetest.go:130/:143/:160/:170` — and item 8 widens it; see §9's probe-expectations list.
+> parent's own token is never touched). The harness *was* POSIX-shaped (`sh -c` hard-coded in every
+> probe); item 8 widened it — the probes now run through the `Shell` the caller passes
+> (`platform.Current()`), and the shell-dialect lines live per OS in `confinetest/lines_other.go` and
+> `confinetest/lines_windows.go`; see §9's probe-expectations list.
 
 ### 6.3 Per-backend acceptance checklists (now mechanical)
 

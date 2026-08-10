@@ -233,7 +233,7 @@ the audit's own verdict table recording where the docs lived when it judged them
 (same treatment item 1 gave that table's `prompt-box-layout.md` row), and this
 plan file's own `:218`, which contains the grep pattern as a literal.
 
-## 8. Amend the two kept contracts
+## 8. Amend the two kept contracts — ✅ DONE (2026-08-10)
 
 What: confinement-execution-contract.md — §6.1 pinned signatures gain the
 `Shell` third parameter (`confinetest.go:45,122`); §6.2 shell-line refs point
@@ -250,6 +250,20 @@ Acceptance: both contracts read true against the working tree on the audited
 points.
 
 Commit: `docs(design): amend confinement contract and mcp-client to current truth`
+
+NOTES (2026-08-10): three departures from the item's literal text. (a) In §6.1's
+pinned block the `sh` parameter entry *replaced* the phantom `new` entry (the
+harness never took a `new`; it owns its temp dirs) — documenting the new third
+parameter beside a parameter that does not exist would leave the pinned block
+wrong in a fresh way. (b) The `sh -c` claim lives in two places, so both were
+repointed at the per-OS files: the §6.2 amendment note's line anchors (the
+audited spot) and the prose sentence that closes §6.1. That sentence's other
+half — "the network battery re-execs a tiny Go helper (the `TestHelperProcess`
+idiom)" — was corrected with it: the net probe runs `bash -c 'exec
+3<>/dev/tcp/<host>/<port>'` (`confinetest.go:177`), and a sentence being
+rewritten for truth could not keep a false clause. (c) `mcp-client.md`'s two
+other prose uses of the retired word "disposition" (`:35`, `:85`) were left
+alone — the audit scoped this doc to exactly the two one-liners named here.
 
 ## 9. TODO.md / ISSUES.md prune, refresh, and the new confinement gap — ✅ DONE (2026-08-10)
 

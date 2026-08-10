@@ -21,7 +21,7 @@
 (`github.com/modelcontextprotocol/go-sdk` **v1.6.1**, pinned per P3.0) over **stdio / SSE /
 streamable-http**. It connects to the external MCP servers a host configures, discovers the tools
 each advertises, and surfaces them into a `domain.ToolRegistry` as `domain.ExternalEffectTool` of
-kind **`mcp`**. The agent's existing blast-radius disposition (D5) then gates each MCP tool through
+kind **`mcp`**. The agent's existing blast-radius Resolution (D5) then gates each MCP tool through
 Approval in Auto under `confine-to-workspace=true` **for free** — surfacing them with the right
 effect kind is the entire integration; no dispatch change was needed.
 
@@ -90,7 +90,7 @@ Connect(ctx, []ServerConfig, URLGuard) → *Client     // dial every server, lis
 | Criterion | Mechanism |
 |---|---|
 | A hermetic stdio server exposes a tool that appears in the menu, is callable | `TestConnect_SurfacesServerToolsAndCalls` over a fork-and-exec stdio fixture |
-| Raises Approval in Auto (asserted) | `EffectMCP` ⇒ `classMCP` ⇒ `dispoGate` (disposition table, `dispatch_test.go`); the real tool's kind asserted in `TestServerTool_IsMCPExternalEffect` |
+| Raises Approval in Auto (asserted) | `EffectMCP` ⇒ `classMCP` ⇒ `resolveGate` (the Resolution ladder, `internal/agent/resolution.go`; `dispatch_test.go`); the real tool's kind asserted in `TestServerTool_IsMCPExternalEffect` |
 | A resumed session re-establishes from scratch | `TestResume_ReconnectsFresh` (Close, then a fresh Connect rediscovers the tools) |
 | The bench swaps a deterministic stub with no process | the `mcp`-kind tool routes through `Config.ExternalEffects.Do` (ADR 0008; `dispatch_test.go`) |
 | `Close` tears down cleanly (no orphan) | all-or-nothing Connect rollback + `TestClose_TearsDownSessions` |

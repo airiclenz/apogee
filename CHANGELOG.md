@@ -423,6 +423,16 @@ point is a **minor** bump, not a breaking change.
   errors at Execute, because the write tool's os.Root fence never learned to honour an approval —
   the confinement contract's §4 "unreachable row" is only half true, and closing it either way is an
   owner decision.
+- **The two kept design contracts read true against the code again.** The confinement execution
+  contract's §6.1 pinned harness signatures gain the `Shell` third parameter the probes actually
+  take (taken from the caller so the battery runs natively on Windows), §6.2's shell-line anchors
+  point at the per-OS `confinetest/lines_other.go` and `lines_windows.go` instead of line numbers
+  inside `confinetest.go`, and §4's "the out-of-workspace row is unreachable" paragraph is rewritten
+  to the half-landed truth: the row is now reached (dispatch classifies with
+  `resolveTargetUnbounded`) while the `Execute`-side fence still refuses an approved escape, the
+  open `ISSUES.md` entry it now cites. `mcp-client.md` picks up the Resolution vocabulary — the
+  retired `dispoGate`/"disposition table" becomes `resolveGate` and the Resolution ladder
+  (`internal/agent/resolution.go`), and the D5 gate is named Resolution, not disposition.
 
 ### Fixed
 
