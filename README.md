@@ -26,12 +26,12 @@ autonomy fenced at the operating-system level rather than on trust.
 Apogee is built on three commitments:
 
 - **A complete agent with a UX that gets out of your way.** The full agentic
-  loop — provider abstraction, a ~21-tool suite (file ops, grep, git, terminal,
-  web, sub-agents, showing you a finished document), an MCP client, sessions
-  that survive a crash — inside a terminal UI built with care: type your next
-  message while the model streams and queue it into the running task, recall
-  any prompt you have sent, collapse what you are done reading, click every
-  path it prints.
+  loop — provider abstraction, a 28-tool suite (file ops, grep, git, terminal,
+  tests, web, sub-agents, showing you a finished document), an MCP client,
+  sessions that survive a crash — inside a terminal UI built with care: type
+  your next message while the model streams and queue it into the running task,
+  recall any prompt you have sent, collapse what you are done reading, click
+  every path it prints.
 - **Autonomy you can trust.** Four autonomy modes end in Auto, the unsupervised
   one — and Auto is fenced at the operating-system level on all three platforms
   (Linux landlock, macOS seatbelt, a restricted Windows token), not by a prompt
