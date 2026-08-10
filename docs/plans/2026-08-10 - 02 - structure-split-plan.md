@@ -169,7 +169,16 @@ Update `doc.go`'s map in the same commit.
 
 **Commit:** `refactor(tui): lift command running and refusal into commandrun.go`
 
-## 6. Split wire.go — live-apply seams
+## 6. Split wire.go — live-apply seams — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): three deviations from the literal member lists. (a) Each holder's TYPE
+declaration moved with its constructor and methods (`liveSettings`, `liveTools`, `liveMCP`,
+`livePresentation`) — a constructor and its method set cannot live apart from the type, and item 7's
+end state for `wire.go` ("runRoot plus the small top-level helpers") leaves no room for them. (b) The
+cross-seam narrow interfaces (`settingsEngine`, `settingsSkills`, `mcpSession`) and the two boundary
+consts (`contextFileNote`, `toolRosterNote`) STAY in `wire.go` — more than one seam file reads them —
+and that section's banner is reworded to say where the dispatcher went. (c) `cmd/apogee/doc.go`'s file
+map gained the four new files, per the plan's standing doc.go requirement.
 
 **What:** Pure same-package moves out of `cmd/apogee/wire.go` into four new files
 (function bodies unchanged):

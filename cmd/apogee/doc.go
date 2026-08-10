@@ -23,9 +23,17 @@
 // `launcher` seam main backs with tui.Run; subcommands.go the one registration seam
 // naming the children the shipped binary carries; wire.go the composition proper —
 // runRoot assembling roots, config, tools, MCP, sessions, recall and engine into a
-// running TUI, plus the live-apply machinery a /settings edit or a heartbeat rebind
-// drives (liveSettings, liveTools, liveMCP, livePresentation, settingsApplier, and the
-// lateEngine that stands in until a server is picked).
+// running TUI, plus the narrow surfaces its seam files share and the lateEngine that
+// stands in until a server is picked.
+//
+// The live-apply seams split off wire.go by concern (ADR 0043): wire_settings.go the
+// live settings holder, the dispatcher a committed /settings key is applied through,
+// and the per-model re-resolution a heartbeat rebind drives; wire_tools.go the live
+// tool registry and the builders that assemble one — built-ins plus MCP — and validate
+// the `mechanisms:` block against the catalogue; wire_mcp.go the connected MCP sessions
+// and the validate-then-commit reconnect that moves a session onto another set;
+// wire_present.go the presentation ladder this host can walk and the holder that
+// rebuilds and re-installs it.
 //
 // The config cluster: config.go the resolved [settings], the on-disk schema
 // (fileConfig), and the flag > env > file > default precedence between them;
