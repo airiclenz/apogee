@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -83,6 +84,10 @@ func statusCall(id string) domain.ToolCall {
 	return domain.ToolCall{ID: id, Tool: "git_status"}
 }
 
+func logCall(id, args string) domain.ToolCall {
+	return domain.ToolCall{ID: id, Tool: "git_log", Arguments: []byte(args)}
+}
+
 // ----------------------------------------------------------------------------
 // Markers
 // ----------------------------------------------------------------------------
@@ -140,6 +145,22 @@ func TestGit_Markers(t *testing.T) {
 	if IsWorkspaceScopedWriter(st) {
 		t.Error("git_status must NOT carry the workspaceScopedWriter marker (it is OS-confined)")
 	}
+
+	// git_log carries the same pair for the same reason: reading history writes nothing, but
+	// the subprocess marker is what classifies the call.
+	lg := NewGitLog(root)
+	if lg.Name() != "git_log" {
+		t.Errorf("log Name() = %q", lg.Name())
+	}
+	if !domain.IsReadOnly(lg) {
+		t.Error("git_log must be ReadOnly (reading history changes nothing)")
+	}
+	if !domain.IsSubprocessTool(lg) {
+		t.Error("git_log must be a SubprocessTool (it launches the system git)")
+	}
+	if IsWorkspaceScopedWriter(lg) {
+		t.Error("git_log must NOT carry the workspaceScopedWriter marker (it is OS-confined)")
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -165,6 +186,9 @@ func TestGit_GracefulWhenAbsent(t *testing.T) {
 		}},
 		{"status", func() (domain.ToolResult, error) {
 			return NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+		}},
+		{"log", func() (domain.ToolResult, error) {
+			return NewGitLog(root).Execute(context.Background(), logCall("c1", `{}`))
 		}},
 	}
 	for _, tc := range cases {
@@ -792,5 +816,235 @@ func TestGitStatus_NotARepoMatchesOtherGitTools(t *testing.T) {
 	}
 	if !strings.Contains(status.Content, "not a git repository") {
 		t.Errorf("status = %q, want git's own not-a-repository message", status.Content)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// git_log (2026-08-10)
+// ----------------------------------------------------------------------------
+
+// gitLogLine is the exact three-field shape one git_log line must have: short hash, an
+// iso-strict (space-free) timestamp, then the subject. Pinning it here is what keeps the
+// --format/--date pair from drifting into something a model cannot split positionally.
+var gitLogLine = regexp.MustCompile(`^[0-9a-f]{7,40} \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2} .+$`)
+
+// commitInRepo adds a one-file commit to an existing test repo, so a log test has real
+// history to page through.
+func commitInRepo(t *testing.T, root, name, subject string) {
+	t.Helper()
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git on PATH; skipping the live git-tool run")
+	}
+	if err := writeFileForTest(root, name, subject+"\n"); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	for _, args := range [][]string{{"add", name}, {"commit", "-m", subject}} {
+		cmd := exec.Command(gitPath, args...)
+		cmd.Dir = root
+		cmd.Env = safeGitEnv()
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func TestGitLog_ClampsMaxCount(t *testing.T) {
+	t.Parallel()
+
+	// A non-positive count is JSON-absent (or nonsense) and takes the default; anything above
+	// the ceiling is pinned to it; a sane request passes through untouched.
+	for _, tc := range []struct{ in, want int }{
+		{0, defaultGitLogCount},
+		{-7, defaultGitLogCount},
+		{1, 1},
+		{20, 20},
+		{maxGitLogCount, maxGitLogCount},
+		{maxGitLogCount + 1, maxGitLogCount},
+		{100000, maxGitLogCount},
+	} {
+		if got := clampGitLogCount(tc.in); got != tc.want {
+			t.Errorf("clampGitLogCount(%d) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestGitLog_RefValidation proves the ref guard rejects before the subprocess: the same
+// conservative character class git_diff_range uses, plus the explicit leading-"-" rejection
+// that stops a ref being read as an option flag (SEC-06).
+func TestGitLog_RefValidation(t *testing.T) {
+	t.Parallel()
+
+	for _, ref := range []string{
+		"main; rm -rf /",
+		"main$(whoami)",
+		"--output=/tmp/pwned",
+		"-n",
+		"a b",
+	} {
+		res, err := NewGitLog(t.TempDir()).Execute(context.Background(), logCall("c1", fmt.Sprintf(`{"ref":%q}`, ref)))
+		if err != nil {
+			t.Fatalf("Execute(%q) err = %v, want the rejection as a result", ref, err)
+		}
+		if !res.IsError || !strings.Contains(res.Content, "invalid ref") {
+			t.Errorf("ref %q = %q, want an invalid-ref result", ref, res.Content)
+		}
+	}
+}
+
+func TestGitLog_DefaultsToHEADNewestFirst(t *testing.T) {
+	root := gitRepo(t)
+	commitInRepo(t, root, "second.txt", "second subject")
+	commitInRepo(t, root, "third.txt", "third subject")
+
+	res, err := NewGitLog(root).Execute(context.Background(), logCall("c1", `{}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("log errored: %q", res.Content)
+	}
+
+	lines := strings.Split(strings.TrimSpace(res.Content), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("log = %q, want 3 commit lines", res.Content)
+	}
+	// Newest first, and every line carries the pinned hash/date/subject shape.
+	for i, want := range []string{"third subject", "second subject", "initial"} {
+		if !strings.HasSuffix(lines[i], want) {
+			t.Errorf("line %d = %q, want it to end with %q (newest first)", i, lines[i], want)
+		}
+		if !gitLogLine.MatchString(lines[i]) {
+			t.Errorf("line %d = %q, want the short-hash / iso-strict-date / subject shape", i, lines[i])
+		}
+	}
+}
+
+func TestGitLog_MaxCountLimitsCommits(t *testing.T) {
+	root := gitRepo(t)
+	commitInRepo(t, root, "second.txt", "second subject")
+	commitInRepo(t, root, "third.txt", "third subject")
+
+	res, err := NewGitLog(root).Execute(context.Background(), logCall("c1", `{"max_count":2}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("log errored: %q", res.Content)
+	}
+	lines := strings.Split(strings.TrimSpace(res.Content), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("log = %q, want exactly 2 commit lines", res.Content)
+	}
+	if !strings.HasSuffix(lines[0], "third subject") {
+		t.Errorf("line 0 = %q, want the newest commit", lines[0])
+	}
+
+	// An over-ceiling request is clamped, not refused: the call still succeeds and simply
+	// returns everything the (shorter) history holds.
+	over, err := NewGitLog(root).Execute(context.Background(), logCall("c2", `{"max_count":100000}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if over.IsError {
+		t.Fatalf("over-ceiling log errored: %q", over.Content)
+	}
+	if got := len(strings.Split(strings.TrimSpace(over.Content), "\n")); got != 3 {
+		t.Errorf("over-ceiling log returned %d lines, want the whole 3-commit history", got)
+	}
+}
+
+func TestGitLog_ExplicitRef(t *testing.T) {
+	root := gitRepo(t)
+	commitInRepo(t, root, "second.txt", "second subject")
+
+	// An older commit named explicitly logs only the history up to it, proving the ref is
+	// honoured rather than silently replaced by HEAD.
+	res, err := NewGitLog(root).Execute(context.Background(), logCall("c1", `{"ref":"HEAD~1"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("log errored: %q", res.Content)
+	}
+	if strings.Contains(res.Content, "second subject") {
+		t.Errorf("log of HEAD~1 = %q, must not include the commit above it", res.Content)
+	}
+	if !strings.Contains(res.Content, "initial") {
+		t.Errorf("log of HEAD~1 = %q, want the initial commit", res.Content)
+	}
+
+	// A branch name is the everyday form and must work the same way.
+	byBranch, err := NewGitLog(root).Execute(context.Background(), logCall("c2", `{"ref":"main"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if byBranch.IsError || !strings.Contains(byBranch.Content, "second subject") {
+		t.Errorf("log of main = %q, want the full branch history", byBranch.Content)
+	}
+}
+
+// TestGitLog_UnknownRefMatchesOtherGitTools pins the error SHAPE: a ref that passes the
+// character class but does not exist fails the way the other git tools do — an IsError result
+// carrying git's own message, never a Go error and never an empty success.
+func TestGitLog_UnknownRefMatchesOtherGitTools(t *testing.T) {
+	root := gitRepo(t)
+
+	res, err := NewGitLog(root).Execute(context.Background(), logCall("c1", `{"ref":"no-such-branch"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want the failure as a result", err)
+	}
+	diff, err := NewGitDiffRange(root).Execute(context.Background(), diffCall("c2", `{"base":"no-such-branch","head":"HEAD"}`))
+	if err != nil {
+		t.Fatalf("diff Execute err = %v, want the failure as a result", err)
+	}
+	if !res.IsError || !diff.IsError {
+		t.Fatalf("an unknown ref must be IsError for both tools; log=%v diff=%v", res.IsError, diff.IsError)
+	}
+	if strings.TrimSpace(res.Content) == "" {
+		t.Error("git_log on an unknown ref must carry git's own message")
+	}
+}
+
+// TestGitLog_PathShapedRefIsNotAPathspecLog is the behavioural half of the "--" terminator:
+// `git log <name>` where <name> is a tracked PATH rather than a ref is a pathspec log — it
+// answers "which commits touched this file" with exit 0. Dropping the terminator would turn a
+// model's typo'd branch name into a plausible, WRONG history reported as success.
+func TestGitLog_PathShapedRefIsNotAPathspecLog(t *testing.T) {
+	root := gitRepo(t)
+
+	res, err := NewGitLog(root).Execute(context.Background(), logCall("c1", `{"ref":"README.md"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if !res.IsError {
+		t.Errorf("log of the tracked path %q = %q, want a loud failure, not a pathspec log", "README.md", res.Content)
+	}
+}
+
+// TestGitLog_EmptyRepo covers a freshly initialised repository: HEAD resolves to nothing, so
+// git fails and the tool surfaces git's own words rather than claiming an empty history.
+func TestGitLog_EmptyRepo(t *testing.T) {
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git on PATH; skipping the live git-tool run")
+	}
+	root := t.TempDir()
+	cmd := exec.Command(gitPath, "init", "-b", "main")
+	cmd.Dir = root
+	cmd.Env = safeGitEnv()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+
+	res, err := NewGitLog(root).Execute(context.Background(), logCall("c1", `{}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want the failure as a result", err)
+	}
+	if !res.IsError {
+		t.Fatalf("log of an empty repo = %q, want an IsError result", res.Content)
+	}
+	if strings.TrimSpace(res.Content) == "" {
+		t.Error("git_log on an empty repo must carry git's own message")
 	}
 }

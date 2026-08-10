@@ -81,6 +81,16 @@
 // tree mid-refactor must not flood a small model's context. Like git_diff_range it declares
 // ReadOnly() and still carries the subprocess marker, which is what classifies the call.
 //
+// git_log (2026-08-10) is the family's fifth member and the history half of git_status's
+// working-tree half: one line per commit — short hash, iso-strict date, subject — for an
+// optional ref (default HEAD) and an optional max_count (default 20, ceiling 100, because a
+// full log is exactly the kind of output that buries a small model). Its ref takes the same
+// two-part guard as git_diff_range's (the conservative character class plus an explicit
+// leading-"-" rejection), and its argv ends in "--" for the reason buildBranchArgs does:
+// `git log <name>` on a name that is a tracked PATH rather than a ref is a pathspec log, which
+// answers a different question with exit 0 — a wrong history reported as success. Like
+// git_diff_range and git_status it declares ReadOnly() over the outranking subprocess marker.
+//
 // present_document (ADR 0019) is the Asker pattern applied to showing a finished document:
 // the model names a deliverable it has written and the HOST picks the mechanism (the
 // presentation ladder — the transcript baseline always, the OS opener on a local desktop, a

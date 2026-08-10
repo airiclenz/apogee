@@ -441,6 +441,12 @@ var toolRegistry = map[string]toolPresenter{
 		// No target: the tool takes no arguments — the repository IS the target.
 		detail: outputDetail, // the branch line plus the staged/unstaged/untracked sections
 	},
+	"git_log": {
+		label:  "Git Log",
+		verb:   "reading",
+		target: gitLogTarget,
+		detail: outputDetail, // one line per commit
+	},
 	"diagnostics": {
 		label:  "Diagnostics",
 		verb:   "checking",
@@ -812,6 +818,16 @@ func refRangeTarget(args map[string]any) string {
 		return ""
 	}
 	return base + "..." + head
+}
+
+// gitLogTarget renders git_log's target as the ref being logged (defaulting to HEAD, matching
+// the tool), so the row never omits what the call actually read.
+func gitLogTarget(args map[string]any) string {
+	ref, _ := args["ref"].(string)
+	if ref = strings.TrimSpace(ref); ref == "" {
+		return "HEAD"
+	}
+	return ref
 }
 
 // methodURLTarget renders http_request's target as "METHOD url" (method defaults to GET,

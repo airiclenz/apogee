@@ -225,7 +225,29 @@ passes.
 
 **Commit:** `feat(tools): add git_status tool`
 
-## 6. New `git_log` tool
+## 6. New `git_log` tool — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): no CHANGELOG entry was written for this item — the owner ratified that NO
+item in this plan touches CHANGELOG.md. Beyond the item's literal text, the same roster-facing
+set item 5 established was updated so it stays true of the shipped suite, all consequences of
+adding a tool rather than choices about it: registration in `internal/tools/registry.go` (an
+unregistered tool is not a tool), which moved the registry tests' name lists, ordering and
+counts; `internal/tools/doc.go`; a card entry in `internal/tui/toolpresent.go` (with a small
+`gitLogTarget` extractor that defaults the shown ref to HEAD exactly as the tool does, the
+precedent being `methodURLTarget`'s GET default); and the tool-suite counts in
+`docs/design/technical-design.md` (23 → 24, including the present_document ordinal item 5
+maintained as a live count). The git-family header comment said "Four one-shot tools", now
+five. Three shape calls the item left open: (a) the date is `--date=iso-strict`, whose
+timestamp is space-free so each line splits positionally into hash / date / subject; (b) a
+`max_count` of 0 or less takes the default rather than the clamp's floor of 1 — Go's zero
+value carries no "was it supplied?" bit, and this is the reading grep's `max_results` already
+uses, so every accepted value still lands in 1–100; (c) an empty repository is git's own
+error surfaced as an IsError result (the not-a-repo shape the item names), never a success
+claiming an empty history. One safety addition the item did not name: the argv ends in `--`,
+because `git log <name>` on a name that is a tracked PATH rather than a ref is a pathspec log
+that answers a different question with exit 0 — a model's typo'd branch name would otherwise
+return a plausible, wrong history reported as success (the same class `buildBranchArgs` closes
+for checkout; pinned by `TestGitLog_PathShapedRefIsNotAPathspecLog`).
 
 **What:** In `internal/tools/git.go`, add a read-only `git_log` tool: optional `ref`
 (default HEAD) and `max_count` (default 20, clamped 1–100). Output one line per commit:

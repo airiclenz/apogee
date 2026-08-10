@@ -15,18 +15,18 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The git tools (P3.9) — branch / commit / diff-range / status over the system git
+// The git tools (P3.9) — branch / commit / diff-range / status / log over the system git
 // ----------------------------------------------------------------------------
 //
-// Four one-shot tools shell out to the system `git` (§3a — a convenience dep,
+// Five one-shot tools shell out to the system `git` (§3a — a convenience dep,
 // detected on PATH and degrading gracefully when absent, never a hard
 // dependency). They are SubprocessTools (domain.SubprocessTool): the dispatch
 // disposition runs all of them under Confiner.Confine in Auto and gates them when
 // fs-confinement is unavailable ("confine if you can, gate if you can't").
-// git_diff_range and git_status also declare ReadOnly(), but the unfakeable
+// git_diff_range, git_status and git_log also declare ReadOnly(), but the unfakeable
 // subprocess marker outranks that self-declaration
 // (confinement-execution-contract §4, amended 2026-07-26) — and since 2026-08-02
-// the Plan tool menu keys on the same class the ladder does, so neither is offered
+// the Plan tool menu keys on the same class the ladder does, so none of them is offered
 // nor run in Plan. All of them are
 // stateless across Turns (ADR 0008 — a fresh git
 // process per call), path-scope their inputs to the workspace root, and run with
@@ -760,6 +760,132 @@ func writeStatusSection(b *strings.Builder, title string, entries []string) {
 	}
 }
 
+// ----------------------------------------------------------------------------
+// git_log — recent commits on a ref
+// ----------------------------------------------------------------------------
+
+var gitLogSpec = toolSpec{
+	name:        "git_log",
+	description: "Show the recent commit history of a git ref (branch, tag, or commit) as one line per commit: short hash, ISO date, and subject. Read-only — it changes nothing. Defaults to HEAD and to the 20 most recent commits.",
+	schema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "ref": {"type": "string", "description": "Ref to log (branch name, tag, or commit SHA). Defaults to HEAD."},
+    "max_count": {"type": "integer", "description": "How many commits to show, most recent first (default 20, clamped to 100)"}
+  }
+}`),
+}
+
+type gitLogArgs struct {
+	Ref      string `json:"ref"`
+	MaxCount int    `json:"max_count"`
+}
+
+// defaultGitLogCount and maxGitLogCount bound how much history one git_log call returns. A
+// repository's full log would flood a small model's context with commits it did not ask for,
+// so the default is a screenful and the ceiling is firm: a model wanting more pages by moving
+// its ref, which is how git history is read anyway.
+const (
+	defaultGitLogCount = 20
+	maxGitLogCount     = 100
+)
+
+// gitLogDateFormat is the --date argument. iso-strict (rather than plain iso) renders the
+// timestamp as a single space-free ISO 8601 token, so every log line splits cleanly into its
+// three fields — hash, date, subject — for a model reading the output positionally.
+const gitLogDateFormat = "iso-strict"
+
+// GitLog reports the recent commits of a ref in the repository at a workspace root over the
+// system git. Like git_diff_range and git_status it is read-only — it inspects history and
+// never mutates — and like them it is a SubprocessTool, which is the marker that classifies
+// the call.
+type GitLog struct {
+	toolSpec
+	root string
+}
+
+// NewGitLog returns a git-log tool operating in root.
+func NewGitLog(root string) *GitLog { return &GitLog{toolSpec: gitLogSpec, root: root} }
+
+// ReadOnly reports that git_log performs no writes (reading history changes nothing) — an
+// honest statement about the tool, read by self-regulation's read/write tally. As with
+// git_diff_range and git_status it is NOT what classifies the call: the Subprocess marker
+// below outranks it in both the disposition and the Plan menu.
+func (t *GitLog) ReadOnly() bool { return true }
+
+// Subprocess reports that git_log launches an OS subprocess (the system git) — the unfakeable
+// marker that OUTRANKS the read-only declaration above (confinement-execution-contract §4,
+// amended 2026-07-26), so the call takes the subprocess row: confined in Auto, gated below it.
+func (t *GitLog) Subprocess() bool { return true }
+
+// Execute runs `git log` over the validated ref and renders one line per commit. A missing
+// git, an invalid ref, or a git failure (an unknown ref, a repository with no commits yet, or
+// no repository at all) is surfaced as a result carrying git's own message; only ctx
+// cancellation or a confinement-unavailable demotion is a Go error.
+func (t *GitLog) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.ToolResult{}, err
+	}
+
+	args, fail, ok := decodeToolArgs[gitLogArgs](call)
+	if !ok {
+		return fail, nil
+	}
+
+	ref := strings.TrimSpace(args.Ref)
+	if ref == "" {
+		ref = "HEAD"
+	}
+	// Same two-part ref guard as git_diff_range: the conservative character class, plus an
+	// explicit leading-"-" rejection because "-" is itself a legal ref character and git would
+	// otherwise read such a ref as an option flag (SEC-06).
+	if !validRef.MatchString(ref) || looksLikeOption(ref) {
+		return errorResult(call.ID, "invalid ref: "+ref), nil
+	}
+
+	gitPath, ok := lookGit()
+	if !ok {
+		return errorResult(call.ID, gitUnavailableMessage), nil
+	}
+
+	// The trailing "--" terminates the ref position, closing the same ref-vs-pathspec
+	// ambiguity buildBranchArgs closes: `git log <name>` where <name> is not a ref but IS a
+	// tracked path is a PATHSPEC log — it silently answers "which commits touched this file"
+	// with exit 0, so a model's typo'd branch name would return a plausible, wrong history
+	// reported as success. With "--" the same call fails loudly ("fatal: bad revision").
+	gitArgs := []string{
+		"log",
+		fmt.Sprintf("--max-count=%d", clampGitLogCount(args.MaxCount)),
+		"--date=" + gitLogDateFormat,
+		"--format=%h %ad %s",
+		ref,
+		"--",
+	}
+	res, err := runGit(ctx, gitPath, t.root, gitTimeout, gitArgs...)
+	if err != nil {
+		return domain.ToolResult{}, err
+	}
+	if res.exitCode != 0 {
+		return errorResult(call.ID, gitResultText(res, "git log failed")), nil
+	}
+	return okResult(call.ID, gitResultText(res, "No commits found")), nil
+}
+
+// clampGitLogCount pins a requested commit count to the 1–maxGitLogCount range. A count of
+// zero is JSON-absent (Go's zero value carries no "was it supplied?" bit), and a negative one
+// is nonsense, so both take the default rather than the floor — the same reading of a
+// non-positive bound that grep's max_results uses.
+func clampGitLogCount(n int) int {
+	switch {
+	case n <= 0:
+		return defaultGitLogCount
+	case n > maxGitLogCount:
+		return maxGitLogCount
+	default:
+		return n
+	}
+}
+
 // gitUnavailableMessage is the graceful-degradation result when git is not on PATH
 // (§3a — git is a convenience dep, never a hard requirement).
 const gitUnavailableMessage = "git not available: no git executable found on PATH"
@@ -775,4 +901,7 @@ var (
 	_ domain.Tool           = (*GitStatus)(nil)
 	_ domain.ReadOnlyTool   = (*GitStatus)(nil)
 	_ domain.SubprocessTool = (*GitStatus)(nil)
+	_ domain.Tool           = (*GitLog)(nil)
+	_ domain.ReadOnlyTool   = (*GitLog)(nil)
+	_ domain.SubprocessTool = (*GitLog)(nil)
 )

@@ -73,10 +73,10 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // tools among them (find-replace, edit_existing_file) carry the workspaceScopedWriter
 // marker so the dispatch disposition path-bounds rather than confines them (ADR 0012 D1).
 // The execution tools (P3.8 — terminal, python_exec) and the git tools (P3.9 —
-// git_branch, git_commit, git_diff_range, joined 2026-08-10 by git_status) follow;
-// they are SubprocessTools the
+// git_branch, git_commit, git_diff_range, joined 2026-08-10 by git_status and git_log)
+// follow; they are SubprocessTools the
 // disposition confines in Auto (or gates when confinement is unavailable), not
-// workspace-scoped writers (git_diff_range and git_status declare ReadOnly(), but the
+// workspace-scoped writers (git_diff_range, git_status and git_log declare ReadOnly(), but the
 // subprocess marker outranks the declaration — they too are confined or gated, and since
 // 2026-08-02 Plan neither offers nor runs them, because the menu keys on the same
 // class the ladder does). The
@@ -122,6 +122,7 @@ func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 		NewGitCommit(root),
 		NewGitDiffRange(root),
 		NewGitStatus(root),
+		NewGitLog(root),
 		NewDiagnostics(root),
 		NewWebFetch(host.URLGuard),
 		NewHTTPRequest(host.URLGuard),
