@@ -184,6 +184,11 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 		Confiner:           confiner,
 		ConfineToWorkspace: opts.confineToWorkspace,
 		WebSearchEndpoint:  opts.webSearchEndpoint,
+		// The `tools.disabled:` roster switch: the built-in tools this config takes off the menu.
+		// Empty ⇒ the whole roster, exactly the set built before the key existed. It is carried on
+		// Config rather than passed to the assembly alone so every Driver — this session, a headless
+		// run, an embedder — prunes the same roster from the same value.
+		DisabledTools: opts.toolsDisabled,
 		// The model profile (CONTEXT: Model profile) — tool-call format + thinking channel —
 		// resolved from config.yaml (file-only). A zero profile is native tool calls with no
 		// inline thinking, so an unconfigured model behaves exactly as today.
@@ -268,14 +273,16 @@ func runRoot(ctx context.Context, opts options, launch launcher) error {
 	// registry the engine built privately, and with no MCP server configured the two builds are the
 	// same tools in the same order, so this changes what the root HOLDS, never what the Agent runs.
 	cfg.Tools = registryWithMCP(roots.workspace, cfg, mcpSet.tools())
-	toolSet := newLiveTools(cfg.Tools, cfg.WebSearchEndpoint, func(endpoint string) *apogee.ToolRegistry {
-		// The set as this session would have built it with another search endpoint: the MCP tools
-		// are re-folded from the holder rather than remembered, so a rebuild always carries the
-		// connections that are live NOW.
-		host := cfg
-		host.WebSearchEndpoint = endpoint
-		return registryWithMCP(roots.workspace, host, mcpSet.tools())
-	})
+	toolSet := newLiveTools(cfg.Tools, cfg.WebSearchEndpoint, opts.toolsDisabled,
+		func(endpoint string, disabled []string) *apogee.ToolRegistry {
+			// The set as this session would have built it with another search endpoint and another
+			// roster: the MCP tools are re-folded from the holder rather than remembered, so a
+			// rebuild always carries the connections that are live NOW.
+			host := cfg
+			host.WebSearchEndpoint = endpoint
+			host.DisabledTools = disabled
+			return registryWithMCP(roots.workspace, host, mcpSet.tools())
+		})
 
 	// Resolve the catalogued Mechanisms enabled in config.yaml to the sorted ID list the engine arms
 	// (ADR 0015 §1: wire.go collapses to a YAML→ID-list producer). runRoot validates EVERY
@@ -1140,15 +1147,22 @@ type liveTools struct {
 	// the startup value would quietly revert a search-endpoint edit made an hour earlier.
 	endpoint string
 
+	// disabled is the `tools.disabled:` roster the live set was built from, remembered for the
+	// endpoint's exact reason: a rebuild driven by anything else must carry the roster this session
+	// is on, or an MCP reconnect would quietly hand back a tool the user switched off.
+	disabled []string
+
 	// build assembles the whole set as this session would have assembled it at startup, for a given
-	// web-search endpoint — host tools plus the MCP tools that are connected now.
-	build func(webSearchEndpoint string) *apogee.ToolRegistry
+	// web-search endpoint and a given disabled roster — host tools plus the MCP tools that are
+	// connected now.
+	build func(webSearchEndpoint string, disabled []string) *apogee.ToolRegistry
 }
 
-// newLiveTools holds the registry the session was constructed with, the endpoint it was built from,
-// and the recipe for another.
-func newLiveTools(current *apogee.ToolRegistry, endpoint string, build func(webSearchEndpoint string) *apogee.ToolRegistry) *liveTools {
-	return &liveTools{current: current, endpoint: endpoint, build: build}
+// newLiveTools holds the registry the session was constructed with, the endpoint and roster it was
+// built from, and the recipe for another.
+func newLiveTools(current *apogee.ToolRegistry, endpoint string, disabled []string,
+	build func(webSearchEndpoint string, disabled []string) *apogee.ToolRegistry) *liveTools {
+	return &liveTools{current: current, endpoint: endpoint, disabled: disabled, build: build}
 }
 
 // setSearchEndpoint moves web_search to endpoint. While the tool is registered — the ordinary case,
@@ -1170,7 +1184,18 @@ func (t *liveTools) setSearchEndpoint(endpoint string, engine settingsEngine) er
 		t.mu.Unlock()
 		return nil
 	}
-	return t.rebuildWith(endpoint, engine)
+	_, disabled := t.built()
+	return t.rebuildWith(endpoint, disabled, engine)
+}
+
+// setDisabled moves the session onto another `tools.disabled:` roster. Unlike the search endpoint
+// above there is no tool to re-point: which tools EXIST is the set's identity, so this is always the
+// swap door (ADR 0037 binding F) — build the set the roster describes, hand it to the engine, and the
+// next request's tool list is offered from it. Being idle-only, SwapTools can refuse mid-run, and the
+// refusal lands on the row over a value already persisted; re-committing retries it.
+func (t *liveTools) setDisabled(disabled []string, engine settingsEngine) error {
+	endpoint, _ := t.built()
+	return t.rebuildWith(endpoint, disabled, engine)
 }
 
 // rebuild reassembles the whole set as this session would assemble it NOW and hands it to the engine
@@ -1178,23 +1203,30 @@ func (t *liveTools) setSearchEndpoint(endpoint string, engine settingsEngine) er
 // configuration (ADR 0037 binding F). Today that is one caller: a reconnect to another set of MCP
 // servers, whose tools are part of the set's identity rather than a field on a tool already in it.
 func (t *liveTools) rebuild(engine settingsEngine) error {
-	t.mu.Lock()
-	endpoint := t.endpoint
-	t.mu.Unlock()
-	return t.rebuildWith(endpoint, engine)
+	endpoint, disabled := t.built()
+	return t.rebuildWith(endpoint, disabled, engine)
 }
 
-// rebuildWith is the swap both doors share: build, hand to the engine, and become the live set only
+// built reports the two values the live set was assembled from — the search endpoint and the
+// disabled-tool roster — which is what a rebuild driven by something else entirely must carry
+// forward rather than re-derive from the startup snapshot.
+func (t *liveTools) built() (string, []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.endpoint, t.disabled
+}
+
+// rebuildWith is the swap every door shares: build, hand to the engine, and become the live set only
 // once the engine has taken it. Being idle-only, SwapTools can refuse mid-run — and then nothing has
 // moved, which is what makes re-committing the edit a retry rather than a second half-application.
-func (t *liveTools) rebuildWith(endpoint string, engine settingsEngine) error {
-	next := t.build(endpoint)
+func (t *liveTools) rebuildWith(endpoint string, disabled []string, engine settingsEngine) error {
+	next := t.build(endpoint, disabled)
 	if err := engine.SwapTools(next); err != nil {
 		return err
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.current, t.endpoint = next, endpoint
+	t.current, t.endpoint, t.disabled = next, endpoint, disabled
 	return nil
 }
 
@@ -1334,6 +1366,12 @@ func mcpReconnectFailed(err error) error {
 // deferral wording this dispatcher has — nothing here ever says "next launch".
 const contextFileNote = "applies at next clear"
 
+// toolRosterNote is the boundary sentence `tools.disabled` carries back: the set is swapped the
+// moment the key is committed, and the model learns of it at the next request, whose tool list is
+// built from the set the session now holds. It is a boundary, not a deferral — nothing waits for a
+// session boundary and nothing waits for a launch.
+const toolRosterNote = "applies to the next request"
+
 // settingsApplier is everything a committed key can have to reach, in one value rather than in a
 // constructor that grows an argument per key class. It is composed at the composition root, where all
 // six members already exist, and it is what makes the dispatcher exercisable without a session: every
@@ -1461,6 +1499,21 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			_ = a.skills.Reload()
 		case "web-search-endpoint":
 			return "", a.tools.setSearchEndpoint(value, a.engine)
+		case "tools.disabled":
+			// The roster reaches the session as a whole tool SET rather than as a value on a tool, so
+			// this is the swap door and not a re-point (setDisabled). The value arrives as the FILE
+			// spells it and is read back by the same parse the writer rendered it with, so the set the
+			// session runs and the line the file carries cannot be two readings of one edit.
+			names := parseSettingList(value)
+			if err := a.tools.setDisabled(names, a.engine); err != nil {
+				return "", err
+			}
+			// A name that matches no tool is reported on the row rather than refused, exactly as it is
+			// at startup: the rest of the list has already applied, and saying so is the honest note.
+			if unknown := unknownToolNames(names); len(unknown) > 0 {
+				return "no tool named " + strings.Join(unknown, ", "), nil
+			}
+			return toolRosterNote, nil
 		case "editor":
 			// The one key with nothing at all behind it to move: the editor ladder reads `editor` off a
 			// FRESH projection of the file every time an external edit starts (externalEdit.spec), so the
@@ -1560,9 +1613,10 @@ func (a settingsApplier) unreachable(key string) error {
 		reaches = a.engine != nil && a.live != nil
 	case "use-project-skills":
 		reaches = a.skills != nil
-	case "web-search-endpoint":
+	case "web-search-endpoint", "tools.disabled":
 		// The engine as well as the tool set: a registry with no web_search to re-point is rebuilt and
-		// handed through SwapTools, which is the swap door and not this holder's to skip.
+		// handed through SwapTools, which is the swap door and not this holder's to skip — and the
+		// roster switch is that door every time.
 		reaches = a.tools != nil && a.engine != nil
 	case "present.auto-open", "present.command", "present.port", "present.host":
 		reaches = a.present != nil
@@ -1967,12 +2021,17 @@ func (l *livePresentation) close() {
 // ExternalEffectTools the dispatch disposition gates in Auto. A duplicate name (an MCP server's
 // qualified tool colliding with a built-in — unlikely given the alias prefix) is dropped with a
 // stderr notice rather than failing startup; the built-in wins.
+//
+// cfg.DisabledTools (`tools.disabled:`) prunes the BUILT-IN half only, which is the half it names:
+// an MCP server's tools come and go with the server, so the way to stop offering them is to stop
+// connecting it (`mcp-servers:`) rather than to list every tool it happens to advertise.
 func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool) *apogee.ToolRegistry {
 	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{
 		URLGuard:          security.URLGuard{},
 		WebSearchEndpoint: cfg.WebSearchEndpoint,
 		Asker:             cfg.Asker,
 		Presenter:         cfg.Presenter,
+		Disabled:          cfg.DisabledTools,
 	})
 	for _, t := range mcpTools {
 		if err := registry.Register(t); err != nil {

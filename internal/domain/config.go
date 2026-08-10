@@ -110,6 +110,19 @@ type Config struct {
 	// config.yaml.
 	WebSearchEndpoint string
 
+	// DisabledTools names built-in tools the Agent must not be given — the roster switch the
+	// host folds in from `tools.disabled:` in config.yaml. A named tool is left out of the set
+	// built when Config.Tools is nil, so it is neither offered to the model nor dispatchable (a
+	// call naming it is refused as an unknown tool). Empty/nil ⇒ the whole built-in roster, the
+	// byte-identical default. A name matching no tool is ignored — pruning a roster must not be
+	// able to stop an Agent from being constructed — so a host that can warn should check the
+	// list against tools.KnownToolNames before it gets here.
+	//
+	// It applies to the DEFAULT set only: an injected Config.Tools is the host's own assembly and
+	// is taken exactly as given (ADR 0001 — the registry is injectable, and an embedder that
+	// builds one has already said what it wants).
+	DisabledTools []string
+
 	// Profile describes how the configured model speaks the wire (CONTEXT: Model profile) —
 	// its tool-call format and inline thinking-channel style — so the loop selects the matching
 	// tool-call parser and content-stripper at the parse seam. A ZERO Profile == native tool

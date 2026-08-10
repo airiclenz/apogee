@@ -261,6 +261,100 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 	}
 }
 
+// TestHostToolsDisabled_DropsExactlyTheListedTools pins the roster switch (`tools.disabled:`): the
+// named tools leave the menu, everything else keeps its place and its order, and both halves of
+// "disabled" hold at once — the set the model is OFFERED and the set a call can RESOLVE against are
+// the same registry, so a tool that is not offered cannot be dispatched either.
+func TestHostToolsDisabled_DropsExactlyTheListedTools(t *testing.T) {
+	t.Parallel()
+
+	full := NewDefaultRegistry(t.TempDir()).All()
+	registry := NewDefaultRegistryWithHost(t.TempDir(), HostTools{Disabled: []string{"view_diff", "python_exec"}})
+
+	for _, name := range []string{"view_diff", "python_exec"} {
+		if _, ok := registry.Lookup(name); ok {
+			t.Errorf("%q is disabled but a call could still resolve it", name)
+		}
+	}
+	var offered []string
+	for _, tool := range registry.All() {
+		offered = append(offered, tool.Name())
+	}
+	if len(offered) != len(full)-2 {
+		t.Fatalf("disabling two tools left %d of %d", len(offered), len(full))
+	}
+	// Everything else survives, in unchanged menu order.
+	want := make([]string, 0, len(full))
+	for _, tool := range full {
+		if name := tool.Name(); name != "view_diff" && name != "python_exec" {
+			want = append(want, name)
+		}
+	}
+	for i, name := range offered {
+		if name != want[i] {
+			t.Errorf("tool %d = %q, want %q — the switch must subtract, never reorder", i, name, want[i])
+		}
+	}
+}
+
+// TestHostToolsDisabled_EmptyAndUnknownChangeNothing pins the two no-ops the key must have: the
+// default (nothing listed) is the whole roster, and a name that is no tool disables nothing rather
+// than failing the assembly — reporting the typo is the host's job, not this one's.
+func TestHostToolsDisabled_EmptyAndUnknownChangeNothing(t *testing.T) {
+	t.Parallel()
+
+	full := len(NewDefaultRegistry(t.TempDir()).All())
+	for _, tc := range []struct {
+		name     string
+		disabled []string
+	}{
+		{name: "nil", disabled: nil},
+		{name: "empty", disabled: []string{}},
+		{name: "unknown name", disabled: []string{"grepp"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := NewDefaultRegistryWithHost(t.TempDir(), HostTools{Disabled: tc.disabled}).All()
+			if len(got) != full {
+				t.Errorf("roster holds %d tools, want the full %d", len(got), full)
+			}
+		})
+	}
+}
+
+// TestHostToolsDisabled_TrimsTheNamesItIsGiven pins the forgiveness the key needs: the list reaches
+// the assembly from a YAML sequence a human wrote, so a stray space around a name is a spelling of
+// that name rather than a different tool.
+func TestHostToolsDisabled_TrimsTheNamesItIsGiven(t *testing.T) {
+	t.Parallel()
+
+	registry := NewDefaultRegistryWithHost(t.TempDir(), HostTools{Disabled: []string{"  grep  "}})
+	if _, ok := registry.Lookup("grep"); ok {
+		t.Error("a name written with surrounding spaces must still disable its tool")
+	}
+}
+
+// TestKnownToolNamesCoversTheComposedSet pins the catalogue a host checks a configured name against
+// to the assembly itself: every tool a fully-composed registry holds must be a name KnownToolNames
+// answers for, or a valid `tools.disabled:` entry would be reported to the user as a typo.
+func TestKnownToolNamesCoversTheComposedSet(t *testing.T) {
+	t.Parallel()
+
+	known := make(map[string]bool)
+	for _, name := range KnownToolNames() {
+		known[name] = true
+	}
+	composed := DefaultToolsWithHost(t.TempDir(), HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}})
+	for _, tool := range composed {
+		if !known[tool.Name()] {
+			t.Errorf("%q is a built-in tool but KnownToolNames does not list it", tool.Name())
+		}
+	}
+	if got := len(KnownToolNames()); got != len(composed) {
+		t.Errorf("KnownToolNames lists %d names for %d composed tools", got, len(composed))
+	}
+}
+
 // stubAsker is a no-op Asker for the registry tests (it is never called — the tests only
 // check registration/ordering). ask_user's round-trip behaviour is covered in ask_user_test.go.
 type stubAsker struct{}

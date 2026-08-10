@@ -149,6 +149,13 @@ type options struct {
 	// the config file only (default-empty ⇒ MCP dormant). applyConfig sets it from settings.
 	mcpServers []mcp.ServerConfig
 
+	// toolsDisabled is the resolved `tools.disabled:` roster switch — the built-in tools this
+	// config takes off the menu, by name. Loaded from the config file only (default-empty ⇒ the
+	// whole roster). applyConfig sets it from settings, having already reported any name that
+	// matches no tool; runRoot folds it into apogee.Config.DisabledTools, which the registry
+	// assembly subtracts, so a disabled tool is neither offered to the model nor dispatchable.
+	toolsDisabled []string
+
 	// profile is the model profile (CONTEXT: Model profile) — the model's tool-call format and
 	// inline thinking-channel style — loaded from the config file only (a per-model concern, no
 	// flag/env). applyConfig sets it from settings; a zero profile is native tool calls with no

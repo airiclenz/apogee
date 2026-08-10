@@ -1424,6 +1424,72 @@ func TestApplyConfigMCPServers(t *testing.T) {
 	}
 }
 
+// The `tools:` block round-trips: the disabled roster parses into opts.toolsDisabled in file
+// order, an absent block leaves the whole roster standing, and a name matching no tool is a NOTICE
+// rather than a startup error — the rest of the list still applies, so pruning a roster can never
+// cost the user their session.
+func TestApplyConfigToolsDisabled(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the listed names resolve in file order", func(t *testing.T) {
+		t.Parallel()
+		home := testConfigHome(t, "")
+		writeConfigHome(t, home, "tools:\n  disabled: [view_diff, python_exec]\n")
+		opts := options{configDir: home}
+		if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+			os.ReadFile, noNotify); err != nil {
+			t.Fatalf("applyConfig: %v", err)
+		}
+		if want := []string{"view_diff", "python_exec"}; !reflect.DeepEqual(opts.toolsDisabled, want) {
+			t.Errorf("toolsDisabled = %v; want %v", opts.toolsDisabled, want)
+		}
+	})
+
+	t.Run("an absent block disables nothing", func(t *testing.T) {
+		t.Parallel()
+		home := testConfigHome(t, "")
+		writeConfigHome(t, home, "mode: plan\n")
+		opts := options{configDir: home}
+		if err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+			os.ReadFile, noNotify); err != nil {
+			t.Fatalf("applyConfig: %v", err)
+		}
+		if len(opts.toolsDisabled) != 0 {
+			t.Errorf("toolsDisabled = %v; want nothing disabled", opts.toolsDisabled)
+		}
+	})
+
+	t.Run("a name that is no tool warns and is otherwise ignored", func(t *testing.T) {
+		t.Parallel()
+		home := testConfigHome(t, "")
+		writeConfigHome(t, home, "tools:\n  disabled: [grepp, grep]\n")
+		opts := options{configDir: home}
+		var notices []string
+		err := applyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+			os.ReadFile, func(n string) { notices = append(notices, n) })
+		if err != nil {
+			t.Fatalf("an unrecognised tool name must not stop startup: %v", err)
+		}
+		if want := []string{"grepp", "grep"}; !reflect.DeepEqual(opts.toolsDisabled, want) {
+			t.Errorf("toolsDisabled = %v; want the list as written %v", opts.toolsDisabled, want)
+		}
+		var warned string
+		for _, n := range notices {
+			if strings.Contains(n, "tools.disabled") {
+				warned = n
+			}
+		}
+		switch {
+		case warned == "":
+			t.Fatalf("no notice named tools.disabled; got %v", notices)
+		case !strings.Contains(warned, "grepp"):
+			t.Errorf("the notice must name the unrecognised entry: %q", warned)
+		case strings.Contains(warned, `"grep"`):
+			t.Errorf("the notice must not name the entry that IS a tool: %q", warned)
+		}
+	})
+}
+
 // The servers config block parses into opts.servers: every entry, in file order, with all four
 // fields — so the composition root can offer them as the servers this session may move to. It is
 // file-only, like mcp-servers, and the two optional keys default empty (a keyless server with no

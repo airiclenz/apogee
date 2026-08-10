@@ -854,6 +854,92 @@ func TestRegistryWithMCPThreadsPresenter(t *testing.T) {
 	}
 }
 
+// The roster switch reaches the assembly through the same Config the rest of the host wiring does,
+// and it has to hold in BOTH halves of what a registry is for: the tool list the engine offers is
+// built from All(), and a call is resolved through Lookup — so a disabled tool must be missing from
+// each. An MCP tool is deliberately untouched by the key: those come and go with their server.
+func TestRegistryWithMCPHonoursDisabledTools(t *testing.T) {
+	t.Parallel()
+	cfg := validCfg(t)
+	cfg.DisabledTools = []string{"view_diff", "python_exec"}
+	mcpTool := mcpFixtureTool{name: "docs__search"}
+
+	registry := registryWithMCP(t.TempDir(), cfg, []apogee.Tool{mcpTool})
+
+	for _, name := range []string{"view_diff", "python_exec"} {
+		if _, ok := registry.Lookup(name); ok {
+			t.Errorf("%q is disabled but a call naming it would still resolve", name)
+		}
+		for _, offered := range registry.All() {
+			if offered.Name() == name {
+				t.Errorf("%q is disabled but the engine would still offer it in the tool list", name)
+			}
+		}
+	}
+	if _, ok := registry.Lookup("grep"); !ok {
+		t.Error("a tool nobody disabled left the set")
+	}
+	if _, ok := registry.Lookup("docs__search"); !ok {
+		t.Error("the MCP tool left the set; tools.disabled prunes the built-in half only")
+	}
+}
+
+// The same key, live: committing `tools.disabled` in the settings pane rebuilds the set and hands it
+// to the engine through the one door a set-level change goes through (SwapTools, ADR 0037 binding
+// F), so the NEXT request's tool list is built without the disabled tool. The row's note says that
+// boundary, and a name that is no tool is reported on the row rather than refused.
+func TestApplySettingToolsDisabledSwapsTheSet(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	var built []string
+	spy := &applySettingSpy{}
+	live := newLiveTools(tools.NewDefaultRegistry(workspace), "", nil,
+		func(endpoint string, disabled []string) *apogee.ToolRegistry {
+			built = append(built, strings.Join(disabled, ","))
+			return tools.NewDefaultRegistryWithHost(workspace,
+				tools.HostTools{WebSearchEndpoint: endpoint, Disabled: disabled})
+		})
+	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
+
+	note, err := apply("tools.disabled", "[view_diff, python_exec]")
+	if err != nil {
+		t.Fatalf("apply tools.disabled: %v", err)
+	}
+	if note != toolRosterNote {
+		t.Errorf("note = %q, want %q", note, toolRosterNote)
+	}
+	if want := []string{"view_diff,python_exec"}; !slices.Equal(built, want) {
+		t.Fatalf("rebuilds = %v, want %v", built, want)
+	}
+	if len(spy.swaps) != 1 {
+		t.Fatalf("SwapTools calls = %d, want 1: which tools exist is a set-level change", len(spy.swaps))
+	}
+	if _, ok := spy.swaps[0].Lookup("view_diff"); ok {
+		t.Error("the swapped-in registry still holds a disabled tool")
+	}
+	if _, ok := spy.swaps[0].Lookup("grep"); !ok {
+		t.Error("the swapped-in registry lost a tool nobody disabled")
+	}
+
+	// A later edit is built from the roster it names, not from the one before it — and the search
+	// endpoint the session is on rides along, rather than reverting to the startup value.
+	if _, err := apply("tools.disabled", "grep"); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	if want := []string{"view_diff,python_exec", "grep"}; !slices.Equal(built, want) {
+		t.Errorf("rebuilds = %v, want %v", built, want)
+	}
+
+	// A name that is no tool disables nothing and says so on the row, over a value already written.
+	note, err = apply("tools.disabled", "grepp")
+	if err != nil {
+		t.Fatalf("an unrecognised name must not fail the apply: %v", err)
+	}
+	if !strings.Contains(note, "grepp") {
+		t.Errorf("note = %q, want it to name the entry that is no tool", note)
+	}
+}
+
 // stubPresenter shows nothing: the wiring under test consults only whether the delegate is
 // non-nil (the registration condition), never what it does with a document.
 type stubPresenter struct{}
@@ -3105,7 +3191,8 @@ func TestApplySettingWebSearchEndpointMovesTheRegisteredTool(t *testing.T) {
 	spy := &applySettingSpy{}
 	apply := applySettingFor(settingsApplier{
 		engine: spy,
-		tools:  newLiveTools(registry, "", func(string) *apogee.ToolRegistry { return apogee.NewToolRegistry() }),
+		tools: newLiveTools(registry, "", nil,
+			func(string, []string) *apogee.ToolRegistry { return apogee.NewToolRegistry() }),
 	})
 
 	if _, err := apply("web-search-endpoint", "https://search.example.com/s"); err != nil {
@@ -3132,10 +3219,12 @@ func TestApplySettingWebSearchEndpointSwapsWhenTheToolIsAbsent(t *testing.T) {
 	workspace := t.TempDir()
 	var built []string
 	spy := &applySettingSpy{}
-	live := newLiveTools(apogee.NewToolRegistry(), "", func(endpoint string) *apogee.ToolRegistry {
-		built = append(built, endpoint)
-		return tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{WebSearchEndpoint: endpoint})
-	})
+	live := newLiveTools(apogee.NewToolRegistry(), "", nil,
+		func(endpoint string, disabled []string) *apogee.ToolRegistry {
+			built = append(built, endpoint)
+			return tools.NewDefaultRegistryWithHost(workspace,
+				tools.HostTools{WebSearchEndpoint: endpoint, Disabled: disabled})
+		})
 	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
 
 	if _, err := apply("web-search-endpoint", "https://first.example.com/s"); err != nil {
@@ -3167,8 +3256,9 @@ func TestApplySettingWebSearchSwapRefusalKeepsTheOldSet(t *testing.T) {
 	t.Parallel()
 	old := apogee.NewToolRegistry()
 	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
-	live := newLiveTools(old, "", func(endpoint string) *apogee.ToolRegistry {
-		return tools.NewDefaultRegistryWithHost(t.TempDir(), tools.HostTools{WebSearchEndpoint: endpoint})
+	live := newLiveTools(old, "", nil, func(endpoint string, disabled []string) *apogee.ToolRegistry {
+		return tools.NewDefaultRegistryWithHost(t.TempDir(),
+			tools.HostTools{WebSearchEndpoint: endpoint, Disabled: disabled})
 	})
 	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
 
@@ -3217,7 +3307,7 @@ type mcpFixture struct {
 func newMCPFixture(start mcpSession, endpoint string, connect func([]mcp.ServerConfig) (mcpSession, error)) *mcpFixture {
 	f := &mcpFixture{}
 	f.set = newLiveMCP(start, connect)
-	f.tools = newLiveTools(apogee.NewToolRegistry(), endpoint, func(e string) *apogee.ToolRegistry {
+	f.tools = newLiveTools(apogee.NewToolRegistry(), endpoint, nil, func(e string, _ []string) *apogee.ToolRegistry {
 		f.built = append(f.built, e)
 		registry := apogee.NewToolRegistry()
 		for _, tool := range f.set.tools() {

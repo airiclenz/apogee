@@ -224,6 +224,16 @@ var keyRegistry = []configKey{
 		Desc: "External MCP servers connected at startup; their tools always ask in auto.",
 	},
 	{
+		// The roster switch, a name list on one line like context-files.names — so the pane edits it
+		// in a field and the writer renders it back as the flow sequence the template documents. No
+		// validate hook, deliberately: a name matching no tool is a startup NOTICE rather than a
+		// refusal (unknownToolNotice), and a hook here would make the settings surface stricter than
+		// the file it writes.
+		Path: "tools.disabled", Kind: kindStringList,
+		Editable: true,
+		Desc:     "Built-in tools to take off the menu, by name; the model is neither offered nor able to call them.",
+	},
+	{
 		Path: "use-project-skills", Kind: kindBool, Default: "true",
 		Editable: true,
 		Desc:     "Discover skills from the workspace's bare skills/ folder as well as the libraries.",

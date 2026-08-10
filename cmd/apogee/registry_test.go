@@ -382,8 +382,12 @@ func TestRegistryValidateHooksSitOnEditableKeys(t *testing.T) {
 	// at selection, where the list is in hand, and any string is a writable value here.
 	// `editor` joins them for present.command's reason: it is a command LINE, and whether this
 	// machine has that program is not a fact a per-value hook can settle — it is answered at launch.
+	// `tools.disabled` joins them because a name matching no tool is deliberately a NOTICE rather
+	// than a refusal (unknownToolNotice): a hook here would make the settings surface stricter than
+	// the file it writes, and refuse an edit the next launch would happily read.
 	unchecked := map[string]bool{
 		"server": true, "present.command": true, "present.host": true, "editor": true,
+		"tools.disabled": true,
 	}
 	for _, k := range keyRegistry {
 		switch {

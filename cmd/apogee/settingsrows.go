@@ -112,19 +112,23 @@ var settingValues = map[string]func(options) string{
 	"unconfined-hosts":     func(o options) string { return countSummary(len(o.unconfinedHosts), "host") },
 	"web-search-endpoint":  func(o options) string { return o.webSearchEndpoint },
 	"mcp-servers":          func(o options) string { return countSummary(len(o.mcpServers), "server") },
-	"use-project-skills":   func(o options) string { return boolValue(o.useProjectSkills) },
-	"auto-compact":         func(o options) string { return boolValue(o.autoCompact) },
-	"auto-title":           func(o options) string { return boolValue(o.autoTitle) },
-	"context-window":       func(o options) string { return strconv.Itoa(o.contextWindow) },
-	"present.auto-open":    func(o options) string { return boolValue(o.present.autoOpen) },
-	"present.command":      func(o options) string { return o.present.command },
-	"present.port":         func(o options) string { return strconv.Itoa(o.present.port) },
-	"present.host":         func(o options) string { return o.present.host },
-	"ui.spinner":           func(o options) string { return string(o.ui.spinner) },
-	"ui.spinner-color":     func(o options) string { return boolValue(o.ui.spinnerColor) },
-	"ui.show-scrollbar":    func(o options) string { return boolValue(o.ui.showScrollbar) },
-	"ui.color-scheme":      func(o options) string { return o.ui.colorScheme },
-	"cursor-shape":         func(o options) string { return o.cursorShape },
+	// The roster switch shows the NAMES it holds, not a count: the list is short, and which tools
+	// are off is the whole of what the row is asked. Blank when nothing is disabled — the answer
+	// every editable field row gives, since this value seeds the edit field.
+	"tools.disabled":     func(o options) string { return listValue(o.toolsDisabled) },
+	"use-project-skills": func(o options) string { return boolValue(o.useProjectSkills) },
+	"auto-compact":       func(o options) string { return boolValue(o.autoCompact) },
+	"auto-title":         func(o options) string { return boolValue(o.autoTitle) },
+	"context-window":     func(o options) string { return strconv.Itoa(o.contextWindow) },
+	"present.auto-open":  func(o options) string { return boolValue(o.present.autoOpen) },
+	"present.command":    func(o options) string { return o.present.command },
+	"present.port":       func(o options) string { return strconv.Itoa(o.present.port) },
+	"present.host":       func(o options) string { return o.present.host },
+	"ui.spinner":         func(o options) string { return string(o.ui.spinner) },
+	"ui.spinner-color":   func(o options) string { return boolValue(o.ui.spinnerColor) },
+	"ui.show-scrollbar":  func(o options) string { return boolValue(o.ui.showScrollbar) },
+	"ui.color-scheme":    func(o options) string { return o.ui.colorScheme },
+	"cursor-shape":       func(o options) string { return o.cursorShape },
 	// The command AS WRITTEN, blank when the key names none — the answer every other editable string
 	// row gives, and the only safe one here too: this value SEEDS the edit field, so a word standing
 	// in for emptiness ("$EDITOR", "the OS opener") would be a word the next ⏎ persisted as a command.

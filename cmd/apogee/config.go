@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/scheme"
+	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 	"gopkg.in/yaml.v3"
 )
@@ -116,6 +117,12 @@ type settings struct {
 	// and default-empty (no servers ⇒ the MCP feature is dormant). Their tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
 	mcpServers []mcp.ServerConfig
+
+	// toolsDisabled is the `tools.disabled:` roster switch: the built-in tools this config takes
+	// off the menu, by name. File-only and default-empty (⇒ the whole roster), like mcpServers
+	// beside it — which tools a model is offered is a per-machine tuning fact, not an invocation
+	// one. It is deliberately GLOBAL: a per-profile roster is a later key that builds on it.
+	toolsDisabled []string
 
 	// profile is the model profile (CONTEXT: Model profile) — the model's tool-call format and
 	// inline thinking-channel style — file-only (a per-model concern, like mcpServers, with no
@@ -491,6 +498,11 @@ type layer struct {
 	// with no flag/env). A nil slice means the source does not configure servers (fall through).
 	mcpServers []mcp.ServerConfig
 
+	// toolsDisabled is set only by the FILE layer (the roster is config'd, default-empty, with no
+	// flag/env — like mcpServers above). A nil slice means the source disables no tool, so
+	// resolution leaves the whole built-in roster standing.
+	toolsDisabled []string
+
 	// profile is set only by the FILE layer (the model profile is config'd, default-zero, with no
 	// flag/env). A nil pointer means the source does not configure a profile, so resolution falls
 	// through to the zero/native default.
@@ -674,6 +686,7 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 	}
 	s.servers = file.servers             // file-only; env/flag never name an upstream server
 	s.mcpServers = file.mcpServers       // file-only (P3.15); env/flag never set MCP servers
+	s.toolsDisabled = file.toolsDisabled // file-only; env/flag never prune the tool roster
 	s.mechanisms = file.mechanisms       // file-only (Phase 4); env/flag never enable Mechanisms
 	if file.validatedSetsEnable != nil { // file-only (ADR 0016); env/flag never touch the surface
 		s.validatedSetsEnable = *file.validatedSetsEnable
@@ -706,6 +719,50 @@ func resolveSettings(file, env, flag layer, hostID string) (settings, []string) 
 		}
 	}
 	return s, notices
+}
+
+// unknownToolNames returns the entries of a `tools.disabled:` list that name no tool this build
+// offers, in the order they were listed and trimmed as the filter trims them. The catalogue is
+// internal/tools' own (tools.KnownToolNames), so a tool renamed or added there is answered here
+// with no second list to keep in step.
+func unknownToolNames(disabled []string) []string {
+	if len(disabled) == 0 {
+		return nil
+	}
+	catalogue := tools.KnownToolNames()
+	known := make(map[string]bool, len(catalogue))
+	for _, name := range catalogue {
+		known[name] = true
+	}
+	var unknown []string
+	for _, name := range disabled {
+		if name = strings.TrimSpace(name); name != "" && !known[name] {
+			unknown = append(unknown, name)
+		}
+	}
+	return unknown
+}
+
+// unknownToolNotice is the ONE line an unrecognised `tools.disabled:` entry produces at startup,
+// or "" when every listed name is a tool. It is a notice and not an error on purpose: the list is
+// how a roster is pruned on evidence, so a typo in it costs the user the tool they meant to turn
+// off — never the session. Every name that IS a tool still applies.
+func unknownToolNotice(disabled []string) string {
+	unknown := unknownToolNames(disabled)
+	if len(unknown) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("apogee: tools.disabled names %s, which apogee has no tool for — check the "+
+		"spelling; the rest of the list applies", strings.Join(quoteAll(unknown), ", "))
+}
+
+// quoteAll quotes each name so a list of them reads as names rather than as prose.
+func quoteAll(names []string) []string {
+	quoted := make([]string, 0, len(names))
+	for _, name := range names {
+		quoted = append(quoted, strconv.Quote(name))
+	}
+	return quoted
 }
 
 // resolveConfineToWorkspace is Auto's effective blast-radius decision (ADR 0012 as amended
@@ -841,6 +898,10 @@ type fileConfig struct {
 	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
 	MCPServers []mcpServerConfig `yaml:"mcp-servers"`
+	// Tools is the roster block: today its one key is `disabled:`, the built-in tools this config
+	// takes off the menu. A pointer so an absent block falls through to the default (every tool)
+	// rather than reading as an explicit empty one.
+	Tools *toolsConfig `yaml:"tools"`
 	// ModelProfile describes how the configured model speaks the wire (CONTEXT: Model profile) —
 	// its tool-call format and inline thinking-channel style. A per-model concern (like
 	// mcp-servers): file-only, no flag/env. Absent ⇒ the zero profile (native tool calls, no
@@ -1199,6 +1260,20 @@ func (u uiConfig) toUISettings() uiSettings {
 	return s
 }
 
+// toolsConfig is the on-disk `tools:` block — the tool roster this config runs with. Its one key
+// is the switch: the built-in tools to leave OFF the menu, by name.
+//
+// It is a BLOCK rather than a top-level `disabled-tools:` list because the roster is a subject
+// that will grow (per-profile rosters build on this key), and a block is where the next key of the
+// same subject goes without a second top-level name that means almost the same thing.
+type toolsConfig struct {
+	// Disabled names the built-in tools this config takes off the menu, so the model is neither
+	// offered them nor able to call them. Absent/empty ⇒ every tool, the default. A name matching
+	// no tool is a warning at startup, never an error: a roster the user is pruning must not be
+	// able to stop a session from starting.
+	Disabled []string `yaml:"disabled"`
+}
+
 // mcpServerConfig is the on-disk schema for one MCP server (P3.15). It mirrors mcp.ServerConfig
 // with yaml tags; toServerConfig maps it across so the on-disk shape and the package's value
 // type stay independently evolvable.
@@ -1302,6 +1377,9 @@ func (fc fileConfig) layer() layer {
 			servers[i] = m.toServerConfig()
 		}
 		l.mcpServers = servers
+	}
+	if fc.Tools != nil && len(fc.Tools.Disabled) > 0 {
+		l.toolsDisabled = fc.Tools.Disabled
 	}
 	if fc.ModelProfile != nil {
 		p := fc.ModelProfile.toModelProfile()
@@ -1672,6 +1750,14 @@ func applyConfig(opts *options, changed func(string) bool, getenv func(string) s
 	opts.autoTitle = s.autoTitle
 	opts.contextWindow = s.contextWindow
 	opts.mcpServers = s.mcpServers
+	opts.toolsDisabled = s.toolsDisabled
+	// A `tools.disabled:` name that matches no tool is a NOTICE, never a refusal: the list is how a
+	// roster is pruned on evidence, and a typo in it must cost the user the tool they meant to
+	// disable rather than the session. It is reported here, at the same startup boundary the
+	// confinement notices come out of, because this is where the resolved list first exists.
+	if n := unknownToolNotice(s.toolsDisabled); n != "" {
+		notify(n)
+	}
 	opts.profile = s.profile
 	opts.mechanisms = s.mechanisms
 	opts.validatedSetsEnable = s.validatedSetsEnable

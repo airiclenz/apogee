@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"strings"
+
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 )
@@ -19,6 +21,17 @@ type HostTools struct {
 	WebSearchEndpoint string
 	Asker             domain.Asker
 	Presenter         domain.Presenter
+
+	// Disabled names the built-in tools this host must NOT offer — the global `tools.disabled:`
+	// key. A named tool is left OUT of the assembled set entirely, which is both halves of the
+	// switch in one act: the model is never offered it, and a call naming it resolves against
+	// nothing, so the loop refuses it as an unknown tool. Empty/nil ⇒ the whole roster, which is
+	// the default and byte-identical to the set built before this field existed.
+	//
+	// A name matching no built-in tool is simply ignored here. Reporting it is the HOST's job
+	// (KnownToolNames is what it checks against): a registry assembly has nowhere to put a
+	// warning, and a roster the user is pruning must not be able to stop a session from starting.
+	Disabled []string
 }
 
 // NewDefaultRegistry assembles the built-in tool set — the read/write/list/grep base
@@ -86,6 +99,10 @@ func DefaultTools(root string) []domain.Tool {
 // only when host.Presenter is set, ReadOnly and mode-independent through the Presenter, and
 // no more an ExternalEffectTool than ask_user is — showing the user a document they already
 // own is not a non-forkable remote effect.
+//
+// host.Disabled is applied LAST, to the assembled menu: the roster switch subtracts from the set
+// this build offers rather than deciding, per tool, whether to construct it — so a tool's presence
+// stays one line above and its availability one list in the user's config.
 func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 	all := []domain.Tool{
 		NewReadFile(root),
@@ -115,5 +132,46 @@ func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 	if host.Presenter != nil {
 		all = append(all, NewPresentDocument(root, host.Presenter))
 	}
-	return all
+	return withoutDisabled(all, host.Disabled)
+}
+
+// withoutDisabled returns all minus the tools whose name is listed in disabled, in unchanged menu
+// order. An empty list returns the menu untouched — the same slice, so the default roster costs
+// nothing — and a listed name that matches no tool simply matches nothing.
+//
+// Names are trimmed before they are compared, because the list reaches here from a YAML sequence a
+// human wrote: a stray space around a name is a spelling of that name, not a different tool.
+func withoutDisabled(all []domain.Tool, disabled []string) []domain.Tool {
+	if len(disabled) == 0 {
+		return all
+	}
+	off := make(map[string]bool, len(disabled))
+	for _, name := range disabled {
+		off[strings.TrimSpace(name)] = true
+	}
+	kept := make([]domain.Tool, 0, len(all))
+	for _, tool := range all {
+		if !off[tool.Name()] {
+			kept = append(kept, tool)
+		}
+	}
+	return kept
+}
+
+// KnownToolNames returns the name of every tool this build's default set can offer, in menu order.
+// It is the catalogue a host checks a configured `tools.disabled:` entry against, so a misspelled
+// name is reported to the user instead of silently disabling nothing.
+//
+// The two host-delegate tools are included by CONSTRUCTION rather than by composition: a nil Asker
+// or Presenter leaves them out of a registry (graceful degradation), but their names are still
+// names apogee knows — so the answer is a fact about the build, not about one Driver's wiring.
+// TestKnownToolNamesCoversTheComposedSet pins it to the assembly above.
+func KnownToolNames() []string {
+	all := DefaultToolsWithHost("", HostTools{})
+	all = append(all, NewAskUser(nil), NewPresentDocument("", nil))
+	names := make([]string, 0, len(all))
+	for _, tool := range all {
+		names = append(names, tool.Name())
+	}
+	return names
 }

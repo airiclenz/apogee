@@ -325,9 +325,13 @@ func runHeadless(cmd *cobra.Command, args []string, opts *options, noSave bool) 
 		Confiner:           confiner,
 		ConfineToWorkspace: opts.confineToWorkspace,
 		WebSearchEndpoint:  opts.webSearchEndpoint,
-		Profile:            opts.profile,
-		SystemPrompt:       spec.SystemPrompt,
-		ContextFiles:       opts.contextFiles,
+		// The `tools.disabled:` roster switch, honoured here for the reason every other file-only
+		// key is: it is one configuration, and a headless run of it must offer the model the same
+		// tools an interactive session would.
+		DisabledTools: opts.toolsDisabled,
+		Profile:       opts.profile,
+		SystemPrompt:  spec.SystemPrompt,
+		ContextFiles:  opts.contextFiles,
 		Skills: skills.NewProvider(skills.Sources{
 			Home:             roots.config,
 			Workspace:        roots.workspace,

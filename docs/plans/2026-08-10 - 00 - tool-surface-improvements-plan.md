@@ -155,7 +155,18 @@ passes.
 
 **Commit:** `feat(tools): add find_files name-glob discovery tool`
 
-## 4. Global `tools.disabled` config key — the roster switch
+## 4. Global `tools.disabled` config key — the roster switch — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): no CHANGELOG entry was written for this item — the owner ratified that NO item in
+this plan touches CHANGELOG.md. Three things beyond the item's literal text: (a) the filter is fed
+through a new `domain.Config.DisabledTools` field (threaded by `internal/agent/construct.go`'s
+`hostTools`) as well as through `tools.HostTools.Disabled`, because `apogee headless` leaves
+`Config.Tools` nil and lets the engine assemble the registry — without the Config field the key would
+silently not apply to a headless run of the same config; (b) the switch prunes the BUILT-IN roster
+only — an MCP server's tools come and go with the server, so `mcp-servers:` remains the way to drop
+those, and `registryWithMCP`'s doc comment says so; (c) README's Configuration section gained the
+key's user-facing paragraph, the repo's home for file-only config keys, and the seeded template gained
+the commented example the item asked for.
 
 **What:** Add a `tools.disabled` string-list key to the config (loading in
 `cmd/apogee/config.go`, seeded template untouched except a commented example; the key
