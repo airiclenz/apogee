@@ -134,4 +134,73 @@
 // mode-independent through the host's Presenter delegate, registered only when one is
 // supplied, and its result names the rung actually reached so the model can relay it
 // truthfully; a failed mechanism degrades to the baseline rather than failing the call.
+//
+// # The tool files, one line each
+//
+// Twenty-three files carry the built-ins, grouped by what a call to them can do — which is
+// also what the dispatch disposition keys on (ADR 0012). A file holds a tool FAMILY, not
+// always a single tool: the three-tool file_ops.go and the five-tool git.go each keep a
+// family's shared argument shape and error wording in one place.
+//
+// Reading and discovery. read_file.go is read_file, the line-spanned read that attaches a
+// ReadSpan. open_file.go is open_file, the read-and-locate variant that also reports where a
+// substring sits. list_dir.go is list_dir, the depth-bounded listing. grep.go is grep — the
+// pure-Go content search plus the include-glob parser, match spans and pagination that
+// find_files borrows so the two cannot drift. find_files.go is find_files, the NAME half of
+// discovery beside grep's content half.
+//
+// Writing and editing (the P3.7 family). write_file.go is write_file, the whole-file atomic
+// write. file_edit.go is edit_existing_file, the patch-aware hunk apply. find_replace.go
+// carries the pair single_find_and_replace and multi_find_and_replace. file_ops.go carries the
+// three move-bytes-that-already-exist tools — copy_file, move_file, delete_file — over
+// internal/security's os.Root-pinned primitives. diff.go is view_diff, the pure-Go LCS diff
+// that reports on that family and is itself read-only.
+//
+// Execution. terminal.go is terminal, the one-shot shell command through platform.Shell.
+// python_exec.go is python_exec, the one-shot interpreter run. run_tests.go is run_tests: the
+// runner detection (go.mod / pytest config / package.json), the failure parsing per runner,
+// and the 8 KiB condensed verdict. diagnostics.go is diagnostics — go/parser in process, an
+// optional go vet, and the graceful "no provider" for every other language. git.go is the
+// whole git family: git_branch, git_commit, git_diff_range, git_status and git_log, with the
+// ref guards and porcelain-v2 parsing they share.
+//
+// The subprocess plumbing. exec_common.go is the single runSubprocess every execution tool
+// above calls — the ceilings, the default timeout, the capped output buffer, and the
+// exit-code result shape. exec_teardown.go holds the OS-independent half of the cancel
+// contract (§2.4): planTreeKill, the treeKillAction it returns, and the processTeardown seam.
+// exec_pgroup_unix.go realises that teardown as a POSIX process group — Setpgid, a
+// negative-PID kill, a bounded WaitDelay — and exec_pgroup_other.go realises it on Windows
+// with a Job Object, the only facility there that holds a whole tree.
+// exec_cmdline_unix.go is a no-op because execve takes a real argv;
+// exec_cmdline_other.go hands Windows the raw command line verbatim through
+// SysProcAttr.CmdLine, bypassing the argv joining cmd.exe cannot read.
+//
+// Network. network.go is the funnel itself — networkTool.do, the single path from a tool to
+// the network — carrying the URLGuard pre-flight and dial-time checks, the one per-call
+// deadline, the response cap, and the unexported url-filter marker the disposition keys on.
+// web_fetch.go is web_fetch (GET plus its body rendering), http_request.go is http_request
+// (any method, headers, body), and web_search.go is web_search — provider selection between
+// the built-in DuckDuckGo, a configured custom endpoint and off, plus the SetEndpoint
+// re-point. web_search_render.go is that tool's rendering half: the DuckDuckGo HTML parse and
+// the generic HTML-to-text cleaning, best-effort by design.
+//
+// Host delegates and the recursion point. ask_user.go is ask_user over the host's Asker,
+// including the queueing that keeps concurrent askers off one prompt. present_document.go is
+// present_document over the host's Presenter ladder, naming the rung actually reached.
+// sub_agent.go is sub_agent — the recursion point that drives a nested Agent and deliberately
+// carries none of the disposition markers.
+//
+// # The package spine, one line each
+//
+// Four files register no tool. tools.go is the shared toolSpec (name, description, JSON
+// schema) every built-in embeds, the size ceilings they all read, and the result helpers —
+// including okSummary, which attaches the structured half. registry.go is HostTools and the
+// two assemblers, NewDefaultRegistry and NewDefaultRegistryWithHost, that turn the built-ins
+// into a domain.ToolRegistry. path_safety.go is the thin alias layer onto internal/security's
+// one symlink-aware boundary (ResolveInRoot, ErrPathEscape), so every tool and test here keeps
+// calling the same names while the rule lives in one place. workspace_scoped.go is the
+// unexported workspaceScopedWriter marker and the write-target resolvers that say WHICH
+// argument a given writer lands on.
+//
+// And doc.go this map.
 package tools

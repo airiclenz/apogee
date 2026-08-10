@@ -494,7 +494,18 @@ re-running the tui guard test fails (verifier may spot-check and revert).
 
 **Commit:** `test(structure): doc.go file-map guard; maps enforced for tui, mechanisms, config, cmd/apogee`
 
-## 14. File maps wave 2 — tools, domain, platform, agent
+## 14. File maps wave 2 — tools, domain, platform, agent — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): two departures from the item's literal text. (i) `internal/tools` holds **34**
+non-test files, not the 32 the item's prose says (ADR 0043's count is the correct one; the prose
+drifted) — the maps were written from a head count of what each package actually contains, so the
+tools map describes all 34. `internal/domain` (22), `internal/platform` (18) and `internal/agent`
+(18) matched the item exactly. (ii) Each map is grouped by concern with short paragraph headings
+(`# The tool files, one line each`, `# The package spine, one line each`, …) rather than one flat
+run of lines, following `internal/mechanisms/doc.go`'s shape — at 18–34 files a flat list is the
+one form of map nobody reads, and the guard only checks that a name appears. No CHANGELOG entry,
+per items 3–13's precedent for a behaviour-preserving structure change; no production code changed
+(comments and four new test files only).
 
 Depends on items 1 and 13.
 
