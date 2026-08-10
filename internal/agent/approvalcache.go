@@ -1,6 +1,10 @@
 package agent
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/airiclenz/apogee/internal/domain"
+)
 
 // approvalCache is the Session's allow-for-session memory: the set of ApprovalRequest.CacheKey
 // identities a human has already cleared for the rest of this Session. There is ONE per agent
@@ -46,4 +50,22 @@ func (c *approvalCache) Allow(key string) {
 		c.allowed = make(map[string]bool)
 	}
 	c.allowed[key] = true
+}
+
+// sessionAllows reaches the Session's allow-for-session memory through the Approver an Agent holds.
+// The memory is not the Agent's to own — it belongs to the queueing seam (queuedApprovals), the one
+// object a parent and all its descendants share — so a dispatch that wants to know "has the human
+// already cleared this key" asks the seam it is about to call rather than a map of its own. That is
+// what makes an allow granted in one sub-agent visible to its parent and its siblings.
+//
+// Anything that is not the seam has no memory and answers nil: a nil Approver (no human to ask at
+// all) and any Approver a rig installed without going through construction. nil is a working answer,
+// not a failure — approvalCache's methods are nil-receiver-safe, so such a rig simply prompts on
+// every call, which is the conservative direction.
+func sessionAllows(ap domain.Approver) *approvalCache {
+	q, ok := ap.(*queuedApprover)
+	if !ok || q == nil {
+		return nil
+	}
+	return q.cache
 }

@@ -540,6 +540,14 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 // per-call event, not a pre-allowable convenience. reason feeds the Approval prompt. It reports
 // dispatchCancelled if ctx is cancelled while the human deliberates.
 //
+// The memory those allows land in is the SESSION's, not this Agent's: it lives on the Approver
+// seam every agent in the tree shares (sessionAllows — internal/agent/approvalcache.go), so a
+// sub-agent never re-asks for something the human already granted anywhere in the tree. Dispatch
+// only READS it, on the silent fast path below — a remembered allow runs the call with no prompt
+// and no ApprovalEvent, exactly as it always has. The WRITES belong to the seam, which is also the
+// only place that can catch the twin: a duplicate request already queued behind the very prompt
+// that allowed its key.
+//
 // The request names the asking agent's delegated task (empty at depth 0 — a.task) and, when the
 // delegation carried one, its short name (a.name), because a prompt raised during a fan-out may be
 // one of several queued behind each other and "which agent is asking" is otherwise unanswerable
@@ -551,11 +559,25 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 // Refuse — Resolution D5), so the nil-Approver guard below is defensive: it refuses rather than
 // dereferencing a nil Approver, never running unapproved.
 func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, force bool, cacheKey, reason string) (bool, dispatchOutcome) {
-	if !force && a.approved[cacheKey] {
+	if !force && sessionAllows(a.cfg.Approver).Allowed(cacheKey) {
 		return true, dispatchDone
 	}
 	if a.cfg.Approver == nil {
 		return false, dispatchDone
+	}
+
+	// The request's CacheKey is what decides whether its answer may ever be remembered, and this
+	// single mapping is the whole of that policy: an ordinary gate travels with its key, a forced
+	// one travels with NOTHING. An empty key is the seam's "unrememberable decision" signal, so a
+	// forced gate stays out of the memory in both directions — the read above and the seam's write.
+	// Otherwise one "allow for session" on a Tier-2 speed-bump (or a runtime demote) would silently
+	// pre-clear every later ordinary gate under the same key — for an MCP tool, every tool of that
+	// server. A forced allow-for-session therefore behaves exactly as a plain ApprovalAllow: it
+	// authorises this call only. The resolution carrying a cacheKey alongside force (the demote
+	// fallback, resolution.go) is harmless precisely because the emptying happens here.
+	sessionKey := cacheKey
+	if force {
+		sessionKey = ""
 	}
 
 	areq := domain.ApprovalRequest{
@@ -564,6 +586,7 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		Reason:       reason,
 		SubAgentTask: a.task,
 		SubAgentName: a.name,
+		CacheKey:     sessionKey,
 	}
 	decision, err := a.cfg.Approver.Approve(ctx, areq)
 	if err != nil {
@@ -576,20 +599,10 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 
 	a.cfg.Events.Emit(domain.ApprovalEvent{EventBase: a.base(turn), Request: areq, Decision: decision})
 	switch decision {
-	case domain.ApprovalAllowForSession:
-		// A forced gate is never pre-allowable, so it skips the cache in BOTH directions: the
-		// read above and this write. Otherwise one "allow for session" on a Tier-2 speed-bump
-		// (or a runtime demote) would silently pre-clear every later ordinary gate under the
-		// same key — for an MCP tool, every tool of that server. A forced allow-for-session
-		// therefore behaves exactly as a plain ApprovalAllow: it authorises this call only.
-		if !force {
-			if a.approved == nil {
-				a.approved = make(map[string]bool)
-			}
-			a.approved[cacheKey] = true
-		}
-		return true, dispatchDone
-	case domain.ApprovalAllow:
+	// The two allows are one branch here: whether this verdict is also REMEMBERED was settled by
+	// the CacheKey above and acted on by the seam, so all dispatch has left to read from either is
+	// "the call may run".
+	case domain.ApprovalAllowForSession, domain.ApprovalAllow:
 		return true, dispatchDone
 	default: // ApprovalDeny or any unknown verdict — refuse
 		return false, dispatchDone

@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"iter"
+	"slices"
 	"strings"
 	"testing"
 
@@ -317,7 +318,7 @@ func TestDispatch_ForcedApprovalNeverCachesAllowForSession(t *testing.T) {
 	ran := 0
 	cfg := configWithTools(sink, fakeTool{name: "terminal", readOnly: false, ran: &ran, result: "ok"})
 	cfg.Mode = domain.ModeAskBefore
-	approver := &fakeApprover{decision: domain.ApprovalAllowForSession}
+	approver := &seamApprover{decision: domain.ApprovalAllowForSession}
 	cfg.Approver = approver
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
 		toolCallScript("c1", "terminal", `{"command":"sudo apt-get install jq"}`), // Tier-2 → forced gate
@@ -336,8 +337,14 @@ func TestDispatch_ForcedApprovalNeverCachesAllowForSession(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if approver.calls != 2 {
-		t.Errorf("approver consulted %d times, want 2 (a forced allow-for-session must not pre-allow the next ordinary gate)", approver.calls)
+	keys := approver.keysSeen()
+	if len(keys) != 2 {
+		t.Errorf("approver consulted %d times, want 2 (a forced allow-for-session must not pre-allow the next ordinary gate)", len(keys))
+	}
+	// The mechanism behind that count: dispatch hands a forced gate an EMPTY CacheKey, the seam's
+	// "this answer can never be remembered" signal, and the ordinary gate its real key.
+	if want := []string{"", "terminal"}; !slices.Equal(keys, want) {
+		t.Errorf("request cache keys = %v, want %v — a forced gate must travel with no key at all", keys, want)
 	}
 	if ran != 2 {
 		t.Errorf("tool ran %d times, want 2 (both calls were allowed)", ran)

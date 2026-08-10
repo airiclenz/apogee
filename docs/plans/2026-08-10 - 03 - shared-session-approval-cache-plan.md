@@ -79,9 +79,17 @@
 
 **Commit:** `feat(agent): session-scoped allow-for-session cache in the approval queue seam`
 
-## 2. Route dispatch through the shared cache; delete the per-Agent map
+## 2. Route dispatch through the shared cache; delete the per-Agent map — ✅ DONE (2026-08-10)
 
 Depends on item 1.
+
+NOTES (2026-08-10): deleting the local write left the `ApprovalAllowForSession` switch case
+byte-identical to `ApprovalAllow`, so the two were merged into one `case` (the WHY prose moved to
+the force→empty CacheKey mapping, which is where that policy now lives). Item 1's
+`approvalcache_test.go` header said "nothing populates CacheKey on the dispatch path yet" — made
+false by this item, so it was reworded; the new tree tests were appended to that same file. The
+existing `TestDispatch_ForcedApprovalNeverCachesAllowForSession` was adapted (recording approver) to
+also assert the forced request carries an empty CacheKey.
 
 **What:**
 - `internal/agent/approvalcache.go` (or `construct.go`): helper
