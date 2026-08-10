@@ -382,7 +382,24 @@ naming if renamed, config.go, configwrite.go, configmigrate.go, configwatch.go).
 
 **Commit:** `refactor(config): move config core and configwrite into internal/config`
 
-## 11. Config move III — drop the bridge, qualify call sites
+## 11. Config move III — drop the bridge, qualify call sites — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): **re-scoped to documentation reconciliation, because the bridge never existed.**
+Items 9 and 10 were merged by owner decision and the whole config cluster moved in one commit
+(`fffa57f`), so no `configbridge.go` was ever created and every `cmd/apogee` call site was already
+qualified to `config.X` there — this item's original mechanical work has no subject. What was left
+was the record: ADR 0043's Decision 3 still said the move "lands **bridge-then-drop**". It gains an
+`## Amendment (2026-08-10)` in the house style (original text stands, amendment states what actually
+happened) covering why the cluster would not split (`registry.go`'s validator column calls into
+`config.go`/`configwrite.go` while `config.go` is typed on the registry's `Key` — circular), why the
+merge made the bridge unnecessary rather than early, and the two facts Decision 3 does not carry:
+`defaults.go` moved whole (an embed cannot reach out of its package directory) and `parseMode`
+became `domain.ParseMode` rather than config's. No Go code changed — both verification greps came
+back clean (no `configbridge` file anywhere in the tree; no unqualified moved config identifier in
+any `cmd/apogee` production file — the only hits are four prose comments and one help string).
+**No CHANGELOG entry:** item 2's entry for ADR 0043 never mentioned the bridge, so nothing there
+needs correcting, and the move itself landed without entries per items 3–10's behaviour-preserving
+precedent.
 
 Depends on item 10.
 

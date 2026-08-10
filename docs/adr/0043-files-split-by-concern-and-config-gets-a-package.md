@@ -165,3 +165,47 @@ At ratification the rule binds `internal/tui` (53 non-test files), `internal/too
   `internal/mechanisms` into line and cures its confusable `syntax.go` / `syntaxcheck.go` pair.
 - More files and more qualified call sites (`config.X`) is the accepted cost. The alternative —
   fewer, larger files — is the state this record exists to end.
+
+## Amendment (2026-08-10) — the config cluster moved in one commit; the bridge was never written
+
+Decision 3's closing paragraph — *"The move lands **bridge-then-drop**: a temporary
+`configbridge.go` of type aliases keeps every staying file compiling unchanged while the files
+relocate in reviewable steps, and the last step deletes it"* — describes a landing that did not
+happen. It stands as written because it records what this record decided on the day it was written;
+read it as the intended sequencing rather than as a description of how `internal/config` came to
+exist. The move landed whole, in `fffa57f`.
+
+**The cluster would not split.** The implementing plan cut the move into three items: 9 (registry,
+options, migrate and watch move behind the bridge), 10 (`config.go` and `configwrite.go` follow),
+11 (drop the bridge, qualify the call sites). Item 9 reported BLOCKED — the bridge it was asked to
+write could not be written without item 10's files. The key registry is not a layer beneath the
+config core; the two name each other. `registry.go`'s validator column calls straight into the
+files item 10 was to move (`ParseSettingList`, `PresentSettings.Validate`, `UISettings.Validate`,
+and now `domain.ParseMode`), because a row's startup check is the real check rather than a second
+spelling of it, while `config.go`'s multi-source table is typed on the registry's `Key`. Aliasing
+half of that back into `package main` while the other half stayed there is circular by
+construction. The owner's call on 2026-08-10 was to merge items 9 and 10 and move all six
+production files at once.
+
+**Which made the bridge unnecessary, not merely early.** With every file crossing the seam in the
+same commit, each crossing name could be exported and each call site qualified to `config.X`
+directly, so no alias file was ever created and none had to be unwound. Item 11's "drop the bridge"
+half consequently had nothing to delete and its "qualify the call sites" half was already done;
+the item became this reconciliation. The scaffolding this record called "not a layer" turned out
+not to be needed at all — the reviewability it was meant to buy was traded for one atomic,
+behaviour-preserving move.
+
+**Two facts about the moved set that Decision 3 does not carry.** `defaults.go` moved **whole** —
+`defaultConfigYAML`, its `//go:embed` line, the `defaults/` directory that line points at, and the
+seeding helpers — because an embed directive cannot reach outside its own package directory; the
+seed template now lives at `internal/config/defaults/config.yaml`. And `parseMode` did **not**
+become part of `internal/config`: parsing the autonomy ladder belongs beside the ladder's
+vocabulary, so it moved to `internal/domain` as `ParseMode`, joining the
+`ModePlan`/`ModeAskBefore`/`ModeAllowEdits`/`ModeAuto` constants `internal/domain` already
+exported. `cmd/apogee` had been re-aliasing those four through the root package; the aliases were
+deleted and every call site now names `domain.ModeX`.
+
+What this record decides is untouched. The config cluster is `internal/config`; `settingsrows.go`
+and `settingsedit.go` stayed in the binary as the /settings display projection; the package imports
+`internal/domain` and siblings and never the root module; the doc.go file-map rule binds it as
+stated. Only the sentence about how the move would be sequenced was wrong.
