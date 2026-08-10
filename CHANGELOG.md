@@ -366,6 +366,18 @@ point is a **minor** bump, not a breaking change.
   (owner-ratified 2026-07-04, a bench-side experimental hook until a production trigger is found).
   The two code comments carrying the same staleness — `internal/tui/command.go`'s `safeWhileRunning`
   and `internal/domain/mechanism.go`'s `PostToolResultHook` — are corrected with them.
+- **The layout specs read to the renderer's truth again.** `layout.md`'s opening paragraph had the
+  right-gutter arithmetic off by one and contradicted its own scroll-bar section (one free column
+  beside a painted bar, two to the window edge while the gutter is blank); the scroll-bar key is no
+  longer described as "fixed for the run" now that `/settings` applies it to the running session
+  (ADR 0037) and re-lays the frame out; the sketch at the top carries the current prompt-box legend
+  (`⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit`) and a `Sub-Agent` run drawn in its ⤷-railed shape with
+  the `N tool calls · <used>/<window> · gist` head; and the autocomplete section lists all six verbs
+  that take arguments rather than four. `docs/layout/user-questions-layout.md` strikes the
+  `[1]`/`[2]`/`[3]` digit shortcuts (ratified out 2026-08-04), draws the always-painted hint row on
+  the multi-option mockup, and lowercases the approval body's `command:` label. The two renderer
+  comments riding the same drift — `internal/tui/theme.go`'s `bodyRightGutter` and
+  `internal/tui/autocomplete.go`'s accept-behaviour note — are corrected with them.
 
 ### Fixed
 

@@ -27,8 +27,9 @@ import (
 // Accepting a row is not always a completion. A skill or a file row splices its token and leaves
 // the human typing; a COMMAND row runs the command there and then (acceptAutocomplete), cutting its
 // "/verb" out of the draft and leaving everything else in the box — which is what lets a command be
-// invoked from the middle of a half-written message without destroying it. The one verb that needs
-// what follows it — /confine (arguments) — completes instead.
+// invoked from the middle of a half-written message without destroying it. The verbs that need what
+// follows them — the takesArgs rows of commandSpecs (command.go), today /color-scheme, /confine,
+// /model, /rename, /schedule and /server — complete instead.
 
 // maxAutocompleteItems caps how many suggestions the overlay OFFERS (and how far the file walk
 // runs) — enough to be useful, small enough that a large workspace walk stays cheap. Type more to

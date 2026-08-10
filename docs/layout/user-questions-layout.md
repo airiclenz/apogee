@@ -4,15 +4,22 @@
 
 Arrow keys (up and down) navigate.
 Enter selects the item and sends the answer.
-If shortcuts are given, the directly select the corresponding item and send the answer.
+~~If shortcuts are given, the directly select the corresponding item and send the answer.~~
 Please refer to the menu system UI-laypout in llama-launcher for reference.
+
+> Amended 2026-08-04 by `docs/plans/archived/2026-08-04 - 03 - user-questions-menu-layout-plan.md`,
+> whose ratified design calls struck the digit shortcuts out ("no digit shortcuts"): a question's
+> choices are reached with `↑↓` and sent with `⏎`, and typing a digit types a character into the
+> custom answer like any other key. So the `[1]` / `[2]` / `[3]` cells the multi-option sketch below
+> draws are **not** painted — the always-painted hint row under it is. The approval prompt's `[a]` /
+> `[s]` / `[d]` / `[esc]` cells are unaffected: those shortcuts are live (`approvalMenu`).
 
 
 # User Approval:
 
 ╭────────────────────────── Approve terminal? ───────────────────────────╮
 │ Reason: subprocess execution (confinement unavailable on this  host)   │
-│ Command:                                                               │
+│ command:                                                               │
 │   cd /workspace/repos/apogee && git status                             │
 │                                                                        │
 │ ❯ Allow                     [a]                                        │
@@ -37,6 +44,7 @@ Please refer to the menu system UI-laypout in llama-launcher for reference.
 │   part in a separate commit. Run make check after each. The config     │
 │   change is the riskier part — get it stable first.                    │
 │                                                                        │
+│  ↑↓ select · ⏎ send · type for a custom answer · esc cancel            │
 ╰────────────────────────────────────────────────────────────────────────╯
 
 

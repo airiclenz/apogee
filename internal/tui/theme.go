@@ -109,7 +109,9 @@ const bodyIndent = "  "
 // visible transcript mid-run. That leaves one free column between the text and a painted bar, and
 // two to the window edge while the gutter is blank. Turning the setting off removes the column and
 // the bar together — the body takes the column and this gutter still holds it off the window edge
-// — which cannot re-wrap mid-run either, because the setting is fixed for the process lifetime.
+// — which does re-wrap mid-run, but only where the human asked for it: /settings applies the key to
+// the running session (ADR 0037) and lays the frame out again from there (settingsApplyLocal), while
+// the config file is read at start-up. One deliberate re-wrap, never an incidental one.
 // TestTranscriptBodyLeavesRightGutter pins the shown state against a really-composed View and
 // TestHiddenScrollbarYieldsTheColumn the hidden one.
 const bodyRightGutter = 1

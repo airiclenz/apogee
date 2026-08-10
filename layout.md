@@ -1,6 +1,6 @@
 ❯ The last prompt that the user sent is in white text. It's background color should be
   dark gray. Word wrap must apply everywhere, and it breaks short of the right edge:
-  two columns stay free between the text and the scroll bar, three between the text
+  one column stays free between the text and the scroll bar, two between the text
   and the window edge while no bar is painted. The user must be able to scroll up in
   the chat session to see the complete chat history. The session area follows the
   generated output: while the view sits at the bottom, every repaint keeps the tail
@@ -39,11 +39,17 @@
     + a new code line
     + another new code line
 
-✦ Sub Agent ▼
-  ┕ 3 Sub Agents
-    Sub Agent 1: Agent Name (= brief one line summary)
-    Sub Agent 2: Agent Name (= brief one line summary)
-    Sub Agent 3: Agent Name (= brief one line summary)
+✦ Sub-Agent ▼
+  ┕ survey the tests  2 tool calls · 12k/32k · Found 4 gaps
+
+│ ⤷ sub-agent
+│
+│ ✦ Read File
+│   ┕ a.go 1 - 5
+│
+│ ✦ Run ▶
+│   ┕ go test ./...
+│     +3 more lines
 
 ✦ This is the last message from the LLM. There must always be one empty line between
   chat content and the bottom prompt/information section like displayed here.
@@ -51,7 +57,7 @@
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ centered session name ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
   ⠉⠹ reading · 3s                                              16k/32k 50% █████░░░░░
 ╭─────────────────────────────────────────────────────────────────────────────────────╮
-│ Send a message… [Shift] + [Enter] creates a line break                              │
+│ Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit                           │
 │ This text box can be multiline. The text edit area auto increases height to         │
 │ accomodate the bigger message. Clicking into this field should position the cursor  │
 │ at the clicked position. The background color of this box is black. The border      │
@@ -456,9 +462,11 @@ a hairline. The two tones do the rest of the work: the thumb takes the dim foreg
 the chrome uses, the track the recessive one. Both glyphs are one cell wide, which is what lets the
 column stay a single column.
 
-**It is fixed for the run.** The key is config-file only, like the rest of the `ui:` block, and it
-is read once at start-up, so the width the transcript wraps to cannot change under text that has
-already been wrapped; a changed key takes effect the next time apogee starts.
+**It re-wraps once, and only on a deliberate change.** The key is read from `config.yaml` at
+start-up like the rest of the `ui:` block, and `/settings` applies an edit to the *running* session
+(ADR 0037): the bar's column is transcript width, so flipping the key lays the frame out again and
+the visible transcript re-wraps there and then. What the rule rules out is a re-wrap nobody asked
+for — the width never moves because a bar appeared or vanished on its own.
 
 **The terminal's own scroll bar is a different bar, and apogee puts it out.** Every frame apogee
 draws lives on the alternate screen, so nothing it renders ever reaches the terminal's scrollback —
@@ -747,7 +755,7 @@ own report is. The `+N more lines` marker is apogee's line too and is painted as
 quieter sibling of the prompt block's `see more` (the `prompt-toggle` role) — so a body line
 that happens to open with `+` can never be mistaken for the affordance beneath it. The sketch at the
 top of this file shows both states side by side: a collapsed `Run ▶` over its remainder marker, and
-a `View Diff ▼` and a `Sub Agent ▼` deliberately drawn open so the shape of a full body appears
+a `View Diff ▼` and a `Sub-Agent ▼` deliberately drawn open so the shape of a full body appears
 too — the run among them, because collapsed it would show nothing of what it holds.
 `docs/layout/tool-layout.md` is the owner's own sketch of these shapes, the one this section and the
 one above it were written from.
@@ -1315,9 +1323,9 @@ everything on either side is untouched.
 
 **Accepting a command RUNS it.** The `/verb` is cut out of the draft and the command fires; the
 rest of what was typed stays in the box with the caret where it belongs. The verbs that need what
-follows them are the exception and complete instead: the four that take arguments — `/confine`,
-`/model`, `/server` and `/schedule` (and arguments are only ever read from a whole-line
-invocation). Accepting a skill row writes that skill's own `/id ` token into the text.
+follows them are the exception and complete instead: the ones that take arguments — today
+`/color-scheme`, `/confine`, `/model`, `/rename`, `/schedule` and `/server` (and arguments are
+only ever read from a whole-line invocation). Accepting a skill row writes that skill's own `/id ` token into the text.
 
 **One overlay for "which one?".** `/model` and `/server` with nothing after them open a
 picker: the same bordered pane as the `/sessions` browser, one row per choice, one highlight,

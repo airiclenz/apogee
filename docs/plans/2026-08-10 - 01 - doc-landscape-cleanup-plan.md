@@ -103,7 +103,7 @@ current truth; `make check` green.
 
 Commit: `docs(context): sync mid-run verbs, tool spellings, and the post-tool-result resident`
 
-## 4. layout.md and user-questions-layout.md drift fixes
+## 4. layout.md and user-questions-layout.md drift fixes — ✅ DONE (2026-08-10)
 
 What: layout.md — `:2–4` gutter numbers to one-beside-bar / two-at-edge (agree
 with :448); `:459–462` scrollbar paragraph to "one re-wrap per deliberate
@@ -123,6 +123,18 @@ Acceptance: every audited layout.md mismatch reads to the code's truth; the two
 code comments match behavior; `make check` green.
 
 Commit: `docs(layout): sync spec drift and the two stale renderer comments`
+
+NOTES (2026-08-10): two departures from the item's literal text. (a) Redrawing
+the `:42–46` mockup also corrected its label from `Sub Agent` to the `Sub-Agent`
+the presenter actually paints (`toolpresent.go:501`), so the one companion
+reference to that sketch (`layout.md:758`) was respelled with it — otherwise the
+file would name a block it no longer draws. (b) In
+`user-questions-layout.md` the struck digit rule got the file's own
+pinned-sketch treatment: the prose rule is struck through and a blockquote
+amendment note (the convention the multi-select section already uses) says the
+sketch's `[1]/[2]/[3]` cells are not painted, rather than the cells being erased
+from the owner's pinned mockup. Left alone as out of scope: the file's `:2`
+Status blockquote still cites the pre-archive path of the 2026-08-04 - 03 plan.
 
 ## 5. mechanism-catalogue: add the missing guided_decomposition row
 
