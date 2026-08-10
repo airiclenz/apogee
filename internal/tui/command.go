@@ -258,8 +258,10 @@ func commandByName(name string) (commandSpec, bool) {
 // actually does can never disagree.
 //
 // Two tests, because the policy is about the line and not only about the verb. The verb's own
-// commandSpec.whileRunning says it merely reports — /version, /skills, /confine. /confine then adds
-// the one nuance: its STATUS form reports (Engine.ConfineToWorkspace is goroutine-safe, read under
+// commandSpec.whileRunning says it does nothing this session's engine must be quiescent for —
+// /version, /skills, /confine report, and the Schedule pair /schedule, /schedule-stop touches only
+// the scheduler library (ADR 0033, see commandSpecs). /confine then adds the one nuance: its
+// STATUS form reports (Engine.ConfineToWorkspace is goroutine-safe, read under
 // the engine's own confineMu), while "/confine off|on" swaps Auto's blast radius under a Step that
 // is already dispatching tool calls and is idle-only for the same reason /clear is. confineArgs'
 // zero value IS confineStatus, so that second test reads true for every other verb without naming

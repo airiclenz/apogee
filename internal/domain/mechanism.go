@@ -51,9 +51,11 @@ type PreToolExecHook interface {
 }
 
 // PostToolResultHook acts on a tool result before the model next sees it — the home
-// of correct_tool_result, new to the loop (the proxy could not host it). It receives
-// the originating call (the tool name and arguments live there, not on the result)
-// and the loop view (error handling often counts prior failures across Turns).
+// of error_enrichment (correct_tool_result is deferred, owner-ratified 2026-07-04: a
+// bench-side experimental hook until a production trigger is found), new to the loop
+// (the proxy could not host it). It receives the originating call (the tool name and
+// arguments live there, not on the result) and the loop view (error handling often
+// counts prior failures across Turns).
 type PostToolResultHook interface {
 	PostToolResult(ctx context.Context, call ToolCall, result *ToolResult, view LoopView) error
 }

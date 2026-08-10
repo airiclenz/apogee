@@ -87,7 +87,7 @@ Acceptance: no README claim contradicts the working tree on the audited points;
 
 Commit: `docs: truth pass over AGENTS.md and README against the working tree`
 
-## 3. CONTEXT.md micro-fixes and their code-comment twins
+## 3. CONTEXT.md micro-fixes and their code-comment twins — ✅ DONE (2026-08-10)
 
 What: `:305` add the Schedule pair to the mid-run verb list (ADR 0033);
 `:356` respell `web_fetch`/`http_request`; `:636–637` name error enrichment as

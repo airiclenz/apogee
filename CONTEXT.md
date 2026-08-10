@@ -301,7 +301,9 @@ Mid-run delivery is 1:1 (one row, one marked message); a flush at idle joins the
 **unmarked** message, because exactly one unmarked user message opens an Exchange. A **Skill** or
 a **File reference** named in a staged message is message content and rides the Interjection with
 it; a `/command` never queues, and which ones may run mid-run is a **per-command** policy rather
-than a blanket "at idle" rule — the reporting verbs (`/version`, `/skills`, `/confine` status) run
+than a blanket "at idle" rule — the reporting verbs (`/version`, `/skills`, `/confine` status) and
+the Schedule pair (`/schedule`, `/schedule-stop`, which touch only the scheduler library and never
+this session's engine — [ADR 0033](docs/adr/0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md)) run
 immediately, every other verb is offered *tagged* in the menu and refused with a note that leaves
 the line in the box (ADR 0027, amending ADR 0025's decision 10). See
 [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md).
@@ -352,7 +354,7 @@ privilege ladder**. Four:
   **`confine-to-workspace`** flag (ADR 0012): **on** (default) OS-**Confines** the subprocess
   surface to the workspace with the **network open**, and still gates **MCP**; **off** ("I am
   the sandbox") runs unconfined — safe only inside a VM. Apogee's own network tools
-  (`web-fetch`/`http-request`) auto-run url-filtered in both (they no longer gate in Auto —
+  (`web_fetch`/`http_request`) auto-run url-filtered in both (they no longer gate in Auto —
   ADR 0012 reversed ADR 0004 here).
 _Avoid_: "permission level", "trust mode".
 
@@ -634,7 +636,9 @@ Four positions plus a cross-cutting capability:
   before the loop acts on it.
 - **pre-tool-exec** — act between the decision to run a tool and its execution.
 - **post-tool-result** — act on a tool result before the model next sees it (home of
-  `correct_tool_result`). New to the loop; the proxy could not host it.
+  `error_enrichment`; `correct_tool_result` is **deferred** — owner-ratified 2026-07-04,
+  a bench-side experimental hook until a production trigger is found). New to the loop;
+  the proxy could not host it.
 - **history-rewrite** — a capability that edits conversation state (home of
   `truncate_history`); may attach at more than one point.
 _Avoid_: "stage" (a pre-request-only, pipeline-era word), "phase".

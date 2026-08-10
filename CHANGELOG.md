@@ -358,6 +358,14 @@ point is a **minor** bump, not a breaking change.
   `/opt/homebrew/bin` — the Makefile's own comment carried the same inversion and is fixed too),
   the `make dist` tool claim no longer says everything but `zip` ships with Go, and a short
   "Reading the code?" pointer sends contributors to `AGENTS.md` as the single map.
+- **`CONTEXT.md` says what the code says on three points.** The mid-run `/command` policy now names
+  the Schedule pair beside the reporting verbs (`/schedule` and `/schedule-stop` are safe while a
+  worker works because they touch only the scheduler library, ADR 0033); the network tools are
+  spelled `web_fetch`/`http_request` as the tool registry names them; and the post-tool-result hook
+  point names `error_enrichment` as its resident, with `correct_tool_result` marked deferred
+  (owner-ratified 2026-07-04, a bench-side experimental hook until a production trigger is found).
+  The two code comments carrying the same staleness — `internal/tui/command.go`'s `safeWhileRunning`
+  and `internal/domain/mechanism.go`'s `PostToolResultHook` — are corrected with them.
 
 ### Fixed
 
