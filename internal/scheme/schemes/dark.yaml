@@ -41,6 +41,7 @@ file-ref: "#cdffa4" # the prompt's inline @file token accent — the tone a refe
 # --- chrome accents ----------------------------------------------------------------
 prompt-toggle: "#b0d2ff" # the collapsed prompt's see-more / see-less marker — an apogee affordance that reads as chrome inside the block, not as more of what the human wrote
 tool-marker: "#FFB050"   # a tool block's synthesized "+N more lines" remainder marker — a warm "apogee is talking" line on a body column, so the count never reads as part of the output it counts
+tool-leader: "#8a8a8a"   # the ⋯ leader carrying a tool row's eye from its target to the outcome slot at the row's edge — seeded from `muted`, the tone the ▶ beside it wears; damp it further to make the dots recede
 
 # --- misc --------------------------------------------------------------------------
 gauge: "#c396ff"     # context-fill gauge bar — periwinkle

@@ -88,6 +88,17 @@ type branchSummary struct {
 	quoted bool
 }
 
+// The wordings that mark an outcome as a FAILURE, whatever produced it: the "error: …" line a
+// faulted result is summarised with (enrichWithResult), and the two bare verdicts a call that never
+// ran carries. The painter reads them to give the outcome slot its red (summaryStyle, render.go),
+// and design call 11 of docs/plans/"2026-08-10 - 04" makes that red the ONLY failure marking — no
+// glyph and no header changes colour — so the vocabulary and the mark stay one fact in one place.
+const (
+	errorSummaryPrefix = "error: "
+	deniedSummary      = "denied"
+	cancelledSummary   = "cancelled"
+)
+
 // namedSummary is a summary in the presenter's OWN words — a typed phrase, or a sentence naming a
 // path — so the shortening seam spells that path relative to the workspace.
 func namedSummary(line detailLine) branchSummary {
@@ -680,7 +691,7 @@ func (tv *toolView) sanitize() {
 func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot) {
 	defer tv.finishDisplay(ws)
 	if result.IsError {
-		tv.Summary = namedSummary(detailLine{Text: "error: " + firstLine(result.Content)})
+		tv.Summary = namedSummary(detailLine{Text: errorSummaryPrefix + firstLine(result.Content)})
 		return
 	}
 	p, known := toolRegistry[tv.name]
@@ -1136,7 +1147,7 @@ func editLines(text string) []string {
 //
 // The two tags are the ones diffBody emits, so the lines paint through the very red/green styles
 // view_diff's hunks do; the house collapsed cap then holds an
-// edit block to the same four rows as every other block (collapsedTargetRows, render.go). It
+// edit block to the same three rows as every other block (collapsedBodyRows, render.go). It
 // truncates nothing — the entry keeps every line — and the per-line clip is the same 160-rune
 // guard against a minified blob every other detail line carries.
 //

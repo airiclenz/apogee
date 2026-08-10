@@ -50,6 +50,11 @@ type Scheme struct {
 
 	PromptToggle string `yaml:"prompt-toggle"` // the collapsed prompt's see-more / see-less marker
 	ToolMarker   string `yaml:"tool-marker"`   // a tool block's "+N more lines" remainder marker
+	// ToolLeader is the dotted run carrying the eye from a tool row's target to the outcome slot
+	// right-aligned at the row's edge (docs/layout/tool-layout.md). It ships seeded from `muted` —
+	// the tone the ▶/▼ indicator beside it already wears — so the leader reads as the same chrome
+	// until a scheme damps it further; splitting it off is what makes that possible at all.
+	ToolLeader string `yaml:"tool-leader"` // the ⋯ leader between a tool row's target and its outcome
 
 	Gauge     string `yaml:"gauge"`     // context-fill gauge bar
 	Selection string `yaml:"selection"` // mouse drag-selection highlight background

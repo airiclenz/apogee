@@ -47,7 +47,43 @@
   membership in super-groups; ADR 0039 fan-out UI beyond the grouping here; any
   engine/wire change (step counts, durations); version bumps.
 
-## 1. `tool-leader` role and the right-aligned outcome row
+## 1. `tool-leader` role and the right-aligned outcome row — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): the `tool-leader` role lives in `internal/scheme/scheme.go` +
+`schemes/dark.yaml` + `schemes/light.yaml` (the scheme vocabulary), not in
+`internal/tui/colorscheme.go` — that file is the `/color-scheme` command and holds no roles.
+The item's acceptance grep therefore reads `grep -n "tool-leader" internal/scheme/scheme.go`.
+
+NOTES (2026-08-10): consequences of the one-row leader shape, all recorded deliberately:
+(a) the `▶`/`▼` moved off a targeted block's HEADER onto its branch row (canon sketch);
+the targetless shape, having no branch row, keeps it on the header. (b) A clipped target
+alone no longer makes a block a toggle target — the row is identical open and closed, so
+expanding revealed nothing; canon says a row with nothing to expand carries no indicator.
+(c) `collapsedTargetRows` is gone: a targeted branch is always one row, so a collapsed
+block is at most three rows. (d) Added the tail design call 4 does not word: an outcome
+wider than the whole row is itself clipped, otherwise the row overruns the frame and the
+viewport folds it. (e) `renderPlain` in the tests collapses a painted leader to a single
+`⋯` so goldens read as shape rather than as width arithmetic.
+
+NOTES (2026-08-10): checkpoint — done: `tool-leader` scheme role + theme style + both
+built-in schemes; `leaderRow`/`toolRowCells`/`summaryStyle`/`failedSummary` in render.go;
+indicator moved to the branch row; `branchText`/`groupMemberText`/`groupTargetCells`/
+`collapsedBranch`/`collapsedTargetRows`/`groupMemberRows` deleted; ~45 existing goldens
+updated (`go build` clean, 2 tests still red). Remaining: rewrite
+`TestGroupMemberKeepsItsSummaryAndClipsTheTarget` (obsolete shared-summary-column
+invariant) and `TestTranscriptClickTogglesTheBlock/a clipped target row expands the
+block` (dead premise); add the item's new tests (row-painter table + `tool-leader` role
+test in both schemes); CHANGELOG entry.
+
+NOTES (2026-08-10): continuation — the item's overflow order needed one step the item's text does
+not word, and the new painter table test caught it: when the target's budget is narrower than the
+clip tail itself, `clipCells` returns a string WIDER than the budget it was given (`fitClipTail`
+appends " …" whatever room is left), so the row overran its width by those cells and the viewport
+would have folded it. `leaderRow` now drops the target outright in that case rather than painting a
+lone " …" stub — the same order taken one step further, and the reading NOTES (d) above already
+applies to the outcome slot. One existing golden moved with it (the width-11 wrapped-marker case in
+`TestRenderMarksTheWholeBlockAndItsMarker`). The obsolete shared-summary-column helper
+`summaryColumn` was deleted with the test that was its only caller.
 
 **What:** Introduce the new row shape for single-block branch lines and same-label
 group member rows: left `<tool-details>` (the target), flexing `⋯` leader, right-aligned

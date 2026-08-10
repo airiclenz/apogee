@@ -1039,16 +1039,19 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // the authority's wrap is SGR-aware and its measure strips ANSI, so baking the style into the text
 // leaves the soft-wrap and sticky-offset arithmetic untouched.
 //
-// Targets are padded to the block's widest so the detail column lines up; widths are display
-// cells (th.measure, width.go), so a multi-byte path pads correctly. A block of one pads to itself,
-// which is no padding at all. An empty slice renders nothing — every caller passes at least one
-// view, and a renderer on the repaint path must not be the thing that panics if one ever does not.
+// Every branch row takes the one shape the canon spec draws (docs/layout/tool-layout.md): the
+// target on the left, the outcome slot flush against the row's right edge, and a dotted leader
+// flexing between the two (leaderRow). The outcomes therefore line up down the block's edge without
+// a target column to pad to — the leader absorbs whatever the targets differ by, which is what lets
+// a block of one and a block of ten put their outcomes in the same place. An empty slice renders
+// nothing — every caller passes at least one view, and a renderer on the repaint path must not be
+// the thing that panics if one ever does not.
 //
 // A block of MANY is a different shape from a block of one, and it hands off at the top
 // (renderToolGroup): its header carries the member count and no state of its own, and each member
 // is held to a single row with an indicator of its own at the block's right edge. The two shapes
-// share this entry point — and the aligned target column, settled below over every view — because
-// what a caller has is a slice of views and which shape that is, is this function's answer.
+// share this entry point — and the row shape itself — because what a caller has is a slice of views
+// and which shape that is, is this function's answer.
 //
 // state is the SINGLE block's view state, and its expanded half changes exactly one thing: an
 // expanded block paints its retained body whole while a collapsed one paints the compact shape,
@@ -1072,27 +1075,20 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // selection meaning down every row it paints. The mark is state-independent by design: an expanded
 // block still marks its rows, which is what lets the same click collapse it again.
 //
-// The header WEARS that same answer: the ▶/▼ state indicator is appended to the label under the
-// very predicate that marks the lines, so the affordance and the click-target rule cannot come to
-// disagree — a block that wears an indicator is clickable and a block that does not is not, with
-// one condition behind both. Unlike the mark, the glyph is state-DEPENDENT: it is what says which
-// way the click will go (stateIndicator). It is styled apart from the label (th.toolIndicator, the
-// detail tone) so it reads as chrome beside the gold rather than as the last letter of it.
+// The BRANCH ROW wears that same answer: the ▶/▼ state indicator lands at the row's right edge,
+// after the outcome slot, under the very predicate that marks the lines — so the affordance and the
+// click-target rule cannot come to disagree, a block that wears an indicator being clickable and a
+// block that does not not, with one condition behind both. Unlike the mark, the glyph is
+// state-DEPENDENT: it is what says which way the click will go (stateIndicator). It is styled apart
+// from the row (th.toolIndicator) so it reads as chrome beside the text rather than as the last word
+// of it. The one shape that keeps the glyph on its HEADER is the targetless one, which paints no
+// branch row for it to sit at the edge of (docs/layout/tool-layout.md, "Single tool collapsed").
 func renderToolBlock(th theme, views []toolView, width int, state blockState) blockPaint {
 	if len(views) == 0 {
 		return blockPaint{}
 	}
-	// The column is measured over EXPANDED targets, for the reason expandTabs gives: a tab weighs
-	// nothing here while the wrap downstream spends four cells on it, so a column set from raw
-	// targets is a column the branch lines cannot land on (renderToolBranch pads to the same
-	// expanded measure). It is settled BEFORE the header, because the toggle-target rule now asks
-	// how the branch lines wrap and they pad to this column before they are wrapped.
-	column := 0
-	for _, tv := range views {
-		column = max(column, th.measure.Width(expandTabs(tv.Target)))
-	}
 	if len(views) > 1 {
-		return renderToolGroup(th, views, column, width, state)
+		return renderToolGroup(th, views, width, state)
 	}
 	// toggle is the block's whole click surface in one value — targetHeader when there is something
 	// behind the block and targetNone when there is not — settled once and spent on every row the
@@ -1100,14 +1096,16 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 	// this block is clickable.
 	toggle := targetNone
 	label := th.toolLabel.Render(views[0].Label)
-	if state.elides || blockHidesWhenCollapsed(th, views, column, width) {
+	if state.elides || blockHidesWhenCollapsed(th, views, width) {
 		toggle = targetHeader
-		label += " " + th.toolIndicator.Render(stateIndicator(state.expanded))
+		if views[0].Target == "" {
+			label += " " + th.toolIndicator.Render(stateIndicator(state.expanded))
+		}
 	}
 	var out blockPaint
 	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), toggle)
 	for i, tv := range views {
-		out.join(renderToolBranch(th, tv, column, branchMarker(i == len(views)-1), width, state.expanded, toggle))
+		out.join(renderToolBranch(th, tv, branchMarker(i == len(views)-1), width, state.expanded, toggle))
 	}
 	return out
 }
@@ -1134,15 +1132,14 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 //
 // state's own expanded flag reaches nothing here: it is the head entry's, and inside a group the
 // head is just the first member.
-func renderToolGroup(th theme, views []toolView, column, width int, state blockState) blockPaint {
+func renderToolGroup(th theme, views []toolView, width int, state blockState) blockPaint {
 	label := th.toolLabel.Render(views[0].Label) + " " +
 		th.toolIndicator.Render(fmt.Sprintf(groupCountFormat, len(views)))
 	var out blockPaint
 	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), targetNone)
-	room := max(1, width-groupIndicatorCells(th))
-	column = groupTargetCells(th, views, column, room)
+	room := toolRowCells(th, width)
 	for i, tv := range views {
-		rows, hides := renderGroupMember(th, tv, column, branchMarker(i == len(views)-1), width, room,
+		rows, hides := renderGroupMember(th, tv, branchMarker(i == len(views)-1), width, room,
 			state.memberExpanded(i))
 		kind := targetNone
 		if hides {
@@ -1153,75 +1150,44 @@ func renderToolGroup(th theme, views []toolView, column, width int, state blockS
 	return out
 }
 
-// groupTargetCells is the column every member's target is held to — the block's widest target,
-// capped at what leaves the block's WIDEST summary room on the row. It is a block-wide number
-// rather than a per-member one for the only reason the column exists: the summaries have to open in
-// the same place. Cap each member against its own summary and a group of one long target and one
-// short one puts its two outcomes two columns apart, which reads as a mistake rather than as a list.
-//
-// Where every target fits inside that cap — the common case, a batch of file names — the cap does
-// nothing and the column is the widest target, exactly as the ungrouped painter measures it. Where
-// they do not, every target is cut to the same width and the summaries line up all the same, which
-// is the trade the one-row budget makes: what the row cannot show of a path is a click away, and
-// what happened to it is the half worth keeping.
-//
-// A group with no summary anywhere has nothing to align and returns the plain column: an in-flight
-// batch spends the whole row on its targets.
-func groupTargetCells(th theme, views []toolView, column, room int) int {
-	tail := 0
-	for _, tv := range views {
-		if tv.Summary.Text != "" {
-			tail = max(tail, th.measure.Width(" "+tv.Summary.Text))
-		}
-	}
-	if tail == 0 {
-		return column
-	}
-	return max(1, min(column, room-th.measure.Width(branchMarker(true))-tail))
-}
-
 // renderGroupMember paints one member of a grouped block, in whichever of its two states the
 // member's own entry is in, and reports whether the COLLAPSED paint hides anything — which is both
 // what makes the member wear an indicator and what makes its rows a click target (renderToolGroup).
 //
-// Collapsed, it is one screen row whatever the call is carrying: the branch marker, the call's
-// target clipped to what is left after the summary and the indicator field, the pad that keeps the
-// block's summary column, and the summary itself; a ▶ then right-aligns at the block's edge when the
+// Collapsed, it is one screen row whatever the call is carrying — leaderRow's shape, the same one
+// the ungrouped branch line takes: the branch marker, the call's target, the dotted leader, and the
+// outcome flush against the room's right edge; a ▶ then right-aligns at the block's edge when the
 // member hides anything.
 //
-// The order the room is spent in is the rule: the SUMMARY is never dropped. It is the outcome — "1 -
-// 154", "+2 -2", "error: …" — and a member row that showed more of a long path at the cost of what
-// happened to it would be showing the less useful half. So the summary's cells are reserved first,
-// block-wide (groupTargetCells), and the target takes what remains, ending in " …" when that was not
-// enough (clipCells). Where the targets are short they all fit, the pad puts every summary in the
-// same column, and the row is byte-identical to the one the ungrouped painter drew before this shape
-// existed.
+// The order the room is spent in is the rule: the OUTCOME is never dropped. It is what happened —
+// "12 lines", "+2 −3", "error: …" — and a member row that showed more of a long path at the cost of
+// it would be showing the less useful half. So the slot's cells are reserved first, the leader
+// flexes down to its floor, and only then does the target give way, ending in " …" (design call 4).
 //
 // The indicator field is reserved on every member, hidden one or not, so the ▶s line up down the
 // block's right edge and a member does not gain three columns of target by having nothing to reveal.
-// Whether the member WEARS one is the same question the single block's header asks — does the
-// collapsed paint hide anything (blockHidesWhenCollapsed) — asked here of one call: a body, or a
-// target the row's own width cut. A call still in flight has neither and paints a bare row.
+// Whether the member WEARS one is the same question the single block asks — does the collapsed paint
+// hide anything (blockHidesWhenCollapsed) — asked here of one call: a body, or a target the row's own
+// width cut. A call still in flight has neither and paints a bare row.
 //
 // The hidden answer is taken from the COLLAPSED arithmetic in both states, which is why the clip is
 // composed even when the member is open: an expanded member is expanded precisely because its
 // collapsed paint hid something, and it has to stay a click target so the same click closes it —
-// the state-independence the single block's header mark has always had.
+// the state-independence the single block's mark has always had.
 //
-// column is the block's own (groupTargetCells) and room is the row less the indicator field; both
-// are settled once for the whole block, so no member can lay itself out against a different one,
-// and the field the ▶ sits in is held clear down an OPEN member too (renderExpandedMember) — a row
-// that re-wrapped on being opened would move out from under the very click that opened it.
-func renderGroupMember(th theme, tv toolView, column int, marker string, width, room int, expanded bool) (lines []string, hides bool) {
-	text, style, clipped := groupMemberText(th, tv, column, marker, room)
-	rows, cut := clipWrap(th, style, marker, text, room, groupMemberRows)
-	if hides = clipped || cut || tv.Details.len() > 0; !hides {
-		return rows, false
+// room is the row less the indicator field, settled once for the whole block, so no member can lay
+// itself out against a different one, and the field the ▶ sits in is held clear down an OPEN member
+// too (renderExpandedMember) — a row that re-wrapped on being opened would move out from under the
+// very click that opened it.
+func renderGroupMember(th theme, tv toolView, marker string, width, room int, expanded bool) (lines []string, hides bool) {
+	row := leaderRow(th, tv, marker, room, expanded)
+	if hides = tv.Details.len() > 0; !hides {
+		return []string{row}, false
 	}
 	if expanded {
-		return renderExpandedMember(th, tv, column, marker, width, room), true
+		return renderExpandedMember(th, tv, marker, width, room), true
 	}
-	return []string{indicatorRow(th, rows[0], width, glyphCollapsed)}, true
+	return []string{indicatorRow(th, row, width, glyphCollapsed)}, true
 }
 
 // renderExpandedMember paints an OPEN member of a grouped block — the sketch's "middle one
@@ -1234,20 +1200,20 @@ func renderGroupMember(th theme, tv toolView, column int, marker string, width, 
 // rail's and its meaning is not, so an open member inside a nested run must not wear the rail's
 // gold — the two frames are read at a glance and confusing them would misattribute the body.
 //
-// The first row is the branch TEXT, not the bare target: the summary is the call's outcome and
-// opening a member must not take it away, and composing it through the same branchText the
-// collapsed row and the ungrouped block both use keeps the summary in the column it already
-// occupied. Nothing is clipped here — that is the whole of what opening a member buys — but the
-// wrap still stops at room, so the indicator field stays clear down the member and the ▼ lands in
-// the column the ▶ vacated.
+// The first row is the whole branch ROW, not the bare target: the outcome is what happened and
+// opening a member must not take it away, and composing it through the same leaderRow the collapsed
+// row and the ungrouped block both use keeps the outcome in the column it already occupied — under
+// the very click that opened the member. That is also why it is still laid out against room: the
+// indicator field stays clear down the member and the ▼ lands in the column the ▶ vacated. The row
+// therefore keeps the one-row budget in both states; what opening a member buys is its BODY, which
+// is the half a collapsed member was hiding.
 //
 // It grows no "+N more lines" marker: the marker counts what a collapsed paint left out, and this
 // paint leaves nothing out. The see-less marker closes it instead, worded from the prompt block's
 // own constant so the transcript has one vocabulary for "close this" (design call 7).
-func renderExpandedMember(th theme, tv toolView, column int, marker string, width, room int) []string {
-	text, style := branchText(th, tv, column, true)
-	out := gutteredWrap(th, style, marker, memberGutter, text, room)
-	out[0] = indicatorRow(th, out[0], width, glyphExpanded)
+func renderExpandedMember(th theme, tv toolView, marker string, width, room int) []string {
+	row := leaderRow(th, tv, marker, room, true)
+	out := []string{indicatorRow(th, row, width, glyphExpanded)}
 	for _, d := range tv.Details.all() {
 		out = append(out, gutteredWrap(th, detailStyle(th, d.Kind, true), memberGutter, memberGutter, d.Text, room)...)
 	}
@@ -1302,31 +1268,104 @@ func seeLessRow(th theme, width int) string {
 // open member's text in the column its collapsed row used.
 const memberGutter = "  " + glyphMemberGutter + " "
 
-// groupMemberText composes a member row's text and the style it paints in — branchText under the
-// one-row budget. It returns TEXT rather than a painted line because the row is styled whole, the
-// way the ungrouped branch line is: the target and the summary beside it are one sentence about one
-// call, and splitting the render at the pad would put a style boundary in the middle of it.
+// The dotted leader and the room it flexes in (docs/layout/tool-layout.md, "Width and overflow").
 //
-// clipped says the target was cut, which is half of what makes the member wear an indicator. The
-// composed text always fits the row by construction — the target is cut to the block's column and
-// the column already leaves the widest summary its cells — so the clip the caller then applies is a
-// guard rather than the mechanism.
+// glyphLeaderDot is one cell of the run that carries the eye from a row's target to the outcome
+// slot at its right edge. leaderGap is the blank held on each side of that run, so the dots never
+// touch the text they run between. leaderMinDots is the floor the run flexes down to before the
+// LEFT target starts giving way — one dot, because a leader that vanished entirely would leave two
+// unrelated words abutting and read as a single phrase.
+const (
+	glyphLeaderDot = "⋯" // U+22EF MIDLINE HORIZONTAL ELLIPSIS — deliberately one glyph per cell, so the run's length IS its cell count
+	leaderGap      = 1
+	leaderMinDots  = 1
+)
+
+// leaderRow paints one call's branch row whole — the shape every single block and every group
+// member takes (docs/layout/tool-layout.md): the branch marker, the call's target, a dotted leader,
+// and the outcome slot flush against the right of room.
 //
-// A member with NO summary yet is the one that ignores the column: nothing has to line up beside a
-// call still in flight, so its target spends the whole row before the indicator field.
+// It returns a painted row rather than text-and-a-style because the row is no longer one voice: the
+// target speaks in the block's state tone, the leader in its own damped `tool-leader` role, and the
+// outcome in whatever its own kind and verdict call for (summaryStyle). A caller that wrapped this
+// afterwards would be wrapping a styled string; nothing needs to, because the row is one row by
+// construction — that is what the overflow order below buys.
 //
-// It composes in the COLLAPSED tone whichever state the member is in, because that is the only
-// state its rows are painted in: an open member's rows are renderExpandedMember's, and what this
-// returns then serves the clipped answer alone (renderGroupMember).
-func groupMemberText(th theme, tv toolView, column int, marker string, room int) (text string, style lipgloss.Style, clipped bool) {
-	target := expandTabs(tv.Target)
-	if tv.Summary.Text == "" {
-		text, clipped = clipCells(th, target, room-th.measure.Width(marker))
-		return text, detailTone(th, false), clipped
+// The order room is spent in IS design call 4, and it is the whole of the arithmetic: the outcome
+// slot is reserved first and always prints whole, the leader then flexes down to leaderMinDots, and
+// only then is the target cut, ending in " …" (clipCells). A row too narrow for even that drops the
+// target outright rather than the outcome — what happened is the half worth keeping, and a row with
+// nothing left to give still says it.
+//
+// expanded reaches the TONES alone (detailTone, summaryStyle): a row is the same shape in both
+// states, which is what lets the same click that opened a member close it without the row moving
+// out from under the pointer.
+func leaderRow(th theme, tv toolView, marker string, room int, expanded bool) string {
+	avail := max(1, room-th.measure.Width(marker))
+	slot := tv.Summary.Text
+	// The last resort under design call 4, past the point it words: an outcome WIDER than the row
+	// itself is cut too. A slot that printed whole there would not print whole anywhere — it would
+	// run past the frame and the viewport would fold it into a second row, taking the block out of
+	// its budget and the ▶ out from under the pointer. Everything above it still holds: the dots go
+	// first, the target next, and only an outcome with no row left to stand in is touched at all.
+	if slotCells := avail - leaderGap - leaderMinDots; th.measure.Width(slot) > slotCells {
+		slot, _ = clipCells(th, slot, max(1, slotCells))
 	}
-	text, clipped = clipCells(th, target, column)
-	pad := strings.Repeat(" ", max(0, column-th.measure.Width(text)))
-	return text + pad + " " + tv.Summary.Text, detailStyle(th, tv.Summary.Kind, false), clipped
+	tail := 0
+	if slot != "" {
+		tail = leaderGap + th.measure.Width(slot)
+	}
+	target := ""
+	if budget := avail - tail - leaderGap - leaderMinDots; budget >= 1 {
+		target, _ = clipCells(th, expandTabs(tv.Target), budget)
+		// A budget too narrow to hold even the clip tail comes back WIDER than it was given —
+		// fitClipTail appends the tail whatever room is left — and those cells would push the row
+		// past its width and fold it onto a second line. The target is dropped outright instead,
+		// which is the order above taken one step further: a row this narrow has nothing left to
+		// give up but the target, and what happened is the half worth keeping.
+		if th.measure.Width(target) > budget {
+			target = ""
+		}
+	}
+	lead, leadCells := "", 0
+	if target != "" {
+		lead = detailTone(th, expanded).Render(target) + strings.Repeat(" ", leaderGap)
+		leadCells = th.measure.Width(target) + leaderGap
+	}
+	dots := max(leaderMinDots, avail-leadCells-tail)
+	row := detailTone(th, expanded).Render(marker) + lead +
+		th.toolLeader.Render(strings.Repeat(glyphLeaderDot, dots))
+	if slot != "" {
+		row += strings.Repeat(" ", leaderGap) + summaryStyle(th, tv.Summary, expanded).Render(slot)
+	}
+	return row
+}
+
+// toolRowCells is the room a branch or member row lays itself out in: the block's width less the
+// field the ▶/▼ is held in at its right edge (groupIndicatorCells). The field is reserved on every
+// row, one wearing an indicator or not, so the outcome slots line up down the block's edge whatever
+// each row has to reveal — and so a row does not move sideways the moment it gains something.
+func toolRowCells(th theme, width int) int {
+	return max(1, width-groupIndicatorCells(th))
+}
+
+// summaryStyle is the tone the outcome slot takes. A summary that says the call FAILED is red —
+// design call 11 makes that red the only failure marking, so no glyph and no header changes with it
+// — and every other summary keeps the branch line's own tone, the diff kinds included (detailStyle).
+func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
+	if failedSummary(s.Text) {
+		return th.errorText
+	}
+	return detailStyle(th, s.Kind, expanded)
+}
+
+// failedSummary reads the outcome's own wording for a verdict of failure (errorSummaryPrefix and
+// the two bare verdicts beside it). It asks the TEXT because that is where the fact is: a summary
+// carries no verdict flag, and inventing one to be derived from the same words would be a second
+// answer to a question already settled at the presenter's seam.
+func failedSummary(text string) bool {
+	return strings.HasPrefix(text, errorSummaryPrefix) ||
+		text == deniedSummary || text == cancelledSummary
 }
 
 // clipCells fits text into ONE row of at most cells columns, ending it in clipTail when it had to
@@ -1347,17 +1386,14 @@ func clipCells(th theme, text string, cells int) (string, bool) {
 
 // The GROUPED block's own numbers (docs/layout/tool-layout.md).
 //
-// groupMemberRows is the whole of a member's budget: one row, always. A group is a list and a list's
-// rows are one line each — the body a member hides is reached by opening that member, not by letting
-// it grow down the block.
-//
-// groupIndicatorGap is the field held clear between a member's text and its ▶, and it is reserved on
-// every member so the indicators line up down the right edge whether or not each row wears one.
+// groupIndicatorGap is the field held clear between a row's outcome slot and its ▶, and it is
+// reserved on every row so the indicators line up down the right edge whether or not each row wears
+// one. A member's own budget is not among these numbers any more: one row is not the group's rule
+// but the row shape's, since a leader row fills its width exactly by construction (leaderRow).
 //
 // groupCountFormat is the "(N)" the header carries beside the label for N ≥ 2 — a lone groupable
 // call is painted as a single block and counts nothing.
 const (
-	groupMemberRows   = 1
 	groupIndicatorGap = 3
 	groupCountFormat  = "(%d)"
 )
@@ -1474,15 +1510,19 @@ func memberFlags(entries []entry) []bool {
 // blockHidesWhenCollapsed reports whether a block's collapsed paint leaves anything unshown — the
 // whole of the toggle-target rule: a header is a click target exactly when there is something
 // behind it. It asks the very functions that do the hiding — collapsedCall for the lines a cap
-// drops, collapsedBranch and clipDetails for a line the row budget cuts — rather than re-deriving
-// any of it, so the rule cannot answer differently from the paint.
+// drops, clipDetails for a branch line the row budget cuts — rather than re-deriving any of it, so
+// the rule cannot answer differently from the paint.
 //
-// A call hides on EITHER count, and the second is why this takes a width: the collapsed paint
-// spends at most collapsedTargetRows rows on a target and collapsedBranchRows on each branch line
-// it keeps, so whether a long line is cut depends on how wide the block is being painted this frame
-// (clipWrap). A block that hides nothing at 200 columns hides a tail at 60, and the indicator, the
-// click target and the paint all have to say so together — which is what makes the width an
-// argument here rather than a fact the caller keeps.
+// A CUT TARGET is deliberately not among the counts. It used to be, back when the branch line could
+// spend a second row and opening the block gave the whole path back; a leader row is one row in both
+// states by construction (leaderRow), so an over-long target ends in " …" whichever way the block is
+// folded and expanding it would reveal nothing. The canon spec says the same thing from the other
+// end: a row with nothing to expand carries no indicator at all (docs/layout/tool-layout.md), and an
+// affordance that opens onto the row it was already showing is one a reader learns to distrust.
+//
+// The width is still an argument because the TARGETLESS shape's branch lines are cut by it
+// (clipDetails): a block that hides nothing at 200 columns hides a tail at 60, and the indicator,
+// the click target and the paint all have to say so together.
 //
 // BOTH shapes answer through it, the targetless one included: an unregistered tool's verbatim
 // arguments, a registered call that arrived without its target, a stray result — all spend the same
@@ -1495,8 +1535,8 @@ func memberFlags(entries []entry) []bool {
 // each wearing an indicator of their own under this same question asked of one call
 // (renderGroupMember). The slice stays a slice because the question is about a block's views rather
 // than about one of them, and item 5's per-member state is where that distinction is spent.
-func blockHidesWhenCollapsed(th theme, views []toolView, column, width int) bool {
-	for i, tv := range views {
+func blockHidesWhenCollapsed(th theme, views []toolView, width int) bool {
+	for _, tv := range views {
 		shown, _, truncated := collapsedCall(tv)
 		if truncated {
 			return true
@@ -1505,10 +1545,6 @@ func blockHidesWhenCollapsed(th theme, views []toolView, column, width int) bool
 			if _, clipped := clipDetails(th, shown, width); clipped {
 				return true
 			}
-			continue
-		}
-		if _, clipped := collapsedBranch(th, tv, column, branchMarker(i == len(views)-1), width); clipped {
-			return true
 		}
 	}
 	return false
@@ -1536,13 +1572,13 @@ func blockHidesWhenCollapsed(th theme, views []toolView, column, width int) bool
 //
 // The block's state reaches BOTH shapes. An expanded call lays out every line the entry retained,
 // soft-wrapping whatever is overlong, and grows no remainder marker. A COLLAPSED targeted call is
-// the row budget's (layout.md, "Collapsed and expanded blocks"): its branch is clipped to
-// collapsedTargetRows rows (collapsedBranch), no body line is painted at all, and the marker
+// the row budget's (layout.md, "Collapsed and expanded blocks"): its branch is the ONE leader row
+// (leaderRow), no body line is painted at all, and the marker
 // counts the body WHOLE — the sketch's "+5 more lines" over a five-line output. So a collapsed
-// block stands at most four rows tall whatever tool filled it and however long its target is,
+// block stands at most three rows tall whatever tool filled it and however long its target is,
 // which is the point: a scrollback of tool calls reads as a list rather than as a wall. A
 // collapsed targetless call caps its branch list instead, since there the lines ARE the branches —
-// collapsedBodyCap of them, one clipped row each — and lands on the same four rows.
+// collapsedBodyCap of them, one clipped row each — and lands on the same three rows.
 //
 // toggle is the block's own click surface, settled once by renderToolBlock and spent on every row
 // a branch emits: the branch line, the body under it, the targetless shape's branch list. A click
@@ -1552,7 +1588,7 @@ func blockHidesWhenCollapsed(th theme, views []toolView, column, width int) bool
 // and is laid out on its own so the mark lands on exactly the marker's physical lines (all of them,
 // should it ever wrap) and on nothing else: it belongs to the collapsed paint, so it OPENS and
 // never closes (targetMarker).
-func renderToolBranch(th theme, tv toolView, column int, marker string, width int, expanded bool, toggle targetKind) blockPaint {
+func renderToolBranch(th theme, tv toolView, marker string, width int, expanded bool, toggle targetKind) blockPaint {
 	if tv.Target == "" {
 		if expanded {
 			var out blockPaint
@@ -1573,14 +1609,15 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 	}
 	indent := th.measure.Width(marker)
 	var out blockPaint
+	row := leaderRow(th, tv, marker, toolRowCells(th, width), expanded)
+	if toggle != targetNone {
+		row = indicatorRow(th, row, width, stateIndicator(expanded))
+	}
+	out.add([]string{row}, toggle)
 	if expanded {
-		text, style := branchText(th, tv, column, true)
-		out.add(hangingWrap(th, style, marker, text, width), toggle)
 		out.add(renderSubDetails(th, tv.Details.all(), indent, width), toggle)
 		return out
 	}
-	rows, _ := collapsedBranch(th, tv, column, marker, width)
-	out.add(rows, toggle)
 	if _, remainder, truncated := collapsedDetails(tv.Details); truncated {
 		// The marker is painted in its OWN style role rather than through the body's detailStyle:
 		// it is a paint artefact, not a line the tool wrote, and a body line that happens to open
@@ -1591,49 +1628,14 @@ func renderToolBranch(th theme, tv toolView, column int, marker string, width in
 	return out
 }
 
-// branchText composes one call's branch line and the style it paints in: the target alone, or —
-// where the call has a summary — the target padded to the block's column, one space, then that
-// summary. It is the line's TEXT and nothing about its rows, so the collapsed paint, the expanded
-// paint and the toggle-target rule all wrap the same string and cannot come to disagree about where
-// it breaks.
-//
-// The target is expanded before it is measured AND before it is padded, so the pad is computed over
-// the very string the wrap goes on to hand the style (expandTabs). Measured raw it read as nothing,
-// wrapText then spent four cells per tab on it, and the summary opened that far right of the column
-// its siblings opened theirs in — the column being the only thing that lines a block's summaries up,
-// since nothing is drawn between them.
-//
-// expanded is the state of the block the line belongs to, and it reaches the STYLE alone: the line
-// is one sentence about one call, so the target and the summary beside it take one tone, and it is
-// the open one wherever the block is open (detailTone). A diff-kinded summary keeps its colour
-// either way (detailStyle).
-func branchText(th theme, tv toolView, column int, expanded bool) (text string, style lipgloss.Style) {
-	target := expandTabs(tv.Target)
-	text, style = target, detailTone(th, expanded)
-	if tv.Summary.Text != "" {
-		pad := strings.Repeat(" ", max(0, column-th.measure.Width(target)))
-		text += pad + " " + tv.Summary.Text
-		style = detailStyle(th, tv.Summary.Kind, expanded)
-	}
-	return text, style
-}
-
-// collapsedBranch is the collapsed paint of one targeted call's branch line: the branch text under
-// the row budget, and whether the budget cut it (clipWrap, which ends a cut row in " …"). It is the
-// one place the cut is taken, asked by the painter and by the toggle-target rule alike
-// (blockHidesWhenCollapsed), so a target the paint clips is a target the indicator knows about.
-func collapsedBranch(th theme, tv toolView, column int, marker string, width int) (lines []string, clipped bool) {
-	text, style := branchText(th, tv, column, false)
-	return clipWrap(th, style, marker, text, width, collapsedTargetRows)
-}
-
 // The COLLAPSED block's row budget — the house numbers behind "a collapsed block stands at most
-// four rows tall": its header, then at most three content rows, whatever tool filled it and however
-// long its target is (layout.md, "Collapsed and expanded blocks"; docs/layout/tool-layout.md).
+// three rows tall": its header, its branch row, and the remainder marker beneath it, whatever tool
+// filled it and however long its target is (layout.md, "Collapsed and expanded blocks";
+// docs/layout/tool-layout.md).
 //
-// collapsedTargetRows is what a targeted call may spend on its branch line before the clip takes
-// the rest (collapsedBranch); the third content row is the remainder marker, which counts the body
-// WHOLE because a collapsed block paints no body line at all. Nothing of the output is previewed:
+// A targeted call's branch is not among them because it can only ever be ONE row: the leader shape
+// fills the width exactly and cuts the target to make it (leaderRow). The marker counts the body
+// WHOLE, since a collapsed block paints no body line at all. Nothing of the output is previewed:
 // one preview line of a hundred said little and cost every block a row, while the marker's count
 // says the same thing in the row the block was going to spend anyway.
 //
@@ -1647,10 +1649,9 @@ func collapsedBranch(th theme, tv toolView, column int, marker string, width int
 // lines are two rows only while neither soft-wraps, and an MCP call's argument blob wraps at any
 // width a terminal actually has.
 //
-// All three are paint-time caps on content the entry keeps in full, which is why they live beside
-// the painter and not beside diffBody, the producer that used to apply the diff's own.
+// Both are paint-time caps on content the entry keeps in full, which is why they live beside the
+// painter and not beside diffBody, the producer that used to apply the diff's own.
 const (
-	collapsedTargetRows = 2
 	collapsedBodyCap    = 2
 	collapsedBranchRows = 1
 )
@@ -1705,7 +1706,7 @@ func splitAtCap[T any](lines []T, limit int) (shown []T, hidden int) {
 // collapsedDetails is the collapsed paint of a retained body: NO line of it, and the synthesized
 // "+N more lines" marker counting all of it (truncated says whether there is a body at all; the
 // marker is meaningless when there is not). The rows a collapsed block has to spend go to its
-// target (collapsedTargetRows), so a body is a thing a click reveals rather than a thing the
+// target (its one leader row), so a body is a thing a click reveals rather than a thing the
 // scrollback previews — which is why the shown slice it still returns is always empty, kept only so
 // the two collapsed shapes answer in one signature.
 //

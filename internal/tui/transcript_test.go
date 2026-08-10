@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -25,12 +26,30 @@ import (
 // strips the ANSI styling, and trims each line's trailing padding so the assertions test the
 // text, not the styling (ansiPattern lives in model_test.go). plainRender is the width-80
 // default the substring assertions use.
+//
+// It also collapses a tool row's dotted leader to a SINGLE ⋯ (leaderRow, render.go). The run's
+// length is pure geometry — it flexes to whatever the width less the target and the outcome leaves
+// — so a golden carrying it verbatim would assert the terminal's width in every line and break on
+// any change to a fixture's wording. The shape still shows: a golden reads
+// `┕ main.go ⋯ 12 lines   ▶`, which says target, leader, outcome slot and indicator in the order
+// the spec draws them. The geometry itself — the dot floor, the target's truncation, the outcome
+// printing whole — is pinned directly on the painter instead (TestLeaderRowSpendsItsRoomInOrder).
 func renderPlain(tr *transcript, width int) string {
 	lines := tr.renderLines(newTheme(scheme.Default()), width)
 	for i, ln := range lines {
-		lines[i] = strings.TrimRight(ansiPattern.ReplaceAllString(ln, ""), " ")
+		lines[i] = strings.TrimRight(collapseLeader(ansiPattern.ReplaceAllString(ln, "")), " ")
 	}
 	return strings.Join(lines, "\n")
+}
+
+// leaderRun matches a painted leader — two or more of its dots — so collapsing it cannot touch a
+// lone ⋯ a tool's own output happens to contain.
+var leaderRun = regexp.MustCompile(glyphLeaderDot + "{2,}")
+
+// collapseLeader reduces every dotted leader on a line to one dot. It is renderPlain's, and the
+// paint-level tests deliberately do not use it: what they measure is the very geometry this drops.
+func collapseLeader(line string) string {
+	return leaderRun.ReplaceAllString(line, glyphLeaderDot)
 }
 
 func plainRender(tr *transcript) string { return renderPlain(tr, 80) }
@@ -99,7 +118,7 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 		"✦ Let me read it.",
 		"",
 		"✦ Read File",
-		"  ┕ main.go 1 - 1",
+		"  ┕ main.go ⋯ 1 - 1",
 		"",
 		"✦ It is a Go file.",
 	}, "\n")
@@ -343,7 +362,7 @@ func TestTranscriptTrimsNarrationBlankLines(t *testing.T) {
 		"✦ Reading it.",
 		"",
 		"✦ Read File",
-		"  ┕ main.go",
+		"  ┕ main.go ⋯",
 	}, "\n")
 	if got := plainRender(tr); got != want {
 		t.Errorf("narration mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -969,8 +988,8 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	subAgentReport(tr, "s1", "Found 4 gaps\nin the suite\nhere they are", 0)
 
 	collapsed := strings.Join([]string{
-		"✦ Sub-Agent ▶",
-		"  ┕ survey the tests 2 tool calls · 12k/32k · Found 4 gaps",
+		"✦ Sub-Agent",
+		groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls · 12k/32k · Found 4 gaps"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != collapsed {
 		t.Errorf("collapsed run mismatch (collapsed is the default):\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
@@ -983,8 +1002,8 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 		t.Fatal("toggleExpanded(0) = false; want the run's head entry expanded")
 	}
 	expanded := strings.Join([]string{
-		"✦ Sub-Agent ▼",
-		"  ┕ survey the tests",
+		"✦ Sub-Agent",
+		leaderEdgeRow("  ┕ survey the tests ⋯", glyphExpanded),
 		"    Found 4 gaps",
 		"    in the suite",
 		"    here they are",
@@ -992,10 +1011,10 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 		"│ ⤷ sub-agent",
 		"│",
 		"│ ✦ Read File",
-		"│   ┕ a.go 1 - 5",
+		"│   ┕ a.go ⋯ 1 - 5",
 		"│",
-		"│ ✦ Run ▶",
-		"│   ┕ go test",
+		"│ ✦ Run",
+		leaderEdgeRow("│   ┕ go test ⋯", glyphCollapsed),
 		"│     +3 more lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != expanded {
@@ -1077,7 +1096,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				tr.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 1},
 					Call: domain.ToolCall{ID: "c2", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)}})
 			},
-			want: "  ┕ survey the tests 2 tool calls · searching · TODO",
+			want: groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls · searching · TODO"),
 		},
 		{
 			name: "working with every call settled: the count alone",
@@ -1085,7 +1104,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
-			want: "  ┕ survey the tests 1 tool call",
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call"),
 		},
 		{
 			name: "finished: the count plus a one-line report, which needs no body",
@@ -1094,7 +1113,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				subAgentReport(tr, "s1", "Found 4 gaps", 0)
 			},
-			want: "  ┕ survey the tests 1 tool call · Found 4 gaps",
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · Found 4 gaps"),
 		},
 		{
 			name: "finished: the count plus the first line of a report long enough to be a body",
@@ -1103,7 +1122,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				subAgentReport(tr, "s1", "Found 4 gaps\nand here they are", 0)
 			},
-			want: "  ┕ survey the tests 1 tool call · Found 4 gaps",
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · Found 4 gaps"),
 		},
 		{
 			name: "working, having reported: the fill sits between the count and the live phrase",
@@ -1114,7 +1133,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				tr.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 1},
 					Call: domain.ToolCall{ID: "c2", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)}})
 			},
-			want: "  ┕ survey the tests 2 tool calls · 12k/32k · searching · TODO",
+			want: groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls · 12k/32k · searching · TODO"),
 		},
 		{
 			name: "working with every call settled: the count and the fill, and no empty separator after it",
@@ -1123,7 +1142,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				subAgentUsage(tr, 1, 900, 32768)
 			},
-			want: "  ┕ survey the tests 1 tool call · 900/32k",
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · 900/32k"),
 		},
 		{
 			name: "finished: the reading the run ended on stands beside its report",
@@ -1134,7 +1153,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				subAgentUsage(tr, 1, 18432, 32768)
 				subAgentReport(tr, "s1", "Found 4 gaps", 0)
 			},
-			want: "  ┕ survey the tests 1 tool call · 18k/32k · Found 4 gaps",
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · 18k/32k · Found 4 gaps"),
 		},
 		{
 			name: "a reading with no window behind it is no cell at all",
@@ -1144,7 +1163,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				subAgentUsage(tr, 1, 12000, 0) // an unbound window: a fill with no scale says nothing
 				subAgentReport(tr, "s1", "Found 4 gaps", 0)
 			},
-			want: "  ┕ survey the tests 1 tool call · Found 4 gaps",
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · Found 4 gaps"),
 		},
 	}
 	for _, tc := range cases {
@@ -1183,7 +1202,7 @@ func TestSubAgentCountIsTransitive(t *testing.T) {
 	// One read at depth 1, the nested sub-agent call, and its two reads at depth 2 — against the
 	// outer run's OWN 12k, never the 19k the two windows would add up to.
 	painted := renderPlain(tr, 80)
-	want := "  ┕ survey the repo 4 tool calls · 12k/32k · survey complete"
+	want := groupMemberLine("  ┕ survey the repo ⋯ 4 tool calls · 12k/32k · survey complete")
 	if branch := strings.Split(painted, "\n")[1]; branch != want {
 		t.Errorf("transitive summary = %q; want %q", branch, want)
 	}
@@ -1208,13 +1227,13 @@ func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ Sub-Agent ▼",
-		"  ┕ survey the repo survey complete",
+		"✦ Sub-Agent",
+		leaderEdgeRow("  ┕ survey the repo ⋯ survey complete", glyphExpanded),
 		"",
 		"│ ⤷ sub-agent",
 		"│",
-		"│ ✦ Sub-Agent ▶", // the nested run keeps its OWN state, and its indicator says so
-		"│   ┕ read the tests 1 tool call · tests read",
+		"│ ✦ Sub-Agent", // the nested run keeps its OWN state, and its indicator says so
+		leaderEdgeRow("│   ┕ read the tests ⋯ 1 tool call · tests read", glyphCollapsed),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("nested run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -1244,7 +1263,7 @@ func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
-		"  ┕ survey the tests",
+		"  ┕ survey the tests ⋯",
 	}, "\n")
 	got := renderPlain(tr, 80)
 	if got != want {
@@ -1267,7 +1286,7 @@ func TestSubAgentStreamPreviewRailedWhenRunExpanded(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
-		"  ┕ survey the tests",
+		"  ┕ survey the tests ⋯",
 		"",
 		"│ ⤷ sub-agent",
 		"│",
@@ -1356,8 +1375,8 @@ func TestParentMessageKeepsTheDelegatesStreamInsideItsRun(t *testing.T) {
 		t.Fatal("setExpanded(0, true) = false; want the run expanded")
 	}
 	want := strings.Join([]string{
-		"✦ Sub-Agent ▼",
-		"  ┕ survey the tests",
+		"✦ Sub-Agent",
+		leaderEdgeRow("  ┕ survey the tests ⋯", glyphExpanded),
 		"",
 		"│ ⤷ sub-agent",
 		"│",

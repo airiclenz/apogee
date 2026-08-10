@@ -920,33 +920,56 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 	})
 
 	// A collapsed block's TARGET row is the same surface from the other side: the row a reader is
-	// looking at when they want the rest is the clipped path itself, not the label above it.
-	t.Run("a clipped target row expands the block", func(t *testing.T) {
+	// looking at when they want the rest is the clipped path itself, not the label above it. The
+	// row does not move when the click lands, either — a leader row is the same one row open and
+	// closed (leaderRow, render.go), so the target it could not fit stays cut in both states and
+	// the pointer is still over the surface that toggles it back.
+	t.Run("a clipped target row toggles the block", func(t *testing.T) {
 		m := modelWithClippedToolBlock(t)
 		rows := markedRows(t, m, targetHeader)
-		if len(rows) != 3 {
-			t.Fatalf("the collapsed block marks %d rows, want a header and two clipped target rows:\n%s",
+		if len(rows) != 2 {
+			t.Fatalf("the collapsed block marks %d rows, want its header and its one target row:\n%s",
 				len(rows), strings.Join(m.lines, "\n"))
 		}
-		target := rows[2] // the second clipped row, the furthest from the header
-		if !strings.HasSuffix(strip(m.lines[target]), clipTail) {
+		target := rows[1] // the branch row itself, the one carrying the cut
+		if !strings.Contains(strip(m.lines[target]), clipTail) {
 			t.Fatalf("setup: line %d is %q, not a clipped target row", target, strip(m.lines[target]))
 		}
+		before := strip(m.lines[target])
 
 		m = clickCell(t, m, 6, screenRow(t, m, target))
 		if !blockExpanded(t, m, rows[0]) {
 			t.Fatal("a click on a clipped target row did not expand the block")
 		}
-		if painted := strings.Join(m.lines, "\n"); strings.Contains(painted, clipTail) {
-			t.Fatalf("the expanded paint still clips its target:\n%s", painted)
+		if painted := strings.Join(m.lines, "\n"); !strings.Contains(painted, "PASS") {
+			t.Fatalf("the expanded paint revealed no body:\n%s", painted)
+		}
+		if got := strip(m.lines[target]); got != swapIndicator(before) {
+			t.Errorf("the target row moved under the pointer: %q became %q; want the same row wearing ▼", before, got)
+		}
+
+		m = clickCell(t, m, 6, screenRow(t, m, target))
+		if blockExpanded(t, m, rows[0]) {
+			t.Fatal("a second click on the clipped target row did not collapse the block")
 		}
 	})
 }
 
+// swapIndicator rewrites a row's ▶ as the ▼ it wears once the block is open, so a caller can assert
+// that NOTHING ELSE about the row changed with the state.
+func swapIndicator(row string) string {
+	return strings.Replace(row, glyphCollapsed, glyphExpanded, 1)
+}
+
 // modelWithClippedToolBlock builds a ready idle model whose one tool block carries a command far too
-// long for the width — the block whose collapsed paint spends its two content rows on a clipped
-// target, so the rows a click has to reach are the target's rather than the header
-// (TestClippedTargetAloneMakesABlockAToggleTarget is the paint's own side of the same rule).
+// long for the width, so its branch row spends every cell it has and still cuts the target — the row
+// a click has to reach being that cut one rather than the header above it.
+//
+// The output is a BODY of several lines, because a cut target is no longer a reason to toggle
+// anything on its own: a leader row is identical open and closed, so a block with nothing beneath it
+// wears no indicator and marks no rows at all (TestClippedTargetAloneIsNoToggleTarget is the paint's
+// own side of that rule). The body is what makes this block a target; the cut is what puts the
+// target row where this test needs it.
 func modelWithClippedToolBlock(t *testing.T) Model {
 	t.Helper()
 	m := newTestModel(t) // 80x24
@@ -954,7 +977,8 @@ func modelWithClippedToolBlock(t *testing.T) Model {
 	command := "cd . && " + strings.Repeat("echo one-more-fragment && ", 12) + "true"
 	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"` + command + `"}`)}})
-	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "done"}})
+	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+		CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
 	m.refreshViewport()
 	return m
 }

@@ -148,6 +148,7 @@ type theme struct {
 	// (toolIndicator, toolMarker, the open member's gutter) stays dim in both, because the
 	// affordances are not what the reader opened the block for (detailStyle).
 	toolDetailBright lipgloss.Style
+	toolLeader       lipgloss.Style // the ⋯ run carrying a tool row's eye from its target to the outcome slot at the row's edge (its own `tool-leader` role, seeded from `muted`): chrome like the ▶ it runs up to, so the dots never read as content — and its own role so a scheme can damp them without moving the indicator with them
 	toolMarker       lipgloss.Style // the synthesized "+N more lines" remainder marker beneath a hidden body: its own `tool-marker` role (a warm orange under `dark`, a cooler blue under `light`), no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "+" — the prompt block's see-more keeps the heavier promptToggle treatment
 	subRail          lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (toolLabel's `tool-header` role — one tone for the whole sub-agent frame)
 	skillAccent      lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
@@ -242,7 +243,7 @@ func (th theme) modeColor(m domain.Mode) color.Color {
 	}
 }
 
-// newTheme builds the styles from a colour scheme — the 25 semantic roles of ADR 0040, resolved
+// newTheme builds the styles from a colour scheme — the 26 semantic roles of ADR 0040, resolved
 // before it is called (the renderer never reads a scheme file itself). It is the ONE seam between a
 // scheme and the look: calling it again with another scheme rebuilds every style, which is what a
 // live scheme switch does (settingsApplyLocal).
@@ -275,6 +276,7 @@ func newTheme(s scheme.Scheme) theme {
 		fileRef        = lipgloss.Color(s.FileRef)
 		promptToggleFg = lipgloss.Color(s.PromptToggle)
 		toolMarkerFg   = lipgloss.Color(s.ToolMarker)
+		toolLeaderFg   = lipgloss.Color(s.ToolLeader)
 		gauge          = lipgloss.Color(s.Gauge)
 		selectionFill  = lipgloss.Color(s.Selection)
 	)
@@ -295,6 +297,7 @@ func newTheme(s scheme.Scheme) theme {
 		toolIndicator:    lipgloss.NewStyle().Foreground(muted),
 		toolDetail:       lipgloss.NewStyle().Foreground(muted),
 		toolDetailBright: lipgloss.NewStyle().Foreground(openDetail),
+		toolLeader:       lipgloss.NewStyle().Foreground(toolLeaderFg),
 		toolMarker:       lipgloss.NewStyle().Foreground(toolMarkerFg),
 		subRail:          lipgloss.NewStyle().Foreground(toolHeaderFg),
 		// The inline token accents are one act on two fields: the skill's violet moves to the

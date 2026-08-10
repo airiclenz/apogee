@@ -10,6 +10,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Tool rows now read left-to-right: what was touched, a dotted leader, what came of it.** A tool
+  call's branch line puts its target on the left, runs a faint `⋯` leader across the gap, and sets
+  the outcome — `12 lines`, `+2 -2`, `exit 0`, a red `error: …` — flush against the block's right
+  edge, with the `▶`/`▼` in a field reserved past it. Every row fills its width exactly, so the
+  outcomes line up down the edge of a group instead of drifting with the length of each target, and
+  a row is the same shape open and closed: clicking one no longer moves it out from under the
+  pointer. When the width runs short the row gives things up in a fixed order — the dots flex down
+  to a single `⋯` first, then the target is cut with `…`, and only a row too narrow to hold even a
+  cut target drops it outright. What happened is the half worth keeping, so the outcome is the last
+  thing to go and prints whole until the row itself is narrower than it is.
+  - A collapsed tool block is now at most three rows, because a targeted branch is always exactly
+    one — the `▶`/`▼` moved off such a block's header onto that branch row, where the spec draws it.
+  - A cut target on its own is no longer a reason to click: with the row identical in both states,
+    expanding a bodiless call whose path the width trimmed revealed nothing, so it now wears no
+    indicator at all. Blocks with a body are unchanged.
+  - **New `tool-leader` scheme role** for the dots, seeded in both shipped schemes from the same
+    faint tone the `▶` beside them wears. It is its own role so a scheme can damp the leader without
+    dragging the indicator's tone along with it; `/color-scheme export` writes it like any other.
 - **`<u>…</u>` renders as underlined text.** Markdown spells no underline of its own — CommonMark
   spends `__` on strong emphasis — so the renderer recognises the one HTML pair a model actually
   reaches for, and assistant text saying `press <u>Enter</u>` now shows *Enter* underlined with the

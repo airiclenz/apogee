@@ -499,10 +499,10 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 				"│ ⤷ sub-agent",
 				"│",
 				"│ ✦ Read File",
-				"│   ┕ a.go 1 - 5",
+				"│   ┕ a.go ⋯ 1 - 5",
 				"│", // both sides sit at depth 1: the rail runs straight through
 				"│ ✦ Run",
-				"│   ┕ go test",
+				"│   ┕ go test ⋯",
 			},
 		},
 		{
@@ -586,15 +586,15 @@ func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ Sub-Agent ▼", // a run's head is always a toggle target (its span), so it always wears the state
-		"  ┕ first",
+		"✦ Sub-Agent", // a run's head is always a toggle target (its span), so its branch row always wears the state
+		leaderEdgeRow("  ┕ first ⋯", glyphExpanded),
 		"",
 		"│ ⤷ sub-agent",
 		"│",
 		"│ ✦ first child",
 		"", // the first run closes here…
-		"✦ Sub-Agent ▼",
-		"  ┕ second",
+		"✦ Sub-Agent",
+		leaderEdgeRow("  ┕ second ⋯", glyphExpanded),
 		"", // …and the second call is fenced off from it on both sides
 		"│ ⤷ sub-agent",
 		"│",
@@ -660,8 +660,8 @@ func TestToolHeaderLabelStyled(t *testing.T) {
 	if got, want := ansi.Strip(head), "✦ Read File"; got != want {
 		t.Errorf("header text = %q; want %q (no brackets, and never a target)", got, want)
 	}
-	if got, want := ansi.Strip(block[1]), "  ┕ main.go"; got != want {
-		t.Errorf("branch text = %q; want %q (the target leads the branch)", got, want)
+	if got, want := ansi.Strip(block[1]), "  ┕ main.go "; !strings.HasPrefix(got, want) {
+		t.Errorf("branch text = %q; want it to open %q (the target leads the branch)", got, want)
 	}
 	styled := th.toolLabel.Render("Read File")
 	if styled == "Read File" {
@@ -708,9 +708,9 @@ func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Read File (3)",
-		"  ┝ README.md 1 - 154",
-		"  ┝ TODO.md   1 - 408",
-		"  ┕ ISSUES.md 1 - 8",
+		"  ┝ README.md ⋯ 1 - 154",
+		"  ┝ TODO.md ⋯ 1 - 408",
+		"  ┕ ISSUES.md ⋯ 1 - 8",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("grouped block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -729,8 +729,8 @@ func TestRenderGroupsInsideSubAgent(t *testing.T) {
 		"│ ⤷ sub-agent",
 		"│",
 		"│ ✦ Read File (2)",
-		"│   ┝ a.go  1 - 5",
-		"│   ┕ bb.go 1 - 9",
+		"│   ┝ a.go ⋯ 1 - 5",
+		"│   ┕ bb.go ⋯ 1 - 9",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("railed group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -748,8 +748,8 @@ func TestRenderGroupsDifferentToolsSharingALabel(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Edit File (2)",
-		"  ┝ a.go  replaced text in a.go",
-		"  ┕ bb.go applied 2 replacements to bb.go",
+		"  ┝ a.go ⋯ replaced text in a.go",
+		"  ┕ bb.go ⋯ applied 2 replacements to bb.go",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("shared-label group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -765,8 +765,8 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Read File (2)",
-		"  ┝ README.md 1 - 154",
-		"  ┕ TODO.md",
+		"  ┝ README.md ⋯ 1 - 154",
+		"  ┕ TODO.md ⋯",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("in-flight member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -777,8 +777,8 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 		Summary: domain.ReadSpan{Start: 1, End: 408, Total: 408}}})
 	want = strings.Join([]string{
 		"✦ Read File (2)",
-		"  ┝ README.md 1 - 154",
-		"  ┕ TODO.md   1 - 408",
+		"  ┝ README.md ⋯ 1 - 154",
+		"  ┕ TODO.md ⋯ 1 - 408",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("re-rendered group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -795,7 +795,7 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Read File",
-		"  ┕ main.go 1 - 154",
+		"  ┕ main.go ⋯ 1 - 154",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("single-call block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -805,8 +805,8 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	readCall(tr, "c2", "a-much-longer-name.go", 1, 9, 0)
 	want = strings.Join([]string{
 		"✦ Read File (2)",
-		"  ┝ main.go               1 - 154",
-		"  ┕ a-much-longer-name.go 1 - 9",
+		"  ┝ main.go ⋯ 1 - 154",
+		"  ┕ a-much-longer-name.go ⋯ 1 - 9",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("grown block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -827,8 +827,8 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 	}})
 
 	want := strings.Join([]string{
-		"✦ Run ▶", // a hidden body is something to reveal, and the header says so
-		"  ┕ go test ./...",
+		"✦ Run", // a hidden body is something to reveal, and the branch row's ▶ says so
+		groupMemberLine("  ┕ go test ./... ⋯"),
 		"    +3 more lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -852,8 +852,8 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ View Diff ▼",
-		"  ┕ main.go +1 -1",
+		"✦ View Diff",
+		leaderEdgeRow("  ┕ main.go ⋯ +1 -1", glyphExpanded),
 		"    - a removed line",
 		"    + an added line",
 	}, "\n")
@@ -889,8 +889,8 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ View Diff ▼",
-		"  ┕ main.go +2 -2",
+		"✦ View Diff",
+		leaderEdgeRow("  ┕ main.go ⋯ +2 -2", glyphExpanded),
 		"    - a code line that has been removed",
 		"    - a second removed line",
 		"    + a new code line",
@@ -901,8 +901,8 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	}
 
 	th := newTheme(scheme.Default())
-	if got, want := tr.renderLines(th, 80)[1], th.toolDetailBright.Render("  ┕ main.go +2 -2"); got != want {
-		t.Errorf("diffstat branch = %q; want the plain detail tone of an OPEN block %q", got, want)
+	if got, want := tr.renderLines(th, 80)[1], th.toolDetailBright.Render("+2 -2"); !strings.Contains(got, want) {
+		t.Errorf("diffstat branch = %q; want its outcome slot in the plain detail tone of an OPEN block %q", got, want)
 	}
 }
 
@@ -919,7 +919,7 @@ func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
 	}})
 
 	lines := strings.Split(renderPlain(tr, 80), "\n")
-	if got, want := lines[1], "  ┕ main.go +"+strconv.Itoa(longDiff)+" -0"; got != want {
+	if got, want := lines[1], groupMemberLine("  ┕ main.go ⋯ +"+strconv.Itoa(longDiff)+" -0"); got != want {
 		t.Errorf("capped diff branch = %q, want %q (the stat spans the whole diff)", got, want)
 	}
 	if got, want := lines[len(lines)-1], "    +"+strconv.Itoa(longDiff)+" more lines"; got != want {
@@ -1100,19 +1100,24 @@ func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nPASS"}})
 
 		// Row 0 is the header and row 2 the remainder marker — chrome with roles of their own — so
-		// row 1, the branch line, is the whole of what the collapsed paint says about the call.
+		// row 1, the branch line, is the whole of what the collapsed paint says about the call. Its
+		// own leader and indicator are chrome too, so the tone is asserted on the TARGET it carries.
 		collapsed := tr.renderLines(th, 80)
-		if want := th.toolDetail.Render(strip(collapsed[1])); collapsed[1] != want {
-			t.Errorf("collapsed branch = %q; want the dim tone %q", collapsed[1], want)
+		if want := th.toolDetail.Render("go test ./..."); !strings.Contains(collapsed[1], want) {
+			t.Errorf("collapsed branch = %q; want its target in the dim tone %q", collapsed[1], want)
 		}
 
 		if !tr.setExpanded(0, true) {
 			t.Fatal("setExpanded(0, true) = false; want the block opened")
 		}
-		// Open, everything below the header is the call's own: the branch line and every body row.
-		for i, row := range tr.renderLines(th, 80)[1:] {
+		open := tr.renderLines(th, 80)
+		if want := th.toolDetailBright.Render("go test ./..."); !strings.Contains(open[1], want) {
+			t.Errorf("open branch = %q; want its target in the brighter tone %q", open[1], want)
+		}
+		// Open, every body row below the branch is the call's own text and lifts whole.
+		for i, row := range open[2:] {
 			if want := th.toolDetailBright.Render(strip(row)); row != want {
-				t.Errorf("open row %d = %q; want the brighter tone %q", i+1, row, want)
+				t.Errorf("open row %d = %q; want the brighter tone %q", i+2, row, want)
 			}
 		}
 	})
@@ -1128,7 +1133,7 @@ func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
 
 		// A member row is not one style run — its ▶/▼ and, open, its gutter are chrome painted
 		// beside the text — so the tone is asserted on the text the member is carrying.
-		if want := th.toolDetail.Render("  ┝ go build ./..."); !strings.Contains(rows[1], want) {
+		if want := th.toolDetail.Render("go build ./..."); !strings.Contains(rows[1], want) {
 			t.Errorf("the closed member = %q; want its row in the dim tone %q", rows[1], want)
 		}
 		if want := th.toolDetailBright.Render("go vet ./..."); !strings.Contains(rows[2], want) {
@@ -1183,16 +1188,16 @@ func TestDiffLinesKeepTheirColourInBothBlockStates(t *testing.T) {
 	}
 }
 
-// TestCollapsedBlockStandsAtMostFourRows is the cap itself, asked of the case that used to break
+// TestCollapsedBlockStandsAtMostThreeRows is the cap itself, asked of the case that used to break
 // it: a 400-character command soft-wrapped over five rows before the row budget existed, and the
-// block it led stood seven rows tall in a scrollback of them. Now the block is its header, two rows
-// of target with the clip's " …" saying the target goes on, and the marker counting the body — four
-// rows, whatever the target's length and whatever the body's (docs/layout/tool-layout.md).
+// block it led stood seven rows tall in a scrollback of them. Now the block is its header, ONE
+// leader row with the clip's " …" saying the target goes on, and the marker counting the body —
+// three rows, whatever the target's length and whatever the body's (docs/layout/tool-layout.md).
 //
 // The width bound is asserted on every row rather than assumed from the wrap: the clip re-cuts the
-// row it ends, and a tail appended past the column would fold that row in two and spend a fifth row
+// row it ends, and a tail appended past the column would fold that row in two and spend a fourth row
 // the budget does not have (clipWrap).
-func TestCollapsedBlockStandsAtMostFourRows(t *testing.T) {
+func TestCollapsedBlockStandsAtMostThreeRows(t *testing.T) {
 	const width = 80
 	command := strings.Repeat("cd . && head -3 go.mod && ", 16)[:400]
 
@@ -1202,17 +1207,18 @@ func TestCollapsedBlockStandsAtMostFourRows(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok\nPASS\ndone"}})
 
 	lines := strings.Split(renderPlain(tr, width), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("the collapsed block stands %d rows tall, want the budget's 4:\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 3 {
+		t.Fatalf("the collapsed block stands %d rows tall, want the budget's 3:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	if want := "✦ Run " + glyphCollapsed; lines[0] != want {
-		t.Errorf("header = %q, want %q", lines[0], want)
+	if want := "✦ Run"; lines[0] != want {
+		t.Errorf("header = %q, want %q — the indicator rides the branch row now", lines[0], want)
 	}
-	if !strings.HasSuffix(lines[2], clipTail) {
-		t.Errorf("the last target row = %q, want it cut short with %q", lines[2], clipTail)
+	if !strings.HasSuffix(lines[1], glyphCollapsed) || !strings.Contains(lines[1], clipTail) {
+		t.Errorf("branch row = %q, want the target cut short with %q and the row wearing %q",
+			lines[1], clipTail, glyphCollapsed)
 	}
-	if want := "    +3 more lines"; lines[3] != want {
-		t.Errorf("marker row = %q, want %q", lines[3], want)
+	if want := "    +3 more lines"; lines[2] != want {
+		t.Errorf("marker row = %q, want %q", lines[2], want)
 	}
 	th := newTheme(scheme.Default())
 	for i, ln := range lines {
@@ -1222,13 +1228,12 @@ func TestCollapsedBlockStandsAtMostFourRows(t *testing.T) {
 	}
 }
 
-// …and the target's own clip is enough to make a block a toggle target: a call with NO body at all
-// still hides something once its target is cut, so it wears the indicator, is marked for the click,
-// and expands to the target whole. That is what makes the toggle-target rule WIDTH-dependent — the
-// same call at a wide enough block hides nothing and is no target — and why the indicator and the
-// mark are one predicate asked with the width the frame is painted at
-// (blockHidesWhenCollapsed).
-func TestClippedTargetAloneMakesABlockAToggleTarget(t *testing.T) {
+// …but the target's own clip is NOT enough to make a block a toggle target any more. A leader row
+// is one row in both states (leaderRow), so a bodiless call whose path the width cuts shows exactly
+// the same row open as closed — and the canon spec's rule for that case is that the row carries no
+// indicator at all (docs/layout/tool-layout.md). The block therefore wears nothing, marks nothing,
+// and a click on it keeps its selection meaning, at any width.
+func TestClippedTargetAloneIsNoToggleTarget(t *testing.T) {
 	const width = 60
 	path := "internal/" + strings.Repeat("deeply-nested-package/", 6) + "main.go"
 
@@ -1239,56 +1244,173 @@ func TestClippedTargetAloneMakesABlockAToggleTarget(t *testing.T) {
 	}
 
 	collapsed := strings.Split(renderPlain(tr, width), "\n")
-	if len(collapsed) != 3 || !strings.HasSuffix(collapsed[2], clipTail) {
-		t.Errorf("collapsed paint = %d rows ending %q, want 3 rows ending in the clip tail:\n%s",
+	if len(collapsed) != 2 || !strings.Contains(collapsed[1], clipTail) {
+		t.Errorf("collapsed paint = %d rows, last %q, want 2 rows with the clip tail in the branch:\n%s",
 			len(collapsed), collapsed[len(collapsed)-1], strings.Join(collapsed, "\n"))
 	}
-	// And it is a target WHOLE: the header and both clipped target rows are one click surface, so
-	// the reader opens the path by clicking the path (renderToolBlock).
-	marks := blockMarks(t, tr, width)
-	if len(marks) != len(collapsed) {
-		t.Fatalf("collapsed block marked %d of its %d rows, want every one:\n%+v",
-			len(marks), len(collapsed), marks)
-	}
-	if marks[0].text != "✦ Read File "+glyphCollapsed {
-		t.Errorf("header = %q, want the label wearing the collapsed indicator", marks[0].text)
-	}
-	for i, mark := range marks {
-		if mark.line != i || mark.kind != targetHeader || mark.entry != 0 {
-			t.Errorf("mark %d = %+v; want line %d, a toggle naming entry 0", i, mark, i)
+	for i, ln := range collapsed {
+		if strings.HasSuffix(ln, glyphCollapsed) || strings.HasSuffix(ln, glyphExpanded) {
+			t.Errorf("row %d = %q wears an indicator; a cut target reveals nothing", i, ln)
 		}
 	}
-
-	if !tr.setExpanded(0, true) {
-		t.Fatal("setExpanded(0, true) = false; want the clipped block expanded")
+	if got := blockMarks(t, tr, width); got != nil {
+		t.Errorf("marks on a bodiless block = %+v, want none", got)
 	}
-	expanded := renderPlain(tr, width)
-	if strings.Contains(expanded, clipTail) {
-		t.Errorf("the expanded paint still carries a clip tail:\n%s", expanded)
-	}
-	if flat := strings.Join(strings.Fields(expanded), ""); !strings.Contains(flat, strings.ReplaceAll(path, " ", "")) {
-		t.Errorf("the expanded paint does not carry the whole target:\n%s", expanded)
-	}
-
-	// The same call in a block wide enough to seat its target hides nothing and is no target at
-	// all — the predicate follows the width, which is the half a fixed-width test cannot show.
+	// And the same call at a width its target fits is no target either — one rule, not two.
 	if got := blockMarks(t, tr, 200); got != nil {
 		t.Errorf("marks at a width the target fits = %+v, want none", got)
 	}
 }
 
-// groupMemberLine composes a collapsed member row the way the painter lays it out: the row's own
-// text, then the ▶ flush against the block's right edge. A golden line then reads as the text it
-// carries rather than as a hand-counted run of spaces, and the count moves with the width.
-func groupMemberLine(t *testing.T, text string, width int) string {
-	t.Helper()
-	return memberEdgeRow(t, text, glyphCollapsed, width)
+// TestLeaderRowSpendsItsRoomInOrder is design call 4 asked of the painter itself
+// (docs/layout/tool-layout.md, leaderRow): the outcome slot is reserved FIRST and prints whole, the
+// dotted leader flexes down to its floor of one, and only then is the target cut — dropped outright
+// if a row that narrow leaves it nothing. Every case measures the row against the room it was given,
+// because the shape's whole promise is a row that fills its width exactly and so puts its outcome
+// flush against the block's edge whatever it is carrying.
+//
+// It goes at the painter rather than through the transcript because these are the geometries a
+// fixture cannot aim at: the rendered goldens collapse the leader to one dot precisely so they stop
+// asserting this arithmetic (renderPlain, transcript_test.go), and it is asserted here instead.
+func TestLeaderRowSpendsItsRoomInOrder(t *testing.T) {
+	t.Parallel()
+
+	const (
+		marker = "┕ "
+		short  = "main.go"
+		long   = "internal/tui/deeply/nested/package/holding/one/very/long/path/main.go"
+		stat   = "12 lines"
+		// An outcome longer than any row below, for the tail case design call 4 does not word.
+		wide = "replaced 3 occurrences across internal/tui/render.go and internal/tui/mouse.go"
+	)
+
+	th := newTheme(scheme.Default())
+	for _, tc := range []struct {
+		name     string
+		target   string
+		summary  string
+		room     int
+		expanded bool
+
+		wantTarget  string // the target text the row must carry whole, or "" when it is cut or dropped
+		wantSlot    string // the outcome text the row must END in
+		wantDropped bool   // no cell of the target survived: the leader opens straight after the marker
+		wantClip    bool   // the row carries a clip tail somewhere
+		wantFloor   bool   // the leader is down to leaderMinDots
+		wantFailed  bool   // the outcome is painted in the failure tone
+	}{{
+		// Room to spare: nothing gives way and the leader stretches to hold the outcome at the edge.
+		name:   "a wide row keeps target, leader and outcome whole",
+		target: short, summary: stat, room: 60,
+		wantTarget: short, wantSlot: stat,
+	}, {
+		// The first thing spent: the dots, down to the floor, with the target still whole. At room 20
+		// the marker (2), the target (7), the two gaps and the outcome (8) leave exactly one dot.
+		name:   "the leader gives way first",
+		target: short, summary: stat, room: 20,
+		wantTarget: short, wantSlot: stat, wantFloor: true,
+	}, {
+		// The second: the target is cut, and the outcome is untouched.
+		name:   "the target gives way next",
+		target: long, summary: stat, room: 40,
+		wantSlot: stat, wantClip: true, wantFloor: true,
+	}, {
+		// The third: a row with nothing left to give up shows WHAT HAPPENED and drops the target
+		// outright rather than trading away half the outcome for a stub of a path — a budget this
+		// narrow being narrower than the clip tail alone.
+		name:   "a narrow row drops the target and keeps the outcome",
+		target: long, summary: stat, room: 12,
+		wantSlot: stat, wantDropped: true, wantFloor: true,
+	}, {
+		// Past the point design call 4 words: an outcome wider than the whole row is cut too, since
+		// one printed whole there would overrun the frame and be folded onto a second row.
+		name:   "an outcome wider than the row is itself cut",
+		target: short, summary: wide, room: 30,
+		wantSlot: clipTail, wantDropped: true, wantClip: true,
+	}, {
+		// Design call 11: the red outcome is the only mark a failure leaves on the row.
+		name:   "a failed outcome is red",
+		target: short, summary: "error: exit 1", room: 60,
+		wantTarget: short, wantSlot: "error: exit 1", wantFailed: true,
+	}, {
+		// The same row open: the state reaches the TONES and never the geometry, which is what lets
+		// a click that opened a block close it without the row moving out from under the pointer.
+		name:   "an open row keeps the shape and changes tone",
+		target: short, summary: stat, room: 20, expanded: true,
+		wantTarget: short, wantSlot: stat, wantFloor: true,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tv := toolView{Target: tc.target, Summary: namedSummary(detailLine{Text: tc.summary})}
+			row := leaderRow(th, tv, marker, tc.room, tc.expanded)
+			plain := strip(row)
+
+			if got := th.measure.Width(plain); got != tc.room {
+				t.Errorf("row measures %d cells, want the whole room of %d: %q", got, tc.room, plain)
+			}
+			if !strings.HasSuffix(plain, tc.wantSlot) {
+				t.Errorf("row = %q; want it to end in the outcome %q", plain, tc.wantSlot)
+			}
+			if tc.wantTarget != "" && !strings.Contains(plain, tc.wantTarget) {
+				t.Errorf("row = %q; want the target %q whole", plain, tc.wantTarget)
+			}
+			// Dropped means DROPPED: the leader opens straight after the marker, so not one cell of
+			// the target — nor a lone clip tail standing in for it — is left on the row.
+			if got := strings.HasPrefix(plain, marker+glyphLeaderDot); got != tc.wantDropped {
+				t.Errorf("row = %q opens with its leader = %v, want the target dropped = %v",
+					plain, got, tc.wantDropped)
+			}
+			if got := strings.Contains(plain, clipTail); got != tc.wantClip {
+				t.Errorf("row = %q carries a clip tail = %v, want %v", plain, got, tc.wantClip)
+			}
+
+			dots := strings.Count(plain, glyphLeaderDot)
+			if dots < leaderMinDots {
+				t.Errorf("row = %q carries %d leader dots, below the floor of %d", plain, dots, leaderMinDots)
+			}
+			if tc.wantFloor && dots != leaderMinDots {
+				t.Errorf("row = %q carries %d leader dots, want the floor of %d", plain, dots, leaderMinDots)
+			}
+			// The dots wear the `tool-leader` role of their own, so a scheme can damp them without
+			// moving the target's tone with them.
+			if leader := th.toolLeader.Render(strings.Repeat(glyphLeaderDot, dots)); !strings.Contains(row, leader) {
+				t.Errorf("the leader is not painted in the tool-leader role: %q", row)
+			}
+			// Design call 11 both ways: red when the wording says the call failed, and the row's own
+			// tone when it does not. The slot is read off the row STRUCTURALLY — everything past the
+			// last dot and its gap — so the assertion holds for the case whose outcome was itself
+			// cut and whose final text no fixture spells out.
+			slot := strings.TrimPrefix(plain[strings.LastIndex(plain, glyphLeaderDot)+len(glyphLeaderDot):], " ")
+			if got := strings.Contains(row, th.errorText.Render(slot)); got != tc.wantFailed {
+				t.Errorf("outcome %q painted in the failure tone = %v, want %v", slot, got, tc.wantFailed)
+			}
+			if !tc.wantFailed && !strings.Contains(row, detailTone(th, tc.expanded).Render(slot)) {
+				t.Errorf("outcome %q does not wear the row's own %s tone: %q",
+					slot, map[bool]string{true: "open", false: "collapsed"}[tc.expanded], row)
+			}
+		})
+	}
 }
 
-// memberEdgeRow is that arithmetic for any right-aligned mark a member row carries — the ▶ of a
-// collapsed one, the ▼ an open one wears on its first row, the see-less marker closing it. One
-// definition of "flush against the block's right edge", so a golden that moves because the edge
-// moved fails everywhere at once instead of in one place.
+// groupMemberLine composes a collapsed member row the way the painter lays it out: the row's own
+// text, then the ▶ flush against the block's right edge.
+func groupMemberLine(text string) string { return leaderEdgeRow(text, glyphCollapsed) }
+
+// leaderEdgeRow is that arithmetic for the indicator a LEADER row carries (leaderRow, render.go) —
+// the ▶ of a collapsed one, the ▼ an open one wears on its first row. The field between the outcome
+// slot and the mark is the constant groupIndicatorGap rather than a pad measured against the width,
+// because a leader row fills its room exactly by construction: the dots take up whatever the target
+// and the outcome leave, so nothing but the reserved field can stand at the end of one. A golden
+// line then reads as the text it carries and stays true at any width.
+func leaderEdgeRow(text, mark string) string {
+	return text + strings.Repeat(" ", groupIndicatorGap) + mark
+}
+
+// memberEdgeRow is the same arithmetic for a mark that is NOT on a leader row and so must be padded
+// out to the edge by hand — today the see-less marker closing an open member. One definition of
+// "flush against the block's right edge", so a golden that moves because the edge moved fails
+// everywhere at once instead of in one place.
 func memberEdgeRow(t *testing.T, text, mark string, width int) string {
 	t.Helper()
 	th := newTheme(scheme.Default())
@@ -1316,18 +1438,6 @@ func runGroup(depth int, calls ...[2]string) *transcript {
 	return tr
 }
 
-// summaryColumn is the display CELL a row's summary opens in — the column the eye reads it in,
-// which a byte offset is not: a branch marker and a clip tail are three bytes each and one cell
-// each, so two rows carrying different glyphs land at different byte offsets in the same column.
-func summaryColumn(t *testing.T, row, summary string) int {
-	t.Helper()
-	at := strings.Index(row, summary)
-	if at < 0 {
-		t.Fatalf("row %q carries no summary %q", row, summary)
-	}
-	return newTheme(scheme.Default()).measure.Width(row[:at])
-}
-
 // TestRenderGroupsBodyCarryingCalls is the grouping scope's new half (design call 3): a call that
 // carries a body groups exactly as a bodiless one does, and pays for it with a member row held to
 // ONE line. Three Runs with output are the sketch's own case
@@ -1347,9 +1457,9 @@ func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Run (3)",
-		groupMemberLine(t, "  ┝ go build ./...", 80),
-		groupMemberLine(t, "  ┝ go vet ./...", 80),
-		groupMemberLine(t, "  ┕ go test ./...", 80),
+		groupMemberLine("  ┝ go build ./... ⋯"),
+		groupMemberLine("  ┝ go vet ./... ⋯"),
+		groupMemberLine("  ┕ go test ./... ⋯"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("body-carrying group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -1385,9 +1495,13 @@ func TestGroupHeaderCountIsFaintAndInert(t *testing.T) {
 }
 
 // A member's summary is never traded away for more of its target: the outcome's cells are reserved
-// first and the target takes what is left, ending in the clip tail. The indicator field is reserved
-// on every member, so the ▶ of the member that has something to reveal lands in the same column the
-// bare rows leave empty.
+// first, the leader flexes down to its floor, and only then is the target cut, ending in the clip
+// tail (design call 4). What lines the outcomes up down the block's edge is no longer a shared
+// column measured across the members — it is that every member row fills its room EXACTLY, so each
+// outcome ends flush against the reserved indicator field whatever the target beside it did.
+//
+// The fixture is deliberately one long member and one short one: the short row proves the leader
+// stretches to hold its outcome at the same edge the cut row reaches by giving the target up.
 func TestGroupMemberKeepsItsSummaryAndClipsTheTarget(t *testing.T) {
 	const width = 60
 	long := "cd . && " + strings.Repeat("echo one-more-fragment && ", 6) + "true"
@@ -1400,28 +1514,38 @@ func TestGroupMemberKeepsItsSummaryAndClipsTheTarget(t *testing.T) {
 		Arguments: []byte(`{"command":"pwd"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "/repo"}})
 
-	rows := strings.Split(renderPlain(tr, width), "\n")
+	// The RAW rows, not renderPlain's: the leader's length is the very thing under test here, and
+	// renderPlain collapses it (transcript_test.go).
+	th := newTheme(scheme.Default())
+	rows := tr.renderLines(th, width)
 	if len(rows) != 3 {
 		t.Fatalf("group painted %d rows, want 3 — one header and one row per member:\n%s",
 			len(rows), strings.Join(rows, "\n"))
 	}
-	if !strings.HasSuffix(rows[1], glyphCollapsed) || !strings.Contains(rows[1], clipTail) {
-		t.Errorf("clipped member = %q; want the target cut with %q and the ▶ at the edge",
-			rows[1], clipTail)
-	}
-	if got := newTheme(scheme.Default()).measure.Width(rows[1]); got != width {
-		t.Errorf("clipped member measures %d cells, want the full %d", got, width)
-	}
-	if strings.HasSuffix(rows[2], glyphCollapsed) {
-		t.Errorf("short member = %q; it hides nothing and must wear no indicator", rows[2])
-	}
-	// The summaries open in the SAME column though one target was cut and the other padded: the
-	// column is the block's, capped once against its widest summary (groupTargetCells). Measured in
-	// display cells, not bytes — both rows carry multi-byte glyphs the other does not.
-	a, b := summaryColumn(t, rows[1], "abc1234"), summaryColumn(t, rows[2], "/repo")
-	if a != b {
-		t.Errorf("summaries open at columns %d and %d; want one shared column:\n%s\n%s",
-			a, b, rows[1], rows[2])
+	for _, tc := range []struct {
+		name    string
+		row     string
+		summary string
+		cut     bool
+	}{
+		{"clipped member", strip(rows[1]), "abc1234", true},
+		{"short member", strip(rows[2]), "/repo", false},
+	} {
+		if got := th.measure.Width(tc.row); got != toolRowCells(th, width) {
+			t.Errorf("%s measures %d cells, want the row's whole room of %d: %q",
+				tc.name, got, toolRowCells(th, width), tc.row)
+		}
+		if !strings.HasSuffix(tc.row, tc.summary) {
+			t.Errorf("%s = %q; want its outcome %q printed whole and flush at the edge",
+				tc.name, tc.row, tc.summary)
+		}
+		if got := strings.Count(tc.row, glyphLeaderDot); got < leaderMinDots {
+			t.Errorf("%s carries %d leader dots, want at least the floor of %d: %q",
+				tc.name, got, leaderMinDots, tc.row)
+		}
+		if got := strings.Contains(tc.row, clipTail); got != tc.cut {
+			t.Errorf("%s target cut = %v, want %v: %q", tc.name, got, tc.cut, tc.row)
+		}
 	}
 }
 
@@ -1442,13 +1566,13 @@ func TestExpandedGroupMemberPaintsTheSketchShape(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Run (3)",
-		groupMemberLine(t, "  ┝ go build ./...", width),
-		memberEdgeRow(t, "  ┝ go vet ./...", glyphExpanded, width),
+		groupMemberLine("  ┝ go build ./... ⋯"),
+		leaderEdgeRow("  ┝ go vet ./... ⋯", glyphExpanded),
 		"  │ clean",
 		"  │ no findings",
 		"  │ done",
 		memberEdgeRow(t, "  │ ", promptSeeLess, width),
-		groupMemberLine(t, "  ┕ go test ./...", width),
+		groupMemberLine("  ┕ go test ./... ⋯"),
 	}, "\n")
 	got := renderPlain(tr, width)
 	if got != want {
@@ -1548,8 +1672,8 @@ func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
 	askUserCall(tr, "c1", `{"question":"Which mode?","choices":["Plan","Ask before","Auto"]}`, "Ask before")
 
 	collapsed := strings.Join([]string{
-		"✦ Ask User ▶",
-		"  ┕ Which mode? Ask before",
+		"✦ Ask User",
+		groupMemberLine("  ┕ Which mode? ⋯ Ask before"),
 		"    +4 more lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != collapsed {
@@ -1560,8 +1684,8 @@ func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
 		t.Fatal("toggleExpanded(0) = false; want the answered question expanded")
 	}
 	expanded := strings.Join([]string{
-		"✦ Ask User ▼",
-		"  ┕ Which mode? Ask before",
+		"✦ Ask User",
+		leaderEdgeRow("  ┕ Which mode? ⋯ Ask before", glyphExpanded),
 		"    Which mode?",
 		"    [ ] Plan",
 		"    [x] Ask before",
@@ -1593,8 +1717,8 @@ func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 		askUserCall(tr, "c1", question, "Ask before")
 
 		want := []blockMark{
-			{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User ▶"},
-			{line: 1, kind: targetHeader, entry: 0, text: "  ┕ Which mode? Ask before"},
+			{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User"},
+			{line: 1, kind: targetHeader, entry: 0, text: groupMemberLine("  ┕ Which mode? ⋯ Ask before")},
 			{line: 2, kind: targetMarker, entry: 0, text: "    +4 more lines"},
 		}
 		if got := blockMarks(t, tr, 80); !reflect.DeepEqual(got, want) {
@@ -1605,8 +1729,8 @@ func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 			t.Fatal("toggleExpanded(0) = false; want the answered question expanded")
 		}
 		want = []blockMark{
-			{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User ▼"},
-			{line: 1, kind: targetHeader, entry: 0, text: "  ┕ Which mode? Ask before"},
+			{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User"},
+			{line: 1, kind: targetHeader, entry: 0, text: leaderEdgeRow("  ┕ Which mode? ⋯ Ask before", glyphExpanded)},
 			{line: 2, kind: targetHeader, entry: 0, text: "    Which mode?"},
 			{line: 3, kind: targetHeader, entry: 0, text: "    [ ] Plan"},
 			{line: 4, kind: targetHeader, entry: 0, text: "    [x] Ask before"},
@@ -1645,12 +1769,12 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 		}
 
 		want := strings.Join([]string{
-			"✦ Ask User ▶",
-			"  ┕ Ship it? Yes",
+			"✦ Ask User",
+			groupMemberLine("  ┕ Ship it? ⋯ Yes"),
 			"    +3 more lines",
 			"",
-			"✦ Ask User ▶",
-			"  ┕ Tag it? No",
+			"✦ Ask User",
+			groupMemberLine("  ┕ Tag it? ⋯ No"),
 			"    +3 more lines",
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
@@ -1687,8 +1811,8 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 
 		want := strings.Join([]string{
 			"✦ Ask User (2)",
-			"  ┝ Ship it?",
-			"  ┕ Tag it?",
+			"  ┝ Ship it? ⋯",
+			"  ┕ Tag it? ⋯",
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("pending questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -1721,13 +1845,13 @@ func TestSpanlessSubAgentHeadsNeverGroup(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
+		// The refusal fills the whole outcome slot, so the leader keeps its floor of one dot and
+		// the target gives way entirely — design call 4's order, played out to its end.
 		"✦ Sub-Agent",
-		"  ┕ first error: sub-agent depth limit reached (max 2): cannot spawn a deeper",
-		"    sub-agent",
+		"  ┕ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper" + clipTail,
 		"",
 		"✦ Sub-Agent",
-		"  ┕ second error: sub-agent depth limit reached (max 2): cannot spawn a deeper",
-		"    sub-agent",
+		"  ┕ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper" + clipTail,
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("refused delegations mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -2178,7 +2302,7 @@ func blockMarks(t *testing.T, tr *transcript, width int) []blockMark {
 			line:  i,
 			kind:  target.kind,
 			entry: target.entry,
-			text:  strings.TrimRight(ansiPattern.ReplaceAllString(rendered.lines[i], ""), " "),
+			text:  strings.TrimRight(collapseLeader(ansiPattern.ReplaceAllString(rendered.lines[i], "")), " "),
 		})
 	}
 	return marks
@@ -2221,8 +2345,8 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				run(tr, "c1", "go test ./...", "ok   a\nok   b\nok   c\nPASS", 0)
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run ▶"},
-				{line: 3, kind: targetHeader, entry: 1, text: "  ┕ go test ./..."},
+				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run"},
+				{line: 3, kind: targetHeader, entry: 1, text: groupMemberLine("  ┕ go test ./... ⋯")},
 				{line: 4, kind: targetMarker, entry: 1, text: "    +4 more lines"},
 			},
 		},
@@ -2240,8 +2364,8 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				}
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run ▼"},
-				{line: 3, kind: targetHeader, entry: 1, text: "  ┕ go test ./..."},
+				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run"},
+				{line: 3, kind: targetHeader, entry: 1, text: leaderEdgeRow("  ┕ go test ./... ⋯", glyphExpanded)},
 				{line: 4, kind: targetHeader, entry: 1, text: "    ok   a"},
 				{line: 5, kind: targetHeader, entry: 1, text: "    ok   b"},
 				{line: 6, kind: targetHeader, entry: 1, text: "    ok   c"},
@@ -2310,11 +2434,13 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run"},
-				{line: 1, kind: targetHeader, entry: 0, text: "  Python ▶"},
-				{line: 2, kind: targetHeader, entry: 0, text: "  ┕ print(1"},
-				{line: 3, kind: targetHeader, entry: 0, text: "    )"},
-				{line: 4, kind: targetMarker, entry: 0, text: "    +3 more"},
-				{line: 5, kind: targetMarker, entry: 0, text: "    lines"},
+				{line: 1, kind: targetHeader, entry: 0, text: "  Python"},
+				// One leader row whatever the width: at eleven columns the target has nothing left
+				// to be cut INTO — a budget narrower than the clip tail itself — so it is dropped
+				// outright and the leader alone runs out to the indicator (design call 4).
+				{line: 2, kind: targetHeader, entry: 0, text: leaderEdgeRow("  ┕ ⋯", glyphCollapsed)},
+				{line: 3, kind: targetMarker, entry: 0, text: "    +3 more"},
+				{line: 4, kind: targetMarker, entry: 0, text: "    lines"},
 			},
 		},
 		{
@@ -2331,11 +2457,11 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				run(tr, "c2", "go vet ./...", "x\ny", 0)
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run ▶"},
-				{line: 1, kind: targetHeader, entry: 0, text: "  ┕ go build ./..."},
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run"},
+				{line: 1, kind: targetHeader, entry: 0, text: groupMemberLine("  ┕ go build ./... ⋯")},
 				{line: 2, kind: targetMarker, entry: 0, text: "    +3 more lines"},
-				{line: 6, kind: targetHeader, entry: 2, text: "✦ Run ▶"},
-				{line: 7, kind: targetHeader, entry: 2, text: "  ┕ go vet ./..."},
+				{line: 6, kind: targetHeader, entry: 2, text: "✦ Run"},
+				{line: 7, kind: targetHeader, entry: 2, text: groupMemberLine("  ┕ go vet ./... ⋯")},
 				{line: 8, kind: targetMarker, entry: 2, text: "    +2 more lines"},
 			},
 		},
@@ -2350,8 +2476,8 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent ▶"},
-				{line: 1, kind: targetHeader, entry: 0, text: "  ┕ survey the tests 1 tool call"},
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent"},
+				{line: 1, kind: targetHeader, entry: 0, text: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call")},
 			},
 		},
 		{
@@ -2369,8 +2495,8 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				}
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent ▼"},
-				{line: 1, kind: targetHeader, entry: 0, text: "  ┕ survey the tests survey complete"},
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent"},
+				{line: 1, kind: targetHeader, entry: 0, text: leaderEdgeRow("  ┕ survey the tests ⋯ survey complete", glyphExpanded)},
 			},
 		},
 		{
@@ -2382,8 +2508,8 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				run(tr, "c1", "go test", "a\nb\nc", 1)
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 0, text: "│ ✦ Run ▶"},
-				{line: 3, kind: targetHeader, entry: 0, text: "│   ┕ go test"},
+				{line: 2, kind: targetHeader, entry: 0, text: "│ ✦ Run"},
+				{line: 3, kind: targetHeader, entry: 0, text: leaderEdgeRow("│   ┕ go test ⋯", glyphCollapsed)},
 				{line: 4, kind: targetMarker, entry: 0, text: "│     +3 more lines"},
 			},
 		},
@@ -2406,13 +2532,16 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 // transcript rather than across two fixtures, because that is the claim: nothing about the entry
 // changes but the flag the painter reads. The block kinds that reach the indicator by three
 // different routes are each here: a hidden body (blockHidesWhenCollapsed), a sub-agent run's elided
-// span (blockState.elides) and a Firing wearing the borrowed shape under its own glyph. A CLIPPED
-// TARGET is the fourth route into the same predicate and has a test of its own, the width being
-// what it turns on (TestClippedTargetAloneMakesABlockAToggleTarget).
+// span (blockState.elides) and a Firing wearing the borrowed shape under its own glyph.
+//
+// The glyph rides the BRANCH ROW, at the right edge past the outcome slot, and the header carries
+// the label alone (renderToolBlock) — so each case names the header it keeps and the row the
+// indicator lands on is checked beside it.
 func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 	cases := []struct {
 		name                        string
 		build                       func() *transcript
+		wantHeader                  string
 		wantCollapsed, wantExpanded string
 	}{
 		{
@@ -2424,7 +2553,8 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok\na\nb"}})
 				return tr
 			},
-			wantCollapsed: "✦ Run ▶", wantExpanded: "✦ Run ▼",
+			wantHeader:    "✦ Run",
+			wantCollapsed: glyphCollapsed, wantExpanded: glyphExpanded,
 		},
 		{
 			name: "a sub-agent run's elided span",
@@ -2435,32 +2565,37 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 				subAgentReport(tr, "s1", "survey complete", 0)
 				return tr
 			},
-			wantCollapsed: "✦ Sub-Agent ▶", wantExpanded: "✦ Sub-Agent ▼",
+			wantHeader:    "✦ Sub-Agent",
+			wantCollapsed: glyphCollapsed, wantExpanded: glyphExpanded,
 		},
 		{
 			name:          "a Firing under its own glyph",
 			build:         func() *transcript { return firingBlock("found 3 stale entries\nremoved them") },
-			wantCollapsed: "⟳ Schedule ▶", wantExpanded: "⟳ Schedule ▼",
+			wantHeader:    "⟳ Schedule",
+			wantCollapsed: glyphCollapsed, wantExpanded: glyphExpanded,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tr := tc.build()
 
-			if got := headerStar(t, tr, false); got != tc.wantCollapsed {
-				t.Errorf("collapsed header = %q, want %q", got, tc.wantCollapsed)
+			if got := headerStar(t, tr, false); got != tc.wantHeader {
+				t.Errorf("header = %q, want the label alone %q", got, tc.wantHeader)
+			}
+			if got := branchIndicator(t, tr); got != tc.wantCollapsed {
+				t.Errorf("collapsed branch wears %q, want %q", got, tc.wantCollapsed)
 			}
 			if !tr.toggleExpanded(0) {
 				t.Fatal("toggleExpanded(0) = false; want the block expanded")
 			}
-			if got := headerStar(t, tr, false); got != tc.wantExpanded {
-				t.Errorf("expanded header = %q, want %q", got, tc.wantExpanded)
+			if got := branchIndicator(t, tr); got != tc.wantExpanded {
+				t.Errorf("expanded branch wears %q, want %q", got, tc.wantExpanded)
 			}
 			if !tr.toggleExpanded(0) {
 				t.Fatal("toggleExpanded(0) = false on the way back; want the block collapsed again")
 			}
-			if got := headerStar(t, tr, false); got != tc.wantCollapsed {
-				t.Errorf("re-collapsed header = %q, want %q", got, tc.wantCollapsed)
+			if got := branchIndicator(t, tr); got != tc.wantCollapsed {
+				t.Errorf("re-collapsed branch wears %q, want %q", got, tc.wantCollapsed)
 			}
 		})
 	}
@@ -2477,13 +2612,13 @@ func TestHeaderIndicatorIsStyledApartFromTheLabel(t *testing.T) {
 		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok\na\nb"}})
 
-	header := tr.renderLines(th, 80)[0]
+	lines := tr.renderLines(th, 80)
 
-	if want := th.toolIndicator.Render(glyphCollapsed); !strings.Contains(header, want) {
-		t.Errorf("header %q does not carry the detail-toned indicator %q", header, want)
+	if want := th.toolIndicator.Render(glyphCollapsed); !strings.Contains(lines[1], want) {
+		t.Errorf("branch row %q does not carry the detail-toned indicator %q", lines[1], want)
 	}
-	if styledIntoTheLabel := th.toolLabel.Render("Run " + glyphCollapsed); strings.Contains(header, styledIntoTheLabel) {
-		t.Errorf("header %q paints the indicator inside the label's own run", header)
+	if styledIntoTheLabel := th.toolLabel.Render("Run " + glyphCollapsed); strings.Contains(lines[0], styledIntoTheLabel) {
+		t.Errorf("header %q paints the indicator inside the label's own run", lines[0])
 	}
 }
 
@@ -2684,6 +2819,22 @@ func TestBlockMarksAgreeWithTheMouseMapping(t *testing.T) {
 // headerStar renders tr at one blink phase and returns its first rendered line with the styling
 // stripped — the block header the star leads. The phase is the renderer's parameter rather than
 // anything the transcript holds, so a test names it outright instead of driving a clock.
+// branchIndicator is the mark a targeted block's BRANCH ROW wears at its right edge — the ▶/▼ the
+// header used to carry — or "" where the row wears none.
+func branchIndicator(t *testing.T, tr *transcript) string {
+	t.Helper()
+	lines := strings.Split(renderPlain(tr, 80), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("the block painted %d rows; it has no branch row to check", len(lines))
+	}
+	for _, glyph := range []string{glyphCollapsed, glyphExpanded} {
+		if strings.HasSuffix(lines[1], glyph) {
+			return glyph
+		}
+	}
+	return ""
+}
+
 func headerStar(t *testing.T, tr *transcript, blink bool) string {
 	t.Helper()
 	lines := tr.renderView(newTheme(scheme.Default()), 80, blink).lines
@@ -2765,7 +2916,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
-			settled: "✦ Sub-Agent ▶", flipped: "  Sub-Agent ▶",
+			settled: "✦ Sub-Agent", flipped: "  Sub-Agent",
 		},
 		{
 			// The mirror case, and the reason the rule asks the span as well as the head: the report
@@ -2777,7 +2928,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				openRead(tr, "c1", "a.go", 1)
 				subAgentReport(tr, "s1", "survey complete", 0)
 			},
-			settled: "✦ Sub-Agent ▶", flipped: "  Sub-Agent ▶",
+			settled: "✦ Sub-Agent", flipped: "  Sub-Agent",
 		},
 		{
 			name: "a finished run settles",
@@ -2786,7 +2937,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				subAgentReport(tr, "s1", "survey complete", 0)
 			},
-			settled: "✦ Sub-Agent ▶", flipped: "✦ Sub-Agent ▶",
+			settled: "✦ Sub-Agent", flipped: "✦ Sub-Agent",
 		},
 	}
 	for _, tc := range cases {
@@ -2843,13 +2994,13 @@ func TestFiringBlockCollapsesToItsRemainderMarker(t *testing.T) {
 			name:   "a multi-line answer leads the body",
 			answer: "found 3 stale entries\nremoved them",
 			wantCollapsed: []string{
-				"⟳ Schedule ▶",
-				"  ┕ nightly tidy",
+				"⟳ Schedule",
+				groupMemberLine("  ┕ nightly tidy ⋯"),
 				"    +5 more lines",
 			},
 			wantExpanded: []string{
-				"⟳ Schedule ▼",
-				"  ┕ nightly tidy",
+				"⟳ Schedule",
+				leaderEdgeRow("  ┕ nightly tidy ⋯", glyphExpanded),
 				"    found 3 stale entries",
 				"    removed them",
 				"    prompt: check the log",
@@ -2861,13 +3012,13 @@ func TestFiringBlockCollapsesToItsRemainderMarker(t *testing.T) {
 			name:   "a one-line answer rides the branch beside the Schedule's name",
 			answer: "the log is clean",
 			wantCollapsed: []string{
-				"⟳ Schedule ▶",
-				"  ┕ nightly tidy the log is clean",
+				"⟳ Schedule",
+				groupMemberLine("  ┕ nightly tidy ⋯ the log is clean"),
 				"    +3 more lines",
 			},
 			wantExpanded: []string{
-				"⟳ Schedule ▼",
-				"  ┕ nightly tidy the log is clean",
+				"⟳ Schedule",
+				leaderEdgeRow("  ┕ nightly tidy ⋯ the log is clean", glyphExpanded),
 				"    prompt: check the log",
 				"    2 turns · 4s",
 				`    saved as "nightly tidy — 14:05" — find it in /sessions`,
@@ -2909,8 +3060,8 @@ func TestFiringBlockHeaderNeverBlinks(t *testing.T) {
 		// rule: a collapsed block paints no body line at all, so the running Firing's one-line
 		// prompt is as much hidden as the returned one's whole record and both wear the ▶ a click
 		// acts on.
-		{"a Firing still running", open, "⟳ Schedule ▶"},
-		{"a Firing that returned", firingBlock("the log is clean"), "⟳ Schedule ▶"},
+		{"a Firing still running", open, "⟳ Schedule"},
+		{"a Firing that returned", firingBlock("the log is clean"), "⟳ Schedule"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := headerStar(t, tc.tr, false); got != tc.want {
@@ -2972,7 +3123,7 @@ func TestRenderOneLineOutputRidesTheBranch(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Run",
-		"  ┕ git rev-parse HEAD abc1234",
+		"  ┕ git rev-parse HEAD ⋯ abc1234",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("one-line Run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -2991,8 +3142,8 @@ func TestRenderGroupsOneLineOutputCalls(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Run (2)",
-		"  ┝ git rev-parse HEAD abc1234",
-		"  ┕ pwd                /workspace/repos/apogee",
+		"  ┝ git rev-parse HEAD ⋯ abc1234",
+		"  ┕ pwd ⋯ /workspace/repos/apogee",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("one-line Run group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -3007,7 +3158,7 @@ func TestRenderInFlightStandalone(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Read File",
-		"  ┕ main.go",
+		"  ┕ main.go ⋯",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("in-flight block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -3224,9 +3375,9 @@ func TestEveryToolShapeCollapsesInsideTheRowBudget(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			lines := strings.Split(renderPlain(tc.build(), width), "\n")
-			if len(lines) > 1+collapsedTargetRows+1 {
+			if len(lines) > 1+collapsedBodyCap+1 {
 				t.Errorf("collapsed block is %d rows, want at most %d:\n%s",
-					len(lines), 1+collapsedTargetRows+1, strings.Join(lines, "\n"))
+					len(lines), 1+collapsedBodyCap+1, strings.Join(lines, "\n"))
 			}
 			for i, ln := range lines {
 				if w := th.measure.Width(ln); w > width {
@@ -3234,9 +3385,15 @@ func TestEveryToolShapeCollapsesInsideTheRowBudget(t *testing.T) {
 				}
 			}
 			// A block that hides this much says so, whatever its shape: the indicator and the click
-			// target are one predicate, so a missing ▶ here is an unreachable second state.
-			if !strings.HasSuffix(lines[0], " "+glyphCollapsed) {
-				t.Errorf("collapsed header = %q, want it to wear %q", lines[0], glyphCollapsed)
+			// target are one predicate, so a missing ▶ here is an unreachable second state. WHERE it
+			// sits follows the shape — at the right edge of a targeted call's leader row, and on the
+			// header of the targetless shape, which paints no such row (renderToolBlock).
+			worn := false
+			for _, ln := range lines {
+				worn = worn || strings.HasSuffix(ln, glyphCollapsed)
+			}
+			if !worn {
+				t.Errorf("collapsed block wears no %q:\n%s", glyphCollapsed, strings.Join(lines, "\n"))
 			}
 		})
 	}
@@ -3343,14 +3500,14 @@ func TestRenderGroupBreakers(t *testing.T) {
 			},
 			want: []string{
 				"✦ Read File",
-				"  ┕ a.go 1 - 5",
+				"  ┕ a.go ⋯ 1 - 5",
 				"",
-				"✦ Run ▶",
-				"  ┕ go test",
+				"✦ Run",
+				groupMemberLine("  ┕ go test ⋯"),
 				"    +3 more lines",
 				"",
 				"✦ Read File",
-				"  ┕ b.go 1 - 9",
+				"  ┕ b.go ⋯ 1 - 9",
 			},
 		},
 		{
@@ -3362,12 +3519,12 @@ func TestRenderGroupBreakers(t *testing.T) {
 			},
 			want: []string{
 				"✦ Read File",
-				"  ┕ a.go 1 - 5",
+				"  ┕ a.go ⋯ 1 - 5",
 				"",
 				"· approval allow: read_file",
 				"",
 				"✦ Read File",
-				"  ┕ b.go 1 - 9",
+				"  ┕ b.go ⋯ 1 - 9",
 			},
 		},
 		{
@@ -3378,12 +3535,12 @@ func TestRenderGroupBreakers(t *testing.T) {
 			},
 			want: []string{
 				"✦ Read File",
-				"  ┕ a.go 1 - 5",
+				"  ┕ a.go ⋯ 1 - 5",
 				"", // the descent's own spacer joins at depth 0: the rail starts at the label
 				"│ ⤷ sub-agent",
 				"│",
 				"│ ✦ Read File",
-				"│   ┕ b.go 1 - 9",
+				"│   ┕ b.go ⋯ 1 - 9",
 			},
 		},
 		{
@@ -3397,7 +3554,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 			},
 			want: []string{
 				"✦ Read File",
-				"  ┕ a.go 1 - 5",
+				"  ┕ a.go ⋯ 1 - 5",
 				"",
 				"✦ Read File",
 				"  ┕ 1 - 1",
@@ -3429,8 +3586,8 @@ func TestRenderGroupBreakers(t *testing.T) {
 		}
 		want := strings.Join([]string{
 			"✦ Run (2)",
-			"  ┝ go build done",
-			groupMemberLine(t, "  ┕ go test", 80),
+			"  ┝ go build ⋯ done",
+			groupMemberLine("  ┕ go test ⋯"),
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("joined group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -3504,24 +3661,24 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"✦ Reading the docs first.",
 		"",
 		"✦ Read File (3)",
-		"  ┝ README.md 1 - 154",
-		"  ┝ TODO.md   1 - 408",
-		"  ┕ ISSUES.md 1 - 8",
+		"  ┝ README.md ⋯ 1 - 154",
+		"  ┝ TODO.md ⋯ 1 - 408",
+		"  ┕ ISSUES.md ⋯ 1 - 8",
 		"",
-		"✦ Run ▶",
-		"  ┕ go test ./...",
+		"✦ Run",
+		groupMemberLine("  ┕ go test ./... ⋯"),
 		"    +3 more lines",
 		"",
-		"✦ View Diff ▶",
-		"  ┕ main.go +2 -2",
+		"✦ View Diff",
+		groupMemberLine("  ┕ main.go ⋯ +2 -2"),
 		"    +6 more lines",
 		"",
 		"✦ Edit File (2)",
-		groupMemberLine(t, "  ┝ main.go replaced text in main.go", 80),
-		groupMemberLine(t, "  ┕ main.go applied 1 replacement to main.go", 80),
+		groupMemberLine("  ┝ main.go ⋯ replaced text in main.go"),
+		groupMemberLine("  ┕ main.go ⋯ applied 1 replacement to main.go"),
 		"",
-		"✦ Write File ▶",
-		"  ┕ notes.md +25 bytes",
+		"✦ Write File",
+		groupMemberLine("  ┕ notes.md ⋯ +25 bytes"),
 		"    +3 more lines",
 		"",
 		"✦ mcp_search ▶",
@@ -3534,7 +3691,7 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"│ ⤷ sub-agent",
 		"│",
 		"│ ✦ Read File",
-		"│   ┕ main.go 1 - 154",
+		"│   ┕ main.go ⋯ 1 - 154",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("transcript layout mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)

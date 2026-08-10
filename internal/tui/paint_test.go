@@ -869,14 +869,14 @@ func TestPaintedTabBearingToolTargetKeepsItsColumn(t *testing.T) {
 			}
 			branches := lines[1:]
 
-			want := paintedColumn(strip(branches[len(branches)-1]), "—", tc.method) // the tab-free row
-			if want < 0 {
-				t.Fatalf("no summary on the last branch — the fixture is not a summarised block:\n%s",
-					strings.Join(mapStrip(lines), "\n"))
-			}
+			// A leader row fills its room exactly — the dots take up whatever the target and the
+			// outcome leave — so a tab measured as nothing would show up here as a row of the
+			// wrong width, tab-bearing and tab-free rows disagreeing by the four cells the paint
+			// spends on it.
+			want := width - groupIndicatorCells(th)
 			for i, ln := range branches {
-				if got := paintedColumn(strip(ln), "—", tc.method); got != want {
-					t.Errorf("branch %d opens its summary in painted column %d, want the block's target column %d: %q",
+				if got := paintedWidth(strip(ln), tc.method); got != want {
+					t.Errorf("branch %d paints %d columns, want the leader row's %d: %q",
 						i, got, want, strip(ln))
 				}
 				if strings.Contains(strip(ln), "\t") {
@@ -1034,7 +1034,7 @@ type paintedDetail struct {
 // arithmetic about indents or wrap points standing between the assertion and what the screen shows.
 //
 // The block is EXPANDED, because the retained line is what this probes: a collapsed block spends
-// two rows on its branch and clips the rest whatever the line holds (collapsedTargetRows,
+// one row on its branch and clips the rest whatever the line holds (leaderRow,
 // render.go), so it would measure the row budget rather than the per-line rune cap. Expanded, every
 // rune the entry kept reaches the grid and the cap is the only thing bounding the flood.
 func paintedDetailRows(t *testing.T, method ansi.Method, fill string) paintedDetail {
@@ -1046,7 +1046,9 @@ func paintedDetailRows(t *testing.T, method ansi.Method, fill string) paintedDet
 	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{
-		CallID: "c1", Content: strings.Repeat(fill, detailClipRunes+40)}})
+		// A SECOND line keeps the flood a body: a one-line output is promoted into the branch
+		// row's outcome slot instead (toolpresent.go), and a leader row never wraps.
+		CallID: "c1", Content: strings.Repeat(fill, detailClipRunes+40) + "\ntail"}})
 	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 		ID: "c2", Tool: "read_file", Arguments: []byte(`{"path":"neighbour.go"}`)}})
 	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "one line"}})

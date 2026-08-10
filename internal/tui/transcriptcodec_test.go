@@ -229,10 +229,10 @@ func TestTranscriptCodecReDerivesSubAgentSolo(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
-		"  ┕ survey the tests refused",
+		"  ┕ survey the tests ⋯ refused",
 		"",
 		"✦ Sub-Agent",
-		"  ┕ survey the docs refused",
+		"  ┕ survey the docs ⋯ refused",
 	}, "\n")
 	if out := renderPlain(&transcript{entries: got}, 80); out != want {
 		t.Errorf("replayed delegations mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
@@ -277,12 +277,12 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 		}
 
 		want := strings.Join([]string{
-			"✦ Ask User ▶",
-			"  ┕ Ship it? Yes",
+			"✦ Ask User",
+			groupMemberLine("  ┕ Ship it? ⋯ Yes"),
 			"    +3 more lines",
 			"",
-			"✦ Ask User ▶",
-			"  ┕ Tag it? No",
+			"✦ Ask User",
+			groupMemberLine("  ┕ Tag it? ⋯ No"),
 			"    +3 more lines",
 		}, "\n")
 		if out := renderPlain(&transcript{entries: got}, 80); out != want {
@@ -312,8 +312,8 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 
 		want := strings.Join([]string{
 			"✦ Ask User (2)",
-			"  ┝ Ship it?",
-			"  ┕ Tag it?",
+			"  ┝ Ship it? ⋯",
+			"  ┕ Tag it? ⋯",
 		}, "\n")
 		if out := renderPlain(&transcript{entries: got}, 80); out != want {
 			t.Errorf("replayed pending questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
@@ -350,8 +350,8 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 
 		want := strings.Join([]string{
 			"✦ Ask User (2)",
-			"  ┝ Ship it? " + errLine,
-			"  ┕ Tag it?  " + errLine,
+			"  ┝ Ship it? ⋯ " + errLine,
+			"  ┕ Tag it? ⋯ " + errLine,
 		}, "\n")
 		if out := renderPlain(&transcript{entries: got}, 80); out != want {
 			t.Errorf("replayed failed questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
