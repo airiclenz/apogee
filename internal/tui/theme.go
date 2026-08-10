@@ -159,10 +159,11 @@ type theme struct {
 	queuedText       lipgloss.Style // a staged-interjection strip row: faint on black, painted edge to edge so the strip reads as one band (its own role, deliberately not statusBar's)
 	presentTitle     lipgloss.Style // the ▤ marker and title of a presented document (bold white — a deliverable reads as a heading, not as plumbing; its path and URL stay unstyled so the terminal linkifies plain text)
 
-	// Markdown styles for assistant chat text (markdown.go): **bold** weight, ## headings
-	// as bold white, `inline code` and ``` fenced blocks ``` in the scheme's `code` role, and the
-	// dim frame a table draws around its columns.
+	// Markdown styles for assistant chat text (markdown.go): **bold** weight, <u>underline</u>,
+	// ## headings as bold white, `inline code` and ``` fenced blocks ``` in the scheme's `code` role,
+	// and the dim frame a table draws around its columns.
 	mdBold        lipgloss.Style // **bold** span
+	mdUnderline   lipgloss.Style // <u>underline</u> span — SGR 4 and nothing else, so the underlined run keeps whatever colour it stands in
 	mdHeading     lipgloss.Style // # … ###### heading line (bold white)
 	mdCode        lipgloss.Style // `inline code` span (the `code` role)
 	mdCodeBlock   lipgloss.Style // a ``` fenced ``` code-block line (the `code` role)
@@ -311,6 +312,7 @@ func newTheme(s scheme.Scheme) theme {
 		queuedText:   lipgloss.NewStyle().Foreground(muted).Background(surface),
 		presentTitle: lipgloss.NewStyle().Bold(true).Foreground(userText),
 		mdBold:       lipgloss.NewStyle().Bold(true),
+		mdUnderline:  lipgloss.NewStyle().Underline(true),
 		mdHeading:    lipgloss.NewStyle().Bold(true).Foreground(userText),
 		mdCode:       lipgloss.NewStyle().Foreground(code),
 		mdCodeBlock:  lipgloss.NewStyle().Foreground(code),

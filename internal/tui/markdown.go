@@ -9,7 +9,8 @@ import (
 // ----------------------------------------------------------------------------
 //
 // Assistant messages arrive as markdown source; this file turns the small, common subset the
-// transcript needs into styled physical lines: **bold**, # headings (bold white), `inline code`
+// transcript needs into styled physical lines: **bold**, <u>underline</u> (the one HTML pair it
+// knows, because markdown has no underline of its own), # headings (bold white), `inline code`
 // and ``` fenced blocks ``` (the scheme's `code` role), bullet/numbered lists, and GFM pipe tables
 // — the last dispatched from the walk below into its companion mdtable.go, which draws them as aligned
 // columns ruled by a faint │ and by a ─ under the header and between adjacent body rows, wrapping
@@ -22,7 +23,7 @@ import (
 // into the text as ANSI before wrapping, and the wrap helpers are SGR-aware (they re-emit a
 // style across a soft-wrap boundary), so word-wrap arithmetic is unperturbed (render.go:204);
 // and every width measure here strips ANSI, so the sticky-header scroll math still measures
-// visible columns. Unterminated markup (a ` or ** or fence still streaming in) degrades to
+// visible columns. Unterminated markup (a ` or ** or <u> or fence still streaming in) degrades to
 // literal text, so a partially-streamed message never leaks an escape or breaks the layout.
 
 // renderMarkdownBody renders an assistant message's markdown into styled physical lines at the
@@ -159,9 +160,15 @@ func renderCodeBlock(th theme, code []string, width int) []string {
 	return out
 }
 
-// renderInline styles the inline spans in one logical line: `code` (the scheme's `code` role) and
-// **bold**. Code spans win over bold (no bold is parsed inside a code span), matching CommonMark's code-span
-// precedence. An unterminated ` or ** is emitted literally so a mid-stream line renders cleanly.
+// renderInline styles the inline spans in one logical line: `code` (the scheme's `code` role),
+// **bold** and <u>underline</u>. Code spans win over both (no bold and no <u> is parsed inside a code span),
+// matching CommonMark's code-span precedence. An unterminated ` or ** or <u> is emitted literally so a
+// mid-stream line renders cleanly.
+//
+// <u> is the one HTML tag this renderer knows, and it is matched as exact lowercase bytes: markdown
+// has no underline of its own (CommonMark spends __ on strong emphasis), so the tag is the only
+// spelling a model reaches for. <U>, <u > and every other tag fall through to the literal default
+// branch untouched — recognising one pair is not the start of an HTML parser.
 func renderInline(th theme, s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); {
@@ -182,6 +189,14 @@ func renderInline(th theme, s string) string {
 			}
 			b.WriteString("**")
 			i += 2
+		case strings.HasPrefix(s[i:], "<u>"):
+			if end := strings.Index(s[i+3:], "</u>"); end >= 0 {
+				b.WriteString(th.mdUnderline.Render(s[i+3 : i+3+end]))
+				i += 3 + end + 4
+				continue
+			}
+			b.WriteString("<u>")
+			i += 3
 		default:
 			b.WriteByte(s[i])
 			i++

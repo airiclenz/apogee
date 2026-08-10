@@ -27,6 +27,21 @@ func strip(s string) string { return ansi.Strip(s) }
 // style-presence assertions run only where colour is actually produced.
 func colorActive(th theme) bool { return strings.Contains(th.mdCode.Render("x"), "\x1b") }
 
+// underlineSGR returns the opening escape sequence th.mdUnderline paints with, probed from the
+// theme rather than spelled literally: lipgloss composes the underline parameter with others of its
+// own choosing (today "\x1b[4;4m", not the bare "\x1b[4m"), and the wire spelling is its business,
+// not the test's. Empty string on a no-colour profile, where there is nothing to look for.
+func underlineSGR(th theme) string {
+	probe := th.mdUnderline.Render("x")
+	if !strings.HasPrefix(probe, "\x1b[") {
+		return ""
+	}
+	if idx := strings.IndexByte(probe, 'm'); idx >= 0 {
+		return probe[:idx+1]
+	}
+	return ""
+}
+
 func TestRenderInlineBold(t *testing.T) {
 	th := newTheme(scheme.Default())
 	got := renderInline(th, "a **bold** b")
@@ -38,6 +53,34 @@ func TestRenderInlineBold(t *testing.T) {
 	}
 	if colorActive(th) && !strings.Contains(got, "\x1b") {
 		t.Errorf("bold span emitted no styling: %q", got)
+	}
+}
+
+// <u>…</u> is the one HTML pair the renderer knows: the tags are consumed and the enclosed run is
+// underlined (SGR 4).
+func TestRenderInlineUnderline(t *testing.T) {
+	th := newTheme(scheme.Default())
+	got := renderInline(th, "press <u>Enter</u> now")
+	if v := strip(got); v != "press Enter now" {
+		t.Errorf("visible = %q; want %q (the <u> tags consumed)", v, "press Enter now")
+	}
+	if strings.Contains(got, "<u>") || strings.Contains(got, "</u>") {
+		t.Errorf("output still carries the literal tags: %q", got)
+	}
+	if sgr := underlineSGR(th); sgr != "" && !strings.Contains(got, sgr) {
+		t.Errorf("underline span emitted no underline SGR %q: %q", sgr, got)
+	}
+}
+
+// Only the exact lowercase pair is markup. Everything else that looks like it — CommonMark's __,
+// an uppercase tag, a tag with anything after the "u" — survives byte for byte and unstyled.
+func TestRenderInlineUnderlineLiteralPassthrough(t *testing.T) {
+	th := newTheme(scheme.Default())
+	for _, in := range []string{"__text__", "<U>x</U>", "<u >x</u>"} {
+		got := renderInline(th, in)
+		if got != in {
+			t.Errorf("renderInline(%q) = %q; want it byte-for-byte literal", in, got)
+		}
 	}
 }
 
@@ -61,10 +104,22 @@ func TestRenderInlineCodeBeatsBold(t *testing.T) {
 	}
 }
 
+// A code span wins over <u> too: the tag text stays visible inside `…` and is never underlined.
+func TestRenderInlineCodeBeatsUnderline(t *testing.T) {
+	th := newTheme(scheme.Default())
+	got := renderInline(th, "`<u>x</u>`")
+	if v := strip(got); v != "<u>x</u>" {
+		t.Errorf("visible = %q; want %q (<u> not parsed inside a code span)", v, "<u>x</u>")
+	}
+	if sgr := underlineSGR(th); sgr != "" && strings.Contains(got, sgr) {
+		t.Errorf("code span underlined its contents: %q", got)
+	}
+}
+
 // An unterminated marker (mid-stream) is left literal — never a leaked escape or eaten text.
 func TestRenderInlineUnterminated(t *testing.T) {
 	th := newTheme(scheme.Default())
-	for _, in := range []string{"a **bold start", "a `code start", "trailing *"} {
+	for _, in := range []string{"a **bold start", "a `code start", "trailing *", "a <u>open"} {
 		got := renderInline(th, in)
 		if v := strip(got); v != in {
 			t.Errorf("renderInline(%q) visible = %q; want it left literal", in, v)

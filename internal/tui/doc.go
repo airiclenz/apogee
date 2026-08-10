@@ -156,7 +156,8 @@
 // and URL are emitted as raw plain text because terminal linkification is the whole mechanism.
 //
 // Three files round out the renderer without touching the state machine. markdown.go turns the
-// common markdown subset in assistant text (**bold**, # headings, `inline`/fenced code, bullet/
+// common markdown subset in assistant text (**bold**, <u>underline</u> — the one HTML pair, since
+// markdown spells no underline of its own — # headings, `inline`/fenced code, bullet/
 // numbered lists, GFM pipe tables) into styled physical lines — a spare, pure, lipgloss-only
 // renderer matching toolpresent.go's posture, with render.go still owning the marker and depth
 // framing. Tables are the one construct with a file of their own, mdtable.go: it parses the block

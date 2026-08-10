@@ -340,6 +340,25 @@ func TestTableConsumesItsSyntax(t *testing.T) {
 	}
 }
 
+// A cell is rendered through renderInline like any other text, so the inline subset works inside a
+// table for free: an <u>…</u> cell has its tags consumed and its text underlined.
+func TestTableCellUnderline(t *testing.T) {
+	th := newTheme(scheme.Default())
+	source := "| a | b |\n| --- | --- |\n| <u>x</u> | y |"
+
+	got := renderMarkdownBody(th, source, 40)
+
+	if len(got) != 3 {
+		t.Fatalf("got %d lines, want 3 (header, rule, one row): %#v", len(got), visible(got))
+	}
+	if v, want := strip(got[2]), "x │ y"; v != want {
+		t.Errorf("body row = %q; want %q (the <u> tags consumed, the column no wider for them)", v, want)
+	}
+	if sgr := underlineSGR(th); sgr != "" && !strings.Contains(got[2], sgr) {
+		t.Errorf("underlined cell emitted no underline SGR %q: %q", sgr, got[2])
+	}
+}
+
 // EVERY rule the table draws — the one under the header and the one between each pair of adjacent
 // body rows — runs the whole width of the table: it is ruled THROUGH the dividers rather than
 // stopping at each one, so it reads as a single horizontal rule across the block rather than a dash

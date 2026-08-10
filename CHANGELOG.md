@@ -10,6 +10,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`<u>…</u>` renders as underlined text.** Markdown spells no underline of its own — CommonMark
+  spends `__` on strong emphasis — so the renderer recognises the one HTML pair a model actually
+  reaches for, and assistant text saying `press <u>Enter</u>` now shows *Enter* underlined with the
+  tags consumed. It works everywhere inline markup does, table cells included. The match is exact
+  lowercase bytes: `<U>`, `<u >`, `__text__` and every other tag stay literal, an unterminated `<u>`
+  mid-stream stays literal like an unterminated `` ` `` or `**`, and a `<u>` inside a code span is
+  still just text. This is not the start of an HTML parser.
 - **Type-to-filter across the selector pop-ups.** Every overlay that offers a list now narrows as
   you type: `/model` over the models a server advertises, `/model` over llama-launcher's Launch
   profiles, `/server`, `/schedule`'s cycle and mode panes, `/schedule-stop`, and the `/sessions`
