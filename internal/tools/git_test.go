@@ -826,7 +826,10 @@ func TestGitStatus_NotARepoMatchesOtherGitTools(t *testing.T) {
 // gitLogLine is the exact three-field shape one git_log line must have: short hash, an
 // iso-strict (space-free) timestamp, then the subject. Pinning it here is what keeps the
 // --format/--date pair from drifting into something a model cannot split positionally.
-var gitLogLine = regexp.MustCompile(`^[0-9a-f]{7,40} \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2} .+$`)
+// The zone is the one part that is NOT byte-stable across git versions: a UTC offset is
+// spelled "Z" by newer git and "+00:00" by older, both RFC 3339 for the same instant, so
+// the alternation is the drift the shape tolerates — and the only one.
+var gitLogLine = regexp.MustCompile(`^[0-9a-f]{7,40} \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2}|Z) .+$`)
 
 // commitInRepo adds a one-file commit to an existing test repo, so a log test has real
 // history to page through.
