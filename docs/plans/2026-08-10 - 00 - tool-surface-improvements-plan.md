@@ -310,7 +310,26 @@ includes both.
 
 **Commit:** `feat(tools): add copy_file and move_file workspace tools`
 
-## 8. New `delete_file` tool
+## 8. New `delete_file` tool — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): no CHANGELOG entry — the owner ratified that NO item in this plan touches
+CHANGELOG.md. The item's conditional ("if the guard's disposition table needs a row") resolved to
+NO new row and no code change in `internal/security`: ADR 0012's ruleset is precision-over-recall
+(almost-never-legitimate AND catastrophic) and deleting one in-workspace file is ordinary
+refactoring — the exact near-miss the shipped rules are written not to fire on, and a rule there
+would gate normal work. What delete_file inherits instead is structural and already in place: its
+argument is `path`, which is not a `payloadKey`, so the guard reads a delete target as inspectable
+text and the shipped credential/persistence rules hard-refuse it in every mode ahead of the ladder;
+`TestDeleteFile_DangerousActionClassification` pins both halves (ordinary path ⇒ TierNone, `~/.ssh`
+⇒ TierHardRefuse). Beyond the item's literal text, the roster-facing set items 3/5/6/7 established
+was updated so it stays true of the shipped suite: registration in `internal/tools/registry.go`
+(which moved the registry tests' name lists and all four counts), `internal/tools/doc.go`, a card
+entry in `internal/tui/toolpresent.go`, a probe row in `internal/tools/workspace_scoped_test.go`
+(without it `TestWriteTargetProbesCoverEveryWriter` fails — every marker carrier needs one), and the
+tool-suite counts in `docs/design/technical-design.md` (26 → 27, both places). One shape call the
+item left open: the directory refusal is a real check, not just wording, because `os.Remove` would
+unlink an EMPTY directory; a name swapped between the stat and the remove can therefore cost at most
+one empty directory inside the fence, which is inside the blast radius the call already declared.
 
 **What:** In `internal/tools/file_ops.go`, add a `delete_file` write tool taking
 `path`. Files only: a directory target is refused with a clear IsError (ratified

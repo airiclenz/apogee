@@ -23,6 +23,18 @@ import (
 // source needs no separate classification because it is fenced anyway — a source outside the
 // workspace is refused by the same os.Root the copy reads through, so there is no reachable
 // state in which a call touches a file the destination classification did not account for.
+//
+// delete_file (2026-08-10) joins them as the family's remove-bytes half. It names ONE file, so its
+// marker resolves `path` like every other single-file writer, and its dangerous-action
+// classification is the one ADR 0012 already assigns: NO new default rule. That ruleset is
+// precision-over-recall — membership is *almost-never-legitimate* AND *catastrophic* — and deleting
+// a single file inside the workspace is neither: it is an ordinary refactoring step, the exact
+// near-miss the shipped rules go out of their way NOT to fire on ("rm -rf ./build" is documented as
+// allowed). What DOES wire delete_file into the guard is structural and already in place: `path` is
+// not a payloadKey (internal/security/dangerous.go), so a delete_file call's target is inspectable
+// text and the shipped credential/persistence rules hard-refuse it in every mode, ahead of the
+// ladder — belt to the fence's braces, since the os.Root would refuse those paths anyway.
+// TestDeleteFile_DangerousActionClassification pins both halves.
 
 var copyFileSpec = toolSpec{
 	name: "copy_file",
@@ -214,9 +226,104 @@ func checkFileOpsPaths(args fileOpsArgs, root string) string {
 	return ""
 }
 
+var deleteFileSpec = toolSpec{
+	name: "delete_file",
+	// The description says "permanently" because that is the one fact the model cannot recover
+	// from getting wrong: there is no trash and no undo, and the file is gone from the workspace
+	// even though a committed copy may survive in git.
+	description: "Permanently delete a file within the workspace. Files only — a directory is refused. There is no undo, so name the path exactly.",
+	schema: json.RawMessage(`{
+  "type": "object",
+  "required": ["path"],
+  "properties": {
+    "path": {"type": "string", "description": "File path to delete"}
+  }
+}`),
+}
+
+// deleteFileArgs is delete_file's argument shape. It spells its target `path` — the key every
+// single-file writer uses and pathArgWriteTarget decodes — so the blast-radius fence sees the file
+// this call would remove (TestWriteToolsDeclarePathArgument pins the two surfaces together).
+type deleteFileArgs struct {
+	Path string `json:"path"`
+}
+
+// DeleteFile removes one workspace file. It is a write tool — the loop routes it through Approval
+// in Ask-Before before Execute is called — and the most destructive of the family, which is why it
+// refuses everything it is not certain about rather than guessing.
+type DeleteFile struct {
+	toolSpec
+	root string
+}
+
+// NewDeleteFile returns a delete_file tool that resolves paths within root.
+func NewDeleteFile(root string) *DeleteFile { return &DeleteFile{toolSpec: deleteFileSpec, root: root} }
+
+// ReadOnly reports that delete_file is write-capable — it returns false, the signal that the loop
+// must gate it through Approval in Ask-Before (domain.ReadOnlyTool).
+func (t *DeleteFile) ReadOnly() bool { return false }
+
+// workspaceWriteTarget resolves the absolute path this call would remove so dispatch can classify
+// in- vs out-of-workspace before Execute (the workspaceScopedWriter marker,
+// confinement-execution-contract §3). A removal is a write to the directory that held the file, and
+// the file's own path is what states that blast radius. It performs no removal.
+func (t *DeleteFile) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
+	return pathArgWriteTarget(call, t.root)
+}
+
+// Execute removes the named file, honouring ctx cancellation. Bad arguments, a missing file, a
+// directory target and a path escaping the root are all reported as IsError results the model can
+// react to. The removal itself goes through the pinned os.Root, so the fence is re-decided at
+// REMOVE time rather than trusted from the check above.
+func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.ToolResult{}, err
+	}
+
+	args, fail, ok := decodeToolArgs[deleteFileArgs](call)
+	if !ok {
+		return fail, nil
+	}
+	if refusal := checkDeletePath(args.Path, t.root); refusal != "" {
+		return errorResult(call.ID, refusal), nil
+	}
+	if err := security.SafeRemove(t.root, args.Path); err != nil {
+		return errorResult(call.ID, err.Error()), nil
+	}
+	return okResult(call.ID, "deleted "+args.Path), nil
+}
+
+// checkDeletePath validates the one path delete_file takes and returns the model-facing refusal
+// (empty when the removal may proceed): the name must exist inside the fence and must not be a
+// directory, because directory removal is a different blast radius and a different tool.
+//
+// The stat goes through the workspace fence, so an escaping path is refused here with the uniform
+// escape wording rather than reported as an ordinary absence. Like checkFileOpsPaths this is for
+// the MESSAGE first — SafeRemove re-decides containment at operation time — but the directory
+// refusal also carries weight of its own, since os.Remove would happily unlink an EMPTY directory.
+// A name swapped between the two steps can therefore cost at most one empty directory inside the
+// workspace: still within the blast radius the call already declared, and not worth a second
+// fenced primitive to close.
+func checkDeletePath(path, root string) string {
+	if path == "" {
+		return "path is required"
+	}
+
+	info, err := statInRoot(path, root)
+	if err != nil {
+		return escapeOrMessage(err, "file not found: "+path)
+	}
+	if info.IsDir() {
+		return "not a file: " + path + " (directories are not supported)"
+	}
+	return ""
+}
+
 var (
 	_ domain.Tool           = (*CopyFile)(nil)
 	_ workspaceScopedWriter = (*CopyFile)(nil)
 	_ domain.Tool           = (*MoveFile)(nil)
 	_ workspaceScopedWriter = (*MoveFile)(nil)
+	_ domain.Tool           = (*DeleteFile)(nil)
+	_ workspaceScopedWriter = (*DeleteFile)(nil)
 )

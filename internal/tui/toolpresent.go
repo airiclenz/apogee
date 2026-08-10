@@ -417,6 +417,12 @@ var toolRegistry = map[string]toolPresenter{
 		target: sourceDestinationTarget,
 		detail: firstLineDetail, // "moved a.txt to b.txt"
 	},
+	"delete_file": {
+		label:  "Delete File",
+		verb:   "deleting",
+		target: stringArg("path"),
+		detail: firstLineDetail, // "deleted a.txt"
+	},
 	"terminal": {
 		label:  "Run",
 		verb:   "running",

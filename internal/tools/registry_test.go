@@ -18,7 +18,7 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 	for _, name := range []string{
 		"read_file", "write_file", "list_dir", "grep", "find_files",
 		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
-		"view_diff", "open_file", "copy_file", "move_file",
+		"view_diff", "open_file", "copy_file", "move_file", "delete_file",
 		"terminal", "python_exec",
 		"git_branch", "git_commit", "git_diff_range", "git_status", "git_log",
 		"diagnostics",
@@ -31,10 +31,10 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 	}
 
 	// ask_user (no Asker) and present_document (no Presenter) are omitted when NewDefaultRegistry
-	// uses a zero HostTools, so the default set is 24 (20 base/exec/git/diag + 3 network +
+	// uses a zero HostTools, so the default set is 25 (21 base/exec/git/diag + 3 network +
 	// sub_agent).
-	if got := len(registry.All()); got != 24 {
-		t.Errorf("default registry holds %d tools, want 24", got)
+	if got := len(registry.All()); got != 25 {
+		t.Errorf("default registry holds %d tools, want 25", got)
 	}
 	if _, ok := registry.Lookup("ask_user"); ok {
 		t.Error("ask_user must NOT be registered without an Asker")
@@ -52,7 +52,7 @@ func TestNewDefaultRegistry_MenuOrderIsDeterministic(t *testing.T) {
 	want := []string{
 		"read_file", "write_file", "list_dir", "grep", "find_files",
 		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
-		"view_diff", "open_file", "copy_file", "move_file",
+		"view_diff", "open_file", "copy_file", "move_file", "delete_file",
 		"terminal", "python_exec",
 		"git_branch", "git_commit", "git_diff_range", "git_status", "git_log",
 		"diagnostics",
@@ -83,8 +83,8 @@ func TestNewDefaultRegistryWithHost_RegistersAskUserOnlyWithAsker(t *testing.T) 
 	if got := all[len(all)-1].Name(); got != "ask_user" {
 		t.Errorf("ask_user should be last in the menu, got last = %q", got)
 	}
-	if got := len(all); got != 25 {
-		t.Errorf("registry with Asker holds %d tools, want 25", got)
+	if got := len(all); got != 26 {
+		t.Errorf("registry with Asker holds %d tools, want 26", got)
 	}
 }
 
@@ -106,14 +106,14 @@ func TestNewDefaultRegistryWithHost_RegistersPresentDocumentOnlyWithPresenter(t 
 	if _, ok := reg.Lookup("ask_user"); ok {
 		t.Error("ask_user must stay absent when only a Presenter is configured")
 	}
-	if got := len(reg.All()); got != 25 {
-		t.Errorf("registry with a Presenter holds %d tools, want 25", got)
+	if got := len(reg.All()); got != 26 {
+		t.Errorf("registry with a Presenter holds %d tools, want 26", got)
 	}
 
 	// Both delegates ⇒ both tools, present_document last in the menu.
 	both := NewDefaultRegistryWithHost(t.TempDir(), HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}}).All()
-	if got := len(both); got != 26 {
-		t.Errorf("registry with both delegates holds %d tools, want 26", got)
+	if got := len(both); got != 27 {
+		t.Errorf("registry with both delegates holds %d tools, want 27", got)
 	}
 	if got := both[len(both)-1].Name(); got != "present_document" {
 		t.Errorf("present_document should be last in the menu, got last = %q", got)
@@ -224,10 +224,11 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 		"edit_existing_file":      false,
 		"view_diff":               true,
 		"open_file":               true,
-		// File operations (2026-08-10): moving bytes that already exist is still a write —
-		// both must gate, like every other member of the family.
-		"copy_file": false,
-		"move_file": false,
+		// File operations (2026-08-10): moving or removing bytes that already exist is still a
+		// write — all three must gate, like every other member of the family.
+		"copy_file":   false,
+		"move_file":   false,
+		"delete_file": false,
 		// Execution tools (P3.8): write-capable subprocess tools — the loop confines/gates
 		// them, so they must not declare read-only.
 		"terminal":    false,

@@ -104,6 +104,16 @@
 // DESTINATION — where the write lands — because the source is fenced by the operation itself
 // (destinationArgWriteTarget, workspace_scoped.go).
 //
+// delete_file (2026-08-10) closes that family with its remove-bytes half: one path, files only (a
+// directory is a different blast radius), removed through SafeRemove's pinned os.Root so the fence
+// is decided at REMOVE time. It names a single file, so its marker resolves `path` like every other
+// single-file writer. Its dangerous-action classification is the one ADR 0012's ruleset already
+// assigns and needs no new rule: that ruleset is precision-over-recall — almost-never-legitimate AND
+// catastrophic — and deleting one workspace file is an ordinary refactoring step, the near-miss the
+// shipped rules deliberately do not fire on. The wiring that matters is structural and already
+// there: `path` is not a payloadKey, so the credential/persistence rules inspect a delete_file
+// target and hard-refuse it in every mode, ahead of the ladder.
+//
 // present_document (ADR 0019) is the Asker pattern applied to showing a finished document:
 // the model names a deliverable it has written and the HOST picks the mechanism (the
 // presentation ladder — the transcript baseline always, the OS opener on a local desktop, a

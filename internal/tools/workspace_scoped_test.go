@@ -95,6 +95,7 @@ func writeTargetProbes(root string) []writeTargetProbe {
 		{tool: NewEditExistingFile(root), args: fileEditArgs{}, targetKey: pathArgKey},
 		{tool: NewCopyFile(root), args: fileOpsArgs{}, targetKey: destinationArgKey},
 		{tool: NewMoveFile(root), args: fileOpsArgs{}, targetKey: destinationArgKey},
+		{tool: NewDeleteFile(root), args: deleteFileArgs{}, targetKey: pathArgKey},
 	}
 }
 
