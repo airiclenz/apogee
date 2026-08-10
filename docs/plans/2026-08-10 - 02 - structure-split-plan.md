@@ -453,7 +453,22 @@ green; `ls internal/mechanisms/*_*.go` matches only `*_test.go` files;
 
 **Commit:** `refactor(mechanisms): compact file naming, split syntax pair naming, real doc.go map`
 
-## 13. doc.go map guard test — helper plus first wave (tui, mechanisms, config, cmd/apogee)
+## 13. doc.go map guard test — helper plus first wave (tui, mechanisms, config, cmd/apogee) — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): three departures from the item's literal text. (i) The temp-dir unit test drives
+`unmapped(dir)` — the directory-taking core `Check` is a four-line wrapper over — rather than
+`docmap.Check` itself: asserting that a `*testing.T` FAILS needs a fake T the standard library does
+not offer, so testing the wrapper would prove less than testing what it wraps. The wrapper's own
+substance (os.Getwd + one Errorf per missing file) is proven by the four guard tests and by the
+acceptance spot-check. (ii) `Check` matches a file name on a NAME BOUNDARY, not as a bare substring:
+without it a map describing `configwatch.go` would silently vouch for a `watch.go` nobody ever
+described. The rule and its own fixture case are in `docmap_test.go`. (iii) Part (c) collapsed to
+adding the guard test — `cmd/apogee/doc.go` (created by the doc-landscape cleanup plan's item 10,
+`90b363c`) already names all 27 non-test files including the seven `wire_*.go` seams, so the
+"update instead of create" branch had nothing to update; `internal/config/doc.go` and
+`internal/mechanisms/doc.go` were likewise already complete (items 9–12), leaving `internal/tui` the
+only map that needed the five names part (b) lists. No CHANGELOG entry: items 3–12 set the
+precedent that a behaviour-preserving structure change gets none, and this one adds only tests.
 
 Depends on items 3–12.
 

@@ -499,7 +499,10 @@
 // both invocation routes share, while the parse that classifies the line stays in command.go and
 // [Model.submit] stays with the input concern; theme.go the palette, the
 // marker glyphs, and the
-// lipgloss styles; width.go the display-width authority the theme carries — one measure for the
+// lipgloss styles, with colorscheme.go the routing half of the `/color-scheme` verb that swaps
+// that palette under the running frame (status, pick, and the `export` that is the only way to
+// get a built-in scheme onto disk to edit — internal/scheme owns what a scheme IS, ADR 0040);
+// width.go the display-width authority the theme carries — one measure for the
 // whole TUI, and it is whichever one the painter itself is using; inputaccent.go the
 // resolve-gated inline accents the prompt box paints its
 // "/id" and @file tokens with; transcript.go the append-only scrollback model and transcriptcodec.go its
@@ -554,14 +557,19 @@
 // carrying the reasoning beside an `_other.go` no-op twin the six-target cross-build pins:
 // environ_windows.go names the terminal (TERM=xterm-256color, COLORTERM=truecolor, into
 // bubbletea's own environment slice and never the process's) because a Windows shell leaves TERM
-// empty and an empty TERM hands ultraviolet noCaps; syncoutput.go with its two twins filters
-// bubbletea's mode-2026 question out of the stream on Windows, where ConPTY forwards the
-// synchronized-output window EMPTY and re-serializes the frame outside it while the ask costs the
-// cursor-hide flicker mitigation; and altscreen_windows.go sets DISABLE_NEWLINE_AUTO_RETURN on the
+// empty and an empty TERM hands ultraviolet noCaps, environ_other.go being the nil the rule
+// collapses to wherever the shell names the terminal itself; syncoutput.go filters
+// bubbletea's mode-2026 question out of the stream and carries the measurement behind declining
+// it — ConPTY forwards the synchronized-output window EMPTY and re-serializes the frame outside
+// it while the ask costs the cursor-hide flicker mitigation — with syncoutput_windows.go the
+// real-terminal predicate that asks for the filter and syncoutput_other.go the false that leaves
+// every other host on the mode it honours; and altscreen_windows.go sets
+// DISABLE_NEWLINE_AUTO_RETURN on the
 // primary buffer before [Run] claims the alternate one — the ghosting fix, since the console mode
 // word is per screen buffer and a buffer without that flag rewrites the bare LF ultraviolet means
 // "next row, same column" by into CR LF — returning the restore closure that gives the shell back
-// the console mode it lent (ADR 0038);
+// the console mode it lent (ADR 0038), altscreen_other.go being the never-nil no-op restore that
+// stands in where there is no console mode word to lend;
 // and doc.go this narration.
 //
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.
