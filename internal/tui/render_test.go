@@ -1393,6 +1393,144 @@ func TestLeaderRowSpendsItsRoomInOrder(t *testing.T) {
 	}
 }
 
+// TestPromoteGuardHoldsFifteenCellsOfTarget is design call 5 asked of the painter
+// (docs/layout/tool-layout.md, "Width and overflow"): a one-line output may have the outcome slot
+// only while the row still keeps promoteMinTargetCells of target beside the floor dot. Below that
+// the line goes back where it came from — the first line of the body — and the presenter's typed
+// stat takes the slot (guardPromotions, toolView.demoted).
+//
+// The threshold is computed from the constants rather than spelled as a width, so a change to the
+// row's own arithmetic moves the boundary the test aims at instead of silently landing both rows on
+// the same side of it. Both sides then assert the SAME invariant — fifteen cells of target — which
+// is the whole of what the guard buys; what differs between them is only which reading of the
+// outcome the slot got.
+func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
+	t.Parallel()
+
+	const (
+		target = "git rev-parse HEAD"
+		output = "abc1234"
+		stat   = "1 line"
+	)
+	th := newTheme(scheme.Default())
+	promoted := toolView{Label: "Run", Target: target, stat: stat,
+		Summary: quotedSummary(detailLine{Text: output})}
+
+	// The narrowest width at which the promoted line still leaves the target its floor: the room a
+	// row lays out in is the width less the indicator field, and leaderRow spends it on the marker,
+	// the slot, both gaps and the one dot before the target sees a cell of it.
+	edge := promoteMinTargetCells + th.measure.Width(output) + 2*leaderGap + leaderMinDots +
+		th.measure.Width(branchMarker(true)) + groupIndicatorCells(th)
+
+	// targetCells is what the painted row left the target: everything before the leader, less the
+	// marker leading it and the gap the dots stand clear of.
+	targetCells := func(plain string) int {
+		head := plain[:strings.Index(plain, glyphLeaderDot)]
+		return th.measure.Width(strings.TrimRight(head, " ")) - th.measure.Width(branchMarker(true))
+	}
+
+	for _, tc := range []struct {
+		name     string
+		view     toolView
+		width    int
+		expanded bool
+
+		wantSlot     string // the outcome slot's text on the branch row
+		wantBodyLine string // the row the body must carry, or "" when the block keeps none
+	}{{
+		// At the threshold exactly the line is promoted: the target still has its fifteen cells.
+		name: "the line takes the slot while the target keeps its floor",
+		view: promoted, width: edge,
+		wantSlot: output,
+	}, {
+		// One cell narrower and the guard refuses: the stat says what happened and the line drops
+		// into the body, where a collapsed block counts it rather than painting it.
+		name: "one cell short and the line goes back to the body",
+		view: promoted, width: edge - 1,
+		wantSlot: stat, wantBodyLine: "+1 more line",
+	}, {
+		// The same block open: the demoted line is one click away, whole, which is what makes the
+		// guard a MOVE rather than a truncation.
+		name: "the demoted line is what opening the block reveals",
+		view: promoted, width: edge - 1, expanded: true,
+		wantSlot: stat, wantBodyLine: output,
+	}, {
+		// The case the guard exists for: an output far too long to share a row with anything never
+		// reaches the slot at any width a terminal has, and the collapsed block counts it as the one
+		// body line it is — however many rows it would take to print.
+		name: "a monster one-line output stays a body",
+		view: toolView{Label: "Run", Target: target, stat: stat,
+			Summary: quotedSummary(detailLine{Text: strings.Repeat("x", 300)})},
+		width:    120,
+		wantSlot: stat, wantBodyLine: "+1 more line",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := renderToolBlock(th, []toolView{tc.view}, tc.width,
+				blockState{expanded: tc.expanded}).lines
+			branch := strip(lines[1])
+
+			if !strings.Contains(branch, tc.wantSlot) {
+				t.Errorf("branch row = %q; want the outcome %q in its slot", branch, tc.wantSlot)
+			}
+			if got := targetCells(branch); got < promoteMinTargetCells {
+				t.Errorf("branch row = %q leaves the target %d cells, below the guard's %d",
+					branch, got, promoteMinTargetCells)
+			}
+			body := strip(strings.Join(lines[2:], "\n"))
+			if tc.wantBodyLine == "" {
+				if len(lines) != 2 {
+					t.Errorf("promoted block paints %d rows, want the header and its branch alone:\n%s",
+						len(lines), strip(strings.Join(lines, "\n")))
+				}
+				return
+			}
+			if !strings.Contains(body, tc.wantBodyLine) {
+				t.Errorf("body = %q; want the demoted line %q beneath the branch", body, tc.wantBodyLine)
+			}
+			// The slot holds one reading of the outcome, never both: a demoted line that also
+			// printed on the branch would be the row the guard was called in to prevent.
+			if !tc.expanded && strings.Contains(branch, output) {
+				t.Errorf("branch row = %q still carries the demoted line", branch)
+			}
+		})
+	}
+}
+
+// TestDemotedLineKeepsTheSpellingItWasWrittenWith is the promote-guard read against the shortening
+// seam (branchSummary): a promoted line is QUOTED content, and demoting it moves where it sits
+// without touching what it says. So an in-workspace absolute path a command printed reaches the body
+// exactly as the file holds it — the same protection the line had on the branch — while the slot
+// beside it falls back to the presenter's own count.
+func TestDemotedLineKeepsTheSpellingItWasWrittenWith(t *testing.T) {
+	t.Parallel()
+
+	const width = 40
+	ws := newWorkspaceRoot("/home/me/proj")
+	printed := "/home/me/proj/deep/file.txt"
+
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "terminal",
+		Arguments: []byte(`{"command":"cat /home/me/proj/notes.md"}`)}, ws)
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: printed + "\n"}, ws)
+
+	th := newTheme(scheme.Default())
+	lines := renderToolBlock(th, []toolView{tv}, width, blockState{expanded: true}).lines
+	branch, body := strip(lines[1]), strip(strings.Join(lines[2:], "\n"))
+
+	if !strings.Contains(branch, "1 line") {
+		t.Errorf("branch row = %q; want the typed stat in the slot at width %d", branch, width)
+	}
+	if !strings.Contains(body, printed) {
+		t.Errorf("body = %q; want the printed path spelled as the file holds it", body)
+	}
+	// The TARGET is the block's own words and shortens as it always did — the split the guard
+	// inherits rather than one it introduces.
+	if !strings.Contains(branch, "cat notes.md") {
+		t.Errorf("branch row = %q; want the command shortened against the workspace", branch)
+	}
+}
+
 // groupMemberLine composes a collapsed member row the way the painter lays it out: the row's own
 // text, then the ▶ flush against the block's right edge.
 func groupMemberLine(text string) string { return leaderEdgeRow(text, glyphCollapsed) }

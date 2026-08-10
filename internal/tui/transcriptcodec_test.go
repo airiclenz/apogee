@@ -569,6 +569,43 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 		}
 	})
 
+	// The promotion's OTHER half travels for the same reason the mark does, and this case is where it
+	// shows: the typed stat is what the promote-guard swaps into the slot on a narrow row
+	// (toolView.stat), and decode never re-runs the presenter that worded it. A record that came back
+	// without it could no longer be demoted, so the same session would paint a different shape after
+	// a resume at the very widths the guard exists for.
+	t.Run("the promotion's typed stat comes back with it", func(t *testing.T) {
+		const narrow = 40
+
+		tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
+		tr.addToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
+			Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, runRef{})
+		tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, runRef{})
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		if want := `"stat":"1 line"`; !strings.Contains(string(data), want) {
+			t.Errorf("wire blob does not carry %s:\n%s", want, data)
+		}
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 1 || got[0].tool.stat != "1 line" {
+			t.Fatalf("decoded %+v; want the one call with its typed stat", got)
+		}
+		// The fixture is only worth anything if the guard actually bites at this width.
+		if live := renderPlain(tr, narrow); !strings.Contains(live, "1 line") {
+			t.Fatalf("fixture: the guard does not demote at width %d:\n%s", narrow, live)
+		}
+		if replayed, live := renderPlain(&transcript{entries: got}, narrow), renderPlain(tr, narrow); replayed != live {
+			t.Errorf("the block changed shape across the round trip:\n--- replayed ---\n%s\n--- live ---\n%s",
+				replayed, live)
+		}
+	})
+
 	t.Run("a line the block worded stays unquoted and writes no member", func(t *testing.T) {
 		card := toolView{
 			Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
@@ -970,7 +1007,7 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 		if got := fields(wireEntry{}); !slices.Equal(got, wantEntry) {
 			t.Errorf("wireEntry members = %v, want %v — widening the wire needs its own decision", got, wantEntry)
 		}
-		wantTool := []string{"Label", "Verb", "Target", "Name", "Solo", "Summary", "Details"}
+		wantTool := []string{"Label", "Verb", "Target", "Name", "Solo", "Stat", "Summary", "Details"}
 		if got := fields(wireToolView{}); !slices.Equal(got, wantTool) {
 			t.Errorf("wireToolView members = %v, want %v — widening the wire needs its own decision", got, wantTool)
 		}

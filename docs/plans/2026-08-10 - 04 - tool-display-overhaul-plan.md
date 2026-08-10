@@ -105,9 +105,28 @@ error tone on `error: …` summaries; colorscheme test for the new role in both 
 
 **Commit:** `feat(tui): right-aligned outcome slot with dotted leader on tool rows`
 
-## 2. Promote-guard and overflow edge cases
+## 2. Promote-guard and overflow edge cases — ✅ DONE (2026-08-10)
 
 Depends on item 1.
+
+NOTES (2026-08-10): three calls the item's text does not word, all deliberate.
+(a) The guard is applied at the BLOCK's entrance (`guardPromotions`, called from `renderToolBlock`)
+rather than inside `leaderRow`: demotion gives the call a body, which is the very question the
+header indicator, the click surface and the `+N more lines` marker are answered from
+(`blockHidesWhenCollapsed`) — a guard applied at the row would leave those three saying the block
+hid nothing while the paint had just hidden a line. It still depends on the width alone, never on
+the block's state, so a row does not change shape when it opens.
+(b) The guard is scoped to promotions that OFFER a fallback: `promotedOutput` now takes the typed
+stat beside the line, `outputDetail`'s one-line case passes `1 line`, and ask_user's answer passes
+`""` and is never demoted — its body is the RECORD of the exchange (`askUserAnswerRecord`), which
+the answer would be repeated above rather than folded into, and the spec's wording is "a one-line
+output". A targetless call is likewise never demoted: it paints no branch row, so there is no
+target for the guard to protect.
+(c) `toolView.stat` was added to the wire (`wireToolView.Stat`, additive within
+`transcriptVersion`), which item 2 does not name. Decode never re-runs a presenter, so a record
+that came back without its stat could no longer be demoted and a resumed session would paint a
+different shape at exactly the widths the guard exists for — the round trip's own invariant. The
+codec's structural member-list guard test was updated with it.
 
 **What:** Apply the promote-guard in `internal/tui/toolpresent.go`: a one-line output
 is promoted into the right slot only when the row keeps ≥ 15 cells of target plus

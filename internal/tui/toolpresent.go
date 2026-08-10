@@ -187,6 +187,16 @@ type toolView struct {
 	// painter's cap rather than anything decided here.
 	Details toolBody
 
+	// stat is the other reading of a PROMOTED outcome: the presenter's own typed phrase for the
+	// fact the quoted Summary spells out in the tool's words ("1 line"), carried beside it so the
+	// painter can choose between the two by measure (promotable, demoted). It is empty on every
+	// view whose summary the block worded itself — those have only one reading — and on a promotion
+	// the guard must never take back (promotedOutput).
+	//
+	// It is display text and travels the sanitize and shortening seams with the Summary it stands
+	// in for, because it reaches the very same slot.
+	stat string
+
 	name string
 
 	// agentName is the short name a delegation was given (the sub_agent call's optional `name`
@@ -252,6 +262,13 @@ type toolOutcome struct {
 	Summary branchSummary
 	Details []detailLine
 	Solo    bool
+
+	// Stat is the presenter's own typed phrase for the same fact the promoted Summary carries
+	// ("1 line") — what the outcome slot says INSTEAD when the row is too narrow to hold the
+	// promoted line without eating the target (the promote-guard, design call 5). It is the
+	// second half of a promotion and empty on every other outcome: a summary the block WORDED is
+	// already the typed phrase, so there is nothing to fall back to.
+	Stat string
 }
 
 // summaryOnly is the outcome of a tool whose whole result is one plain line in the PRESENTER's
@@ -268,8 +285,19 @@ func summaryOnly(text string) toolOutcome {
 // rides the branch beside the target. Promotion moves where the text sits and changes nothing about
 // whose text it is — it is quoted, so it is marked as such and reaches the screen with the spelling
 // it was written with (branchSummary).
-func promotedOutput(text string) toolOutcome {
-	return toolOutcome{Summary: quotedSummary(detailLine{Text: text})}
+//
+// Promotion is a CANDIDACY rather than a settled fact, because whether the line may have the slot
+// depends on a width this file knows nothing about: a long line on a narrow row would push the
+// target off it, and design call 5 holds 15 cells of target back for exactly that. So a promoter
+// hands over both readings of its outcome — the line, and stat, its own typed phrase for the same
+// fact ("1 line") — and the painter picks by measure (toolView.demoted, guardRefuses in render.go).
+//
+// A promoter with no such phrase passes "" and its line is never taken back. The guard cannot
+// demote what it has nothing to put in the slot's place, and ask_user is that case for a second
+// reason: its body is the RECORD of the exchange (askUserAnswerRecord), which the answer would be
+// repeated above rather than folded into.
+func promotedOutput(text, stat string) toolOutcome {
+	return toolOutcome{Summary: quotedSummary(detailLine{Text: text}), Stat: stat}
 }
 
 // toolPresenter maps a tool name to its friendly label, the active verb naming what the tool
@@ -636,10 +664,16 @@ func (tv *toolView) shortenPaths(ws workspaceRoot) {
 	if !tv.Summary.quoted {
 		tv.Summary.Text = ws.shorten(tv.Summary.Text)
 	}
+	// The stat is the block's OWN wording for the same outcome and may take the slot at paint time
+	// (toolView.demoted), by which point this seam has long run — so it is spelled here, with the
+	// summary it stands in for, rather than left to reach the screen as the only unshortened text
+	// the block ever wrote.
+	tv.stat = ws.shorten(tv.stat)
 }
 
 // sanitize escape-strips every DISPLAY field of the view — label, verb, target, the one-line
-// summary and each detail line — so no ESC byte from a tool call or its result can reach the
+// summary, the typed stat standing by to replace it (toolView.stat) and each detail line — so no
+// ESC byte from a tool call or its result can reach the
 // terminal (stripEscapes). It is the tool card's security seam, run on the way out of
 // presentToolCall and of enrichWithResult (finishDisplay) rather than left to the two dozen target
 // and detail extractors above to remember one at a time.
@@ -665,7 +699,43 @@ func (tv *toolView) sanitize() {
 	tv.Target = stripEscapes(tv.Target)
 	tv.agentName = stripEscapes(tv.agentName)
 	tv.Summary.Text = stripEscapes(tv.Summary.Text)
+	tv.stat = stripEscapes(tv.stat)
 	tv.Details.stripEscapes()
+}
+
+// promotable says whether the outcome slot holds a PROMOTED line the guard may still take back: a
+// summary the block quotes rather than words, with a typed stat to stand in its place. Both halves
+// are required. The block's own wording is not a promotion — there is nothing to demote it TO — and
+// a promotion whose promoter offered no stat is one the guard was told to leave alone
+// (promotedOutput).
+func (tv toolView) promotable() bool {
+	return tv.stat != "" && tv.Summary.quoted && tv.Summary.Text != ""
+}
+
+// demoted is the view as it reads once the promote-guard refuses the promotion (design call 5): the
+// quoted line leaves the outcome slot, the presenter's typed stat takes its place, and the line
+// lands where it would have been had the tool printed two of them — the first line of the body.
+// Nothing is lost by the swap, which is the guard's whole licence to make it: the text is one click
+// away in a block that now has something to reveal, and the slot still says what happened.
+//
+// It is the pure half of the guard. The MEASURE that calls it is the painter's (guardRefuses,
+// render.go), because whether a row keeps 15 cells of target is a question about a width, and this
+// file knows nothing about widths.
+//
+// The body is rebuilt rather than prepended in place: a view is a value the entry hands out copies
+// of, and writing through the slice it shares would put the line in the entry's own body as well —
+// once per repaint. Demoting is idempotent for the same reason it is safe: the stat leaves with the
+// promotion, so a view already demoted is no longer promotable.
+func (tv toolView) demoted() toolView {
+	if !tv.promotable() {
+		return tv
+	}
+	lines := make([]detailLine, 0, tv.Details.len()+1)
+	lines = append(lines, tv.Summary.detailLine)
+	tv.Details = newToolBody(append(lines, tv.Details.all()...))
+	tv.Summary = namedSummary(detailLine{Text: tv.stat})
+	tv.stat = ""
+	return tv
 }
 
 // enrichWithResult folds a tool's result into the view, in four layers. An error result
@@ -705,6 +775,7 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 	if known && p.outcome != nil {
 		out := p.outcome(tv.args, result.Content)
 		tv.Summary = out.Summary
+		tv.stat = out.Stat
 		tv.Details = tv.Details.with(out.Details)
 		tv.solo = tv.solo || out.Solo
 		return
@@ -712,6 +783,7 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 	if known && p.detail != nil {
 		out := p.detail(result.Content)
 		tv.Summary = out.Summary
+		tv.stat = out.Stat
 		tv.Details = tv.Details.with(out.Details)
 		return
 	}
@@ -911,8 +983,11 @@ func firstLineDetail(content string) toolOutcome {
 // stands — ask_user, whose result IS the answer the human typed. The line is marked quoted
 // (promotedOutput), so the workspace root is not spelled out of it: a human who answers with an
 // absolute path wrote that path, and the block quotes people the way it quotes files.
+// The promotion carries no stat: the answer is the whole point of the row and the record beneath it
+// already holds every line the human typed, so there is neither a phrase worth swapping in nor a
+// body line to demote to (promotedOutput, askUserAnswerRecord).
 func quotedFirstLineDetail(content string) toolOutcome {
-	return promotedOutput(clipDetail(firstLine(content)))
+	return promotedOutput(clipDetail(firstLine(content)), "")
 }
 
 // askUserAnswerRecord renders an ANSWERED ask_user call. The branch line is what it always was —
@@ -1052,6 +1127,11 @@ func answerLines(content string) []string {
 // calls grouping; output with more to say is a body and lays out beneath the target instead,
 // because two lines cannot share a branch (layout.md's Run sketch).
 //
+// The one-line half is an OFFER, not a settlement: a line too long to share a narrow row with the
+// target is put back into the body by the painter's promote-guard, which is why that half hands over
+// the typed stat to take the slot in its place (promotedOutput, design call 5). "(no output)" makes
+// no such offer — the block wrote that phrase itself, and there is nothing to demote.
+//
 // It truncates NOTHING. The collapsed paint's "+N more lines" marker is a render-time act on this
 // retained body (collapsedDetails, render.go) — it counts the body whole and paints none of it, so
 // expanding the block is what shows anything the compact shape hides. Only the per-line clip stays here — a 160-rune cap on one line, which
@@ -1074,7 +1154,10 @@ func outputDetail(content string) toolOutcome {
 	}
 	body := lines[first:]
 	if len(body) == 1 {
-		return promotedOutput(clipDetail(body[0]))
+		// The one-line half is a promotion the painter may still refuse, so the stat travels with
+		// it: the line count this output would have been summarised by had it come to two lines,
+		// which is exactly the shape the guard demotes it into (promotedOutput, design call 5).
+		return promotedOutput(clipDetail(body[0]), plural(len(body), "line"))
 	}
 	details := make([]detailLine, 0, len(body))
 	for _, ln := range body {

@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -449,6 +450,10 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 		result      domain.ToolResult
 		wantSummary string
 		wantBody    []string
+		// wantStat is the OTHER reading a promoted outcome carries — the typed phrase the
+		// promote-guard swaps into the slot on a narrow row (toolView.stat). Every outcome the
+		// block worded itself has one reading and so no stat.
+		wantStat string
 	}{
 		{
 			name: "read_file is summary-only",
@@ -469,6 +474,7 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			call:        domain.ToolCall{ID: "3", Tool: "terminal", Arguments: []byte(`{"command":"git rev-parse HEAD"}`)},
 			result:      domain.ToolResult{CallID: "3", Content: "abc1234\n"},
 			wantSummary: "abc1234",
+			wantStat:    "1 line",
 		},
 		{
 			name:        "empty terminal output is summary-only",
@@ -492,12 +498,105 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			if tv.Summary.Text != tc.wantSummary {
 				t.Errorf("summary = %q, want %q", tv.Summary.Text, tc.wantSummary)
 			}
+			if tv.stat != tc.wantStat {
+				t.Errorf("stat = %q, want %q", tv.stat, tc.wantStat)
+			}
 			body := make([]string, 0, tv.Details.len())
 			for _, d := range tv.Details.all() {
 				body = append(body, d.Text)
 			}
 			if strings.Join(body, "\n") != strings.Join(tc.wantBody, "\n") {
 				t.Errorf("body = %q, want %q", body, tc.wantBody)
+			}
+		})
+	}
+}
+
+// TestPromotionCarriesBothReadingsOfTheOutcome pins the presenter's half of the promote-guard
+// (design call 5, docs/layout/tool-layout.md): a promoted one-line output travels beside the typed
+// stat that may stand in for it, and demoting swaps the two — the line to the head of the body, the
+// stat into the slot — losing nothing either way. A summary the block WORDED itself has only one
+// reading and cannot be demoted at all, and neither can a promotion whose promoter offered no stat:
+// ask_user's answer is the row's whole point and its record already holds every line of it.
+//
+// The measure that decides is the painter's and is asserted there
+// (TestPromoteGuardHoldsFifteenCellsOfTarget); what is pinned here is that both readings exist and
+// that the swap is exact.
+func TestPromotionCarriesBothReadingsOfTheOutcome(t *testing.T) {
+	t.Parallel()
+
+	present := func(call domain.ToolCall, content string) toolView {
+		t.Helper()
+		tv := presentToolCall(call, workspaceRoot{})
+		tv.enrichWithResult(domain.ToolResult{CallID: call.ID, Content: content}, workspaceRoot{})
+		return tv
+	}
+	terminal := domain.ToolCall{ID: "1", Tool: "terminal", Arguments: []byte(`{"command":"git rev-parse HEAD"}`)}
+	read := domain.ToolCall{ID: "2", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}
+	ask := domain.ToolCall{ID: "3", Tool: "ask_user", Arguments: []byte(`{"question":"Which file?"}`)}
+
+	for _, tc := range []struct {
+		name string
+		view toolView
+
+		wantPromotable bool
+		wantSummary    string   // the slot's text once demoted — unchanged where the view is not promotable
+		wantBody       []string // the body once demoted, first line first
+	}{{
+		name:           "a one-line output demotes into the body",
+		view:           present(terminal, "abc1234\n"),
+		wantPromotable: true, wantSummary: "1 line", wantBody: []string{"abc1234"},
+	}, {
+		// The line lands at the HEAD of whatever body the call already had — where the tool printed
+		// it — rather than after it.
+		name: "the demoted line leads the body it joins",
+		view: func() toolView {
+			tv := present(terminal, "abc1234\n")
+			tv.Details = tv.Details.with([]detailLine{{Text: "an earlier line"}})
+			return tv
+		}(),
+		wantPromotable: true, wantSummary: "1 line",
+		wantBody: []string{"abc1234", "an earlier line"},
+	}, {
+		name:        "a summary the block worded is not a promotion",
+		view:        present(read, "[File: main.go, 154 lines total, showing lines 1-154]\npackage main"),
+		wantSummary: "[File: main.go, 154 lines total, showing lines 1-154]",
+	}, {
+		name:        "an ask_user answer is promoted and never demoted",
+		view:        present(ask, "/tmp/notes.md"),
+		wantSummary: "/tmp/notes.md",
+		wantBody:    []string{"Which file?"},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := tc.view.promotable(); got != tc.wantPromotable {
+				t.Errorf("promotable = %v, want %v (stat %q, quoted %v)",
+					got, tc.wantPromotable, tc.view.stat, tc.view.Summary.quoted)
+			}
+
+			got := tc.view.demoted()
+
+			if got.Summary.Text != tc.wantSummary {
+				t.Errorf("demoted summary = %q, want %q", got.Summary.Text, tc.wantSummary)
+			}
+			if tc.wantPromotable && got.Summary.quoted {
+				t.Error("the typed stat took the slot as quoted text; it is the block's own wording")
+			}
+			body := make([]string, 0, got.Details.len())
+			for _, d := range got.Details.all() {
+				body = append(body, d.Text)
+			}
+			if !slices.Equal(body, tc.wantBody) {
+				t.Errorf("demoted body = %q, want %q", body, tc.wantBody)
+			}
+			// The stat leaves with the promotion, so demoting twice is demoting once — and the
+			// entry's own body is untouched by either, the view being a copy the painter holds.
+			if got.promotable() {
+				t.Error("the demoted view is still promotable; the swap must be a one-way move")
+			}
+			if tc.wantPromotable && tc.view.Details.len() == got.Details.len() {
+				t.Error("demoting wrote through the body the entry shares")
 			}
 		})
 	}

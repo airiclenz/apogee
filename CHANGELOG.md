@@ -22,6 +22,13 @@ point is a **minor** bump, not a breaking change.
   thing to go and prints whole until the row itself is narrower than it is.
   - A collapsed tool block is now at most three rows, because a targeted branch is always exactly
     one — the `▶`/`▼` moved off such a block's header onto that branch row, where the spec draws it.
+  - **A one-line output only takes the outcome slot while the row can still spare it.** A command
+    whose whole output came to one line rides the branch as before, but on a row that would leave
+    the target under ~15 cells the line goes back to being the block's body and the slot shows the
+    count instead — `1 line`. Nothing is lost: the block now has something to reveal, so it wears an
+    indicator and one click shows the line whole, spelled exactly as the tool printed it. A row
+    about a command you can no longer read is a row about nothing, which is what the guard buys back
+    at narrow widths.
   - A cut target on its own is no longer a reason to click: with the row identical in both states,
     expanding a bodiless call whose path the width trimmed revealed nothing, so it now wears no
     indicator at all. Blocks with a body are unchanged.

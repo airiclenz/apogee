@@ -112,12 +112,21 @@ type wireSkillSpan struct {
 // trusts — the sub-agent head, knowable from Name alone, and the ANSWERED user question, knowable
 // from Name, the record's done bit and the Details only its answer hook writes — see
 // fromWireToolView.
+//
+// Stat travels for the reason Solo does: it is the second reading of a PROMOTED outcome
+// (toolView.stat), the typed phrase the promote-guard swaps into the slot on a narrow row, and the
+// decode path never re-runs the presenter that worded it. Without it a resumed session's one-line
+// `cat` could no longer be demoted and would crowd its own command off the row at widths where the
+// live session kept it — the scrollback changing shape across a restart. It is ADDITIVE on the same
+// rule: a blob written before it decodes with no stat, which is the reading every record was written
+// under, and such a promotion simply stays put.
 type wireToolView struct {
 	Label   string            `json:"label,omitempty"`
 	Verb    string            `json:"verb,omitempty"`
 	Target  string            `json:"target,omitempty"`
 	Name    string            `json:"name,omitempty"`
 	Solo    bool              `json:"solo,omitempty"`
+	Stat    string            `json:"stat,omitempty"`
 	Summary wireBranchSummary `json:"summary"`
 	Details []wireDetailLine  `json:"details,omitempty"`
 }
@@ -301,6 +310,7 @@ func toWireToolView(tv toolView) *wireToolView {
 		Target: tv.Target,
 		Name:   tv.name,
 		Solo:   tv.solo,
+		Stat:   tv.stat,
 		Summary: wireBranchSummary{
 			wireDetailLine: wireDetailLine{Kind: int(tv.Summary.Kind), Text: tv.Summary.Text},
 			Quoted:         tv.Summary.quoted,
@@ -408,6 +418,7 @@ func fromWireToolView(w *wireToolView, done bool) toolView {
 		Target:  w.Target,
 		name:    stripEscapes(w.Name),
 		solo:    w.Solo,
+		stat:    w.Stat, // sanitize below strips it with the other display fields
 		Summary: summary,
 	}
 	// Two verdicts are re-derived rather than trusted, and only in the direction that can ADD solo. A

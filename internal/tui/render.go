@@ -1087,6 +1087,9 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 	if len(views) == 0 {
 		return blockPaint{}
 	}
+	// The promote-guard runs before anything is asked of the views, both shapes through the one
+	// call: what it changes is what the block hides, and every question below is asked of that.
+	views = guardPromotions(th, views, toolRowCells(th, width))
 	if len(views) > 1 {
 		return renderToolGroup(th, views, width, state)
 	}
@@ -1280,6 +1283,76 @@ const (
 	leaderGap      = 1
 	leaderMinDots  = 1
 )
+
+// promoteMinTargetCells is the promote-guard's floor (design call 5, docs/layout/tool-layout.md,
+// "Width and overflow"): how many cells of TARGET a row must still be able to show for a one-line
+// tool output to be allowed into its outcome slot at all. Below it the line is demoted back into
+// the body and the presenter's typed stat takes the slot (toolView.demoted).
+//
+// It is the one place the overflow order is not simply "the outcome wins". The order's premise is
+// that what happened is the half worth keeping, and that premise fails for a promotion: a promoted
+// line IS the body, moved up for want of anywhere better, so trading the path or the command that
+// produced it for one more line of that body reads as a row about nothing. Fifteen cells is the
+// span a shortened path's tail needs to still identify a file ("…/render.go" and a little), which
+// is what the guard is protecting rather than any exact count.
+const promoteMinTargetCells = 15
+
+// guardPromotions settles the promote-guard for a whole block, before one row of it is painted: a
+// view whose promoted one-line output would leave the row less than promoteMinTargetCells of target
+// is replaced by its demoted reading, the line back in the body and the typed stat in the slot
+// (toolView.demoted).
+//
+// It runs HERE, at the block's entrance, rather than inside leaderRow, because demotion changes what
+// the block IS and not merely how one row prints: a demoted call has a body, so it now hides
+// something when collapsed, and that is the very question the header's indicator, the click surface
+// and the remainder marker are all answered from (blockHidesWhenCollapsed). A guard applied at the
+// row would leave those three saying the call had nothing to reveal while the paint had just hidden
+// a line.
+//
+// The answer depends on the WIDTH alone and never on the block's state, which is the leader row's
+// standing promise read one level up: a row that promoted its line collapsed and demoted it open
+// would move out from under the click that opened it.
+//
+// The slice is copied only where a view actually changed, so the ordinary block — nothing promoted,
+// or everything promoted comfortably — reaches the painter as the very slice the entries handed
+// over. The copy is shallow and that is enough: demoted rebuilds the body it changes rather than
+// writing through the one the entry shares (toolView.demoted).
+func guardPromotions(th theme, views []toolView, room int) []toolView {
+	out, copied := views, false
+	for i, tv := range views {
+		if !guardRefuses(th, tv, room) {
+			continue
+		}
+		if !copied {
+			out, copied = append([]toolView(nil), views...), true
+		}
+		out[i] = tv.demoted()
+	}
+	return out
+}
+
+// guardRefuses asks the promote-guard's question of one call at one width: laid out as leaderRow
+// will lay it out, does the promoted line leave promoteMinTargetCells of target standing beside the
+// floor of one dot? The arithmetic is that function's own — the slot and its gap reserved first,
+// then the gap and the dot the leader may not go below — so the guard and the row cannot come to
+// different answers about the same width.
+//
+// Two calls are never refused. One that promoted nothing has only one reading of its outcome
+// (toolView.promotable), and one with NO TARGET has no branch row at all: its lines are the branches
+// themselves (renderToolBranch), so there is no target for a long line to crowd out and nothing for
+// the guard to protect.
+//
+// The marker is measured as the closing ┕ because both branch markers are one glyph in the same
+// four-cell frame (branchMarker) — a member's row keeps the same budget wherever in the block it
+// sits, which is what lets one answer settle a block.
+func guardRefuses(th theme, tv toolView, room int) bool {
+	if !tv.promotable() || tv.Target == "" {
+		return false
+	}
+	avail := room - th.measure.Width(branchMarker(true))
+	tail := leaderGap + th.measure.Width(tv.Summary.Text)
+	return avail-tail-leaderGap-leaderMinDots < promoteMinTargetCells
+}
 
 // leaderRow paints one call's branch row whole — the shape every single block and every group
 // member takes (docs/layout/tool-layout.md): the branch marker, the call's target, a dotted leader,
