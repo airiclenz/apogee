@@ -78,7 +78,13 @@ still counts matches only; default output unchanged.
 
 **Commit:** `feat(tools): grep gains a context_lines parameter`
 
-## 2. SafeWriteFile writes atomically via temp + rename
+## 2. SafeWriteFile writes atomically via temp + rename — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): no CHANGELOG entry was written for this item — the owner ratified that
+NO item in this plan touches CHANGELOG.md. Beyond the item's "update the function's doc
+comment", the TOCTOU-safe-I/O paragraph in `docs/design/technical-design.md` gained the
+new atomicity + replace-the-name contract, since that doc is the one describing
+`SafeWriteFile`'s write-path guarantees and would otherwise be stale.
 
 **What:** In `internal/security/safeio.go`, change `SafeWriteFile` to write the data to
 a temporary file in the TARGET'S parent directory inside the pinned `os.Root` (a name

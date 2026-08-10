@@ -3,8 +3,10 @@ package security
 import (
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -114,6 +116,204 @@ func TestSafeWriteFile_RejectsTraversal(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(filepath.Dir(root), "escape.txt")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("traversal write escaped the fence (stat err = %v)", statErr)
 	}
+}
+
+// assertNoStagingLeftovers walks dir and fails if any of SafeWriteFile's staging files
+// survived the call — the atomic write must leave the tree exactly as clean as the direct
+// write it replaced, on success and on failure alike.
+func assertNoStagingLeftovers(t *testing.T, dir string) {
+	t.Helper()
+
+	walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(d.Name(), stagingPrefix) {
+			t.Errorf("staging file left behind: %s", path)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk %s: %v", dir, walkErr)
+	}
+}
+
+// TestSafeWriteFile_OverwritePreservesMode: the rename must land the target with the mode
+// it already had, not with the caller's perm (which only ever governs a NEW file). An
+// executable script rewritten by a tool has to stay executable.
+func TestSafeWriteFile_OverwritePreservesMode(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	target := filepath.Join(root, "run.sh")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\necho old\n"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Chmod(target, 0o755); err != nil {
+		t.Fatalf("setup chmod: %v", err)
+	}
+
+	if err := SafeWriteFile(root, "run.sh", []byte("#!/bin/sh\necho new\n"), 0o600); err != nil {
+		t.Fatalf("SafeWriteFile overwrite: %v", err)
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat after overwrite: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Errorf("mode after overwrite = %v, want %v (the target's own mode, not perm)", got, os.FileMode(0o755))
+	}
+	assertNoStagingLeftovers(t, root)
+}
+
+// TestSafeWriteFile_NewFileTakesPermArgument: a target that does not exist yet is created
+// with the caller's perm. The reference file written by os.WriteFile with the same perm
+// pins the expectation umask-independently — the staged create must be no more permissive
+// than an ordinary create.
+func TestSafeWriteFile_NewFileTakesPermArgument(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "reference.txt"), []byte("x"), 0o640); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	reference, err := os.Stat(filepath.Join(root, "reference.txt"))
+	if err != nil {
+		t.Fatalf("stat reference: %v", err)
+	}
+
+	if err := SafeWriteFile(root, "fresh.txt", []byte("x"), 0o640); err != nil {
+		t.Fatalf("SafeWriteFile new file: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(root, "fresh.txt"))
+	if err != nil {
+		t.Fatalf("stat new file: %v", err)
+	}
+	if got, want := info.Mode().Perm(), reference.Mode().Perm(); got != want {
+		t.Errorf("new-file mode = %v, want %v (same as an ordinary create with that perm)", got, want)
+	}
+	assertNoStagingLeftovers(t, root)
+}
+
+// TestSafeWriteFile_ReplacesContentWholesale: the new content fully replaces the old, with
+// no tail of the longer previous file surviving — the failure mode a truncate-in-place
+// write can produce and a rename cannot.
+func TestSafeWriteFile_ReplacesContentWholesale(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := SafeWriteFile(root, "notes.txt", []byte(strings.Repeat("long original content\n", 50)), 0o644); err != nil {
+		t.Fatalf("SafeWriteFile first: %v", err)
+	}
+	if err := SafeWriteFile(root, "notes.txt", []byte("short"), 0o644); err != nil {
+		t.Fatalf("SafeWriteFile second: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, "notes.txt"))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(got) != "short" {
+		t.Errorf("content = %q, want %q", got, "short")
+	}
+	assertNoStagingLeftovers(t, root)
+}
+
+// TestSafeWriteFile_FailedRenameRemovesStagingFile: when the rename cannot land — here the
+// target name is an existing DIRECTORY — the call must fail and clean up after itself,
+// leaving no staging file for the next listing (or the next tool) to trip over.
+func TestSafeWriteFile_FailedRenameRemovesStagingFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "occupied"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	if err := SafeWriteFile(root, "occupied", []byte("data"), 0o644); err == nil {
+		t.Fatal("SafeWriteFile over an existing directory succeeded, want an error")
+	}
+	assertNoStagingLeftovers(t, root)
+}
+
+// TestSafeWriteFile_EscapeStagesNothingOutsideRoot: the staging file is part of the write,
+// so it is subject to the same fence. Neither a traversal nor a component symlinked
+// outside the root may leave anything — target or staging file — beyond the workspace.
+func TestSafeWriteFile_EscapeStagesNothingOutsideRoot(t *testing.T) {
+	t.Parallel()
+
+	t.Run("traversal", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		if err := SafeWriteFile(root, "../escape.txt", []byte("x"), 0o644); !errors.Is(err, ErrPathEscape) {
+			t.Fatalf("traversal write err = %v, want ErrPathEscape", err)
+		}
+		assertNoStagingLeftovers(t, filepath.Dir(root))
+	})
+
+	t.Run("symlinked component", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		outside := t.TempDir()
+		if err := os.Symlink(outside, filepath.Join(root, "build")); err != nil {
+			t.Skipf("symlinks unsupported: %v", err)
+		}
+
+		if err := SafeWriteFile(root, "build/artifact.txt", []byte("x"), 0o644); !errors.Is(err, ErrPathEscape) {
+			t.Fatalf("write through escaping symlink err = %v, want ErrPathEscape", err)
+		}
+		if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
+			t.Fatalf("outside dir entries = %v (err %v), want none", entries, err)
+		}
+		assertNoStagingLeftovers(t, root)
+	})
+}
+
+// TestSafeWriteFile_ReplacesInRootSymlinkName is the one deliberate semantic change of the
+// atomic write: because the last step is a rename, a target NAME that is an in-root
+// symlink is REPLACED by a regular file rather than written through to its link target.
+// (A symlink pointing OUTSIDE the root stays refused — see
+// TestSafeWriteFile_RefusesFinalSymlinkToOutside.)
+func TestSafeWriteFile_ReplacesInRootSymlinkName(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "real.txt"), []byte("original"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink("real.txt", filepath.Join(root, "link.txt")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	if err := SafeWriteFile(root, "link.txt", []byte("replacement"), 0o644); err != nil {
+		t.Fatalf("SafeWriteFile over in-root symlink: %v", err)
+	}
+
+	info, err := os.Lstat(filepath.Join(root, "link.txt"))
+	if err != nil {
+		t.Fatalf("lstat link.txt: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("link.txt is still a symlink, want a regular file (replace-the-name contract)")
+	}
+	got, err := os.ReadFile(filepath.Join(root, "link.txt"))
+	if err != nil {
+		t.Fatalf("read link.txt: %v", err)
+	}
+	if string(got) != "replacement" {
+		t.Errorf("link.txt content = %q, want %q", got, "replacement")
+	}
+	through, err := os.ReadFile(filepath.Join(root, "real.txt"))
+	if err != nil {
+		t.Fatalf("read real.txt: %v", err)
+	}
+	if string(through) != "original" {
+		t.Errorf("real.txt content = %q, want %q (the write must not go through the link)", through, "original")
+	}
+	assertNoStagingLeftovers(t, root)
 }
 
 // TestSafeReadFile_ReadsWithinRoot is the read positive control.

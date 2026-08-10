@@ -1,6 +1,9 @@
 package security
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -51,7 +54,24 @@ import (
 // through an os.Root pinned at root. A path that escapes the root — by traversal, by an
 // absolute target outside root, or by a symlinked component pointing outside (including
 // one swapped in concurrently) — returns an error wrapping ErrPathEscape, and nothing is
-// written. perm is the file mode for a newly-created file.
+// written.
+//
+// The write is ATOMIC at the target name: data goes to a staging file in the target's own
+// parent directory (same directory, hence same filesystem — what rename atomicity
+// requires) and is then renamed over the target through the pinned root. A crash or a
+// failing write mid-call therefore never leaves a truncated target: readers see either the
+// old file or the new one, never a half-written one. The staging file is removed on any
+// failure after it is created. There is no fsync — the guarantee is "no torn file visible
+// at the target name", not power-loss durability.
+//
+// Mode: an existing target keeps its own mode across the rename; a newly-created target
+// takes perm (subject to the process umask, as an ordinary create is).
+//
+// Because the last step is a rename, the contract at the target NAME is REPLACE-THE-NAME:
+// when the name is a symlink pointing inside the root, the rename replaces the symlink
+// itself with a regular file rather than writing through to its target. A name (or
+// component) symlinked OUTSIDE the root is still refused with ErrPathEscape, and nothing —
+// not even a staging file — is created outside the fence.
 func SafeWriteFile(root, input string, data []byte, perm os.FileMode) error {
 	rel, err := rootRelative(input, root)
 	if err != nil {
@@ -63,23 +83,118 @@ func SafeWriteFile(root, input string, data []byte, perm os.FileMode) error {
 	}
 	defer r.Close()
 
-	if dir := filepath.Dir(rel); dir != "." {
+	dir := filepath.Dir(rel)
+	if dir != "." {
 		// Create parent directories within the fence. An ESCAPE error here (a parent
 		// component symlinked outside the root) is fatal — refuse before writing. A
 		// non-escape error (e.g. "file exists" when a parent component already exists,
-		// including as a symlink) is NOT fatal here: the authoritative gate is the
-		// WriteFile below, which os.Root refuses with "path escapes from parent" if the
-		// final open would traverse out of the root. Deferring to it keeps WriteFile the
-		// single source of truth for the fence and avoids a false failure on a pre-existing
-		// parent.
+		// including as a symlink) is NOT fatal here: the authoritative gates are the
+		// targetMode stat and the staging open below, which os.Root refuses with "path
+		// escapes from parent" if resolution would traverse out of the root. Deferring to
+		// them keeps the fence decided at use time and avoids a false failure on a
+		// pre-existing parent.
 		if err := r.MkdirAll(dir, 0o755); err != nil && isRootEscapeError(err) {
 			return mapRootEscape(err)
 		}
 	}
-	if err := r.WriteFile(rel, data, perm); err != nil {
+
+	mode, existed, err := targetMode(r, rel, perm)
+	if err != nil {
+		return err
+	}
+	staged, f, err := createStagingFile(r, dir, mode)
+	if err != nil {
+		return mapRootEscape(err)
+	}
+	if err := stageAndClose(f, data, mode, existed); err != nil {
+		_ = r.Remove(staged)
+		return err
+	}
+	if err := r.Rename(staged, rel); err != nil {
+		_ = r.Remove(staged)
 		return mapRootEscape(err)
 	}
 	return nil
+}
+
+// stagingPrefix is the basename prefix of SafeWriteFile's staging file. The leading dot
+// keeps it out of ordinary listings, and the fixed prefix makes a leftover from a killed
+// process recognisable as ours.
+const stagingPrefix = ".apogee-tmp-"
+
+// stagingNameAttempts bounds the retries on a staging-name collision. Names carry 64 bits
+// of randomness, so a collision means a stale leftover with that exact name; a handful of
+// attempts is generous.
+const stagingNameAttempts = 5
+
+// targetMode reports the mode SafeWriteFile's staged write must land with, and whether the
+// target already exists — an existing target keeps its own mode, a new one takes perm.
+// Statting through the root is also the fence gate the direct WriteFile used to be: a
+// component symlinked outside the root, or a target NAME symlinked outside it, is refused
+// here, before anything is staged.
+func targetMode(r *os.Root, rel string, perm os.FileMode) (mode os.FileMode, existed bool, err error) {
+	info, err := r.Stat(rel)
+	switch {
+	case err == nil:
+		return info.Mode().Perm(), true, nil
+	case isRootEscapeError(err):
+		return 0, false, mapRootEscape(err)
+	case errors.Is(err, os.ErrNotExist):
+		return perm, false, nil
+	default:
+		return 0, false, err
+	}
+}
+
+// createStagingFile creates SafeWriteFile's staging file inside dir — the target's own
+// parent, so the rename that follows stays within one filesystem — and returns its
+// root-relative name alongside the open handle. The exclusive create means an existing
+// name is never clobbered.
+func createStagingFile(r *os.Root, dir string, perm os.FileMode) (string, *os.File, error) {
+	var lastErr error
+	for range stagingNameAttempts {
+		name, err := stagingName()
+		if err != nil {
+			return "", nil, err
+		}
+		rel := filepath.Join(dir, name)
+		f, err := r.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+		if err == nil {
+			return rel, f, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return "", nil, err
+		}
+		lastErr = err
+	}
+	return "", nil, lastErr
+}
+
+// stagingName builds a collision-resistant staging basename.
+func stagingName() (string, error) {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", fmt.Errorf("staging name: %w", err)
+	}
+	return stagingPrefix + hex.EncodeToString(buf[:]), nil
+}
+
+// stageAndClose writes data to the staging handle, applies mode when the target already
+// existed (an explicit fchmod, because the creating open is subject to the process umask
+// and would otherwise lose bits the target had), and closes the handle — always, including
+// on error, so a failed write never leaks a descriptor.
+func stageAndClose(f *os.File, data []byte, mode os.FileMode, applyMode bool) error {
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if applyMode {
+		if err := f.Chmod(mode); err != nil {
+			f.Close()
+			return err
+		}
+	}
+	return f.Close()
 }
 
 // SafeReadFile reads input (relative to root, or absolute-inside-root) with the workspace
