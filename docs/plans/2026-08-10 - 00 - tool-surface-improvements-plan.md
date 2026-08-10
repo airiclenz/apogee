@@ -350,7 +350,33 @@ passes.
 
 **Commit:** `feat(tools): add delete_file with dangerous-action guard classification`
 
-## 9. New `run_tests` tool — auto-detected, condensed output
+## 9. New `run_tests` tool — auto-detected, condensed output — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): no CHANGELOG entry — the owner ratified that NO item in this plan touches
+CHANGELOG.md. Beyond the item's literal text, the roster-facing set items 3/5/6/7/8 established was
+updated so it stays true of the shipped suite, each a consequence of adding a tool rather than a
+choice about it: registration in `internal/tools/registry.go` (which moved the registry tests' name
+lists, ordering and all four counts), `internal/tools/doc.go`, a card entry in
+`internal/tui/toolpresent.go` (`joinedArgs("path", "filter")`, which renders the empty target the
+common no-argument call needs — no renderer change), and the tool-suite counts in
+`docs/design/technical-design.md` (27 → 28, both places). It attaches no `domain.ToolSummary`, for
+item 3's reason: that sum type is sealed and its seven carriers are pinned by name in three places.
+Six shape calls the item left open: (a) the environment is INHERITED (`spec.env` nil, as terminal
+and python_exec do) rather than git's allowlist — a suite reads its toolchain's own variables (build
+cache, virtualenv, NODE_PATH) and the git list would break runs that work in the user's shell;
+(b) the bounded runtime is 300s, above the 120s subprocess default but under the 600s ceiling, and a
+timeout renders as a FAIL verdict naming it; (c) a subtree given to `go test` becomes
+`./<path>/...`, because a model naming a directory means "test this part of the project" and go's
+plain directory form would silently test one package; (d) npm's filter maps to `-t` — npm itself
+defines no filter flag, and `-t` is the jest/vitest spelling of `--testNamePattern`, the majority of
+that ecosystem; (e) a failure block's detail lines are the ones the runner INDENTED under the
+headline, since a line at column 0 is the log moving on (a test's own stdout) and without the rule a
+noisy suite donates its printing to the previous failure's block; (f) a failing suite is an IsError
+result carrying the condensed text, exactly as a non-zero `terminal` exit is. One addition the item
+did not name: `path` and `filter` are refused when they begin with `-` (`looksLikeOption`, the git
+tools' guard) — the runner is handed an argv, so that is the remaining argument-injection class. The
+`[… N more failing tests]` line rides in the footer beside the closing note rather than in the body,
+because the cap cuts the body and those two lines are what a cut result can least afford to lose.
 
 **What:** New file `internal/tools/run_tests.go`: a tool that detects the project's
 test runner by markers — `go.mod` → `go test ./...`, pytest config (`pytest.ini`, or

@@ -21,7 +21,7 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 		"view_diff", "open_file", "copy_file", "move_file", "delete_file",
 		"terminal", "python_exec",
 		"git_branch", "git_commit", "git_diff_range", "git_status", "git_log",
-		"diagnostics",
+		"diagnostics", "run_tests",
 		"web_fetch", "http_request", "web_search",
 		"sub_agent",
 	} {
@@ -31,10 +31,10 @@ func TestNewDefaultRegistry_HoldsTheBuiltInTools(t *testing.T) {
 	}
 
 	// ask_user (no Asker) and present_document (no Presenter) are omitted when NewDefaultRegistry
-	// uses a zero HostTools, so the default set is 25 (21 base/exec/git/diag + 3 network +
+	// uses a zero HostTools, so the default set is 26 (22 base/exec/git/diag/tests + 3 network +
 	// sub_agent).
-	if got := len(registry.All()); got != 25 {
-		t.Errorf("default registry holds %d tools, want 25", got)
+	if got := len(registry.All()); got != 26 {
+		t.Errorf("default registry holds %d tools, want 26", got)
 	}
 	if _, ok := registry.Lookup("ask_user"); ok {
 		t.Error("ask_user must NOT be registered without an Asker")
@@ -55,7 +55,7 @@ func TestNewDefaultRegistry_MenuOrderIsDeterministic(t *testing.T) {
 		"view_diff", "open_file", "copy_file", "move_file", "delete_file",
 		"terminal", "python_exec",
 		"git_branch", "git_commit", "git_diff_range", "git_status", "git_log",
-		"diagnostics",
+		"diagnostics", "run_tests",
 		"web_fetch", "http_request", "web_search",
 		"sub_agent",
 	}
@@ -83,8 +83,8 @@ func TestNewDefaultRegistryWithHost_RegistersAskUserOnlyWithAsker(t *testing.T) 
 	if got := all[len(all)-1].Name(); got != "ask_user" {
 		t.Errorf("ask_user should be last in the menu, got last = %q", got)
 	}
-	if got := len(all); got != 26 {
-		t.Errorf("registry with Asker holds %d tools, want 26", got)
+	if got := len(all); got != 27 {
+		t.Errorf("registry with Asker holds %d tools, want 27", got)
 	}
 }
 
@@ -106,14 +106,14 @@ func TestNewDefaultRegistryWithHost_RegistersPresentDocumentOnlyWithPresenter(t 
 	if _, ok := reg.Lookup("ask_user"); ok {
 		t.Error("ask_user must stay absent when only a Presenter is configured")
 	}
-	if got := len(reg.All()); got != 26 {
-		t.Errorf("registry with a Presenter holds %d tools, want 26", got)
+	if got := len(reg.All()); got != 27 {
+		t.Errorf("registry with a Presenter holds %d tools, want 27", got)
 	}
 
 	// Both delegates ⇒ both tools, present_document last in the menu.
 	both := NewDefaultRegistryWithHost(t.TempDir(), HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}}).All()
-	if got := len(both); got != 27 {
-		t.Errorf("registry with both delegates holds %d tools, want 27", got)
+	if got := len(both); got != 28 {
+		t.Errorf("registry with both delegates holds %d tools, want 28", got)
 	}
 	if got := both[len(both)-1].Name(); got != "present_document" {
 		t.Errorf("present_document should be last in the menu, got last = %q", got)
@@ -248,6 +248,9 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 		// Diagnostics (P3.10): inspects only — read-only, same declaration-vs-marker split as
 		// git_diff_range (the go vet half shells out, so the call takes the subprocess row).
 		"diagnostics": true,
+		// run_tests (2026-08-10): a suite runs the project's OWN code, which writes — so unlike
+		// diagnostics it declares no read-only nature and takes terminal's disposition.
+		"run_tests": false,
 		// Network tools (P3.11): external-effect, write-capable (the loop gates/auto-runs them
 		// by effect kind, not read-only) — they must NOT declare read-only.
 		"web_fetch":    false,

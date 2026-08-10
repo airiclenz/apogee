@@ -114,6 +114,19 @@
 // there: `path` is not a payloadKey, so the credential/persistence rules inspect a delete_file
 // target and hard-refuse it in every mode, ahead of the ladder.
 //
+// run_tests (2026-08-10) asks diagnostics' question of the whole project instead of one file:
+// it DETECTS the runner from project markers — go.mod ⇒ `go test`, a pytest config ⇒ `pytest`,
+// a package.json test script ⇒ `npm test`, in that order — and returns a CONDENSED verdict, never
+// the log: PASS/FAIL, the counts the runner reports (or the failing count derived from the blocks
+// recognised), and the first failing tests with their first error lines, the whole result
+// hard-capped at 8 KiB with a closing note naming the full output size and the command to re-run
+// under terminal. Flooding a small context is the failure it exists to prevent, so the cap binds
+// the text that leaves the tool. Detection rather than a model-supplied command is the same
+// discovery lesson find_files embodies: a capability found by tool NAME beats one found by
+// parameter. It is a write-capable SubprocessTool on terminal's disposition — a suite runs the
+// project's own code — over the shared runSubprocess, with a 5-minute ceiling and the inherited
+// environment the toolchains need.
+//
 // present_document (ADR 0019) is the Asker pattern applied to showing a finished document:
 // the model names a deliverable it has written and the HOST picks the mechanism (the
 // presentation ladder — the transcript baseline always, the OS opener on a local desktop, a

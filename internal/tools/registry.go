@@ -83,7 +83,10 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // 2026-08-02 Plan neither offers nor runs them, because the menu keys on the same
 // class the ladder does). The
 // diagnostics tool (P3.10) closes the file/exec set: a read-only SubprocessTool that checks
-// Go in-process (plus optional go vet) and degrades gracefully for other languages. The
+// Go in-process (plus optional go vet) and degrades gracefully for other languages, joined
+// 2026-08-10 by run_tests — the same verification question asked of the whole project rather
+// than of one file, a write-capable SubprocessTool on terminal's disposition whose result is a
+// condensed verdict rather than the runner's log. The
 // network/host tools (P3.11) and the sub_agent recursion point (P3.13) follow; sub_agent
 // carries NO disposition marker — dispatch special-cases it as the recursion point that
 // drives a nested Agent, never a leaf tool (ADR 0013).
@@ -129,6 +132,7 @@ func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 		NewGitStatus(root),
 		NewGitLog(root),
 		NewDiagnostics(root),
+		NewRunTests(root),
 		NewWebFetch(host.URLGuard),
 		NewHTTPRequest(host.URLGuard),
 		NewWebSearch(host.URLGuard, host.WebSearchEndpoint),

@@ -471,6 +471,14 @@ var toolRegistry = map[string]toolPresenter{
 		target: stringArg("path"),
 		detail: outputDetail,
 	},
+	"run_tests": {
+		label: "Run Tests",
+		verb:  "running tests",
+		// Both arguments are optional and the common call carries neither — the whole suite is
+		// the target then, and joinedArgs renders the empty target a bare "running tests" needs.
+		target: joinedArgs("path", "filter"),
+		detail: firstLineDetail, // the tool's own verdict line: "PASS (go test)" / "FAIL …"
+	},
 	"web_fetch": {
 		label:  "Web Fetch",
 		verb:   "fetching",
