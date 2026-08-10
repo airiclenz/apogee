@@ -67,7 +67,7 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 
 ## Status
 
-**`v0.11.x` on `main` — pre-production.** The release line was deliberately reset
+**`v0.12.x` on `main` — pre-production.** The release line was deliberately reset
 from `1.x` to `0.x` (2026-07-23): the old numbering overstated maturity, and under
 SemVer a `0.x` version makes no API-stability promise — the Go API is still allowed
 to move while the tool hardens. That is a statement about the *API*, not about how
@@ -87,11 +87,15 @@ unbounded; apogee says so at startup, `apogee probe` answers "what would Auto do
 this box?" without running an agent, and `/confine` is the way out (see
 [Auto mode's blast radius](#auto-modes-blast-radius)).
 
-Newest on `main`: **scheduled prompts** — `/schedule` puts a prompt on a cycle,
-and each firing runs headless and saves its own browsable session (see
-[Sessions](#sessions)) — plus a wave of transcript polish: prompt recall (`↑`),
-prompt and tool blocks that collapse and expand, markdown tables rendered as
-tables, and the session's name written on the top rule. The mechanism catalogue
+Newest on `main`: **colour schemes** — every colour on screen comes from a
+25-role scheme file, `dark` and `light` ship in the binary, and `/color-scheme`
+switches, saves or exports one for editing — plus **sub-agents that run in
+parallel** under a per-server cap, a **watched `config.yaml`** where saving the
+file is what applies an edit (with a new `editor:` key naming the program that
+opens it), and type-to-filter in every selector pop-up. Released just before
+those: the [`/settings`](#the-settings-screen--settings) screen,
+[`apogee headless`](#running-one-prompt--apogee-headless), and scheduled prompts
+(`/schedule`, each firing saving its own browsable session). The mechanism catalogue
 is fully ported (21 mechanisms) and the first Validated set
 (`gemma-4-e4b-it-qat`) ships with the binary; current work is per-model bench
 validation of that catalogue alongside TUI layout refinement. See
@@ -127,7 +131,7 @@ them so you can check what you downloaded.
 
 ```bash
 # macOS / Linux — set these two to your release and platform
-VERSION=0.11.0
+VERSION=0.12.0
 PLATFORM=darwin_arm64   # or darwin_amd64 · linux_amd64 · linux_arm64
 
 curl -fsSLO "https://github.com/airiclenz/apogee/releases/download/v$VERSION/apogee_${VERSION}_${PLATFORM}.tar.gz"
@@ -1008,13 +1012,13 @@ A `Makefile` wraps the common Go invocations:
 | `make test` | Run the test suite with the race detector |
 | `make cross` | Cross-build all six release targets (Linux/macOS/Windows × amd64/arm64) |
 | `make dist` | Build the publishable release archives into `dist/`, plus `SHA256SUMS` |
-| `make check` | The full acceptance gate — gofmt, vet, build, race tests, cross-build |
+| `make check` | The full acceptance gate — gofmt, vet, build, race tests, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
 | `make help` | List every target |
 
 To run `apogee` from anywhere, `make install` copies the built binary to the first
 directory that is both on your `PATH` and writable without `sudo`, trying
 `/usr/local/bin`, your Go bin dir (`go env GOBIN`, else `$(go env GOPATH)/bin`),
-`/opt/homebrew/bin`, `~/.local/bin` and `~/bin` in that order. It never installs
+`~/.local/bin`, `/opt/homebrew/bin` and `~/bin` in that order. It never installs
 somewhere your shell cannot find it: if nothing qualifies — the usual case on macOS,
 where `/usr/local/bin` belongs to root — it stops and prints the two ways to finish,
 either `sudo install -m 0755 ./apogee /usr/local/bin/apogee` or an explicit
@@ -1033,7 +1037,14 @@ them: the tree is CGO-free, so `make dist` builds and packs the entire published
 matrix on whichever machine cuts the release (`make cross` is the same six builds
 thrown away, as a compile check), and every OS-specific backend is behind a build tag
 rather than a separate artifact. `make dist` needs `zip` on the box for the two
-Windows archives; every other tool it uses ships with Go.
+Windows archives; everything else it reaches for is either the Go toolchain itself or
+standard on any Unix-like box (`tar`, `sed`, and `sha256sum`/`shasum`).
+
+**Reading the code?** [`AGENTS.md`](AGENTS.md) is the single map: it says where each
+kind of knowledge lives — `CONTEXT.md` for the domain language, `docs/adr/` for the
+settled decisions, `docs/design/` for the contracts, `layout.md` for the TUI spec — and
+states the conventions you cannot derive from the source. Per-package `doc.go` files
+carry the file-by-file tours from there.
 
 > **Note:** launch the TUI with `apogee --endpoint <openai-compatible-url> --model <name>`
 > to hold a real coding conversation with a local model. All four autonomy modes, the

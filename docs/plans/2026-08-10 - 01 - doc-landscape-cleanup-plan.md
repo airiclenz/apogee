@@ -64,7 +64,7 @@ keep tracked; the only live run dir is this plan's own
 `2026-08-10_-_01_-_doc-landscape-cleanup-plan/`, kept on disk and untracked
 like the rest.
 
-## 2. AGENTS.md and README truth pass
+## 2. AGENTS.md and README truth pass — ✅ DONE (2026-08-10)
 
 What: AGENTS.md — replace the stale distribution bullet with: Homebrew tap
 `airiclenz/tap` + six prebuilt archives per release (`make dist`);

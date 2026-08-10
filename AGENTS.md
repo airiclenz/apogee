@@ -12,14 +12,14 @@ Apogee is a terminal coding agent (Go, Bubble Tea TUI) built to run small, local
 - `docs/reviews/` — saved review reports.
 - `layout.md` — the TUI layout/rendering spec in prose.
 - `ISSUES.md` / `TODO.md` — known issues and deferred work.
-- `CHANGELOG.md` + `VERSION` — keep both in step; versioning is deliberately 0.x while pre-production.
+- `CHANGELOG.md` + `VERSION` — `VERSION` micro-bumps per shipped feature; `CHANGELOG.md` collects those under `[Unreleased]` and only gains a release heading when a release is cut. Versioning is deliberately 0.x while pre-production.
 
 ## Conventions not derivable from the code
 
 - **Pre-production policy (current phase):** commit directly to `main` — no feature branches or PRs. Commit and push only when the owner asks.
 - **No AI attribution trailers** in commit messages (no Co-Authored-By / "generated with" lines); a local commit-msg hook strips them as a backstop.
 - Run `make check` before committing.
-- Distribution is build-from-source for now (no Homebrew formula, no prebuilt binaries published yet), and never `go install` — proxy.golang.org still serves the deleted v1.x tags from its immutable cache, so `@latest` resolves to stale `v1.7.0`; known, not a bug.
+- Distribution: a Homebrew tap (`airiclenz/tap`, binary formula) plus six prebuilt archives per release (`make dist`); building from source stays fully supported. Never `go install …@latest` — proxy.golang.org still serves the deleted v1.x tags from its immutable cache, so `@latest` resolves to stale `v1.7.0`; known, not a bug (`@main` and `@<sha>` are fine).
 - Config home is a single `~/.apogee` dotdir on every OS (like `~/.aws`). Settled decision — do not propose XDG / os.UserConfigDir`.
 - The Bubble Tea `Model` is copied by value on every `Update`: never let a `strings.Builder` (or any no-copy type) be held by value anywhere it reaches. Rule and guard test are in `internal/tui/` (see `doc.go`, ADR 0011).
 - Tests that need a live LLM are gated by `APOGEE_LIVE_ENDPOINT`; without it they skip. `make live-eval` drives the live path.

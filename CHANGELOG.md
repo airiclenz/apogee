@@ -346,6 +346,18 @@ point is a **minor** bump, not a breaking change.
   `docs/layout/archived/`. `docs/skill-runs/` is gitignored: the per-run prompt copies and ledgers
   the orchestrator skills write are machine junk with a run's lifetime, so a finished run's dir is
   deleted rather than committed.
+- **`AGENTS.md` and the README now read true against the working tree.** The agent guide's
+  distribution bullet had stood still since v0.11.0 — it now names the Homebrew tap and the six
+  prebuilt archives per release beside build-from-source, keeping the never-`go install …@latest`
+  warning — and the `CHANGELOG` + `VERSION` bullet describes the practice actually followed
+  (per-feature `VERSION` micro-bumps, release headings only at a release cut). In the README: the
+  Status line reads `v0.12.x`, "Newest on `main`" names colour schemes, parallel sub-agents and the
+  watched `config.yaml` instead of the scheduling wave, the archive example uses the current
+  release, the `make check` row names the ADR-0010 import invariant and the `--help` smoke, the
+  `make install` search order matches `INSTALL_CANDIDATES` (`~/.local/bin` before
+  `/opt/homebrew/bin` — the Makefile's own comment carried the same inversion and is fixed too),
+  the `make dist` tool claim no longer says everything but `zip` ships with Go, and a short
+  "Reading the code?" pointer sends contributors to `AGENTS.md` as the single map.
 
 ### Fixed
 

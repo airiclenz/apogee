@@ -46,7 +46,7 @@ LIVE_ENDPOINT ?= http://192.168.64.1:1111
 # first candidate dir that is already on $PATH *and* writable without sudo,
 # trying, in order: /usr/local/bin (most Linux, and macOS if you own it), the Go
 # bin dir (`go env GOBIN`, else `$(go env GOPATH)/bin` — on PATH for most Go
-# developers), /opt/homebrew/bin (Apple Silicon), ~/.local/bin, ~/bin. Nothing is
+# developers), ~/.local/bin, /opt/homebrew/bin (Apple Silicon), ~/bin. Nothing is
 # ever installed off-PATH by auto-detection: if no candidate qualifies, `install`
 # stops and prints the one-line ways to finish, because a binary copied somewhere
 # the shell cannot see is not an install. Override with
