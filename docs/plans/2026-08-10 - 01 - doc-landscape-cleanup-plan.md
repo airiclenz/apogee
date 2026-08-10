@@ -168,7 +168,7 @@ saying "closed" means the porting question is settled, not that the table is
 frozen — the preamble declared the ledger closed 2026-07-04 and a new line
 under it would otherwise read as a contradiction.
 
-## 6. Salvage orphaned "why"s into ADRs
+## 6. Salvage orphaned "why"s into ADRs — ✅ DONE (2026-08-10)
 
 What: (a) new ADR — the dependency policy from technical-design.md §3
 (:142–147): external programs are runtime-detected optional enhancements,
@@ -189,6 +189,18 @@ Acceptance: each salvaged "why" is findable in `docs/adr/` without opening the
 source docs; new ADR follows house numbering/format.
 
 Commit: `docs(adr): salvage dependency policy, mutation discipline, and ToolOutcome rationale`
+
+NOTES (2026-08-10): two departures from the item's literal text. (a) All three
+salvages cite the two source docs at their **post-item-7 archived paths**
+(`docs/design/archived/technical-design.md`, `.../hook-mutation-api.md`) rather
+than their current live paths — item 7's acceptance grep forbids the live paths
+in any non-archived `*.md`, and it does not list the new ADRs among the
+references it repoints, so the forward cite is what makes the two items
+consistent; the links resolve the moment item 7 lands. (b) The ADR 0022 salvage
+is headed "Addendum", the word that file uses for all five of its own later
+sections, rather than the "Amendment" heading ADRs 0001/0012/0013/0018 use; ADR
+0001's salvage uses "Amendment" for the same reason. Nothing else in either
+amended ADR was touched.
 
 ## 7. Archive technical-design.md and hook-mutation-api.md
 

@@ -388,6 +388,18 @@ point is a **minor** bump, not a breaking change.
   over the `guided_decomposition` + `tool_result_cap` stack. The `truncate_history` row's F7 note no
   longer reads as a half-recorded edge: the declaration lives on one descriptor, but either side
   naming the other fails start-up, so the two can never be enabled together whichever row you read.
+- **Three decisions that were only ever recorded in design drafts are now ADRs.** The dependency
+  policy becomes **ADR 0042** — one static CGO-free binary, every external program (`git`, a Python,
+  the Go toolchain, the formatter ladder) a runtime-detected enhancement that degrades to a named
+  result, an in-process rung wherever one is possible (`grep` needs no ripgrep; autofix keeps its
+  `go/format.Source` tail), and exactly one bounded exception in macOS `sandbox-exec` for Auto-mode
+  confinement, which costs a mode rather than the agent. **ADR 0001** gains the hook-mutation
+  discipline it always depended on: hooks read `Message` value snapshots and edit by index
+  (`SetMessageContent`/`Insert`/`DropRange`/`Replace`), never the loop's backing slice, and
+  `Message.Content` stays a string with unknown wire structure preserved in `Extra`. **ADR 0022**
+  gains the `ToolOutcome` rationale — why a committed tool result carries its own `ok`/`error`
+  verdict as an `omitempty` snapshot sibling, why text sniffing survives only as the pre-marker
+  fallback anchored to the result's first line, and why neither needed a `SessionVersion` bump.
 
 ### Fixed
 

@@ -95,3 +95,41 @@ disables them with deterministic stubs for v1 — see
   > public-surface additions reviewed at the freeze (§3 D7 of the Phase-3 detail plan): the
   > `Asker` host delegate (struct-typed for additive growth) and the `ModeAllowEdits` constant.
   > The changelog is tracked from this release in [`CHANGELOG.md`](../../CHANGELOG.md).
+
+## Amendment (2026-08-10) — hook mutation is index-addressed, and `Message.Content` is string-only
+
+**Why now.** "Copyable conversation state" and "Hook points as Go interfaces" are two of this
+record's Phase-0 constraints, and the P0.1 hook-mutation survey
+(`docs/design/archived/hook-mutation-api.md` §8, decisions 5 and 6) made two calls that decide
+whether those constraints actually hold once a Mechanism starts rewriting history. Both shipped in
+`internal/domain/hooks.go` and both have been load-bearing since; the survey that decided them is an
+archived draft, so the reasons are recorded here, where the property they protect lives.
+
+**1. Mutation is index-addressed, never raw-slice.** A hook never receives the loop's backing
+storage. It reads `Message` **value snapshots** — `Conversation.At(i)`, `Range`, or `Messages()`,
+which returns a copy — and edits by index against the owning container: `SetMessageContent(i, …)`,
+`Insert(i, m)`, `DropRange(start, end)`, `Append`, and `Replace(msgs)` for a wholesale rewrite. The
+loop keeps the slice.
+
+The alternative — hand out `[]Message` and take back whatever comes off the other side — fails both
+classes of Mechanism at once. The in-place editors (compress, decompose) want to change one message
+without asserting anything about the rest, and a returned slice makes every such edit a
+whole-history claim; the wholesale rewriters (Compaction, `truncate_history`) want exactly that
+claim, and only get it safely if the container knows a rewrite happened. Index addressing gives each
+its own verb. It also keeps two properties this ADR promises: the backing storage never escapes, so
+"copyable conversation state" stays something the loop guarantees rather than hopes for, and
+`Message.extra` — the preserved unknown wire fields (`reasoning_content`, `thinking`, …) read
+through `Extra` — round-trips through an edit instead of being dropped by a hook that rebuilt
+messages from the fields it happened to know about. That round-trip is what the bench's fork and
+snapshot/resume both rest on, and `MarshalJSON` splices the preserved siblings in sorted key order,
+so the bytes stay reproducible for a later snapshot diff or hash.
+
+**2. `Message.Content` is a string; unknown structure is preserved in `Extra`.** The OpenAI wire
+shape allows an array of content parts; apogee's `Message.Content` is a plain `string`, as
+apogee-sim's pipeline already flattened it. A small-model coding agent's content is text — a parts
+union would push a type switch into every Mechanism, every renderer and every scorer to buy nothing
+any of them use. Structure that does arrive is not lost: unknown siblings land in `extra` and are
+re-emitted verbatim, so a provider field apogee has no opinion about survives a history rewrite
+untouched. **Revisit when a vision-model target appears** — that is the case this call is scoped
+against, and it would be an additive change to the wire projection, not a break in the hook
+surface.
