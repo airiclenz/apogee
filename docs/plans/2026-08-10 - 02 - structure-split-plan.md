@@ -118,7 +118,15 @@ is a move.
 
 **Commit:** `refactor(tui): lift the session-save write queue into sessionsave.go`
 
-## 4. Lift approval handling into internal/tui/approval.go
+## 4. Lift approval handling into internal/tui/approval.go — ✅ DONE (2026-08-10)
+
+NOTES (2026-08-10): the render block carries one member the item's list does not name —
+`const approvalTaskClipRunes` (it sits between `approvalPrompt` and `subAgentPromptLine`, is the
+clip budget `subAgentPromptLine` spends, and is referenced elsewhere only from comments). It moved
+with the trio rather than leaving an approval-only const stranded in `model.go`; same package, so
+every call site is unchanged. Line anchors had drifted after item 3 (key block 1211–1301, render
+block 3979–4155 in the post-item-3 tree); the member-name lists governed. No CHANGELOG entry, per
+item 3's precedent for a behaviour-preserving move.
 
 **What:** Pure same-package move out of `model.go` into a new `internal/tui/approval.go`,
 both halves of the concern: the key-handling block (~1212–1302) — `approvalOption`,

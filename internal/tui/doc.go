@@ -486,7 +486,13 @@
 // layout, the status line and the footer; sessionsave.go the record-write cluster lifted out of
 // model.go (ADR 0043) — the assembled [savePayload], the per-Turn and idle saves, and the
 // single-flight queue that orders every Save, Rename, Delete, Rotate and Activate against one
-// another (the Model still owns the three fields it latches on); theme.go the palette, the
+// another (the Model still owns the three fields it latches on); approval.go the approval-decision
+// concern lifted out of model.go beside it (ADR 0043), both halves in one file — the [approvalMenu]
+// the keys and the pane both read, the keypress half over it ([Model.handleApprovalKey],
+// [Model.resolveApproval], [Model.sendApproval]) and the pane that paints it
+// ([Model.approvalPrompt] with its Sub-agent identity line and its argument block), so a row can
+// never be paintable and unreachable (the Model still owns the pending request and the menu
+// selection); theme.go the palette, the
 // marker glyphs, and the
 // lipgloss styles; width.go the display-width authority the theme carries — one measure for the
 // whole TUI, and it is whichever one the painter itself is using; inputaccent.go the
