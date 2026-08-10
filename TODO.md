@@ -359,7 +359,7 @@ engine's reducers — which is the whole of the observation.
   `internal/domain` with the root re-exporting it — `apogee.go:416` is `type Request = domain.Request`
   — and ADR 0010's *Stability* consequence states the public surface **is** the set of root aliases
   (ADR 0001 §18). `InjectContext` is a method on that aliased type and is a documented member of the
-  hook mutation API (`docs/design/hook-mutation-api.md` §3, the `Request` pre-request surface, and
+  hook mutation API (`docs/design/archived/hook-mutation-api.md` §3, the `Request` pre-request surface, and
   its §7 traceability table — a P0.1 draft, so read its line references as stale). Moving it
   is a **breaking public-surface change**, not a refactor — and ADR 0010's own lowest-layer rule
   ("a type lives at the lowest layer that can define it without importing upward", and pure logic

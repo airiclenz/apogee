@@ -400,6 +400,15 @@ point is a **minor** bump, not a breaking change.
   gains the `ToolOutcome` rationale — why a committed tool result carries its own `ok`/`error`
   verdict as an `omitempty` snapshot sibling, why text sniffing survives only as the pre-marker
   fallback anchored to the result's first line, and why neither needed a `SessionVersion` bump.
+- **`docs/design/` now holds only live contracts.** With their "why"s salvaged into ADRs, the two
+  design drafts that were never ground truth move to a new `docs/design/archived/`: the Phase-1
+  `technical-design.md` scaffold (frozen at its 2026-06-23 vintage, self-declared
+  non-authoritative) and the P0.1 `hook-mutation-api.md` draft. Each opens with a tombstone naming
+  what replaced it, and the technical design's §5 component rows are declared closed — component
+  narration stops there, so no future plan amends them. What remains in `docs/design/` is the three
+  contracts that are still binding: the confinement execution contract, the MCP client, and the
+  Mechanism catalogue. Live citations (`TODO.md`, four in the catalogue) point at the new paths;
+  code comments citing section numbers are left as the history references they are.
 
 ### Fixed
 

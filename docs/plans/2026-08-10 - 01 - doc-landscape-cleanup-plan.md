@@ -202,7 +202,7 @@ sections, rather than the "Amendment" heading ADRs 0001/0012/0013/0018 use; ADR
 0001's salvage uses "Amendment" for the same reason. Nothing else in either
 amended ADR was touched.
 
-## 7. Archive technical-design.md and hook-mutation-api.md
+## 7. Archive technical-design.md and hook-mutation-api.md — ✅ DONE (2026-08-10)
 
 What: create `docs/design/archived/`; `git mv` both docs into it. Repoint live
 references to the new paths: `TODO.md:362` (keep its stale-line-refs caveat),
@@ -219,6 +219,19 @@ Acceptance: `docs/design/` contains exactly the three kept contracts;
 (excluding `archived/` and CHANGELOG) returns nothing; item 6 landed first.
 
 Commit: `chore(docs): archive technical-design and hook-mutation-api after ADR salvage`
+
+NOTES (2026-08-10): three things worth stating. (a) The "note for future plan
+runs" (§5 rows no longer amended) is written into the technical-design tombstone
+itself, since that is where a future plan run would read it. (b) Only one of the
+catalogue's four hook-mutation cites (`:24`) was a full `docs/design/` path; the
+other three (`:73`, `:102`, `:204`) name the file bare, so they were repointed in
+their own style to `archived/hook-mutation-api.md` — still correct relative to
+the catalogue's own directory — rather than being rewritten to full paths. (c)
+The acceptance grep still returns two hits that are not live references and were
+deliberately left: `docs/reviews/2026-08-10 - 00 - doc-landscape-audit.md:39–40`,
+the audit's own verdict table recording where the docs lived when it judged them
+(same treatment item 1 gave that table's `prompt-box-layout.md` row), and this
+plan file's own `:218`, which contains the grep pattern as a literal.
 
 ## 8. Amend the two kept contracts
 

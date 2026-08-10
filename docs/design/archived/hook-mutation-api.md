@@ -1,5 +1,9 @@
 # Hook Mutation API — Design Draft (P0.1)
 
+> **ARCHIVED (2026-08-10) — history, not ground truth.** Superseded by ADR 0001
+> (its §8 mutation-discipline decisions), ADR 0022 (its §5 `ToolOutcome` rationale),
+> `docs/design/mechanism-catalogue.md` (the per-Mechanism hook map), and `CONTEXT.md`.
+
 **Status:** ✅ **Applied to `apogee.go` 2026-06-23** under the §8 recommended defaults. This
 is **P0.1** from the TDD §8 backlog — the missing piece of the public keystone: the
 accessor/mutation surface for the opaque `Request`, `Response`, and `Conversation` types the

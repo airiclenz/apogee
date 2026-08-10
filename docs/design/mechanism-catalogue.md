@@ -21,7 +21,7 @@ counts). Those are cited in the *Prior evidence* column. The raw **trace archive
 from this machine** — the sim writes it to `$APOGEE_SIM_HOME`/`~/.apogee-sim/traces`
 (`internal/sim/trace_archive.go:108`), which does not exist here — so no row is grounded on a
 re-run of the traces; the hook-point mapping is grounded on the **signature survey**
-(`docs/design/hook-mutation-api.md`, three-slice survey) plus the sim catalogue's recorded
+(`docs/design/archived/hook-mutation-api.md`, three-slice survey) plus the sim catalogue's recorded
 figures. Every quantitative claim below is quoted from the sim catalogue, not re-measured.
 
 **Vocabulary:** apogee's own (`internal/domain/mechanism.go`) — hook points `pre-request` /
@@ -70,7 +70,7 @@ until bench-proven (D1).
   Mechanism that *delivers* a streaming deferred correction on the next request
   (`response_validator.go`, `session_state.go:StoreCorrection`). apogee expresses exactly this
   as `validate`/`syntax` returning `ActionDefer{Inject}` held in conversation state
-  (`hook-mutation-api.md` §4.1; `PostResponseDecision.Inject` survives snapshot/resume). No
+  (`archived/hook-mutation-api.md` §4.1; `PostResponseDecision.Inject` survives snapshot/resume). No
   standalone `feed_forward_correction` Mechanism.
   **Amended 2026-07-04 (R1, `docs/plans/phase-4-review-fixes-plan.md` — owner-ratified):**
   the delivery expression is `ActionRetry{Inject}` — retry-in-place — not `ActionDefer`. The
@@ -99,7 +99,7 @@ until bench-proven (D1).
 
 Relocations carried from the survey (plan item 1): `cached_content_intercept` → `pre-tool-exec`;
 `error_enrichment` → `post-tool-result`. `grammar` and `filehint` are pre-request (explicit
-assignment, hook-mutation-api §8 #7).
+assignment, `archived/hook-mutation-api.md` §8 #7).
 
 ---
 
@@ -201,7 +201,7 @@ low-confidence metadata label does not inject); observe records on any identifie
 |---|---|---|---|
 | `codeinfo` | `codeinfo` (untracked) | **DROP** | Broad plan §2 deprioritized (modest effect, superseded by shell-out diagnostics). Sim A/B (gpt-oss-20b-MXFP4, `propagate-lookup-rename`, N=75/arm): full pipeline good-rate 54.7% vs 32.0% (+22.7pp, Fisher p=0.008) is multi-stage; the codeinfo-specific missed-call-site shape 37→30 is **not significant** (OR 0.69, p=0.32). Not ported. |
 | `intent` | — (helper) | **FOLD (helper)** | Shared intent classifier (`intent.go`), no hook/descriptor; ports inline with `cot`/`decompose`/`tool_use_enforcer`/`empty_response_recovery`/`library` (C6). |
-| `feed_forward_correction` | `feed_forward_correction` | **FOLD into `validate`** | The streaming deferred-correction delivery path; apogee expresses it as `ActionRetry{Inject}` — retry-in-place, appended to the in-flight request (C5 as amended 2026-07-04; hook-mutation-api §4.1). No standalone Mechanism. |
+| `feed_forward_correction` | `feed_forward_correction` | **FOLD into `validate`** | The streaming deferred-correction delivery path; apogee expresses it as `ActionRetry{Inject}` — retry-in-place, appended to the in-flight request (C5 as amended 2026-07-04; `archived/hook-mutation-api.md` §4.1). No standalone Mechanism. |
 | `compress` | `context_compression` | **SPLIT (D6)** | → `tool_result_cap` (item 9, Mechanism) · generative Compaction (item 9, structural `context/`, on in Bypass, **not** a Mechanism) · `truncate_history` (item 7, Mechanism). External-client-compaction sniffing **DROPPED** (no external client — broad plan §4). |
 | `cot` | `cot` (Transform, untracked) | **SPLIT → `stall_nudge` / `list_nudge` / `tool_use_directive` (C4)** | The sim's `cot` Transform is not itself a tracked Mechanism — it emits the three tracked completion nudges (`internal/cot/cot.go`; desc `descriptor.go:63/70/77`). They port as three plain pre-request `proactive-nudge` Mechanisms in item 12. (Row added 2026-07-04, review-fixes item 6 — the SPLIT was decided in C4 but missing from this table.) |
 | `read_loop_detector`, `greenfield_read_loop_detector`, `successful_read_loop_detector` | same | **CONSOLIDATE → `read_loop`** | Three sim variants exist only to give each an independent suppression counter and are pairwise-incompatible (one fires per request). Folded into one apogee `read_loop` with internal branch selection (C2). |
