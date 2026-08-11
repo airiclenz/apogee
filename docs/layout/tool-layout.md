@@ -206,9 +206,9 @@ One row per consecutive same-type run, in time order. A row's
 
 ## Grouped Sub-agents
 
-- remove exsiting `⤷ sub-agent` from expanded sub agents.
-- the vertical line on the very left of an expanded sub-agents still needs to be colored.
-- `┊` is only displayed if another grouped sub-agent follows after the expanded sub-agent. The last sub-agent in the group (if expanded) does not show this.ok, 
+- expanded sub-agents carry no `⤷ sub-agent` label.
+- the vertical line on the very left of an expanded sub-agent is colored.
+- `┊` is only displayed if another grouped sub-agent follows after the expanded sub-agent. The last sub-agent in the group (if expanded) does not show this.
 
 ```text
 ✦ Sub-Agent (<group-count>)
