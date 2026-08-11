@@ -36,6 +36,13 @@ type Stripped struct {
 // unclosed trailing span (the model is still streaming its reasoning) is captured as
 // reasoning with an empty visible tail, and visible content is trimmed. A nil cfg — or
 // one with an empty token — returns the whole message as visible with no reasoning.
+//
+// One case goes beyond the oracle: an EndToken that appears before any StartToken closes
+// an implicit span opened at position 0. Chat templates that pre-open the thinking channel
+// (and servers that split reasoning into reasoning_content) consume the opener, so the
+// model's content starts mid-think and carries only the orphan closer — seen live as a
+// bare "</mm:think>" leaking from minimax-m3. The text before that closer is reasoning,
+// never visible content.
 func StripThinking(raw string, cfg *ThinkingConfig) Stripped {
 	if cfg == nil || cfg.StartToken == "" || cfg.EndToken == "" {
 		return Stripped{Visible: raw}
@@ -43,6 +50,12 @@ func StripThinking(raw string, cfg *ThinkingConfig) Stripped {
 
 	var visible, reasoning []string
 	pos := 0
+	if end := strings.Index(raw, cfg.EndToken); end != -1 {
+		if start := strings.Index(raw, cfg.StartToken); start == -1 || end < start {
+			reasoning = append(reasoning, raw[:end])
+			pos = end + len(cfg.EndToken)
+		}
+	}
 	for pos < len(raw) {
 		start := indexFrom(raw, cfg.StartToken, pos)
 		if start == -1 {

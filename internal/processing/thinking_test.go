@@ -96,6 +96,84 @@ func TestStripThinking_PortedOracleVectors_MatchTypeScript(t *testing.T) {
 	}
 }
 
+// TestStripThinking_OrphanCloser_ImplicitLeadingSpan covers the pre-opened-template case
+// the oracle never saw: the server consumes the StartToken (or splits reasoning into
+// reasoning_content), so content carries an EndToken with no opener — live shape from
+// minimax-m3 emitting a bare "</mm:think>".
+func TestStripThinking_OrphanCloser_ImplicitLeadingSpan(t *testing.T) {
+	t.Parallel()
+
+	mmConfig := &ThinkingConfig{StartToken: "<mm:think>", EndToken: "</mm:think>"}
+
+	cases := []struct {
+		name         string
+		cfg          *ThinkingConfig
+		raw          string
+		wantVisible  string
+		wantReason   string
+		wantReasoned bool
+	}{
+		{
+			name:         "bare orphan closer strips to empty",
+			cfg:          mmConfig,
+			raw:          "</mm:think>",
+			wantVisible:  "",
+			wantReason:   "",
+			wantReasoned: true,
+		},
+		{
+			name:         "orphan closer before answer strips to answer",
+			cfg:          mmConfig,
+			raw:          "</mm:think>Here is my answer.",
+			wantVisible:  "Here is my answer.",
+			wantReason:   "",
+			wantReasoned: true,
+		},
+		{
+			name:         "pre-opened reasoning before orphan closer is reasoning",
+			cfg:          mmConfig,
+			raw:          "the template opened this span for me</mm:think>Answer.",
+			wantVisible:  "Answer.",
+			wantReason:   "the template opened this span for me",
+			wantReasoned: true,
+		},
+		{
+			name:         "orphan closer then a normal span both strip",
+			cfg:          gemmaConfig,
+			raw:          "lead-in</think>Part 1 <think>Second thought</think>Part 2",
+			wantVisible:  "Part 1 Part 2",
+			wantReason:   "lead-in\n\nSecond thought",
+			wantReasoned: true,
+		},
+		{
+			name:         "closer after an opener is not orphaned",
+			cfg:          gemmaConfig,
+			raw:          "<think>First</think>Answer",
+			wantVisible:  "Answer",
+			wantReason:   "First",
+			wantReasoned: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := StripThinking(tc.raw, tc.cfg)
+
+			if got.Visible != tc.wantVisible {
+				t.Errorf("Visible = %q, want %q", got.Visible, tc.wantVisible)
+			}
+			if got.Reasoning != tc.wantReason {
+				t.Errorf("Reasoning = %q, want %q", got.Reasoning, tc.wantReason)
+			}
+			if got.HasReasoning != tc.wantReasoned {
+				t.Errorf("HasReasoning = %v, want %v", got.HasReasoning, tc.wantReasoned)
+			}
+		})
+	}
+}
+
 func TestStripThinking_EmptyTokenConfig_PassesThrough(t *testing.T) {
 	t.Parallel()
 
