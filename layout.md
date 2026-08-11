@@ -40,16 +40,16 @@
                                                                             see less…
 
 ✦ Sub-Agent
-  ┕ survey the tests ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 2 tool calls · 12k/32k · Found 4 gaps   ▼
-
-│ ⤷ sub-agent
+┌─┶ survey the tests ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 2 tool calls · 12k/32k · Found 4 gaps   ▼
+│
+│ Survey the tests and report the gaps you find.
 │
 │ ✦ Read
 │   ┕ a.go ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 5 lines
 │
 │ ✦ Terminal
 │   ┕ go test ./... ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 · +3 more lines   ▶
-
+┊
 ✦ This is the last message from the LLM. There must always be one empty line between
   chat content and the bottom prompt/information section like displayed here.
 
@@ -618,10 +618,13 @@ of its leading and trailing blank lines, and interior runs of two or more blank 
 to one — except inside a fenced code block, where blank lines are code and stay verbatim.
 
 Inside a sub-agent run that separating row is not empty: it carries the `│` rail gutter, drawn as
-deep as *both* neighbouring blocks reach, so the run's frame runs unbroken from its `⤷ sub-agent`
-label to its last line. It is still exactly one row, and it is bare wherever the two blocks share
-no rail — at a run's start and end, and between two sub-agent calls that follow one another, which
-is what keeps them from reading as one run.
+deep as *both* neighbouring blocks reach, so the run's frame runs unbroken from its `┌─┶` header
+row to its last line. It is still exactly one row, and where the walk climbs back out of a run it
+is the `┊` closing that run — one per level left behind, innermost first, each railed one level
+shallower than the span it ends — standing *in* the separator's place rather than beside it, since
+a blank row next to it would say the run ended twice. It is bare only where the two blocks share
+no rail — at a run's start, and between two sub-agent calls that follow one another, which is what
+keeps them from reading as one run.
 
 ---
 
@@ -820,7 +823,7 @@ same text twice in two adjacent rows. It counts no `+N more lines` either — th
 count is what says there is work behind the header, and the header is a toggle target however
 short the report is, so nothing is unreachable. **A run's live text is inside the run from its
 first token**: while the delegate is generating, the streamed preview paints at the depth that
-produced it — railed under the run's own `⤷ sub-agent` label when the run is expanded, and elided
+produced it — railed inside the run's own frame when the run is expanded, and elided
 with the whole span when it is collapsed, where the blinking head and the status line's
 `sub-agent · responding` already say a delegate is talking. A preview at the top level would say
 the opposite: that this is the main agent's answer. Expanding the run reveals the report in full

@@ -10,6 +10,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **An expanded sub-agent is now a framed span that opens with what the delegate was asked.**
+  Opening a delegation used to reveal a `⤷ sub-agent` label and then, straight away, the child's
+  tool calls — the one thing missing was the instruction that produced them. The row you open a
+  delegation from is now the top-left corner of its own frame (`┌─┶ …`), the whole span runs behind
+  a gold `│` rail at column 0, one `┊` closes it where the blank separator used to be, and the
+  first thing inside the frame is the delegation's full task, rendered as markdown and wrapped to
+  the railed width. The label went with it: a frame already says "this is inside the delegate"
+  without spending a row on saying so, and the task is now retained through a session save and
+  reload rather than being dropped once the call was presented.
+  - **One shape, everywhere, live.** A lone delegation, a member of a `✦ Sub-Agent (N)` list and a
+    delegation nested inside another all open into the same frame at their own left edge, and it is
+    drawn from the first token: the header wears the spinner star and the child's streamed text
+    lands inside the rail, so a run settling into the transcript changes nothing about its shape.
+  - **A finished delegation is marked `✓`** — after its name and before the dots, on the collapsed
+    row and on the open header alike, painted in a new green `success` scheme role seeded in both
+    shipped schemes. A delegation still working carries none, and a failed one is marked by its red
+    outcome slot alone: a green tick beside a red `error: …` would be two answers to one question.
+    The slot still says `done` / `failed` exactly as before.
 - **Tool rows now read left-to-right: what was touched, a dotted leader, what came of it.** A tool
   call's branch line puts its target on the left, runs a faint `⋯` leader across the gap, and sets
   the outcome — `12 lines`, `+2 −2`, `exit 0`, a red `error: …` — flush against the block's right
@@ -96,7 +114,7 @@ point is a **minor** bump, not a breaking change.
   how much work is behind it, how full its context is, and what it is touching right now, replaced by
   its report once it lands. Delegations group only with each OTHER: one still breaks a batch of
   ordinary tool calls and never becomes a row of it.
-  - **Opening a row opens that agent's whole run**, railed and labelled exactly as before, with every
+  - **Opening a row opens that agent's whole run**, railed exactly as before, with every
     block inside it keeping its own fold state. The list resumes underneath, so the siblings stay one
     click away while you read through one of them.
 
@@ -526,7 +544,7 @@ point is a **minor** bump, not a breaking change.
   beside a painted bar, two to the window edge while the gutter is blank); the scroll-bar key is no
   longer described as "fixed for the run" now that `/settings` applies it to the running session
   (ADR 0037) and re-lays the frame out; the sketch at the top carries the current prompt-box legend
-  (`⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit`) and a `Sub-Agent` run drawn in its ⤷-railed shape with
+  (`⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit`) and a `Sub-Agent` run drawn in its railed shape with
   the `N tool calls · <used>/<window> · gist` head; and the autocomplete section lists all six verbs
   that take arguments rather than four. `docs/layout/user-questions-layout.md` strikes the
   `[1]`/`[2]`/`[3]` digit shortcuts (ratified out 2026-08-04), draws the always-painted hint row on

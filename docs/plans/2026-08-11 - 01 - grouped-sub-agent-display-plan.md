@@ -270,7 +270,18 @@ the new live shape.
 
 **Commit:** `feat(tui): live sub-agent streams inside the new rail shape`
 
-## 8. Docs closeout
+## 8. Docs closeout — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): three deviations. (a) `layout.md` needed more than the verification the item
+asks for: its top-of-file sketch and two prose paragraphs still drew and named the deleted
+`⤷ sub-agent` label, so they were re-drawn to the shipped shape (`┌─┶` header, the prompt inside
+the rail, the `┊` standing in the separator's place) under the item's own "fix only if stale".
+(b) Two `[Unreleased]` CHANGELOG lines carried the same staleness — "railed and labelled exactly as
+before" and a `⤷-railed shape` — and were corrected alongside the new entry rather than left
+contradicting it; released sections were not touched. (c) The spec section carries an uncommitted
+bullet (owner, working tree) suppressing the `┊` after a group's LAST expanded member; that is
+item 4's territory and is not implemented, so the "As implemented" note states what the join seam
+actually draws and the gap is reported as a follow-up rather than coded here.
 
 Depends on items 4–7.
 

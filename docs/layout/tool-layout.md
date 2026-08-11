@@ -14,6 +14,19 @@ one and design call 14 rules out growing the engine for presentation;
 `answered`/`pending`; and `git_diff_range`'s target keeps git's three-dot
 `base...head`, which is the diff the tool actually takes.
 
+The **Grouped Sub-agents** section below landed separately, later the same day,
+by `docs/plans/2026-08-11 - 01 - grouped-sub-agent-display-plan.md`, and three
+things there read differently on screen, each argued in that plan's item notes.
+The `┊` closer is drawn by the seam that joins two blocks rather than by the
+group painter — so a **lone** expanded delegation closes with one exactly as a
+grouped member does, a delegation still streaming at the foot of the transcript
+carries none until something follows it, and an expanded last member closes
+against whatever comes after the group rather than suppressing its closer. The
+prompt opens the span but stands **below** the head's own report rows where that
+report was long enough to lay out as a body, because the head's rows are painted
+before the span begins. And the done `✓` takes a new green `success` scheme
+role, which the sketches below leave uncoloured.
+
 ## Rules
 
 - clicking anywhere in the tool body must expand/collapse it. A press+release
@@ -192,14 +205,15 @@ One row per consecutive same-type run, in time order. A row's
 
 - remove exsiting `⤷ sub-agent` from expanded sub agents.
 - the vertical line on the very left of an expanded sub-agents still needs to be colored.
+- `┊` is only displayed if another grouped sub-agent follows after the expanded sub-agent. The last sub-agent in the group (if expanded) does not show this.ok, 
 
 ```text
 ✦ Sub-Agent (<group-count>)
   ┝ first-sub-agent-collapsed ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
 ┌─┶ sub-agent-expanded ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
 │
-│ The initial prompt for the sub agent should be displayed here. IF it contains
-│ more than one row, it needs to be wrapped. Markdown need to be properly
+│ The initial prompt for the sub agent should be displayed here. If it contains
+│ more than one row, it needs to be wrapped. Markdown needs to be properly
 │ formatted.
 │
 │ ✦ Tools (N calls)
