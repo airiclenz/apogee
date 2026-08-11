@@ -61,7 +61,7 @@
     a `dispatchConfinementUnavailable` from the `box == nil` path). Neither is reachable through
     in-repo tools today; both are follow-ups, not this plan.
 
-## 1. `gateReason` reads the ladder cell for the subprocess class
+## 1. `gateReason` reads the ladder cell for the subprocess class — ✅ DONE (2026-08-11)
 
 **What:** in `internal/agent/resolution.go`, change `gateReason` to take the full
 `resolutionInput` instead of just the tool, and split the subprocess arm into its own helper:

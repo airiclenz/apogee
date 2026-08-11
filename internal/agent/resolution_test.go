@@ -83,13 +83,15 @@ func TestResolve_LadderTable(t *testing.T) {
 		{"WS/unknown-mode", wsw, badMode, true, true, false, resolveGate, "out-of-workspace write", security.AuditAllowed},
 
 		// subprocess — confine when caps suffice, else gate ("confine if you can, gate if you can't").
+		// The gate's REASON names the host only in the caps-insufficient cell, where the backend's
+		// incapacity is what caused the gate; every other rung gates the surface as a mode decision.
 		{"subproc/plan", sub, domain.ModePlan, true, true, true, resolveRefuse, planRefusalReason, ""},
-		{"subproc/ask-before", sub, domain.ModeAskBefore, true, true, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
-		{"subproc/allow-edits", sub, domain.ModeAllowEdits, true, true, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
+		{"subproc/ask-before", sub, domain.ModeAskBefore, true, true, true, resolveGate, "subprocess execution", security.AuditAllowed},
+		{"subproc/allow-edits", sub, domain.ModeAllowEdits, true, true, true, resolveGate, "subprocess execution", security.AuditAllowed},
 		{"subproc/auto-confine-caps-suff", sub, domain.ModeAuto, true, true, true, resolveConfine, "", security.AuditAllowed},
 		{"subproc/auto-confine-caps-insuff", sub, domain.ModeAuto, true, false, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
 		{"subproc/auto-noconfine", sub, domain.ModeAuto, false, true, true, resolveRun, "", security.AuditAllowed},
-		{"subproc/unknown-mode", sub, badMode, true, false, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
+		{"subproc/unknown-mode", sub, badMode, true, false, true, resolveGate, "subprocess execution", security.AuditAllowed},
 
 		// vouched-for network (Apogee's own, url-filtered by the funnel) — auto-runs in Auto;
 		// gates on the lower rungs.
@@ -131,12 +133,12 @@ func TestResolve_LadderTable(t *testing.T) {
 		// it either — planmenu_test.go), the middle rungs gate it, Auto confines it (or gates it
 		// when the caps are insufficient), and "I am the sandbox" still runs everything.
 		{"RO+subproc/plan", roSub, domain.ModePlan, true, true, true, resolveRefuse, planRefusalReason, ""},
-		{"RO+subproc/ask-before", roSub, domain.ModeAskBefore, true, true, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
-		{"RO+subproc/allow-edits", roSub, domain.ModeAllowEdits, true, true, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
+		{"RO+subproc/ask-before", roSub, domain.ModeAskBefore, true, true, true, resolveGate, "subprocess execution", security.AuditAllowed},
+		{"RO+subproc/allow-edits", roSub, domain.ModeAllowEdits, true, true, true, resolveGate, "subprocess execution", security.AuditAllowed},
 		{"RO+subproc/auto-confine-caps-suff", roSub, domain.ModeAuto, true, true, true, resolveConfine, "", security.AuditAllowed},
 		{"RO+subproc/auto-confine-caps-insuff", roSub, domain.ModeAuto, true, false, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
 		{"RO+subproc/auto-noconfine", roSub, domain.ModeAuto, false, true, true, resolveRun, "", security.AuditAllowed},
-		{"RO+subproc/unknown-mode", roSub, badMode, true, true, true, resolveGate, "subprocess execution (confinement unavailable on this host)", security.AuditAllowed},
+		{"RO+subproc/unknown-mode", roSub, badMode, true, true, true, resolveGate, "subprocess execution", security.AuditAllowed},
 
 		// read-only DECLARATION + EffectNetwork (a host-registered tool that only GETs URLs) —
 		// the effect kind wins, so it takes the 3p-net row and gates in Auto rather than

@@ -422,7 +422,7 @@ func finishGate(in resolutionInput, gate resolution) resolution {
 	}
 	gate.cacheKey = gateCacheKey(in.tool, in.call)
 	if gate.reason == "" {
-		gate.reason = gateReason(in.tool)
+		gate.reason = gateReason(in)
 	}
 	gate.auditDecision = in.guard.Audit
 	gate.auditReason = in.guard.Reason
@@ -490,12 +490,14 @@ func confineFallback(in resolutionInput) *resolution {
 	}
 }
 
-// gateReason maps a gated tool onto the human-facing why for the Approval prompt, derived
-// from its blast-radius class so the human sees what kind of reach they are authorising. It
+// gateReason maps a gated tool onto the human-facing why for the Approval prompt. It
 // reproduces the P3 approvalReason() mapping, plus the third-party-network reason the
-// vouched-for/unvouched network split added (ADR 0012 Amendment 2026-07-25).
-func gateReason(tool domain.Tool) string {
-	switch classifyTool(tool) {
+// vouched-for/unvouched network split added (ADR 0012 Amendment 2026-07-25). Six of the seven
+// classes are a bare statement of the reach being authorised, so the class alone decides them;
+// the subprocess class also reads the ladder CELL, because only one of its cells is a
+// confinement failure (see subprocessGateReason).
+func gateReason(in resolutionInput) string {
+	switch classifyTool(in.tool) {
 	case classNetwork:
 		return "network reach"
 	case classThirdPartyNetwork:
@@ -503,10 +505,26 @@ func gateReason(tool domain.Tool) string {
 	case classMCP:
 		return "unconfinable MCP tool"
 	case classSubprocess:
-		return "subprocess execution (confinement unavailable on this host)"
+		return subprocessGateReason(in)
 	case classWorkspaceWrite:
 		return "out-of-workspace write"
 	default:
 		return "write"
 	}
+}
+
+// subprocessGateReason words a gated subprocess call by the ladder cell it was gated in. In
+// Auto with confinement asked for, a gate means the backend could not give the fence ("confine
+// if you can, gate if you can't"), so the host's incapacity IS the reason and naming it is what
+// points the user at /confine. Every other rung gates the subprocess surface as a MODE
+// decision, capable host or not — claiming otherwise blamed a working seatbelt/landlock backend
+// for an approval the rung itself asked for, and sent the user to /confine status to be told the
+// opposite (dated 2026-08-11). The three-term test spells the cell out: confineToWorkspace ==
+// false in Auto cannot reach a subprocess gate today (resolveLadderAuto auto-runs it), so that
+// term documents the cell rather than carrying live logic.
+func subprocessGateReason(in resolutionInput) string {
+	if in.mode == domain.ModeAuto && in.confineToWorkspace && !in.fsConfineAvailable {
+		return "subprocess execution (confinement unavailable on this host)"
+	}
+	return "subprocess execution"
 }
