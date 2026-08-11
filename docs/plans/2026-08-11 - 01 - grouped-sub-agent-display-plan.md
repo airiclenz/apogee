@@ -36,7 +36,13 @@
   already arrives in the tool-call args); VERSION/CHANGELOG release headings;
   new markdown features beyond the existing `renderMarkdownBody` pipeline.
 
-## 1. Gate on the tool-slot-color plan and land the spec section
+## 1. Gate on the tool-slot-color plan and land the spec section — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): gate satisfied —
+`docs/plans/archived/2026-08-11 - 00 - tool-slot-color-and-inline-marker-plan.md`
+is present. `docs/layout/tool-layout.md` was already clean at HEAD (its
+"Grouped Sub-agents" section incl. the finished-sub-agent `✓` example landed in
+`dc748aa`), so no docs commit was needed for this item.
 
 **What:** Verify
 `docs/plans/archived/2026-08-11 - 00 - tool-slot-color-and-inline-marker-plan.md`
