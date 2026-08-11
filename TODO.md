@@ -813,6 +813,31 @@ territory); streaming/progress for long-running tools; structured JSON tool outp
 
 ---
 
+## A delegation that never ran shows no prompt when expanded
+
+**Status:** parked 2026-08-11 — flagged while executing the tool-printout-fixes plan
+(`docs/plans/2026-08-11 - 04 - tool-printout-fixes-plan.md`, item 7's NOTES) and deferred by owner
+call the same day. **Pre-existing** — that plan neither introduced it nor changed it. Not a defect to
+fix on sight: what a never-run delegation should show is an open design call.
+
+A delegation that is over and left nothing behind it — a child refused at the depth bound, one that
+failed a hook before its first event — is drawn as an ordinary tool block rather than as a run.
+`subAgentFramed` (`internal/tui/subagentblock.go`) frames only a delegation with a span behind it or
+one that is still open and expanded, and the initial prompt is painted *inside* that frame
+(`subAgentPromptRows`), so expanding such a delegation shows what the ordinary tool block shows and
+never the prompt the delegation carried. The rule is one rule for both rendering paths — the lone run
+(`renderView`, `internal/tui/render.go`) and the grouped member (`renderSubAgentGroup`) — so the
+behaviour is identical in each and there is nothing path-specific to fix.
+
+**The framing itself is not the thing to reopen:** a frame opened over an empty span would enclose
+nothing and be closed again by the very next row, which is exactly why `subAgentFramed` is written the
+way it is (its doc comment carries the reasoning). The open question is whether "what was asked" is
+worth showing for work that never ran and, if it is, where it goes on an *unframed* block — the
+task's first line already rides the header as the name fallback, so a second rendering of the prompt
+beneath it has to earn its rows. Settle that before touching either path.
+
+---
+
 ## Closed entries — the one-line trail
 
 Full records live in the named docs; a line here keeps the deferral trail deliberate and carries
