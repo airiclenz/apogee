@@ -997,7 +997,8 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 
 // A call with a BODY keeps the same header and leader row — its typed stat in the outcome slot at
 // the row's right edge — and the body lays out beneath it at the branch marker's width: those lines
-// are not ┝/┕ branches of their own, because only calls are (layout.md's Run sketch). COLLAPSED,
+// are not ┝/┕ branches of their own, because only calls are (docs/layout/tool-layout.md,
+// "Single tool expanded"). COLLAPSED,
 // none of them lays out at all: the collapsed block's rows go to its leader row and the marker
 // counts the body whole (collapsedBodyRows), which is the shape the sketch draws.
 func TestRenderMultiDetailStandalone(t *testing.T) {
@@ -1776,7 +1777,7 @@ func runGroup(depth int, calls ...[2]string) *transcript {
 
 // TestRenderGroupsBodyCarryingCalls is the grouping scope's new half (design call 3): a call that
 // carries a body groups exactly as a bodiless one does, and pays for it with a member row held to
-// ONE line. Three Runs with output are the sketch's own case
+// ONE line. Three Terminal calls with output are the sketch's own case
 // (docs/layout/tool-layout.md): one header counting them, one row each, and every ▶ flush against
 // the block's right edge, whatever the commands beneath it are doing.
 func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
@@ -3989,7 +3990,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "ok\nPASS\ndone"}})
 
 		if run := toolCallRun(tr.entries, 0); len(run) != 2 {
-			t.Fatalf("toolCallRun over the two Runs = %d views, want 2 — a body no longer breaks a run", len(run))
+			t.Fatalf("toolCallRun over the two Terminal calls = %d views, want 2 — a body no longer breaks a run", len(run))
 		}
 		want := strings.Join([]string{
 			"✦ Terminal (2)",

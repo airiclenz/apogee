@@ -258,9 +258,10 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 		},
 	}, {
 		// BOTH per-entry view states, on the one entry, because both are in the paint key and each is
-		// a level of the same block: the Run opens a super-group's TYPE ROW — the reads before it
-		// carry a different label, so the two runs fold under one umbrella — and the member behind
-		// that row then opens its own body. A Run keeps a body, so its two states really do paint
+		// a level of the same block: the Terminal call opens a super-group's TYPE ROW — the reads
+		// before it carry a different label, so the two runs fold under one umbrella — and the member
+		// behind that row then opens its own body. A Terminal call keeps a body, so its two states
+		// really do paint
 		// differently — asserted at each step, because a toggle over something that hides nothing
 		// would make this row vacuous.
 		name: "a type row and a block expanded and collapsed again",

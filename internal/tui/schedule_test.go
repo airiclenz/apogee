@@ -622,7 +622,8 @@ func TestScheduleFiringOpensABlock(t *testing.T) {
 }
 
 // The Firing returns and its block is enriched IN PLACE — same entry, no second block, no note — with
-// a one-line answer promoted onto the branch as QUOTED text (nothing respells an answer), the prompt
+// a one-line answer promoted into the row's outcome slot as QUOTED text (nothing respells an
+// answer), the prompt
 // still beneath it, then what the run cost and where the record is.
 func TestScheduleFiringCompletesInPlace(t *testing.T) {
 	m := scheduleModel(t, &fakeScheduler{}, "")

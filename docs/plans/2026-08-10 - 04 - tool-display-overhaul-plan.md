@@ -481,9 +481,23 @@ key reaching the prompt; highlight golden for one row.
 
 **Commit:** `feat(tui): modal keyboard block cursor for tool blocks`
 
-## 9. Docs: layout.md points at the canon spec
+## 9. Docs: layout.md points at the canon spec — ✅ DONE (2026-08-11)
 
 Depends on items 1–8.
+
+NOTES (2026-08-11): three additions beyond the item's literal text, all inside "any other prose the
+new shape contradicts". (a) The sketch opening `layout.md` was redrawn — it still showed
+`✦ Read File` / `✦ Run ▶` / `✦ View Diff ▼` over summary-beside-target rows, which is the shape the
+section directly under it was written about. It now draws leader rows with the outcome at the edge,
+the shipped labels, and the `see less…` footer. (b) `docs/layout/tool-layout.md`'s status line
+gained an "As implemented" note listing the four cells that shipped differently from its ratified
+table (Title-Case labels, no durations, `ask_user`'s answer in the slot, `git_diff_range`'s
+`base...head`) — marking a spec "implemented" while four of its cells read otherwise on screen
+would make canon untrue; each divergence is the one already argued in item 3's notes. (c) `layout.md`
+gained one new paragraph, "A change is coloured the one way wherever a block shows one": the diff
+`+`/`-` colour rule lived only inside the deleted edit-shape paragraph, and colour is grammar that
+stays in `layout.md` (design call 16). ISSUES.md carried no "tool-layout.md sketch = unimplemented
+design" flag to remove.
 
 **What:** Shrink `layout.md`'s tool-block sections ("The rules behind the tool-call
 sketch", the tool parts of "Collapsed and expanded blocks", and any other prose the

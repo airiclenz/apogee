@@ -295,6 +295,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`docs/layout/tool-layout.md` is the canonical tool-block spec now, and `layout.md` points at
+  it.** The two `layout.md` sections that carried the tool-block shape — §"The rules behind the
+  tool-call sketch" and §"Collapsed and expanded blocks" — keep only the grammar every block obeys
+  (the row budget, the colour roles, workspace-relative paths, what a body may quote, the blank line
+  between blocks) and hand the row shape, what groups, the fold states, the interaction and the
+  per-tool table to the canon spec; where the two disagree about a tool block, the spec wins. The
+  sketch opening `layout.md` was redrawn to what the renderer paints today — leader rows with the
+  outcome at the edge, the renamed labels, the `see less…` footer — and the `internal/tui` doc
+  comments that cited the moved prose now cite the spec. The spec itself records the four cells
+  that shipped differently from its ratified table (Title-Case labels, no durations, `ask_user`'s
+  answer in the slot, `git_diff_range`'s three-dot range).
+
 - **The prompt legend advertises `⇧⏎` only where `⇧⏎` actually works.** That chord needs the
   enhanced (kitty) keyboard protocol: on a terminal that has not negotiated it, shift+enter is
   folded into a plain `⏎` and the "newline" the legend promised sends the message instead. The empty

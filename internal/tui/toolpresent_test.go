@@ -440,7 +440,8 @@ func TestPresentToolCallErrorResult(t *testing.T) {
 // the split the block's shape is read off. A fixed result header is summary-only (it fills the
 // branch row's outcome slot). Free-form command output fills the half its own size dictates:
 // output of one line (including none at all) takes that slot like any other one-line outcome,
-// while output with more to say is a body beneath the command (layout.md's Run sketch) — and
+// while output with more to say is a body beneath the command (docs/layout/tool-layout.md,
+// "Single tool expanded") — and
 // that body now holds every line, since the collapsed shape's remainder is the painter's act.
 // view_diff is the one producer filling both, a diffstat in the slot over a coloured body.
 func TestPresentToolCallOutcomeSplit(t *testing.T) {

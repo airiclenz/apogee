@@ -1306,7 +1306,8 @@ func TestTranscriptStreamingClickTogglesOnlyThePressedBlock(t *testing.T) {
 	}
 }
 
-// modelWithToolGroup builds a ready idle model holding one user prompt and three consecutive Runs,
+// modelWithToolGroup builds a ready idle model holding one user prompt and three consecutive
+// Terminal calls,
 // each with output — one grouped block whose members every one has a body and so a state of its
 // own. The start-up box is dropped so the block sits high enough to be aimed at.
 func modelWithToolGroup(t *testing.T) Model {

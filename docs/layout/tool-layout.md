@@ -1,8 +1,18 @@
 # Tool layout
 
-This file is the canonical tool-block layout spec (grill session 2026-08-10).
+This file is the canonical tool-block layout spec (grill session 2026-08-10),
+**implemented 2026-08-11** by `docs/plans/2026-08-10 - 04 - tool-display-overhaul-plan.md`.
 `layout.md` keeps the global grammar — widths, colors, path shortening, body
 quoting — and its tool sections point here.
+
+**As implemented**, four things below read differently on screen. Each was
+settled at implementation time and argued in that plan's item notes: labels are
+Title Case (`Diff Preview`, `Find Files`, `Git Status`, `Ask User`, `Sub-Agent`)
+rather than sentence case; no stat carries a duration, because no result exposes
+one and design call 14 rules out growing the engine for presentation;
+`ask_user`'s right slot keeps the human's own answer rather than
+`answered`/`pending`; and `git_diff_range`'s target keeps git's three-dot
+`base...head`, which is the diff the tool actually takes.
 
 ## Rules
 

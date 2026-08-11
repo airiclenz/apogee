@@ -1980,7 +1980,8 @@ func (s blockState) star() string {
 // stateIndicator is the glyph a TOGGLEABLE block wears — at its leader row's right edge, past the
 // outcome slot (indicatorRow), or trailing the header's label in the targetless shape, which paints
 // no leader row for it to sit at the edge of: ▼ for an expanded block, ▶ for a collapsed one
-// (layout.md, "Collapsed and expanded blocks"). It answers for the state alone — whether a block
+// (docs/layout/tool-layout.md, "Fold states and interaction"). It answers for the state alone —
+// whether a block
 // wears one at all is the toggle-target rule's, asked once in renderToolBlock — so the two questions
 // stay one condition and one glyph apart.
 func stateIndicator(expanded bool) string {

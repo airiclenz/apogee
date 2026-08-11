@@ -12,7 +12,8 @@ import (
 // A tool call names files the way the tool loop needs them — absolutely, because a confinement
 // check and an os.Open both want an unambiguous path. A transcript reader needs the opposite:
 // they are looking at ONE project, every interesting file is inside it, and repeating the same
-// long prefix on every branch line spends the row's width saying what the reader already knows.
+// long prefix on every branch row spends width the leader and the outcome slot are already
+// spending, to say what the reader already knows.
 // So the workspace root is shortened out of the paths a tool block NAMES — the target it acts on,
 // and the one-line summary of its outcome when that summary is the block's own wording — and out of
 // nothing else. What the block QUOTES is not in that set: a body (a diff's hunk lines, an edit's

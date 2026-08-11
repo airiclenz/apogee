@@ -1763,7 +1763,7 @@ func answerLines(content string) []string {
 // non-empty-led line — a single-line result, or none at all — is that call's whole outcome and
 // fills the branch row's outcome slot ("┕ true ⋯⋯⋯ (no output)"), which is also what keeps such
 // calls grouping; output with more to say is a body and lays out beneath the target instead,
-// because two lines cannot share a branch (layout.md's Run sketch).
+// because two lines cannot share a row (docs/layout/tool-layout.md, "Single tool collapsed").
 //
 // The one-line half is an OFFER, not a settlement: a line too long to share a narrow row with the
 // target is put back into the body by the painter's promote-guard, which is why that half hands over
@@ -1834,8 +1834,9 @@ func openFileBody(res domain.ToolResult) []detailLine {
 	return []detailLine{{Text: clipDetail(fmt.Sprintf("Located %q on lines: %s", v.Locate, strings.Join(numbers, ", ")))}}
 }
 
-// diffBody renders view_diff's unified output as the coloured body beneath the branch — "+ "
-// lines green, "- " lines red, context plain (layout.md's Update File sketch). Tagging on the
+// diffBody renders view_diff's unified output as the coloured body beneath the row — "+ "
+// lines green, "- " lines red, context plain (layout.md, "A change is coloured the one way wherever
+// a block shows one"; docs/layout/tool-layout.md's per-tool table). Tagging on the
 // leading "+"/"-" is exact here because internal/tools' unifiedLineDiff tags every line "  ",
 // "- " or "+ " and emits no "+++ b/…" / "--- a/…" file header, so a content line that itself
 // starts with "+" always arrives behind a tag. It returns every line: the collapsed paint's cap
