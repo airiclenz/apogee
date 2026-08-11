@@ -87,6 +87,17 @@ point is a **minor** bump, not a breaking change.
     the last row: the block appears the moment a second differently-labelled call starts, rather
     than settling into shape only once the work is done.
 
+- **A fan-out of sub-agents now reads as one `✦ Sub-Agent (N)` list.** Delegations standing next to
+  each other used to cost a full block each, so three parallel agents filled the screen with headers
+  before any of them had reported. They now fold into one list with a row per agent — its name (or
+  the head of its task) on the left, and on the right the same live tail a lone delegation carries:
+  how much work is behind it, how full its context is, and what it is touching right now, replaced by
+  its report once it lands. Delegations group only with each OTHER: one still breaks a batch of
+  ordinary tool calls and never becomes a row of it.
+  - **Opening a row opens that agent's whole run**, railed and labelled exactly as before, with every
+    block inside it keeping its own fold state. The list resumes underneath, so the siblings stay one
+    click away while you read through one of them.
+
 - **`<u>…</u>` renders as underlined text.** Markdown spells no underline of its own — CommonMark
   spends `__` on strong emphasis — so the renderer recognises the one HTML pair a model actually
   reaches for, and assistant text saying `press <u>Enter</u>` now shows *Enter* underlined with the

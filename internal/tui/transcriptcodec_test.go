@@ -195,14 +195,18 @@ func TestTranscriptCodecDecodesALegacyBlobUnchanged(t *testing.T) {
 }
 
 // TestTranscriptCodecReDerivesSubAgentSolo proves the one verdict decode does not take from the
-// file: a sub-agent head is solo by rule (presentToolCall, design call 3 — a head blocks a whole
-// delegation and never becomes a row in someone's list), so a blob written before Solo rode the
-// wire must still replay as one block per delegation. Hand-written bytes with no "solo" member,
-// because the case IS an old file: a re-encode would carry today's true and prove nothing.
+// file: a sub-agent head is solo by rule (presentToolCall, design call 12 — a delegation never
+// joins a MIXED super-group, whatever it stands next to), so a blob written before Solo rode the
+// wire must still replay refusing that fold. Hand-written bytes with no "solo" member, because the
+// case IS an old file: a re-encode would carry today's true and prove nothing.
 //
 // Two records rather than one, and span-less ones — no nested entries behind either head — because
 // that is the shape the painter's own span rule cannot catch (a delegation refused at the depth
-// bound) and the shape a stale false would fold into "✦ Sub-Agent (2)".
+// bound) and the shape a stale false would fold into an umbrella's row.
+//
+// What the two DO fold into is the sub-agent group's own list (subAgentGroup, item 7): grouping
+// with each OTHER is a different rule from grouping with everyone, and it is derived off the tool
+// name rather than off this flag, so a replayed pair reads as one "✦ Sub-Agent (2)".
 func TestTranscriptCodecReDerivesSubAgentSolo(t *testing.T) {
 	t.Parallel()
 	data := []byte(`{"version":1,"entries":[` +
@@ -228,10 +232,8 @@ func TestTranscriptCodecReDerivesSubAgentSolo(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ Sub-Agent",
-		"  ┕ survey the tests ⋯ refused",
-		"",
-		"✦ Sub-Agent",
+		"✦ Sub-Agent (2)",
+		"  ┝ survey the tests ⋯ refused",
 		"  ┕ survey the docs ⋯ refused",
 	}, "\n")
 	if out := renderPlain(&transcript{entries: got}, 80); out != want {

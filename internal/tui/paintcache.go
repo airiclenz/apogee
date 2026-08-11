@@ -41,6 +41,8 @@ package tui
 // `&transcript{}`) simply renders uncached, and a cold render is always available as the oracle a
 // warm one is checked against.
 
+import "strconv"
+
 // blockShape names which of [transcript.renderView]'s four painter branches produced a paint — the
 // branch itself, not anything derived from it.
 //
@@ -54,10 +56,11 @@ package tui
 type blockShape int
 
 const (
-	shapeEntry       blockShape = iota // renderEntryLines — one entry, one block
-	shapeToolRun                       // renderToolBlock over a folded run of same-label calls
-	shapeSubAgentRun                   // renderSubAgentRun — the call plus the run nested under it
-	shapeToolSuper                     // renderSuperGroup — the umbrella over adjacent runs of different tools
+	shapeEntry         blockShape = iota // renderEntryLines — one entry, one block
+	shapeToolRun                         // renderToolBlock over a folded run of same-label calls
+	shapeSubAgentRun                     // renderSubAgentRun — the call plus the run nested under it
+	shapeToolSuper                       // renderSuperGroup — the umbrella over adjacent runs of different tools
+	shapeSubAgentGroup                   // renderSubAgentGroup — the folded list of adjacent delegations
 )
 
 // paintKey is everything one block's paint depends on besides the immutable content of its
@@ -94,14 +97,18 @@ type paintKey struct {
 	blink bool   // the frame's star phase, folded in ONLY while live — a settled block paints identically at either phase
 	flags string // one byte per covered entry: bit 0 expanded, bit 1 done, bit 2 typeExpanded (spanFlags)
 
-	// The head's context reading, which a collapsed sub-agent run states on its summary line
-	// (subAgentFill). It is the one input that moves with NO other movement the key can see: a
-	// UsageEvent appends no entry, extends no span and flips no flag, so a run whose delegate just
-	// reported would otherwise keep serving the previous figure until its next tool call. Both
-	// halves are named because both are painted, and the limit moves on its own when the window
-	// rebinds under a run that has not reported since.
-	ctxUsed  int
-	ctxLimit int
+	// The context readings of the entries this paint covers, which a collapsed delegation states on
+	// its summary line (subAgentFill). They are the one input that moves with NO other movement the
+	// key can see: a UsageEvent appends no entry, extends no span and flips no flag, so a run whose
+	// delegate just reported would otherwise keep serving the previous figure until its next tool
+	// call. Both halves of each reading are named because both are painted, and the limit moves on
+	// its own when the window rebinds under a run that has not reported since.
+	//
+	// It covers every entry rather than only the head because a block can now state more than one
+	// reading: a folded group of delegations paints one summary line per member
+	// (renderSubAgentGroup), and a reading landing on the second of them moves no field of the
+	// first (spanFills).
+	fills string
 }
 
 // cacheable reports whether a block with this key may be stored at all. Exactly one kind may not:
@@ -135,6 +142,31 @@ func spanFlags(entries []entry) string {
 			f |= 4
 		}
 		b[i] = f
+	}
+	return string(b)
+}
+
+// spanFills packs the context readings of the entries a paint covers into one comparable string:
+// each reading as "<offset>:<used>/<limit>;", and nothing at all for an entry that carries none.
+// It is [spanFlags]' shape for a fact that is a pair of numbers rather than a bit — the same reason
+// that one is a string: a block's span has no fixed length, and a key that stopped covering the
+// members past some bound would be a stale paint rather than a missed optimisation.
+//
+// The overwhelmingly common block carries no reading anywhere (only a delegation's head does), and
+// answers "" without allocating.
+func spanFills(entries []entry) string {
+	var b []byte
+	for i := range entries {
+		e := entries[i]
+		if e.ctxUsed <= 0 && e.ctxLimit <= 0 {
+			continue
+		}
+		b = strconv.AppendInt(b, int64(i), 10)
+		b = append(b, ':')
+		b = strconv.AppendInt(b, int64(e.ctxUsed), 10)
+		b = append(b, '/')
+		b = strconv.AppendInt(b, int64(e.ctxLimit), 10)
+		b = append(b, ';')
 	}
 	return string(b)
 }
@@ -239,17 +271,16 @@ func (c *paintCache) clear() {
 // different one (blockState.live); everything else is read off the entries and the frame.
 func (t *transcript) blockKey(shape blockShape, head, n int, th theme, width int, blink, live bool) paintKey {
 	return paintKey{
-		shape:    shape,
-		kind:     t.entries[head].kind,
-		depth:    t.entries[head].depth,
-		width:    width,
-		measure:  th.measure,
-		span:     n,
-		live:     live,
-		blink:    blink && live, // a settled block's paint does not depend on the phase; folding it in anyway would miss on every phase flip
-		flags:    spanFlags(t.entries[head : head+n]),
-		ctxUsed:  t.entries[head].ctxUsed,
-		ctxLimit: t.entries[head].ctxLimit,
+		shape:   shape,
+		kind:    t.entries[head].kind,
+		depth:   t.entries[head].depth,
+		width:   width,
+		measure: th.measure,
+		span:    n,
+		live:    live,
+		blink:   blink && live, // a settled block's paint does not depend on the phase; folding it in anyway would miss on every phase flip
+		flags:   spanFlags(t.entries[head : head+n]),
+		fills:   spanFills(t.entries[head : head+n]),
 	}
 }
 

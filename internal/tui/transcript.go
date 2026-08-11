@@ -1139,6 +1139,109 @@ func toolSuperGroup(entries []entry, i int) superGroup {
 	return runs
 }
 
+// subAgentBlock is one member of a sub-agent group: the index of the delegation's call entry and
+// the length of the run nested beneath it ([subAgentSpan]). The span is carried because it is what
+// separates one member from the next — a delegation's whole span lies between its call and its
+// neighbour's — so a walk over the group's members steps by 1+span rather than by 1.
+type subAgentBlock struct {
+	at   int // index into the entries slice of the delegation's own call entry
+	span int // how many nested entries the delegation left behind it; 0 for one that produced none
+}
+
+// subAgentHeads reports whether entries[i] is a delegation's call block — the head a sub-agent run
+// hangs off. It matches the retained tool name for [subAgentSpan]'s reason: a relabelling must not
+// switch the rule off, and a third-party tool sharing the "Sub-Agent" label must not switch it on.
+func subAgentHeads(entries []entry, i int) bool {
+	if i < 0 || i >= len(entries) {
+		return false
+	}
+	e := entries[i]
+	return e.kind == entryToolCall && e.tool.name == subAgentToolName
+}
+
+// subAgentGroup is the group entries[i] opens, or nil when it opens none: the adjacent delegations
+// standing at the same depth, each with the run nested beneath it (docs/layout/tool-layout.md,
+// Rules — "Sub-agent calls group with each other"). Two are the floor, as they are for every other
+// folded shape: a lone delegation is the block it always was.
+//
+// Adjacency here is adjacency of BLOCKS, not of entries, which is the whole reason this rule cannot
+// be [sameLabelRun] with the solo mark lifted: a delegation's span sits between its call and the
+// next call at its own depth, so two delegations are never neighbouring entries once either of them
+// has done any work. The walk therefore steps over each member's span, and everything else the
+// group rule needs follows from that: an entry of any other kind between two delegations — a
+// narration, a note, an approval — is not a head at the group's depth and ends it where it stands,
+// and so does a call to any other tool.
+//
+// A delegation with NO span joins like any other (a child refused at the depth bound, one that
+// faulted before its first event): it is a delegation, its row says so, and the reader grouping two
+// of them is reading the same list. That is the one rule the presenter's solo mark used to state
+// from the other side (presentToolCall) — solo still keeps a delegation out of a MIXED super-group
+// (design call 12), which is a different question and is answered where it always was (groupable).
+func subAgentGroup(entries []entry, i int) []subAgentBlock {
+	if !subAgentHeads(entries, i) {
+		return nil
+	}
+	var group []subAgentBlock
+	for at := i; subAgentHeads(entries, at) && entries[at].depth == entries[i].depth; {
+		span := subAgentSpan(entries, at)
+		group = append(group, subAgentBlock{at: at, span: span})
+		at += 1 + span
+	}
+	if len(group) < 2 {
+		return nil
+	}
+	return group
+}
+
+// subAgentGroupAt is the group entries[i] BELONGS to and its position in it — what the painter asks
+// at a block head, where [subAgentGroup] alone would answer about the members from i onward and so
+// would grow a second "✦ Sub-Agent (N)" header at every member of one group.
+//
+// It walks back to the group's first member before walking forward, and the backward step is exact
+// for the same reason the forward one is: a member's span is contiguous and ends where the next
+// member begins (transcript.place), so the entry at the group's own depth immediately before i is
+// the previous member's head whenever there is one.
+//
+// ok is false for anything that is in no group at all, which is every entry that is not a
+// delegation and every delegation standing alone.
+func subAgentGroupAt(entries []entry, i int) (group []subAgentBlock, pos int, ok bool) {
+	if !subAgentHeads(entries, i) {
+		return nil, 0, false
+	}
+	first := i
+	for {
+		prev := prevSibling(entries, first)
+		if !subAgentHeads(entries, prev) || entries[prev].depth != entries[i].depth {
+			break
+		}
+		first = prev
+	}
+	group = subAgentGroup(entries, first)
+	for k := range group {
+		if group[k].at == i {
+			return group, k, true
+		}
+	}
+	return nil, 0, false
+}
+
+// prevSibling is the index of the entry standing at entries[i]'s own depth immediately before it —
+// the head of the block that ends where i begins — or −1 when i opens its level. Everything nested
+// deeper than i belongs to whatever block precedes it, so the walk skips it whole.
+func prevSibling(entries []entry, i int) int {
+	if i <= 0 || i >= len(entries) {
+		return -1
+	}
+	j := i - 1
+	for j >= 0 && entries[j].depth > entries[i].depth {
+		j--
+	}
+	if j < 0 || entries[j].depth != entries[i].depth {
+		return -1
+	}
+	return j
+}
+
 // addApproval records an Approval observationally — the decision already came back through
 // the C3 reply channel, so this is a transcript record of what was decided, not the gate.
 //

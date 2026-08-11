@@ -2873,3 +2873,81 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 		}
 	})
 }
+
+// modelWithSubAgentGroup builds a ready idle model whose scrollback holds a fan-out of three
+// delegations, each with one nested read behind it — the shape the folded "✦ Sub-Agent (3)" list is
+// derived from (subAgentGroup). The delegations stand at entries 1, 3 and 5, the prompt at 0.
+func modelWithSubAgentGroup(t *testing.T) Model {
+	t.Helper()
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	m.transcript.addUser("survey the repo three ways", nil)
+	for _, d := range [][3]string{
+		{"s1", "survey", "a.go"},
+		{"s2", "build", "b.go"},
+		{"s3", "check", "c.go"},
+	} {
+		subAgentCall(&m.transcript, d[0], d[1], 0)
+		readCall(&m.transcript, "r"+d[0], d[2], 1, 5, 1)
+		subAgentReport(&m.transcript, d[0], "all clear", 0)
+	}
+	m.refreshViewport()
+	return m
+}
+
+// TestSubAgentGroupMemberClickOpensItsSpan is the folded list's interaction: a member row is its own
+// click surface, so a click opens THAT delegation's span and leaves its siblings folded, and a
+// second click on the same row closes it again. The group header itself toggles nothing — a list
+// has no state of its own, exactly as the same-label group's header has none.
+func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
+	// The prompt is entries[0], so the three delegations head at 1, 3 and 5.
+	const first, middle, last = 1, 3, 5
+
+	clickLine := func(t *testing.T, m Model, line int) Model {
+		t.Helper()
+		return clickCell(t, m, 4, screenRow(t, m, line))
+	}
+
+	t.Run("a click opens the delegation it landed on, alone", func(t *testing.T) {
+		m := modelWithSubAgentGroup(t)
+		m = clickLine(t, m, memberRows(t, m, middle)[0])
+		if !m.transcript.entries[middle].expanded {
+			t.Fatal("a click on the middle delegation's row did not open it")
+		}
+		for _, sibling := range []int{first, last} {
+			if m.transcript.entries[sibling].expanded {
+				t.Errorf("opening entry %d opened entry %d as well", middle, sibling)
+			}
+		}
+		body := strings.Join(m.lines, "\n")
+		if !strings.Contains(body, "b.go") {
+			t.Errorf("the open delegation's span never reached the viewport:\n%s", body)
+		}
+		if strings.Contains(body, "a.go") || strings.Contains(body, "c.go") {
+			t.Errorf("a sibling's span came with it:\n%s", body)
+		}
+	})
+
+	t.Run("a second click closes it again", func(t *testing.T) {
+		m := modelWithSubAgentGroup(t)
+		m = clickLine(t, m, memberRows(t, m, middle)[0])
+		if m = clickLine(t, m, memberRows(t, m, middle)[0]); m.transcript.entries[middle].expanded {
+			t.Error("a second click on the open delegation's row did not close it")
+		}
+	})
+
+	t.Run("the group header toggles nothing", func(t *testing.T) {
+		m := modelWithSubAgentGroup(t)
+		line := memberRows(t, m, first)[0] - 1 // the header sits directly above the first row
+		if got := strip(m.lines[line]); !strings.Contains(got, "Sub-Agent (3)") {
+			t.Fatalf("setup: the line above the first member is %q, not the group header", got)
+		}
+		if kind := m.lineTargets[line].kind; kind != targetNone {
+			t.Errorf("the group header is marked %v, want no target at all", kind)
+		}
+		before := strings.Join(m.lines, "\n")
+		if got := strings.Join(clickLine(t, m, line).lines, "\n"); got != before {
+			t.Errorf("a click on the group header repainted it:\n%s", got)
+		}
+	})
+}

@@ -272,14 +272,61 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 				appendBlock(false, d, i, plainPaint(renderSubAgentLabel(th, d, width)))
 			}
 		}
-		// A sub-agent run is ONE block while it is collapsed (layout.md): its head paints with the
-		// cascading summary and the whole span is then skipped outright, which is what elides the
-		// inner blocks, their ⤷ labels, and every rail and spacer among them — nothing is painted
-		// and afterwards taken back, and the descent logic above never fires because it never sees
-		// a deeper entry. Expanded, only the head is painted here and the loop walks into the span
-		// exactly as it always has, so every inner block keeps its OWN state and a nested run
-		// collapses inside an expanded parent by this same rule, at every depth.
-		if span := subAgentSpan(t.entries, i); span > 0 {
+		// Adjacent delegations fold into ONE "✦ Sub-Agent (N)" list (subAgentGroupAt), asked first
+		// because every member of one is also a run head and would otherwise take the branch below
+		// as a block of its own. The question is asked at every member and not only at the first:
+		// an OPEN member's span is painted by this same walk, so the list resumes in a second block
+		// of the same shape after it, headerless, its rows still counted against the whole group.
+		//
+		// The walk covers the members whose rows this block paints and stops at the first open one,
+		// leaving i on that member so the loop steps into its span exactly as it does under a lone
+		// expanded delegation. A collapsed member's span is skipped whole, by the rule below.
+		if grp, pos, ok := subAgentGroupAt(t.entries, i); ok {
+			end := len(grp) - 1
+			for k := pos; k < len(grp); k++ {
+				if t.entries[grp[k].at].expanded {
+					end = k
+					break
+				}
+			}
+			members := make([]subAgentMember, 0, end-pos+1)
+			for k := pos; k <= end; k++ {
+				at := grp[k].at
+				members = append(members, subAgentMember{
+					head:   t.entries[at],
+					span:   t.entries[at+1 : at+1+grp[k].span],
+					offset: at - i,
+					last:   k == len(grp)-1,
+				})
+			}
+			// count opens the header, and only the group's FIRST block carries one.
+			count := 0
+			if pos == 0 {
+				count = len(grp)
+			}
+			// The key covers this block's members and everything still ahead of them in the group:
+			// the header's star asks the whole list whether any delegate is still working, and a
+			// member's row changes shape the moment its delegation grows a span to reveal, so a key
+			// stopping at the last row it paints would serve a stale one (paintcache.go).
+			tail := grp[len(grp)-1]
+			cover := tail.at + 1 + tail.span - i
+			key := t.blockKey(shapeSubAgentGroup, i, cover, th, width, blink,
+				anyOpenCall(t.entries[i:i+cover]))
+			appendBlock(false, e.depth, i, t.paintBlock(i, key, func() blockPaint {
+				return renderSubAgentGroup(th, count, members, railedWidth(width, e.depth),
+					blockState{live: key.live, blink: blink}).railed(th, e.depth)
+			}))
+			if i = grp[end].at; !t.entries[i].expanded {
+				i += grp[end].span
+			}
+		} else if span := subAgentSpan(t.entries, i); span > 0 {
+			// A sub-agent run is ONE block while it is collapsed (layout.md): its head paints with the
+			// cascading summary and the whole span is then skipped outright, which is what elides the
+			// inner blocks, their ⤷ labels, and every rail and spacer among them — nothing is painted
+			// and afterwards taken back, and the descent logic above never fires because it never sees
+			// a deeper entry. Expanded, only the head is painted here and the loop walks into the span
+			// exactly as it always has, so every inner block keeps its OWN state and a nested run
+			// collapses inside an expanded parent by this same rule, at every depth.
 			// The paint covers the head AND its span: the collapsed summary counts the work behind
 			// the header (subAgentSummary) and the star asks the span whether anything is still open,
 			// so a nested entry arriving or landing its result is a different block (paintcache.go).
@@ -555,8 +602,7 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool) blockPaint {
 	view := head.tool
 	if !head.expanded {
-		view.Summary = subAgentSummary(th.measure, head, span)
-		view.Details = toolBody{} // the zero body: no lines, and so nothing to lay out beneath
+		view = collapsedSubAgentView(th.measure, head, span)
 	}
 	return renderToolBlock(th, []toolView{view}, railedWidth(width, head.depth), blockState{
 		expanded: head.expanded,
@@ -564,6 +610,135 @@ func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool
 		live:     !head.done || anyOpenCall(span),
 		blink:    blink,
 	}).railed(th, head.depth)
+}
+
+// subAgentMember is one row of a folded sub-agent group as the painter needs it: the delegation's
+// own call entry, the run nested beneath it, and where that entry sits relative to the block's
+// head. It is the paint-time reading of [subAgentBlock], which names the same member by index — the
+// indexes are what a click resolves through and the entries are what is drawn, so the two shapes
+// are kept apart rather than one being made to serve both (renderView builds these).
+//
+// It carries the head and its span rather than a finished view for [renderSubAgentRun]'s reason:
+// what a COLLAPSED delegation's row says is derived from both (subAgentSummary), and deriving it
+// inside the painter is what keeps the work behind the paint cache instead of on every frame.
+type subAgentMember struct {
+	head   entry   // the delegation's own call entry: its view, and its expanded state
+	span   []entry // the run nested beneath it; empty for a delegation that produced none
+	offset int     // the member's entry, as an offset from the block's head (blockPaint.addFor)
+
+	// last marks the GROUP's final member, whose row closes the list with ┕. It is the group's
+	// answer and not the block's: a group interrupted by an open delegation's span paints its
+	// remaining rows in a second block, and the ┕ still belongs to the last row of the whole list.
+	last bool
+}
+
+// subAgentGroupLabel is the header a folded group of delegations wears, ahead of its count
+// (docs/layout/tool-layout.md, Rules: "✦ Sub-Agent (N)"). It is read off the members' own registry
+// label rather than restated, so the group and a lone delegation cannot come to name the tool
+// differently; this constant is only the fallback for a group whose views carry no label at all.
+const subAgentGroupLabel = "Sub-Agent"
+
+// renderSubAgentGroup paints a folded group of adjacent delegations — "✦ Sub-Agent (3)" over one
+// row per agent, the agent's name on the left and its verdict in the outcome slot
+// (docs/layout/tool-layout.md, Rules). It is the same list the same-label group is
+// (renderToolGroup), and the member rows go through the very painter that block's do, so a
+// delegation reads as a row of a list wherever it is folded.
+//
+// What is NOT here is the half that makes a delegation different: an open member's SPAN. Expanding
+// one reveals the whole nested run — its ⤷ label, its rails, its own blocks, each with its own
+// state — and those are entries in their own right, painted by [transcript.renderView]'s ordinary
+// walk exactly as they are under a lone expanded delegation. So a group interrupted by an open
+// member paints its rows up to that member here and its remaining rows in a second block of this
+// same shape after the span, which is why count and last are stated separately: count opens the
+// header and is 0 on the continuation block, while last belongs to the whole group's final row.
+//
+// An open member therefore carries no see-less footer of its own: the row that closes it would sit
+// ABOVE the span it opened rather than at the end of it, which is an affordance pointing at the
+// wrong thing (item 4's rule). Its own leader row keeps the click in both states, as every member's
+// does. A member with no span at all is an ordinary group member and takes that painter whole,
+// footer included — its body is the whole of what it hides.
+//
+// What a row SAYS is not the group's business at all: each member is read exactly as the lone block
+// it folded from (collapsedSubAgentView), so folding changes the frame around a delegation and
+// never the record of it.
+func renderSubAgentGroup(th theme, count int, members []subAgentMember, width int, state blockState) blockPaint {
+	var out blockPaint
+	if count > 0 {
+		label := th.toolLabel.Render(groupLabelOf(members)) + " " +
+			th.toolIndicator.Render(fmt.Sprintf(groupCountFormat, count))
+		out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), targetNone)
+	}
+	room := toolRowCells(th, width)
+	for _, m := range members {
+		marker, spanned := branchMarker(m.last), len(m.span) > 0
+		view := m.head.tool
+		if spanned && !m.head.expanded {
+			view = collapsedSubAgentView(th.measure, m.head, m.span)
+		}
+		view = guardPromotions(th, []toolView{view}, room, marker)[0]
+		rows, hides := renderSubAgentMemberRows(th, view, marker, width, room, m.head.expanded, spanned)
+		kind := targetNone
+		if hides {
+			kind = targetHeader
+		}
+		out.addFor(m.offset, rows, kind)
+	}
+	return out
+}
+
+// groupLabelOf is the label a folded group of delegations names itself with: the members' own, off
+// the first of them, falling back to the constant for a view built before the registry knew the
+// tool (a replayed record, a hand-built test transcript).
+func groupLabelOf(members []subAgentMember) string {
+	if len(members) > 0 && members[0].head.tool.Label != "" {
+		return members[0].head.tool.Label
+	}
+	return subAgentGroupLabel
+}
+
+// renderSubAgentMemberRows paints one member of a folded sub-agent group and reports whether the
+// collapsed row hides anything — which is both what makes it wear an indicator and what makes it a
+// click target, the same question every folded shape asks (renderGroupMember).
+//
+// A delegation that left a RUN behind it always hides something, whatever its own report says: the
+// span is what expanding reveals. Its row is one line collapsed, and open it is that same line plus
+// the report the delegate returned, under the member gutter — the span itself follows outside this
+// block (renderSubAgentGroup).
+//
+// A delegation with no span is an ordinary member and goes through the ordinary painter, so a
+// refused delegation folds, opens and closes exactly as a read or a terminal call does.
+func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room int,
+	expanded, spanned bool) (lines []string, hides bool) {
+	if !spanned {
+		return renderGroupMember(th, tv, marker, memberGutter, width, room, expanded)
+	}
+	row := leaderRow(th, tv, marker, room, expanded)
+	if !expanded {
+		return []string{indicatorRow(th, row, width, glyphCollapsed)}, true
+	}
+	out := []string{indicatorRow(th, row, width, glyphExpanded)}
+	for _, d := range tv.Details.all() {
+		out = append(out, gutteredWrap(th, detailStyle(th, d.Kind, true), memberGutter, memberGutter,
+			d.Text, room)...)
+	}
+	return out, true
+}
+
+// collapsedSubAgentView is what a COLLAPSED delegation shows of itself, wherever it is folded: its
+// own header view with the cascading summary in the outcome slot and no body at all. The body is
+// dropped because the summary already carries the report's first line and no block says the same
+// thing twice in two adjacent rows; the copy is a paint-time act on facts the entry keeps whole,
+// which is why expanding shows the report the delegation actually returned.
+//
+// One reading serves the lone block and the folded group's member row alike (renderSubAgentRun,
+// renderSubAgentGroup): grouping changes the frame a delegation is drawn in, and a second wording
+// of "what does a collapsed delegation say" would part company with this one — taking the per-child
+// live tail a fan-out is observed through (ADR 0039) with it.
+func collapsedSubAgentView(measure widthAuthority, head entry, span []entry) toolView {
+	view := head.tool
+	view.Summary = subAgentSummary(measure, head, span)
+	view.Details = toolBody{} // the zero body: no lines, and so nothing to lay out beneath
+	return view
 }
 
 // subAgentSummary words a collapsed run's one line: how much work happened in there, how full the

@@ -573,7 +573,7 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 }
 
 // The issue's core case: two sub-agent calls back to back are never visually connected. The
-// second call's own tool-call block sits at the parent's depth between the two runs, so the join
+// second call's own member row sits at the parent's depth between the two runs, so the join
 // dips to 0, the rail breaks, and a fresh ⤷ sub-agent label opens the second run.
 //
 // Both runs are EXPANDED first, because a collapsed run elides its span whole (layout.md) and a run
@@ -592,14 +592,14 @@ func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ Sub-Agent", // a run's head is always a toggle target (its span), so its branch row always wears the state
-		leaderEdgeRow("  ┕ first ⋯", glyphExpanded),
+		"✦ Sub-Agent (2)", // the two adjacent delegations are rows of one list (subAgentGroup)
+		// A member is always a toggle target (its span), so its row always wears the state.
+		leaderEdgeRow("  ┝ first ⋯", glyphExpanded),
 		"",
 		"│ ⤷ sub-agent",
 		"│",
 		"│ ✦ first child",
 		"", // the first run closes here…
-		"✦ Sub-Agent",
 		leaderEdgeRow("  ┕ second ⋯", glyphExpanded),
 		"", // …and the second call is fenced off from it on both sides
 		"│ ⤷ sub-agent",
@@ -866,6 +866,72 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		), "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("2nd-step umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+}
+
+// A fan-out reads as ONE list: adjacent delegations fold under "✦ Sub-Agent (3)", one row per agent
+// in the shape every folded member takes (docs/layout/tool-layout.md, Rules). What a row SAYS is
+// the lone block's own collapsed reading (collapsedSubAgentView) — the work behind it and the gist
+// its delegate reported — because folding changes the frame around a delegation, not the record.
+//
+// Opening one reveals its SPAN rather than a body: the nested run paints railed and labelled
+// exactly as it does under a lone expanded delegation, and the list resumes beneath it, its last
+// row still closing with ┕. That interruption is why the group's remaining rows are painted in a
+// second block, and it is what this golden pins.
+func TestRenderSubAgentGroupSketchStates(t *testing.T) {
+	// The three delegations stand at entries 0, 2 and 4 — each with one nested read between them.
+	const secondHead = 2
+
+	build := func(t *testing.T) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		for _, d := range [][3]string{
+			{"s1", "survey", "a.go"},
+			{"s2", "build", "b.go"},
+			{"s3", "check", "c.go"},
+		} {
+			subAgentCall(tr, d[0], d[1], 0)
+			readCall(tr, "r"+d[0], d[2], 1, 5, 1)
+			subAgentReport(tr, d[0], "all clear", 0)
+		}
+		return tr
+	}
+	header := "✦ Sub-Agent (3)"
+	rows := []string{
+		groupMemberLine("  ┝ survey ⋯ 1 tool call · all clear"),
+		groupMemberLine("  ┝ build ⋯ 1 tool call · all clear"),
+		groupMemberLine("  ┕ check ⋯ 1 tool call · all clear"),
+	}
+
+	t.Run("collapsed to one row per agent", func(t *testing.T) {
+		want := strings.Join(append([]string{header}, rows...), "\n")
+		if got := renderPlain(build(t), 80); got != want {
+			t.Errorf("collapsed fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("one member opened to its span", func(t *testing.T) {
+		tr := build(t)
+		if !tr.setExpanded(secondHead, true) {
+			t.Fatalf("setExpanded(%d, true) = false; want the second delegation open", secondHead)
+		}
+		want := strings.Join([]string{
+			header,
+			rows[0],
+			// Open, the row shows the delegation's own view — the report it promoted — and the span
+			// it opened follows as the blocks it is, railed and announced by the ⤷ label.
+			leaderEdgeRow("  ┝ build ⋯ all clear", glyphExpanded),
+			"",
+			"│ ⤷ sub-agent",
+			"│",
+			"│ ✦ Read",
+			"│   ┕ b.go ⋯ 5 lines", // the nested read hides nothing, so its row wears no indicator
+			"",
+			rows[2], // the list resumes, and its last row still closes the whole group
+		}, "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("opened fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
 	})
 }
@@ -2128,14 +2194,16 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 	})
 }
 
-// A sub-agent call heads a run rather than joining one: what hangs beneath its block is a whole
-// delegation (renderSubAgentRun), so two delegations in a row are two blocks and never one
-// "✦ Sub-Agent (2)" counting them. The painter's span rule cannot carry that on its own — it fires
-// only for a head with nested entries behind it, and a delegation refused at the depth bound
-// (executeRefuse, internal/agent) leaves a head with NO span, which is a call of the right shape
-// sitting beside another. The presenter states the fact instead (presentToolCall marks the call
-// solo), so the rule holds for the empty run as well as the full one.
-func TestSpanlessSubAgentHeadsNeverGroup(t *testing.T) {
+// A delegation with NO span joins its neighbours' list exactly as a full one does (subAgentGroup,
+// item 7). The painter's span rule cannot carry the group on its own — it fires only for a head
+// with nested entries behind it, and a delegation refused at the depth bound (executeRefuse,
+// internal/agent) leaves a head with none — so the group is derived off the TOOL and two refusals
+// in a row read as one "✦ Sub-Agent (2)" with a red row each.
+//
+// What the presenter's solo mark still keeps out is the MIXED umbrella (design call 12): these
+// heads are ungroupable in [sameLabelRun]'s sense and so head no super-group, which is the other
+// half of the rule and is asserted here beside the paint.
+func TestSpanlessSubAgentHeadsGroupWithEachOther(t *testing.T) {
 	const refusal = "sub-agent depth limit reached (max 2): cannot spawn a deeper sub-agent"
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"first"}`)}})
@@ -2155,10 +2223,8 @@ func TestSpanlessSubAgentHeadsNeverGroup(t *testing.T) {
 	want := strings.Join([]string{
 		// The refusal fills the whole outcome slot, so the leader keeps its floor of one dot and
 		// the target gives way entirely — design call 4's order, played out to its end.
-		"✦ Sub-Agent",
-		"  ┕ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper" + clipTail,
-		"",
-		"✦ Sub-Agent",
+		"✦ Sub-Agent (2)",
+		"  ┝ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper" + clipTail,
 		"  ┕ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper" + clipTail,
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {

@@ -373,9 +373,40 @@ spinner star.
 
 **Commit:** `feat(tui): render tool super-groups with aggregated type rows`
 
-## 7. Sub-agent same-label grouping
+## 7. Sub-agent same-label grouping — ✅ DONE (2026-08-11)
 
 Depends on items 5 and 6.
+
+NOTES (2026-08-11): five calls the item's text does not word.
+(a) A member row's outcome slot keeps the LONE block's collapsed reading (`collapsedSubAgentView`,
+shared with `renderSubAgentRun`) rather than the bare `done`/`failed` the item words. Folding changes
+the frame around a delegation, not the record of it — and `done`/`failed` is exactly what that reading
+degrades to for a span-less delegation, which is the row the table describes. Taking the item
+literally would have deleted the per-child live tail ADR 0039 shipped (each running delegate's own
+count, fill and activity phrase), which `TestEachRunningChildBlockShowsItsOwnLiveTail` pins and which
+is the only thing that makes a fan-out observable. Its "N tool calls" is counted off entries the
+transcript already holds, so design call 14's ban on engine changes for presentation is untouched.
+(b) The group is a NEW derivation (`subAgentGroup`/`subAgentGroupAt`, transcript.go) rather than the
+presenter's `solo` mark lifted. Adjacency here is adjacency of BLOCKS — a delegation's whole span sits
+between its call and its neighbour's — which `sameLabelRun`'s entry-adjacent walk cannot express; and
+leaving `solo` alone is what keeps design call 12 (never a row of a MIXED umbrella) true by
+construction rather than by a second rule.
+(c) An open member INTERRUPTS the list: its span is painted by `renderView`'s own walk, so it keeps
+its rails, its ⤷ label and every inner block's own state, and the group's remaining rows are painted
+in a second, header-less block of the same shape after it (`count` opens the header, `last` belongs to
+the whole group). An open member therefore carries no `see less…` footer — the row would sit ABOVE the
+span it opened, which is item 4's rule against an affordance that points at nothing.
+(d) `paintKey`'s `ctxUsed`/`ctxLimit` (two ints, the HEAD's reading) became `fills` (`spanFills`, every
+covered entry's reading). A folded group states one summary line per member, so a UsageEvent landing on
+the second delegation moved no field of the key and served a stale row — the failure
+`TestPaintCacheMatchesAColdRenderThroughEveryMutation` caught. Nothing outside paintcache.go read the
+two fields.
+(e) Two tests whose premise this item reverses were rewritten rather than deleted:
+`TestSpanlessSubAgentHeadsNeverGroup` → `TestSpanlessSubAgentHeadsGroupWithEachOther` (span-less
+delegations now fold like any other), and `TestTranscriptCodecReDerivesSubAgentSolo`'s golden and
+comment (decode still re-derives `solo`; what it now protects is the umbrella, not the list).
+`TestRenderConsecutiveSubAgentRunsAreNotConnected` keeps its rule — two runs' rails never join — in the
+grouped frame.
 
 **What:** Let adjacent sub-agent blocks group with each other as `✦ Sub-Agent (N)`
 (`transcript.go` lifts the standalone rule for sub-agent–sub-agent adjacency only;
