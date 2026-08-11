@@ -1085,10 +1085,16 @@ func TestCollapsedRunSaysItsGistOnce(t *testing.T) {
 	}
 }
 
-// TestSubAgentSummaryTempi pins the collapsed summary's two tempi: while the run works it counts
-// the calls and names what the span has open right now, in the same words the status line uses for
-// that call; once the report lands it counts the calls and shows the report's own gist. A run with
-// nothing to add to the count says the count alone rather than trailing an empty separator.
+// TestSubAgentSummaryTempi pins the collapsed summary's two tempi: while the run works it counts the
+// calls and stops — it does NOT name what the span has open, which is the flicker this line was
+// freed of (subAgentGist) — and once the report lands it counts the calls and shows the report's own
+// gist. A run with nothing to add to the count says the count alone rather than trailing an empty
+// separator.
+//
+// The working tempo keeps exactly one live word, and both halves of its rule are pinned: `delegating`
+// while the span's most recent open call is itself a delegation, and nothing again the moment that
+// grandchild opens a call of its own — the newest open call is the one the rule reads, so the cell
+// names the nearest live fact or none.
 //
 // Each tempo is pinned twice — with a context reading and without one. The delegate's fill takes the
 // middle cell whenever it has reported one, in the gauge's own coarse spelling; where it has
@@ -1101,14 +1107,33 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 		want  string
 	}{
 		{
-			name: "working: the count plus the live phrase of the span's open call",
+			name: "working: the count alone, the call in flight left to its own block",
 			build: func(tr *transcript) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				tr.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 1},
 					Call: domain.ToolCall{ID: "c2", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)}})
 			},
-			want: groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls · searching · TODO"),
+			want: groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls"),
+		},
+		{
+			name: "working, having delegated on: the one live word the line keeps",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentCall(tr, "s2", "read the tests", 1) // open: the child is waiting on its own child
+			},
+			want: groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls · delegating"),
+		},
+		{
+			name: "the grandchild's own call is the newest: the word goes again",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				subAgentCall(tr, "s2", "read the tests", 1)
+				tr.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 2},
+					Call: domain.ToolCall{ID: "c1", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)}})
+			},
+			want: groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls"),
 		},
 		{
 			name: "working with every call settled: the count alone",
@@ -1137,7 +1162,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 			want: groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · done"),
 		},
 		{
-			name: "working, having reported: the fill sits between the count and the live phrase",
+			name: "working, having reported: the count and the fill close the line",
 			build: func(tr *transcript) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
@@ -1145,7 +1170,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				tr.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 1},
 					Call: domain.ToolCall{ID: "c2", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)}})
 			},
-			want: groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls · 12k/32k · searching · TODO"),
+			want: groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls · 12k/32k"),
 		},
 		{
 			name: "working with every call settled: the count and the fill, and no empty separator after it",

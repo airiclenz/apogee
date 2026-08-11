@@ -74,6 +74,17 @@ point is a **minor** bump, not a breaking change.
   one ran. Nothing about history changed, and the burst that follows is a no-op on a member already
   marked: the report is folded in once, never twice.
 
+- **A running sub-agent's row no longer flickers through the child's every tool call.** Its summary
+  said `N tool calls · 12k/32k · reading · some/long/path.go`, and that last cell was re-read on
+  every frame: the one part of the row that changed several times a second sat beside the two parts
+  worth reading, and pulled the eye to the least durable thing on screen. The row now reads
+  `N tool calls · 12k/32k` while the child works — the calls it used to name are all still there,
+  each as a block of its own inside the run, one click away. One live word survives: `· delegating`,
+  shown only while the most recent call open inside the run is itself a sub-agent, which is the one
+  state the run's own (collapsed) blocks cannot show. Finished rows are untouched — still the
+  report's first line, or `done`. Lone and grouped delegations read alike, and the status line's own
+  activity phrase is unaffected.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added

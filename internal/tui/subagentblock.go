@@ -160,7 +160,7 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool) blockPaint {
 	view := head.tool
 	if !head.expanded {
-		view = collapsedSubAgentView(th.measure, head, span)
+		view = collapsedSubAgentView(head, span)
 	}
 	view.finished = subAgentFinished(head)
 	// An OPEN lone run wears the very frame a grouped one does (design call 3): the ┌─┶ takes the
@@ -283,7 +283,7 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 		case subAgentScheduled(m.head, len(m.span)):
 			view = scheduledSubAgentView(m.head)
 		case spanned && !m.head.expanded:
-			view = collapsedSubAgentView(th.measure, m.head, m.span)
+			view = collapsedSubAgentView(m.head, m.span)
 		}
 		// An OPEN delegation's row is the top of a frame rather than a twig of the list: the corner
 		// takes the two columns the ┝/┕ hung off and the rail runs on down the span (design call 2).
@@ -433,9 +433,9 @@ func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room 
 // renderSubAgentGroup): grouping changes the frame a delegation is drawn in, and a second wording
 // of "what does a collapsed delegation say" would part company with this one — taking the per-child
 // live tail a fan-out is observed through (ADR 0039) with it.
-func collapsedSubAgentView(measure widthAuthority, head entry, span []entry) toolView {
+func collapsedSubAgentView(head entry, span []entry) toolView {
 	view := head.tool
-	view.Summary = subAgentSummary(measure, head, span)
+	view.Summary = subAgentSummary(head, span)
 	view.Details = toolBody{} // the zero body: no lines, and so nothing to lay out beneath
 	return view
 }
@@ -450,14 +450,17 @@ func collapsedSubAgentView(measure widthAuthority, head entry, span []entry) too
 // nested run's, because each agent fills a window of its own. It sits between the count and the gist
 // so the gist — the one part with no bound on its length — is what a narrow terminal clips.
 //
-// A run with nothing to say beyond the count — no reading yet, no call open, or a report that
-// carried no line at all — keeps the count alone rather than trailing an empty separator.
+// A run with nothing to say beyond the count — no reading yet, nothing to add while it works, or a
+// report that carried no line at all — keeps the count alone rather than trailing an empty
+// separator. That is the ORDINARY reading of a working run now that the gist has no live tempo of
+// its own (subAgentGist): while the child works the line is its count and its fill, and both hold
+// still between one landing and the next.
 //
-// The line is marked QUOTED (branchSummary) for what its last cell is: the child's own report, or
-// the phrase for the call it has open. Nothing respells it in either case — this is composed at
-// paint, long after the shortening seam ran on the way in — so the mark is a statement about the
-// text rather than a switch, and it is the one that stays true if a seam ever reads it.
-func subAgentSummary(measure widthAuthority, head entry, span []entry) branchSummary {
+// The line is marked QUOTED (branchSummary) for what its last cell is once the run reports: the
+// child's own report. Nothing respells it — this is composed at paint, long after the shortening
+// seam ran on the way in — so the mark is a statement about the text rather than a switch, and it is
+// the one that stays true if a seam ever reads it.
+func subAgentSummary(head entry, span []entry) branchSummary {
 	calls := 0
 	for i := range span {
 		if span[i].kind == entryToolCall {
@@ -468,7 +471,7 @@ func subAgentSummary(measure widthAuthority, head entry, span []entry) branchSum
 	if fill := subAgentFill(head); fill != "" {
 		text += " · " + fill
 	}
-	if gist := subAgentGist(measure, head, span); gist != "" {
+	if gist := subAgentGist(head, span); gist != "" {
 		text += " · " + gist
 	}
 	return quotedSummary(detailLine{Text: text})
@@ -490,21 +493,29 @@ func subAgentFill(head entry) string {
 	return format.Tokens(head.ctxUsed) + "/" + format.Tokens(head.ctxLimit)
 }
 
-// subAgentGist is the second half of a collapsed run's summary, in the two tempi layout.md gives it.
-// While the run works — no report in hand yet (subAgentReported) — it is the live phrase for the call
-// the span has open: verb and shortened target together (toolPhrase, activity.go), worded from the same view the
-// status line reads its verb from, but KEEPING the target the status line sheds. Inside a collapsed
-// run the gist is the only live view of what the child is touching, since the block that would have
-// named that target is elided. It is read off the span at paint rather than kept as a second copy of
-// the activity state. The MOST RECENT open call is the honest one when several are open at once:
-// it is the work the child turned to last.
+// delegatingSummary is the one live word a working run's summary can add: its child is not doing the
+// work itself but has handed it to a child of its own.
+const delegatingSummary = "delegating"
+
+// subAgentGist is the last cell of a collapsed run's summary. Once the report lands it is the head's
+// own gist — the summary a short report was compressed to, or, where the report was long enough to
+// become a body, its first line.
 //
-// Once the report lands the head has a gist of its own and that is the line — the summary a short
-// report was compressed to, or, where the report was long enough to become a body, its first line.
+// While the run WORKS it is almost always empty, and that is the point. It used to name the call the
+// span had open, verb and shortened target together (toolPhrase, activity.go), re-read on every
+// frame: a cell that changed several times a second beside two that did not, so the eye was pulled
+// to the least durable thing on the row and the count and fill it sat next to were the harder ones
+// to read. The work it named is not lost, only left where it already stands: every one of those
+// calls has a block of its own inside the run, in full, one click away.
 //
-// measure is the width authority the live phrase's target cap is spent through (toolPhrase,
-// activity.go), threaded down from the theme the render layer already carries.
-func subAgentGist(measure widthAuthority, head entry, span []entry) string {
+// The one live word it keeps is `delegating`, and only when the span's MOST RECENT open call is
+// itself a delegation — the child has passed the work on and has nothing of its own in flight. That
+// is the single live fact the run's own blocks cannot stand in for, since opening the row shows a
+// nested run that is itself collapsed. It is deliberately the most recent call and not any open one:
+// the moment the grandchild calls a tool of its own that call is the newest, the word goes, and the
+// row is back to its count — so the cell names the nearest live fact or nothing at all, never a
+// stale one.
+func subAgentGist(head entry, span []entry) string {
 	if subAgentReported(head) {
 		if head.tool.Summary.Text != "" {
 			return head.tool.Summary.Text
@@ -516,7 +527,10 @@ func subAgentGist(measure widthAuthority, head entry, span []entry) string {
 	}
 	for i := len(span) - 1; i >= 0; i-- {
 		if e := span[i]; e.kind == entryToolCall && !e.done {
-			return toolPhrase(measure, e.tool)
+			if e.tool.name == subAgentToolName {
+				return delegatingSummary
+			}
+			return ""
 		}
 	}
 	return ""

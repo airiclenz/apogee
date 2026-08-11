@@ -95,9 +95,13 @@ func TestConcurrentChildrenGroupByTheirSpawningCall(t *testing.T) {
 }
 
 // TestEachRunningChildBlockShowsItsOwnLiveTail pins the live tail per child: while a fan-out runs,
-// every child's block carries ITS OWN count, ITS OWN context fill and ITS OWN activity phrase, all
-// on the one summary line the collapsed cap gives it. This is what the status line cannot do once
-// several delegates work at once — it can name only one — so it is what makes a fan-out observable.
+// every child's block carries ITS OWN count and ITS OWN context fill on the one summary line the
+// collapsed cap gives it. This is what the status line cannot do once several delegates work at once
+// — it can name only one — so it is what makes a fan-out observable.
+//
+// What no child's line carries is the call it has open: that cell was dropped for the flicker it was
+// (subAgentGist), and the two facts left are the durable ones. Neither may cross to a sibling, which
+// is the half the run identity earns and the reason both are asserted from both directions.
 func TestEachRunningChildBlockShowsItsOwnLiveTail(t *testing.T) {
 	t.Parallel()
 
@@ -134,18 +138,26 @@ func TestEachRunningChildBlockShowsItsOwnLiveTail(t *testing.T) {
 	}
 
 	first, second := summary("survey the tests"), summary("survey the docs")
-	for _, want := range []string{"2 tool calls", "12k/31k", "reading · alpha_test.go"} {
+	for _, want := range []string{"2 tool calls", "12k/31k"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("the first child's live tail is missing %q:\n%s", want, first)
 		}
 	}
-	for _, want := range []string{"1 tool call", "4k/31k", "reading · beta.md"} {
+	for _, want := range []string{"1 tool call", "4k/31k"} {
 		if !strings.Contains(second, want) {
 			t.Errorf("the second child's live tail is missing %q:\n%s", want, second)
 		}
 	}
-	if strings.Contains(second, "alpha") || strings.Contains(first, "beta") {
+	if strings.Contains(second, "2 tool calls") || strings.Contains(second, "12k/31k") ||
+		strings.Contains(first, "4k/31k") {
 		t.Errorf("a child's block reported its sibling's work:\n%s\n%s", first, second)
+	}
+	// The dropped cell, from the one angle a golden cannot state: neither row names what its child
+	// is touching, however much of it the child has read (subAgentGist).
+	for _, gone := range []string{"reading", "alpha", "beta"} {
+		if strings.Contains(first, gone) || strings.Contains(second, gone) {
+			t.Errorf("a running child's line still names its open call (%q):\n%s\n%s", gone, first, second)
+		}
 	}
 
 	// The cap is the existing one: a collapsed run is its header and no more than three content

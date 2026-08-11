@@ -70,8 +70,12 @@
 // default a sub_agent call block and the span of deeper entries behind it are ONE block ([subAgentSpan],
 // [renderSubAgentRun]), its summary slot carrying the run's transitive tool-call count, the
 // delegate's own context fill where it has reported one ([subAgentFill] — not transitive, since each
-// agent fills a window of its own), and its gist
-// — the live phrase of whatever the span has open, then the report's first line. The head's own
+// agent fills a window of its own), and its gist ([subAgentGist]). While the run WORKS that cell is
+// empty — count and fill are the whole line, and both hold still between one landing and the next —
+// save for the single word `delegating`, which stands only while the span's MOST RECENT open call
+// is itself a sub_agent: the one live fact the run's own blocks cannot stand in for, since opening
+// that row shows a nested run that is itself collapsed. Once the report lands the gist
+// becomes that report's own first line, the one durable thing it had to say. The head's own
 // report body is elided with that frame, so a collapsed run reads as ONE summarised line and never
 // repeats in a body row what the summary slot just said; the framing and the full report are what
 // expanding it reveals, each inner block in its own state (layout.md, "Collapsed and expanded
@@ -292,9 +296,11 @@
 // asking — with a live activity phrase and an elapsed clock ("thinking · 12s", "reading · 3s",
 // "sub-agent · searching · 6s"). A tool's phrase is the presented VERB and nothing else: the target
 // it used to carry restated the tool-call block one row beneath it and routinely pushed the context
-// gauge off the row, so it stays with the block. [toolPhrase] still words verb and target together
-// for the one surface with no block to read — a COLLAPSED sub-agent run's gist, whose inner blocks
-// are elided. Dropping the target makes the elapsed clock's key a real question: back-to-back reads
+// gauge off the row, so it stays with the block. [toolPhrase] words verb and target together for a
+// surface that would have no block to read, but no caller spends it that way any more: a collapsed
+// sub-agent run's gist was the last one, and it now says nothing while the child works (see the
+// transcript section above). Dropping the target makes the elapsed clock's key a real
+// question: back-to-back reads
 // both word themselves "reading", so a clock restarted on a change of TEXT would count the first
 // file's call straight through the second. A tool activity therefore carries the id of the call it
 // describes (domain.ToolCall.ID) and restarts when that changes; every other kind keeps the

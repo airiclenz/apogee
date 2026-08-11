@@ -548,10 +548,10 @@ rewritten, so the agent's view of a path and the transcript's differ in spelling
 else. It is applied to the workspace root's own spelling wherever such a line mentions it, so a
 line that merely contains a slash — a URL, a fraction, a regex — is not a path and is left alone,
 and a sibling directory whose name only opens with the root's spelling (`/home/me/proj-old`) stays
-whole. The **collapsed sub-agent run's gist** reads the same shortened path the blocks it elides
-would, for the same reason it reads the same verb: both are worded from one view. The status line
-takes the verb from that view and stops there — the target it would have named is already on the
-block a row beneath it, and the room that path was costing goes to the context gauge.
+whole. The **status line** is worded from that same view and takes the verb alone — the target it
+would have named is already on the block a row beneath it, and the room that path was costing goes
+to the context gauge. A **collapsed sub-agent run's summary** names no target either (below), so no
+path rides it.
 
 **A body is quoted, never respelled — and so is a promoted line.** The rule above reaches the paths
 a block *names* and stops there. The **body** beneath the branch is text the block *quotes* — a
@@ -804,13 +804,17 @@ and all — is elided. **Its target — the text leading its row — is the
 delegation's name** when the call gave one, and the delegated task's first line when it did not, so
 a fan-out reads as what each child is *for* rather than as several openings of one instruction. The
 name is clipped and escape-stripped exactly as a task line is, and an unnamed delegation's header
-is unchanged. Its summary is `N tool calls · <used>/<window> · ` plus the run's gist, carried in
-the row's outcome slot,
-and the gist arrives in two tempi: while the run works, the verb and shortened target of the call
-in flight (`reading · main.go`), ticking as inner calls land; once the report arrives, the
-report's first line. That pair is worded from the same view the status line reads its verb from,
-but the gist keeps the **target** the status line sheds: inside a collapsed run the gist is the
-only live view of what the child is touching, since the block that would have named it is elided. The count is **transitive** — every call in the span counts, whatever its
+is unchanged. Its summary is `N tool calls · <used>/<window>`, carried in the row's outcome slot,
+and while the run works that is the whole of it: the line does **not** name the call in flight. It
+used to — the verb and shortened target of the open call, re-read on every frame — and that one
+cell changed several times a second beside two that held still, which made the least durable thing
+on the row the loudest one. Nothing it said is lost: every call it named has a block of its own
+inside the run, one click away. The single live word the line still adds is **`· delegating`**,
+and only while the most recent call open in the span is itself a sub-agent — the child has passed
+the work on and has nothing of its own in flight, which is the one live fact its own blocks cannot
+stand in for, the nested run they would show being collapsed too. Once the report arrives the slot
+carries the **report's first line**, or `· done` where the report was long enough to become a
+body. The count is **transitive** — every call in the span counts, whatever its
 depth — so one number says how much work happened in there, at every nesting level by the same
 rule. The middle cell is the other half of that summary: **how full the delegate's own context
 got** (`12k/32k`), spelled in the unit-capped form the status line's gauge spells its window in so

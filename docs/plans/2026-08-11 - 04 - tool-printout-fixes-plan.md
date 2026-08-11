@@ -181,7 +181,20 @@ row, expandable.
 
 Commit: `feat(tui): scheduled state for queued sub-agents`
 
-## 5. TUI: drop the ongoing-action text from sub-agent summaries
+## 5. TUI: drop the ongoing-action text from sub-agent summaries — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): one deviation and one thing deliberately left. (a) `toolPhrase` was the only
+consumer of the `measure widthAuthority` threaded into `subAgentGist`, `subAgentSummary` and
+`collapsedSubAgentView`, so dropping the phrase left the parameter dead in all three; it was removed
+from the three signatures and their two call sites rather than left as rot (no behavior change, no
+test touched it). (b) `toolPhrase` and `statusTargetCells` (`internal/tui/activity.go`) now have no
+production caller at all — the item's text orders activity.go untouched, so they stand, and their doc
+comments still describe the gist as their surface. Worth a follow-up to remove both or repoint their
+prose. Also pinned the "most recent open call" half of the `delegating` rule: a grandchild's own open
+call is the newest one, so the word goes again while it works. (c) the package map
+`internal/tui/doc.go` asserted the removed behavior — the collapsed run's gist at :73-74 and
+`toolPhrase` "still" serving that surface at :295-297 — so both passages were rewritten to the
+shipped rule (docs only, no code change).
 
 **What:** In `internal/tui/subagentblock.go`, `subAgentSummary` (:387-402) and
 `subAgentGist` (:434-450): remove the live `toolPhrase` gist for BOTH grouped members
