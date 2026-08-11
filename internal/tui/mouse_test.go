@@ -11,6 +11,7 @@ import (
 	"github.com/rivo/uniseg"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -434,9 +435,15 @@ func TestHighlightInputPreservesGlyphs(t *testing.T) {
 	}
 }
 
-// selectionBg is the truecolor SGR for the dark scheme's `selection` role (#3a5fcd → 58,95,205), the
-// marker that the selection background actually reached the rendered output.
-const selectionBg = "48;2;58;95;205"
+// selectionBg is the truecolor SGR the dark scheme's `selection` role paints as — the marker that
+// the selection background actually reached the rendered output. It is DERIVED from the scheme
+// rather than written out: the schemes stay under tuning, so retuning `selection` must never fail a
+// test (owner call, 2026-08-11), and what the tests below are about is whether that tone arrives at
+// all, not which tone it is.
+var selectionBg = func() string {
+	r, g, b, _ := lipgloss.Color(scheme.Default().Selection).RGBA()
+	return fmt.Sprintf("48;2;%d;%d;%d", r>>8, g>>8, b>>8)
+}()
 
 // TestViewRendersSelectionHighlight drives a full drag through Update and confirms the
 // selection background appears in the whole-screen View — end-to-end, not just the helper.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -29,9 +30,10 @@ func hexOf(c color.Color) string {
 //
 // It samples rather than enumerates: one style per SHAPE a role can arrive in (a foreground, a
 // background, a border slot, a per-value colour, a raw field), asserted against a scheme whose every
-// role carries a DISTINCT value, so a swap between any two of the sampled roles fails here. The
-// pixel-identity of the shipped dark scheme is the whole existing suite's job, and the scheme
-// package's own TestEmbeddedDarkMatchesPinnedPalette pins the hex values themselves.
+// role carries a DISTINCT value, so a swap between any two of the sampled roles fails here. What
+// the SHIPPED scheme puts in those slots is the test below's business, and that scheme's structure
+// the scheme package's own TestEmbeddedDarkIsTheCompleteDefault — its hex values are deliberately
+// pinned nowhere, so retuning a color is never a test failure.
 func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 	t.Parallel()
 
@@ -110,53 +112,61 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 	}
 }
 
-// TestDefaultThemeKeepsTheDarkPalette pins the production path — [scheme.Default] through
-// [newTheme] — to the hex values apogee has always drawn with, on the sample of roles the plan
-// names. It is the "nothing moved" half of the guard above: the wiring test proves a role reaches
-// the style it names, this one proves the DEFAULT scheme still carries the tones the transcript,
-// the footer and the prompt were designed around.
-func TestDefaultThemeKeepsTheDarkPalette(t *testing.T) {
+// TestDefaultThemeCarriesTheShippedScheme walks the PRODUCTION path — [scheme.Default] through
+// [newTheme] — where the test above walks a synthetic one: the wiring test proves a role reaches
+// the style it names, this one proves the slot a human actually looks at is fed by the SHIPPED
+// scheme's own value for that role. A newTheme hard-coding a tone, or a Default() handing back a
+// zero scheme, fails here.
+//
+// It asserts against `scheme.Default()` and never against a literal: the schemes stay under
+// tuning, so changing a colour must never fail a test (owner call, 2026-08-11). The two things
+// that must hold whatever the values are retuned to are asserted as the relations they are — the
+// collapsed/open detail contrast step, and a spinner lap with stops in it.
+func TestDefaultThemeCarriesTheShippedScheme(t *testing.T) {
 	t.Parallel()
 
-	th := newTheme(scheme.Default())
+	def := scheme.Default()
+	th := newTheme(def)
+
+	// The stops arrive as a slice built from four roles at once rather than as a style, so the lap
+	// is asserted to exist before the table indexes into it: an empty loop would crash the run
+	// instead of failing it.
+	if len(th.spinnerStops) == 0 {
+		t.Fatal("the theme carries no spinner stops; the colour loop would have nothing to blend")
+	}
 
 	for _, tc := range []struct {
 		name string
 		got  color.Color
 		want string
 	}{
-		{"errorText fg", th.errorText.GetForeground(), "#f85149"},
-		{"selection bg", th.selection.GetBackground(), "#3a5fcd"},
-		{"mode plan", th.modeColor(domain.ModePlan), "#2afefa"},
-		{"mode ask-before", th.modeColor(domain.ModeAskBefore), "#3fb950"},
-		{"mode allow-edits", th.modeColor(domain.ModeAllowEdits), "#58a6ff"},
-		{"mode auto", th.modeColor(domain.ModeAuto), "#f0883e"},
-		{"raw surface", th.surface, "#000000"},
-		{"raw chrome", th.chrome, "#4a4a4a"},
+		{"errorText fg", th.errorText.GetForeground(), def.Error},
+		{"selection bg", th.selection.GetBackground(), def.Selection},
+		{"mode plan", th.modeColor(domain.ModePlan), def.ModePlan},
+		{"mode ask-before", th.modeColor(domain.ModeAskBefore), def.ModeAskBefore},
+		{"mode allow-edits", th.modeColor(domain.ModeAllowEdits), def.ModeAllowEdits},
+		{"mode auto", th.modeColor(domain.ModeAuto), def.ModeAuto},
+		{"raw surface", th.surface, def.Surface},
+		{"raw chrome", th.chrome, def.Chrome},
+		// The open-detail tone travels as the `muted-bright` role, sampled here because the pair it
+		// forms with `muted` is checked below and a crossed wire would satisfy that check trivially.
+		{"toolDetailBright fg", th.toolDetailBright.GetForeground(), def.MutedBright},
+		// The one role that has to survive a conversion into the blend's own colour space on its way
+		// onto the theme.
+		{"first spinner stop", th.spinnerStops[0], def.Spinner1},
 	} {
-		if got := hexOf(tc.got); got != tc.want {
-			t.Errorf("%s = %s; want the dark scheme's %s", tc.name, got, tc.want)
+		// A scheme file may write its hex in either case (dark.yaml ships both) while hexOf always
+		// renders lower, so the comparison is case-blind: re-casing a value is a retune too.
+		if got := hexOf(tc.got); !strings.EqualFold(got, tc.want) {
+			t.Errorf("%s = %s; want the default scheme's %s", tc.name, got, tc.want)
 		}
 	}
 
-	// The open-detail tone now travels as the `muted-bright` role, and the dark scheme must keep
-	// paying it the same hex the literal used to: assert it is still the step brighter the collapsed
-	// dim is read against, so the contrast cannot vanish silently.
-	if got := hexOf(th.toolDetailBright.GetForeground()); got != "#b2b2b2" {
-		t.Errorf("toolDetailBright fg = %s; want the dark scheme's #b2b2b2", got)
-	}
+	// The collapsed and open detail tones are two steps of one ramp, read against each other — so
+	// this holds whatever the scheme retunes them to. Let them meet and the open block loses the
+	// only cue that says it is open.
 	if hexOf(th.toolDetail.GetForeground()) == hexOf(th.toolDetailBright.GetForeground()) {
 		t.Error("the collapsed and open detail tones resolve to the same colour; the contrast step is gone")
-	}
-
-	// The spinner's loop is the scheme's too, now that the last four palette vars are gone: pin the
-	// violet the lap has always opened on, so the tones the animation was designed around cannot
-	// drift out of the dark scheme unnoticed.
-	if len(th.spinnerStops) == 0 {
-		t.Fatal("the theme carries no spinner stops; the colour loop would have nothing to blend")
-	}
-	if got := hexOf(th.spinnerStops[0]); got != "#8668ff" {
-		t.Errorf("first spinner stop = %s; want the dark scheme's #8668ff", got)
 	}
 }
 

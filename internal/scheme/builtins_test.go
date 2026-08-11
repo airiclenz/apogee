@@ -3,6 +3,8 @@ package scheme
 import (
 	"slices"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // The guards in this file run over every shipped scheme rather than over a named one, so
@@ -41,6 +43,43 @@ func TestBuiltinSchemesStateEveryRole(t *testing.T) {
 				if role.get(got) == "" {
 					t.Errorf("key %q is missing — a shipped scheme states all %d roles, so exporting one hands the user a complete file to edit", role.key, len(roleTable))
 				}
+			}
+		})
+	}
+}
+
+func TestBuiltinSchemesStateEveryRoleOnce(t *testing.T) {
+	t.Parallel()
+	for _, name := range builtinNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			// Read the raw file, not the parsed Scheme: YAML keeps a repeated key and lets the
+			// last one win, so a scheme stating a role twice parses clean while one of the two
+			// lines quietly does nothing — invisible in the struct, and handed to the user
+			// verbatim by `/color-scheme export`.
+			data, ok := builtinBytes(name)
+			if !ok {
+				t.Fatalf("built-in scheme %q is not embedded", name)
+			}
+			var doc yaml.Node
+			if err := yaml.Unmarshal(data, &doc); err != nil {
+				t.Fatalf("built-in %q is unreadable YAML: %v", name, err)
+			}
+			if len(doc.Content) == 0 {
+				t.Fatalf("built-in %q states no roles at all", name)
+			}
+			root := doc.Content[0]
+			if root.Kind != yaml.MappingNode {
+				t.Fatalf("built-in %q is not a mapping of color roles", name)
+			}
+			firstLine := make(map[string]int, len(roleKeys))
+			for i := 0; i+1 < len(root.Content); i += 2 {
+				key := root.Content[i]
+				if line, dup := firstLine[key.Value]; dup {
+					t.Errorf("key %q is stated twice, on lines %d and %d — the later value silently wins and the earlier line is dead", key.Value, line, key.Line)
+					continue
+				}
+				firstLine[key.Value] = key.Line
 			}
 		})
 	}

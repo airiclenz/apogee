@@ -111,7 +111,7 @@ func (w Warning) String() string {
 
 // defaultScheme parses the embedded default once. Its warnings are deliberately
 // dropped: a defect in a file compiled into the binary is a build defect, and
-// TestEmbeddedDarkMatchesPinnedPalette fails long before a user could meet it.
+// TestEmbeddedDarkIsTheCompleteDefault fails long before a user could meet it.
 var defaultScheme = sync.OnceValue(func() Scheme {
 	data, ok := builtinBytes(DefaultName)
 	if !ok {

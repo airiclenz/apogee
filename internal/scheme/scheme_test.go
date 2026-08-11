@@ -42,37 +42,6 @@ var roleTable = []struct {
 	{"spinner-4", func(s Scheme) string { return s.Spinner4 }},
 }
 
-// darkPalette pins the shipped "dark" values. It is the drift guard on
-// schemes/dark.yaml: change the file without this map and this fails.
-var darkPalette = map[string]string{
-	"user-text":        "#ffffff",
-	"chrome":           "#4a4a4a",
-	"divider":          "#333333",
-	"surface":          "#000000",
-	"muted":            "#8a8a8a",
-	"muted-bright":     "#b2b2b2",
-	"diff-add":         "#3fb950",
-	"diff-del":         "#f85149",
-	"error":            "#f85149",
-	"code":             "#70BBFF",
-	"tool-header":      "#FFD060",
-	"mode-plan":        "#2afefa",
-	"mode-ask-before":  "#3fb950",
-	"mode-allow-edits": "#58a6ff",
-	"mode-auto":        "#f0883e",
-	"skill":            "#b1baff",
-	"file-ref":         "#cdffa4",
-	"prompt-toggle":    "#b0d2ff",
-	"tool-marker":      "#FFB050",
-	"tool-leader":      "#8a8a8a",
-	"gauge":            "#c396ff",
-	"selection":        "#3a5fcd",
-	"spinner-1":        "#8668ff",
-	"spinner-2":        "#19a946",
-	"spinner-3":        "#ffbf00",
-	"spinner-4":        "#ff4a81",
-}
-
 // yamlFor renders a scheme file from key/value pairs, quoting values the way a real
 // scheme file must (an unquoted # opens a YAML comment).
 func yamlFor(t *testing.T, values map[string]string) []byte {
@@ -97,9 +66,6 @@ func TestRoleTableCoversEveryRole(t *testing.T) {
 		if roleKeys[i] != role.key {
 			t.Errorf("role %d: Scheme declares %q, roleTable says %q", i, roleKeys[i], role.key)
 		}
-	}
-	if len(darkPalette) != len(roleKeys) {
-		t.Errorf("darkPalette pins %d roles, Scheme declares %d", len(darkPalette), len(roleKeys))
 	}
 }
 
@@ -216,22 +182,25 @@ func TestParseEmptyFileKeepsDefaultsSilently(t *testing.T) {
 	}
 }
 
-func TestEmbeddedDarkMatchesPinnedPalette(t *testing.T) {
+// TestEmbeddedDarkIsTheCompleteDefault guards the shipped default's STRUCTURE and never its
+// palette. The schemes are retuned as the TUI is tuned, so pinning hex values here would make
+// every color tweak a test failure; what has to hold is that dark.yaml is embedded, loads
+// without a warning (so every value it states is a real #rrggbb under a known role), fills
+// every role, and is exactly what Default() hands out. Completeness is asserted on Default()
+// rather than on the file because that is where it bites: Default() is the fallback every role
+// another scheme omits lands on, so a gap in it paints with no color at all.
+func TestEmbeddedDarkIsTheCompleteDefault(t *testing.T) {
 	t.Parallel()
-	data, ok := builtinBytes(DefaultName)
-	if !ok {
-		t.Fatalf("embedded scheme %q is missing", DefaultName)
-	}
-	got, warnings := parseInto(Scheme{}, DefaultName+".yaml", data)
-	if len(warnings) != 0 {
-		t.Fatalf("embedded dark.yaml warned: %v", warnings)
+
+	got := builtinScheme(t, DefaultName)
+
+	def := Default()
+	if def != got {
+		t.Fatalf("Default() = %+v, want the parsed dark.yaml %+v", def, got)
 	}
 	for _, role := range roleTable {
-		if got := role.get(got); got != darkPalette[role.key] {
-			t.Errorf("dark.yaml key %q: got %q, want %q", role.key, got, darkPalette[role.key])
+		if role.get(def) == "" {
+			t.Errorf("the default scheme leaves role %q empty — dark.yaml must state it, since every scheme that omits the role falls back to this value", role.key)
 		}
-	}
-	if Default() != got {
-		t.Errorf("Default() = %+v, want the parsed dark.yaml %+v", Default(), got)
 	}
 }

@@ -222,5 +222,8 @@ What this record decides is untouched: the role set is a compatibility surface (
 needs an amendment; `tool-header` was an additive 25th key), a role's *value* is scheme data
 rather than a decision of this record, and the cross-scheme skill/file-ref distinction test still
 holds. The "existing render tests are the proof" clause reads as history too — those tests assert
-against `scheme.Default()` rather than against pinned literals, so they followed the retunes;
-`internal/scheme`'s `darkPalette` drift guard is what pins the shipped hex today.
+against `scheme.Default()` rather than against pinned literals, so they followed the retunes.
+Nothing pins the shipped hex any more: `internal/scheme`'s `darkPalette` drift guard was retired
+on 2026-08-11 (owner call — the schemes stay under tuning, so a color change must never fail a
+test) in favour of colour-agnostic guards on the files' structure — every role stated, stated
+once, parsing clean, and `Default()` complete.
