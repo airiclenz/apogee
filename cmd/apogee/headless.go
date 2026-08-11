@@ -416,6 +416,13 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	for _, line := range headlessSubAgentLines(res.SubAgents) {
 		cmd.PrintErrln(line)
 	}
+	// What the run SPENT, beside what it filled: the fill lines above say how full each window
+	// ended, these say how many tokens got it there — the Firing's own totals first, then one
+	// line per delegated run that accounted for anything. A run whose Upstream reported no usage
+	// prints none of them.
+	for _, line := range headlessUsageLines(res) {
+		cmd.PrintErrln(line)
+	}
 	cmd.PrintErrln(headlessSummary(res))
 
 	if runErr != nil {
@@ -484,6 +491,64 @@ func headlessSubAgentLines(runs []run.SubAgentUsage) []string {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+// headlessUsageLines renders what the run SPENT: the Firing's own cumulative totals on one line,
+// then one line per delegated run that accounted for anything, in the order the runs finished. It
+// is the headless twin of the /usage popup — the same per-agent totals, from the same events, on
+// the Driver that has no popup to open — and it deliberately does NOT print a session total: the
+// lines are the addends, and a script that wants the sum can take it without this parser inventing
+// a row for it.
+//
+// A grain that counted no call is omitted rather than printed as four zeros, which is the fill
+// lines' self-hiding rule applied to the reading this one carries: an Upstream that reports no
+// usage leaves a run with nothing to say, not with a spend of zero. Sub-agent lines are named by
+// headlessSubAgentTarget, so a child is named here exactly as it is named a few lines above.
+func headlessUsageLines(res run.Result) []string {
+	lines := make([]string, 0, 1+len(res.SubAgents))
+	if line := headlessUsageLine(res.Usage, ""); line != "" {
+		lines = append(lines, line)
+	}
+	for _, r := range res.SubAgents {
+		usage := run.Usage{
+			Calls:            r.Calls,
+			PromptTokens:     r.PromptTokens,
+			CompletionTokens: r.CompletionTokens,
+			TotalTokens:      r.TotalTokens,
+		}
+		if line := headlessUsageLine(usage, headlessSubAgentTarget(r)); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+// headlessUsageLine spells one agent's cumulative totals, "" when that agent accounted for no
+// call at all. The counts go through format.Tokens like every other reading the binary prints, so
+// a spend reads in the same units as the fill beside it; who is the delegation label the line ends
+// with, empty for the Firing's own totals, which need no label because they are the run's.
+func headlessUsageLine(u run.Usage, who string) string {
+	if u.Calls <= 0 {
+		return ""
+	}
+	line := fmt.Sprintf("usage: calls %d · prompt %s · completion %s · total %s",
+		u.Calls, headlessTokens(u.PromptTokens), headlessTokens(u.CompletionTokens), headlessTokens(u.TotalTokens))
+	if who != "" {
+		line += " · " + who
+	}
+	return line
+}
+
+// headlessTokens is format.Tokens with a spelling for zero. The shared formatter renders a
+// non-positive count as the EMPTY string, because everywhere else in the binary a zero reading is
+// one to hide; on a usage line the counter is a labelled column that the line has already earned by
+// counting a call, so an absent number would leave "total ·" hanging rather than say what it means.
+// A server that reports the two parts and omits the sum is exactly that case (run.Usage.TotalTokens).
+func headlessTokens(n int) string {
+	if text := format.Tokens(n); text != "" {
+		return text
+	}
+	return "0"
 }
 
 // headlessSubAgentTarget says WHICH delegation a sub-agent line is reporting on: the short name the

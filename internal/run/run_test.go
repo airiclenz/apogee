@@ -464,7 +464,13 @@ func TestOnceReportsEachSubAgentsContextFill(t *testing.T) {
 	if len(res.SubAgents) != 1 {
 		t.Fatalf("Result.SubAgents = %+v, want exactly one finished run", res.SubAgents)
 	}
-	want := SubAgentUsage{Used: 12000, Limit: window, Task: taskLine}
+	// The entry carries the child's cumulative spend beside its fill: one call, the counts this
+	// script gave it. TestOnceReportsWhatTheFiringSpent is where that half is the point; here it
+	// travels along because the assertion is on the WHOLE entry.
+	want := SubAgentUsage{
+		Used: 12000, Limit: window, Task: taskLine,
+		Calls: 1, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000,
+	}
 	if res.SubAgents[0] != want {
 		t.Errorf("Result.SubAgents[0] = %+v, want %+v", res.SubAgents[0], want)
 	}
@@ -701,6 +707,165 @@ func TestEventTapDropsWhatItCannotAttribute(t *testing.T) {
 	tap.Emit(toolResult(0, "call_3"))
 	if runs := tap.subAgentRuns(); len(runs) != 1 {
 		t.Errorf("subAgentRuns() = %+v, want the silent run absent", runs)
+	}
+}
+
+// usageWithTotals is one accounting event in the shape internal/agent stamps: the call's OWN
+// counts in the fill fields, the emitting agent's running counters in the cumulative ones.
+// maintenance marks the Compaction fold — an event whose tokens are real spend but whose fill
+// describes the summarizer's request rather than the conversation.
+func usageWithTotals(depth int, spawnCallID string, fill int, cumulative Usage, maintenance bool) domain.UsageEvent {
+	return domain.UsageEvent{
+		EventBase:                  domain.EventBase{Depth: depth, CallID: spawnCallID},
+		TotalTokens:                fill,
+		CumulativePromptTokens:     cumulative.PromptTokens,
+		CumulativeCompletionTokens: cumulative.CompletionTokens,
+		CumulativeTotalTokens:      cumulative.TotalTokens,
+		CumulativeCalls:            cumulative.Calls,
+		Maintenance:                maintenance,
+	}
+}
+
+// TestEventTapKeepsCumulativeTotalsPerAgent pins the second grain of the readout: an agent's
+// running totals ride its own events, so the Firing's land on Result.Usage and a delegated run's
+// on its own entry — never mixed, never summed by the tap. The script gives the child far bigger
+// totals than the parent and lets the parent report AGAIN after the child closed, so a tap that
+// folded the two together would be caught by either assertion.
+func TestEventTapKeepsCumulativeTotalsPerAgent(t *testing.T) {
+	t.Parallel()
+
+	const window = 32000
+	tap := &eventTap{window: window}
+
+	tap.Emit(usageWithTotals(0, "", 900, Usage{Calls: 1, PromptTokens: 800, CompletionTokens: 100, TotalTokens: 900}, false))
+	tap.Emit(subAgentCall(0, "call_1", "audit the issues"))
+	tap.Emit(usageWithTotals(1, "call_1", 5000, Usage{Calls: 1, PromptTokens: 4800, CompletionTokens: 200, TotalTokens: 5000}, false))
+	tap.Emit(usageWithTotals(1, "call_1", 12000, Usage{Calls: 2, PromptTokens: 16600, CompletionTokens: 400, TotalTokens: 17000}, false))
+	tap.Emit(toolResult(0, "call_1"))
+	tap.Emit(usageWithTotals(0, "", 1800, Usage{Calls: 2, PromptTokens: 2500, CompletionTokens: 200, TotalTokens: 2700}, false))
+
+	wantTotals := Usage{Calls: 2, PromptTokens: 2500, CompletionTokens: 200, TotalTokens: 2700}
+	if got := tap.totals(); got != wantTotals {
+		t.Errorf("totals() = %+v, want %+v — the firing counts its own calls only", got, wantTotals)
+	}
+
+	runs := tap.subAgentRuns()
+	if len(runs) != 1 {
+		t.Fatalf("subAgentRuns() = %+v, want exactly one finished run", runs)
+	}
+	want := SubAgentUsage{
+		Used: 12000, Limit: window, Task: "audit the issues",
+		Calls: 2, PromptTokens: 16600, CompletionTokens: 400, TotalTokens: 17000,
+	}
+	if runs[0] != want {
+		t.Errorf("subAgentRuns()[0] = %+v, want %+v", runs[0], want)
+	}
+}
+
+// TestEventTapCountsMaintenanceInTheTotalsOnly pins the flagged Compaction event's split
+// treatment at BOTH grains: its tokens are real spend and advance the totals, while the fill it
+// carries describes the summarizer's own request and must leave the context reading where the
+// last Turn put it. Getting this wrong the other way would report a fold as the run's fill —
+// which is what the engine's old silence about compaction avoided by losing the tokens entirely.
+func TestEventTapCountsMaintenanceInTheTotalsOnly(t *testing.T) {
+	t.Parallel()
+
+	const window = 32000
+	tap := &eventTap{window: window}
+
+	tap.Emit(usageWithTotals(0, "", 12000, Usage{Calls: 1, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000}, false))
+	tap.Emit(usageWithTotals(0, "", 14000, Usage{Calls: 2, PromptTokens: 25600, CompletionTokens: 600, TotalTokens: 26000}, true))
+
+	if got := tap.fill(); got != 12000 {
+		t.Errorf("fill() = %d after a maintenance event, want 12000 — a fold does not restate the window", got)
+	}
+	wantFolded := Usage{Calls: 2, PromptTokens: 25600, CompletionTokens: 600, TotalTokens: 26000}
+	if got := tap.totals(); got != wantFolded {
+		t.Errorf("totals() = %+v, want %+v — a fold's tokens are spent tokens", got, wantFolded)
+	}
+
+	// The Turn after the fold restates the (now much smaller) window and keeps counting from the
+	// totals the fold left behind.
+	tap.Emit(usageWithTotals(0, "", 3000, Usage{Calls: 3, PromptTokens: 28400, CompletionTokens: 800, TotalTokens: 29000}, false))
+	if got := tap.fill(); got != 3000 {
+		t.Errorf("fill() = %d after the post-fold turn, want 3000", got)
+	}
+	wantAfter := Usage{Calls: 3, PromptTokens: 28400, CompletionTokens: 800, TotalTokens: 29000}
+	if got := tap.totals(); got != wantAfter {
+		t.Errorf("totals() = %+v, want %+v", got, wantAfter)
+	}
+
+	// A delegated run folds too, and the same split holds one level down: its entry reports the
+	// fill of its last TURN and the totals of everything it spent, the fold included.
+	tap.Emit(subAgentCall(0, "call_1", "audit the issues"))
+	tap.Emit(usageWithTotals(1, "call_1", 9000, Usage{Calls: 1, PromptTokens: 8800, CompletionTokens: 200, TotalTokens: 9000}, false))
+	tap.Emit(usageWithTotals(1, "call_1", 11000, Usage{Calls: 2, PromptTokens: 19600, CompletionTokens: 400, TotalTokens: 20000}, true))
+	tap.Emit(toolResult(0, "call_1"))
+
+	runs := tap.subAgentRuns()
+	if len(runs) != 1 {
+		t.Fatalf("subAgentRuns() = %+v, want exactly one finished run", runs)
+	}
+	wantRun := SubAgentUsage{
+		Used: 9000, Limit: window, Task: "audit the issues",
+		Calls: 2, PromptTokens: 19600, CompletionTokens: 400, TotalTokens: 20000,
+	}
+	if runs[0] != wantRun {
+		t.Errorf("subAgentRuns()[0] = %+v, want %+v", runs[0], wantRun)
+	}
+}
+
+// TestOnceReportsWhatTheFiringSpent is the end-to-end half of the totals: the engine stamps the
+// cumulative fields, the tap keeps the latest per agent, and Result.Usage carries the Firing's own
+// spend to a caller that never saw the events. The script's two parent calls and one child call
+// have deliberately different counts, so the assertion fails on a tap that kept a single call's
+// numbers, summed the stream, or let the child's totals reach the parent's.
+func TestOnceReportsWhatTheFiringSpent(t *testing.T) {
+	t.Parallel()
+
+	const (
+		taskArgs = `{"task":"audit every open issue"}`
+		taskLine = "audit every open issue"
+	)
+
+	registry := domain.NewToolRegistry()
+	if err := registry.Register(tools.NewSubAgent()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	up := newUpstream(t, func(w http.ResponseWriter, req request) {
+		switch {
+		case req.lastRoleIs(domain.RoleTool):
+			writeUsage(w, 800, 100, 900)
+			writeFinal(w, "four issues are open")
+		case req.lastTextHas(taskLine):
+			writeUsage(w, 11800, 200, 12000)
+			writeFinal(w, "the sub-agent found four open issues")
+		default:
+			writeUsage(w, 600, 100, 700)
+			writeToolCall(w, "call_1", tools.SubAgentToolName, taskArgs)
+		}
+	})
+
+	spec := planSpec(up.url, "summarise the day")
+	spec.Config.Tools = registry
+	spec.Config.Context.MaxContextTokens = 32000
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	wantUsage := Usage{Calls: 2, PromptTokens: 1400, CompletionTokens: 200, TotalTokens: 1600}
+	if res.Usage != wantUsage {
+		t.Errorf("Result.Usage = %+v, want %+v — the firing's two calls, and only those", res.Usage, wantUsage)
+	}
+	if len(res.SubAgents) != 1 {
+		t.Fatalf("Result.SubAgents = %+v, want exactly one finished run", res.SubAgents)
+	}
+	got := res.SubAgents[0]
+	if got.Calls != 1 || got.PromptTokens != 11800 || got.CompletionTokens != 200 || got.TotalTokens != 12000 {
+		t.Errorf("Result.SubAgents[0] = %+v, want the child's own single call (11800/200/12000)", got)
 	}
 }
 

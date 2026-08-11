@@ -74,22 +74,53 @@ type Result struct {
 	// Plan Firing means the model kept reaching past its read-only floor; on an Auto Firing
 	// it means the run needed a human it did not have.
 	Denied int
-	// SubAgents reports how full each delegated run's context got, one entry per sub-agent
-	// run, in FINISH order (so a nested run precedes the run that spawned it). It is flat:
-	// the entries carry no nesting, because a reading belongs to exactly one run and never
-	// rolls up. Runs that reported no usage at all are absent, and a Firing that delegated
+	// SubAgents reports how full each delegated run's context got and what it spent, one entry
+	// per sub-agent run, in FINISH order (so a nested run precedes the run that spawned it). It
+	// is flat: the entries carry no nesting, because a reading belongs to exactly one run and
+	// never rolls up. Runs that reported no usage at all are absent, and a Firing that delegated
 	// nothing carries none.
 	SubAgents []SubAgentUsage
+	// Usage is the Firing's OWN cumulative token accounting — the top-level agent's totals for
+	// the whole run, compaction folds included. It is the spend beside Meta.CtxUsed's fill: the
+	// fill says how full the window ended, these totals say what the run cost to get there. A
+	// delegated run's spend is its own and is absent here (SubAgents carries it), so a
+	// session-wide figure is the sum a caller chooses to take across the two.
+	Usage Usage
 	// Err is the run's own error — the loop's failure, or the cancellation that stopped it
 	// before an answer. It is nil on a Firing that reached its answer, even one whose
 	// record then failed to save (that failure is the returned error only).
 	Err error
 }
 
-// SubAgentUsage is one finished sub-agent run's context fill. It exists because that fill is
-// otherwise unobservable to a Firing's caller: the child fills a window of its OWN, so the
-// Firing's reading (the record's CtxUsed) says nothing about it, and the child Agent is
-// discarded the moment its run ends.
+// Usage is one agent's CUMULATIVE token accounting for a whole run: every completion that
+// agent accounted for, itself included. A caller READS it off the latest UsageEvent the agent
+// stamped rather than summing the stream (domain.UsageEvent), so the figure is whole even for
+// an observer that joined late — and it counts the maintenance work a Compaction fold does,
+// which no fill reading shows.
+//
+// It is per-agent and never rolls up: a sub-agent starts from zero and its totals stay its own
+// (Result.SubAgents), so a session-wide figure is a sum the caller takes, not one this package
+// takes for it. All four counters are zero when nothing accounted for the agent at all — an
+// Upstream that reports no usage, or a run that never completed a call.
+type Usage struct {
+	// Calls is how many completed upstream calls the agent accounted for, Compaction folds
+	// included.
+	Calls int
+	// PromptTokens is the sum of the prompt (context) tokens those calls were charged.
+	PromptTokens int
+	// CompletionTokens is the sum of the tokens they generated.
+	CompletionTokens int
+	// TotalTokens is the sum of the totals the SERVER reported for them, folded as reported
+	// rather than recomputed from the two parts above, so it stays consistent with the server's
+	// own arithmetic (which may count cached or reasoning tokens the split does not show). A
+	// server that reports the parts and omits the sum therefore leaves this at zero.
+	TotalTokens int
+}
+
+// SubAgentUsage is one finished sub-agent run's context fill and cumulative spend. It exists
+// because both are otherwise unobservable to a Firing's caller: the child fills a window of its
+// OWN and spends tokens of its own, so the Firing's readings (the record's CtxUsed, Result.Usage)
+// say nothing about them, and the child Agent is discarded the moment its run ends.
 type SubAgentUsage struct {
 	// Used is the run's final fill: the token total of the LAST usage its Turns reported,
 	// never a sum across them — each Turn restates the whole fill, it does not add to it.
@@ -107,6 +138,16 @@ type SubAgentUsage struct {
 	// existed. RAW model output on the same terms as Task: a surface escape-strips and clips it
 	// at its own render seam.
 	Name string
+
+	// The four below are this run's CUMULATIVE accounting, on Usage's terms exactly (its doc
+	// carries the semantics): the child's own totals, latest-wins from its own events, counting
+	// only the calls IT made. They are spelled flat here rather than reached through a member
+	// so a caller reads a run's spend beside the fill it produced. Zero throughout when the
+	// child's Upstream reported no usage.
+	Calls            int
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
 }
 
 // Once performs one Firing and returns its Result: it validates the mode, constructs a
@@ -167,6 +208,7 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		Turns:     step.TurnIndex + 1,
 		Denied:    den.count(),
 		SubAgents: tap.subAgentRuns(),
+		Usage:     tap.totals(),
 		Err:       runErr,
 	}
 	if spec.Store == nil {
@@ -293,9 +335,13 @@ func (d *denier) count() int {
 
 // eventTap is the EventSink Once installs: it forwards every Event to the caller's sink
 // (nil ⇒ discarded, so a Firing needs no observer to satisfy Config.Events) and catches the
-// three facts the Result cannot recover once the run is over — the latest top-level
-// UsageEvent's token total, the latest top-level MessageEvent's text, and the final token
-// total of each SUB-AGENT run.
+// facts the Result cannot recover once the run is over — the latest top-level UsageEvent's
+// token total and cumulative totals, the latest top-level MessageEvent's text, and the final
+// token total and cumulative totals of each SUB-AGENT run.
+//
+// The cumulative halves ride along the readings they accompany, on the same keying and the
+// same latest-wins rule (noteUsage states how the two differ where they differ): the top-level
+// one becomes Result.Usage, each run's own lands on its Result.SubAgents entry.
 //
 // The top-level total becomes the record's CtxUsed, so a resumed Firing relights the context
 // gauge exactly as an interactive session does; the text becomes Result.FinalText, the
@@ -325,6 +371,9 @@ type eventTap struct {
 
 	mu    sync.Mutex
 	total int
+	// usage is the top-level agent's latest cumulative reading — its running totals for the
+	// whole Firing, which become Result.Usage.
+	usage Usage
 	final string
 	// open holds the in-flight sub-agent runs, keyed by the id of the delegating call that
 	// opened each one; runs is the finished ones in finish order.
@@ -333,12 +382,14 @@ type eventTap struct {
 }
 
 // openSubAgent is one sub-agent run in flight: the task it was given, the optional name it was
-// given with it, and the latest fill its own Turns have reported. The delegating call that will
-// close it is the map key it is filed under, not a member — one run, one identity.
+// given with it, the latest fill its own Turns have reported, and its latest cumulative reading.
+// The delegating call that will close it is the map key it is filed under, not a member — one
+// run, one identity.
 type openSubAgent struct {
-	task string
-	name string
-	used int
+	task  string
+	name  string
+	used  int
+	usage Usage
 }
 
 // Emit records a top-level usage total and answer, tracks the sub-agent runs that pass
@@ -346,15 +397,7 @@ type openSubAgent struct {
 func (t *eventTap) Emit(e domain.Event) {
 	switch ev := e.(type) {
 	case domain.UsageEvent:
-		// Prefer the server's total; fall back to prompt+completion when it omits the sum
-		// (the same degrade the interactive gauge applies).
-		total := ev.TotalTokens
-		if total == 0 {
-			total = ev.PromptTokens + ev.CompletionTokens
-		}
-		if total > 0 {
-			t.noteUsage(ev.Depth, ev.CallID, total)
-		}
+		t.noteUsage(ev)
 	case domain.MessageEvent:
 		if ev.Depth != 0 {
 			break
@@ -376,19 +419,56 @@ func (t *eventTap) Emit(e domain.Event) {
 	}
 }
 
-// noteUsage files one Turn's token total under the agent that reported it: the Firing's own at
-// depth 0, else the sub-agent run the reading's own run identity names (callID — the
-// delegating call that spawned the reporting agent). The latest total wins — a Turn restates
-// the whole fill rather than adding to it — and a total with no run to belong to is dropped.
-func (t *eventTap) noteUsage(depth int, callID string, total int) {
+// noteUsage files one accounting event under the agent that reported it: the Firing's own at
+// depth 0, else the sub-agent run the event's own run identity names (callID — the delegating
+// call that spawned the reporting agent). An event with no run to belong to is dropped.
+//
+// TWO readings travel on one event and they fold on different rules. The FILL is the Turn's
+// restatement of the whole window, so the latest one wins (a Turn restates rather than adds)
+// and a Maintenance event must not touch it: that event is the Compaction call, whose prompt
+// counts describe the summarizer's own request and not the conversation (domain.UsageEvent).
+// The CUMULATIVE totals are the emitting agent's running counters, already summed by the
+// engine, so the latest event wins there too — and a Maintenance event DOES carry them, which
+// is exactly what keeps a Firing's totals honest across a fold.
+//
+// Each reading is taken only when it says something: a zero fill is the absence of a fill and
+// a reading that counted no call is the absence of accounting (a pre-feature event stream, an
+// Upstream that reports no usage), so neither overwrites what an earlier event established.
+func (t *eventTap) noteUsage(ev domain.UsageEvent) {
+	// Prefer the server's total; fall back to prompt+completion when it omits the sum (the same
+	// degrade the interactive gauge applies).
+	fill := ev.TotalTokens
+	if fill == 0 {
+		fill = ev.PromptTokens + ev.CompletionTokens
+	}
+	countsFill := fill > 0 && !ev.Maintenance
+	cumulative := Usage{
+		Calls:            ev.CumulativeCalls,
+		PromptTokens:     ev.CumulativePromptTokens,
+		CompletionTokens: ev.CumulativeCompletionTokens,
+		TotalTokens:      ev.CumulativeTotalTokens,
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if depth == 0 {
-		t.total = total
+	if ev.Depth == 0 {
+		if countsFill {
+			t.total = fill
+		}
+		if cumulative.Calls > 0 {
+			t.usage = cumulative
+		}
 		return
 	}
-	if run := t.open[callID]; run != nil {
-		run.used = total
+	run := t.open[ev.CallID]
+	if run == nil {
+		return
+	}
+	if countsFill {
+		run.used = fill
+	}
+	if cumulative.Calls > 0 {
+		run.usage = cumulative
 	}
 }
 
@@ -423,7 +503,16 @@ func (t *eventTap) closeSubAgentRun(callID string) {
 	if run.used <= 0 {
 		return
 	}
-	t.runs = append(t.runs, SubAgentUsage{Used: run.used, Limit: t.window, Task: run.task, Name: run.name})
+	t.runs = append(t.runs, SubAgentUsage{
+		Used:             run.used,
+		Limit:            t.window,
+		Task:             run.task,
+		Name:             run.name,
+		Calls:            run.usage.Calls,
+		PromptTokens:     run.usage.PromptTokens,
+		CompletionTokens: run.usage.CompletionTokens,
+		TotalTokens:      run.usage.TotalTokens,
+	})
 }
 
 // firstTaskLine reads the sub_agent call's task argument and returns its first line, "" when
@@ -472,6 +561,14 @@ func (t *eventTap) subAgentRuns() []SubAgentUsage {
 		return nil
 	}
 	return append([]SubAgentUsage(nil), t.runs...)
+}
+
+// totals reports the Firing's own cumulative accounting — the latest reading its TOP-LEVEL
+// agent stamped, Compaction folds included — zero throughout when nothing accounted for it.
+func (t *eventTap) totals() Usage {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.usage
 }
 
 // fill reports the last observed context fill, 0 when the Upstream reported no usage.

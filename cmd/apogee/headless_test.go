@@ -709,6 +709,78 @@ func TestHeadlessOutputRouting(t *testing.T) {
 		}
 	})
 
+	// What the run SPENT, beside what it filled: one line for the Firing's own totals and one per
+	// delegated run that accounted for anything, all of them ahead of the summary. A sub-agent's
+	// spend line is named exactly as its fill line is, so the two read as one report.
+	t.Run("cumulative usage prints per agent, before the summary", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			SessionID: "s-7", FinalText: "the answer", Turns: 4,
+			Usage: run.Usage{Calls: 3, PromptTokens: 18000, CompletionTokens: 1200, TotalTokens: 19200},
+			SubAgents: []run.SubAgentUsage{
+				{
+					Used: 12000, Limit: 32768, Task: "audit the issues", Name: "repo-scout",
+					Calls: 2, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000,
+				},
+			},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		// Spelled in the gauge's own coarse units (format.Tokens, the spelling the fill lines
+		// above use), so a spend and a fill never read in two dialects on one report.
+		main := strings.Index(errOut, "usage: calls 3 · prompt 18k · completion 1k · total 19k\n")
+		child := strings.Index(errOut, "usage: calls 2 · prompt 12k · completion 200 · total 12k · repo-scout\n")
+		summary := strings.Index(errOut, "turns: 4")
+		if main < 0 || child < 0 {
+			t.Fatalf("the usage lines are missing or misspelled: %q", errOut)
+		}
+		if main > child {
+			t.Errorf("a delegated run's spend printed before the firing's own: %q", errOut)
+		}
+		if child > summary {
+			t.Errorf("a usage line printed after the summary: %q", errOut)
+		}
+	})
+
+	// The fill lines' self-hiding rule, applied to the reading this line carries: an agent that
+	// accounted for no call has nothing to say about spend, and four zeros would say it wrongly.
+	t.Run("an agent that counted no call prints no usage line", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 2,
+			SubAgents: []run.SubAgentUsage{
+				{Used: 4000, Limit: 32768, Task: "silent about its spend"},
+			},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.Contains(errOut, "usage:") {
+			t.Errorf("a run that accounted for nothing printed a usage line: %q", errOut)
+		}
+		if !strings.Contains(errOut, "sub-agent: 4k/32k · silent about its spend") {
+			t.Errorf("the fill line went with it: %q", errOut)
+		}
+	})
+
+	// A server that reports the two parts and omits the sum leaves the total at zero, and the
+	// shared token formatter spells a zero as nothing at all — which would leave the column
+	// hanging. The line has already earned its place by counting a call, so the zero is spelled.
+	t.Run("a zero counter is spelled rather than left blank", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 1,
+			Usage: run.Usage{Calls: 1, PromptTokens: 900, CompletionTokens: 100},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if !strings.Contains(errOut, "usage: calls 1 · prompt 900 · completion 100 · total 0\n") {
+			t.Errorf("the zero total is not spelled: %q", errOut)
+		}
+	})
+
 	t.Run("terminal escapes are stripped from the answer", func(t *testing.T) {
 		stub := &stubRunner{res: run.Result{FinalText: "safe \x1b]52;c;cGF5bG9hZA==\x07 text", Turns: 1}}
 		out, _, err := headlessRun(t, stub, "a prompt")

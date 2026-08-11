@@ -983,7 +983,12 @@ adds one stderr line per sub-agent run just ahead of that summary —
 `sub-agent: 12k/32k · <the name it was given, else the task>`, in the order the runs
 finished — because
 each child fills a context window of its own that the run's own figures say nothing
-about; a run that delegated nothing prints none. The exit status says which kind of
+about; a run that delegated nothing prints none. Beside those, and on the same terms,
+comes what the run **spent**: `usage: calls 3 · prompt 18k · completion 1k · total 19k`
+for the run itself and one such line per delegated run (labelled the same way), counting
+every model call the agent made — the compaction folds included, which no context reading
+shows. They are the addends and never a sum: an agent that made no call prints no line.
+The exit status says which kind of
 thing happened:
 
 | Exit | Means |

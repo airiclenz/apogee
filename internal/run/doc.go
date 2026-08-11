@@ -53,4 +53,11 @@
 // delegated run fills a window of its own (it inherits the parent's Config verbatim, so the
 // same limit, never the same fill), so its reading is neither the Firing's nor summable into
 // it, and a nested run's reading is its own rather than its spawner's.
+//
+// Token SPEND is reported at those same two grains, for the same reason and by the same
+// keying: the Firing's own cumulative totals land on Result.Usage and each delegated run's on
+// its Result.SubAgents entry. Spend is not fill — it counts every completion the agent
+// accounted for, the Compaction folds included, where a fill says only how full the window
+// ended — and it is per-agent, so a session-wide figure is a sum the caller takes across the
+// two grains rather than one this package takes for it.
 package run

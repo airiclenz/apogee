@@ -166,7 +166,7 @@ openPanes/give-way covered by existing pane tests if present, else a minimal pre
 
 **Commit:** `feat(tui): /usage command with session usage popup`
 
-## 5. Headless/run: cumulative totals in Result
+## 5. Headless/run: cumulative totals in Result — ✅ DONE (2026-08-11)
 
 Depends on items 1 and 2 (independent of items 3–4).
 
