@@ -68,6 +68,24 @@ point is a **minor** bump, not a breaking change.
   member it belongs to rather than the run. A drag still selects and copies as before; only a
   press-and-release that never moved is a toggle. Blocks with nothing to reveal grow no footer,
   because a `see less…` that did nothing would be an affordance about nothing.
+- **A batch of different tools now folds into one `✦ Tools (N calls)` block.** Adjacent calls used
+  to stack one header per tool, so eight calls in a row cost eight blocks and a screen of scroll.
+  They now fold under a single umbrella carrying one row per consecutive run of the same tool, in
+  time order — calls are never reordered to merge, so `read, terminal, read` stays three rows — with
+  the run's own count beside its label (`Read (3)`) and the run's outcome aggregated on the right:
+  a red `2 errors` when anything in it failed, the natural sum where the stats add up (`570 lines`,
+  `+8 −3`, `12 hits`), and nothing at all when they do not. Anything between two calls still breaks
+  the batch — narration, a note, an approval — and a sub-agent block always does.
+  - **Two clicks reach any single line of output.** A click on a type row lists the calls behind it,
+    each in the same target-leader-outcome shape as anywhere else; a click on one of those opens its
+    body under a `│` gutter. The two levels are independent and both survive scrolling and new
+    messages, so a run you opened stays open while the model keeps working beneath it.
+  - **The umbrella header closes everything under it.** It has no fold state of its own — its floor
+    is the type rows, it never collapses to one line — so clicking it is the one gesture that puts a
+    whole exploded batch away, and it does nothing at all while nothing is open.
+  - The header's star blinks while any call in the batch is still running, and the running call is
+    the last row: the block appears the moment a second differently-labelled call starts, rather
+    than settling into shape only once the work is done.
 
 - **`<u>…</u>` renders as underlined text.** Markdown spells no underline of its own — CommonMark
   spends `__` on strong emphasis — so the renderer recognises the one HTML pair a model actually

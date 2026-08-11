@@ -1289,3 +1289,95 @@ func detailLineTexts(lines []detailLine) []string {
 	}
 	return out
 }
+
+// ----------------------------------------------------------------------------
+// The type row's aggregate (tool-display-overhaul plan, item 6)
+// ----------------------------------------------------------------------------
+
+// aggregated builds a run out of bare summaries — the presenter's own typed phrases — and returns
+// what its type row would say (runAggregate). The views carry nothing else because nothing else is
+// read: the aggregate is a function of the members' outcome slots alone.
+func aggregated(texts ...string) branchSummary {
+	views := make([]toolView, len(texts))
+	for i, text := range texts {
+		views[i] = toolView{Summary: namedSummary(detailLine{Text: text})}
+	}
+	return runAggregate(views)
+}
+
+// TestRunAggregate is design call 10 in one table: a type row counts its run's FAILURES first, else
+// sums where the members' stats sum, else says nothing at all and lets the dots run to the ▶. Every
+// wording a registry stat hook writes is represented, because the summer reads those phrases back and
+// a hook that reworded its stat would show up here as a run that stopped adding up.
+func TestRunAggregate(t *testing.T) {
+	cases := []struct {
+		name string
+		run  []string
+		want string
+	}{
+		{"a run of counted lines sums", []string{"5 lines", "9 lines"}, "14 lines"},
+		{"a singular member sums into a plural total", []string{"1 line", "2 lines"}, "3 lines"},
+		{"two singulars still make a plural", []string{"1 line", "1 line"}, "2 lines"},
+		{"a total of one keeps the singular", []string{"0 lines", "1 line"}, "1 line"},
+		{"a producer's fixed plural is kept", []string{"1 entries", "0 entries"}, "1 entries"},
+		{"an invariant noun is not re-pluralised", []string{"0 changed", "2 changed"}, "2 changed"},
+		{"diffstats sum on both halves", []string{"+2 −1", "+6 −2"}, "+8 −3"},
+		{"hits sum", []string{"3 hits", "1 hit"}, "4 hits"},
+		{"a failure is counted, not summed", []string{"5 lines", errorSummaryPrefix + "no such file"}, "1 error"},
+		{"failures are counted first and plural", []string{deniedSummary, cancelledSummary, "5 lines"}, "2 errors"},
+		{"different nouns do not sum", []string{"3 hits", "2 files"}, ""},
+		{"a stat with no arithmetic is blank", []string{"exit 0", "exit 0"}, ""},
+		{"a verdict is blank", []string{"PASS", "FAIL"}, ""},
+		{"a mixed run is blank", []string{"5 lines", "exit 0"}, ""},
+		{"an unfinished member is blank", []string{"5 lines", ""}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := aggregated(tc.run...).Text; got != tc.want {
+				t.Errorf("runAggregate(%q) = %q, want %q", tc.run, got, tc.want)
+			}
+		})
+	}
+
+	// A run of ONE is its own member's outcome, whatever kind that is: summing one call is that call,
+	// so nothing is reworded and a lone failure keeps the sentence that says what went wrong instead
+	// of being counted as "1 error".
+	t.Run("a run of one is its own summary", func(t *testing.T) {
+		for _, text := range []string{"5 lines", "exit 0", errorSummaryPrefix + "no such file", ""} {
+			if got := aggregated(text).Text; got != text {
+				t.Errorf("runAggregate over one %q = %q, want it verbatim", text, got)
+			}
+		}
+		quoted := toolView{Summary: quotedSummary(detailLine{Text: "all clear"})}
+		if got := runAggregate([]toolView{quoted}); got.Text != "all clear" || !got.quoted {
+			t.Errorf("a promoted line lost its quoting on the way to the type row: %+v", got)
+		}
+	})
+
+	// A promoted line is the TOOL's text, not a typed stat, so it is never added into an arithmetic
+	// it was never part of — even when it happens to read exactly like one.
+	t.Run("a promoted line never sums", func(t *testing.T) {
+		run := []toolView{
+			{Summary: namedSummary(detailLine{Text: "5 lines"})},
+			{Summary: quotedSummary(detailLine{Text: "9 lines"})},
+		}
+		if got := runAggregate(run).Text; got != "" {
+			t.Errorf("runAggregate summed a quoted line: %q, want blank", got)
+		}
+	})
+
+	// The aggregate's own wording reads red by the same test a member's failure does, so the type row
+	// needs no second answer to "did this fail" (failedSummary, render.go).
+	t.Run("the errors aggregate reads as a failure", func(t *testing.T) {
+		for _, text := range []string{"1 error", "3 errors"} {
+			if !failedSummary(text) {
+				t.Errorf("failedSummary(%q) = false; the aggregate would paint in the ordinary tone", text)
+			}
+		}
+		for _, text := range []string{"0 errors", "5 lines", "clean"} {
+			if failedSummary(text) {
+				t.Errorf("failedSummary(%q) = true; a clean outcome would paint red", text)
+			}
+		}
+	})
+}

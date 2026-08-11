@@ -59,12 +59,21 @@ type renderedTranscript struct {
 // block's MEMBER rows wear it too, each naming its own call rather than the block's head, which is
 // how a group of ten opens one of them (renderToolBlock, renderToolGroup). What the kind means has
 // not moved: it is the toggle, whatever line it lands on.
+//
+// A super-group adds the two kinds its extra LEVEL needs (renderSuperGroup). targetType is a type
+// row: it toggles the run's own second state (transcript.toggleTypeExpanded) rather than the
+// expanded flag every other target flips, which is what lets a reader open a run to its member rows
+// and then open a member to its body. targetUmbrella is the umbrella header, whose click is not a
+// toggle at all — its floor is the type rows, so it never folds to one line and instead closes every
+// open child beneath it (design call 9, transcript.closeSuperGroup).
 type targetKind int
 
 const (
 	targetNone targetKind = iota
 	targetHeader
 	targetMarker
+	targetType
+	targetUmbrella
 )
 
 // lineTarget is one rendered line's click surface: what the line is, and the index into
@@ -282,6 +291,27 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			if !e.expanded {
 				i += span
 			}
+		} else if sup := toolSuperGroup(t.entries, i); len(sup) > 0 {
+			// Adjacent runs of DIFFERENT tools fold under one umbrella (toolSuperGroup, item 5), which
+			// is asked FIRST because a same-label run inside one is a row of it rather than a block of
+			// its own. The question is only ever asked here, at a block head — the loop's index is one
+			// by construction, since every branch either advances by a single entry or skips a whole
+			// block — and toolSuperGroup is only correct there: asked mid-run it would answer with a
+			// partial first run.
+			//
+			// The umbrella covers its calls and nothing else (superGroup.calls), so the walk steps
+			// over exactly them. Its per-entry state is in the paint key already: blockKey spans the
+			// whole umbrella and spanFlags packs both levels — a member's expanded at bit 0 and a run
+			// head's typeExpanded at bit 2 — so opening either level is a different key and a fresh
+			// paint (paintcache.go).
+			calls := sup.calls()
+			key := t.blockKey(shapeToolSuper, i, calls, th, width, blink,
+				anyOpenCall(t.entries[i:i+calls]))
+			appendBlock(false, e.depth, i, t.paintBlock(i, key, func() blockPaint {
+				return renderSuperGroup(th, superRunViews(t.entries, sup), railedWidth(width, e.depth),
+					blockState{live: key.live, blink: blink}).railed(th, e.depth)
+			}))
+			i += calls - 1
 		} else if run := toolCallRun(t.entries, i); len(run) > 1 {
 			// Consecutive same-label tool calls fold into one block at render time, so a batch of
 			// reads is one header plus one leader row per file. The entry list is untouched: a
@@ -1089,7 +1119,7 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 	}
 	// The promote-guard runs before anything is asked of the views, both shapes through the one
 	// call: what it changes is what the block hides, and every question below is asked of that.
-	views = guardPromotions(th, views, toolRowCells(th, width))
+	views = guardPromotions(th, views, toolRowCells(th, width), branchMarker(true))
 	if len(views) > 1 {
 		return renderToolGroup(th, views, width, state)
 	}
@@ -1142,7 +1172,7 @@ func renderToolGroup(th theme, views []toolView, width int, state blockState) bl
 	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), targetNone)
 	room := toolRowCells(th, width)
 	for i, tv := range views {
-		rows, hides := renderGroupMember(th, tv, branchMarker(i == len(views)-1), width, room,
+		rows, hides := renderGroupMember(th, tv, branchMarker(i == len(views)-1), memberGutter, width, room,
 			state.memberExpanded(i))
 		kind := targetNone
 		if hides {
@@ -1153,7 +1183,155 @@ func renderToolGroup(th theme, views []toolView, width int, state blockState) bl
 	return out
 }
 
-// renderGroupMember paints one member of a grouped block, in whichever of its two states the
+// toolRunView is one RUN of a super-group as the painter needs it: the calls it folds, whether its
+// type row is open, and each member's own state. It is the paint-time reading of [toolRun], which
+// names the same run by index — the indexes are what the transcript resolves a click through, and
+// the views are what the painter draws, so the two shapes are kept apart rather than one being made
+// to serve both (superRunViews builds these from those).
+type toolRunView struct {
+	views    []toolView
+	expanded bool   // the run's TYPE ROW state (entry.typeExpanded on its head)
+	members  []bool // each member's own expanded flag, in view order
+}
+
+// memberExpanded is the n'th member's own view state, bounded for the repaint path exactly as
+// [blockState.memberExpanded] is: a short slice is a collapsed member and never a panic mid-frame.
+func (r toolRunView) memberExpanded(n int) bool {
+	return n >= 0 && n < len(r.members) && r.members[n]
+}
+
+// The umbrella header's own wording (design call 9, docs/layout/tool-layout.md, "Vocabulary"):
+// "✦ Tools (7 calls)". superGroupLabel takes the label's bold gold like any tool name — it is what
+// the block IS — and the count beside it the faint tone every group count wears, because N is the
+// block's own arithmetic rather than part of a name.
+const (
+	superGroupLabel = "Tools"
+	superCallNoun   = "call"
+)
+
+// renderSuperGroup paints the umbrella: adjacent runs of DIFFERENT tools folded under one
+// "✦ Tools (N calls)" header, one row per run in time order (docs/layout/tool-layout.md, "Grouped
+// tools collapsed (different types / super-group)"). It is the same list the same-label group is,
+// one level up — the rows stand for runs instead of for calls — and everything about the shape
+// follows from that:
+//
+//   - a TYPE ROW is the leader row about a whole run (leaderRowIn): the label and its "(N)" where a
+//     call would put its target, the run's aggregate in the outcome slot (runAggregate), and a ▶/▼
+//     of its own at the block's right edge. Every type row is a toggle target, because every one of
+//     them has member rows to reveal — even a run of 1, whose member row carries the target the type
+//     row does not.
+//   - an OPEN type row lists its members beneath it in item 1's row shape, drawn one level deeper
+//     (superMemberMarker) and by the very painter a plain group's members go through
+//     (renderGroupMember), so a member opens onto its body inside a type row exactly as it does
+//     inside a group — the sketch's 2nd step.
+//   - the HEADER wears no state indicator at all: the umbrella's floor is its type rows, it never
+//     folds to one line, and a click there closes every open child instead (targetUmbrella). It is
+//     marked as a target only while something IS open, so a header with nothing to close keeps a
+//     click's selection meaning rather than offering an affordance that does nothing.
+//
+// The count the header states is the number of CALLS, not of rows: a reader wants to know how much
+// work is folded away, and the rows already say how it divides. Its star is the block's, live while
+// any call in it is still open (blockState.live) — the running call being the last row's last
+// member, by construction of a time-ordered walk (design call 2).
+//
+// Each run's views go through the promote-guard on their own (guardPromotions), in the frame their
+// rows are actually drawn in: demotion changes what a member hides, and that is what its indicator
+// and its click surface are answered from — the same reason the guard runs at the block's entrance
+// rather than inside a row.
+func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState) blockPaint {
+	calls := 0
+	for _, r := range runs {
+		calls += len(r.views)
+	}
+	label := th.toolLabel.Render(superGroupLabel) + " " +
+		th.toolIndicator.Render("("+plural(calls, superCallNoun)+")")
+	room := toolRowCells(th, width)
+
+	var rows blockPaint
+	open, at := false, 0 // at: the run head's offset from the umbrella's own head
+	for i, r := range runs {
+		views := guardPromotions(th, r.views, room, superMemberMarker(true))
+		row := leaderRowIn(th, typeRowText(views), typeRowPaint(th, views),
+			runAggregate(views), branchMarker(i == len(runs)-1), room, r.expanded)
+		rows.addFor(at, []string{indicatorRow(th, row, width, stateIndicator(r.expanded))}, targetType)
+		if r.expanded {
+			open = true
+			for k, tv := range views {
+				lines, hides := renderGroupMember(th, tv, superMemberMarker(k == len(views)-1),
+					superMemberGutter, width, room, r.memberExpanded(k))
+				kind := targetNone
+				if hides {
+					kind = targetHeader
+				}
+				rows.addFor(at+k, lines, kind)
+			}
+		}
+		at += len(r.views)
+	}
+
+	header := targetNone
+	if open {
+		header = targetUmbrella
+	}
+	var out blockPaint
+	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), header)
+	out.join(rows)
+	return out
+}
+
+// typeRowText is a type row's left content as it is MEASURED: the run's label, and the "(N)" beside
+// it for a run of more than one. A run of 1 counts nothing, which is the rule the same-label group's
+// header already answers to (groupCountFormat) — the number exists to say that a row stands for more
+// than the single call it otherwise looks like.
+func typeRowText(views []toolView) string {
+	if len(views) == 0 {
+		return ""
+	}
+	if len(views) < 2 {
+		return views[0].Label
+	}
+	return views[0].Label + " " + fmt.Sprintf(groupCountFormat, len(views))
+}
+
+// typeRowPaint dresses whatever of [typeRowText] survived the row's clip: the label in the tool
+// label's own bold gold — it is a tool name, and scanning the umbrella for those is what the reader
+// opened it to do — and the count after it in the faint tone every group count wears. A clip that
+// reached into the count leaves nothing to split on, and the survivor is painted as the label it
+// began as.
+func typeRowPaint(th theme, views []toolView) func(string) string {
+	count := ""
+	if len(views) >= 2 {
+		count = " " + fmt.Sprintf(groupCountFormat, len(views))
+	}
+	return func(clipped string) string {
+		if head, ok := strings.CutSuffix(clipped, count); ok && count != "" {
+			return th.toolLabel.Render(head) + th.toolIndicator.Render(count)
+		}
+		return th.toolLabel.Render(clipped)
+	}
+}
+
+// superRunViews is the umbrella's paint input: each of its runs as the views it folds plus the view
+// state of the row and its members ([toolRunView]). The state is COPIED out of the entries, like
+// memberFlags and for its reason — a painter is handed what it needs to draw and nothing it could
+// write through (ADR 0011).
+func superRunViews(entries []entry, g superGroup) []toolRunView {
+	runs := make([]toolRunView, 0, len(g))
+	for _, r := range g {
+		span := entries[r.at : r.at+r.n]
+		views := make([]toolView, len(span))
+		for i := range span {
+			views[i] = span[i].tool
+		}
+		runs = append(runs, toolRunView{
+			views:    views,
+			expanded: entries[r.at].typeExpanded,
+			members:  memberFlags(span),
+		})
+	}
+	return runs
+}
+
 // member's own entry is in, and reports whether the COLLAPSED paint hides anything — which is both
 // what makes the member wear an indicator and what makes its rows a click target (renderToolGroup).
 //
@@ -1182,13 +1360,18 @@ func renderToolGroup(th theme, views []toolView, width int, state blockState) bl
 // itself out against a different one, and the field the ▶ sits in is held clear down an OPEN member
 // too (renderExpandedMember) — a row that re-wrapped on being opened would move out from under the
 // very click that opened it.
-func renderGroupMember(th theme, tv toolView, marker string, width, room int, expanded bool) (lines []string, hides bool) {
+//
+// marker and gutter are the FRAME the member is drawn in — the row's branch marker and the prefix
+// its continuation rows hang under — rather than constants, because a member of a super-group's type
+// row sits one level deeper than a member of a plain group and both frames have to reach the same
+// painter (superMemberMarker, renderSuperGroup).
+func renderGroupMember(th theme, tv toolView, marker, gutter string, width, room int, expanded bool) (lines []string, hides bool) {
 	row := leaderRow(th, tv, marker, room, expanded)
 	if hides = tv.Details.len() > 0; !hides {
 		return []string{row}, false
 	}
 	if expanded {
-		return renderExpandedMember(th, tv, marker, width, room), true
+		return renderExpandedMember(th, tv, marker, gutter, width, room), true
 	}
 	return []string{indicatorRow(th, row, width, glyphCollapsed)}, true
 }
@@ -1214,13 +1397,13 @@ func renderGroupMember(th theme, tv toolView, marker string, width, room int, ex
 // It grows no "+N more lines" marker: the marker counts what a collapsed paint left out, and this
 // paint leaves nothing out. The see-less marker closes it instead, worded from the prompt block's
 // own constant so the transcript has one vocabulary for "close this" (design call 7).
-func renderExpandedMember(th theme, tv toolView, marker string, width, room int) []string {
+func renderExpandedMember(th theme, tv toolView, marker, gutter string, width, room int) []string {
 	row := leaderRow(th, tv, marker, room, true)
 	out := []string{indicatorRow(th, row, width, glyphExpanded)}
 	for _, d := range tv.Details.all() {
-		out = append(out, gutteredWrap(th, detailStyle(th, d.Kind, true), memberGutter, memberGutter, d.Text, room)...)
+		out = append(out, gutteredWrap(th, detailStyle(th, d.Kind, true), gutter, gutter, d.Text, room)...)
 	}
-	return append(out, seeLessRow(th, memberGutter, width))
+	return append(out, seeLessRow(th, gutter, width))
 }
 
 // gutteredWrap is hangingWrap with a CONTINUATION prefix of its own: the first row leads with
@@ -1301,6 +1484,21 @@ func seeLessFooter(th theme, body []string, width int, toggle targetKind) []stri
 // open member's text in the column its collapsed row used.
 const memberGutter = "  " + glyphMemberGutter + " "
 
+// The frame a super-group's MEMBER rows are drawn in, one level inside the type row they belong to
+// (docs/layout/tool-layout.md, "Grouped tools expanded 1st step"): the type row's own gutter, then
+// the member's branch glyph — "  │ ┝ " — with its body continuing under "  │ │ ". Both are built
+// from memberGutter rather than restated, so a member of a type row sits exactly under the ┝ of the
+// row it opened out of, and the two frames keep the one cell count that lets them share a painter
+// (renderGroupMember).
+const superMemberGutter = memberGutter + glyphMemberGutter + " "
+
+func superMemberMarker(last bool) string {
+	if last {
+		return memberGutter + glyphBranchLast + " "
+	}
+	return memberGutter + glyphBranch + " "
+}
+
 // The dotted leader and the room it flexes in (docs/layout/tool-layout.md, "Width and overflow").
 //
 // glyphLeaderDot is one cell of the run that carries the eye from a row's target to the outcome
@@ -1347,10 +1545,14 @@ const promoteMinTargetCells = 15
 // or everything promoted comfortably — reaches the painter as the very slice the entries handed
 // over. The copy is shallow and that is enough: demoted rebuilds the body it changes rather than
 // writing through the one the entry shares (toolView.demoted).
-func guardPromotions(th theme, views []toolView, room int) []toolView {
+// marker is the frame the block's rows lead with — the closing branch marker for an ordinary block,
+// the deeper nested one inside a super-group's type row (superMemberMarker) — because those cells
+// come off the same row budget the guard is measuring and a member indented one level further has
+// that much less target to protect.
+func guardPromotions(th theme, views []toolView, room int, marker string) []toolView {
 	out, copied := views, false
 	for i, tv := range views {
-		if !guardRefuses(th, tv, room) {
+		if !guardRefuses(th, tv, room, marker) {
 			continue
 		}
 		if !copied {
@@ -1372,14 +1574,15 @@ func guardPromotions(th theme, views []toolView, room int) []toolView {
 // themselves (renderToolBranch), so there is no target for a long line to crowd out and nothing for
 // the guard to protect.
 //
-// The marker is measured as the closing ┕ because both branch markers are one glyph in the same
-// four-cell frame (branchMarker) — a member's row keeps the same budget wherever in the block it
-// sits, which is what lets one answer settle a block.
-func guardRefuses(th theme, tv toolView, room int) bool {
+// The caller passes the CLOSING marker of the block's frame, and either of that frame's two markers
+// would do: both are one glyph in the same cell count (branchMarker, superMemberMarker) — a member's
+// row keeps the same budget wherever in the block it sits, which is what lets one answer settle a
+// block.
+func guardRefuses(th theme, tv toolView, room int, marker string) bool {
 	if !tv.promotable() || tv.Target == "" {
 		return false
 	}
-	avail := room - th.measure.Width(branchMarker(true))
+	avail := room - th.measure.Width(marker)
 	tail := leaderGap + th.measure.Width(tv.Summary.Text)
 	return avail-tail-leaderGap-leaderMinDots < promoteMinTargetCells
 }
@@ -1404,8 +1607,24 @@ func guardRefuses(th theme, tv toolView, room int) bool {
 // states, which is what lets the same click that opened a member close it without the row moving
 // out from under the pointer.
 func leaderRow(th theme, tv toolView, marker string, room int, expanded bool) string {
+	tone := detailTone(th, expanded)
+	return leaderRowIn(th, expandTabs(tv.Target), func(s string) string { return tone.Render(s) },
+		tv.Summary, marker, room, expanded)
+}
+
+// leaderRowIn is the leader arithmetic itself, with the row's LEFT content handed in rather than
+// read off a call: the plain text it is measured and clipped by, and the painter that dresses
+// whatever survives that clip. It exists because a super-group's TYPE ROW is the same row about a
+// whole run — "Terminal (3)" where a call would put its path — and a second copy of the overflow
+// order would part company with this one the first time either moved (renderSuperGroup).
+//
+// paint receives the CLIPPED text and not the original, because a painted string cannot be cut
+// without cutting its escapes: the row measures plain text, decides what fits, and only then hands
+// the survivor to whoever knows how it should look.
+func leaderRowIn(th theme, left string, paint func(string) string, summary branchSummary,
+	marker string, room int, expanded bool) string {
 	avail := max(1, room-th.measure.Width(marker))
-	slot := tv.Summary.Text
+	slot := summary.Text
 	// The last resort under design call 4, past the point it words: an outcome WIDER than the row
 	// itself is cut too. A slot that printed whole there would not print whole anywhere — it would
 	// run past the frame and the viewport would fold it into a second row, taking the block out of
@@ -1420,7 +1639,7 @@ func leaderRow(th theme, tv toolView, marker string, room int, expanded bool) st
 	}
 	target := ""
 	if budget := avail - tail - leaderGap - leaderMinDots; budget >= 1 {
-		target, _ = clipCells(th, expandTabs(tv.Target), budget)
+		target, _ = clipCells(th, left, budget)
 		// A budget too narrow to hold even the clip tail comes back WIDER than it was given —
 		// fitClipTail appends the tail whatever room is left — and those cells would push the row
 		// past its width and fold it onto a second line. The target is dropped outright instead,
@@ -1432,14 +1651,14 @@ func leaderRow(th theme, tv toolView, marker string, room int, expanded bool) st
 	}
 	lead, leadCells := "", 0
 	if target != "" {
-		lead = detailTone(th, expanded).Render(target) + strings.Repeat(" ", leaderGap)
+		lead = paint(target) + strings.Repeat(" ", leaderGap)
 		leadCells = th.measure.Width(target) + leaderGap
 	}
 	dots := max(leaderMinDots, avail-leadCells-tail)
 	row := detailTone(th, expanded).Render(marker) + lead +
 		th.toolLeader.Render(strings.Repeat(glyphLeaderDot, dots))
 	if slot != "" {
-		row += strings.Repeat(" ", leaderGap) + summaryStyle(th, tv.Summary, expanded).Render(slot)
+		row += strings.Repeat(" ", leaderGap) + summaryStyle(th, summary, expanded).Render(slot)
 	}
 	return row
 }
@@ -1463,12 +1682,21 @@ func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
 }
 
 // failedSummary reads the outcome's own wording for a verdict of failure (errorSummaryPrefix and
-// the two bare verdicts beside it). It asks the TEXT because that is where the fact is: a summary
-// carries no verdict flag, and inventing one to be derived from the same words would be a second
-// answer to a question already settled at the presenter's seam.
+// the two bare verdicts beside it), plus the count a TYPE ROW aggregates its run's failures into
+// ("3 errors", runAggregate). It asks the TEXT because that is where the fact is: a summary carries
+// no verdict flag, and inventing one to be derived from the same words would be a second answer to a
+// question already settled at the presenter's seam.
+//
+// The aggregate is read through the very parser that wrote it (countPhrase), so the two cannot come
+// to disagree, and only a count of one or more reads as a failure — "0 errors" is a clean run, and
+// no aggregate says it anyway.
 func failedSummary(text string) bool {
-	return strings.HasPrefix(text, errorSummaryPrefix) ||
-		text == deniedSummary || text == cancelledSummary
+	if strings.HasPrefix(text, errorSummaryPrefix) ||
+		text == deniedSummary || text == cancelledSummary {
+		return true
+	}
+	n, noun, ok := countPhrase(text)
+	return ok && n > 0 && strings.TrimSuffix(noun, "s") == errorNoun
 }
 
 // clipCells fits text into ONE row of at most cells columns, ending it in clipTail when it had to

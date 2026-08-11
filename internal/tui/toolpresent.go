@@ -819,6 +819,174 @@ func (tv toolView) demoted() toolView {
 	return tv
 }
 
+// errorNoun is the word a TYPE ROW counts its run's failures with — "1 error", "3 errors" — and the
+// only wording apogee reserves in the outcome slot beyond the three a single call may carry
+// (errorSummaryPrefix and the two bare verdicts). Reserving it is what lets the failure test stay
+// one reading of the TEXT for a member row and an aggregate alike (failedSummary, render.go).
+const errorNoun = "error"
+
+// runAggregate is the outcome slot of a whole RUN — what a super-group's type row says about the
+// calls folded behind it (design call 10, docs/layout/tool-layout.md, "Fold states and
+// interaction"). Three answers, in this order:
+//
+//   - a run of ONE is its own member's summary, verbatim, whatever kind that is. Summing one call is
+//     that call, so nothing has to be invented: a lone failure keeps its "error: …" sentence instead
+//     of being counted as "1 error", and a promoted line stays the quoted line it is.
+//   - any FAILED member and the row counts them, "N errors", which reads red for exactly the reason
+//     a member's own failure does — the wording (failedSummary).
+//   - otherwise the run's natural sum, where the members' typed stats sum at all (sumStats), and
+//     nothing when they do not: an empty slot lets the dots run to the ▶, which is the spec's "else
+//     blank".
+//
+// It is pure and lipgloss-free like everything else in this file: it words the slot, and the tone
+// that wording earns is the painter's (summaryStyle).
+func runAggregate(views []toolView) branchSummary {
+	if len(views) == 0 {
+		return branchSummary{}
+	}
+	if len(views) == 1 {
+		return views[0].Summary
+	}
+	if n := failedCalls(views); n > 0 {
+		return namedSummary(detailLine{Text: plural(n, errorNoun)})
+	}
+	if text, ok := sumStats(views); ok {
+		return namedSummary(detailLine{Text: text})
+	}
+	return branchSummary{}
+}
+
+// failedCalls counts the members of a run whose outcome says the call failed. It asks
+// [failedSummary] (render.go) rather than restating the three wordings, because "does this outcome
+// say failure" is one question and a second answer to it would drift the first time the vocabulary
+// moved.
+func failedCalls(views []toolView) int {
+	n := 0
+	for _, tv := range views {
+		if failedSummary(tv.Summary.Text) {
+			n++
+		}
+	}
+	return n
+}
+
+// sumStats adds a run's typed stats up into one phrase, and reports whether they add up at all. Two
+// shapes sum, and they are the two shapes the registry's stat hooks actually write: a diffstat
+// ("+8 −3", diffCounts) and a counted noun ("12 lines", "4 entries", "2 hits"). Everything else —
+// "exit 0", "PASS", "clean", "done", a short hash — has no sum and comes back false, which the type
+// row prints as an empty slot.
+//
+// Only stats the presenter WORDED are summed (statPhrase): a promoted line is the tool's own text,
+// and one that happened to read "3 errors" or "12 lines" would otherwise be added into an arithmetic
+// it was never part of.
+func sumStats(views []toolView) (string, bool) {
+	if text, ok := sumDiffCounts(views); ok {
+		return text, true
+	}
+	return sumCountPhrases(views)
+}
+
+// statPhrase is one member's slot text WHEN it is the presenter's own typed phrase — the only kind
+// that may be summed. A quoted promotion, and a call still in flight with no slot at all, answer
+// false.
+func statPhrase(tv toolView) (string, bool) {
+	if tv.Summary.quoted || tv.Summary.Text == "" {
+		return "", false
+	}
+	return tv.Summary.Text, true
+}
+
+// sumDiffCounts adds a run of diffstats up: "+2 −1" and "+6 −2" make "+8 −3". Every member must
+// carry one, so a run where a single call errored or is still open does not sum — and does not need
+// to, since a failure is counted by the branch above it (runAggregate).
+func sumDiffCounts(views []toolView) (string, bool) {
+	added, removed := 0, 0
+	for _, tv := range views {
+		text, ok := statPhrase(tv)
+		if !ok {
+			return "", false
+		}
+		a, r, ok := parseDiffCounts(text)
+		if !ok {
+			return "", false
+		}
+		added, removed = added+a, removed+r
+	}
+	return diffCounts(added, removed), true
+}
+
+// parseDiffCounts reads a diffstat back out of the phrase diffCounts wrote — the one direction the
+// wording is ever read in, and deliberately anchored on that function's exact spelling (the ASCII
+// "+" and the U+2212 minus) so a change to how a diffstat is written cannot leave a summer quietly
+// parsing the old one.
+func parseDiffCounts(text string) (added, removed int, ok bool) {
+	head, tail, found := strings.Cut(text, " −")
+	if !found || !strings.HasPrefix(head, "+") {
+		return 0, 0, false
+	}
+	a, err := strconv.Atoi(strings.TrimPrefix(head, "+"))
+	if err != nil {
+		return 0, 0, false
+	}
+	r, err := strconv.Atoi(tail)
+	if err != nil {
+		return 0, 0, false
+	}
+	return a, r, true
+}
+
+// sumCountPhrases adds a run of counted nouns up. Every member must count the SAME thing, judged on
+// the noun with a plural "s" trimmed off it, so "1 line" and "12 lines" sum and "3 hits" beside
+// "2 files" does not.
+//
+// The total is then spelled the way the run's own members spell it: the noun is borrowed from a
+// member whose count has the same plurality as the total, which is what keeps a producer's fixed
+// spelling ("1 entries", "0 changed") intact instead of re-pluralising it into "1 entrie" or
+// "2 changeds". Only where no member shares the total's plurality — two ones making a two — does it
+// fall back to the naive plural, which is the very rule those members were written by.
+func sumCountPhrases(views []toolView) (string, bool) {
+	total, stem := 0, ""
+	for i, tv := range views {
+		text, ok := statPhrase(tv)
+		if !ok {
+			return "", false
+		}
+		n, noun, ok := countPhrase(text)
+		if !ok {
+			return "", false
+		}
+		if s := strings.TrimSuffix(noun, "s"); i == 0 {
+			stem = s
+		} else if s != stem {
+			return "", false
+		}
+		total += n
+	}
+	for _, tv := range views {
+		n, noun, _ := countPhrase(tv.Summary.Text)
+		if (n == 1) == (total == 1) {
+			return strconv.Itoa(total) + " " + noun, true
+		}
+	}
+	return plural(total, stem), true
+}
+
+// countPhrase splits a counted noun into its number and its word — "12 lines" into 12 and "lines".
+// It is deliberately total and deliberately strict: a phrase that is not exactly an integer, one
+// space and one word is not a count, so "exit 0", "PASS", "a1b2c3d" and a promoted sentence all
+// answer false and reach the slot untouched.
+func countPhrase(text string) (n int, noun string, ok bool) {
+	num, rest, found := strings.Cut(text, " ")
+	if !found || rest == "" || strings.ContainsRune(rest, ' ') {
+		return 0, "", false
+	}
+	n, err := strconv.Atoi(num)
+	if err != nil {
+		return 0, "", false
+	}
+	return n, rest, true
+}
+
 // enrichWithResult folds a tool's result into the view, in four layers. An error result
 // (the tool flagged it IsError — a normal in-band outcome the model reacts to) is the
 // one-line summary, so an errored call still groups with its neighbours. A result carrying a

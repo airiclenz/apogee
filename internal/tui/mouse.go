@@ -503,6 +503,11 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 // a click keeps its selection meaning, which is the overwhelmingly common case and the one this
 // returns on first.
 //
+// A super-group's two extra kinds are the same rule at its two extra levels (renderSuperGroup): a
+// TYPE ROW flips the second state of the run it heads — its member rows, not their bodies — and the
+// UMBRELLA HEADER closes every open child beneath it rather than toggling anything, its floor being
+// the type rows it never folds below (docs/layout/tool-layout.md, design call 9).
+//
 // WHAT a toggle line names is the paint's business and not this function's, which is why one case
 // covers a single block, its body and a group member alike. A single tool block marks every row it
 // paints for its HEAD entry — header, leader row and body — so a click on a Terminal call's output
@@ -547,6 +552,14 @@ func (m Model) toggleBlockAt(line, releaseRow int) (tea.Model, tea.Cmd) {
 		}
 	case targetMarker:
 		if !m.transcript.setExpanded(target.entry, true) {
+			return m, nil
+		}
+	case targetType:
+		if !m.transcript.toggleTypeExpanded(target.entry) {
+			return m, nil
+		}
+	case targetUmbrella:
+		if !m.transcript.closeSuperGroup(target.entry) {
 			return m, nil
 		}
 	default:

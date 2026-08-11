@@ -257,22 +257,35 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 			}})
 		},
 	}, {
-		// A Run keeps a body, so its two states really do paint differently — asserted here, because
-		// a toggle over a block that hides nothing would make this row vacuous.
-		name: "a block expanded and collapsed again",
+		// BOTH per-entry view states, on the one entry, because both are in the paint key and each is
+		// a level of the same block: the Run opens a super-group's TYPE ROW — the reads before it
+		// carry a different label, so the two runs fold under one umbrella — and the member behind
+		// that row then opens its own body. A Run keeps a body, so its two states really do paint
+		// differently — asserted at each step, because a toggle over something that hides nothing
+		// would make this row vacuous.
+		name: "a type row and a block expanded and collapsed again",
 		mutate: func() {
 			runCall(tr, "c5", "go test ./...", "ok   internal/tui\nok   internal/agent\nok   internal/run\nok   internal/schedule\nok   internal/domain\nPASS", 0)
 			head := len(tr.entries) - 1
-			collapsed := tr.renderView(th, width, blink)
+			shut := tr.renderView(th, width, blink)
+			if !tr.toggleTypeExpanded(head) {
+				t.Fatalf("entries[%d] heads no run — the script's fixture is wrong", head)
+			}
+			listed := tr.renderView(th, width, blink)
+			check("the Run's type row opened")
+			if equalLines(shut.lines, listed.lines) {
+				t.Error("the type row painted identically open and shut — it lists nothing")
+			}
 			if !tr.toggleExpanded(head) {
 				t.Fatalf("entries[%d] is not a toggleable block — the script's fixture is wrong", head)
 			}
 			expanded := tr.renderView(th, width, blink)
 			check("the Run expanded")
-			if equalLines(collapsed.lines, expanded.lines) {
+			if equalLines(listed.lines, expanded.lines) {
 				t.Error("the Run painted identically open and shut — its output hides nothing")
 			}
 			tr.toggleExpanded(head)
+			tr.toggleTypeExpanded(head)
 		},
 	}, {
 		name:   "a width change",

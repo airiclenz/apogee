@@ -487,9 +487,13 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 		want  []string
 	}{
 		{
+			// The narration between the two calls is what keeps them two BLOCKS: adjacent calls of
+			// different labels fold under one umbrella otherwise (toolSuperGroup), and one block has
+			// no spacer inside it to rail.
 			name: "two different-label blocks inside one run",
 			build: func(tr *transcript) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
+				tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "now the tests"})
 				tr.apply(domain.ToolCallEvent{
 					EventBase: domain.EventBase{Depth: 1},
 					Call:      domain.ToolCall{ID: "c2", Tool: "terminal", Arguments: []byte(`{"command":"go test"}`)},
@@ -501,6 +505,8 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 				"│ ✦ Read",
 				"│   ┕ a.go ⋯ 5 lines",
 				"│", // both sides sit at depth 1: the rail runs straight through
+				"│ ✦ now the tests",
+				"│",
 				"│ ✦ Terminal",
 				"│   ┕ go test ⋯",
 			},
@@ -758,9 +764,10 @@ func TestRenderGroupsDifferentToolsSharingALabel(t *testing.T) {
 
 // The flip side of the rule, and the ratified table's doing: grouping keys on the LABEL, so the
 // table's split of "Edit File" into Edit (edit_existing_file) and Replace (the find-and-replace
-// pair) splits the block too. Two adjacent calls that used to read as one "Edit File (2)" now head
-// two blocks — which is the point of the rename: a patch and a find-and-replace are different acts,
-// and a reader scanning the left edge should be told which one ran.
+// pair) splits the run too. Two adjacent calls that used to read as one "Edit File (2)" now head
+// two RUNS — two type rows of the umbrella they fold under, since adjacent runs of different labels
+// are what a super-group is — which is the point of the rename: a patch and a find-and-replace are
+// different acts, and a reader scanning the rows should be told which one ran.
 func TestRenderSplitsEditFromReplace(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "edit_existing_file",
@@ -774,14 +781,93 @@ func TestRenderSplitsEditFromReplace(t *testing.T) {
 		t.Fatalf("toolCallRun over Edit then Replace = %d views, want 1 — the labels differ", len(run))
 	}
 	got := renderPlain(tr, 80)
-	for _, want := range []string{"✦ Edit", "✦ Replace"} {
+	for _, want := range []string{"┝ Edit ", "┕ Replace "} {
 		if !strings.Contains(got, want) {
 			t.Errorf("painted transcript is missing %q:\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, "(2)") {
-		t.Errorf("the two calls were grouped under one header:\n%s", got)
+		t.Errorf("the two calls were grouped under one type row:\n%s", got)
 	}
+}
+
+// The umbrella's three states, in the order the canon spec sketches them (docs/layout/tool-layout.md
+// — "Grouped tools collapsed / expanded 1st step / expanded 2nd step (different types /
+// super-group)"): the type rows alone, one row opened to the calls behind it, and one of those calls
+// opened to its own body. One transcript walks all three, so the goldens read as the steps a reader
+// actually takes rather than as three unrelated fixtures.
+//
+// The shape each step pins is the spec's: a header naming the umbrella and counting its CALLS and
+// never a state indicator, since its floor is the type rows; one row per consecutive run in time
+// order, counting the run only where it holds more than one call; the run's aggregate in the outcome
+// slot ("14 lines" for the two reads, summed); member rows one level deeper under the │ gutter that
+// continues the row they opened out of; and an open member's body under a second gutter, closed by
+// the see-less footer.
+func TestRenderSuperGroupSketchStates(t *testing.T) {
+	// entries[0] and [1] are the two reads — one run — and entries[2] is the Terminal call that makes
+	// the second, which is what an umbrella needs at all (toolSuperGroup).
+	const readHead, runHead = 0, 2
+
+	build := func(t *testing.T) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		readCall(tr, "c1", "a.go", 1, 5, 0)
+		readCall(tr, "c2", "b.go", 1, 9, 0)
+		runCall(tr, "c3", "go test", "ok   a\nPASS", 0)
+		return tr
+	}
+	header := []string{
+		"✦ Tools (3 calls)",
+	}
+	readRowShut := groupMemberLine("  ┝ Read (2) ⋯ 14 lines")
+	readRowOpen := []string{
+		leaderEdgeRow("  ┝ Read (2) ⋯ 14 lines", glyphExpanded),
+		"  │ ┝ a.go ⋯ 5 lines",
+		"  │ ┕ b.go ⋯ 9 lines",
+	}
+
+	t.Run("collapsed to its type rows", func(t *testing.T) {
+		want := strings.Join(append(header,
+			readRowShut,
+			groupMemberLine("  ┕ Terminal ⋯ exit 0"),
+		), "\n")
+		if got := renderPlain(build(t), 80); got != want {
+			t.Errorf("collapsed umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("1st step: a type row opened to its members", func(t *testing.T) {
+		tr := build(t)
+		if !tr.setTypeExpanded(readHead, true) {
+			t.Fatalf("setTypeExpanded(%d, true) = false; want the Read run's type row open", readHead)
+		}
+		want := strings.Join(append(append(header, readRowOpen...),
+			groupMemberLine("  ┕ Terminal ⋯ exit 0"),
+		), "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("1st-step umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("2nd step: a member opened to its body", func(t *testing.T) {
+		tr := build(t)
+		if !tr.setTypeExpanded(readHead, true) || !tr.setTypeExpanded(runHead, true) {
+			t.Fatal("setTypeExpanded = false; want both type rows of the umbrella open")
+		}
+		if !tr.setExpanded(runHead, true) {
+			t.Fatalf("setExpanded(%d, true) = false; want the Terminal member open", runHead)
+		}
+		want := strings.Join(append(append(header, readRowOpen...),
+			leaderEdgeRow("  ┕ Terminal ⋯ exit 0", glyphExpanded),
+			leaderEdgeRow("  │ ┕ go test ⋯ exit 0", glyphExpanded),
+			"  │ │ ok   a",
+			"  │ │ PASS",
+			memberEdgeRow(t, "  │ │", promptSeeLess, 80),
+		), "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("2nd-step umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
 }
 
 // A member whose result has not landed shows its target and a leader running to the row's edge with
@@ -3166,6 +3252,25 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 			},
 			settled: "✦ Sub-Agent", flipped: "✦ Sub-Agent",
 		},
+		{
+			// The umbrella's star answers for every call under it, the group's rule one level up: the
+			// running call is its LAST row by construction of a time-ordered walk (design call 2), and
+			// that row is the only thing on screen saying the batch is not done.
+			name: "an umbrella blinks while its last run is open",
+			build: func(_ *testing.T, tr *transcript) {
+				readCall(tr, "c1", "main.go", 1, 154, 0)
+				openRun(tr, "c2", "go test ./...")
+			},
+			settled: "✦ Tools (2 calls)", flipped: "  Tools (2 calls)",
+		},
+		{
+			name: "an umbrella whose calls have all landed settles",
+			build: func(_ *testing.T, tr *transcript) {
+				readCall(tr, "c1", "main.go", 1, 154, 0)
+				runCall(tr, "c2", "go test ./...", "PASS", 0)
+			},
+			settled: "✦ Tools (2 calls)", flipped: "✦ Tools (2 calls)",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3729,6 +3834,9 @@ func TestRenderGroupBreakers(t *testing.T) {
 		want  []string
 	}{
 		{
+			// The break shows as three TYPE ROWS rather than three blocks: adjacent runs of different
+			// labels fold under one umbrella (renderSuperGroup), and what the breaker buys is that
+			// the two reads are two rows of it instead of one "Read (2)".
 			name: "a differently-labelled call between two reads",
 			build: func(tr *transcript) {
 				readCall(tr, "c1", "a.go", 1, 5, 0)
@@ -3737,15 +3845,10 @@ func TestRenderGroupBreakers(t *testing.T) {
 				readCall(tr, "c3", "b.go", 1, 9, 0)
 			},
 			want: []string{
-				"✦ Read",
-				"  ┕ a.go ⋯ 5 lines",
-				"",
-				"✦ Terminal",
-				groupMemberLine("  ┕ go test ⋯ exit 0"),
-				"    +3 more lines",
-				"",
-				"✦ Read",
-				"  ┕ b.go ⋯ 9 lines",
+				"✦ Tools (3 calls)",
+				groupMemberLine("  ┝ Read ⋯ 5 lines"),
+				groupMemberLine("  ┝ Terminal ⋯ exit 0"),
+				groupMemberLine("  ┕ Read ⋯ 9 lines"),
 			},
 		},
 		{
@@ -3846,21 +3949,27 @@ func TestRenderGroupBreakers(t *testing.T) {
 // approval note, and a sub-agent read — as an exact line sequence, blank lines included. It is the
 // backstop across the layout changes rather than a test of any one of them: the blank-line hygiene
 // shows as the single separator row between every block — empty at the top level, the │ rail
-// gutter inside the sub-agent run — the bracketless bold-gold label as the
-// header text, the grouping as the two counted blocks — three reads under "Read (3)",
-// and the two consecutive edits under "Replace (2)", differently tooled and sharing a label, each
-// held to one member row with its diff behind its own indicator now that a body no longer breaks a
-// run — and the uniform shape as the fact
-// that every header here — grouped, standalone, railed — is a label and nothing else, with the
-// target always leading its own branch row, the summary standing in the outcome slot flush against
-// that row's right edge behind a leader, and the body beneath. The ▶ at the right edge of every
-// leader row whose block hides something — on the HEADER only in the targetless mcp_search block,
-// which paints no leader row for it to sit at the edge of — and its absence everywhere else
-// is the affordance rule in the same picture: exactly the blocks here that hide something say so,
-// the targetless one among them now that it collapses like every other — and in a group it is the
-// MEMBER that says it, the counted header wearing none. A regression in any of
-// them changes this golden, and the golden doubles as the living example of what layout.md
-// sketches.
+// gutter inside the sub-agent run — and the bracketless bold-gold label as the header text.
+//
+// The eight calls in a row are ONE block now, the umbrella of docs/layout/tool-layout.md: five type
+// rows in time order under "✦ Tools (8 calls)", each counting its run where the run holds more than
+// one call ("Read (3)", "Replace (2)") and aggregating it in the outcome slot — the reads' 570 lines
+// summed, the Replace run blank because a diffstat and a change count do not add up. The golden
+// carries all three of the canon sketch's states at once: the rows collapsed, the Terminal row open
+// to the call behind it under a │ gutter, and that call open to its output under a second one,
+// closed by the see-less footer. The targetless mcp_search block is the run's breaker as well as the
+// grammar's other shape — it can lead no member row, so it stands alone with its verbatim arguments
+// as its own branches.
+//
+// The uniform shape shows as the fact that every header here — umbrella, standalone, railed — is a
+// label and nothing else, with the target always leading its own branch row, the summary standing in
+// the outcome slot flush against that row's right edge behind a leader, and the body beneath. The
+// ▶/▼ at the right edge of every row that hides something — on the HEADER only in the targetless
+// mcp_search block, which paints no leader row for it to sit at the edge of — and its absence
+// everywhere else is the affordance rule in the same picture: exactly the rows here that hide
+// something say so, the umbrella's own header wearing none because its floor is the type rows. A
+// regression in any of them changes this golden, and the golden doubles as the living example of
+// what the canon spec sketches.
 func TestTranscriptLayoutGolden(t *testing.T) {
 	tr := &transcript{}
 	tr.addUser("read the docs, then run the tests", nil)
@@ -3894,32 +4003,29 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		Arguments: []byte(`{"query":"collapse","limit":20}`)}})
 	tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})
 	readCall(tr, "c10", "main.go", 1, 154, 1)
+	// The Terminal run is opened to its member and the member to its body, so the golden carries all
+	// three of the canon sketch's states at once: the umbrella collapsed to its type rows, one row
+	// open to the calls behind it, and one of those open to its output.
+	if !tr.setTypeExpanded(5, true) || !tr.setExpanded(5, true) {
+		t.Fatal("entries[5] is not the Terminal run's head — the fixture's indexing is wrong")
+	}
 
 	want := strings.Join([]string{
 		"❯ read the docs, then run the tests",
 		"",
 		"✦ Reading the docs first.",
 		"",
-		"✦ Read (3)",
-		"  ┝ README.md ⋯ 154 lines",
-		"  ┝ TODO.md ⋯ 408 lines",
-		"  ┕ ISSUES.md ⋯ 8 lines",
-		"",
-		"✦ Terminal",
-		groupMemberLine("  ┕ go test ./... ⋯ exit 0"),
-		"    +3 more lines",
-		"",
-		"✦ Diff Preview",
-		groupMemberLine("  ┕ main.go ⋯ +2 −2"),
-		"    +6 more lines",
-		"",
-		"✦ Replace (2)",
-		groupMemberLine("  ┝ main.go ⋯ +1 −1"),
-		groupMemberLine("  ┕ main.go ⋯ 1 change"),
-		"",
-		"✦ Write",
-		groupMemberLine("  ┕ notes.md ⋯ 3 lines"),
-		"    +3 more lines",
+		"✦ Tools (8 calls)",
+		groupMemberLine("  ┝ Read (3) ⋯ 570 lines"),
+		leaderEdgeRow("  ┝ Terminal ⋯ exit 0", glyphExpanded),
+		leaderEdgeRow("  │ ┕ go test ./... ⋯ exit 0", glyphExpanded),
+		"  │ │ ok   apogee/internal/tui     0.412s",
+		"  │ │ ok   apogee/internal/agent   1.203s",
+		"  │ │ PASS",
+		memberEdgeRow(t, "  │ │", promptSeeLess, 80),
+		groupMemberLine("  ┝ Diff Preview ⋯ +2 −2"),
+		groupMemberLine("  ┝ Replace (2) ⋯"),
+		groupMemberLine("  ┕ Write ⋯ 3 lines"),
 		"",
 		"✦ mcp_search ▶",
 		"  ┝ query:",

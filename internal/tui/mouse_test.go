@@ -2747,3 +2747,129 @@ func TestTranscriptDragOutlivesASettingsHighlight(t *testing.T) {
 		t.Fatalf("flash = %q, want %q — the transcript's own span, not the field's", m.flash, flash)
 	}
 }
+
+// modelWithSuperGroup builds a ready idle model holding one user prompt and four calls in two runs
+// of different labels — two reads, then two Runs each carrying output — which is exactly what the
+// transcript folds into an umbrella (toolSuperGroup). The Runs carry bodies so their members have
+// something to reveal and therefore states of their own. The start-up box is dropped so the block
+// sits high enough to be aimed at.
+func modelWithSuperGroup(t *testing.T) Model {
+	t.Helper()
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	m.transcript.addUser("read the files, then check the build", nil)
+	readCall(&m.transcript, "c1", "a.go", 1, 5, 0)
+	readCall(&m.transcript, "c2", "b.go", 1, 9, 0)
+	runCall(&m.transcript, "c3", "go build ./...", "ok\nbuilt", 0)
+	runCall(&m.transcript, "c4", "go test ./...", "ok\nPASS", 0)
+	m.refreshViewport()
+	return m
+}
+
+// typeRowLine is the content line the run headed by entry head is listed on inside its umbrella,
+// read off the marks the painter made — the same accounting the mouse resolves against.
+func typeRowLine(t *testing.T, m Model, head int) int {
+	t.Helper()
+	for i, target := range m.lineTargets {
+		if target.kind == targetType && target.entry == head {
+			return i
+		}
+	}
+	t.Fatalf("no rendered row is marked as the type row of entry %d:\n%s", head, strings.Join(m.lines, "\n"))
+	return -1
+}
+
+// umbrellaHeaderLine is the content line the umbrella's own header paints on. It is found by its
+// TEXT rather than by its mark, because the header is deliberately unmarked while nothing is open —
+// which is one of the things the test below asserts.
+func umbrellaHeaderLine(t *testing.T, m Model) int {
+	t.Helper()
+	for i, line := range m.lines {
+		if strings.Contains(strip(line), superGroupLabel+" (") {
+			return i
+		}
+	}
+	t.Fatalf("the transcript paints no umbrella header:\n%s", strings.Join(m.lines, "\n"))
+	return -1
+}
+
+// TestSuperGroupClickTogglesEachLevel is the umbrella's whole interaction (design calls 6 and 9):
+// the deepest element under the pointer wins, so a click on a type row opens that RUN to its member
+// rows and a click on a member opens that CALL to its body, each leaving the other level alone; and
+// a click on the umbrella header — which toggles nothing, its floor being the type rows — closes
+// every open child at once.
+func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
+	// entries[0] is the prompt, so the two reads are entries 1..2 and the two Runs 3..4: one umbrella
+	// of two runs, headed at 1 and 3.
+	const readRun, runRun = 1, 3
+
+	clickLine := func(t *testing.T, m Model, line int) Model {
+		t.Helper()
+		return clickCell(t, m, 4, screenRow(t, m, line))
+	}
+
+	t.Run("a click on a type row lists the calls behind it", func(t *testing.T) {
+		m := modelWithSuperGroup(t)
+		m = clickLine(t, m, typeRowLine(t, m, readRun))
+		if !m.transcript.entries[readRun].typeExpanded {
+			t.Fatal("a click on the Read type row did not open it")
+		}
+		if m.transcript.entries[runRun].typeExpanded {
+			t.Error("opening one type row opened the other as well")
+		}
+		body := strings.Join(m.lines, "\n")
+		for _, want := range []string{"a.go", "b.go"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("the open run never listed %q:\n%s", want, body)
+			}
+		}
+		if m = clickLine(t, m, typeRowLine(t, m, readRun)); m.transcript.entries[readRun].typeExpanded {
+			t.Error("a second click on the type row did not close it again")
+		}
+	})
+
+	t.Run("a click on a member row opens that call alone", func(t *testing.T) {
+		m := modelWithSuperGroup(t)
+		m = clickLine(t, m, typeRowLine(t, m, runRun))
+		m = clickLine(t, m, memberRows(t, m, runRun)[0])
+		if !m.transcript.entries[runRun].expanded {
+			t.Fatal("a click on the member row did not open the call")
+		}
+		if m.transcript.entries[runRun+1].expanded {
+			t.Error("opening one member opened its sibling as well")
+		}
+		if !m.transcript.entries[runRun].typeExpanded {
+			t.Error("opening a member closed the type row it sits under")
+		}
+		if body := strings.Join(m.lines, "\n"); !strings.Contains(body, "built") {
+			t.Errorf("the open member's body never reached the viewport:\n%s", body)
+		}
+	})
+
+	t.Run("the header closes every open child", func(t *testing.T) {
+		m := modelWithSuperGroup(t)
+		m = clickLine(t, m, typeRowLine(t, m, readRun))
+		m = clickLine(t, m, typeRowLine(t, m, runRun))
+		m = clickLine(t, m, memberRows(t, m, runRun)[0])
+
+		m = clickLine(t, m, umbrellaHeaderLine(t, m))
+		for i, e := range m.transcript.entries {
+			if e.expanded || e.typeExpanded {
+				t.Errorf("entry %d is still open after the header click (expanded=%v, type=%v)",
+					i, e.expanded, e.typeExpanded)
+			}
+		}
+	})
+
+	t.Run("the header offers nothing while nothing is open", func(t *testing.T) {
+		m := modelWithSuperGroup(t)
+		header := umbrellaHeaderLine(t, m)
+		if kind := m.lineTargets[header].kind; kind != targetNone {
+			t.Errorf("the header of a shut umbrella is marked %v, want no target at all", kind)
+		}
+		before := strings.Join(m.lines, "\n")
+		if got := strings.Join(clickLine(t, m, header).lines, "\n"); got != before {
+			t.Errorf("a click on the shut umbrella's header repainted it:\n%s", got)
+		}
+	})
+}

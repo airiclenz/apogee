@@ -1012,6 +1012,33 @@ func (t *transcript) toggleTypeExpanded(index int) bool {
 	return t.setTypeExpanded(index, !t.entries[index].typeExpanded)
 }
 
+// closeSuperGroup closes every open child of the umbrella headed by entries[head] — what a click on
+// its header means (design call 9, docs/layout/tool-layout.md: "the umbrella's floor is its type
+// rows … clicking the umbrella header closes all open children"). It reports whether anything was
+// open to close, so a click on a header with nothing behind it repaints nothing.
+//
+// BOTH levels are cleared, the type rows and the members beneath them, because "closed" has to mean
+// the same thing whichever way a reader got there: a member left open under a type row that was
+// closed first is invisible but still open, and a header that left it that way would reopen it the
+// next time the type row was.
+//
+// head must be the umbrella's own head — the index [transcript.renderView] painted the header at and
+// marked its lines with. The derivation is only correct at a run boundary (toolSuperGroup), which is
+// exactly what a painted head is; asked anywhere else it would answer about a different umbrella,
+// and an index that heads no umbrella at all answers with no runs and so changes nothing.
+func (t *transcript) closeSuperGroup(head int) bool {
+	changed := false
+	for _, r := range toolSuperGroup(t.entries, head) {
+		for i := r.at; i < r.at+r.n; i++ {
+			if t.entries[i].expanded || t.entries[i].typeExpanded {
+				t.entries[i].expanded, t.entries[i].typeExpanded = false, false
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
 // toolRun is one RUN of tool calls: the maximal stretch of adjacent entries carrying the same
 // friendly Label at the same sub-agent depth, every one of them foldable into a member row
 // (groupable). It is the unit both folded shapes are built from — a same-label group IS one run, and

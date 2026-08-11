@@ -294,9 +294,64 @@ same umbrella), state retention across appends.
 
 **Commit:** `feat(tui): model mixed-type tool super-groups in the transcript`
 
-## 6. Super-group rendering and umbrella interaction
+## 6. Super-group rendering and umbrella interaction — ✅ DONE (2026-08-11)
 
 Depends on items 4 and 5.
+
+NOTES (2026-08-11): the render walk asks `toolSuperGroup` only at a block head — the carried-over
+warning from item 5's verifier, taken as binding. `renderView`'s loop index is one by construction
+(every branch either advances a single entry or skips a whole block), and the umbrella branch is
+placed ahead of the same-label one because a same-label run inside an umbrella is a ROW of it rather
+than a block of its own. `paintKey.shape` stops being redundant with this fourth painter and its
+comment says so.
+
+NOTES (2026-08-11): the aggregate is one rule over the members' typed stat WORDING, not a per-label
+table. `runAggregate` sums the two shapes the registry's hooks actually write — a counted noun
+("12 lines", "4 entries") and a diffstat ("+8 −3") — reading them back through the parser that wrote
+them, and answers blank for anything else. A per-label whitelist would be a second place to update
+whenever a hook reworded its stat, and the seam is the same "per-label" one the item asks for either
+way: what a run holds is one label's calls. Three calls the item's text does not word:
+
+(a) A run of ONE aggregates to its own member's summary, verbatim, rather than to a count or to
+blank. Summing one call is that call, so nothing has to be invented — a lone failure keeps the
+"error: …" sentence that says what went wrong instead of reading "1 error", and a promoted line stays
+the quoted line it is. The failure count applies from two members up.
+
+(b) The total is spelled the way the run's own members spell it (borrowing the noun from a member
+whose count shares the total's plurality), because the producers do not agree on English: `list_dir`
+writes a fixed "1 entries" and `git_status` an invariant "0 changed", and naive re-pluralising would
+have made those "1 entrie" and "2 changeds".
+
+(c) `failedSummary` (render.go) was extended to read the aggregate's own "N errors" wording, so the
+type row's red goes through the ONE style authority (`summaryStyle`) rather than a second verdict
+flag beside it — the standing doctrine of that function read one level up. Only summaries the
+presenter WORDED are summed (`statPhrase`): a promoted line is the tool's text, and one reading "12
+lines" must not be added into an arithmetic it was never part of.
+
+NOTES (2026-08-11): three shape calls the item's text does not word.
+(a) A type row's left is the tool label in its own bold gold with the count in the faint tone every
+group count wears — the umbrella exists to be scanned for tool names, and painting the row's naming
+cell in the target's grey would take that away. The count follows `renderToolGroup`'s existing rule
+and appears only for a run of 2+, so a lone call's row reads "Terminal" rather than "Terminal (1)".
+(b) The umbrella header is marked as a click target only while a type row is open. Design call 9
+gives it "close all open children", which is nothing to offer when nothing is open, and item 4's
+rule against writing an affordance that lies applies unchanged; it wears no ▶/▼ either, its floor
+being the type rows.
+(c) Member rows take canon's own nested frame, "  │ ┝ " over a "  │ │ " body, built from
+`memberGutter` rather than restated. Reaching it meant handing the frame in rather than hard-coding
+it: `renderGroupMember`/`renderExpandedMember` gained a gutter parameter, `guardPromotions` a marker
+one (a member one level deeper has that much less target for the promote-guard to protect), and
+`leaderRow` split into `leaderRowIn`, which takes the row's left as plain text plus a painter — a
+type row is the same row about a whole run, and a second copy of the overflow order would have parted
+company with the first.
+
+NOTES (2026-08-11): the umbrella is a visible change to every mixed batch, so five existing tests
+moved with it, all fixture updates rather than rule changes: `TestTranscriptLayoutGolden` (now the
+living example of all three sketch states), `TestRenderGroupBreakers`' differently-labelled case and
+`TestRenderSplitsEditFromReplace` (the break now shows as separate TYPE ROWS), the paint-cache script
+(its toggle step drives both levels, which is what puts the new `typeExpanded` flag through the key),
+and the wide-detail paint probe. `TestRenderSpacerRailsAtTheJoinDepth`'s "two different-label blocks"
+case gained a narration between its calls, since two such blocks no longer exist without a breaker.
 
 **What:** Paint the umbrella (`internal/tui/render.go`): header `✦ Tools (N calls)` —
 N = total calls, count in the faint tone (design call 9); one type row per run in time

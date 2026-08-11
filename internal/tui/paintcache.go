@@ -41,22 +41,23 @@ package tui
 // `&transcript{}`) simply renders uncached, and a cold render is always available as the oracle a
 // warm one is checked against.
 
-// blockShape names which of [transcript.renderView]'s three painter branches produced a paint — the
+// blockShape names which of [transcript.renderView]'s four painter branches produced a paint — the
 // branch itself, not anything derived from it.
 //
-// Today it is redundant, and deliberately kept: a head that changes branches also changes the length
-// of its span, so the flags string already differs (a sub-agent call whose first nested entry has not
-// arrived is an ordinary one-entry tool block, and becomes a two-entry run's head the moment it
-// does). That redundancy is an accident of the three branches renderView happens to have, not a
-// property of the design — and the cost of relying on it is that a fourth painter sharing a span
-// length with a third would serve the wrong paint with no test able to see it. Naming the branch
-// costs an int.
+// It was redundant when there were three, and deliberately kept: a head that changed branches also
+// changed the length of its span, so the flags string already differed (a sub-agent call whose first
+// nested entry has not arrived is an ordinary one-entry tool block, and becomes a two-entry run's
+// head the moment it does). That redundancy was an accident of the branches renderView happened to
+// have, not a property of the design — and the cost of relying on it was that a fourth painter
+// sharing a span length with a third would serve the wrong paint with no test able to see it.
+// Naming the branch costs an int.
 type blockShape int
 
 const (
 	shapeEntry       blockShape = iota // renderEntryLines — one entry, one block
 	shapeToolRun                       // renderToolBlock over a folded run of same-label calls
 	shapeSubAgentRun                   // renderSubAgentRun — the call plus the run nested under it
+	shapeToolSuper                     // renderSuperGroup — the umbrella over adjacent runs of different tools
 )
 
 // paintKey is everything one block's paint depends on besides the immutable content of its

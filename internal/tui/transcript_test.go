@@ -977,8 +977,8 @@ func runCall(tr *transcript, id, command, output string, depth int) {
 // the inner blocks and every spacer among them are gone, the report body is gone with them, and the
 // head's summary slot carries the cascading count and gist.
 // Expanded, the head shows the report it actually returned and the railed span comes back exactly
-// as it has always painted — with each inner block in its OWN state, which is why the Run inside it
-// is still collapsed to its first line and a remainder marker.
+// as it has always painted — with each inner block in its OWN state, which is why the umbrella the
+// two inner calls fold under (renderSuperGroup) comes back with both of its type rows still shut.
 func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
@@ -1011,12 +1011,9 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 		"",
 		"│ ⤷ sub-agent",
 		"│",
-		"│ ✦ Read",
-		"│   ┕ a.go ⋯ 5 lines",
-		"│",
-		"│ ✦ Terminal",
-		leaderEdgeRow("│   ┕ go test ⋯ exit 0", glyphCollapsed),
-		"│     +3 more lines",
+		"│ ✦ Tools (2 calls)",
+		leaderEdgeRow("│   ┝ Read ⋯ 5 lines", glyphCollapsed),
+		leaderEdgeRow("│   ┕ Terminal ⋯ exit 0", glyphCollapsed),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != expanded {
 		t.Errorf("expanded run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, expanded)

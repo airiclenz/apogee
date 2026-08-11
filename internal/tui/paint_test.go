@@ -1028,9 +1028,10 @@ type paintedDetail struct {
 // paintedDetailRows drives one tool result whose whole body is detailClipRunes+40 of fill through
 // the transcript, with a second block behind it, and reports what the terminal painted.
 //
-// A row belongs to the detail when it holds nothing but fill and the clip marker, which is why the
-// fixture's body is a single repeated glyph — it names its own rows on the painted grid, with no
-// arithmetic about indents or wrap points standing between the assertion and what the screen shows.
+// A row belongs to the detail when it holds nothing but its gutter, fill and the clip marker, which
+// is why the fixture's body is a single repeated glyph — it names its own rows on the painted grid,
+// with no arithmetic about indents or wrap points standing between the assertion and what the screen
+// shows.
 //
 // The block is EXPANDED, because the retained line is what this probes: a collapsed block spends
 // one row on its branch and clips the rest whatever the line holds (leaderRow,
@@ -1051,6 +1052,14 @@ func paintedDetailRows(t *testing.T, method ansi.Method, fill string) paintedDet
 	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 		ID: "c2", Tool: "read_file", Arguments: []byte(`{"path":"neighbour.go"}`)}})
 	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "one line"}})
+	// The two calls carry different labels, so they fold under one umbrella and each is a run of its
+	// own: both type rows are opened for their member rows to paint at all, and the wide detail's own
+	// member is then opened for its retained body (renderSuperGroup).
+	for i := range 2 {
+		if !m.transcript.setTypeExpanded(i, true) {
+			t.Fatalf("setTypeExpanded(%d, true) = false; want both type rows of the umbrella open", i)
+		}
+	}
 	if !m.transcript.setExpanded(0, true) {
 		t.Fatal("setExpanded(0, true) = false; want the wide detail's block expanded")
 	}
@@ -1061,7 +1070,7 @@ func paintedDetailRows(t *testing.T, method ansi.Method, fill string) paintedDet
 		if w := paintedWidth(trimRight(row), method); w > m.width {
 			t.Errorf("transcript row %d paints %d columns, past the %d-column window: %q", i, w, m.width, row)
 		}
-		body := strings.TrimSpace(strip(row))
+		body := strings.TrimLeft(strings.TrimSpace(strip(row)), glyphMemberGutter+" ")
 		if body != "" && strings.Trim(body, fill+"…") == "" {
 			out.detail = append(out.detail, strip(row))
 			out.lastDetail = i
