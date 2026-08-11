@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/format"
 )
@@ -144,13 +145,46 @@ func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool
 	if head.expanded {
 		marker = subAgentOpenMarker
 	}
-	return renderToolBlock(th, []toolView{view}, railedWidth(width, head.depth), blockState{
+	inner := railedWidth(width, head.depth)
+	block := renderToolBlock(th, []toolView{view}, inner, blockState{
 		expanded: head.expanded,
 		elides:   true,
 		live:     !head.done || anyOpenCall(span),
 		blink:    blink,
 		marker:   marker,
-	}).railed(th, head.depth)
+	})
+	// The prompt opens the SPAN and so is added after the head's own rows — under the report the
+	// head promoted or laid out, and above the first block the delegate produced. It joins the
+	// head's click surface (targetHeader) because a spanned delegation always elides something and
+	// so is always a toggle: every row this block paints closes it again, the rule the block's own
+	// body rows already answer to (renderToolBlock).
+	if head.expanded {
+		block.add(subAgentPromptRows(th, view.task, inner), targetHeader)
+	}
+	return block.railed(th, head.depth)
+}
+
+// subAgentPromptRows opens an EXPANDED delegation's railed span with what the delegation was
+// actually ASKED: one blank rail line, then the retained prompt (toolView.task) rendered through the
+// transcript's own markdown pipeline behind the rail (docs/layout/tool-layout.md, "Grouped
+// Sub-agents"). The span's own first block brings the blank line that CLOSES the frame with it — a
+// block separator railed at the span's depth (railJoin) — so emitting one here would open a two-row
+// gap under the prompt.
+//
+// It is [renderMarkdownBody] and not a plain wrap because the prompt is prose a model wrote: its
+// headings, lists and fences are how it reads, and rendering it any other way would show a prompt
+// nobody would recognise as the one they sent. width is the block's already-railed inner column, so
+// the text is wrapped to what is left inside the run's own rail.
+//
+// A delegation with no prompt to show — an empty task, whitespace alone, a record written before the
+// text was retained (transcriptcodec.go) — opens no block at all rather than a blank rail line over
+// an empty row: the frame exists to hold the prompt, and there is nothing here for it to hold.
+func subAgentPromptRows(th theme, task string, width int) []string {
+	if strings.TrimSpace(task) == "" {
+		return nil
+	}
+	body := renderMarkdownBody(th, task, railedWidth(width, 1))
+	return append([]string{railSpacer(th, 1)}, railLines(th, body, 1)...)
 }
 
 // subAgentMember is one row of a folded sub-agent group as the painter needs it: the delegation's
@@ -284,7 +318,10 @@ func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room 
 		out = append(out, gutteredWrap(th, detailStyle(th, d.Kind, true), memberGutter, memberGutter,
 			d.Text, room)...)
 	}
-	return out, true
+	// The span this row opened begins with the prompt the delegate was handed, exactly as a lone
+	// run's does (renderSubAgentRun): folding changes the frame around a delegation and never what
+	// the delegation shows of itself.
+	return append(out, subAgentPromptRows(th, tv.task, width)...), true
 }
 
 // collapsedSubAgentView is what a COLLAPSED delegation shows of itself, wherever it is folded: its

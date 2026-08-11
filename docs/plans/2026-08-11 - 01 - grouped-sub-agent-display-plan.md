@@ -206,7 +206,22 @@ the group member's; no `⤷` remains in the package.
 
 **Commit:** `feat(tui): lone sub-agent runs share the rail shape; drop the ⤷ label`
 
-## 6. Prompt body: markdown-rendered task text inside the rail
+## 6. Prompt body: markdown-rendered task text inside the rail — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): three deviations. (a) Only the OPENING blank rail line is emitted here — the
+closing one is the block separator the span's first block already brings with it, railed at the
+span's depth (`railJoin`, wrap.go). The painted shape is the sketch's exactly; emitting a second
+blank row would open a two-row gap under the prompt. (b) The prompt is appended after the head's
+OWN rows rather than spliced under the header row, so a delegation whose report was long enough to
+lay out as a body (`Found 4 gaps…` + see-less footer) shows that body above the prompt. The item's
+words are "the expanded SPAN's body opens with the task text", and it does — the prompt is the
+first thing inside the rail; moving the head's report to the end of the span is a different change
+and no item owns it. (c) Re-pinning reached beyond `render_test.go`: the expanded-run goldens in
+`transcript_test.go` (`TestSubAgentRunCollapsesToItsCallBlock`,
+`TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent`,
+`TestParentMessageKeepsTheDelegatesStreamInsideItsRun`) and the marks case in
+`TestRenderMarksTheWholeBlock` all paint an open delegation. `doc.go`'s rail narration gained the
+prompt with them.
 
 Depends on items 2, 4, 5.
 

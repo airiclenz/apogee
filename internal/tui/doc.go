@@ -69,7 +69,10 @@
 // report body is elided with that frame, so a collapsed run reads as ONE summarised line and never
 // repeats in a body row what the summary slot just said; the framing and the full report are what
 // expanding it reveals, each inner block in its own state (layout.md, "Collapsed and expanded
-// blocks"). While anything behind a block's header is still waiting for a result, that
+// blocks"). An OPEN run's railed span opens on the prompt the delegate was handed — the retained
+// task text rendered as markdown behind the rail ([subAgentPromptRows]) — so the frame reads as
+// what was ASKED, then the work, then what came back; the header row above it says only what the
+// delegation IS, which is the half a collapsed row has room for. While anything behind a block's header is still waiting for a result, that
 // header's ✦ blinks against a bare cell ([blockState.star]) on the STATUS SPINNER's half-second
 // phase ([spinnerAnim.blink]) — the transcript keeps no clock of its own, and the spinner tick
 // repaints the viewport only on the tick that flips that phase and only while

@@ -1005,7 +1005,9 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 		"    in the suite",
 		"    here they are",
 		seeLessFooterLine(t, 80), // the head's own body closes with the footer; its span follows below
-		"│",                      // the separator is railed: an open head's span continues its frame
+		"│",                      // the span opens on the prompt the delegate was handed (item 6)…
+		"│ survey the tests",
+		"│", // …and the separator is railed: an open head's span continues its frame
 		"│ ✦ Tools (2 calls)",
 		leaderEdgeRow("│   ┝ Read ⋯ 5 lines", glyphCollapsed),
 		leaderEdgeRow("│   ┕ Terminal ⋯ exit 0", glyphCollapsed),
@@ -1232,6 +1234,8 @@ func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
 		"✦ Sub-Agent",
 		leaderEdgeRow("┌─┶ survey the repo ✓ ⋯ survey complete", glyphExpanded),
 		"│",
+		"│ survey the repo", // the outer span opens with the prompt the delegate was handed
+		"│",
 		"│ ✦ Sub-Agent", // the nested run keeps its OWN state, and its indicator says so
 		leaderEdgeRow("│   ┕ read the tests ✓ ⋯ 1 tool call · tests read", glyphCollapsed),
 	}, "\n")
@@ -1378,6 +1382,8 @@ func TestParentMessageKeepsTheDelegatesStreamInsideItsRun(t *testing.T) {
 		// The frame opens on the run being OPEN and not on its being over: this delegate never
 		// reported, so the row wears the ┌─┶ and no ✓ (design call 6).
 		leaderEdgeRow("┌─┶ survey the tests ⋯", glyphExpanded),
+		"│",
+		"│ survey the tests", // the span opens with the prompt, whatever the delegate went on to say
 		"│",
 		"│ ✦ child words",
 		"┊", // the run closes before the parent picks its own thread back up
