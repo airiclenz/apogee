@@ -297,6 +297,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The `sub_agent` tool now tells the model it may delegate several times in one reply.** The
+  parallel fan-out has been there since the per-server Parallel agents cap landed, but nothing on
+  the model-facing surface said so, and a model that does not batch tool calls of its own accord
+  never tried: a live run dispatched every phase of a multi-agent workflow one call per turn, so the
+  cap never engaged and independent sub-tasks ran end to end. The description now says outright that
+  sub_agent may be called several times in a single reply and that siblings run concurrently, so
+  independent work is dispatched together. Nothing about the schema, the name or the dispatch path
+  changed — only what the model is told about them.
+
 - **`docs/layout/tool-layout.md` is the canonical tool-block spec now, and `layout.md` points at
   it.** The two `layout.md` sections that carried the tool-block shape — §"The rules behind the
   tool-call sketch" and §"Collapsed and expanded blocks" — keep only the grammar every block obeys

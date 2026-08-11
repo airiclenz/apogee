@@ -186,7 +186,7 @@ plan is re-invoked later; items 1–2 stay landed.
 **Commit:** none — nothing to commit; the verifier marks the item done on a
 passing check alone.
 
-## 4. sub_agent description: invite concurrent same-reply delegations; close the ISSUES entry
+## 4. sub_agent description: invite concurrent same-reply delegations; close the ISSUES entry — ✅ DONE (2026-08-11)
 
 Depends on item 3.
 

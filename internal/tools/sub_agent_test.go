@@ -2,8 +2,24 @@ package tools
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
+
+// TestSubAgentDescriptionInvitesConcurrentDelegations guards the one sentence that tells the
+// model it may fan out: the ADR 0039 concurrent dispatch is only ever exercised when the model
+// emits several sub_agent calls in ONE reply, and the description is the only place it learns
+// that it may. A live run showed models dispatching one call per turn without it.
+func TestSubAgentDescriptionInvitesConcurrentDelegations(t *testing.T) {
+	t.Parallel()
+
+	desc := NewSubAgent().Description()
+	for _, want := range []string{"several times in a single reply", "concurrently"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("description does not invite concurrent same-reply delegations (missing %q): %q", want, desc)
+		}
+	}
+}
 
 // TestSubAgentSchemaOffersAnOptionalName pins the model-facing contract for the delegation
 // name: the published schema advertises a string `name` property, and `task` stays the ONLY

@@ -22,7 +22,10 @@ var subAgentSpec = toolSpec{
 	name: SubAgentToolName,
 	description: "Delegate a focused sub-task to a nested sub-agent. The sub-agent runs with the " +
 		"same (or stricter) privileges as you, has a subset of your tools, and reports a " +
-		"single result back. Use it to isolate a self-contained piece of work.",
+		"single result back. Use it to isolate a self-contained piece of work. " +
+		"You may call sub_agent several times in a single reply; sibling delegations run " +
+		"concurrently, so dispatch independent sub-tasks together in one reply rather than " +
+		"one per turn.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["task"],
