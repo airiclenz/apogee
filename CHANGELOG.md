@@ -10,6 +10,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`/usage` — what this session has spent, agent by agent.** The status gauge is a *fill*: it says
+  how full the window stands right now, nothing about the tokens a long run burned through and
+  compacted away, and nothing at all about a delegate whose window closed when its run ended.
+  `/usage` opens a popup that answers that question instead — `agent · calls · prompt · completion ·
+  total · ctx`, one row for the main agent, one for every sub-agent that reported a count (in
+  transcript order, indented under it, named by the delegation or the first line of its task), and a
+  `session` row adding them up wherever there is more than one agent to total. `esc` closes it, a
+  click outside dismisses it without swallowing the click, and the wheel scrolls the rows when a
+  session fanned out past the pane's row budget. The verb is safe while the model works — the pane
+  reads what the frame already holds and calls nothing — which is exactly when the question gets
+  asked. The counting itself lives in the **engine**, not the screen: every agent, main and each
+  delegate, keeps its own running totals and stamps them on each `UsageEvent` it emits, so every
+  Driver reads the same numbers with the latest event per agent winning and no consumer summing
+  anything. Compaction is counted too, on an event flagged `Maintenance` that the fill gauge and the
+  tokens/sec clock skip and the totals accept — so the report is right immediately after a
+  `/compact` rather than pretending the fold was free. The totals ride a session save and come back
+  on reload; sessions recorded before this feature reload with zeros. `apogee headless` reports the
+  same figures on stderr — `usage: calls 3 · prompt 18k · completion 1k · total 19k` for the run and
+  one such line per delegated run — and they are on `run.Result` for any other Driver to read.
 - **An expanded sub-agent is now a framed span that opens with what the delegate was asked.**
   Opening a delegation used to reveal a `⤷ sub-agent` label and then, straight away, the child's
   tool calls — the one thing missing was the instruction that produced them. The row you open a

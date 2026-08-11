@@ -233,8 +233,8 @@ cursor is on, so you can start typing a message and reach for a command halfway
 through, or go back and fix a misspelled name. Accepting a command from the menu
 **runs it and keeps the rest of your draft**. The menu stays open while the model is
 working, too — commands that need a quiet engine wear an `— idle only` tag for as long
-as the engine is busy, and say so if you pick one anyway, while `/version`, `/skills`
-and `/confine`'s status report answer immediately. Once the engine is idle that tag is
+as the engine is busy, and say so if you pick one anyway, while `/version`, `/skills`,
+`/usage` and `/confine`'s status report answer immediately. Once the engine is idle that tag is
 gone from the menu entirely — there is nothing left for it to warn about. A token
 lights up in the box exactly when it resolves — the `skill` role for a skill your catalog
 has, the `file-ref` role for a file your workspace has (violet and green under `dark`) — so
@@ -246,6 +246,7 @@ a typo is visible before you send.
 | `@<path>` | Hand a workspace file to the model | ✅ rides the queued message |
 | `/skills` | List the discovered skills — id, name and summary | ✅ |
 | `/version` | Show the apogee version | ✅ |
+| `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total | ✅ |
 | `/confine` | Report or change Auto's blast radius — see [below](#auto-modes-blast-radius) | ✅ report only |
 | `/schedule` | Run a prompt on a cycle — bare lists what is live, `/schedule <prompt>` asks for the cycle and mode, `/schedule <cycle> [auto] <prompt>` creates one outright | ✅ |
 | `/schedule-stop` | Take a schedule off the clock — the only one straight away, a picker when several are live | ✅ |

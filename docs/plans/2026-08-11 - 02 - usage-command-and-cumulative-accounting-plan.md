@@ -218,9 +218,16 @@ closes; hit inside is consumed).
 
 **Commit:** `feat(tui): mouse hit-testing for the usage popup`
 
-## 7. Docs + changelog
+## 7. Docs + changelog — ✅ DONE (2026-08-11)
 
 Depends on items 4 and 5.
+
+NOTES (2026-08-11): one edit beyond the item's literal text — README's prose about the menu while the
+engine is busy named three of the four verbs that answer immediately (`/version`, `/skills`,
+`/confine`); `/usage` is `whileRunning: true`, so it joined that list two paragraphs above the table
+it was being added to. `layout.md` already carries the item-4 section (`## The /usage popup`,
+extended by item 6) and was left untouched, and README's headless section already documents the
+`usage:` lines item 5 added — neither was duplicated.
 
 **What:** add the `/usage` row to the README command table (~`README.md:257`); one
 `CHANGELOG.md` line under `[Unreleased]` describing the feature (command + engine
