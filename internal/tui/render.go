@@ -1062,10 +1062,9 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // It also marks the block's CLICK SURFACE as it emits it, because the lines and the marks have to
 // be one act: a second pass over the finished lines would be a second derivation of the same
 // accounting, and the two would drift the first time the shape changed (ADR 0030's rule). That
-// surface is the block WHOLE — its header, the clipped target rows beneath it, and, open, the full
-// target and every body line — the shape the prompt block has always had (renderUserBlock): a
-// reader who wants the rest of a Run's output clicks the output, not the one row of the block that
-// happens to be its header. The one exception is the synthesized `+N more lines` marker, which
+// surface is the block WHOLE — its header, the leader row beneath it, and, open, every body line —
+// the shape the prompt block has always had (renderUserBlock): a reader who wants the rest of a
+// Run's output clicks the output, not the one row of the block that happens to be its header. The one exception is the synthesized `+N more lines` marker, which
 // keeps its OPEN-ONLY meaning (targetMarker): it is a line of the collapsed paint alone, so a click
 // there can only mean "show me the rest".
 //
@@ -1444,7 +1443,8 @@ func failedSummary(text string) bool {
 // clipCells fits text into ONE row of at most cells columns, ending it in clipTail when it had to
 // cut, and reports the cut. It is clipWrap's arithmetic with no marker and no style — the same
 // hangingPrefixes wrap and the same fitted tail — for the caller that has to keep composing after
-// the clip instead of painting what comes back (groupMemberText).
+// the clip instead of painting what comes back (leaderRow, which seats a clipped target and a
+// clipped outcome slot in a row it goes on to assemble).
 //
 // It goes through the wrap rather than truncating the string, so a target carrying a newline is cut
 // at its first line like any other overlong one: wrapText keeps the text's own line breaks, and a
@@ -1788,9 +1788,9 @@ func splitAtCap[T any](lines []T, limit int) (shown []T, hidden int) {
 // artefact rather than a body line, and lets the painter mark it as its own click target instead of
 // sniffing the finished lines for the wording.
 //
-// The split is also half the toggle-target rule's oracle: truncated is "the collapsed paint hides
-// body", which — with a clipped target, the other half — is what makes a header clickable
-// (blockHidesWhenCollapsed, through collapsedCall).
+// The split is also the toggle-target rule's oracle for this shape: truncated is "the collapsed
+// paint hides body", and since a targeted block's leader row is the same row open or closed, that
+// alone is what makes its header clickable (blockHidesWhenCollapsed, through collapsedCall).
 //
 // Nothing about the lines is examined at this seam, which is worth having: this runs on every
 // repaint and twice per call, since the toggle-target rule asks it as well as the branch does, over
@@ -1820,9 +1820,11 @@ const collapsedBodyRows = 0
 // line has rows to spend on them. Which lines are cut is the only thing the shape decides; neither
 // can grow taller than the block's own budget.
 //
-// It answers for the lines alone. A targeted call also hides when the row budget CLIPS its branch,
-// which is a fact about the width rather than about the entry, and lives with the clip that takes
-// it (collapsedBranch).
+// It answers for the lines alone, and for a TARGETED call that is the whole answer: its branch is
+// one leader row in both states (leaderRow), so an over-long target ends in " …" open or closed and
+// a clipped target reveals nothing to expand (blockHidesWhenCollapsed). The width still reaches the
+// TARGETLESS shape, whose surviving branch lines the row budget cuts — a fact about the width rather
+// than about the entry, which lives with the clip that takes it (clipDetails).
 func collapsedCall(tv toolView) (shown []detailLine, remainder detailLine, truncated bool) {
 	if tv.Target == "" {
 		return collapseAtCap(branchDetails(tv), collapsedBodyCap)
@@ -1974,10 +1976,11 @@ func renderDetails(th theme, details []detailLine, width int) []string {
 // is what keeps that shape inside the four-row budget the targeted one is held to — unclipped, one
 // argument blob's first line soft-wrapped the block as tall as the terminal was narrow.
 //
-// It REPORTS the cut for the same reason collapsedBranch does: whether a collapsed targetless block
-// hides anything is width-dependent once its lines can be cut, and the indicator, the click target
-// and the paint all have to agree about it (blockHidesWhenCollapsed). Each shape asks the clipper
-// that paints it, so neither can drift from what is on screen.
+// It REPORTS the cut because whether a collapsed targetless block hides anything is width-dependent
+// once its lines can be cut, and the indicator, the click target and the paint all have to agree
+// about it (blockHidesWhenCollapsed). It is the only cut that is asked about: the targeted shape's
+// row is one row in both states, so the target it clips hides nothing (leaderRow). The rule asks the
+// clipper that paints the shape, so it cannot drift from what is on screen.
 func clipDetails(th theme, details []detailLine, width int) (lines []string, clipped bool) {
 	out := make([]string, 0, len(details))
 	for i, d := range details {
