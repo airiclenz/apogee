@@ -114,6 +114,22 @@ func TestBuiltinSchemesKeepBothMutedStepsDistinct(t *testing.T) {
 	}
 }
 
+func TestBuiltinSchemesKeepBothMarkerStepsDistinct(t *testing.T) {
+	t.Parallel()
+	for _, name := range builtinNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := builtinScheme(t, name)
+			// The marker pair carries the same open/closed step as the muted pair, one column
+			// over: a scheme giving both roles one value is a scheme in which opening a block
+			// leaves its marker tone exactly where it was.
+			if got.ToolMarker == got.ToolMarkerBright {
+				t.Errorf("tool-marker and tool-marker-bright are both %q — an open block's marker must read a step out of the collapsed tone", got.ToolMarker)
+			}
+		})
+	}
+}
+
 func TestBuiltinSchemesKeepToolHeaderAndCodeDistinct(t *testing.T) {
 	t.Parallel()
 	for _, name := range builtinNames() {

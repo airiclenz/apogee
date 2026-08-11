@@ -33,6 +33,7 @@ var roleTable = []struct {
 	{"file-ref", func(s Scheme) string { return s.FileRef }},
 	{"prompt-toggle", func(s Scheme) string { return s.PromptToggle }},
 	{"tool-marker", func(s Scheme) string { return s.ToolMarker }},
+	{"tool-marker-bright", func(s Scheme) string { return s.ToolMarkerBright }},
 	{"tool-leader", func(s Scheme) string { return s.ToolLeader }},
 	{"gauge", func(s Scheme) string { return s.Gauge }},
 	{"selection", func(s Scheme) string { return s.Selection }},

@@ -41,7 +41,18 @@ pointer back to `leaderRowIn` and the `tool-leader` role, since it now sits far 
 
 ---
 
-## 2. Add the `tool-marker-bright` scheme role
+## 2. Add the `tool-marker-bright` scheme role — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): `darkPalette` and `TestEmbeddedDarkMatchesPinnedPalette` no longer exist —
+`5555c44` deleted them to make the scheme tests colour-agnostic (owner call: a scheme still under
+tuning must never fail a test by changing a value), so only `roleTable` gained a row and no test
+pins the new hex. The colour-agnostic guard that carries the item's intent instead is
+`TestBuiltinSchemesKeepBothMarkerStepsDistinct` in `builtins_test.go`, mirroring the existing
+`muted`/`muted-bright` pair guard: it fails a scheme in which opening a block leaves the marker
+tone where it was. Two knock-ons of adding a key: the chrome-accents comment column in both
+shipped yamls was re-aligned to the new longest key (the files are handed to users verbatim by
+`/color-scheme export`, and each block aligns its comments), and `CONTEXT.md`'s stated role count
+went 25 → 27 (it was already one stale — `tool-leader` landed without it).
 
 **What:** New role in the scheme, the open-state sibling of `tool-marker`, mirroring the `muted` / `muted-bright` pattern:
 - `internal/scheme/scheme.go`: new `Scheme` field with tag `yaml:"tool-marker-bright"`, placed beside `tool-marker` (:52). Reflection (`roleKeys`/`fieldIndex`) picks it up automatically.

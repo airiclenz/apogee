@@ -50,6 +50,11 @@ type Scheme struct {
 
 	PromptToggle string `yaml:"prompt-toggle"` // the collapsed prompt's see-more / see-less marker
 	ToolMarker   string `yaml:"tool-marker"`   // a tool block's "+N more lines" remainder marker
+	// ToolMarkerBright is ToolMarker's open step, the pair `muted` / `muted-bright` already
+	// models: the same voice at a higher volume, so an opened tool block's marker tone reads a
+	// step out of the collapsed ones around it. A stated role rather than a color computed at
+	// render time, because every color on screen is a role a scheme can name (ADR 0040).
+	ToolMarkerBright string `yaml:"tool-marker-bright"` // the marker role's EXPANDED-block step
 	// ToolLeader is the dotted run carrying the eye from a tool row's target to the outcome slot
 	// right-aligned at the row's edge (docs/layout/tool-layout.md). It ships seeded from `muted` —
 	// the tone the ▶/▼ indicator beside it already wears — so the leader reads as the same chrome
