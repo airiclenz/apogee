@@ -163,3 +163,81 @@ func TestSubAgentUsageIsChildLocal(t *testing.T) {
 			p.CumulativeCalls, p.CumulativePromptTokens, p.CumulativeCompletionTokens, p.CumulativeTotalTokens)
 	}
 }
+
+// TestCompactionUsageRidesFlaggedMaintenanceEvent pins the compaction half of the accounting: the
+// summary call is real spend, so it folds into the same Agent's tally and surfaces as exactly ONE
+// UsageEvent flagged Maintenance — the flag being what lets a gauge/tokens-per-sec reader skip a
+// fill figure that describes the summarizer's request rather than the conversation, while a totals
+// reader keeps it. The Turn after the fold continues from those totals unflagged, which is what
+// makes /usage right immediately after /compact.
+func TestCompactionUsageRidesFlaggedMaintenanceEvent(t *testing.T) {
+	sink := &recordingSink{}
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		usageScript("first", provider.Usage{PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19}),
+		usageScript("second", provider.Usage{PromptTokens: 30, CompletionTokens: 5, TotalTokens: 35}),
+		usageScript("FOLDED-SUMMARY", provider.Usage{PromptTokens: 500, CompletionTokens: 60, TotalTokens: 560}),
+		usageScript("after the fold", provider.Usage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11}),
+	}}
+	a, err := newAgent(baseConfig(sink), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	// Two exchanges → a foldable [user, assistant, user, assistant] conversation, then the fold,
+	// then one more exchange to prove the totals carry across it.
+	step := func(text string) {
+		t.Helper()
+		if err := a.Submit(domain.UserInput{Text: text}); err != nil {
+			t.Fatalf("Submit(%q): %v", text, err)
+		}
+		if _, err := a.Step(context.Background()); err != nil {
+			t.Fatalf("Step(%q): %v", text, err)
+		}
+	}
+	step("task one")
+	step("task two")
+	if skipped, err := a.Compact(context.Background()); err != nil {
+		t.Fatalf("Compact: %v", err)
+	} else if skipped {
+		t.Fatal("Compact skipped a foldable conversation; want a real fold that spends tokens")
+	}
+	step("task three")
+
+	got := usageEvents(sink.events)
+	if len(got) != 4 {
+		t.Fatalf("emitted %d UsageEvents, want 4 (three Turns + the compaction call)", len(got))
+	}
+	var maintenance []domain.UsageEvent
+	for _, ue := range got {
+		if ue.Maintenance {
+			maintenance = append(maintenance, ue)
+		}
+	}
+	if len(maintenance) != 1 {
+		t.Fatalf("%d Maintenance UsageEvents, want exactly 1 (the compaction call)", len(maintenance))
+	}
+
+	fold := maintenance[0]
+	if fold.PromptTokens != 500 || fold.CompletionTokens != 60 || fold.TotalTokens != 560 {
+		t.Errorf("compaction fill fields = {%d %d %d}, want {500 60 560} (the summary call's own counts)",
+			fold.PromptTokens, fold.CompletionTokens, fold.TotalTokens)
+	}
+	if fold.CumulativeCalls != 3 || fold.CumulativePromptTokens != 542 ||
+		fold.CumulativeCompletionTokens != 72 || fold.CumulativeTotalTokens != 614 {
+		t.Errorf("compaction cumulative = {calls %d, %d %d %d}, want {calls 3, 542 72 614} — the two Turns plus the fold",
+			fold.CumulativeCalls, fold.CumulativePromptTokens, fold.CumulativeCompletionTokens, fold.CumulativeTotalTokens)
+	}
+	if got[2] != fold {
+		t.Error("the Maintenance event is not the third emission; the fold must account at the point it ran")
+	}
+
+	after := got[3]
+	if after.Maintenance {
+		t.Error("the Turn after the fold is flagged Maintenance; only the compaction call is")
+	}
+	if after.CumulativeCalls != 4 || after.CumulativePromptTokens != 550 ||
+		after.CumulativeCompletionTokens != 75 || after.CumulativeTotalTokens != 625 {
+		t.Errorf("post-fold cumulative = {calls %d, %d %d %d}, want {calls 4, 550 75 625} — continuing from the fold's totals",
+			after.CumulativeCalls, after.CumulativePromptTokens, after.CumulativeCompletionTokens, after.CumulativeTotalTokens)
+	}
+}

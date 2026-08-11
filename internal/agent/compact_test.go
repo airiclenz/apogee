@@ -5,7 +5,9 @@ package agent
 // the fault side — precisely where the truthfulness fixes (plan item 2a/2b) live and where
 // /compact runs most (on-demand compaction fires when the upstream is likeliest to fault, at
 // high context fill). Every fault must leave the conversation untouched so a failed /compact
-// never corrupts history, and compaction must be SILENT (no TokenEvent/UsageEvent).
+// never corrupts history, and compaction must stay out of the transcript (no TokenEvent). Its
+// token accounting is NOT silent: a summary call the server accounts for rides one
+// Maintenance-flagged UsageEvent, pinned in usagetally_test.go.
 
 import (
 	"context"
@@ -266,11 +268,15 @@ func TestCompactCancelMidSummaryLeavesConvUntouched(t *testing.T) {
 	}
 }
 
-// TestCompactEmitsNoTokenOrUsageEvents pins the silence contract: compaction is a maintenance
-// call, not a Turn, so it must not stream into the transcript (TokenEvent) or move the live
-// context gauge (UsageEvent). A real exchange first (which does emit events) proves the sink is
-// wired; the events it produced are dropped so only compaction's emissions are asserted on.
-func TestCompactEmitsNoTokenOrUsageEvents(t *testing.T) {
+// TestCompactEmitsNoTokenEventAndNoUsageWithoutServerReport pins the transcript half of the
+// contract: compaction is a maintenance call, not a Turn, so it must not stream into the
+// transcript (TokenEvent). Its accounting event is conditional on the server reporting usage the
+// same way a Turn's is — echoResponder reports none, so this fold accounts for nothing and emits
+// no UsageEvent either. The accounted case (a flagged Maintenance event) is pinned by
+// TestCompactionUsageRidesFlaggedMaintenanceEvent. A real exchange first (which does emit events)
+// proves the sink is wired; the events it produced are dropped so only compaction's emissions are
+// asserted on.
+func TestCompactEmitsNoTokenEventAndNoUsageWithoutServerReport(t *testing.T) {
 	sink := &recordingSink{}
 	a, err := newAgent(baseConfig(sink), echoResponder{reply: "reply"})
 	if err != nil {
@@ -298,7 +304,7 @@ func TestCompactEmitsNoTokenOrUsageEvents(t *testing.T) {
 		t.Error("compaction emitted a TokenEvent; it must not stream into the transcript")
 	}
 	if hasEvent[domain.UsageEvent](sink.events) {
-		t.Error("compaction emitted a UsageEvent; it must not move the live context gauge")
+		t.Error("compaction emitted a UsageEvent though the server reported no usage; there was nothing to account for")
 	}
 }
 

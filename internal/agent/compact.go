@@ -299,13 +299,17 @@ func (a *Agent) compactTranscriptChars() int {
 	return int(float64(transcriptTokens) * a.budget().CharsPerToken)
 }
 
-// compactCompleter adapts the Agent's provider seam to context.Completer: a single, SILENT
-// upstream completion. Unlike streamResponse it emits NO TokenEvent/UsageEvent — compaction is
-// a maintenance call, not a Turn, so it must not stream into the transcript or move the live
-// context gauge (the gauge re-measures on the next real Turn's usage). It reuses the loop's
+// compactCompleter adapts the Agent's provider seam to context.Completer: a single upstream
+// completion that is silent in the transcript but NOT unaccounted. Unlike streamResponse it emits
+// no TokenEvent — compaction is a maintenance call, not a Turn, so it must not stream into the
+// transcript. It does emit one UsageEvent flagged Maintenance: the summary call spends real tokens
+// that session totals must include, while its prompt/completion counts describe the SUMMARIZER's
+// request rather than the conversation's fill, so a reader of the live gauge or the tokens/sec
+// clock skips the flagged event (the gauge re-measures on the next real Turn's usage) and a reader
+// of the cumulative totals accepts it — the contract on domain.UsageEvent. It reuses the loop's
 // request projection (toProviderRequest) and collects the streamed content into one string; a
 // cancelled ctx or a terminal stream fault surfaces as an error, so the reducer leaves the
-// conversation untouched.
+// conversation untouched and — having no completed call to account for — emits nothing.
 type compactCompleter struct{ a *Agent }
 
 func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (string, error) {
@@ -317,10 +321,13 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	var content strings.Builder
 	var failed bool
 	var errMsg string
+	var usage *provider.Usage
 	for delta := range c.a.upstream.Stream(ctx, c.a.toProviderRequest(req)) {
 		switch delta.Kind {
 		case provider.DeltaContent:
 			content.WriteString(delta.Content)
+		case provider.DeltaDone:
+			usage = delta.Usage // nil when the server omits its accounting, exactly as in streamResponse
 		case provider.DeltaError, provider.DeltaContextOverflow:
 			failed = true
 			errMsg = delta.Err
@@ -331,6 +338,17 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	}
 	if failed {
 		return "", errors.New(errMsg)
+	}
+	// Account for the completed summary call on the OWNING Agent's tally — the same tally its Turns
+	// feed, so /usage stays accurate straight after a fold instead of silently losing the tokens the
+	// fold spent. Emitting only here (past the cancel and fault exits) keeps the tally honest about
+	// what actually completed, and unlike streamResponse this call does NOT calibrate the chars→token
+	// estimator: the summarizer prompt is a rendered transcript, not the conversation the estimator
+	// models.
+	if usage != nil {
+		event := c.a.usage.record(c.a.base(c.a.turns.index), usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+		event.Maintenance = true
+		c.a.cfg.Events.Emit(event)
 	}
 	return content.String(), nil
 }

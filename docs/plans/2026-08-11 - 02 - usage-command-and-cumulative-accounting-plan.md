@@ -60,9 +60,18 @@ then `make check`.
 
 **Commit:** `feat(engine): accumulate per-agent usage and stamp cumulative totals on UsageEvent`
 
-## 2. Engine: compaction usage counted via flagged maintenance event
+## 2. Engine: compaction usage counted via flagged maintenance event — ✅ DONE (2026-08-11)
 
 Depends on item 1.
+
+NOTES (2026-08-11): beyond the item's literal text, the existing test that pinned the OLD
+silence contract had to move with it — `TestCompactEmitsNoTokenOrUsageEvents` is renamed
+`TestCompactEmitsNoTokenEventAndNoUsageWithoutServerReport` (its fake reports no usage, so the
+fold accounts for nothing) and `compact_test.go`'s file header restated. The emission is
+conditional on the server reporting usage and sits past the cancel/fault exits, so a faulted or
+cancelled fold accounts for nothing; unlike `streamResponse` the compaction call does NOT
+calibrate the chars→token estimator (its prompt is a rendered transcript, not the conversation).
+The item-1 `UsageEvent` doc comment already covers `Maintenance` — left unchanged.
 
 **What:** `compactCompleter.Complete` (`internal/agent/compact.go:311`) today deliberately
 emits no UsageEvent (comment at `compact.go:302-308`). Keep the "must not move the live
