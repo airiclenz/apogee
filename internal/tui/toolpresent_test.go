@@ -66,6 +66,35 @@ func TestPresentToolCall(t *testing.T) {
 			wantTarget: "main.go", wantDetail: "[File: main.go, 120 lines total, showing lines 1-100]",
 		},
 		{
+			name: "read_file with locate → the Located line, never the content",
+			call: domain.ToolCall{ID: "1c", Tool: "read_file", Arguments: []byte(`{"path":"main.go","locate":"func main"}`)},
+			result: domain.ToolResult{CallID: "1c", Content: "[File: main.go, 120 lines total, showing lines 1-100]\nLocated \"func main\" on lines: 5\npackage main",
+				Summary: domain.ReadSpan{Start: 1, End: 100, Total: 120, Locate: "func main", LocatedOn: []int{5}}},
+			wantLabel:  "Read",
+			wantVerb:   "reading",
+			wantTarget: `main.go · locate "func main"`, wantDetail: `Located "func main" on lines: 5`,
+		},
+		{
+			name: "read_file with a locate that matched nothing → on no lines",
+			call: domain.ToolCall{ID: "1d", Tool: "read_file", Arguments: []byte(`{"path":"main.go","locate":"zzz"}`)},
+			result: domain.ToolResult{CallID: "1d", Content: "[File: main.go, 120 lines total, showing lines 1-100]\nLocated \"zzz\" on no lines\npackage main",
+				Summary: domain.ReadSpan{Start: 1, End: 100, Total: 120, Locate: "zzz"}},
+			wantLabel:  "Read",
+			wantVerb:   "reading",
+			wantTarget: `main.go · locate "zzz"`, wantDetail: `Located "zzz" on no lines`,
+		},
+		{
+			// The range says which lines came back; the term says what the call was hunting for —
+			// and the numbers beneath may fall outside that range, since locate scans the whole file.
+			name: "read_file with a range AND a locate → both qualify the target",
+			call: domain.ToolCall{ID: "1e", Tool: "read_file", Arguments: []byte(`{"path":"main.go","start_line":12,"end_line":80,"locate":"func main"}`)},
+			result: domain.ToolResult{CallID: "1e", Content: "[File: main.go, 120 lines total, showing lines 12-80]\nLocated \"func main\" on lines: 5\nfunc helper() {}",
+				Summary: domain.ReadSpan{Start: 12, End: 80, Total: 120, Locate: "func main", LocatedOn: []int{5}}},
+			wantLabel:  "Read",
+			wantVerb:   "reading",
+			wantTarget: `main.go:12–80 · locate "func main"`, wantDetail: `Located "func main" on lines: 5`,
+		},
+		{
 			name: "write_file → Write + the line count of what it writes",
 			call: domain.ToolCall{ID: "2", Tool: "write_file", Arguments: []byte(`{"path":"notes.txt","content":"hello"}`)},
 			result: domain.ToolResult{CallID: "2", Content: "wrote 5 bytes to notes.txt",
@@ -533,6 +562,16 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			result: domain.ToolResult{CallID: "1", Content: "[File: main.go, 154 lines total, showing lines 1-154]\npackage main",
 				Summary: domain.ReadSpan{Start: 1, End: 154, Total: 154}},
 			wantSummary: "154 lines",
+		},
+		{
+			// A locate is read_file's one body: the located lines, never the content it returned —
+			// that belongs to the model, and the slot already says how much of it came back.
+			name: "a located read is the line count over the located lines alone",
+			call: domain.ToolCall{ID: "1c", Tool: "read_file", Arguments: []byte(`{"path":"main.go","locate":"func main"}`)},
+			result: domain.ToolResult{CallID: "1c", Content: "[File: main.go, 154 lines total, showing lines 1-154]\nLocated \"func main\" on lines: 5, 9\npackage main",
+				Summary: domain.ReadSpan{Start: 1, End: 154, Total: 154, Locate: "func main", LocatedOn: []int{5, 9}}},
+			wantSummary: "154 lines",
+			wantBody:    []string{`Located "func main" on lines: 5, 9`},
 		},
 		{
 			name:        "multi-line terminal output is a body under the typed exit code",
@@ -1239,6 +1278,40 @@ func TestDecliningStatKeepsTheProseFloor(t *testing.T) {
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "\n"}, workspaceRoot{})
 	if tv.Summary.Text != "(no output)" {
 		t.Errorf("summary = %q, want the extractor's own phrase", tv.Summary.Text)
+	}
+}
+
+// read_file's locate report lays out beneath the branch: the term is in the target, the slot holds
+// the span's line count, and the lines the term was found on are here — three facts, three places.
+// A read that asked for no term has no report at all, which is the case only the typed summary can
+// tell apart from a term that matched nothing, and an over-long term is clipped like any other
+// detail line so a model asking to locate a minified blob cannot flood the row.
+func TestReadFileBodyRecordsTheLocateReport(t *testing.T) {
+	t.Parallel()
+
+	matched := readFileBody(domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 40, Total: 40, Locate: "func main", LocatedOn: []int{5, 9}}})
+	if len(matched) != 1 || matched[0].Text != `Located "func main" on lines: 5, 9` {
+		t.Errorf("located lines = %+v", matched)
+	}
+	// The numbers are absolute and may lie outside the span the read returned.
+	outside := readFileBody(domain.ToolResult{Summary: domain.ReadSpan{Start: 12, End: 80, Total: 120, Locate: "func main", LocatedOn: []int{5}}})
+	if len(outside) != 1 || outside[0].Text != `Located "func main" on lines: 5` {
+		t.Errorf("a match outside the returned span = %+v", outside)
+	}
+	missed := readFileBody(domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 40, Total: 40, Locate: "zzz"}})
+	if len(missed) != 1 || missed[0].Text != `Located "zzz" on no lines` {
+		t.Errorf("a locate that matched nothing = %+v", missed)
+	}
+	if none := readFileBody(domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 3, Total: 3}}); len(none) != 0 {
+		t.Errorf("a read that asked for no term has no report: %+v", none)
+	}
+	if other := readFileBody(domain.ToolResult{Summary: domain.WroteBytes{Bytes: 5}}); len(other) != 0 {
+		t.Errorf("another tool's summary is not read_file's report: %+v", other)
+	}
+	long := strings.Repeat("x", detailClipRunes+40)
+	clipped := readFileBody(domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 2, Total: 2, Locate: long, LocatedOn: []int{1}}})
+	if len(clipped) != 1 || len([]rune(clipped[0].Text)) != detailClipRunes+1 { // +1 for the ellipsis
+		t.Errorf("locate line is not clipped to %d runes: %+v", detailClipRunes, clipped)
 	}
 }
 

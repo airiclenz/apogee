@@ -460,9 +460,10 @@ var toolRegistry = map[string]toolPresenter{
 	"read_file": {
 		label:  "Read",
 		verb:   "reading",
-		target: readFileTarget,  // path, plus ":12–80" when the call asked for a range
+		target: readFileTarget,  // path, plus ":12–80" and `· locate "…"` when the call asked
 		detail: firstLineDetail, // floor; the slot's line count comes from domain.ReadSpan
 		stat:   readSpanStat,
+		body:   readFileBody, // the located line numbers, when a term was asked for
 	},
 	"write_file": {
 		label:   "Write",
@@ -1498,21 +1499,31 @@ func qualifiedTarget(head, qualifier string) string {
 // for ("main.go:12–80") when it asked for one — the table's ranged form, which is what tells two
 // reads of one file apart in a group. A half-open request states the half it gave: a start with no
 // end reads "…:12–", an end with no start "…:–80". A plain read is the bare path.
+//
+// A locate term rides the same target as the qualifier the table spells it with, composing with
+// the range rather than replacing it (`main.go:12–80 · locate "x"`): the range says WHICH lines
+// came back and the term says what the call was hunting for, and the whole file is scanned for it
+// whatever the range (domain.ReadSpan). The lines it was found on lay out beneath the branch
+// (readFileBody).
 func readFileTarget(args map[string]any) string {
-	path, _ := args["path"].(string)
+	head, _ := args["path"].(string)
 	start, end := intArg(args, "start_line"), intArg(args, "end_line")
-	if start <= 0 && end <= 0 {
-		return path
+	if start > 0 || end > 0 {
+		span := ""
+		if start > 0 {
+			span = strconv.Itoa(start)
+		}
+		span += "–"
+		if end > 0 {
+			span += strconv.Itoa(end)
+		}
+		head += ":" + span
 	}
-	span := ""
-	if start > 0 {
-		span = strconv.Itoa(start)
+	locate := stringArg("locate")(args)
+	if locate != "" {
+		locate = `locate "` + locate + `"`
 	}
-	span += "–"
-	if end > 0 {
-		span += strconv.Itoa(end)
-	}
-	return path + ":" + span
+	return qualifiedTarget(head, locate)
 }
 
 // openFileTarget leads open_file's branch with the path and the locate term the call asked for,
@@ -1886,6 +1897,30 @@ func commitDetail(content string) toolOutcome {
 // (toolPresenter.body) — open_file's body is read off its typed summary instead.
 func viewDiffBody(res domain.ToolResult) []detailLine {
 	return diffBody(res.Content)
+}
+
+// readFileBody lays read_file's LOCATE REPORT out beneath the branch: the lines the requested term
+// was found on, or the statement that it was found on none — a case only the typed summary can
+// tell apart from "no locate was asked for" (domain.ReadSpan's Locate/LocatedOn pair). A read that
+// asked for no term has no report and so no body: the file's content belongs to the model, and the
+// slot's line count already says how much of it came back.
+//
+// The numbers are ABSOLUTE and may fall outside the span the row's target names, because the tool
+// scans the whole file whatever range the call asked for — that is the point of asking a ranged
+// read to locate something.
+func readFileBody(res domain.ToolResult) []detailLine {
+	v, ok := res.Summary.(domain.ReadSpan)
+	if !ok || v.Locate == "" {
+		return nil
+	}
+	if len(v.LocatedOn) == 0 {
+		return []detailLine{{Text: clipDetail(fmt.Sprintf("Located %q on no lines", v.Locate))}}
+	}
+	numbers := make([]string, len(v.LocatedOn))
+	for i, n := range v.LocatedOn {
+		numbers[i] = strconv.Itoa(n)
+	}
+	return []detailLine{{Text: clipDetail(fmt.Sprintf("Located %q on lines: %s", v.Locate, strings.Join(numbers, ", ")))}}
 }
 
 // openFileBody lays open_file's LOCATE REPORT out beneath the branch: the lines the requested term

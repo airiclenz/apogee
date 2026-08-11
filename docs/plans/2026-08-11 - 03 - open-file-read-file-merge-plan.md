@@ -104,7 +104,14 @@ longer compiled and became `reflect.DeepEqual`. The `toolresult.go` cite did shi
 
 **Commit:** `feat(tools): read_file gains a locate parameter reporting absolute line numbers`
 
-## 2. TUI presents read_file's locate — target qualifier and Located body line
+## 2. TUI presents read_file's locate — target qualifier and Located body line — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): line cites had drifted (registry entry :460-467, `readFileTarget` :1497,
+`openFileBody` :1899; the tool-layout read_file row is :249, not :232) — content matched, approach
+unchanged. Two tests added beyond the four listed: an outcome-split row pinning that a located
+read's body is the Located line ALONE (the "never the content" half, which the substring-matching
+table cannot assert), and `TestReadFileBodyRecordsTheLocateReport` — the mirror of the open_file
+unit test item 4 deletes, keeping its clipping and wrong-summary coverage.
 
 Depends on item 1.
 
