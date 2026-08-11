@@ -165,7 +165,7 @@ point is a **minor** bump, not a breaking change.
   The type-to-filter grammar and the rebound verbs are documented in `layout.md` (§"One overlay for
   'which one?'" and the `/sessions` browser paragraph beside it).
 - **Color schemes — apogee's palette is now a file you can pick, and write.** Every colour on screen
-  comes from the active **colour scheme**: one YAML file of 25 semantic roles (`error`, `code`,
+  comes from the active **colour scheme**: one YAML file of 28 semantic roles (`error`, `code`,
   `tool-header`, `skill`, `file-ref`, `muted`/`muted-bright`, the four autonomy modes, the four
   spinner stops, …), named for what they mean rather than where they are drawn. Two schemes ship,
   compiled into the binary: **`dark`**, which is the palette apogee has always drawn with apart from

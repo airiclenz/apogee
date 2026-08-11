@@ -466,17 +466,18 @@ behaviour — pick it up when a stderr notice proves easy to miss.
 
 ---
 
-## A presented document carries no sub-agent depth (the ⤷ label re-opens around it)
+## A presented document carries no sub-agent depth (it breaks the run's rail)
 
 **Status:** parked 2026-07-21 (noticed while verifying the `present_document` plan,
 `docs/plans/archived/2026-07-21 - 01 - present-document-tool-plan.md`). Cosmetic, no wrong output.
 
 `domain.PresentRequest` carries no sub-agent depth, so `internal/tui`'s presentation entry is
-always rendered at depth 0 — unrailed even when a sub-agent presented the document. Because
-`renderView` opens the `⤷` label whenever a block descends deeper than the previous one, a
-depth-0 presentation inside a sub-agent run splits that run and the label is announced again
-after it. Not presentation-specific: any depth-0 entry between two nested blocks does the same
-(a `· cancelled` note already can). The fix is to carry the Step's depth on `PresentRequest` and
+always rendered at depth 0 — unrailed even when a sub-agent presented the document. A depth-0
+block sitting inside a sub-agent run breaks the rail framing it: the rail stops above the
+presentation and picks up again below it, with neither a `┊` closing the first stretch nor a
+`┌─┶` header opening the second, so one run reads as two railed stretches with an unframed gap
+between them. Not presentation-specific: any depth-0 entry between two nested blocks does the
+same (a `· cancelled` note already can). The fix is to carry the Step's depth on `PresentRequest` and
 render the entry at it, which is a domain-seam change and wants its own decision — the loop's
 depth is not currently exposed to a host delegate at all (`domain.AskRequest` has the same gap:
 ADR 0039 gave it `SubAgentTask` and `SubAgentName`, so a delegate now learns *which* child is
@@ -814,8 +815,8 @@ any standing constraint that must not be re-filed.
   tool takes an optional `name`, and it shows in the session chat on the collapsed run header, the
   status line (`<name> · <phrase>`), both prompt panes and a headless run's records. **Standing:**
   the name is display identity only, never privilege (ADR 0005), it stays OPTIONAL with the task's
-  first line as the fallback everywhere, and the `⤷ sub-agent` rail label is deliberately not part
-  of it — do not re-file either as a gap.
+  first line as the fallback everywhere, and the rail framing an expanded run carries no label of
+  its own — the name rides the run's header row — so do not re-file either as a gap.
 - **VS Code names agent CLIs from an allowlist — get `apogee` onto it** — CLOSED 2026-08-03, **moot
   rather than declined** (`docs/plans/2026-08-03 - 01 - session-name-on-the-top-rule-plan.md`
   item 1): apogee no longer sets a terminal title at all, so there is nothing an allowlist entry
