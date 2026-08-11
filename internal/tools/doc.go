@@ -18,9 +18,9 @@
 // prose half, written for the MODEL, and its wording is free to change. A domain.ToolSummary
 // attached beside it (okSummary, tools.go) is the structured half, written for a HOST — the
 // TUI's tool card today, a headless or bench renderer later — carrying as data the facts the
-// tool already computed for its own header. Exactly SEVEN built-ins attach one: read_file
+// tool already computed for its own header. Exactly SIX built-ins attach one: read_file
 // (ReadSpan), write_file (WroteBytes), list_dir (ListedEntries), grep (MatchedLines),
-// view_diff (DiffStat), web_search (SearchHits) and open_file (OpenedFile) — the seven whose
+// view_diff (DiffStat) and web_search (SearchHits) — the six whose
 // outcome a host would otherwise have to re-derive from the sentence. The rest deliberately do
 // not, and that is not an omission to fill in later: quoting a fixed one-line sentence (the
 // find-replace/edit family, web_fetch, http_request, ask_user, present_document) or compressing
@@ -31,7 +31,9 @@
 // persisted and never sent to the model; and an error result never carries one.
 //
 // Phase 3 (P3.7) adds the file-editing family: single/multi find-replace, a patch-aware
-// edit_existing_file, a pure-Go view_diff, and a read-and-locate open_file. The write
+// edit_existing_file, and a pure-Go view_diff. It also added a read-and-locate open_file,
+// merged into read_file on 2026-08-11 — read_file's optional locate parameter carries that
+// half now, so the roster asks one tool to read a file instead of two. The write
 // tools among them carry the unexported workspaceScopedWriter marker so the dispatch
 // disposition path-bounds rather than confines them (ADR 0012 D1).
 //
@@ -137,14 +139,14 @@
 //
 // # The tool files, one line each
 //
-// Twenty-three files carry the built-ins, grouped by what a call to them can do — which is
+// Twenty-two files carry the built-ins, grouped by what a call to them can do — which is
 // also what the dispatch disposition keys on (ADR 0012). A file holds a tool FAMILY, not
 // always a single tool: the three-tool file_ops.go and the five-tool git.go each keep a
 // family's shared argument shape and error wording in one place.
 //
 // Reading and discovery. read_file.go is read_file, the line-spanned read that attaches a
-// ReadSpan. open_file.go is open_file, the read-and-locate variant that also reports where a
-// substring sits. list_dir.go is list_dir, the depth-bounded listing. grep.go is grep — the
+// ReadSpan and, when its optional locate term is given, also reports the absolute line
+// numbers where a substring sits. list_dir.go is list_dir, the depth-bounded listing. grep.go is grep — the
 // pure-Go content search plus the include-glob parser, match spans and pagination that
 // find_files borrows so the two cannot drift. find_files.go is find_files, the NAME half of
 // discovery beside grep's content half.

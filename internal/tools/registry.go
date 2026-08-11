@@ -120,7 +120,6 @@ func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 		NewMultiFindReplace(root),
 		NewEditExistingFile(root),
 		NewViewDiff(root),
-		NewOpenFile(root),
 		NewCopyFile(root),
 		NewMoveFile(root),
 		NewDeleteFile(root),

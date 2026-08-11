@@ -171,7 +171,6 @@ func TestClassifyTool(t *testing.T) {
 		{"multi find-replace", tools.NewMultiFindReplace(ws), classWorkspaceWrite},
 		{"edit existing file", tools.NewEditExistingFile(ws), classWorkspaceWrite},
 		{"view diff", tools.NewViewDiff(ws), classReadOnly},
-		{"open file", tools.NewOpenFile(ws), classReadOnly},
 		// The network kind splits on the (unexported, unfakeable) url-filter marker: Apogee's
 		// own web_fetch routes through the network funnel and is vouched for; a tool that only
 		// DECLARES EffectNetwork reaches unfiltered URLs and is third-party network.

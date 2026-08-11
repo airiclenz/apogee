@@ -138,7 +138,7 @@ func TestPlanToolMenuDropsTheDriftedPair(t *testing.T) {
 	}
 	// The floor is intact: the tools no marker claims are still there, and so is the recursion
 	// point (a Plan sub-agent inherits Plan).
-	for _, name := range []string{"read_file", "list_dir", "grep", "view_diff", "open_file", "ask_user", "present_document", tools.SubAgentToolName} {
+	for _, name := range []string{"read_file", "list_dir", "grep", "view_diff", "ask_user", "present_document", tools.SubAgentToolName} {
 		if !offered[name] {
 			t.Errorf("Plan menu is missing %s; Plan runs it, so the model must be shown it", name)
 		}

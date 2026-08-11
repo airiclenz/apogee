@@ -109,16 +109,10 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 			args: `{"query":"golang docs"}`,
 			want: "2 results",
 		},
-		{
-			name: "open_file",
-			tool: tools.NewOpenFile(root),
-			args: `{"path":"main.go","locate":"func main"}`,
-			want: "3 lines", // the locate report moved to the body; the slot carries the size
-		},
 	}
 
-	if len(cases) != 7 {
-		t.Fatalf("the pin covers %d tools, want all 7 summary-bearing ones", len(cases))
+	if len(cases) != 6 {
+		t.Fatalf("the pin covers %d tools, want all 6 summary-bearing ones", len(cases))
 	}
 
 	for _, tc := range cases {
@@ -147,7 +141,7 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 // The presenter names the tool the summary came from: every case above uses the tool's own
 // registry key, so a summary can never render under the wrong label.
 func TestToolSummaryPinUsesRegisteredToolNames(t *testing.T) {
-	for _, name := range []string{"read_file", "write_file", "list_dir", "grep", "view_diff", "web_search", "open_file"} {
+	for _, name := range []string{"read_file", "write_file", "list_dir", "grep", "view_diff", "web_search"} {
 		if _, ok := toolRegistry[name]; !ok {
 			t.Errorf("%s reports a summary but has no registry entry", name)
 		}

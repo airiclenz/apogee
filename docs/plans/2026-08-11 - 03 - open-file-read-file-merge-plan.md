@@ -146,7 +146,15 @@ Depends on item 1.
 
 **Commit:** `feat(tui): read_file presents its locate term and located lines`
 
-## 3. Deregister and delete the open_file tool
+## 3. Deregister and delete the open_file tool — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): three registry_test.go count assertions beyond the enumerated ones needed the
+same −1 (`:87` Asker 27→26, `:110` Presenter 27→26, `:116` both 28→27) — the item's own acceptance
+fails without them. Two comments naming the deleted tool were also corrected: `registry_test.go:221`
+("diff/open-file read" → "diff reads") and `internal/agent/resolution.go:247` (dropped `open_file`
+from the no-marker example list; no item enumerates that file). Left untouched:
+`docs/design/confinement-execution-contract.md:312`, which names `open-file` inside a historical
+"P3.7 adds" record — the same append-only category the plan puts CHANGELOG history in.
 
 Depends on item 1 (the roster must never lose the locate capability).
 

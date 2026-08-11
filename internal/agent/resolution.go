@@ -244,7 +244,7 @@ const (
 // itself read-only that also reaches the network takes a network class and is url-filtered or
 // gated. Otherwise a call could be both unsupervised and unbounded — the one thing ADR 0012's
 // core invariant forbids. The declaration keeps its own job: it decides the floor for the tools
-// no marker claims (read_file, grep, view_diff, open_file, list_dir, ask_user) and it is what
+// no marker claims (read_file, grep, view_diff, list_dir, ask_user) and it is what
 // self-regulation's read/write tally reads (selfreg.go). It is NO LONGER what Plan mode's menu
 // filter reads (2026-08-02): the menu keys on this class through planAdmits, because a filter
 // on the bare declaration offered git_diff_range and diagnostics in Plan and the ladder below

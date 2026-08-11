@@ -294,7 +294,7 @@ func TestMultiFindReplace_ValidationErrors(t *testing.T) {
 }
 
 // TestFindReplace_CarryTheMarker proves both find-replace writers carry the
-// workspaceScopedWriter marker and that view_diff/open_file do not.
+// workspaceScopedWriter marker and that view_diff does not.
 func TestFindReplace_CarryTheMarker(t *testing.T) {
 	t.Parallel()
 
@@ -305,7 +305,7 @@ func TestFindReplace_CarryTheMarker(t *testing.T) {
 			t.Errorf("%s does not carry the workspaceScopedWriter marker", w.Name())
 		}
 	}
-	readers := []domain.Tool{NewViewDiff(root), NewOpenFile(root)}
+	readers := []domain.Tool{NewViewDiff(root)}
 	for _, r := range readers {
 		if IsWorkspaceScopedWriter(r) {
 			t.Errorf("%s wrongly carries the writer marker (it is read-only)", r.Name())
