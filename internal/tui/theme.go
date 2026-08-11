@@ -34,7 +34,8 @@ import (
 // menu-style popup row that is NOT the selected one leads with ·, the ❯'s quiet counterpart. A
 // sub-agent (Depth > 0) block is framed by a vertical rail (│ per nesting level), opened by the
 // delegation's own ┌─┶ header row and closed by a lone ┊ (docs/layout/tool-layout.md, "Grouped
-// Sub-agents"); the ⤷ that used to announce a descent survives only on the live-preview path.
+// Sub-agents") — that frame is the whole of what announces a descent, at every depth and on the
+// live path as well as the committed one.
 const (
 	glyphAssistant      = "✦" // the assistant and tool-header star. A tool block still holding an open call BLINKS it — half a second showing, half a second a bare cell that holds the column (layout.md, "The live star"; blockState.star)
 	glyphBranch         = "┝"
@@ -44,7 +45,6 @@ const (
 	glyphMenuUnselected = "·" // U+00B7 MIDDLE DOT — an unselected row of a menu-style popup (popupSpec.menuRows): glyphUser's counterpart, deliberately NOT glyphBullet's "•", because a menu row is an option waiting to be pointed at rather than an item of a list
 	glyphSubRail        = "│"
 	glyphMemberGutter   = "│" // U+2502 LIGHT VERTICAL — the gutter continuing an EXPANDED group member's rows under its ┝ (memberGutter, render.go). Its shape is glyphSubRail's and deliberately NOT shared with it: the member gutter is painted in the detail tone and the sub-agent rail in the label gold (design call 8), so an open member nested inside a run cannot be read as a frame of the run.
-	glyphSubLabel       = "⤷"
 	glyphRailCorner     = "┌" // U+250C LIGHT DOWN AND RIGHT — the corner an EXPANDED delegation's header row opens its frame with, at the very left of the row (subAgentOpenMarker, docs/layout/tool-layout.md "Grouped Sub-agents"). It is the one cell of that marker painted in the rail's gold, because it IS the rail's top end (design call 2 of docs/plans/"2026-08-11 - 01")
 	glyphRailTee        = "┶" // U+2536 LIGHT UP AND HORIZONTAL AND HEAVY LEFT — where the frame's arm meets the delegation's own branch on that header row. It stands in the row's detail tone with the ─ beside it, not in the rail's gold: it is this row's branch marker, the ┝/┕ of a member that happens to be open (design call 2)
 	glyphRailClose      = "┊" // U+250A BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL — the lone line closing an expanded delegation's span, in the rail's gold. Its dashes are the point: the frame stops rather than continuing, which is what a solid │ under the last row of a span would say
@@ -94,10 +94,6 @@ const (
 	glyphModeAllowEdits = "✔"  // allow edits — edits pass
 	glyphModeAuto       = "▸▸" // auto — fast-forward, no gate
 )
-
-// subAgentLabel is the one-line header that opens each contiguous run of sub-agent
-// (Depth > 0) blocks, announcing the nested section (P3.14).
-const subAgentLabel = "sub-agent"
 
 // bodyIndent is the column every transcript block's body text starts in, as a blank prefix: a
 // marker ("✦ " / "❯ " — the glyph plus its trailing space) is exactly this wide, and a wrapped

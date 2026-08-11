@@ -52,8 +52,8 @@
 // the first run's frame is closed before the second opens one. A join that CLIMBS OUT is the one
 // separator that is not a spacer: it is the ┊ closing each run left behind, one per level
 // (docs/layout/tool-layout.md, "Grouped Sub-agents"). Nothing announces a DESCENT any more — the
-// delegation's own ┌─┶ header row opens the frame and the rail runs down from it — which is why the
-// ⤷ label [renderSubAgentLabel] paints survives only on the live-preview path. The whole frame —
+// delegation's own ┌─┶ header row opens the frame and the rail runs down from it, on the live
+// preview's path as much as on the committed one. The whole frame —
 // rail, corner and closer alike — is one style role (theme's subRail) in the tool-header gold (the
 // scheme's `tool-header` role), coherent with the gold ✦ tool markers; the arm and tee reaching
 // across to the delegation's branch stay in that row's own detail tone ([paintRowMarker]). A run's stretch stays CONTIGUOUS however its events
@@ -593,7 +593,7 @@
 // had once the tool-display overhaul grew render.go past the house ~400-line guideline — a pure
 // file move, nothing renamed and nothing reworded: render.go keeps the transcript walk
 // ([transcript.renderView], [renderEntryLines]) and the [blockPaint] click-mark primitive under
-// it; subagentblock.go the ⤷ label, the run span and the collapsed sub-agent umbrella;
+// it; subagentblock.go the run span, its railed frame and the collapsed sub-agent umbrella;
 // userblock.go the full-width prompt block and its skill-span accents; startupbox.go the startup
 // banner beside the presented-block painter; toolblock.go the tool block, group and super-group
 // walk with the member rows they paint; toolleader.go the leader row, the dotted leader and the

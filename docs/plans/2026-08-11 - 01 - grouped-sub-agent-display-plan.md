@@ -168,7 +168,26 @@ while running and on failure), and that `⤷` no longer appears in group output.
 
 **Commit:** `feat(tui): grouped sub-agent expands behind a column-0 gold rail`
 
-## 5. Lone sub-agent runs adopt the same shape; delete the `⤷` label
+## 5. Lone sub-agent runs adopt the same shape; delete the `⤷` label — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): four deviations. (a) `subAgentLabel` was NOT deleted outright: the status
+line's phrase for an unnamed delegate ("sub-agent · responding", `activity.go`) is a second
+consumer that has nothing to do with the transcript label, so the constant was deleted from
+`theme.go` and re-declared beside its only remaining reader as `subAgentActivityName` — deleting
+it whole would have silently taken the word off the status line. (b) The lone run's `┌─┶` reaches
+the single-block painter through a new `blockState.marker` (read via `branchMarkerIn`) rather than
+by `renderSubAgentRun` composing a header and a branch of its own: a second copy of
+`renderToolBlock`'s toggle/label/star logic is exactly how the lone and grouped shapes would come
+to disagree. (c) The live-preview label emission (`render.go` `paintPreview`) is the "remaining ⤷
+emission site" this item names, so it went here and re-pinned
+`TestSubAgentStreamPreviewRailedWhenRunExpanded`; the live `┌─┶` header itself is still item 7's.
+Its removal also left `prevDepth` unread in `renderView`, and it was dropped with it. (d) The
+done-`✓` on a lone COLLAPSED row re-pinned goldens beyond the item's named files:
+`TestSubAgentSummaryTempi`, `TestSubAgentCountIsTransitive`,
+`TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent`,
+`TestSubAgentRunCollapsesToItsCallBlock` and `TestParentMessageKeepsTheDelegatesStreamInsideItsRun`
+(`transcript_test.go`), plus the block-mark case in `render_test.go` and the `⤷`-absence
+assertions in `model_test.go`/`transcript_test.go`, which the acceptance's grep now guards instead.
 
 Depends on item 4.
 

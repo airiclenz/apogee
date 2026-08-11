@@ -4,11 +4,12 @@ package tui
 // paints to draw, and whether the collapsed one hides anything the views cannot account for.
 //
 // elides is the sub-agent run's case, and today its only one. A collapsed run's whole span — every
-// inner block, every ⤷ label, every rail — is left unpainted by [transcript.renderView] before the
-// head block ever reaches the painter, so nothing among the views records that there is something
-// behind the header. The toggle-target rule has to know anyway: layout.md makes a run with a span
-// clickable however short its own report is. Like the mark itself it is state-INDEPENDENT — an
-// expanded run sets it too, which is what leaves the header clickable so the same click closes it.
+// inner block, every rail, every spacer among them — is left unpainted by [transcript.renderView]
+// before the head block ever reaches the painter, so nothing among the views records that there is
+// something behind the header. The toggle-target rule has to know anyway: layout.md makes a run
+// with a span clickable however short its own report is. Like the mark itself it is
+// state-INDEPENDENT — an expanded run sets it too, which is what leaves the header clickable so the
+// same click closes it.
 //
 // live and blink are the LIVE STAR's two halves, and they are deliberately separate: live is a fact
 // about the block (something in it is still waiting for a result — anyOpenCall), blink is a fact
@@ -20,6 +21,13 @@ package tui
 // borrowing the star's meaning — today the scheduled Firing's ⟳ (renderEntryLines). Its ZERO VALUE
 // is the star, so every existing caller keeps the glyph it always painted without saying so, and a
 // block that names one has no live state to express: a Firing runs in a session of its own.
+//
+// marker replaces the branch marker the SINGLE shape's row would lead with — today the ┌─┶ an
+// EXPANDED lone delegation opens its frame with (renderSubAgentRun, design call 3 of
+// docs/plans/"2026-08-11 - 01"), which is the very marker a grouped delegation's open row takes
+// (renderSubAgentGroup). Its ZERO VALUE is the ┝/┕ of the tree, so every other block keeps the
+// marker it always drew without saying so. It reaches the single shape alone: a group's markers are
+// the LIST's — which row closes it is the list's own arithmetic — and a caller cannot hand one in.
 //
 // members is the GROUPED shape's answer to the same question, one flag per view in the block's own
 // order. A group has no state of its own — its header toggles nothing — and each member opens and
@@ -33,7 +41,19 @@ type blockState struct {
 	live     bool
 	blink    bool
 	glyph    string
+	marker   string
 	members  []bool
+}
+
+// branchMarkerIn is the marker the single shape's n'th of total rows leads with: the frame the
+// caller named, or the tree's own ┝/┕ where it named none ([blockState.marker]). It is a method so
+// the override is read in ONE place — the painter asks for a marker and gets whichever one this
+// block is framed in, rather than each row site remembering to check a field.
+func (s blockState) branchMarkerIn(n, total int) string {
+	if s.marker != "" {
+		return s.marker
+	}
+	return branchMarker(n == total-1)
 }
 
 // memberExpanded is the n'th member's own view state — false wherever the caller named none, which

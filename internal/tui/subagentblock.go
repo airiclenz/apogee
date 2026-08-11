@@ -6,15 +6,6 @@ import (
 	"github.com/airiclenz/apogee/internal/format"
 )
 
-// renderSubAgentLabel renders the one-line ⤷ sub-agent header that opens a contiguous run of
-// sub-agent (Depth > 0) blocks (P3.14). It is itself framed at the run's depth, so the label
-// sits inside the same rail as the block it announces.
-func renderSubAgentLabel(th theme, depth, width int) []string {
-	inner := railedWidth(width, depth)
-	body := hangingWrap(th, th.subRail, glyphSubLabel+" ", subAgentLabel, inner)
-	return railLines(th, body, depth)
-}
-
 // subAgentToolName is the raw tool id whose call block heads a sub-agent run. The span rule matches
 // on the view's retained name (toolView.name, which the codec round-trips) rather than on the
 // "Sub-Agent" label, so a relabelling cannot silently switch the rule off and a third-party tool
@@ -25,8 +16,8 @@ const subAgentToolName = "sub_agent"
 // nested deeper than it. That stretch IS the run — the transcript records a sub-agent's work
 // head-first and folds the report back into the head (transcript.addToolResult), so everything the
 // child did lies between the call and the next entry standing at the parent's own depth. Nothing
-// marks the span; it is derived at paint from the depths already on the entries, exactly as
-// renderView's ⤷ descent labels are.
+// marks the span; it is derived at paint from the depths already on the entries, exactly as the
+// rails framing it are (railLines).
 //
 // It answers 0 for anything that is not a sub-agent call, and for a run that produced no nested
 // entry at all (a child that failed before its first event) — either way the head is an ordinary
@@ -114,8 +105,15 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 // renderSubAgentRun paints the head block of a sub-agent run — the whole of what a COLLAPSED run
 // shows, since renderView elides its span, and the opening block of an expanded one. The two states
 // differ in exactly what layout.md says they do: collapsed, the head's summary slot carries the
-// cascading summary of the work behind it; expanded, the head is an ordinary block with its full
-// report and the span paints as it always has.
+// cascading summary of the work behind it; expanded, the head shows its full report and opens the
+// frame the span paints inside.
+//
+// A LONE run is drawn in the very shape a grouped one is (design call 3 of
+// docs/plans/"2026-08-11 - 01"): the same ┌─┶ opening its frame when it is open, the same rail down
+// its span, the same ┊ closing it, and the same ✓ after its name once it has reported
+// (subAgentFinished). Whether the delegations either side of it happened to fold it into a list is
+// a fact about the frame around a delegation and never about the delegation, so the two paths ask
+// the same two questions of the same head rather than each wording an answer of its own.
 //
 // A COLLAPSED run's head is ONE summarised line: the report body is elided along with the span,
 // because the summary slot already carries that report's first line and no block says the same
@@ -137,11 +135,21 @@ func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool
 	if !head.expanded {
 		view = collapsedSubAgentView(th.measure, head, span)
 	}
+	view.finished = subAgentFinished(head)
+	// An OPEN lone run wears the very frame a grouped one does (design call 3): the ┌─┶ takes the
+	// row's left edge and the rail runs on down the span beneath it, which renderView already paints
+	// one level deeper and railJoin already closes with its ┊. A delegation reads the same whether or
+	// not the delegations beside it happened to fold it into a list.
+	marker := ""
+	if head.expanded {
+		marker = subAgentOpenMarker
+	}
 	return renderToolBlock(th, []toolView{view}, railedWidth(width, head.depth), blockState{
 		expanded: head.expanded,
 		elides:   true,
 		live:     !head.done || anyOpenCall(span),
 		blink:    blink,
+		marker:   marker,
 	}).railed(th, head.depth)
 }
 
@@ -178,7 +186,7 @@ const subAgentGroupLabel = "Sub-Agent"
 // delegation reads as a row of a list wherever it is folded.
 //
 // What is NOT here is the half that makes a delegation different: an open member's SPAN. Expanding
-// one reveals the whole nested run — its ⤷ label, its rails, its own blocks, each with its own
+// one reveals the whole nested run — its rails, its own blocks, each with its own
 // state — and those are entries in their own right, painted by [transcript.renderView]'s ordinary
 // walk exactly as they are under a lone expanded delegation. So a group interrupted by an open
 // member paints its rows up to that member here and its remaining rows in a second block of this

@@ -105,7 +105,7 @@ type blockPaint struct {
 }
 
 // plainPaint is the paint of a block that carries no click surface at all — an assistant answer, a
-// note, a start-up box, a ⤷ descent label. Everything the renderer emits that can
+// note, a start-up box. Everything the renderer emits that can
 // never be toggled goes through here, so "no target" is stated once rather than spelled out at each
 // producer. The two kinds that CAN be toggled — a tool block, and a prompt tall enough to collapse —
 // mark their own lines as they emit them.
@@ -154,9 +154,9 @@ func (p blockPaint) railed(th theme, depth int) blockPaint {
 // continuous through its separators (railSpacer).
 //
 // The in-progress buffer is painted by the SAME rules as a committed block of its depth
-// (transcript.pendingDepth): railed where it was streamed, announced by the ⤷ descent label when it
-// opens a level, and elided outright while it streams inside a collapsed run (insideCollapsedRun) —
-// there the head already blinks and carries the live gist, and the status line names the delegate.
+// (transcript.pendingDepth): railed where it was streamed, and elided outright while it streams
+// inside a collapsed run (insideCollapsedRun) — there the head already blinks and carries the live
+// gist, and the status line names the delegate.
 //
 // blink is this frame's phase of the live star ([spinnerAnim.blink]): it reaches only the header
 // glyph of a block that still holds an open call, and every other line of the transcript paints
@@ -172,10 +172,11 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	var targets []lineTarget
 	var userBlocks []userBlock
 
-	// prevBlockDepth is the depth of the block appended last — the left half of the next
-	// spacer's join. It is deliberately per-APPENDED-BLOCK rather than per-entry (the loop's
-	// prevDepth below): the ⤷ label blocks the descent loop emits carry depths of their own,
-	// and a spacer's rail follows the blocks it actually sits between.
+	// prevBlockDepth is the depth of the block appended last — the left half of the next spacer's
+	// join. It is deliberately per-APPENDED-BLOCK rather than per-entry: an OPEN delegation's head
+	// is appended at its own depth and then hands the join the depth of the span that follows it,
+	// and a spacer's rail follows the blocks it actually sits between rather than the entries the
+	// walk has passed.
 	prevBlockDepth := 0
 	// head is the index into t.entries of the block's FIRST entry — the one a click on the block
 	// toggles wherever the block has a single state, and the base the painter's per-line member
@@ -215,7 +216,6 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	// before the loop so a render never reads a row about a block that is gone.
 	t.paints.prune(len(t.entries))
 
-	prevDepth := 0
 	// previewAt is the index the live buffer paints AT — the end of the run that filled it
 	// (transcript.runEnd), which is where that run's blocks end rather than where the list does. In
 	// a serial session, and for the human's own conversation, the two are the same index and the
@@ -233,21 +233,15 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	// grow a wobbling gap above the footer. An empty buffer still renders its lone marker line, so
 	// the human sees that streaming has begun.
 	paintPreview := func(at int) {
-		// The live buffer is painted at the depth that FILLED it (transcript.pendingRun), like
-		// every committed block above — the descent label included, which the preview owes itself
-		// when the delegate has streamed before producing any entry to announce the level.
-		if t.pendingRun.depth > prevDepth {
-			for d := prevDepth + 1; d <= t.pendingRun.depth; d++ {
-				appendBlock(false, d, at, plainPaint(renderSubAgentLabel(th, d, width)))
-			}
-		}
+		// The live buffer is painted at the depth that FILLED it (transcript.pendingRun), like every
+		// committed block above: its own rail is what says which run is talking, and a delegate that
+		// streams before producing any entry needs nothing else to announce the level.
 		preview := renderEntryLines(th, entry{
 			kind:  entryAssistant,
 			text:  trimTrailingBlankLines(t.pending),
 			depth: t.pendingRun.depth,
 		}, width, blink)
 		appendBlock(false, t.pendingRun.depth, at, preview)
-		prevDepth = t.pendingRun.depth
 	}
 
 	for i := 0; i < len(t.entries); i++ {
@@ -259,10 +253,10 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			previewAt = -1
 		}
 		e := t.entries[i]
-		// A descent used to be announced here by a ⤷ sub-agent label block. Nothing announces it
-		// now: the delegation's own header row opens the frame with ┌─┶ and the rail runs down the
-		// span from there (docs/layout/tool-layout.md, "Grouped Sub-agents"), so a label saying the
-		// same thing one row lower was the run introducing itself twice.
+		// A descent used to be announced here by a label block of its own. Nothing announces it now:
+		// the delegation's own header row opens the frame with ┌─┶ and the rail runs down the span
+		// from there (docs/layout/tool-layout.md, "Grouped Sub-agents"), so a label saying the same
+		// thing one row lower was the run introducing itself twice.
 		//
 		// Adjacent delegations fold into ONE "✦ Sub-Agent (N)" list (subAgentGroupAt), asked first
 		// because every member of one is also a run head and would otherwise take the branch below
@@ -321,11 +315,11 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		} else if span := subAgentSpan(t.entries, i); span > 0 {
 			// A sub-agent run is ONE block while it is collapsed (layout.md): its head paints with the
 			// cascading summary and the whole span is then skipped outright, which is what elides the
-			// inner blocks, their ⤷ labels, and every rail and spacer among them — nothing is painted
-			// and afterwards taken back, and the descent logic above never fires because it never sees
-			// a deeper entry. Expanded, only the head is painted here and the loop walks into the span
-			// exactly as it always has, so every inner block keeps its OWN state and a nested run
-			// collapses inside an expanded parent by this same rule, at every depth.
+			// inner blocks and every rail and spacer among them — nothing is painted and afterwards
+			// taken back. Expanded, only the head is painted here — in the ┌─┶ frame a grouped
+			// delegation's open row opens (renderSubAgentRun, design call 3) — and the loop walks into
+			// the span exactly as it always has, so every inner block keeps its OWN state and a nested
+			// run collapses inside an expanded parent by this same rule, at every depth.
 			// The paint covers the head AND its span: the collapsed summary counts the work behind
 			// the header (subAgentSummary) and the star asks the span whether anything is still open,
 			// so a nested entry arriving or landing its result is a different block (paintcache.go).
@@ -396,7 +390,6 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 				return renderEntryLines(th, e, width, blink)
 			}))
 		}
-		prevDepth = e.depth
 	}
 	if previewAt >= 0 {
 		paintPreview(len(t.entries))

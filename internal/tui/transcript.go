@@ -251,10 +251,11 @@ type startupView struct {
 // sub_agent call block (ADR 0039 decision 6) rather than one interleaved braid behind whichever
 // call happened to be announced last.
 //
-// Contiguity is the point: every rule downstream of here — the run span, the ⤷ descent labels, the
-// folded tool run, the click surface's member offsets — reads a block off adjacent entries, and
-// keeping the grouping in the LIST is what lets all of them stay exactly as they were. In a serial
-// session the run's stretch IS the tail of the list, so nothing moves and nothing is inserted.
+// Contiguity is the point: every rule downstream of here — the run span, the railed frame around
+// it, the folded tool run, the click surface's member offsets — reads a block off adjacent
+// entries, and keeping the grouping in the LIST is what lets all of them stay exactly as they were.
+// In a serial session the run's stretch IS the tail of the list, so nothing moves and nothing is
+// inserted.
 //
 // The paint cache is the one thing an insertion invalidates: its rows are keyed by entry index, on
 // the standing assumption that the list only ever grows at the end (paintcache.go), and everything

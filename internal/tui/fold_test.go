@@ -67,7 +67,7 @@ func foldCases() []foldCase {
 			event:            domain.TokenEvent{EventBase: domain.EventBase{Depth: 1}, Text: "hi"},
 			wantPending:      "hi",
 			wantPendingDepth: 1,
-			wantPhrase:       subAgentLabel + " · responding",
+			wantPhrase:       subAgentActivityName + " · responding",
 			// No generation clock: the gauge times the conversation the human is steering, and a
 			// delegate's tokens are not it (foldStats).
 		},

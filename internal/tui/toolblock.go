@@ -38,7 +38,8 @@ import (
 // expanded block paints its retained body whole while a collapsed one paints the compact shape,
 // remainder marker and all (renderToolBranch). Its live half reaches one glyph and no shape at all:
 // the header's leading star (state.star), ✦ once the block has settled and blinking against a bare
-// cell while it still holds an open call.
+// cell while it still holds an open call. Its marker reaches the ROW's left edge, where an expanded
+// lone delegation hangs the ┌─┶ that opens its frame in place of the tree's ┕ (blockState.marker).
 //
 // It also marks the block's CLICK SURFACE as it emits it, because the lines and the marks have to
 // be one act: a second pass over the finished lines would be a second derivation of the same
@@ -88,7 +89,7 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 	var out blockPaint
 	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), toggle)
 	for i, tv := range views {
-		out.join(renderToolBranch(th, tv, branchMarker(i == len(views)-1), width, state.expanded, toggle))
+		out.join(renderToolBranch(th, tv, state.branchMarkerIn(i, len(views)), width, state.expanded, toggle))
 	}
 	return out
 }

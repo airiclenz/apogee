@@ -564,7 +564,7 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 
 // The issue's core case: two sub-agent calls back to back are never visually connected. The first
 // run's frame is CLOSED by its ┊ before the second call's own header row opens a frame of its own,
-// so the two rails meet nowhere — the closer is what makes the boundary legible now that no ⤷ label
+// so the two rails meet nowhere — the closer is what makes the boundary legible now that no label
 // stands between them.
 //
 // Both runs are EXPANDED first, because a collapsed run elides its span whole (layout.md) and a run
@@ -620,11 +620,11 @@ func TestRenderSpacerRailIsStyledAndUntrailed(t *testing.T) {
 	}
 }
 
-// The sub-agent frame — rail and ⤷ label alike, both the subRail role — is painted in the scheme's
-// `tool-header` role, the same gold toolLabel carries, so a nested run reads as one coloured frame
-// rather than as dim chrome. The assertion compares against the palette's own render rather than
-// a lipgloss byte-golden; the guard below it catches the opposite failure, a subRail role that
-// paints nothing at all and would leave the rail unstyled.
+// The sub-agent frame — rail, corner and closer alike, all the subRail role — is painted in the
+// scheme's `tool-header` role, the same gold toolLabel carries, so a nested run reads as one
+// coloured frame rather than as dim chrome. The assertion compares against the palette's own render
+// rather than a lipgloss byte-golden; the guard below it catches the opposite failure, a subRail
+// role that paints nothing at all and would leave the rail unstyled.
 func TestSubRailPaintedInToolHeaderGold(t *testing.T) {
 	th := newTheme(scheme.Default())
 
@@ -970,9 +970,6 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 		if got != want {
 			t.Errorf("opened fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
-		if strings.Contains(got, glyphSubLabel) {
-			t.Error("the opened group still carries a ⤷ label; the ┌─┶ header is what opens the run now")
-		}
 	})
 
 	// The ✓ is a report that came off, and nothing else says so: a delegation still working has not
@@ -994,6 +991,120 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("unfinished fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+}
+
+// loneDelegation folds one delegation with a nested read behind it, reported unless report is "".
+// It is deliberately the same fixture shape the fan-out golden above builds, so the two shapes are
+// compared on the same delegation rather than on two that merely look alike.
+func loneDelegation(tr *transcript, id, task, path, report string) {
+	subAgentCall(tr, id, task, 0)
+	readCall(tr, "r"+id, path, 1, 5, 1)
+	if report != "" {
+		subAgentReport(tr, id, report, 0)
+	}
+}
+
+// A LONE delegation is drawn in the very frame a grouped one is (design call 3 of
+// docs/plans/"2026-08-11 - 01"): folding changes what stands AROUND a delegation and never the
+// delegation itself, so the row a reader learned to read in a fan-out reads the same when the run
+// happened to stand by itself — ┌─┶ at column 0, the span behind the rail, the ┊ closing it, and
+// the ✓ after the name of a delegation that has reported.
+func TestLoneSubAgentRunOpensInTheGroupMembersFrame(t *testing.T) {
+	openHead := func(t *testing.T, tr *transcript) {
+		t.Helper()
+		if !tr.setExpanded(0, true) {
+			t.Fatal("setExpanded(0, true) = false; want the delegation open")
+		}
+	}
+
+	t.Run("opened to its span", func(t *testing.T) {
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", "all clear")
+		tr.apply(domain.MessageEvent{Text: "back to parent"}) // gives the run something to close before
+		openHead(t, tr)
+
+		want := strings.Join([]string{
+			"✦ Sub-Agent",
+			leaderEdgeRow("┌─┶ survey ✓ ⋯ all clear", glyphExpanded),
+			"│", // the separator is railed: the frame does not break under its own corner
+			"│ ✦ Read",
+			"│   ┕ a.go ⋯ 5 lines",
+			"┊", // one lone closer ends the span, in the separator's place
+			"✦ back to parent",
+		}, "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("lone run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	// The claim is stronger than "it looks like the sketch": the two rows are compared BYTE FOR BYTE
+	// on the same delegation, folded and unfolded, rather than restated as a second golden — two
+	// goldens is exactly how the two shapes would come to disagree.
+	t.Run("row is the grouped member's, to the byte", func(t *testing.T) {
+		lone := &transcript{}
+		loneDelegation(lone, "s1", "survey", "a.go", "all clear")
+		grouped := &transcript{}
+		loneDelegation(grouped, "s1", "survey", "a.go", "all clear")
+		loneDelegation(grouped, "s2", "build", "b.go", "all clear")
+		openHead(t, lone)
+		openHead(t, grouped)
+
+		// Line 0 is the block header ("✦ Sub-Agent", "✦ Sub-Agent (2)"), line 1 the delegation's row.
+		row := strings.Split(renderPlain(lone, 80), "\n")[1]
+		if member := strings.Split(renderPlain(grouped, 80), "\n")[1]; row != member {
+			t.Errorf("lone run's open row = %q; want the grouped member's %q", row, member)
+		}
+	})
+
+	// The ✓ says a report came off, in the lone shape exactly as in the folded one: a delegation
+	// still working has not reported at all, and one that reported a failure is marked by its red
+	// outcome slot alone (design call 6). Both states are pinned collapsed and open.
+	t.Run("no ✓ while running and none on failure", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			build  func(tr *transcript)
+			row    string
+			opened string
+		}{
+			{
+				name:   "still working",
+				build:  func(tr *transcript) { loneDelegation(tr, "s1", "working", "a.go", "") },
+				row:    "  ┕ working ⋯ 1 tool call",
+				opened: "┌─┶ working ⋯",
+			},
+			{
+				name: "reported a failure",
+				build: func(tr *transcript) {
+					loneDelegation(tr, "s1", "broken", "a.go", "")
+					tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+						CallID: "s1", Content: "it fell over", IsError: true}})
+				},
+				row:    "  ┕ broken ⋯ 1 tool call · error: it fell over",
+				opened: "┌─┶ broken ⋯ error: it fell over",
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				tr := &transcript{}
+				tc.build(tr)
+
+				collapsed := strings.Join([]string{"✦ Sub-Agent", groupMemberLine(tc.row)}, "\n")
+				if got := renderPlain(tr, 80); got != collapsed {
+					t.Errorf("collapsed mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
+				}
+				openHead(t, tr)
+				want := strings.Join([]string{
+					"✦ Sub-Agent",
+					leaderEdgeRow(tc.opened, glyphExpanded),
+					"│",
+					"│ ✦ Read",
+					"│   ┕ a.go ⋯ 5 lines",
+				}, "\n")
+				if got := renderPlain(tr, 80); got != want {
+					t.Errorf("opened mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+				}
+			})
 		}
 	})
 }
@@ -3039,12 +3150,12 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent"},
-				{line: 1, kind: targetHeader, entry: 0, text: leaderEdgeRow("  ┕ survey the tests ⋯ survey complete", glyphExpanded)},
+				{line: 1, kind: targetHeader, entry: 0, text: leaderEdgeRow("┌─┶ survey the tests ✓ ⋯ survey complete", glyphExpanded)},
 			},
 		},
 		{
 			// A railed sub-agent block is marked exactly like a flat one — the rail prefixes lines
-			// and adds none — and nothing stands ahead of it now that no ⤷ label opens the descent.
+			// and adds none — and nothing stands ahead of it now that no label opens the descent.
 			name:  "a nested block keeps its marks behind the rail",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {

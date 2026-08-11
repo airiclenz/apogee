@@ -873,7 +873,7 @@ func TestTranscriptMechanismGatedByDebug(t *testing.T) {
 
 // A Depth > 0 event renders as a framed sub-agent block: every line — header and the continuation
 // lines of a multi-line body — is prefixed by the │ rail gutter, without crashing or corrupting the
-// top-level layout. The rail is the WHOLE frame now: the ⤷ label that used to announce the descent
+// top-level layout. The rail is the WHOLE frame now: the label that used to announce the descent
 // is gone, and what opens a run is its own delegation header (docs/layout/tool-layout.md).
 func TestTranscriptDepthRendersFramedBlock(t *testing.T) {
 	tr := feed(domain.ToolResultEvent{
@@ -886,9 +886,6 @@ func TestTranscriptDepthRendersFramedBlock(t *testing.T) {
 		t.Fatal("toggleExpanded(0) = false; want the stray result to expand")
 	}
 	got := plainRender(tr)
-	if strings.Contains(got, glyphSubLabel) {
-		t.Errorf("depth-1 run still opened by a ⤷ label; the rail is the whole frame now:\n%q", got)
-	}
 	if !strings.Contains(got, "│ ✦ result") {
 		t.Errorf("depth-1 entry not framed by the rail:\n%q", got)
 	}
@@ -969,12 +966,14 @@ func runCall(tr *transcript, id, command, output string, depth int) {
 }
 
 // TestSubAgentRunCollapsesToItsCallBlock is the item's acceptance golden, in both directions. By
-// default the whole run is ONE block reading as ONE summarised line: the ⤷ descent label, the rail,
-// the inner blocks and every spacer among them are gone, the report body is gone with them, and the
-// head's summary slot carries the cascading count and gist.
-// Expanded, the head shows the report it actually returned and the railed span comes back exactly
-// as it has always painted — with each inner block in its OWN state, which is why the umbrella the
-// two inner calls fold under (renderSuperGroup) comes back with both of its type rows still shut.
+// default the whole run is ONE block reading as ONE summarised line: the rail, the inner blocks and
+// every spacer among them are gone, the report body is gone with them, and the head's summary slot
+// carries the cascading count and gist.
+// Expanded, the head shows the report it actually returned, opens the ┌─┶ frame a grouped
+// delegation's row opens (design call 3), and the railed span comes back inside it — with each
+// inner block in its OWN state, which is why the umbrella the two inner calls fold under
+// (renderSuperGroup) comes back with both of its type rows still shut. The head has reported, so
+// its name carries the done ✓ in both states (design call 6).
 func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
@@ -985,13 +984,13 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 
 	collapsed := strings.Join([]string{
 		"✦ Sub-Agent",
-		groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls · 12k/32k · done"),
+		groupMemberLine("  ┕ survey the tests ✓ ⋯ 2 tool calls · 12k/32k · done"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != collapsed {
 		t.Errorf("collapsed run mismatch (collapsed is the default):\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
 	}
-	if strings.Contains(collapsed, glyphSubLabel) || strings.Contains(collapsed, glyphSubRail) {
-		t.Errorf("the collapsed run kept a descent label or a rail:\n%s", collapsed)
+	if strings.Contains(collapsed, glyphSubRail) {
+		t.Errorf("the collapsed run kept a rail; its span is elided whole:\n%s", collapsed)
 	}
 
 	if !tr.toggleExpanded(0) {
@@ -999,7 +998,9 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	}
 	expanded := strings.Join([]string{
 		"✦ Sub-Agent",
-		leaderEdgeRow("  ┕ survey the tests ⋯ done", glyphExpanded),
+		// Open, the lone run wears the grouped member's frame: ┌ at column 0, the arm across to its
+		// own branch, the ✓ after the name and the ▼ still at the far edge.
+		leaderEdgeRow("┌─┶ survey the tests ✓ ⋯ done", glyphExpanded),
 		"    Found 4 gaps",
 		"    in the suite",
 		"    here they are",
@@ -1110,7 +1111,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				subAgentReport(tr, "s1", "Found 4 gaps", 0)
 			},
-			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · Found 4 gaps"),
+			want: groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · Found 4 gaps"),
 		},
 		{
 			name: "finished: the count plus the verdict, the report itself being a body",
@@ -1119,7 +1120,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				subAgentReport(tr, "s1", "Found 4 gaps\nand here they are", 0)
 			},
-			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · done"),
+			want: groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · done"),
 		},
 		{
 			name: "working, having reported: the fill sits between the count and the live phrase",
@@ -1150,7 +1151,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				subAgentUsage(tr, 1, 18432, 32768)
 				subAgentReport(tr, "s1", "Found 4 gaps", 0)
 			},
-			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · 18k/32k · Found 4 gaps"),
+			want: groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · 18k/32k · Found 4 gaps"),
 		},
 		{
 			name: "a reading with no window behind it is no cell at all",
@@ -1160,7 +1161,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 				subAgentUsage(tr, 1, 12000, 0) // an unbound window: a fill with no scale says nothing
 				subAgentReport(tr, "s1", "Found 4 gaps", 0)
 			},
-			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · Found 4 gaps"),
+			want: groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · Found 4 gaps"),
 		},
 	}
 	for _, tc := range cases {
@@ -1199,7 +1200,7 @@ func TestSubAgentCountIsTransitive(t *testing.T) {
 	// One read at depth 1, the nested sub-agent call, and its two reads at depth 2 — against the
 	// outer run's OWN 12k, never the 19k the two windows would add up to.
 	painted := renderPlain(tr, 80)
-	want := groupMemberLine("  ┕ survey the repo ⋯ 4 tool calls · 12k/32k · survey complete")
+	want := groupMemberLine("  ┕ survey the repo ✓ ⋯ 4 tool calls · 12k/32k · survey complete")
 	if branch := strings.Split(painted, "\n")[1]; branch != want {
 		t.Errorf("transitive summary = %q; want %q", branch, want)
 	}
@@ -1211,6 +1212,10 @@ func TestSubAgentCountIsTransitive(t *testing.T) {
 // TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent is the cascade: expanding a run reveals
 // its inner blocks in their own states, and an inner block that is itself a run collapses its own
 // span by this same rule. One rule, applied at every depth — not a special case for nesting.
+//
+// The frame cascades with it: the open outer run draws its ┌─┶ at column 0 and the nested run's
+// still-collapsed row keeps the tree's ┕ inside that rail, so the two levels are told apart by
+// where their markers stand rather than by anything either says about itself.
 func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the repo", 0)
@@ -1225,10 +1230,10 @@ func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
-		leaderEdgeRow("  ┕ survey the repo ⋯ survey complete", glyphExpanded),
+		leaderEdgeRow("┌─┶ survey the repo ✓ ⋯ survey complete", glyphExpanded),
 		"│",
 		"│ ✦ Sub-Agent", // the nested run keeps its OWN state, and its indicator says so
-		leaderEdgeRow("│   ┕ read the tests ⋯ 1 tool call · tests read", glyphCollapsed),
+		leaderEdgeRow("│   ┕ read the tests ✓ ⋯ 1 tool call · tests read", glyphCollapsed),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("nested run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -1249,7 +1254,7 @@ func streamAt(tr *transcript, depth int, text string) {
 // collapsed run stands alone and everything beneath it is elided (layout.md), and a delegate's
 // answer is beneath it from its very first token — not only once its MessageEvent lands. Nothing is
 // lost by painting nothing: the head blinks live, carries the run's gist once there is work behind
-// it, and the status line already reads "⤷ sub-agent · responding".
+// it, and the status line already reads "sub-agent · responding".
 func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
@@ -1267,9 +1272,10 @@ func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
 }
 
 // TestSubAgentStreamPreviewRailedWhenRunExpanded is the other half of the rule: an expanded run
-// shows the delegate's stream where it happens — railed at the child's depth, under the ⤷ label the
-// descent opens for it. The label is owed by the preview itself here: the child has produced no
-// entry yet, so nothing in the committed list has announced the level.
+// shows the delegate's stream where it happens — railed at the child's depth, under the delegation
+// that opened the level. Its RAIL is the whole of what announces the descent: the label that used
+// to stand above the preview is gone (item 5), and nothing replaces it, the head above having
+// already named the delegate.
 func TestSubAgentStreamPreviewRailedWhenRunExpanded(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
@@ -1282,9 +1288,7 @@ func TestSubAgentStreamPreviewRailedWhenRunExpanded(t *testing.T) {
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
 		"  ┕ survey the tests ⋯",
-		"",
-		"│ ⤷ sub-agent",
-		"│",
+		"", // the join dips to the parent's depth, so the separator is the flat one
 		"│ ✦ child words",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -1371,7 +1375,9 @@ func TestParentMessageKeepsTheDelegatesStreamInsideItsRun(t *testing.T) {
 	}
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
-		leaderEdgeRow("  ┕ survey the tests ⋯", glyphExpanded),
+		// The frame opens on the run being OPEN and not on its being over: this delegate never
+		// reported, so the row wears the ┌─┶ and no ✓ (design call 6).
+		leaderEdgeRow("┌─┶ survey the tests ⋯", glyphExpanded),
 		"│",
 		"│ ✦ child words",
 		"┊", // the run closes before the parent picks its own thread back up

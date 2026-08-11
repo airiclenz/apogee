@@ -324,11 +324,11 @@ func TestStatusPhraseNamesTheActingDelegation(t *testing.T) {
 		{
 			name: "an unnamed delegation keeps the generic word",
 			head: `{"task":"audit the config loader"}`,
-			want: subAgentLabel + " · responding · 0s",
+			want: subAgentActivityName + " · responding · 0s",
 		},
 		{
 			name: "an unknown run reads as unnamed rather than as nothing",
-			want: subAgentLabel + " · responding · 0s",
+			want: subAgentActivityName + " · responding · 0s",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

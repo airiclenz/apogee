@@ -67,6 +67,13 @@ type activity struct {
 	since time.Time // when this activity began — the elapsed clock's origin
 }
 
+// subAgentActivityName is what the status line calls an UNNAMED delegate — "sub-agent · reading".
+// It is the status line's own word and no longer a label the transcript also draws: the rail and
+// its ┌─┶ header are the whole of what the transcript says about a descent now, so nothing here is
+// held to another surface's spelling. The transcript's own word for the tool is the registry's
+// "Sub-Agent" label, which titles its blocks (subAgentGroupLabel).
+const subAgentActivityName = "sub-agent"
+
 // text renders the activity as the status line's unstyled phrase. Idle says nothing at all —
 // the input box below already invites a message, so a word there would be noise. A phrase from
 // a sub-agent (Depth > 0) is prefixed with its identity, so "sub-agent · searching" reads as one
@@ -76,7 +83,7 @@ type activity struct {
 // transcript.runName) and "" when the delegation was given none. A named child takes its name in
 // place of the generic word — "repo-scout · reading" — because with a fan-out running
 // the slot can name only one delegate at a time and "sub-agent" says nothing about which. An
-// unnamed one keeps the subAgentLabel the transcript rail uses, to the byte.
+// unnamed one falls back to subAgentActivityName.
 func (a activity) text(name string) string {
 	var phrase string
 	switch a.kind {
@@ -102,7 +109,7 @@ func (a activity) text(name string) string {
 		if name != "" {
 			return name + " · " + phrase
 		}
-		return subAgentLabel + " · " + phrase
+		return subAgentActivityName + " · " + phrase
 	}
 	return phrase
 }
