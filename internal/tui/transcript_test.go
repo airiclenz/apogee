@@ -871,9 +871,10 @@ func TestTranscriptMechanismGatedByDebug(t *testing.T) {
 // Rendering sub-agent depth (Phase 3, P3.14 — "tolerate" → "render")
 // ----------------------------------------------------------------------------
 
-// A Depth > 0 event renders as a framed sub-agent block: a ⤷ sub-agent label opens the run,
-// and every line — header and the continuation lines of a multi-line body — is prefixed by
-// the │ rail gutter, without crashing or corrupting the top-level layout.
+// A Depth > 0 event renders as a framed sub-agent block: every line — header and the continuation
+// lines of a multi-line body — is prefixed by the │ rail gutter, without crashing or corrupting the
+// top-level layout. The rail is the WHOLE frame now: the ⤷ label that used to announce the descent
+// is gone, and what opens a run is its own delegation header (docs/layout/tool-layout.md).
 func TestTranscriptDepthRendersFramedBlock(t *testing.T) {
 	tr := feed(domain.ToolResultEvent{
 		EventBase: domain.EventBase{Depth: 1},
@@ -885,8 +886,8 @@ func TestTranscriptDepthRendersFramedBlock(t *testing.T) {
 		t.Fatal("toggleExpanded(0) = false; want the stray result to expand")
 	}
 	got := plainRender(tr)
-	if !strings.HasPrefix(got, "│ ⤷ sub-agent") {
-		t.Errorf("depth-1 run not opened by a ⤷ sub-agent label:\n%q", got)
+	if strings.Contains(got, glyphSubLabel) {
+		t.Errorf("depth-1 run still opened by a ⤷ label; the rail is the whole frame now:\n%q", got)
 	}
 	if !strings.Contains(got, "│ ✦ result") {
 		t.Errorf("depth-1 entry not framed by the rail:\n%q", got)
@@ -896,8 +897,9 @@ func TestTranscriptDepthRendersFramedBlock(t *testing.T) {
 	}
 }
 
-// A nested event sequence (Depth 0 → 1 → 0) renders the sub-agent block framed and labelled
-// while the parent stream stays intact and unframed (the P3.14 acceptance golden).
+// A nested event sequence (Depth 0 → 1 → 0) renders the sub-agent block framed, and CLOSED by the
+// ┊ where it climbs back out, while the parent stream stays intact and unframed (the P3.14
+// acceptance golden, re-pinned to the frame the spec draws).
 func TestTranscriptDepthNestedSequenceGolden(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 0}, Text: "delegating"})
@@ -906,11 +908,9 @@ func TestTranscriptDepthNestedSequenceGolden(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ delegating",
-		"",
-		"│ ⤷ sub-agent",
-		"│", // inside the run: the separator carries the rail
+		"", // the descent joins at depth 0: nothing announces it, so the spacer is the flat one
 		"│ ✦ child work",
-		"", // the climb-out joins at depth 0: the rail ends with the run's last line
+		"┊", // the climb-out closes the frame, in the separator's place
 		"✦ back to parent",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -918,20 +918,16 @@ func TestTranscriptDepthNestedSequenceGolden(t *testing.T) {
 	}
 }
 
-// The ⤷ sub-agent label opens once per descent and at each level: a 0→1→2 climb labels both
-// the first and the second nesting level, framed by one and two rail gutters respectively.
-func TestTranscriptDepthLabelsEachLevel(t *testing.T) {
+// One rail gutter per level frames a 0→1→2 climb, and nothing else marks the descent: the label
+// that used to open each level is gone, so the depth a block stands at is said by the gutters alone.
+func TestTranscriptDepthFramesEachLevel(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "child"})
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 2}, Text: "grandchild"})
 
 	want := strings.Join([]string{
-		"│ ⤷ sub-agent",
-		"│",
 		"│ ✦ child",
 		"│", // the 1→2 descent joins at depth 1: the outer rail alone
-		"│ │ ⤷ sub-agent",
-		"│ │",
 		"│ │ ✦ grandchild",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -1008,9 +1004,7 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 		"    in the suite",
 		"    here they are",
 		seeLessFooterLine(t, 80), // the head's own body closes with the footer; its span follows below
-		"",
-		"│ ⤷ sub-agent",
-		"│",
+		"│",                      // the separator is railed: an open head's span continues its frame
 		"│ ✦ Tools (2 calls)",
 		leaderEdgeRow("│   ┝ Read ⋯ 5 lines", glyphCollapsed),
 		leaderEdgeRow("│   ┕ Terminal ⋯ exit 0", glyphCollapsed),
@@ -1232,8 +1226,6 @@ func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
 		leaderEdgeRow("  ┕ survey the repo ⋯ survey complete", glyphExpanded),
-		"",
-		"│ ⤷ sub-agent",
 		"│",
 		"│ ✦ Sub-Agent", // the nested run keeps its OWN state, and its indicator says so
 		leaderEdgeRow("│   ┕ read the tests ⋯ 1 tool call · tests read", glyphCollapsed),
@@ -1380,11 +1372,9 @@ func TestParentMessageKeepsTheDelegatesStreamInsideItsRun(t *testing.T) {
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
 		leaderEdgeRow("  ┕ survey the tests ⋯", glyphExpanded),
-		"",
-		"│ ⤷ sub-agent",
 		"│",
 		"│ ✦ child words",
-		"",
+		"┊", // the run closes before the parent picks its own thread back up
 		"✦ parent answer",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {

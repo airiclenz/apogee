@@ -107,7 +107,24 @@ must define `success` (colour-agnostic, matching the style of `5555c44`).
 
 **Commit:** `feat(scheme): add a green success role for done markers`
 
-## 4. Expanded grouped member: `┌─┶` header, column-0 gold rail, `┊` closer, done-`✓`
+## 4. Expanded grouped member: `┌─┶` header, column-0 gold rail, `┊` closer, done-`✓` — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): four deviations, all forced by where the seams already sit.
+(a) The `┊` closer lands at the shared block-JOIN seam (`railJoin`, wrap.go) and
+not inside the group painter: an open member's span is painted by
+`renderView`'s own walk, outside the group block, so no other seam can emit a
+line after it — and the sketch puts the closer where the blank separator would
+be, not beside it. Consequence: a LONE expanded run already closes with `┊`
+too; item 5's remaining work there is its `┌─┶` header and deleting the `⤷`
+constants. (b) The closer fires only at a join, never at the end of the
+transcript — a still-streaming run must not be marked closed (item 7). (c) The
+done `✓` rides a new paint-time `toolView.finished` field rather than a flag
+threaded through the shared `renderGroupMember`, so ONE reading serves the
+collapsed row, the `┌─┶` header and item 5's lone run; it is not on the wire.
+(d) Removing the `⤷` descent label re-pinned tests beyond the item's named
+files: `model_test.go`, `transcriptcodec_test.go`, and
+`TestTranscriptDepthLabelsEachLevel` → `TestTranscriptDepthFramesEachLevel`
+(the rule it named is gone); `doc.go`'s rail narration was updated with them.
 
 Depends on items 1, 3.
 

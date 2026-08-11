@@ -3840,8 +3840,8 @@ func TestModelRendersNestedDepth(t *testing.T) {
 	if !strings.Contains(got, "nested") {
 		t.Errorf("nested-depth event not rendered:\n%s", got)
 	}
-	if !strings.Contains(got, "⤷ sub-agent") {
-		t.Errorf("nested-depth block not opened by a sub-agent label:\n%s", got)
+	if strings.Contains(got, glyphSubLabel) {
+		t.Errorf("nested-depth block still opened by a ⤷ label; the rail is the whole frame now:\n%s", got)
 	}
 	if !strings.Contains(got, "│ │ ✦ nested") {
 		t.Errorf("depth-2 block not framed by two rail gutters:\n%s", got)

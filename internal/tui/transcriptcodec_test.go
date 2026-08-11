@@ -232,10 +232,13 @@ func TestTranscriptCodecReDerivesSubAgentSolo(t *testing.T) {
 		}
 	}
 
+	// Both heads decoded DONE, and "refused" is not one of the verdicts apogee reserves for failure
+	// (failedSummary), so each row carries the done ✓ — the mark is read off the record's own state
+	// and its own wording, which is exactly what a replay has to reproduce.
 	want := strings.Join([]string{
 		"✦ Sub-Agent (2)",
-		"  ┝ survey the tests ⋯ refused",
-		"  ┕ survey the docs ⋯ refused",
+		"  ┝ survey the tests ✓ ⋯ refused",
+		"  ┕ survey the docs ✓ ⋯ refused",
 	}, "\n")
 	if out := renderPlain(&transcript{entries: got}, 80); out != want {
 		t.Errorf("replayed delegations mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)

@@ -184,8 +184,13 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	// marks none — every kind but a tool block — may pass whatever index it sits at.
 	appendBlock := func(isUser bool, depth, head int, block blockPaint) {
 		if len(lines) > 0 {
-			lines = append(lines, railSpacer(th, min(prevBlockDepth, depth)))
-			targets = append(targets, lineTarget{}) // a separator belongs to neither block
+			// The join is a REGION and not always one line: climbing out of a run closes its frame
+			// with a ┊ per level left behind (railJoin), and those rows stand exactly where the one
+			// separator would have.
+			for _, sep := range railJoin(th, prevBlockDepth, depth) {
+				lines = append(lines, sep)
+				targets = append(targets, lineTarget{}) // a separator belongs to neither block
+			}
 		}
 		if isUser {
 			userBlocks = append(userBlocks, userBlock{start: len(lines), count: len(block.lines)})
@@ -254,14 +259,11 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			previewAt = -1
 		}
 		e := t.entries[i]
-		// Open a ⤷ sub-agent label whenever a run descends to a deeper level than the
-		// previous block — a 0→1 (or 1→2) transition announces the nested section once,
-		// per level, until the stream climbs back out (P3.14).
-		if e.depth > prevDepth {
-			for d := prevDepth + 1; d <= e.depth; d++ {
-				appendBlock(false, d, i, plainPaint(renderSubAgentLabel(th, d, width)))
-			}
-		}
+		// A descent used to be announced here by a ⤷ sub-agent label block. Nothing announces it
+		// now: the delegation's own header row opens the frame with ┌─┶ and the rail runs down the
+		// span from there (docs/layout/tool-layout.md, "Grouped Sub-agents"), so a label saying the
+		// same thing one row lower was the run introducing itself twice.
+		//
 		// Adjacent delegations fold into ONE "✦ Sub-Agent (N)" list (subAgentGroupAt), asked first
 		// because every member of one is also a run head and would otherwise take the branch below
 		// as a block of its own. The question is asked at every member and not only at the first:
@@ -306,8 +308,15 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 				return renderSubAgentGroup(th, count, members, railedWidth(width, e.depth),
 					blockState{live: key.live, blink: blink}).railed(th, e.depth)
 			}))
+			// A block ending on an OPEN member does not end the run: that member's span follows,
+			// railed one level deeper, and the separator between the two belongs to THAT rail
+			// rather than to the group's own depth. Without it the frame would break for one blank
+			// row directly under the ┌─┶ that opened it (railJoin reads this as the join's left
+			// half).
 			if i = grp[end].at; !t.entries[i].expanded {
 				i += grp[end].span
+			} else {
+				prevBlockDepth = e.depth + 1
 			}
 		} else if span := subAgentSpan(t.entries, i); span > 0 {
 			// A sub-agent run is ONE block while it is collapsed (layout.md): its head paints with the
@@ -327,6 +336,8 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			}))
 			if !e.expanded {
 				i += span
+			} else {
+				prevBlockDepth = e.depth + 1 // the head's span continues the rail beneath it
 			}
 		} else if sup := toolSuperGroup(t.entries, i); len(sup) > 0 {
 			// Adjacent runs of DIFFERENT tools fold under one umbrella (toolSuperGroup, item 5), which

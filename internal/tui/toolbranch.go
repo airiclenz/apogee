@@ -279,6 +279,35 @@ func branchMarker(last bool) string {
 	return "  " + glyphBranch + " "
 }
 
+// subAgentOpenMarker is branchMarker's answer for an EXPANDED delegation: the frame it opens takes
+// the row's whole left edge, so the two blank columns a ┝/┕ hangs off become the corner and the arm
+// carrying it across to the branch (docs/layout/tool-layout.md, "Grouped Sub-agents"). The "─" is
+// written out rather than named because it is the corner's ARM and nothing else in the transcript
+// draws one — the markdown table's rule (glyphTableRule) is a different element that happens to
+// share the shape.
+//
+// It is exactly branchMarker's four cells, which is what lets a member open and close without its
+// text moving sideways under the very click that opened it — the same promise the ▶ → ▼ swap keeps
+// at the row's other edge (groupIndicatorCells).
+const subAgentOpenMarker = glyphRailCorner + "─" + glyphRailTee + " "
+
+// paintRowMarker dresses a leader row's leading marker. Every marker but one is the row's own chrome
+// and takes its detail tone with the target beside it; the delegation frame's corner is the
+// exception, because it is the top end of the RAIL running down the span below it and has to be read
+// as the same line (design call 2 of docs/plans/"2026-08-11 - 01"): ┌ alone takes the rail's gold,
+// while the arm and the branch it reaches — and the ┝/┕/│ of every other shape — stay in the tone
+// their row is in.
+//
+// The split is made HERE, at the one place a marker is painted, rather than by handing pre-styled
+// markers down: leaderRowIn measures the marker to lay the row out, and a measured string with
+// escapes in it is a width waiting to be got wrong.
+func paintRowMarker(th theme, marker string, expanded bool) string {
+	if rest, ok := strings.CutPrefix(marker, glyphRailCorner); ok {
+		return th.subRail.Render(glyphRailCorner) + detailTone(th, expanded).Render(rest)
+	}
+	return detailTone(th, expanded).Render(marker)
+}
+
 // renderSubDetails lays a call's detail lines out beneath its branch line, indented to the
 // branch marker's width and styled by kind, so they read as that branch's content rather than
 // as siblings of it.

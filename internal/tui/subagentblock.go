@@ -208,6 +208,13 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 		if spanned && !m.head.expanded {
 			view = collapsedSubAgentView(th.measure, m.head, m.span)
 		}
+		// An OPEN delegation's row is the top of a frame rather than a twig of the list: the corner
+		// takes the two columns the ┝/┕ hung off and the rail runs on down the span (design call 2).
+		// It is exactly branchMarker's width, so the row does not move under the click that opened it.
+		if spanned && m.head.expanded {
+			marker = subAgentOpenMarker
+		}
+		view.finished = subAgentFinished(m.head)
 		view = guardPromotions(th, []toolView{view}, room, marker)[0]
 		rows, hides := renderSubAgentMemberRows(th, view, marker, width, room, m.head.expanded, spanned)
 		kind := targetNone
@@ -217,6 +224,21 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 		out.addFor(m.offset, rows, kind)
 	}
 	return out
+}
+
+// subAgentFinished asks whether a delegation has earned the done ✓ its row wears after its name
+// (design call 6 of docs/plans/"2026-08-11 - 01"): it has reported, and what it reported was not a
+// failure. A run still working wears nothing — the blinking star is what says it is going — and a
+// FAILED run wears nothing either, because the spec makes its red outcome slot the whole of the
+// failure marking (summaryStyle); a ✓ and a red verdict on one row would be the block saying both
+// at once.
+//
+// The verdict is read off the head's OWN summary and never off the collapsed reading composed for
+// the row (collapsedSubAgentView): that one folds the report's gist behind a count of the work, and
+// failedSummary anchors its prefix at the start of the text, so asking it there would answer "not a
+// failure" for every failed delegation in a group.
+func subAgentFinished(head entry) bool {
+	return head.done && !failedSummary(head.tool.Summary.Text)
 }
 
 // groupLabelOf is the label a folded group of delegations names itself with: the members' own, off

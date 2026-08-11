@@ -244,6 +244,19 @@ type toolView struct {
 	// session paints is built from it, so a record that lost it would come back a different block.
 	task string
 
+	// finished says this view's row wears the done ✓ after its name (design call 6 of
+	// docs/plans/"2026-08-11 - 01"; leaderRow). It is a PAINT-TIME reading and never a presented
+	// fact: whether a delegation came off is on its entry (entry.done) and in the verdict its own
+	// summary words, and the painters that already copy a view to say what a collapsed delegation
+	// shows are the ones that set it (collapsedSubAgentView, renderSubAgentGroup). Keeping it here
+	// rather than threading a flag through renderGroupMember is what lets ONE reading of the mark
+	// serve the collapsed row, the expanded ┌─┶ header and the lone run alike — a second wording
+	// would part company with this one the first time either moved.
+	//
+	// It is deliberately not on the wire (wireToolView) and not display text: nothing sanitises a
+	// bool, and a replayed record re-derives the mark from the entry it decoded.
+	finished bool
+
 	// solo marks a call that must never be folded into a grouped block, however well it matches its
 	// neighbours (groupable, render.go). Grouping's own rule is about the SHAPE of a call — a target
 	// to lead a member's leader row — and says nothing about what the block MEANS; solo is where a

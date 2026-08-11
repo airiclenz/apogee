@@ -122,8 +122,23 @@ func guardRefuses(th theme, tv toolView, room int, marker string) bool {
 // call ONE row of block plus its header.
 func leaderRow(th theme, tv toolView, marker string, room int, expanded bool, remainder string) string {
 	tone := detailTone(th, expanded)
-	return leaderRowIn(th, expandTabs(tv.Target), func(s string) string { return tone.Render(s) },
-		tv.Summary, marker, room, expanded, remainder)
+	left, paint := expandTabs(tv.Target), func(s string) string { return tone.Render(s) }
+	if tv.finished && left != "" {
+		// The mark rides the row's LEFT text so the leader arithmetic measures it exactly as it
+		// measures the name it follows — a ✓ appended after the clip would push the row a cell past
+		// its width and fold it onto a second line. Its own colour is put back on after the clip,
+		// which is why the painter re-splits rather than the caller pre-styling: leaderRowIn hands
+		// back the SURVIVING text, and on a row too narrow to seat the mark the split simply does
+		// not match and the name paints in one tone, whole (toolView.finished).
+		left += " " + glyphDone
+		paint = func(s string) string {
+			if name, ok := strings.CutSuffix(s, " "+glyphDone); ok {
+				return tone.Render(name) + " " + th.successMark.Render(glyphDone)
+			}
+			return tone.Render(s)
+		}
+	}
+	return leaderRowIn(th, left, paint, tv.Summary, marker, room, expanded, remainder)
 }
 
 // leaderRowIn is the leader arithmetic itself, with the row's LEFT content handed in rather than
@@ -175,7 +190,7 @@ func leaderRowIn(th theme, left string, paint func(string) string, summary branc
 		leadCells = th.measure.Width(target) + leaderGap
 	}
 	dots := max(leaderMinDots, avail-leadCells-tail)
-	row := detailTone(th, expanded).Render(marker) + lead +
+	row := paintRowMarker(th, marker, expanded) + lead +
 		th.toolLeader.Render(strings.Repeat(glyphLeaderDot, dots))
 	if slot != "" {
 		row += strings.Repeat(" ", leaderGap) + summaryStyle(th, summary, expanded).Render(slot)

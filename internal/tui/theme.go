@@ -32,8 +32,9 @@ import (
 // The marker glyphs. The assistant and tool headers lead with ✦; tool detail hangs off a
 // tree branch (┝ for an interior line, ┕ for the last); the user prompt leads with ❯, and a
 // menu-style popup row that is NOT the selected one leads with ·, the ❯'s quiet counterpart. A
-// sub-agent (Depth > 0) block is framed by a vertical rail (│ per nesting level) and opened
-// by a ⤷ sub-agent label (P3.14).
+// sub-agent (Depth > 0) block is framed by a vertical rail (│ per nesting level), opened by the
+// delegation's own ┌─┶ header row and closed by a lone ┊ (docs/layout/tool-layout.md, "Grouped
+// Sub-agents"); the ⤷ that used to announce a descent survives only on the live-preview path.
 const (
 	glyphAssistant      = "✦" // the assistant and tool-header star. A tool block still holding an open call BLINKS it — half a second showing, half a second a bare cell that holds the column (layout.md, "The live star"; blockState.star)
 	glyphBranch         = "┝"
@@ -44,6 +45,10 @@ const (
 	glyphSubRail        = "│"
 	glyphMemberGutter   = "│" // U+2502 LIGHT VERTICAL — the gutter continuing an EXPANDED group member's rows under its ┝ (memberGutter, render.go). Its shape is glyphSubRail's and deliberately NOT shared with it: the member gutter is painted in the detail tone and the sub-agent rail in the label gold (design call 8), so an open member nested inside a run cannot be read as a frame of the run.
 	glyphSubLabel       = "⤷"
+	glyphRailCorner     = "┌" // U+250C LIGHT DOWN AND RIGHT — the corner an EXPANDED delegation's header row opens its frame with, at the very left of the row (subAgentOpenMarker, docs/layout/tool-layout.md "Grouped Sub-agents"). It is the one cell of that marker painted in the rail's gold, because it IS the rail's top end (design call 2 of docs/plans/"2026-08-11 - 01")
+	glyphRailTee        = "┶" // U+2536 LIGHT UP AND HORIZONTAL AND HEAVY LEFT — where the frame's arm meets the delegation's own branch on that header row. It stands in the row's detail tone with the ─ beside it, not in the rail's gold: it is this row's branch marker, the ┝/┕ of a member that happens to be open (design call 2)
+	glyphRailClose      = "┊" // U+250A BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL — the lone line closing an expanded delegation's span, in the rail's gold. Its dashes are the point: the frame stops rather than continuing, which is what a solid │ under the last row of a span would say
+	glyphDone           = "✓" // U+2713 CHECK MARK — a FINISHED delegation's mark, after its name on the row and before the leaders, in the scheme's `success` green (theme.successMark, design call 6). A failed run wears no glyph at all: its red outcome slot is the whole of the failure marking (summaryStyle)
 	glyphBullet         = "•" // a markdown bullet-list item (- / * / +)
 	glyphSkill          = "✦" // marks a skill: the "/" menu's skill rows (the sent block marks its own by colouring the token, not by badging it)
 	glyphPresented      = "▤" // leads a presented document — deliberately NOT ✦: a deliverable is not a tool call
@@ -163,17 +168,23 @@ type theme struct {
 	// docs/plans/"2026-08-11 - 00"). A stated role rather than a tone computed at render time, since
 	// every colour on screen is a role a scheme can name (ADR 0040).
 	toolMarkerBright lipgloss.Style
-	subRail          lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (toolLabel's `tool-header` role — one tone for the whole sub-agent frame)
-	skillAccent      lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
-	skillToken       lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)
-	fileToken        lipgloss.Style // a RESOLVING inline "@path" token in the prompt box (the scheme's `file-ref` role on the box's black — a pale green under `dark`, an olive one under `light`)
-	selection        lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
-	diffAdded        lipgloss.Style // a "+" diff detail line (reserved)
-	diffRemoved      lipgloss.Style // a "-" diff detail line (reserved)
-	errorText        lipgloss.Style // a recovered-fault notice
-	noteText         lipgloss.Style // a neutral note (cancelled, approval record) + a presentation's status line
-	queuedText       lipgloss.Style // a staged-interjection strip row: faint on black, painted edge to edge so the strip reads as one band (its own role, deliberately not statusBar's)
-	presentTitle     lipgloss.Style // the ▤ marker and title of a presented document (bold white — a deliverable reads as a heading, not as plumbing; its path and URL stay unstyled so the terminal linkifies plain text)
+	subRail          lipgloss.Style // the sub-agent frame: the │ rail down a Depth > 0 block, the ┌ opening an expanded delegation's header row, and the ┊ closing its span (toolLabel's `tool-header` role — one tone for the whole frame)
+	// successMark is the ✓ a FINISHED delegation wears after its name (the scheme's `success` role,
+	// green): errorText's counterpart, and read as one — the two are what the transcript says about
+	// how something came out. It is a foreground alone, with no bold weight, because the mark is a
+	// small punctuation of a row the reader is skimming rather than a verdict shouted at them; the
+	// red that DOES shout belongs to a failure, which wears no glyph of its own (design call 6).
+	successMark  lipgloss.Style
+	skillAccent  lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
+	skillToken   lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)
+	fileToken    lipgloss.Style // a RESOLVING inline "@path" token in the prompt box (the scheme's `file-ref` role on the box's black — a pale green under `dark`, an olive one under `light`)
+	selection    lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
+	diffAdded    lipgloss.Style // a "+" diff detail line (reserved)
+	diffRemoved  lipgloss.Style // a "-" diff detail line (reserved)
+	errorText    lipgloss.Style // a recovered-fault notice
+	noteText     lipgloss.Style // a neutral note (cancelled, approval record) + a presentation's status line
+	queuedText   lipgloss.Style // a staged-interjection strip row: faint on black, painted edge to edge so the strip reads as one band (its own role, deliberately not statusBar's)
+	presentTitle lipgloss.Style // the ▤ marker and title of a presented document (bold white — a deliverable reads as a heading, not as plumbing; its path and URL stay unstyled so the terminal linkifies plain text)
 
 	// Markdown styles for assistant chat text (markdown.go): **bold** weight, <u>underline</u>,
 	// ## headings as bold white, `inline code` and ``` fenced blocks ``` in the scheme's `code` role,
@@ -279,6 +290,7 @@ func newTheme(s scheme.Scheme) theme {
 		diffAdd        = lipgloss.Color(s.DiffAdd)
 		diffDel        = lipgloss.Color(s.DiffDel)
 		errFg          = lipgloss.Color(s.Error)
+		successFg      = lipgloss.Color(s.Success)
 		code           = lipgloss.Color(s.Code)
 		toolHeaderFg   = lipgloss.Color(s.ToolHeader)
 		modePlan       = lipgloss.Color(s.ModePlan)
@@ -315,6 +327,7 @@ func newTheme(s scheme.Scheme) theme {
 		toolMarker:       lipgloss.NewStyle().Foreground(toolMarkerFg),
 		toolMarkerBright: lipgloss.NewStyle().Foreground(openMarker),
 		subRail:          lipgloss.NewStyle().Foreground(toolHeaderFg),
+		successMark:      lipgloss.NewStyle().Foreground(successFg),
 		// The inline token accents are one act on two fields: the skill's violet moves to the
 		// FOREGROUND and the background stays whatever the token is standing on — the prompt box's
 		// black while the message is being typed, the user block's dark gray once it is sent — so an

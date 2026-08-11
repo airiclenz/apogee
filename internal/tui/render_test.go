@@ -478,8 +478,10 @@ func TestUserBlockRowsAreOneSquareLineEach(t *testing.T) {
 
 // The one separator row between two blocks is railed at the JOIN of their depths — the shallower
 // of the two — and that single rule is the whole of the continuous rail: a spacer inside a run
-// carries the gutter, a spacer that crosses a run boundary does not. Each case pins the entire
-// rendered scrollback, so a separator that gained or lost a rail shows as the row it is.
+// carries the gutter, a spacer that crosses a run boundary does not. Where the join CLIMBS OUT of a
+// run the separator is the ┊ closing it instead, one per level left behind and each railed inside
+// whatever is still open (railJoin). Each case pins the entire rendered scrollback, so a separator
+// that gained or lost a rail shows as the row it is.
 func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -500,8 +502,6 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 				})
 			},
 			want: []string{
-				"│ ⤷ sub-agent",
-				"│",
 				"│ ✦ Read",
 				"│   ┕ a.go ⋯ 5 lines",
 				"│", // both sides sit at depth 1: the rail runs straight through
@@ -518,26 +518,20 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 				tr.apply(domain.MessageEvent{Text: "back to parent"})
 			},
 			want: []string{
-				"│ ⤷ sub-agent",
-				"│",
 				"│ ✦ child",
-				"", // join 0: the rail ends on the run's last line, not on the spacer
+				"┊", // the run ends, and the closer is what says so, in the separator's place
 				"✦ back to parent",
 			},
 		},
 		{
-			name: "a 0 to 2 descent joins the stacked labels at depth 1",
+			name: "a 0 to 2 descent opens both rails at once",
 			build: func(tr *transcript) {
 				tr.apply(domain.MessageEvent{Text: "delegating"})
 				tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 2}, Text: "deep"})
 			},
 			want: []string{
 				"✦ delegating",
-				"",
-				"│ ⤷ sub-agent",
-				"│", // the outer rail alone: the inner run has not opened yet
-				"│ │ ⤷ sub-agent",
-				"│ │",
+				"", // join 0: nothing announces the descent, so the spacer is the flat one
 				"│ │ ✦ deep",
 			},
 		},
@@ -548,12 +542,8 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 				tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "shallower"})
 			},
 			want: []string{
-				"│ ⤷ sub-agent",
-				"│",
-				"│ │ ⤷ sub-agent",
-				"│ │",
 				"│ │ ✦ deep",
-				"│", // the inner run closed; the outer one is still open
+				"│ ┊", // the inner run closed inside the outer one, which is still open
 				"│ ✦ shallower",
 			},
 		},
@@ -572,9 +562,10 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 	}
 }
 
-// The issue's core case: two sub-agent calls back to back are never visually connected. The
-// second call's own member row sits at the parent's depth between the two runs, so the join
-// dips to 0, the rail breaks, and a fresh ⤷ sub-agent label opens the second run.
+// The issue's core case: two sub-agent calls back to back are never visually connected. The first
+// run's frame is CLOSED by its ┊ before the second call's own header row opens a frame of its own,
+// so the two rails meet nowhere — the closer is what makes the boundary legible now that no ⤷ label
+// stands between them.
 //
 // Both runs are EXPANDED first, because a collapsed run elides its span whole (layout.md) and a run
 // with no rail on screen cannot say anything about how two rails meet. The rule under test is the
@@ -593,17 +584,15 @@ func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Sub-Agent (2)", // the two adjacent delegations are rows of one list (subAgentGroup)
-		// A member is always a toggle target (its span), so its row always wears the state.
-		leaderEdgeRow("  ┝ first ⋯", glyphExpanded),
-		"",
-		"│ ⤷ sub-agent",
+		// A member is always a toggle target (its span), so its row always wears the state. Open, it
+		// is the ┌─┶ header of its own frame — the ┕ the last row would have closed the list with
+		// included, since the frame it opens is what that row now says.
+		leaderEdgeRow("┌─┶ first ⋯", glyphExpanded),
 		"│",
 		"│ ✦ first child",
-		"", // the first run closes here…
-		leaderEdgeRow("  ┕ second ⋯", glyphExpanded),
-		"", // …and the second call is fenced off from it on both sides
-		"│ ⤷ sub-agent",
-		"│",
+		"┊", // the first run closes here…
+		leaderEdgeRow("┌─┶ second ⋯", glyphExpanded),
+		"│", // …and the second opens a frame of its own, touching nothing of the first
 		"│ ✦ second child",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -646,6 +635,56 @@ func TestSubRailPaintedInToolHeaderGold(t *testing.T) {
 	}
 	if rail == glyphSubRail {
 		t.Fatal("the subRail role renders no escape sequence; the rail and label would be unstyled")
+	}
+}
+
+// Design call 2 splits the delegation frame's header row between two voices, and the split is the
+// whole point of it: ┌ and ┊ are the RAIL — its top end and its close — and wear the gold the │
+// between them does, while the arm and the tee reaching across to the branch are that row's own
+// chrome and stay in the tone every other ┝/┕ takes. A frame painted in one voice throughout would
+// read as a box drawn around the run rather than as a rail hanging off it.
+func TestSubAgentFrameSplitsRailGoldFromBranchTone(t *testing.T) {
+	th := newTheme(scheme.Default())
+
+	marker := paintRowMarker(th, subAgentOpenMarker, true)
+
+	gold, branch := th.subRail.Render(glyphRailCorner), detailTone(th, true).Render("─"+glyphRailTee+" ")
+	if want := gold + branch; marker != want {
+		t.Errorf("┌─┶ marker = %q; want the corner in rail gold and the arm in the branch tone %q",
+			marker, want)
+	}
+	if got, want := ansi.Strip(marker), subAgentOpenMarker; got != want {
+		t.Errorf("painting the marker changed its cells to %q; want %q", got, want)
+	}
+	if plain := branchMarker(false); paintRowMarker(th, plain, true) != detailTone(th, true).Render(plain) {
+		t.Error("an ordinary ┝ marker no longer paints in one tone; only the frame's corner is split off")
+	}
+}
+
+// The done ✓ is the `success` role and nothing else — errorText's green counterpart, so the two
+// verdicts a row can carry are read as one pair — and it lands on the row it belongs to, after the
+// delegation's name and ahead of the leaders.
+func TestSubAgentDoneMarkPaintedInTheSuccessRole(t *testing.T) {
+	th := newTheme(scheme.Default())
+
+	row := leaderRow(th, toolView{Target: "survey", finished: true}, branchMarker(true), 60, false, noRemainder)
+
+	styled := th.successMark.Render(glyphDone)
+	if styled == glyphDone {
+		t.Fatal("the successMark role renders no escape sequence; the ✓ would be unstyled")
+	}
+	if want := lipgloss.NewStyle().Foreground(lipgloss.Color(scheme.Default().Success)).Render(glyphDone); styled != want {
+		t.Errorf("✓ style = %q; want the scheme's `success` green %q", styled, want)
+	}
+	if !strings.Contains(row, styled) {
+		t.Errorf("row %q does not carry the ✓ in its own role", row)
+	}
+	if got, want := ansi.Strip(row), "  ┕ survey ✓ "; !strings.HasPrefix(got, want) {
+		t.Errorf("row text = %q; want it to open %q (the mark follows the name, ahead of the leaders)", got, want)
+	}
+	plain := leaderRow(th, toolView{Target: "survey"}, branchMarker(true), 60, false, noRemainder)
+	if strings.Contains(ansi.Strip(plain), glyphDone) {
+		t.Errorf("an unfinished delegation's row carries a ✓: %q", ansi.Strip(plain))
 	}
 }
 
@@ -723,17 +762,15 @@ func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 	}
 }
 
-// A grouped run inside a sub-agent is framed like any other block: the ⤷ label opens the run once
-// and every line of the group — header, branches, and the separator between the label and the
-// block alike — carries the │ rail gutter, so the run reads as one continuous frame.
+// A grouped run inside a sub-agent is framed like any other block: every line of the group — header,
+// branches, and the separators between its blocks alike — carries the │ rail gutter, so the run
+// reads as one continuous frame.
 func TestRenderGroupsInsideSubAgent(t *testing.T) {
 	tr := &transcript{}
 	readCall(tr, "c1", "a.go", 1, 5, 1)
 	readCall(tr, "c2", "bb.go", 1, 9, 1)
 
 	want := strings.Join([]string{
-		"│ ⤷ sub-agent",
-		"│",
 		"│ ✦ Read (2)",
 		"│   ┝ a.go ⋯ 5 lines",
 		"│   ┕ bb.go ⋯ 9 lines",
@@ -875,10 +912,11 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 // the lone block's own collapsed reading (collapsedSubAgentView) — the work behind it and the gist
 // its delegate reported — because folding changes the frame around a delegation, not the record.
 //
-// Opening one reveals its SPAN rather than a body: the nested run paints railed and labelled
-// exactly as it does under a lone expanded delegation, and the list resumes beneath it, its last
-// row still closing with ┕. That interruption is why the group's remaining rows are painted in a
-// second block, and it is what this golden pins.
+// Opening one reveals its SPAN rather than a body, and the frame the spec draws around it: the row
+// becomes a ┌─┶ header at the very left of the block, the span runs behind a column-0 │ rail, and
+// one ┊ closes it before the list resumes — its last row still closing the whole group with ┕. That
+// interruption is why the group's remaining rows are painted in a second block, and it is what this
+// golden pins. A FINISHED delegation carries a ✓ after its name in both states (design call 6).
 func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 	// The three delegations stand at entries 0, 2 and 4 — each with one nested read between them.
 	const secondHead = 2
@@ -899,9 +937,9 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 	}
 	header := "✦ Sub-Agent (3)"
 	rows := []string{
-		groupMemberLine("  ┝ survey ⋯ 1 tool call · all clear"),
-		groupMemberLine("  ┝ build ⋯ 1 tool call · all clear"),
-		groupMemberLine("  ┕ check ⋯ 1 tool call · all clear"),
+		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
+		groupMemberLine("  ┝ build ✓ ⋯ 1 tool call · all clear"),
+		groupMemberLine("  ┕ check ✓ ⋯ 1 tool call · all clear"),
 	}
 
 	t.Run("collapsed to one row per agent", func(t *testing.T) {
@@ -919,19 +957,43 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 		want := strings.Join([]string{
 			header,
 			rows[0],
-			// Open, the row shows the delegation's own view — the report it promoted — and the span
-			// it opened follows as the blocks it is, railed and announced by the ⤷ label.
-			leaderEdgeRow("  ┝ build ⋯ all clear", glyphExpanded),
-			"",
-			"│ ⤷ sub-agent",
-			"│",
+			// Open, the row shows the delegation's own view — the report it promoted — and opens the
+			// frame: ┌ at column 0, the arm across to the branch, and the ▼ still at the far edge.
+			leaderEdgeRow("┌─┶ build ✓ ⋯ all clear", glyphExpanded),
+			"│", // the separator is railed too: the frame does not break under its own corner
 			"│ ✦ Read",
 			"│   ┕ b.go ⋯ 5 lines", // the nested read hides nothing, so its row wears no indicator
-			"",
-			rows[2], // the list resumes, and its last row still closes the whole group
+			"┊",                    // one lone closer ends the span, in the separator's place
+			rows[2],                // the list resumes, and its last row still closes the whole group
+		}, "\n")
+		got := renderPlain(tr, 80)
+		if got != want {
+			t.Errorf("opened fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+		if strings.Contains(got, glyphSubLabel) {
+			t.Error("the opened group still carries a ⤷ label; the ┌─┶ header is what opens the run now")
+		}
+	})
+
+	// The ✓ is a report that came off, and nothing else says so: a delegation still working has not
+	// reported at all, and one that reported a failure is marked by its red outcome slot alone
+	// (design call 6). Both are pinned here against the very rows the goldens above carry the mark on.
+	t.Run("no ✓ while running and none on failure", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "working", 0)
+		readCall(tr, "r1", "a.go", 1, 5, 1)
+		subAgentCall(tr, "s2", "broken", 0)
+		readCall(tr, "r2", "b.go", 1, 5, 1)
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+			CallID: "s2", Content: "it fell over", IsError: true}})
+
+		want := strings.Join([]string{
+			"✦ Sub-Agent (2)",
+			groupMemberLine("  ┝ working ⋯ 1 tool call"),
+			groupMemberLine("  ┕ broken ⋯ 1 tool call · error: it fell over"),
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
-			t.Errorf("opened fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			t.Errorf("unfinished fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
 	})
 }
@@ -2982,15 +3044,15 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 		},
 		{
 			// A railed sub-agent block is marked exactly like a flat one — the rail prefixes lines
-			// and adds none — and the ⤷ descent label the run opens with is no target.
+			// and adds none — and nothing stands ahead of it now that no ⤷ label opens the descent.
 			name:  "a nested block keeps its marks behind the rail",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				run(tr, "c1", "go test", "a\nb\nc", 1)
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 0, text: "│ ✦ Terminal"},
-				{line: 3, kind: targetHeader, entry: 0,
+				{line: 0, kind: targetHeader, entry: 0, text: "│ ✦ Terminal"},
+				{line: 1, kind: targetHeader, entry: 0,
 					text: leaderEdgeRow("│   ┕ go test ⋯ exit 0 · +3 more lines", glyphCollapsed)},
 			},
 		},
@@ -4043,9 +4105,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 			want: []string{
 				"✦ Read",
 				"  ┕ a.go ⋯ 5 lines",
-				"", // the descent's own spacer joins at depth 0: the rail starts at the label
-				"│ ⤷ sub-agent",
-				"│",
+				"", // the descent's own spacer joins at depth 0: the rail starts at the block
 				"│ ✦ Read",
 				"│   ┕ b.go ⋯ 9 lines",
 			},
@@ -4199,8 +4259,6 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"",
 		"· approval allow: terminal",
 		"",
-		"│ ⤷ sub-agent",
-		"│",
 		"│ ✦ Read",
 		"│   ┕ main.go ⋯ 154 lines",
 	}, "\n")
