@@ -1079,6 +1079,125 @@ func TestSubAgentMemberDoneOnItsOwnFinishedPhase(t *testing.T) {
 	}
 }
 
+// A fan-out wider than the Parallel agents cap emits every delegation's call up front and starts
+// only as many children as it has slots (ADR 0039), so the rows past the cap stand for work that has
+// not begun. This is what such a row says and what it does: the one word "scheduled" in the outcome
+// slot — no count of tool calls, no context fill, no gist, none of which exist yet — no indicator,
+// and no click target at all, since there is nothing behind it to open. Its own started phase is
+// what ends that (domain.SubAgentPhaseEvent), and the row is an ordinary live delegation from there.
+func TestSubAgentScheduledUntilItStarts(t *testing.T) {
+	// Two members running with a call apiece, and a third the cap held back.
+	build := func(t *testing.T) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey", 0)
+		subAgentStarted(tr, "s1", 1)
+		readCall(tr, "rs1", "a.go", 1, 5, 1)
+		subAgentCall(tr, "s2", "build", 0)
+		subAgentStarted(tr, "s2", 1)
+		readCall(tr, "rs2", "b.go", 1, 5, 1)
+		subAgentCall(tr, "s3", "check", 0)
+		return tr
+	}
+	header := "✦ Sub-Agent (3)"
+	running := []string{
+		groupMemberLine("  ┝ survey ⋯ 1 tool call"),
+		groupMemberLine("  ┝ build ⋯ 1 tool call"),
+	}
+
+	t.Run("queued member says scheduled and wears no indicator", func(t *testing.T) {
+		want := strings.Join(append(append([]string{header}, running...),
+			"  ┕ check ⋯ scheduled"), "\n") // no ▶: the row hides nothing
+		if got := renderPlain(build(t), 80); got != want {
+			t.Errorf("scheduled member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("queued member is not a click target", func(t *testing.T) {
+		lines, targets := targetedRender(build(t), 80)
+		if got := targets[rowWith(t, lines, "check")].kind; got != targetNone {
+			t.Errorf("scheduled row is target kind %v, want targetNone", got)
+		}
+		// The contrast, off the same paint: a member with a run behind it does open.
+		if got := targets[rowWith(t, lines, "survey")].kind; got != targetHeader {
+			t.Errorf("running row is target kind %v, want targetHeader", got)
+		}
+	})
+
+	t.Run("its start ends the scheduled row", func(t *testing.T) {
+		tr := build(t)
+		subAgentStarted(tr, "s3", 1)
+		want := strings.Join(append(append([]string{header}, running...),
+			"  ┕ check ⋯"), "\n") // running with nothing done yet: the ordinary live reading
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("started member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("started member with work is an ordinary expandable row", func(t *testing.T) {
+		tr := build(t)
+		subAgentStarted(tr, "s3", 1)
+		readCall(tr, "rs3", "c.go", 1, 5, 1)
+		want := strings.Join(append(append([]string{header}, running...),
+			groupMemberLine("  ┕ check ⋯ 1 tool call")), "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("started member with work mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+		lines, targets := targetedRender(tr, 80)
+		if got := targets[rowWith(t, lines, "check")].kind; got != targetHeader {
+			t.Errorf("started row is target kind %v, want targetHeader", got)
+		}
+	})
+
+	// A delegation REFUSED at the depth bound or failed by a hook never runs, so its started phase
+	// never comes — but its result does (internal/agent/dispatch.go). A rule reading the missing
+	// phase alone would leave that row queued for the rest of the session; being over is the other
+	// thing that ends the state (subAgentScheduled).
+	t.Run("a refused delegation is not scheduled", func(t *testing.T) {
+		tr := build(t)
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+			CallID: "s3", Content: "sub-agent depth limit reached", IsError: true}})
+		want := strings.Join(append(append([]string{header}, running...),
+			"  ┕ check ⋯ error: sub-agent depth limit reached"), "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("refused member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+}
+
+// targetedRender renders a transcript the way [renderPlain] does and hands back the click surface
+// beside the lines it belongs to — the accounting the paint itself built (renderedTranscript), so a
+// test asks what a click would resolve to rather than re-deriving it from the text.
+func targetedRender(tr *transcript, width int) ([]string, []lineTarget) {
+	view := tr.renderView(newTheme(scheme.Default()), width, false)
+	lines := make([]string, len(view.lines))
+	for i, ln := range view.lines {
+		lines[i] = strings.TrimRight(collapseLeader(ansiPattern.ReplaceAllString(ln, "")), " ")
+	}
+	return lines, view.targets
+}
+
+// rowWith is the index of the ONE painted row carrying text, and a fatal error where there is no
+// such row or more than one: a target assertion made against a row the paint never emitted would
+// pass by finding nothing at all.
+func rowWith(t *testing.T, lines []string, text string) int {
+	t.Helper()
+	found := -1
+	for i, ln := range lines {
+		if !strings.Contains(ln, text) {
+			continue
+		}
+		if found >= 0 {
+			t.Fatalf("%q appears on rows %d and %d; want exactly one", text, found, i)
+		}
+		found = i
+	}
+	if found < 0 {
+		t.Fatalf("no painted row carries %q:\n%s", text, strings.Join(lines, "\n"))
+	}
+	return found
+}
+
 // The ┊ has ONE reason to be drawn, and the spec gives it as a rule rather than as a sketch:
 // "`┊` is only displayed if another grouped sub-agent follows after the expanded sub-agent. The last
 // sub-agent in the group (if expanded) does not show this" (docs/layout/tool-layout.md, "Grouped

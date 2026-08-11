@@ -274,7 +274,15 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 	for _, m := range members {
 		marker, spanned := branchMarker(m.last), subAgentFramed(m.head, len(m.span))
 		view := m.head.tool
-		if spanned && !m.head.expanded {
+		// A QUEUED member is neither of the two readings below: it has no work to summarise and
+		// nothing to open, so it says the one word and takes the ordinary member painter with an
+		// empty body — which is what leaves it without an indicator and without a click target
+		// (scheduledSubAgentView). It cannot be spanned by construction: a delegation with entries
+		// behind it has started.
+		switch {
+		case subAgentScheduled(m.head, len(m.span)):
+			view = scheduledSubAgentView(m.head)
+		case spanned && !m.head.expanded:
 			view = collapsedSubAgentView(th.measure, m.head, m.span)
 		}
 		// An OPEN delegation's row is the top of a frame rather than a twig of the list: the corner
@@ -323,6 +331,55 @@ func subAgentFinished(head entry) bool {
 // before the event existed). Reading either is what lets one rule serve both.
 func subAgentReported(head entry) bool {
 	return head.done || head.phase == domain.SubAgentFinished
+}
+
+// scheduledSummary is the whole of what a queued delegation's <tool-top-level-details> says.
+const scheduledSummary = "scheduled"
+
+// subAgentScheduled reports whether a delegation is QUEUED: the model asked for it, and no child is
+// running behind it yet. A fan-out wider than the Parallel agents cap emits every ToolCallEvent up
+// front and then holds the surplus children back until a worker frees a slot (ADR 0039), so between
+// the request and the start there is a row on screen with no work behind it — which is exactly what
+// it is made to say (scheduledSubAgentView).
+//
+// Three facts end it, and each is a different producer's word. The delegation's own STARTED phase is
+// the engine's (domain.SubAgentPhaseEvent), emitted the instant a worker dequeues the job — the
+// signal this state exists to wait for. Its being OVER is the second: a delegation refused at the
+// depth bound or failed by a hook never runs and so is never started, yet its result still arrives
+// (dispatch.go), and a row left "scheduled" over a delegation that already answered would say so
+// forever. The third is its being FRAMED (subAgentFramed) — a run standing behind it, or a reader
+// having opened it. That one is the answer for a producer that emits no phases at all: a hand-built
+// test transcript, a record replayed from a session written before the phase existed. A delegation
+// with entries behind it has manifestly started whatever it announced, and one that is OPEN was
+// expandable when the click landed, which a scheduled row never is. Reading all three is what lets
+// one rule serve every producer — the discipline subAgentReported follows for the other end of the
+// same life — and being framed and being scheduled are mutually exclusive by construction, which is
+// what keeps the queued row out of the reading that would draw it a frame (renderSubAgentGroup).
+func subAgentScheduled(head entry, span int) bool {
+	if head.kind != entryToolCall || head.tool.name != subAgentToolName {
+		return false
+	}
+	return head.phase != domain.SubAgentStarted && !subAgentReported(head) && !subAgentFramed(head, span)
+}
+
+// scheduledSubAgentView is what a QUEUED delegation shows of itself (docs/layout/tool-layout.md,
+// Grouped Sub-agents): its own header row, and one word in the outcome slot. Everything the running
+// reading carries is deliberately absent — no count of tool calls, because none have happened; no
+// context fill, because the child has no window yet; no gist, because nothing has been touched. A
+// row saying "0 tool calls" would be stating a measurement of work that has not begun.
+//
+// The body goes with them, and that is what makes the row INERT: an empty body hides nothing, so the
+// member painter gives it no indicator and the group gives it no click target (renderGroupMember,
+// renderSubAgentGroup) — an affordance opening onto an empty frame is one a reader learns to
+// distrust. The row becomes an ordinary live delegation the moment its start lands.
+//
+// The summary is NOT marked quoted (branchSummary): the word is apogee's own about a delegation, not
+// a line the child produced, and the mark is a statement about where the text came from.
+func scheduledSubAgentView(head entry) toolView {
+	view := head.tool
+	view.Summary = branchSummary{detailLine: detailLine{Text: scheduledSummary}}
+	view.Details = toolBody{} // the zero body: nothing to lay out, and so nothing to expand for
+	return view
 }
 
 // groupLabelOf is the label a folded group of delegations names itself with: the members' own, off

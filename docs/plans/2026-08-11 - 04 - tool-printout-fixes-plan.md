@@ -144,9 +144,22 @@ the visual is unchanged; expanding the early-done member shows its report body
 
 Commit: `fix(tui): mark grouped sub-agent members done as each finishes`
 
-## 4. TUI: "scheduled" state for queued sub-agents
+## 4. TUI: "scheduled" state for queued sub-agents — ✅ DONE (2026-08-11)
 
 Depends on item 3.
+
+NOTES (2026-08-11): the "no `started` phase ⇒ scheduled" rule is narrowed by two further
+un-schedulings. (a) An arrived RESULT (the dispatched decision): a delegation refused at the depth
+bound or failed by a hook never starts but does answer, and would otherwise read as queued forever.
+(b) Being FRAMED (`subAgentFramed`): entries already committed behind it, or the row being open. That
+one is for producers that emit no phases at all — hand-built test transcripts and replayed records —
+and for the live streaming preview, whose delegate has manifestly started while its span is still
+empty; it also makes scheduled and framed mutually exclusive, so a queued row can never be handed a
+frame. No `blockstate.go` change was needed: the scheduled view drops the body, and the ordinary
+member painter already gives a bodyless member no indicator and no click target (`targetNone`), which
+is exactly the inert row the item asks for. One existing golden
+(`TestSubAgentStreamFramesAnOpenGroupMember`) gained a `started` phase for its second member, which
+is what its prose already claimed of it ("the sibling still working").
 
 **What:** A sub-agent entry whose `ToolCallEvent` arrived but whose `started` phase has
 not (item 3's tracking) renders as scheduled: its `<tool-top-level-details>` slot shows

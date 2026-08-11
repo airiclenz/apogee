@@ -946,6 +946,17 @@ func subAgentCall(tr *transcript, id, task string, depth int) {
 	})
 }
 
+// subAgentStarted marks a delegation as RUNNING — the phase a pool worker emits the instant it
+// dequeues the job (domain.SubAgentPhaseEvent), stamped with the CHILD's own depth. A delegation
+// built without one and with nothing behind it is one still QUEUED behind the Parallel agents cap,
+// which is what its row then says (subAgentScheduled).
+func subAgentStarted(tr *transcript, id string, depth int) {
+	tr.apply(domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: depth, CallID: id},
+		Phase:     domain.SubAgentStarted,
+	})
+}
+
 // subAgentReport folds a run's report back into its head, which is what ends the run: the head is
 // done from there on, and its collapsed summary switches from the live tempo to the report's gist.
 // A run built without one is a run still working.
@@ -1353,6 +1364,10 @@ func TestSubAgentStreamFramesAnOpenGroupMember(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
 	subAgentCall(tr, "s2", "survey the docs", 0)
+	// Both children are RUNNING: the sibling has a slot of its own, so its row is a working one
+	// rather than the queued row a delegation waiting for a slot wears (subAgentScheduled, pinned by
+	// TestSubAgentScheduledUntilItStarts).
+	subAgentStarted(tr, "s2", 1)
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
 
 	if !tr.setExpanded(0, true) {

@@ -209,6 +209,7 @@ One row per consecutive same-type run, in time order. A row's
 - expanded sub-agents carry no `⤷ sub-agent` label.
 - the vertical line on the very left of an expanded sub-agent is colored.
 - `┊` is only displayed if another grouped sub-agent follows after the expanded sub-agent. The last sub-agent in the group (if expanded) does not show this.
+- a sub-agent the engine has not started yet is SCHEDULED: the model asked for it and it is queued behind the `parallel-agents` cap, holding no slot. Its `<tool-top-level-details>` says exactly `scheduled` — no tool-call count, no context fill, no gist, none of which exist yet — and its row carries no indicator and no click target, because there is nothing behind it to open. The moment its child starts, the row becomes an ordinary live sub-agent row and expands like any other. A lone sub-agent starts immediately and never shows this.
 
 ```text
 ✦ Sub-Agent (<group-count>)
@@ -237,6 +238,14 @@ Each member is marked PER MEMBER, the moment that sub-agent finishes — not whe
 ✦ Sub-Agent (<group-count>)
   ┝ <tool-type-header> ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┕ <tool-type-header> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
+```
+
+Example for a fan-out wider than the `parallel-agents` cap: the first sub-agent holds a slot and is working, the second is queued behind it. The queued row states `scheduled` and nothing else, and it wears no `▶` — clicking it does nothing until it starts.
+
+```text
+✦ Sub-Agent (<group-count>)
+  ┝ <tool-type-header> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
+  ┕ <tool-type-header> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ scheduled
 ```
 
 
@@ -274,7 +283,7 @@ expand carries no indicator at all.
 | web_search | Search | the query | `N results` | result titles + URLs |
 | present_document | Present | document title (path fallback) | — | path + title |
 | ask_user | Ask user | the question | `answered` / `pending` | question + choices + the answer |
-| sub_agent | Sub-agent | its name (task head fallback) | `N steps · done/failed` | task text + result summary |
+| sub_agent | Sub-agent | its name (task head fallback) | `scheduled` before it starts, else `N steps · done/failed` | task text + result summary |
 
 Notes:
 - git_commit never promotes its one-line output into the slot at any width: the
@@ -285,6 +294,7 @@ Notes:
 - sub_agent deliberately shows *different* data collapsed (its name) vs
   expanded (task + result). Its `N steps` stat is wired only if the engine
   already exposes a step count; otherwise the slot shows `done`/`failed`
-  alone.
+  alone. A delegation queued behind the `parallel-agents` cap shows
+  `scheduled` and is not expandable at all (see Grouped Sub-agents).
 - Expansion state lives on the transcript entry, so it survives scrolling and
   new messages arriving. New blocks start collapsed.

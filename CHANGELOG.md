@@ -23,6 +23,14 @@ point is a **minor** bump, not a breaking change.
   group, which never becomes a result, emits no finished phase. Observation only, and additive —
   a consumer that ignores the variant loses liveness and nothing else.
 
+- **A sub-agent waiting for a slot now says so: `scheduled`.** Ask for twenty delegations with
+  `parallel-agents` set to five and fifteen of them are queued — the model's calls are all announced
+  at once, but only five children exist. Those queued rows used to look like running ones with
+  nothing to show; each now states `scheduled` in its right-hand slot and nothing else — no tool-call
+  count, no context fill, no live action — and carries no ▶ at all, since there is no work behind it
+  to open and clicking it did nothing anyway. The row becomes an ordinary live delegation the instant
+  its child starts. A lone delegation starts immediately and never shows the state.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's
