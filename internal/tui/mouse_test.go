@@ -2971,3 +2971,105 @@ func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
 		}
 	})
 }
+
+// ----------------------------------------------------------------------------
+// Mouse in the /usage report (usage.go)
+// ----------------------------------------------------------------------------
+
+// usageReportModel opens the report over more delegates than the pane can seat rows for, which is the
+// state both the hit-test and the scroll below are about.
+func usageReportModel(t *testing.T, delegates int) Model {
+	t.Helper()
+	m := usageModel(t, mainTotals, 8192)
+	for i := range delegates {
+		m = delegate(t, m, fmt.Sprintf("s%d", i), fmt.Sprintf("survey %d", i), childTotals, 0)
+	}
+	m.layout()
+	return m
+}
+
+// A click ON the report is swallowed — it has nothing to select, and a press that armed a drag would
+// take the transcript lines hidden under the pane — while a click anywhere else dismisses it. That
+// second click still does what it was aimed at: the pane is not modal (layout.md), so the caret is
+// seated in the prompt exactly as it would have been with no report up.
+func TestUsageReportUnderTheClick(t *testing.T) {
+	m := usageReportModel(t, 20)
+	paneTop, h, ok := m.usagePaneRect()
+	if !ok {
+		t.Fatal("the report is not on the frame")
+	}
+
+	inside := step(t, m, leftClick(10, paneTop+h/2))
+	if !inside.usagePane.open {
+		t.Error("a click on the report closed it")
+	}
+	if inside.sel.active || inside.transcriptSel.active {
+		t.Errorf("a click on the report armed a selection beneath it: prompt %+v, transcript %+v",
+			inside.sel, inside.transcriptSel)
+	}
+
+	_, inputTop, _, _ := m.inputContentRect()
+	outside := step(t, m, leftClick(4, inputTop))
+	if outside.usagePane.open {
+		t.Error("a click outside the report left it up")
+	}
+	if !outside.sel.active {
+		t.Error("the dismissing click was swallowed; it should still seat the caret it was aimed at")
+	}
+}
+
+// The wheel scrolls the report one row per notch while the pointer is over it and CLAMPS at both ends
+// — rolling past the last row must not land the reader back on the first — and the last window it
+// reaches is a FULL one, the end of the list against the bottom of the pane. A notch outside the pane
+// is the transcript's, which is what keeps the conversation behind the report scrollable.
+func TestUsageWheelScrollsTheReport(t *testing.T) {
+	m := usageReportModel(t, 20)
+	paneTop, h, ok := m.usagePaneRect()
+	if !ok {
+		t.Fatal("the report is not on the frame")
+	}
+	win, ok := m.usageWindow()
+	if !ok {
+		t.Fatal("the report reports no window")
+	}
+	if win.start != 0 || win.end >= win.total {
+		t.Fatalf("precondition: window [%d,%d) of %d rows — the report must open at the top with rows below it",
+			win.start, win.end, win.total)
+	}
+	seats := win.end - win.start
+	wheel := func(m Model, button tea.MouseButton, y int) Model {
+		return step(t, m, tea.MouseWheelMsg{X: 10, Y: y, Button: button})
+	}
+	y := paneTop + h/2
+
+	down := wheel(m, tea.MouseWheelDown, y)
+	if down.usagePane.top != 1 {
+		t.Fatalf("top = %d after one notch down, want 1", down.usagePane.top)
+	}
+	if back := wheel(wheel(down, tea.MouseWheelUp, y), tea.MouseWheelUp, y); back.usagePane.top != 0 {
+		t.Errorf("top = %d after rolling past the first row, want it clamped at 0", back.usagePane.top)
+	}
+
+	end := m
+	for range win.total + 5 {
+		end = wheel(end, tea.MouseWheelDown, y)
+	}
+	last, ok := end.usageWindow()
+	if !ok {
+		t.Fatal("the scrolled report reports no window")
+	}
+	if last.end != last.total {
+		t.Errorf("scrolled to the end the window is [%d,%d) of %d rows, want it to reach the last row",
+			last.start, last.end, last.total)
+	}
+	if got := last.end - last.start; got != seats {
+		t.Errorf("the last window shows %d rows, want a full %d — the rows end at the pane's bottom", got, seats)
+	}
+
+	// Above the pane the transcript still owns the wheel.
+	if paneTop > 0 {
+		if off := wheel(down, tea.MouseWheelUp, paneTop-1); off.usagePane.top != down.usagePane.top {
+			t.Errorf("a notch above the report scrolled it to %d", off.usagePane.top)
+		}
+	}
+}

@@ -384,6 +384,13 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		return next, nil
 	}
 	m.settings.sel = promptSel{} // the pane did not claim this click: its highlight goes, as the other two would
+	// The /usage report is asked next and answers in a different currency: a click on it is swallowed,
+	// and a click anywhere else DISMISSES it and then goes on to whatever it named (handleUsageClick).
+	usage, claimed := m.handleUsageClick(msg)
+	if claimed {
+		return usage, nil
+	}
+	m = usage
 	if m.inputEditable() {
 		if visRow, visCol, ok := m.pointInputRow(msg.X, msg.Y); ok {
 			m.transcriptSel = transcriptSel{} // the prompt claims it: drop any transcript selection
@@ -1226,4 +1233,118 @@ func (m Model) highlightTranscript(view string) string {
 		lines[r] = shadeCells(m.th.measure, lines[r], c0, c1, m.th.selection)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// ----------------------------------------------------------------------------
+// Mouse in the /usage report (usage.go, layout.md "The /usage popup")
+// ----------------------------------------------------------------------------
+//
+// A fourth rectangle, and the lightest of them: the report has nothing to select, so the pointer does
+// only the two things its one key cannot. A click OUTSIDE the box dismisses it — the gesture esc
+// already is, made with the hand that is already on the mouse — and a click INSIDE is swallowed, so a
+// press on the report cannot arm a drag-selection across the transcript lines it is drawn over. The
+// wheel scrolls the row list where a session fanned out to more delegates than the frame granted rows.
+//
+// Dismissing does NOT swallow the click. The pane is not modal — the input box behind it stays live
+// and every key goes where it always went (layout.md) — so a click that lands in the prompt seats the
+// caret there as it would have with no report up, and one on the transcript starts its selection. The
+// report going away is a side effect of acting elsewhere, not an act of its own.
+//
+// The scroll is read back off the PAINTER on every notch rather than counted up on this side: the
+// window the pane actually drew (popupPlacement, through usageWindow) says which rows are on the
+// screen and the notch steps that window by one, so an offset left over from a taller window or a
+// shorter list corrects itself the first time the wheel is turned instead of drifting.
+
+// usagePaneRect is where the open /usage report is drawn: the screen row its top border lands on and
+// how many rows it takes. ok is false when it is not on the frame at all — closed, or given way to a
+// window too short to seat it (frameRowPlan).
+//
+// It is settingsPaneRect one slot further down, and it names one term more than that one does: the
+// report is the LAST block of the transcript-side slot (View), the one pane there that can be up
+// beside another, so the /settings pane joins the prompt, the browser and the picker in the run of
+// blocks stacked above it.
+func (m Model) usagePaneRect() (y0, h int, ok bool) {
+	if !m.usagePane.open {
+		// Asked before the frame is composed, because every click and every wheel notch asks: with no
+		// report up there is nothing to place, and composing the frame's overlays to learn that would
+		// put a render on the path of a click the pane has no part in.
+		return 0, 0, false
+	}
+	ov := m.frameOverlays()
+	if ov.usage == "" {
+		return 0, 0, false
+	}
+	y0 = ov.transcriptRows(m.transcriptBudget()) + gapHeight
+	for _, above := range []string{ov.prompt, ov.browser, ov.picker, ov.settings} {
+		if above != "" {
+			y0 += lipgloss.Height(above)
+		}
+	}
+	return y0, lipgloss.Height(ov.usage), true
+}
+
+// usageWindow is the row window the report is showing as the frame DREW it: which rows of the report
+// the pane holds, and how many rows the report has in all. It is everything the wheel needs — whether
+// there is anything above the window to scroll back to, and anything below it to scroll on to.
+//
+// ok is false wherever there is nothing to scroll: the pane closed or given way, or a frame that
+// cannot seat it.
+type usageWindow struct {
+	start, end int // the [start, end) rows of the report the pane is showing
+	total      int // the rows it holds
+}
+
+// usageWindow composes the report exactly as the frame does and reports the window it landed on. It
+// renders the pane to get the answer, the price settingsPaint already pays: the painter is the
+// authority on which rows are on the screen, and asking it costs less than an arithmetic that can
+// disagree with it.
+func (m Model) usageWindow() (usageWindow, bool) {
+	if !m.usagePane.open {
+		return usageWindow{}, false
+	}
+	rows := m.usageRows()
+	spec, seated := m.usageSpec(rows)
+	if !seated {
+		return usageWindow{}, false
+	}
+	_, place := renderPopupPlaced(m.th, spec, m.width)
+	return usageWindow{start: place.start, end: place.end, total: len(rows)}, true
+}
+
+// handleUsageClick answers a left-click while the report is up: inside the box it is claimed and
+// nothing happens — a report has nothing to click ON, and swallowing the press is what keeps it from
+// arming a drag across the transcript underneath — and outside it the report is dismissed and the
+// click goes on to name whatever it landed on. claimed says only which of the two it was.
+func (m Model) handleUsageClick(msg tea.MouseClickMsg) (Model, bool) {
+	y0, h, ok := m.usagePaneRect()
+	if !ok {
+		return m, false
+	}
+	if msg.Y >= y0 && msg.Y < y0+h {
+		return m, true
+	}
+	return m.dismissUsage(), false
+}
+
+// usageWheel scrolls the report one row per notch while the pointer is over it, and CLAMPS at both
+// ends: a wheel is a scroll, so rolling past the last row must not land the reader back at the first.
+// handled is false anywhere else, which leaves the notch to the transcript scrolling above and behind
+// the pane — and true over a report short enough to show every row it has, where the notch moves
+// nothing because there is nothing off the screen to move to.
+func (m Model) usageWheel(msg tea.MouseWheelMsg) (Model, bool) {
+	y0, h, ok := m.usagePaneRect()
+	if !ok || msg.Y < y0 || msg.Y >= y0+h {
+		return m, false
+	}
+	win, ok := m.usageWindow()
+	if !ok {
+		return m, true
+	}
+	switch {
+	case msg.Button == tea.MouseWheelUp && win.start > 0:
+		m.usagePane.top = win.start - 1
+	case msg.Button == tea.MouseWheelDown && win.end < win.total:
+		m.usagePane.top = win.start + 1
+	}
+	return m, true
 }

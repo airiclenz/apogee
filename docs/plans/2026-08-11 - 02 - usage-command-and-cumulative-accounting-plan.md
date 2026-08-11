@@ -187,9 +187,24 @@ maintenance event.
 
 **Commit:** `feat(run): surface cumulative usage totals in Result and headless output`
 
-## 6. TUI: mouse support for the usage popup
+## 6. TUI: mouse support for the usage popup — ✅ DONE (2026-08-11)
 
 Depends on item 4.
+
+NOTES (2026-08-11): the wheel needed one thing the item's literal text does not name — the popup module
+cannot scroll a pane that has no selection (`popupRowWindow` windows around `spec.selected`), and doing
+the windowing pane-side by slicing the rows would break the module's stated alignment invariant (column
+widths are measured over the WHOLE row list so they cannot shift as the window moves). So `popupSpec`
+gained an additive `rowTop` field read only where `selected < 0`, plus `popupRowWindowFrom` (opens at
+`rowTop`, grows downward only); at `rowTop` 0 it returns exactly the window the old path returned, so
+every existing pane is unchanged. The column header scrolls with the rows — it is a row of the list, and
+pinning it is sticky-header work the module has no notion of. Second reading made here: a click OUTSIDE
+the box dismisses the report but is NOT swallowed (it still seats the caret / starts its selection),
+because this pane is explicitly not modal (layout.md); a click INSIDE is swallowed. Three docs followed:
+`layout.md`'s `/usage` section gained a pointer paragraph (item 4 owns that section, but the mouse did
+not exist when it was written), `internal/tui/doc.go`'s mouse-rectangle enumeration gained the fourth
+rectangle, and `popupRowWindow`'s doc points at its new sibling. Tests beyond the item's line: a
+`popupRowWindowFrom` table in `popup_test.go`, since the item's own tests reach it only end-to-end.
 
 **What:** render via `renderPopupPlaced` (`internal/tui/popup.go:372`) and register the
 placement for hit-testing in `internal/tui/mouse.go` following the existing popup

@@ -126,11 +126,11 @@ type Model struct {
 	// is driven only at idle, and it is the frame's one full-height pane (frameRowPlan).
 	settings settingsPane
 
-	// usagePane is the /usage report overlay's state (usage.go): whether it is up, and nothing else —
-	// its rows are derived at render time from the folds that already hold the per-agent totals, so
-	// the value is one bool and its zero value is "closed", the settings posture (ADR 0011). Unlike
-	// the panes above it, it is driven in every state: the verb is whileRunning and the pane reads
-	// Model state only.
+	// usagePane is the /usage report overlay's state (usage.go): whether it is up, and how far the
+	// wheel has scrolled its row list. The rows themselves are derived at render time from the folds
+	// that already hold the per-agent totals, so the value is a bool and an int and its zero value is
+	// "closed at the top", the settings posture (ADR 0011). Unlike the panes above it, it is driven in
+	// every state: the verb is whileRunning and the pane reads Model state only.
 	usagePane usagePane
 
 	// settingEdits is the journal of every config key this SESSION changed through the settings surface
@@ -921,6 +921,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// A notch over the open /settings pane walks its key list instead (mouse.go): the pane is what
 		// is under the pointer there, and the transcript keeps every notch outside it.
 		if next, handled := m.settingsWheel(msg); handled {
+			return next, nil
+		}
+		// A notch over the open /usage report scrolls its row list the same way, for the same reason
+		// (mouse.go) — the two panes never share a frame, so the order between them is arbitrary.
+		if next, handled := m.usageWheel(msg); handled {
 			return next, nil
 		}
 		return m.scrollViewport(msg)

@@ -288,6 +288,12 @@ const (
 // belongs to a ROW: a header is one whether or not the selection is near it, and the selection
 // itself already travels as an index.
 //
+// rowTop is where a spec with NO selection opens its row window: a report is SCROLLED rather than
+// walked, so the window is anchored where the reader put it instead of around a cursor that does not
+// exist (the /usage pane under the wheel, mouse.go). It is read only where selected is negative — a
+// list with a cursor windows around that cursor, which is what keeps the cursor on the screen — and a
+// zero is the top of the list, which is exactly where a selection-less spec has always been read from.
+//
 // bodyLead is a run at the FRONT of the body's first line that is painted as a heading
 // (th.popupBodyLead) instead of as prose — the "Description:" label of the /settings pane's own
 // header. It is a lead rather than a block of its own because it is part of the sentence: the label
@@ -313,6 +319,7 @@ type popupSpec struct {
 	rowPadAbove   bool
 	rowPadBelow   bool
 	selected      int
+	rowTop        int
 	hint          string
 	maxRows       int
 }
@@ -644,7 +651,15 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 		// Negative spends whatever the whole list needs.
 		capLines = popupRowBlockLines(heights, gap, popupRowPadLines(padAbove, padBelow))
 	}
-	start, end := popupRowWindow(spec.selected, heights, gap, capLines)
+	// A list with a cursor windows around the cursor; a REPORT has none, so its window opens where the
+	// reader scrolled it (popupSpec.rowTop) — and at rowTop 0 that is the very window the other branch
+	// would have opened, which is what leaves every selection-less pane before it unchanged.
+	var start, end int
+	if spec.selected < 0 {
+		start, end = popupRowWindowFrom(spec.rowTop, heights, gap, capLines)
+	} else {
+		start, end = popupRowWindow(spec.selected, heights, gap, capLines)
+	}
 	if start == end {
 		// No row on the screen: with rows on offer this is the budget's call, and the pane owes the
 		// human the count (an empty offering owes nothing — there is no list to hide).
@@ -1224,6 +1239,9 @@ func popupTitleLine(th theme, title string, hidden, inner int) string {
 // An empty window is the honest answer to a budget that cannot seat even the selected row: the pane
 // shows no rows at all and renderPopup carries their count onto the title row (popupTitleLine),
 // rather than showing a fraction of an option and saying nothing about the rest.
+//
+// A spec with NO selection is windowed by popupRowWindowFrom instead (popupSpec.rowTop): there is no
+// cursor to grow out of there, and the two answer the same at the top of a list.
 func popupRowWindow(selected int, heights []int, gap, budget int) (int, int) {
 	total := len(heights)
 	if total == 0 {
@@ -1253,6 +1271,33 @@ func popupRowWindow(selected int, heights []int, gap, budget int) (int, int) {
 			return start, end
 		}
 	}
+}
+
+// popupRowWindowFrom is popupRowWindow for a list with no cursor in it: the window opens AT row top
+// and grows downward only. That is what a scroll is — the row the reader scrolled to stays under the
+// block's first line instead of the window sliding back over it — where a cursor's window has to grow
+// both ways to keep the cursor inside itself.
+//
+// Rows are seated whole and separators counted, on the terms popupRowWindow states, so the two agree
+// everywhere they overlap: at top 0 this returns exactly the window that one returns for a selection
+// of −1. A top past the last row seats the last row, so an offset a shrunken list left behind shows
+// something rather than nothing; a top whose own row is taller than the budget seats nothing at all,
+// the same honest empty window, and the count goes to the title row (popupTitleLine).
+func popupRowWindowFrom(top int, heights []int, gap, budget int) (int, int) {
+	total := len(heights)
+	if total == 0 {
+		return 0, 0
+	}
+	start := clampInt(top, 0, total-1)
+	if heights[start] > budget {
+		return 0, 0
+	}
+	end, spent := start+1, heights[start]
+	for end < total && spent+gap+heights[end] <= budget {
+		spent += gap + heights[end]
+		end++
+	}
+	return start, end
 }
 
 // truncateToWidth clips s to at most width DISPLAY cells, ending in an ellipsis when it had to cut

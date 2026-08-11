@@ -193,7 +193,10 @@
 // ([Model.settingsPaint], whose geometry is the painter's own — renderPopupPlaced reports where the
 // rows landed rather than the mouse re-deriving it) — and, where the multi-line prompt field has
 // replaced that list, the field itself, over all of its rows ([Model.settingsTextPaint], which reads
-// the same placement plus the wrap the painter chose). The handlers arbitrate by region, so no two of
+// the same placement plus the wrap the painter chose). A FOURTH joins them while /usage is open, and
+// it is the lightest: the report has nothing to select, so a click inside it is only swallowed, a
+// click outside dismisses it and then goes on to whatever it named, and the wheel scrolls its rows
+// ([Model.usageWindow], reading the same painter's placement). The handlers arbitrate by region, so no two of
 // them coexist. Scope is the owner's rule, not an
 // accident of routing: the TRANSCRIPT selects in every state, while the PROMPT follows
 // [Model.inputEditable] — idle, ask, running — and stays inert at approval/errored, where a/d/s and

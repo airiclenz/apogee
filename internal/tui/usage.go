@@ -29,12 +29,20 @@ import (
 // It is the lightest pane in the frame: no filter, no selection, no keys of its own but esc. The
 // verb is whileRunning — the pane reads Model state and calls nothing — so it opens over a working
 // agent, which is exactly when the question gets asked.
+//
+// The POINTER does what the keyboard has no key for (mouse.go): a click outside the box dismisses
+// the report, a click inside it is swallowed rather than starting a selection on the transcript
+// underneath, and the wheel scrolls a session that fanned out to more delegates than the frame can
+// seat rows for. It is a scroll and not a walk, because there is nothing here to select.
 
-// usagePane is the /usage report overlay's state, which is only whether it is up: the rows are
-// derived at render time from the folds, so there is nothing here to keep in step with them. Its
-// zero value is "closed", so it lives inline in the value-copied Model like the picker and the
-// settings pane (ADR 0011).
-type usagePane struct{ open bool }
+// usagePane is the /usage report overlay's state: whether it is up, and how far its row list is
+// scrolled. The rows themselves are derived at render time from the folds, so there is nothing here
+// to keep in step with them. Its zero value is "closed at the top", so it lives inline in the
+// value-copied Model like the picker and the settings pane (ADR 0011).
+type usagePane struct {
+	open bool
+	top  int // the first row the window shows (popupSpec.rowTop) — the wheel's, and nothing else's
+}
 
 // usageTitle names the pane, and usageHint spells the one key it owns.
 const (
@@ -91,37 +99,63 @@ func (m Model) runUsageCommand() (tea.Model, tea.Cmd) {
 
 // closeUsagePane dismisses the report. It is the whole of the pane's key handling (handleKey).
 func (m Model) closeUsagePane() (tea.Model, tea.Cmd) {
-	m.usagePane = usagePane{}
-	m.layout()
-	return m, nil
+	return m.dismissUsage(), nil
 }
 
-// renderUsage paints the pane, or "" when it is closed or the frame cannot seat it. The rows are
-// composed BEFORE the budget is asked for, because what the pane demands is what it has to show —
-// the same order every other overlay composes in (renderPicker, renderSessionBrowser).
+// dismissUsage takes the report off the frame and gives its rows back to the transcript. Both ways of
+// closing it spend this one — esc (closeUsagePane) and a click outside the box (handleUsageClick,
+// mouse.go) — so the two can never come apart, and neither can leave the scroll behind for the next
+// time the report is opened.
+func (m Model) dismissUsage() Model {
+	m.usagePane = usagePane{}
+	m.layout()
+	return m
+}
+
+// renderUsage paints the pane, or "" when it is closed or the frame cannot seat it.
 func (m Model) renderUsage() string {
 	if !m.usagePane.open {
 		return ""
 	}
-	rows := m.usageRows()
+	spec, seated := m.usageSpec(m.usageRows())
+	if !seated {
+		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
+	}
+	view, _ := renderPopupPlaced(m.th, spec, m.width)
+	return view
+}
+
+// usageSpec composes the report's [popupSpec] for THIS frame — the rows, the budget the frame granted
+// and the window the wheel scrolled to. ok is false when the frame cannot seat the pane at all.
+//
+// The rows are composed BEFORE the budget is asked for, because what the pane demands is what it has
+// to show — the same order every other overlay composes in (renderPicker, renderSessionBrowser). It
+// is a step of its own for the reason the /settings key list's is (settingsKeyListSpec): the painter
+// is not the composition's only reader, and the MOUSE has to be told about the very window that was
+// drawn (usageWindow, mouse.go) rather than a second derivation of it.
+func (m Model) usageSpec(rows []popupRow) (popupSpec, bool) {
 	body := ""
 	if len(rows) == 0 {
 		body = usageEmptyBody
 	}
 	maxBody, shown, seated := m.popupBudget(paneUsage, len(rows), maxUsageRows, popupChrome, popupFloor{})
 	if !seated {
-		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
+		return popupSpec{}, false
 	}
-	return renderPopup(m.th, popupSpec{
+	return popupSpec{
 		title:       usageTitle,
 		body:        body,
 		maxBodyRows: maxBody,
 		rows:        rows,
 		rowKinds:    usageRowKinds(len(rows)),
 		selected:    -1, // a report has no selection: nothing here is chosen (the popup module's convention)
-		hint:        usageHint,
-		maxRows:     shown,
-	}, m.width)
+		// The scroll is clamped to the LAST full window rather than to the last row: a report scrolled
+		// to its end shows a full pane of rows, and a stale offset — the grant shrank with the window,
+		// or a delegate row arrived — is corrected here rather than painting one row over an empty pane.
+		rowTop:  clampInt(m.usagePane.top, 0, max(0, len(rows)-shown)),
+		hint:    usageHint,
+		maxRows: shown,
+	}, true
 }
 
 // usageRowKinds marks the first row as the column header and leaves every other row plain — the

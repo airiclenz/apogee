@@ -1740,3 +1740,42 @@ func TestRenderPopupWrapAndGapOffAreUnchanged(t *testing.T) {
 		t.Errorf("flags off: the long row was not elided:\n%s", strip(strings.Join(lines, "\n")))
 	}
 }
+
+// popupRowWindowFrom opens the window AT the row it is given and grows downward only — the scroll a
+// list with no cursor in it is read by (popupSpec.rowTop, the /usage report). At the top of a list it
+// answers exactly what popupRowWindow answers for a selection of −1, which is what leaves every
+// selection-less pane written before it unchanged; past the end of one it seats the last row rather
+// than nothing; and it spends its budget on the same terms — real heights, separators, whole rows.
+func TestPopupRowWindowFrom(t *testing.T) {
+	cases := []struct {
+		name               string
+		top                int
+		heights            []int
+		gap, budget        int
+		wantStart, wantEnd int
+	}{
+		{"the top of a short list shows all of it", 0, popupRowHeightsOfOne(5), 0, 8, 0, 5},
+		{"the top of a long list is the first window", 0, popupRowHeightsOfOne(30), 0, 8, 0, 8},
+		{"scrolled down it grows downward only", 6, popupRowHeightsOfOne(30), 0, 8, 6, 14},
+		{"the last full window ends on the last row", 22, popupRowHeightsOfOne(30), 0, 8, 22, 30},
+		{"past the end seats the last row", 40, popupRowHeightsOfOne(30), 0, 8, 29, 30},
+		{"a negative top reads from the first row", -3, popupRowHeightsOfOne(30), 0, 8, 0, 8},
+		{"empty list", 0, nil, 0, 8, 0, 0},
+		{"wrapped rows spend their real height", 0, []int{3, 2, 1}, 0, 5, 0, 2},
+		{"separators cost a line each", 0, popupRowHeightsOfOne(3), 1, 4, 0, 2},
+		{"a budget under the top row's height seats nothing", 1, []int{1, 3, 1}, 0, 2, 0, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			start, end := popupRowWindowFrom(c.top, c.heights, c.gap, c.budget)
+			if start != c.wantStart || end != c.wantEnd {
+				t.Errorf("popupRowWindowFrom(%d,%v,gap %d,budget %d) = [%d,%d), want [%d,%d)",
+					c.top, c.heights, c.gap, c.budget, start, end, c.wantStart, c.wantEnd)
+			}
+			if spent := popupRowBlockLines(c.heights[start:end], c.gap, 0); spent > c.budget {
+				t.Errorf("window [%d,%d) paints %d lines, past the %d-line budget", start, end, spent, c.budget)
+			}
+		})
+	}
+}

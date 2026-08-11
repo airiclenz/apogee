@@ -1291,6 +1291,15 @@ spend, and a row of empty cells under the totals would read as one.
 a token count — a fresh session, or a server that omits usage — the pane shows one line of prose
 saying so, with no header row and no columns.
 
+**The pointer does the two things the keyboard has no key for.** A click **outside** the box dismisses
+the report — and, because the pane is not modal, that click still lands where it was aimed: it seats
+the caret in the prompt or starts a transcript selection exactly as it would have with no report up. A
+click **inside** the box does nothing at all, and is swallowed rather than dragging a selection across
+the transcript drawn under it. The **wheel** scrolls the rows one notch at a time where a session fanned
+out to more delegates than the pane was granted rows for, clamped at both ends — a scroll must not roll
+past the last row and land back on the first — and the column header scrolls with them, being a row of
+the list like any other.
+
 **It is the lightest pane in the frame.** No filter, no selection, and `esc` its only key: it is a
 question already answered rather than a decision surface, so the input box behind it stays live and
 every other key goes where it always went. Its verb is safe while the agent works — the pane reads
