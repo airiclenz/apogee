@@ -297,7 +297,7 @@ func superRunViews(entries []entry, g superGroup) []toolRunView {
 // flexes down to its floor, and only then does the target give way, ending in " …" (design call 4).
 //
 // The indicator field is reserved on every member, hidden one or not, so the ▶s line up down the
-// block's right edge and a member does not gain three columns of target by having nothing to reveal.
+// block's right edge and a member does not gain two columns of target by having nothing to reveal.
 // Whether the member WEARS one is the same question the single block asks — does the collapsed paint
 // hide anything (blockHidesWhenCollapsed) — asked here of one call: a body, or a target the row's own
 // width cut. A call still in flight has neither and paints a bare row.
