@@ -192,6 +192,19 @@
 // visibly stall — and the release slices the very lines the rule protected, which is what makes copy
 // equal sight by construction rather than by care.
 //
+// blockcursor.go is that same reach from the KEYBOARD: a modal block cursor over the transcript
+// (docs/layout/tool-layout.md, design call 7). ⌥↑/⌥↓ enter the walk and move it, plain ↑/↓ move
+// inside it, ⏎ opens or closes what the highlight stands on, and esc — or typing, which ends the
+// mode and still lands in the prompt — hands the keys back. It walks the PAINT'S OWN click map
+// ([lineTarget], render.go), collapsed to one stop per surface, so the levels a pointer can open are
+// exactly the stops a cursor has and "deepest visible" needs no second rule; ⏎ goes through the
+// mouse's own [Model.toggleBlockAt], so both ways in flip and anchor identically. The state is two
+// plain fields on the value-copied Model — on/off and the CONTENT line under the highlight — re-
+// seated against every fresh paint in [Model.refreshViewport] ([blockCursor.clamp]), suspended
+// (keys and highlight together) while an approval or ask prompt owns ↑/↓/⏎, and painted as the
+// theme's one selection field, which the drag-selection it replaces on entry can therefore never be
+// confused with.
+//
 // Module map — the input cluster has its own home (review candidate #3). prompteditor.go lifts the
 // loose input-side concerns the architecture review called one coherent concept — the textarea, the
 // autocomplete overlay (+ its skillRegion edge-trigger), the workspace file cache, and the prompt

@@ -423,9 +423,45 @@ goldens for a fan-out of 3 collapsed/one-expanded; mouse toggle on a member.
 
 **Commit:** `feat(tui): group adjacent sub-agent calls with expandable spans`
 
-## 8. Keyboard block cursor
+## 8. Keyboard block cursor — ✅ DONE (2026-08-11)
 
 Depends on items 4 and 6.
+
+NOTES (2026-08-11): six calls the item's text does not word.
+(a) The highlight is the theme's `selection` field (white on blue, its own scheme role), not the
+`th.userBlock` bar the popups call a "selection bar". Inside the TRANSCRIPT that dark-gray field
+already means "a message the human sent", so a cursor wearing it would read as a user block; the
+selection field is the one tone this frame already spends on "the thing you are pointing at", and
+the drag-selection it could be confused with is dropped on the way into the mode — the same region
+arbitration `m.sel` is cleared for on every keypress. The two therefore never paint at once.
+(b) A stop is one per click SURFACE, not one per marked line: `cursorStops` collapses adjacent lines
+carrying the same `lineTarget`. A block marks every row it paints (item 4), which is right for a
+pointer — a human clicks where they are looking — but walking those rows would make ⌥↑ crawl through
+a forty-line body to reach the block above it. The map read is still the mouse's own, so "the toggle
+targets the mouse has" is unchanged; only the granularity of a STEP is stated here.
+(c) Entering lands on the end the key points away from — ⌥↑ on the last stop, ⌥↓ on the first —
+because the cursor arrives from outside the transcript (the prompt, below everything). Movement
+clamps rather than wraps, following the ask_user choice list's existing shape.
+(d) The mode is SUSPENDED, not ended, while an approval or ask prompt is up (`blockCursorOwnsKeys`):
+those two states own ↑/↓/⏎ for their own rows, and a modal cursor swallowing them would leave a human
+unable to answer the thing blocking the run. Keys and highlight go together and both come back on the
+line the walk was standing on.
+(e) `toggleBlockAt` (mouse.go) now returns the concrete `Model` rather than `tea.Model`. ⏎ goes
+through that one function so both ways in flip and anchor identically, and the keyboard carries the
+result on into its own state — an interface there would have put a type assertion of this package's
+own type in the middle of that path. Its single mouse call site took the two-line adaptation.
+(f) The cursor is re-seated against every fresh paint in `refreshViewport` (`blockCursor.clamp`), the
+one place the click map is restashed: a highlight left on a line whose meaning moved is the mouse's
+stale-anchor hazard with a keypress behind it. A line that is no longer a stop falls back to the stop
+before it, and a paint with no stops at all ends the mode.
+One behavioural nuance worth stating: inside the mode `esc` leaves the walk, so stopping a running
+Exchange from inside it takes a second `esc` — the modal contract the item words, applied to the key
+the frame already shares.
+
+NOTES (2026-08-11): `ISSUES.md`'s "keyboard path for collapse/expand: a block-cursor mode …
+deliberately deferred" bullet was removed here rather than left for item 9, which names only the
+tool-layout.md flag: the entry describes THIS item's feature as not built, and it stopped being true
+the moment the item landed.
 
 **What:** A modal block cursor in a new `internal/tui/blockcursor.go` (keep
 `model.go` from growing — it is a flagged split candidate): `alt+up`/`alt+down`

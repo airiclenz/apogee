@@ -98,6 +98,19 @@ point is a **minor** bump, not a breaking change.
     block inside it keeping its own fold state. The list resumes underneath, so the siblings stay one
     click away while you read through one of them.
 
+- **The transcript now folds from the keyboard too — `⌥↑` / `⌥↓`.** Everything the mouse can open
+  was reachable only by pointing at it, which is no help over ssh, in a terminal without mouse
+  reporting, or for anyone who simply keeps their hands on the keys. `⌥↑` (or `⌥↓`) now lights a bar
+  on a tool block and hands the arrows to the transcript: `↑`/`↓` walk from one foldable thing to the
+  next, `⏎` opens or closes the one under the bar, and `esc` gives the keys back. The walk visits
+  exactly what a click can reach, at the level it is showing — a block, a group member, a type row
+  inside a `✦ Tools (N calls)` umbrella — and one stop per thing, so a forty-line output is a single
+  step rather than forty. The view scrolls to keep the bar in sight as you go.
+  - **Typing ends the walk and still types.** The letter that broke you out of it opens the message
+    in the prompt box instead of being swallowed, so there is no mode to remember being in. An
+    approval or a question borrows the arrows back for as long as it is up, then the walk resumes
+    exactly where it was standing.
+
 - **`<u>…</u>` renders as underlined text.** Markdown spells no underline of its own — CommonMark
   spends `__` on strong emphasis — so the renderer recognises the one HTML pair a model actually
   reaches for, and assistant text saying `press <u>Enter</u>` now shows *Enter* underlined with the

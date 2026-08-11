@@ -278,6 +278,12 @@ type Model struct {
 	lines       []string
 	userBlocks  []userBlock
 	lineTargets []lineTarget
+	// cursor is the transcript's modal KEYBOARD pointer over those same targets (blockcursor.go):
+	// whether the walk is on, and which content line its highlight is standing on. Two plain fields
+	// by ADR 0011, and a content line rather than a screen row so the highlight travels with the text
+	// it names through a scroll or a stream — refreshViewport keeps it standing on a real click
+	// surface (blockCursor.clamp) exactly as it keeps the map above it honest.
+	cursor blockCursor
 }
 
 // newModel builds the initial idle Model. parent is the program context the worker derives
@@ -1010,6 +1016,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if handled, nm, cmd := m.autocompleteKey(msg); handled {
 			return nm, cmd
 		}
+	}
+
+	// The transcript's modal block cursor claims its keys here, ahead of the switch below, because
+	// two of them — ⏎ and esc — are the frame's own verbs and the mode exists to borrow them
+	// (blockcursor.go, design call 7). It is entered by ⌥↑/⌥↓ and left by esc or by typing, and the
+	// typing case is why the next Model is taken whether or not the key was claimed: the printable
+	// key that ends the walk goes on to the prompt box below with the mode already off.
+	walked, cursorCmd, cursorTook := m.blockCursorKey(msg)
+	m = walked
+	if cursorTook {
+		return m, cursorCmd
 	}
 
 	switch msg.String() {
@@ -2219,6 +2236,10 @@ func (m *Model) refreshViewport() {
 	m.lines = rendered.lines // stashed for the sticky-header overlay (View)
 	m.userBlocks = rendered.userBlocks
 	m.lineTargets = rendered.targets // the paint's own click surface, for the mouse (render.go)
+	// The keyboard cursor stands on that same map, so it is re-seated against the paint that just
+	// landed: this is the ONE place the map is restashed, and a highlight left on a line whose
+	// meaning moved would be a ⏎ opening some other block (blockCursor.clamp, blockcursor.go).
+	m.cursor = m.cursor.clamp(m.lineTargets)
 	if m.detached {
 		m.viewport.SetContentLines(rendered.lines)
 		// Content that SHRANK under the held offset is clamped back to the bottom by
@@ -2391,7 +2412,8 @@ func (m Model) View() tea.View {
 		vp := m.viewport
 		vp.SetHeight(h)
 		body := m.applyStickyHeader(vp.View())
-		body = m.highlightTranscript(body) // overlay any transcript drag-selection on the composed rows
+		body = m.highlightTranscript(body)  // overlay any transcript drag-selection on the composed rows
+		body = m.highlightBlockCursor(body) // and the keyboard cursor's bar (blockcursor.go — they never coexist)
 		if m.opts.HideScrollbar {
 			rows = append(rows, body)
 		} else {

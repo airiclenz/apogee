@@ -273,7 +273,10 @@ advertises `⇧⏎` only on terminals that negotiated the enhanced (kitty) keybo
 protocol — the thing that makes that chord arrive as anything other than a plain `⏎`;
 everywhere else the legend names `⌥⏎` alone, which works on every terminal. Beyond
 the box, `⇧⇥` cycles the autonomy mode — Plan → Ask-Before → Allow-Edits → Auto — at
-any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. `⌃l` is the
+any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. `⌥↑`/`⌥↓` light a
+bar on the transcript and hand the arrows to it: `↑`/`↓` walk from one foldable block to
+the next — a tool call, a group member, a type row — `⏎` opens or closes the one under
+the bar, and `esc`, or simply typing your next message, gives the keys back. `⌃l` is the
 readline redraw: it forces a full repaint, which is the way back from a terminal that
 has smeared or eaten part of the frame. It sends nothing, edits nothing and interrupts
 nothing — the only thing it takes with it is a mouse drag-selection's highlight, which

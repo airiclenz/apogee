@@ -483,7 +483,8 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 		if m.transcriptSel.anchor == m.transcriptSel.head {
 			pressed := m.transcriptSel.anchor.line
 			m.transcriptSel.active = false
-			return m.toggleBlockAt(pressed, msg.Y)
+			toggled, cmd := m.toggleBlockAt(pressed, msg.Y)
+			return toggled, cmd
 		}
 		text := transcriptSelectionText(m.th.measure, m.lines, m.transcriptSel.anchor, m.transcriptSel.head)
 		if strings.TrimSpace(text) == "" {
@@ -540,7 +541,11 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 // Nothing here re-derives the transcript: an index the entry list has grown past, or one naming a
 // kind with no block state, answers false from the transcript's own guard and this changes
 // nothing at all.
-func (m Model) toggleBlockAt(line, releaseRow int) (tea.Model, tea.Cmd) {
+// The concrete Model comes back rather than a tea.Model because the KEYBOARD reaches the same
+// toggle (toggleAtBlockCursor, blockcursor.go) and carries the result on into its own state rather
+// than returning it to Update — an interface there would put a type assertion of this package's own
+// type in the middle of that path.
+func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 	if line < 0 || line >= len(m.lineTargets) {
 		return m, nil
 	}
