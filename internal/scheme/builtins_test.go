@@ -130,6 +130,22 @@ func TestBuiltinSchemesKeepBothMarkerStepsDistinct(t *testing.T) {
 	}
 }
 
+func TestBuiltinSchemesKeepSuccessAndErrorDistinct(t *testing.T) {
+	t.Parallel()
+	for _, name := range builtinNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := builtinScheme(t, name)
+			// The two roles mark the opposite ends of one outcome — a finished run's ✓ against a
+			// fault notice. A scheme giving both one value says "it came off" and "it did not" in
+			// exactly the same voice, which is the one confusion a marker exists to prevent.
+			if got.Success == got.Error {
+				t.Errorf("success and error are both %q — a done marker must not read as a fault", got.Success)
+			}
+		})
+	}
+}
+
 func TestBuiltinSchemesKeepToolHeaderAndCodeDistinct(t *testing.T) {
 	t.Parallel()
 	for _, name := range builtinNames() {

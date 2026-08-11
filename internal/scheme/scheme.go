@@ -35,7 +35,12 @@ type Scheme struct {
 	DiffAdd string `yaml:"diff-add"` // diff "+" lines
 	DiffDel string `yaml:"diff-del"` // diff "-" lines
 	Error   string `yaml:"error"`    // recovered-fault notices
-	Code    string `yaml:"code"`     // inline `code` + fenced code blocks
+	// Success is Error's counterpart at the other end of an outcome: the tone a marker wears
+	// to say a thing came off. Its first consumer is the ✓ on a finished sub-agent
+	// (docs/layout/tool-layout.md), but the role is named for the meaning rather than that
+	// glyph, so anything else that ends well can speak in the same voice.
+	Success string `yaml:"success"` // the ✓ and other "this came off" markers
+	Code    string `yaml:"code"`    // inline `code` + fenced code blocks
 	// ToolHeader is the tool label's own tone, kept apart from Code so a scheme can
 	// pitch the block headers against the code it prints without moving both at once.
 	ToolHeader string `yaml:"tool-header"` // tool-call block headers + the sub-agent rail

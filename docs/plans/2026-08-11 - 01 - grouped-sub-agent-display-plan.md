@@ -79,7 +79,17 @@ the head's view; `transcriptcodec_test.go` — round-trip keeps it.
 
 **Commit:** `feat(tui): retain the full sub-agent task text through present and codec`
 
-## 3. Add the green `success` scheme role
+## 3. Add the green `success` scheme role — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): three additions beyond the item's literal text, all of them
+the `tool-marker-bright` precedent (`8d96941`) rather than new ground: the role
+sits beside `error` in the semantic block (it is that role's counterpart, not a
+chrome accent); `CONTEXT.md`'s stated role count went 27 → 28; and the
+colour-agnostic guard `TestBuiltinSchemesKeepSuccessAndErrorDistinct` joins the
+existing pair guards, so a shipped scheme cannot say "it came off" and "it did
+not" in one voice. The `theme.go` style that paints the `✓` is deliberately
+NOT wired here — item 4 owns it and is its only consumer, so wiring it now
+would land a style nothing reads.
 
 Depends on item 1 (the scheme files are dirty from that plan's run until it
 lands).

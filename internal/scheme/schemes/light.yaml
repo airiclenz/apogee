@@ -23,6 +23,7 @@ muted-bright: "#424a53" # the muted tone one step up: the text of an EXPANDED to
 diff-add: "#1a7f37"    # diff "+" lines
 diff-del: "#cf222e"    # diff "-" lines
 error: "#cf222e"       # recovered-fault notices
+success: "#116329"     # the ✓ on a finished sub-agent and any other "this came off" marker — error's counterpart, green, and one rung darker than `diff-add` so it carries against a light background
 code: "#bc4c00"        # inline `code` + fenced code blocks (orange)
 tool-header: "#1f6feb" # a tool-call block's header label (Run, List Dir, Sub-Agent, …) and the sub-agent rail that hangs off it — blue, so the blocks apogee ran read apart from the code it prints
 

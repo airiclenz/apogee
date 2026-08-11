@@ -23,6 +23,7 @@ var roleTable = []struct {
 	{"diff-add", func(s Scheme) string { return s.DiffAdd }},
 	{"diff-del", func(s Scheme) string { return s.DiffDel }},
 	{"error", func(s Scheme) string { return s.Error }},
+	{"success", func(s Scheme) string { return s.Success }},
 	{"code", func(s Scheme) string { return s.Code }},
 	{"tool-header", func(s Scheme) string { return s.ToolHeader }},
 	{"mode-plan", func(s Scheme) string { return s.ModePlan }},
