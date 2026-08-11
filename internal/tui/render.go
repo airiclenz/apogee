@@ -1064,9 +1064,10 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // accounting, and the two would drift the first time the shape changed (ADR 0030's rule). That
 // surface is the block WHOLE — its header, the leader row beneath it, and, open, every body line —
 // the shape the prompt block has always had (renderUserBlock): a reader who wants the rest of a
-// Run's output clicks the output, not the one row of the block that happens to be its header. The one exception is the synthesized `+N more lines` marker, which
-// keeps its OPEN-ONLY meaning (targetMarker): it is a line of the collapsed paint alone, so a click
-// there can only mean "show me the rest".
+// Run's output clicks the output, not the one row of the block that happens to be its header. The
+// one exception is the synthesized `+N more lines` marker, which keeps its OPEN-ONLY meaning
+// (targetMarker): it is a line of the collapsed paint alone, so a click there can only mean "show
+// me the rest".
 //
 // The surface exists when the collapsed paint HIDES something — either inside the views
 // (blockHidesWhenCollapsed) or outside them (state.elides, the sub-agent run's span) — because a
@@ -1626,13 +1627,16 @@ func blockHidesWhenCollapsed(th theme, views []toolView, width int) bool {
 // renderToolBranch renders one call of a tool block as its branch line (plus whatever hangs
 // beneath it). Two shapes, and they are the whole grammar:
 //
-//   - a call WITH a target — the branch is the target, and when the call has a Summary, the
-//     target padded to the block's column, one space, then that summary ("┕ main.go 1 - 154",
-//     "┕ main.go +2 -2"). A call still in flight has no summary yet and shows the bare target;
-//     the block repaints whole once the result folds in. Its Details, if any, are the block's
-//     body and lay out beneath the branch at the branch marker's own width — not as ┝/┕ branches
-//     of their own, because only calls are (a Run's output, a diff body under its diffstat) —
-//     painted whole when the block is expanded and not at all when it is collapsed.
+//   - a call WITH a target — the branch is the leader row every single block and every group
+//     member takes (leaderRow): the branch marker, the target, a dotted leader, then the call's
+//     Summary in an outcome slot flush against the row's right edge ("┕ main.go ⋯⋯⋯ 154 lines",
+//     "┕ main.go ⋯⋯⋯ +2 -2"). There is no target column to pad to — the leader absorbs whatever
+//     the targets differ by, which is what puts a block of one and a block of ten's outcomes in
+//     the same place. A call still in flight has no summary yet and lets the dots run to the
+//     row's edge; the block repaints whole once the result folds in. Its Details, if any, are
+//     the block's body and lay out beneath the branch at the branch marker's own width — not as
+//     ┝/┕ branches of their own, because only calls are (a Run's output, a diff body under its
+//     diffstat) — painted whole when the block is expanded and not at all when it is collapsed.
 //   - a call with NO target — the only shape with no target line: the header stands alone and
 //     the detail lines are themselves the ┝/┕ branches, the summary last since it has no branch
 //     line to ride (an unregistered tool's labelled arguments then its "error: …"
