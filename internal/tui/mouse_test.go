@@ -919,6 +919,31 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 		}
 	})
 
+	// The see-less footer is the block's last row and exists for nothing but this click
+	// (seeLessFooter, render.go): it is where the pointer of a reader who has just read to the end
+	// of the output already is.
+	t.Run("the see-less footer closes the block", func(t *testing.T) {
+		m := modelWithToolBlock(t, output)
+		header := markedLine(t, m, targetHeader)
+		m = clickCell(t, m, 2, screenRow(t, m, header))
+		if !blockExpanded(t, m, header) {
+			t.Fatal("setup: the click on the header did not expand the block")
+		}
+		rows := memberRows(t, m, m.lineTargets[header].entry)
+		footer := rows[len(rows)-1]
+		if !strings.Contains(strip(m.lines[footer]), promptSeeLess) {
+			t.Fatalf("setup: the block's last marked row is %q, not the see-less footer", strip(m.lines[footer]))
+		}
+
+		m = clickCell(t, m, 74, screenRow(t, m, footer))
+		if blockExpanded(t, m, header) {
+			t.Fatal("a click on the see-less footer did not collapse the block")
+		}
+		if painted := strings.Join(m.lines, "\n"); strings.Contains(painted, promptSeeLess) {
+			t.Fatalf("the collapsed block kept a see-less footer:\n%s", painted)
+		}
+	})
+
 	// A collapsed block's TARGET row is the same surface from the other side: the row a reader is
 	// looking at when they want the rest is the clipped path itself, not the label above it. The
 	// row does not move when the click lands, either — a leader row is the same one row open and

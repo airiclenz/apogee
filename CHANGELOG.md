@@ -61,6 +61,13 @@ point is a **minor** bump, not a breaking change.
     leaves the tool's own first line in the slot rather than inventing a number.
   - `open_file`'s locate report moved off the branch into the block's body, where the line numbers
     sit under the path and term that asked for them.
+- **An open tool block now closes with a right-aligned `see less…`**, the row a reader who has just
+  read to the end of the output is already on. It joins the block's click surface, which is the
+  whole block: its header, its branch row, every line of its body and now the footer under them all
+  toggle the block a click lands on — and inside a folded group, the row you clicked toggles the
+  member it belongs to rather than the run. A drag still selects and copies as before; only a
+  press-and-release that never moved is a toggle. Blocks with nothing to reveal grow no footer,
+  because a `see less…` that did nothing would be an affordance about nothing.
 
 - **`<u>…</u>` renders as underlined text.** Markdown spells no underline of its own — CommonMark
   spends `__` on strong emphasis — so the renderer recognises the one HTML pair a model actually

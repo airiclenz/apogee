@@ -1007,6 +1007,7 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 		"    Found 4 gaps",
 		"    in the suite",
 		"    here they are",
+		seeLessFooterLine(t, 80), // the head's own body closes with the footer; its span follows below
 		"",
 		"│ ⤷ sub-agent",
 		"│",

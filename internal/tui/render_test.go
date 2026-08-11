@@ -886,6 +886,7 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 		leaderEdgeRow("  ┕ main.go ⋯ +1 −1", glyphExpanded),
 		"    - a removed line",
 		"    + an added line",
+		seeLessFooterLine(t, 80),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("diff block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -925,6 +926,7 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 		"    - a second removed line",
 		"    + a new code line",
 		"    + a second new line",
+		seeLessFooterLine(t, 80),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("diff sketch mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -1089,7 +1091,10 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 			if !tr.toggleExpanded(0) {
 				t.Fatal("toggleExpanded(0) = false; want the tool-call entry toggled")
 			}
-			if got, want := body(), strings.Join(tc.wantExpanded, "\n"); got != want {
+			// The expanded body ends in the see-less footer, whatever filled it: the extra collapse
+			// target every open block grows (seeLessFooter, render.go).
+			wantExpanded := append(append([]string(nil), tc.wantExpanded...), seeLessFooterLine(t, 80))
+			if got, want := body(), strings.Join(wantExpanded, "\n"); got != want {
 				t.Errorf("expanded paint mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 			}
 			if strings.Contains(body(), "more line") {
@@ -1144,8 +1149,10 @@ func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
 		if want := th.toolDetailBright.Render("go test ./..."); !strings.Contains(open[1], want) {
 			t.Errorf("open branch = %q; want its target in the brighter tone %q", open[1], want)
 		}
-		// Open, every body row below the branch is the call's own text and lifts whole.
-		for i, row := range open[2:] {
+		// Open, every body row below the branch is the call's own text and lifts whole — the
+		// see-less footer closing the body apart, which is apogee's own affordance and wears the
+		// marker tone (seeLessFooter).
+		for i, row := range open[2 : len(open)-1] {
 			if want := th.toolDetailBright.Render(strip(row)); row != want {
 				t.Errorf("open row %d = %q; want the brighter tone %q", i+2, row, want)
 			}
@@ -1589,6 +1596,15 @@ func memberEdgeRow(t *testing.T, text, mark string, width int) string {
 	return text + strings.Repeat(" ", pad) + mark
 }
 
+// seeLessFooterLine is the row an expanded SINGLE block closes its body with, as a golden reads it:
+// nothing but the see-less marker, flush against the block's right edge (seeLessFooter, render.go).
+// It goes through memberEdgeRow so the two see-less rows in the transcript — the open member's, under
+// its gutter, and this one — are held to one definition of that edge.
+func seeLessFooterLine(t *testing.T, width int) string {
+	t.Helper()
+	return memberEdgeRow(t, "", promptSeeLess, width)
+}
+
 // runGroup folds a batch of same-label terminal calls, each with its output, into a fresh
 // transcript at depth — the sketch's "✦ Terminal (3)" fixture (docs/layout/tool-layout.md). Each call is
 // a {command, output} pair. They carry bodies deliberately: that is what gives every member
@@ -1751,6 +1767,42 @@ func TestExpandedGroupMemberPaintsTheSketchShape(t *testing.T) {
 	}
 }
 
+// TestSeeLessFooterClosesAnOpenBody is the single block's footer at the seam that decides it: an
+// expanded block that painted a body closes it with a right-aligned see less…, and the two blocks a
+// footer would be lying to get none. One hides nothing, so it is no click target at all and a
+// see-less there would offer a click that does nothing; one painted no body row, so there is nothing
+// above the footer for it to be closing — the sub-agent run whose whole reveal is its railed span.
+func TestSeeLessFooterClosesAnOpenBody(t *testing.T) {
+	const width = 60
+	th := newTheme(scheme.Default())
+	body := []string{"    ok   a", "    PASS"}
+	for _, tc := range []struct {
+		name   string
+		body   []string
+		toggle targetKind
+		want   []string
+	}{
+		{"an open body closes with the footer", body, targetHeader, []string{seeLessFooterLine(t, width)}},
+		{"a block that hides nothing offers no click", body, targetNone, nil},
+		{"an empty body has nothing to close", nil, targetHeader, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := seeLessFooter(th, tc.body, width, tc.toggle)
+			if len(rows) != len(tc.want) {
+				t.Fatalf("footer painted %d rows, want %d: %q", len(rows), len(tc.want), rows)
+			}
+			for i, row := range rows {
+				if got := strip(row); got != tc.want[i] {
+					t.Errorf("footer row %d = %q, want %q", i, got, tc.want[i])
+				}
+				if got := th.measure.Width(strip(row)); got != width {
+					t.Errorf("footer row %d measures %d cells, want the block's whole %d", i, got, width)
+				}
+			}
+		})
+	}
+}
+
 // Every row an open member paints belongs to that member and says so: the marks name entry 1 down
 // the whole of it — first row, body and see-less row alike — while the siblings' single rows name
 // entries 0 and 2 and the group header names nothing at all. This is the click surface the mouse
@@ -1858,6 +1910,7 @@ func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
 		"    [ ] Plan",
 		"    [x] Ask before",
 		"    [ ] Auto",
+		seeLessFooterLine(t, 80),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != expanded {
 		t.Errorf("expanded record mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, expanded)
@@ -1903,6 +1956,7 @@ func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 			{line: 3, kind: targetHeader, entry: 0, text: "    [ ] Plan"},
 			{line: 4, kind: targetHeader, entry: 0, text: "    [x] Ask before"},
 			{line: 5, kind: targetHeader, entry: 0, text: "    [ ] Auto"},
+			{line: 6, kind: targetHeader, entry: 0, text: seeLessFooterLine(t, 80)},
 		}
 		if got := blockMarks(t, tr, 80); !reflect.DeepEqual(got, want) {
 			t.Errorf("expanded marks mismatch:\n--- got ---\n%+v\n--- want ---\n%+v", got, want)
@@ -2523,7 +2577,8 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 		{
 			// The state does not decide the target: an expanded block keeps every row marked — that
 			// is the click that collapses it again, wherever in the output the pointer happens to be
-			// — and has no marker left to mark.
+			// — and has no marker left to mark. The see-less footer closing the body is marked with
+			// the rest: it is the one row that exists ONLY to be clicked (seeLessFooter).
 			name:  "an expanded block marks its body too and loses its marker",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
@@ -2540,6 +2595,7 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				{line: 5, kind: targetHeader, entry: 1, text: "    ok   b"},
 				{line: 6, kind: targetHeader, entry: 1, text: "    ok   c"},
 				{line: 7, kind: targetHeader, entry: 1, text: "    PASS"},
+				{line: 8, kind: targetHeader, entry: 1, text: seeLessFooterLine(t, 80)},
 			},
 		},
 		{
@@ -3206,7 +3262,10 @@ func TestFiringBlockCollapsesToItsRemainderMarker(t *testing.T) {
 			if !tr.toggleExpanded(0) {
 				t.Fatal("toggleExpanded(0) = false; want the firing block toggled")
 			}
-			if got, want := renderPlain(tr, 80), strings.Join(tc.wantExpanded, "\n"); got != want {
+			// A Firing is painted by the tool block's own renderer, so its open body closes with the
+			// same see-less footer (seeLessFooter, render.go).
+			wantExpanded := append(append([]string(nil), tc.wantExpanded...), seeLessFooterLine(t, 80))
+			if got, want := renderPlain(tr, 80), strings.Join(wantExpanded, "\n"); got != want {
 				t.Errorf("expanded paint mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 			}
 		})
@@ -3367,6 +3426,7 @@ func TestRenderNoTargetStandalone(t *testing.T) {
 		"  ┝   1",
 		"  ┝ b:",
 		"  ┕   2",
+		seeLessFooterLine(t, 80),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("expanded targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -3389,6 +3449,7 @@ func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 		"  ┝ a:",
 		"  ┝   1",
 		"  ┕ error: no such server",
+		seeLessFooterLine(t, 80),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("targetless error block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -3413,7 +3474,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 		name          string
 		build         func(tr *transcript)
 		wantCollapsed []string
-		wantExpanded  int // physical lines, header included
+		wantExpanded  int // physical lines, header and see-less footer included
 	}{
 		{
 			name: "an unregistered tool's 60-line argument blob",
@@ -3422,7 +3483,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 					ID: "c1", Tool: "mcp_search", Arguments: blob(58)}})
 			},
 			wantCollapsed: []string{"✦ mcp_search ▶", "  ┝ [", `  ┕   "arg0",`, "    +58 more lines"},
-			wantExpanded:  61,
+			wantExpanded:  62,
 		},
 		{
 			name: "a registered call whose target argument is missing",
@@ -3435,7 +3496,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 			// The typed stat has nowhere to ride on a targetless block, so it lands as the last
 			// branch of the list — one more row for the collapsed cap to count.
 			wantCollapsed: []string{"✦ Terminal ▶", "  ┝ one", "  ┕ two", "    +3 more lines"},
-			wantExpanded:  6,
+			wantExpanded:  7,
 		},
 		{
 			name: "a stray result that matched no call",
@@ -3444,7 +3505,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 					CallID: "gone", Content: "one\ntwo\nthree"}})
 			},
 			wantCollapsed: []string{"✦ result ▶", "  ┝ one", "  ┕ two", "    +1 more line"},
-			wantExpanded:  4,
+			wantExpanded:  5,
 		},
 	}
 	for _, tc := range cases {
@@ -3637,7 +3698,10 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 				t.Fatal("toggleExpanded(0) = false; want the unregistered call to own a block state")
 			}
 			expanded := renderPlain(tr, 80)
-			if want := strings.Join(tc.wantExpanded, "\n"); expanded != want {
+			// The open block closes with the see-less footer, as every expanded block does
+			// (seeLessFooter, render.go).
+			wantExpanded := append(append([]string(nil), tc.wantExpanded...), seeLessFooterLine(t, 80))
+			if want := strings.Join(wantExpanded, "\n"); expanded != want {
 				t.Errorf("expanded block mismatch:\n--- got ---\n%s\n--- want ---\n%s", expanded, want)
 			}
 			// The JSON envelope is what the labelling replaces, so neither state may carry a

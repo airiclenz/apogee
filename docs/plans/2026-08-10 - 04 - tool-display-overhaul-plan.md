@@ -212,9 +212,34 @@ grouping split; render goldens.
 
 **Commit:** `feat(tui): per-tool details and labels per ratified tool-layout table`
 
-## 4. Click-anywhere toggle and the `see less…` footer
+## 4. Click-anywhere toggle and the `see less…` footer — ✅ DONE (2026-08-11)
 
 Depends on item 1.
+
+NOTES (2026-08-11): half of this item was already standing and is deliberately left alone. Every
+row a block paints — header, leader row, body — has been marked for its owning entry since item 1
+(`renderToolBlock`'s `toggle`, spent through `renderToolBranch`), a group member's rows have named
+that member since `8314072` (`blockPaint.addFor`), and `toggleBlockAt` resolves whatever the
+painter marked through ONE case, so deepest-wins and drag-vs-click needed no change: `mouse.go` is
+untouched, and the four mouse cases the item asks for already exist
+(`TestTranscriptClickTogglesTheBlock` — body row, `TestTranscriptDragAcrossBodyRowsStillSelects`,
+`TestGroupMemberClickTogglesOnlyThatMember`). The new work is the footer and the one mouse case
+that was missing with it.
+
+NOTES (2026-08-11): three calls the item's text does not word.
+(a) The footer wears the tool block's own MARKER tone, not the `promptToggle` treatment the item
+names: the open group member already ships a `see less…` in the marker tone (`seeLessRow`,
+`8314072`), and `promptToggle` carries the prompt block's chrome BACKGROUND, which on a tool body
+would paint a grey box floating at the right edge. Two see-less rows in one transcript reading
+differently is the worse outcome, so `seeLessRow` gained a gutter parameter (`"  │ "` for a
+member, empty for a block) and both callers go through it.
+(b) The footer is painted under two conditions, both about not writing an affordance that lies:
+the block must be a toggle target (a block that hides nothing offers a click that does nothing),
+and it must have painted a body row (a sub-agent run whose whole reveal is its railed span has
+nothing above the footer for it to close). `seeLessFooter` states both.
+(c) It reaches the TARGETLESS shape too (unregistered/MCP argument dumps, stray results), which
+the item's text does not mention: there the branch list IS the expanded body, so the same rule
+applies unchanged.
 
 **What:** Every row a block paints becomes a toggle target for its own block: extend
 `lineTargets` (`internal/tui/render.go`) so body rows and the new right-aligned

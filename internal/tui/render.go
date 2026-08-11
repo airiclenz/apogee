@@ -1220,7 +1220,7 @@ func renderExpandedMember(th theme, tv toolView, marker string, width, room int)
 	for _, d := range tv.Details.all() {
 		out = append(out, gutteredWrap(th, detailStyle(th, d.Kind, true), memberGutter, memberGutter, d.Text, room)...)
 	}
-	return append(out, seeLessRow(th, width))
+	return append(out, seeLessRow(th, memberGutter, width))
 }
 
 // gutteredWrap is hangingWrap with a CONTINUATION prefix of its own: the first row leads with
@@ -1254,15 +1254,45 @@ func indicatorRow(th theme, row string, width int, glyph string) string {
 	return row + pad + th.toolIndicator.Render(glyph)
 }
 
-// seeLessRow is the row that closes an open member: the gutter, then the see-less marker flush
-// against the block's right edge. It borrows the prompt block's WORDING and not its treatment —
-// promptSeeLess is the one vocabulary (design call 7), while the style is the tool block's own
-// marker tone, the same a "+N more lines" wears, because both are things apogee wrote onto a block
-// rather than lines the tool produced.
-func seeLessRow(th theme, width int) string {
+// seeLessRow is the row that closes an OPEN body: the gutter its block continues its rows under —
+// empty for a block whose body needs none — then the see-less marker flush against the block's right
+// edge. It borrows the prompt block's WORDING and not its treatment — promptSeeLess is the one
+// vocabulary (design call 7), while the style is the tool block's own marker tone, the same a
+// "+N more lines" wears, because both are things apogee wrote onto a block rather than lines the
+// tool produced.
+//
+// One row shape serves both callers — the open group member, under its │ gutter, and the ungrouped
+// block, whose body hangs at the branch marker's indent and closes with the marker alone
+// (seeLessFooter). A block that grew a footer of its own shape would be a second answer to "how does
+// a body end", and the two would drift the first time either moved.
+func seeLessRow(th theme, gutter string, width int) string {
 	pad := strings.Repeat(" ",
-		max(0, width-th.measure.Width(memberGutter)-th.measure.Width(promptSeeLess)))
-	return th.toolDetail.Render(memberGutter) + pad + th.toolMarker.Render(promptSeeLess)
+		max(0, width-th.measure.Width(gutter)-th.measure.Width(promptSeeLess)))
+	row := pad + th.toolMarker.Render(promptSeeLess)
+	if gutter == "" {
+		return row
+	}
+	return th.toolDetail.Render(gutter) + row
+}
+
+// seeLessFooter is the row an EXPANDED single block closes its body with — the canon spec's
+// "Single tool expanded" sketch, where see less… trails the last body row flush against the right
+// edge (docs/layout/tool-layout.md, "Fold states and interaction"). It is the extra collapse target
+// the two fold states are given, and the only row a block paints that exists ONLY to be clicked —
+// which is why it wears the same marker tone the "+N more lines" affordance does rather than any
+// body tone.
+//
+// Two conditions, and both are about not writing an affordance that lies. A block that hides nothing
+// is not toggleable at all (renderToolBlock's toggle), so a see-less there would offer a click that
+// does nothing; and a block that painted no body row has nothing the footer could be closing — the
+// sub-agent run whose whole reveal is its span, whose head's own report is empty. The caller adds
+// what comes back under its OWN toggle kind, so the footer joins the block's click surface by the
+// same act that paints it (blockPaint.add).
+func seeLessFooter(th theme, body []string, width int, toggle targetKind) []string {
+	if toggle == targetNone || len(body) == 0 {
+		return nil
+	}
+	return []string{seeLessRow(th, "", width)}
 }
 
 // memberGutter is the continuation prefix an open member's rows carry where a hanging wrap would
@@ -1650,10 +1680,11 @@ func blockHidesWhenCollapsed(th theme, views []toolView, width int) bool {
 // there are: a body of one line and a body of ten lay out the same way.
 //
 // The block's state reaches BOTH shapes. An expanded call lays out every line the entry retained,
-// soft-wrapping whatever is overlong, and grows no remainder marker. A COLLAPSED targeted call is
-// the row budget's (layout.md, "Collapsed and expanded blocks"): its branch is the ONE leader row
-// (leaderRow), no body line is painted at all, and the marker
-// counts the body WHOLE — the sketch's "+5 more lines" over a five-line output. So a collapsed
+// soft-wrapping whatever is overlong, and grows no remainder marker — the see-less footer closes it
+// instead (seeLessFooter), which is where the pointer of a reader who has just read to the end of a
+// body already is. A COLLAPSED targeted call is the row budget's (layout.md, "Collapsed and expanded
+// blocks"): its branch is the ONE leader row (leaderRow), no body line is painted at all, and the
+// marker counts the body WHOLE — the sketch's "+5 more lines" over a five-line output. So a collapsed
 // block stands at most three rows tall whatever tool filled it and however long its target is,
 // which is the point: a scrollback of tool calls reads as a list rather than as a wall. A
 // collapsed targetless call caps its branch list instead, since there the lines ARE the branches —
@@ -1671,7 +1702,9 @@ func renderToolBranch(th theme, tv toolView, marker string, width int, expanded 
 	if tv.Target == "" {
 		if expanded {
 			var out blockPaint
-			out.add(renderDetails(th, branchDetails(tv), width), toggle)
+			rows := renderDetails(th, branchDetails(tv), width)
+			out.add(rows, toggle)
+			out.add(seeLessFooter(th, rows, width, toggle), toggle)
 			return out
 		}
 		shown, remainder, truncated := collapsedCall(tv)
@@ -1694,7 +1727,9 @@ func renderToolBranch(th theme, tv toolView, marker string, width int, expanded 
 	}
 	out.add([]string{row}, toggle)
 	if expanded {
-		out.add(renderSubDetails(th, tv.Details.all(), indent, width), toggle)
+		body := renderSubDetails(th, tv.Details.all(), indent, width)
+		out.add(body, toggle)
+		out.add(seeLessFooter(th, body, width, toggle), toggle)
 		return out
 	}
 	if _, remainder, truncated := collapsedDetails(tv.Details); truncated {
