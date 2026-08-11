@@ -120,6 +120,15 @@ type wireSkillSpan struct {
 // live session kept it — the scrollback changing shape across a restart. It is ADDITIVE on the same
 // rule: a blob written before it decodes with no stat, which is the reading every record was written
 // under, and such a promotion simply stays put.
+//
+// Task travels because it is BODY, not lookup: a sub-agent run's expanded span opens with the
+// delegated prompt (toolView.task), and unlike every other body on this struct that text never came
+// from a result — it is the call's own argument, and the arguments are not on the wire. A record
+// that dropped it would replay as a run whose opening prompt block vanished: the scrollback changing
+// shape across a restart, the same thing Solo and Stat are here to prevent. It is ADDITIVE on the
+// same rule and carries omitempty — only a sub_agent head ever fills it, so no other record's blob
+// grows a byte, and a blob written before it decodes with no prompt, which is the shape every such
+// record was written under.
 type wireToolView struct {
 	Label   string            `json:"label,omitempty"`
 	Verb    string            `json:"verb,omitempty"`
@@ -127,6 +136,7 @@ type wireToolView struct {
 	Name    string            `json:"name,omitempty"`
 	Solo    bool              `json:"solo,omitempty"`
 	Stat    string            `json:"stat,omitempty"`
+	Task    string            `json:"task,omitempty"`
 	Summary wireBranchSummary `json:"summary"`
 	Details []wireDetailLine  `json:"details,omitempty"`
 }
@@ -311,6 +321,7 @@ func toWireToolView(tv toolView) *wireToolView {
 		Name:   tv.name,
 		Solo:   tv.solo,
 		Stat:   tv.stat,
+		Task:   tv.task,
 		Summary: wireBranchSummary{
 			wireDetailLine: wireDetailLine{Kind: int(tv.Summary.Kind), Text: tv.Summary.Text},
 			Quoted:         tv.Summary.quoted,
@@ -419,6 +430,7 @@ func fromWireToolView(w *wireToolView, done bool) toolView {
 		name:    stripEscapes(w.Name),
 		solo:    w.Solo,
 		stat:    w.Stat, // sanitize below strips it with the other display fields
+		task:    w.Task, // ditto: a delegated prompt off disk is untrusted text like any other
 		Summary: summary,
 	}
 	// Two verdicts are re-derived rather than trusted, and only in the direction that can ADD solo. A

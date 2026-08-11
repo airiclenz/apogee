@@ -62,7 +62,7 @@ make no commit.
 
 **Commit:** `docs(layout): land the grouped sub-agent layout spec`
 
-## 2. Retain the full sub-agent task text and persist it
+## 2. Retain the full sub-agent task text and persist it — ✅ DONE (2026-08-11)
 
 **What:** In `internal/tui/toolpresent.go` the `sub_agent` presenter drops
 `tv.args` after present (`presentToolCall` keeps args only when an `outcome`

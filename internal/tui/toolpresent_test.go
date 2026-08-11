@@ -419,6 +419,77 @@ func TestPresentSubAgentNameLeadsTheHeader(t *testing.T) {
 	})
 }
 
+// TestPresentSubAgentRetainsTheWholeTask pins what the run head keeps of the delegated prompt. The
+// header's Target is one clipped line — what the collapsed row says the delegation IS — while the
+// expanded span opens with the prompt itself, so the whole argument has to survive presentation:
+// sub_agent registers no result hook, and presentToolCall drops args for every presenter that has
+// none (the rule that keeps a write_file's file content out of the view for the session's life).
+//
+// Verbatim means verbatim — the interior newlines, the markdown, the indentation the model wrote —
+// because the block renders it as markdown and a prompt reflowed at retention time could never be
+// laid out against a width the presenter cannot see. Only the escape strip touches it, on the same
+// seam every other display field leaves through (sanitize), and only sub_agent fills it at all.
+func TestPresentSubAgentRetainsTheWholeTask(t *testing.T) {
+	t.Parallel()
+
+	const task = "Survey the tests.\n\n- read `render_test.go`\n- report the gaps\n\nBe brief."
+
+	t.Run("the whole prompt is retained beside the one-line header", func(t *testing.T) {
+		t.Parallel()
+		args, err := json.Marshal(map[string]any{"name": "test-surveyor", "task": task})
+		if err != nil {
+			t.Fatalf("marshal args: %v", err)
+		}
+
+		tv := presentToolCall(domain.ToolCall{ID: "s1", Tool: subAgentToolName, Arguments: args}, workspaceRoot{})
+
+		if tv.task != task {
+			t.Errorf("retained task = %q, want the argument verbatim %q", tv.task, task)
+		}
+		if tv.Target != "test-surveyor" {
+			t.Errorf("Target = %q; retaining the prompt must not change what the header leads with", tv.Target)
+		}
+	})
+
+	t.Run("an escape byte does not survive into the retained prompt", func(t *testing.T) {
+		t.Parallel()
+		args, err := json.Marshal(map[string]any{"task": "\x1b]8;;http://evil\x07Survey the tests."})
+		if err != nil {
+			t.Fatalf("marshal args: %v", err)
+		}
+
+		tv := presentToolCall(domain.ToolCall{ID: "s2", Tool: subAgentToolName, Arguments: args}, workspaceRoot{})
+
+		if strings.ContainsRune(tv.task, 0x1b) || strings.ContainsRune(tv.task, 0x07) {
+			t.Errorf("a control byte survived into the retained prompt: %q", tv.task)
+		}
+	})
+
+	t.Run("a call with no task and a call that is no delegation retain nothing", func(t *testing.T) {
+		t.Parallel()
+		cases := []struct {
+			name string
+			call domain.ToolCall
+		}{
+			{"a delegation whose task is not a string", domain.ToolCall{
+				ID: "s3", Tool: subAgentToolName, Arguments: []byte(`{"task":7}`)}},
+			{"another tool carrying a task argument", domain.ToolCall{
+				ID: "s4", Tool: "read_file", Arguments: []byte(`{"path":"main.go","task":"not a delegation"}`)}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				tv := presentToolCall(tc.call, workspaceRoot{})
+
+				if tv.task != "" {
+					t.Errorf("retained task = %q, want nothing", tv.task)
+				}
+			})
+		}
+	})
+}
+
 // An error result is summarised as an "error: …" detail rather than the tool's normal
 // summary — a normal in-band outcome the model reacts to. It is the *summary*, not a body
 // line, which is what keeps an errored call grouping with its neighbours.

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"slices"
@@ -947,10 +948,12 @@ func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
 // outlive the process — so it is absent from the blob and empty after a decode, which is the same
 // nothing an unnamed delegation says.
 //
-// The member census is the guard on that claim. This item added display state to toolView, and the
-// cheapest way to have got it onto the screen after a resume would have been to widen the wire;
-// the two field lists below are what makes such a widening a failing test rather than a silent
-// format change (both structs are inside transcriptVersion 1, so every member is forever).
+// The member census is the guard on that claim. Display state added to toolView can always be got
+// onto the screen after a resume by widening the wire; the two field lists below are what makes
+// such a widening a decision someone took rather than a silent format change (both structs are
+// inside transcriptVersion 1, so every member is forever). Task is such a decision — a delegation's
+// retained prompt, which the run's expanded body is built from and which no other member could
+// carry — and it stands in the list beside the members that reached it the same way.
 func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 	t.Parallel()
 
@@ -991,7 +994,7 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 		}
 	})
 
-	t.Run("the wire structs gained no members", func(t *testing.T) {
+	t.Run("the wire structs carry exactly the members that were decided on", func(t *testing.T) {
 		fields := func(v any) []string {
 			typ := reflect.TypeOf(v)
 			out := make([]string, 0, typ.NumField())
@@ -1007,9 +1010,85 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 		if got := fields(wireEntry{}); !slices.Equal(got, wantEntry) {
 			t.Errorf("wireEntry members = %v, want %v — widening the wire needs its own decision", got, wantEntry)
 		}
-		wantTool := []string{"Label", "Verb", "Target", "Name", "Solo", "Stat", "Summary", "Details"}
+		wantTool := []string{"Label", "Verb", "Target", "Name", "Solo", "Stat", "Task", "Summary", "Details"}
 		if got := fields(wireToolView{}); !slices.Equal(got, wantTool) {
 			t.Errorf("wireToolView members = %v, want %v — widening the wire needs its own decision", got, wantTool)
+		}
+	})
+}
+
+// TestTranscriptCodecRoundTripsTheDelegatedPrompt pins the half of a delegation the record cannot
+// re-derive. A run's expanded span opens with the prompt the model wrote (toolView.task), and that
+// text lives nowhere else on the record: the header keeps one clipped line of it and the arguments
+// it came from are never persisted, so a blob that dropped it would replay the run without its
+// opening block — the scrollback changing shape across a restart.
+//
+// The prompt travels VERBATIM, newlines and all, because the block renders it as markdown at paint
+// time against a width the codec cannot see. A blob written before the member decodes to no prompt,
+// which is the additive rule every member of this struct is added under.
+func TestTranscriptCodecRoundTripsTheDelegatedPrompt(t *testing.T) {
+	t.Parallel()
+
+	const task = "Survey the tests.\n\n- read `render_test.go`\n- report the gaps"
+
+	t.Run("a head replays with the prompt it was given", func(t *testing.T) {
+		t.Parallel()
+		args, err := json.Marshal(map[string]any{"name": "test-surveyor", "task": task})
+		if err != nil {
+			t.Fatalf("marshal args: %v", err)
+		}
+		tr := &transcript{}
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: subAgentToolName, Arguments: args}})
+		subAgentReport(tr, "s1", "tests read", 0)
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+
+		if len(got) != 1 || got[0].kind != entryToolCall {
+			t.Fatalf("decoded %+v; want the one sub-agent run head", got)
+		}
+		if got[0].tool.task != task {
+			t.Errorf("replayed prompt = %q, want the delegated task verbatim %q", got[0].tool.task, task)
+		}
+	})
+
+	t.Run("only a delegation spends wire on a prompt", func(t *testing.T) {
+		t.Parallel()
+		tr := &transcript{}
+		runCall(tr, "c1", "go test ./...", "ok", 0)
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+
+		if strings.Contains(string(data), `"task"`) {
+			t.Errorf("a terminal call's blob carries a task member:\n%s", data)
+		}
+	})
+
+	t.Run("a blob written before the member decodes to no prompt", func(t *testing.T) {
+		t.Parallel()
+		legacy := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"s1","done":true,` +
+			`"tool":{"label":"Sub-Agent","verb":"delegating","target":"test-surveyor","name":"sub_agent",` +
+			`"solo":true,"summary":{"text":"done"}}}]}`)
+
+		got, err := decodeTranscript(legacy)
+		if err != nil {
+			t.Fatalf("decodeTranscript(legacy): %v", err)
+		}
+
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries; want the one run head", len(got))
+		}
+		if got[0].tool.task != "" {
+			t.Errorf("a blob predating the member decoded a prompt of %q; want none", got[0].tool.task)
 		}
 	})
 }

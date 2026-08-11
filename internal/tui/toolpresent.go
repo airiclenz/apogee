@@ -225,6 +225,25 @@ type toolView struct {
 	// header display already rides Target.
 	agentName string
 
+	// task is the delegated prompt in full — the sub_agent call's `task` argument verbatim, newlines
+	// and all — kept on the head of the run it opens. The header's Target holds only that text's
+	// first line, clipped to the branch's budget (subAgentTarget), and an expanded run opens its body
+	// with the whole prompt rendered as markdown, so the two answer different questions: what the
+	// collapsed row says the delegation is, and what the delegation was actually ASKED.
+	//
+	// It is retained rather than read back off args because args is dropped for every presenter with
+	// no result hook, sub_agent among them (presentToolCall) — and dropping it is the rule that keeps
+	// a write_file's whole file content out of the view. Retaining this one string keeps that rule
+	// intact: a delegation's prompt is bounded by what a model wrote to open a run, and it is the one
+	// argument the block goes on to paint.
+	//
+	// It is display text and travels the sanitize seam with the fields above it, but not the
+	// shortening one: the prompt is text the block QUOTES, so an absolute path inside it is the
+	// model's own wording and respelling it would show a prompt the child never received
+	// (shortenPaths). Unlike agentName it IS on the wire (wireToolView.Task) — the body a resumed
+	// session paints is built from it, so a record that lost it would come back a different block.
+	task string
+
 	// solo marks a call that must never be folded into a grouped block, however well it matches its
 	// neighbours (groupable, render.go). Grouping's own rule is about the SHAPE of a call — a target
 	// to lead a member's leader row — and says nothing about what the block MEANS; solo is where a
@@ -674,8 +693,12 @@ func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
 	// text is the same string on a named call, but only this says a name was GIVEN, which is the
 	// question the live status line asks (toolView.agentName). The Target is settled by the
 	// registry's own extractor either way (subAgentTarget), so the two cannot disagree.
+	// The delegated prompt is retained whole for the same reason, one step further on: the run's
+	// expanded body opens with it (toolView.task), and args is about to be dropped for a presenter
+	// with no result hook — which sub_agent is.
 	if call.Tool == subAgentToolName {
 		tv.agentName = subAgentName(args)
+		tv.task = stringArg("task")(args)
 	}
 	if p.target != nil {
 		tv.Target = p.target(args)
@@ -754,7 +777,8 @@ func (tv *toolView) shortenPaths(ws workspaceRoot) {
 	tv.stat = ws.shorten(tv.stat)
 }
 
-// sanitize escape-strips every DISPLAY field of the view — label, verb, target, the one-line
+// sanitize escape-strips every DISPLAY field of the view — label, verb, target, a delegation's name
+// and its retained prompt (toolView.task), the one-line
 // summary, the typed stat standing by to replace it (toolView.stat) and each detail line — so no
 // ESC byte from a tool call or its result can reach the
 // terminal (stripEscapes). It is the tool card's security seam, run on the way out of
@@ -781,6 +805,7 @@ func (tv *toolView) sanitize() {
 	tv.Verb = stripEscapes(tv.Verb)
 	tv.Target = stripEscapes(tv.Target)
 	tv.agentName = stripEscapes(tv.agentName)
+	tv.task = stripEscapes(tv.task)
 	tv.Summary.Text = stripEscapes(tv.Summary.Text)
 	tv.stat = stripEscapes(tv.stat)
 	tv.Details.stripEscapes()
