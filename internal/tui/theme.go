@@ -33,9 +33,9 @@ import (
 // tree branch (┝ for an interior line, ┕ for the last); the user prompt leads with ❯, and a
 // menu-style popup row that is NOT the selected one leads with ·, the ❯'s quiet counterpart. A
 // sub-agent (Depth > 0) block is framed by a vertical rail (│ per nesting level), opened by the
-// delegation's own ┌─┶ header row and closed by a lone ┊ (docs/layout/tool-layout.md, "Grouped
-// Sub-agents") — that frame is the whole of what announces a descent, at every depth and on the
-// live path as well as the committed one.
+// delegation's own ┌─┶ header row and parted from the next row of its group by a lone ┊
+// (docs/layout/tool-layout.md, "Grouped Sub-agents") — that frame is the whole of what announces a
+// descent, at every depth and on the live path as well as the committed one.
 const (
 	glyphAssistant      = "✦" // the assistant and tool-header star. A tool block still holding an open call BLINKS it — half a second showing, half a second a bare cell that holds the column (layout.md, "The live star"; blockState.star)
 	glyphBranch         = "┝"
@@ -47,7 +47,7 @@ const (
 	glyphMemberGutter   = "│" // U+2502 LIGHT VERTICAL — the gutter continuing an EXPANDED group member's rows under its ┝ (memberGutter, render.go). Its shape is glyphSubRail's and deliberately NOT shared with it: the member gutter is painted in the detail tone and the sub-agent rail in the label gold (design call 8), so an open member nested inside a run cannot be read as a frame of the run.
 	glyphRailCorner     = "┌" // U+250C LIGHT DOWN AND RIGHT — the corner an EXPANDED delegation's header row opens its frame with, at the very left of the row (subAgentOpenMarker, docs/layout/tool-layout.md "Grouped Sub-agents"). It is the one cell of that marker painted in the rail's gold, because it IS the rail's top end (design call 2 of docs/plans/"2026-08-11 - 01")
 	glyphRailTee        = "┶" // U+2536 LIGHT UP AND HORIZONTAL AND HEAVY LEFT — where the frame's arm meets the delegation's own branch on that header row. It stands in the row's detail tone with the ─ beside it, not in the rail's gold: it is this row's branch marker, the ┝/┕ of a member that happens to be open (design call 2)
-	glyphRailClose      = "┊" // U+250A BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL — the lone line closing an expanded delegation's span, in the rail's gold. Its dashes are the point: the frame stops rather than continuing, which is what a solid │ under the last row of a span would say
+	glyphRailClose      = "┊" // U+250A BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL — the lone line closing an expanded delegation's span where the next row of its group follows it, in the rail's gold (railJoin; a group's last member and a lone run show none). Its dashes are the point: the frame stops rather than continuing, which is what a solid │ under the last row of a span would say
 	glyphDone           = "✓" // U+2713 CHECK MARK — a FINISHED delegation's mark, after its name on the row and before the leaders, in the scheme's `success` green (theme.successMark, design call 6). A failed run wears no glyph at all: its red outcome slot is the whole of the failure marking (summaryStyle)
 	glyphBullet         = "•" // a markdown bullet-list item (- / * / +)
 	glyphSkill          = "✦" // marks a skill: the "/" menu's skill rows (the sent block marks its own by colouring the token, not by badging it)

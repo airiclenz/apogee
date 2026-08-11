@@ -14,7 +14,9 @@ point is a **minor** bump, not a breaking change.
   Opening a delegation used to reveal a `⤷ sub-agent` label and then, straight away, the child's
   tool calls — the one thing missing was the instruction that produced them. The row you open a
   delegation from is now the top-left corner of its own frame (`┌─┶ …`), the whole span runs behind
-  a gold `│` rail at column 0, one `┊` closes it where the blank separator used to be, and the
+  a gold `│` rail at column 0, one `┊` parts it from the next row of its `✦ Sub-Agent (N)` list
+  where the blank separator used to be — a span with no further member behind it, a lone delegation
+  included, simply ends on that separator — and the
   first thing inside the frame is the delegation's full task, rendered as markdown and wrapped to
   the railed width. The label went with it: a frame already says "this is inside the delegate"
   without spending a row on saying so, and the task is now retained through a session save and

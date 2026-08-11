@@ -479,10 +479,11 @@ func TestUserBlockRowsAreOneSquareLineEach(t *testing.T) {
 
 // The one separator row between two blocks is railed at the JOIN of their depths — the shallower
 // of the two — and that single rule is the whole of the continuous rail: a spacer inside a run
-// carries the gutter, a spacer that crosses a run boundary does not. Where the join CLIMBS OUT of a
-// run the separator is the ┊ closing it instead, one per level left behind and each railed inside
-// whatever is still open (railJoin). Each case pins the entire rendered scrollback, so a separator
-// that gained or lost a rail shows as the row it is.
+// carries the gutter, a spacer that crosses a run boundary does not. A climb-out is no exception
+// here: the ┊ replaces the spacer only where another grouped sub-agent follows the expanded one
+// (railJoin, pinned by TestSubAgentCloserOnlyWhenAnotherGroupedMemberFollows), and none of these
+// cases is a group. Each case pins the entire rendered scrollback, so a separator that gained or
+// lost a rail shows as the row it is.
 func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -520,7 +521,7 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 			},
 			want: []string{
 				"│ ✦ child",
-				"┊", // the run ends, and the closer is what says so, in the separator's place
+				"", // the join is the shallower of the two: the rail simply stops here
 				"✦ back to parent",
 			},
 		},
@@ -544,7 +545,7 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 			},
 			want: []string{
 				"│ │ ✦ deep",
-				"│ ┊", // the inner run closed inside the outer one, which is still open
+				"│", // only the rail both sides reach survives the climb; no member follows, so no ┊
 				"│ ✦ shallower",
 			},
 		},
@@ -1002,6 +1003,72 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 	})
 }
 
+// The ┊ has ONE reason to be drawn, and the spec gives it as a rule rather than as a sketch:
+// "`┊` is only displayed if another grouped sub-agent follows after the expanded sub-agent. The last
+// sub-agent in the group (if expanded) does not show this" (docs/layout/tool-layout.md, "Grouped
+// Sub-agents"). Both halves are read off ONE fixture, opened at the first member and then at the
+// last, so what is pinned is the difference the member's POSITION makes — two goldens of two
+// fixtures could drift apart and still both pass.
+func TestSubAgentCloserOnlyWhenAnotherGroupedMemberFollows(t *testing.T) {
+	build := func(t *testing.T, head int) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", "all clear")
+		loneDelegation(tr, "s2", "build", "b.go", "all clear")
+		// The parent's own answer gives the LAST member's span something to stand before: a run at the
+		// foot of the transcript has no seam at all, and a rule about seams cannot be read off one.
+		tr.apply(domain.MessageEvent{Text: "back to parent"})
+		if !tr.setExpanded(head, true) {
+			t.Fatalf("setExpanded(%d, true) = false; want that delegation open", head)
+		}
+		return tr
+	}
+	const header = "✦ Sub-Agent (2)"
+
+	t.Run("first member open: the list resumes, so its span closes with ┊", func(t *testing.T) {
+		want := strings.Join([]string{
+			header,
+			leaderEdgeRow("┌─┶ survey ✓ ⋯ all clear", glyphExpanded),
+			"│",
+			"│ survey",
+			"│",
+			"│ ✦ Read",
+			"│   ┕ a.go ⋯ 5 lines",
+			"┊", // another grouped sub-agent follows: the closer parts the span from its row
+			groupMemberLine("  ┕ build ✓ ⋯ 1 tool call · all clear"),
+			"",
+			"✦ back to parent",
+		}, "\n")
+		if got := renderPlain(build(t, 0), 80); got != want {
+			t.Errorf("open first member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("last member open: nothing of the group follows, so no ┊ at all", func(t *testing.T) {
+		want := strings.Join([]string{
+			header,
+			groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
+			leaderEdgeRow("┌─┶ build ✓ ⋯ all clear", glyphExpanded),
+			"│",
+			"│ build",
+			"│",
+			"│ ✦ Read",
+			"│   ┕ b.go ⋯ 5 lines",
+			// The group is out of rows, so the span is parted from the parent's answer by the ordinary
+			// separator — the closer would be claiming a member still to come.
+			"",
+			"✦ back to parent",
+		}, "\n")
+		got := renderPlain(build(t, 2), 80)
+		if got != want {
+			t.Errorf("open last member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+		if strings.Contains(got, glyphRailClose) {
+			t.Errorf("a group's last expanded member still drew a %s:\n%s", glyphRailClose, got)
+		}
+	})
+}
+
 // loneDelegation folds one delegation with a nested read behind it, reported unless report is "".
 // It is deliberately the same fixture shape the fan-out golden above builds, so the two shapes are
 // compared on the same delegation rather than on two that merely look alike.
@@ -1016,8 +1083,9 @@ func loneDelegation(tr *transcript, id, task, path, report string) {
 // A LONE delegation is drawn in the very frame a grouped one is (design call 3 of
 // docs/plans/"2026-08-11 - 01"): folding changes what stands AROUND a delegation and never the
 // delegation itself, so the row a reader learned to read in a fan-out reads the same when the run
-// happened to stand by itself — ┌─┶ at column 0, the span behind the rail, the ┊ closing it, and
-// the ✓ after the name of a delegation that has reported.
+// happened to stand by itself — ┌─┶ at column 0, the span behind the rail, and the ✓ after the name
+// of a delegation that has reported. The ┊ is the one thing it does not take: that closer parts an
+// expanded member from the next row of its list, and a lone run has no list (railJoin).
 func TestLoneSubAgentRunOpensInTheGroupMembersFrame(t *testing.T) {
 	openHead := func(t *testing.T, tr *transcript) {
 		t.Helper()
@@ -1040,7 +1108,7 @@ func TestLoneSubAgentRunOpensInTheGroupMembersFrame(t *testing.T) {
 			"│",
 			"│ ✦ Read",
 			"│   ┕ a.go ⋯ 5 lines",
-			"┊", // one lone closer ends the span, in the separator's place
+			"", // nothing of a group follows, so the span ends on the ordinary separator
 			"✦ back to parent",
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {

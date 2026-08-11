@@ -49,7 +49,7 @@
 │
 │ ✦ Terminal
 │   ┕ go test ./... ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 · +3 more lines   ▶
-┊
+
 ✦ This is the last message from the LLM. There must always be one empty line between
   chat content and the bottom prompt/information section like displayed here.
 
@@ -619,10 +619,13 @@ to one — except inside a fenced code block, where blank lines are code and sta
 
 Inside a sub-agent run that separating row is not empty: it carries the `│` rail gutter, drawn as
 deep as *both* neighbouring blocks reach, so the run's frame runs unbroken from its `┌─┶` header
-row to its last line. It is still exactly one row, and where the walk climbs back out of a run it
-is the `┊` closing that run — one per level left behind, innermost first, each railed one level
-shallower than the span it ends — standing *in* the separator's place rather than beside it, since
-a blank row next to it would say the run ended twice. It is bare only where the two blocks share
+row to its last line. It is still exactly one row, and where the walk climbs out of an expanded
+`✦ Sub-Agent (N)` member's span *into the next row of that list* it is the `┊` closing that span —
+railed at the level the list resumes at, and standing *in* the separator's place rather than beside
+it, since a blank row next to it would say the run ended twice. That is the closer's only
+occasion (`docs/layout/tool-layout.md`, "Grouped Sub-agents"): a group's last member, a lone
+delegation and a run still streaming at the foot of the transcript are each followed by the
+ordinary separator. It is bare only where the two blocks share
 no rail — at a run's start, and between two sub-agent calls that follow one another, which is what
 keeps them from reading as one run.
 

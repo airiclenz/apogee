@@ -894,9 +894,10 @@ func TestTranscriptDepthRendersFramedBlock(t *testing.T) {
 	}
 }
 
-// A nested event sequence (Depth 0 → 1 → 0) renders the sub-agent block framed, and CLOSED by the
-// ┊ where it climbs back out, while the parent stream stays intact and unframed (the P3.14
-// acceptance golden, re-pinned to the frame the spec draws).
+// A nested event sequence (Depth 0 → 1 → 0) renders the sub-agent block framed, and the frame simply
+// ENDS where it climbs back out — nothing of a group follows it, so the separator is the flat one
+// rather than a ┊ (docs/layout/tool-layout.md, "Grouped Sub-agents") — while the parent stream stays
+// intact and unframed (the P3.14 acceptance golden, re-pinned to the frame the spec draws).
 func TestTranscriptDepthNestedSequenceGolden(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 0}, Text: "delegating"})
@@ -907,7 +908,7 @@ func TestTranscriptDepthNestedSequenceGolden(t *testing.T) {
 		"✦ delegating",
 		"", // the descent joins at depth 0: nothing announces it, so the spacer is the flat one
 		"│ ✦ child work",
-		"┊", // the climb-out closes the frame, in the separator's place
+		"", // the climb-out ends the frame, and no grouped member follows it to be parted from
 		"✦ back to parent",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -1459,7 +1460,9 @@ func TestParentMessageKeepsTheDelegatesStreamInsideItsRun(t *testing.T) {
 		"│ survey the tests", // the span opens with the prompt, whatever the delegate went on to say
 		"│",
 		"│ ✦ child words",
-		"┊", // the run closes before the parent picks its own thread back up
+		// The run is a LONE one, so it is parted from the parent's own thread by the ordinary
+		// separator: the ┊ belongs to a group resuming after one of its members (railJoin).
+		"",
 		"✦ parent answer",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {

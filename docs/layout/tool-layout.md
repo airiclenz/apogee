@@ -15,17 +15,20 @@ one and design call 14 rules out growing the engine for presentation;
 `base...head`, which is the diff the tool actually takes.
 
 The **Grouped Sub-agents** section below landed separately, later the same day,
-by `docs/plans/2026-08-11 - 01 - grouped-sub-agent-display-plan.md`, and three
+by `docs/plans/2026-08-11 - 01 - grouped-sub-agent-display-plan.md`, and two
 things there read differently on screen, each argued in that plan's item notes.
-The `┊` closer is drawn by the seam that joins two blocks rather than by the
-group painter — so a **lone** expanded delegation closes with one exactly as a
-grouped member does, a delegation still streaming at the foot of the transcript
-carries none until something follows it, and an expanded last member closes
-against whatever comes after the group rather than suppressing its closer. The
-prompt opens the span but stands **below** the head's own report rows where that
-report was long enough to lay out as a body, because the head's rows are painted
-before the span begins. And the done `✓` takes a new green `success` scheme
-role, which the sketches below leave uncoloured.
+The prompt opens the span but stands **below** the head's own report rows where
+that report was long enough to lay out as a body, because the head's rows are
+painted before the span begins. And the done `✓` takes a new green `success`
+scheme role, which the sketches below leave uncoloured.
+
+The `┊` rule holds as written: the closer is drawn only where another grouped
+sub-agent follows the expanded one. It is still emitted by the seam that joins
+two blocks rather than by the group painter — the seam is the only place that
+can put a row after an open member's span — but that seam is told whether the
+list resumes, so a group's last expanded member, a **lone** expanded
+delegation, and a delegation still streaming at the foot of the transcript all
+end on the ordinary separator instead.
 
 ## Rules
 

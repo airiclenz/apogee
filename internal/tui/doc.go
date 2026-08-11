@@ -49,8 +49,11 @@
 // whole run-boundary logic: inside a run every join is ≥ 1 so the rail never breaks, a climb-out
 // keeps only the rails both sides reach, and two consecutive sub_agent calls are never joined,
 // because the second call's own tool-call block sits at the PARENT's depth — the join dips there and
-// the first run's frame is closed before the second opens one. A join that CLIMBS OUT is the one
-// separator that is not a spacer: it is the ┊ closing each run left behind, one per level
+// the first run's frame ends before the second opens one. The one separator that is not a spacer is
+// the join climbing out of an expanded group member's span INTO the next row of that member's list:
+// there it is the single ┊ closing the span. Every other climb-out keeps its spacer, because the
+// spec draws the closer only where another grouped sub-agent follows the expanded one — a group's
+// last member and a lone delegation alike close against nothing and so show none
 // (docs/layout/tool-layout.md, "Grouped Sub-agents"). Nothing announces a DESCENT any more — the
 // delegation's own ┌─┶ header row opens the frame and the rail runs down from it, on the live
 // preview's path as much as on the committed one. What opens it is the delegation being OPEN and not

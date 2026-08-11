@@ -183,15 +183,17 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	// offsets are added to where it does not (a grouped run, whose members each own their state).
 	// It is spent only on the lines the block itself marked as a click surface, so a block that
 	// marks none — every kind but a tool block — may pass whatever index it sits at.
-	appendBlock := func(isUser bool, depth, head int, block blockPaint) {
+	//
+	// closes says what the seam above this block IS where the walk is climbing out of a delegation's
+	// span: the ┊ closing that span when another grouped sub-agent follows it, and the ordinary railed
+	// spacer when nothing of the list does — the spec draws no closer after a group's last member, nor
+	// after a lone delegation, which has no list to resume (docs/layout/tool-layout.md, "Grouped
+	// Sub-agents"). Only the caller placing the block below knows which, so every other kind of block
+	// goes through appendBlock and answers no.
+	appendJoined := func(isUser, closes bool, depth, head int, block blockPaint) {
 		if len(lines) > 0 {
-			// The join is a REGION and not always one line: climbing out of a run closes its frame
-			// with a ┊ per level left behind (railJoin), and those rows stand exactly where the one
-			// separator would have.
-			for _, sep := range railJoin(th, prevBlockDepth, depth) {
-				lines = append(lines, sep)
-				targets = append(targets, lineTarget{}) // a separator belongs to neither block
-			}
+			lines = append(lines, railJoin(th, prevBlockDepth, depth, closes))
+			targets = append(targets, lineTarget{}) // a separator belongs to neither block
 		}
 		if isUser {
 			userBlocks = append(userBlocks, userBlock{start: len(lines), count: len(block.lines)})
@@ -210,6 +212,9 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			targets = append(targets, target)
 		}
 		prevBlockDepth = depth
+	}
+	appendBlock := func(isUser bool, depth, head int, block blockPaint) {
+		appendJoined(isUser, false, depth, head, block)
 	}
 
 	// Drop memoised paints for entries the transcript no longer has (paintcache.go). It runs
@@ -298,7 +303,10 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			cover := tail.at + 1 + tail.span - i
 			key := t.blockKey(shapeSubAgentGroup, i, cover, th, width, blink,
 				anyOpenCall(t.entries[i:i+cover]))
-			appendBlock(false, e.depth, i, t.paintBlock(i, key, func() blockPaint {
+			// pos > 0 is this block RESUMING a list whose earlier rows an expanded member's span
+			// interrupted — precisely the spec's "another grouped sub-agent follows the expanded one",
+			// and so the one seam in the whole transcript that closes with a ┊.
+			appendJoined(false, pos > 0, e.depth, i, t.paintBlock(i, key, func() blockPaint {
 				return renderSubAgentGroup(th, count, members, railedWidth(width, e.depth),
 					blockState{live: key.live, blink: blink}).railed(th, e.depth)
 			}))
@@ -327,8 +335,8 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			// An OPEN delegation reaches this branch with a span of nothing (subAgentFramed): its
 			// frame is drawn live, and prevBlockDepth below hands the join the level the frame stands
 			// at, which is what lays the streaming preview inside the rail rather than flat beside it
-			// (design call 4). Its ┊ is not drawn with it — a closer is a join's answer, and a run
-			// that nothing follows yet has not been left.
+			// (design call 4). A run reaching this branch closes with no ┊ at all: the closer belongs to
+			// a list resuming after one of its members, and a delegation standing here stands alone.
 			key := t.blockKey(shapeSubAgentRun, i, span+1, th, width, blink,
 				!e.done || anyOpenCall(t.entries[i+1:i+1+span]))
 			appendBlock(false, e.depth, i, t.paintBlock(i, key, func() blockPaint {

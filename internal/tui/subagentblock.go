@@ -35,8 +35,8 @@ func subAgentSpan(entries []entry, i int) int {
 	return n
 }
 
-// subAgentFramed reports whether a delegation is drawn as a RUN — the ┌─┶ opening its header row,
-// the rail down everything beneath it, the ┊ closing it — rather than as the ordinary tool block a
+// subAgentFramed reports whether a delegation is drawn as a RUN — the ┌─┶ opening its header row and
+// the rail down everything beneath it — rather than as the ordinary tool block a
 // delegation with nothing behind it is. It is asked of the head and its span length, which are the
 // two facts the answer turns on, so [transcript.renderView] and [renderSubAgentGroup] frame a
 // delegation by one rule instead of each wording one of its own.
@@ -136,7 +136,7 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 //
 // A LONE run is drawn in the very shape a grouped one is (design call 3 of
 // docs/plans/"2026-08-11 - 01"): the same ┌─┶ opening its frame when it is open, the same rail down
-// its span, the same ┊ closing it, and the same ✓ after its name once it has reported
+// its span, and the same ✓ after its name once it has reported
 // (subAgentFinished). Whether the delegations either side of it happened to fold it into a list is
 // a fact about the frame around a delegation and never about the delegation, so the two paths ask
 // the same two questions of the same head rather than each wording an answer of its own.
@@ -164,8 +164,9 @@ func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool
 	view.finished = subAgentFinished(head)
 	// An OPEN lone run wears the very frame a grouped one does (design call 3): the ┌─┶ takes the
 	// row's left edge and the rail runs on down the span beneath it, which renderView already paints
-	// one level deeper and railJoin already closes with its ┊. A delegation reads the same whether or
-	// not the delegations beside it happened to fold it into a list.
+	// one level deeper. What it does NOT wear is the ┊ — that closer parts an expanded member from
+	// the next row of its list, and a lone run has no list (railJoin). A delegation reads the same
+	// whether or not the delegations beside it happened to fold it into one.
 	marker := ""
 	if head.expanded {
 		marker = subAgentOpenMarker

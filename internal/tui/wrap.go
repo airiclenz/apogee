@@ -227,29 +227,32 @@ func railSpacer(th theme, depth int) string {
 	return th.subRail.Render(strings.TrimRight(strings.Repeat(glyphSubRail+" ", depth), " "))
 }
 
-// railJoin is the WHOLE separator region between two adjacent blocks: the one railed spacer line
-// (railSpacer) wherever the rail is holding or deepening, and — where the next block stands
-// SHALLOWER than the last — the ┊ closing each run the walk has just left, innermost first
+// railJoin is the ONE separator line between two adjacent blocks: the railed spacer (railSpacer) at
+// the join — the min — of their depths, or, where the block below RESUMES a sub-agent list that an
+// expanded member's span interrupted, the ┊ closing that span
 // (docs/layout/tool-layout.md, "Grouped Sub-agents").
+//
+// closes is that question, and only the caller can answer it. The spec draws the closer for exactly
+// one reason — another grouped sub-agent follows the expanded one — and a group's LAST member shows
+// none however it ends. Depth cannot tell those apart: every climb out of a span looks identical
+// from here whether a sibling row, the parent's own answer, or nothing at all stands below it, so
+// [transcript.renderView] passes the answer down rather than have this guess it.
 //
 // The closer REPLACES the spacer rather than standing beside it, which is what the spec's sketch
 // shows: a span's last row, the ┊, and the next member row are three consecutive lines. It is the
 // separator's job the closer is doing — saying where one thing ends and the next begins — and a
 // blank line beside it would say the run ended twice.
 //
-// Each closer is railed one level SHALLOWER than the run it ends, so the ┊ closing a depth-1 span
-// stands at column 0 under the ┌ that opened it, and the one closing a depth-2 span stands inside
-// the parent's still-open rail as "│ ┊". A climb of several levels at once closes each of them, in
-// that order, which is the only reading that leaves every frame closed exactly once.
-func railJoin(th theme, prevDepth, depth int) []string {
-	if prevDepth <= depth {
-		return []string{railSpacer(th, prevDepth)}
+// It is railed at the depth of the row it stands before — the level the list resumes at — so the ┊
+// closing a depth-1 span sits at column 0 under the ┌ that opened it, and one closing a depth-2 span
+// stands inside the parent's still-open rail as "│ ┊". A climb of several levels at once still draws
+// exactly ONE, for the same reason the rule exists: one member row follows, at one level, and the
+// frames left behind on the way up have no sibling of their own to be parted from.
+func railJoin(th theme, prevDepth, depth int, closes bool) string {
+	if closes && prevDepth > depth {
+		return railLines(th, []string{th.subRail.Render(glyphRailClose)}, depth)[0]
 	}
-	out := make([]string, 0, prevDepth-depth)
-	for d := prevDepth; d > depth; d-- {
-		out = append(out, railLines(th, []string{th.subRail.Render(glyphRailClose)}, d-1)...)
-	}
-	return out
+	return railSpacer(th, min(prevDepth, depth))
 }
 
 // railLines frames a Depth-level block: it prepends one styled "│ " rail gutter per nesting
