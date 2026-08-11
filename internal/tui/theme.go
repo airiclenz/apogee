@@ -38,6 +38,7 @@ const (
 	glyphAssistant      = "✦" // the assistant and tool-header star. A tool block still holding an open call BLINKS it — half a second showing, half a second a bare cell that holds the column (layout.md, "The live star"; blockState.star)
 	glyphBranch         = "┝"
 	glyphBranchLast     = "┕"
+	glyphLeaderDot      = "⋯" // U+22EF MIDLINE HORIZONTAL ELLIPSIS — one cell of the dotted leader a tool row runs from its target to its outcome slot (toolleader.go, leaderRowIn), painted in the `tool-leader` role. Deliberately one glyph per cell, so the run's length IS its cell count
 	glyphUser           = "❯"
 	glyphMenuUnselected = "·" // U+00B7 MIDDLE DOT — an unselected row of a menu-style popup (popupSpec.menuRows): glyphUser's counterpart, deliberately NOT glyphBullet's "•", because a menu row is an option waiting to be pointed at rather than an item of a list
 	glyphSubRail        = "│"

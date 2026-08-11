@@ -297,6 +297,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The tool rows' dotted leader is now defined beside every other glyph.** The `⋯` the leader is
+  built from sat on its own in the leader-row code; it now lives in the one glyph block the branch
+  marks, the bullets and the table rules already share, so changing the character is a single edit
+  in one known place. Its colour was already a scheme role of its own (`tool-leader`). Nothing on
+  screen changed.
+
 - **The `sub_agent` tool now tells the model it may delegate several times in one reply.** The
   parallel fan-out has been there since the per-server Parallel agents cap landed, but nothing on
   the model-facing surface said so, and a model that does not batch tool calls of its own accord

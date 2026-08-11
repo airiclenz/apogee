@@ -6,17 +6,17 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 )
 
-// The dotted leader and the room it flexes in (docs/layout/tool-layout.md, "Width and overflow").
+// The room the dotted leader flexes in (docs/layout/tool-layout.md, "Width and overflow"). The dot
+// the run is built from is glyphLeaderDot, which lives with the other glyphs in theme.go.
 //
-// glyphLeaderDot is one cell of the run that carries the eye from a row's target to the outcome
-// slot at its right edge. leaderGap is the blank held on each side of that run, so the dots never
-// touch the text they run between. leaderMinDots is the floor the run flexes down to before the
-// LEFT target starts giving way — one dot, because a leader that vanished entirely would leave two
-// unrelated words abutting and read as a single phrase.
+// leaderGap is the blank held on each side of the run that carries the eye from a row's target to
+// the outcome slot at its right edge, so the dots never touch the text they run between.
+// leaderMinDots is the floor the run flexes down to before the LEFT target starts giving way — one
+// dot, because a leader that vanished entirely would leave two unrelated words abutting and read as
+// a single phrase.
 const (
-	glyphLeaderDot = "⋯" // U+22EF MIDLINE HORIZONTAL ELLIPSIS — deliberately one glyph per cell, so the run's length IS its cell count
-	leaderGap      = 1
-	leaderMinDots  = 1
+	leaderGap     = 1
+	leaderMinDots = 1
 )
 
 // promoteMinTargetCells is the promote-guard's floor (design call 5, docs/layout/tool-layout.md,
