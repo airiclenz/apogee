@@ -500,7 +500,7 @@ count `(N)`, **and nothing else — never a target**. That holds for every block
 run, a lone call, a call still in flight, and the stray-result `result` header. The target always
 leads the first branch line instead, so the block reshapes around its targets rather than under
 them. The label carries no brackets and is rendered **bold in the scheme's `tool-header` role**
-(`#FFD060` under `dark`) — a role of its own rather than the `code` role inline code and fenced
+(`#E0D090` under `dark`) — a role of its own rather than the `code` role inline code and fenced
 blocks carry, so the blocks apogee *ran* read apart from the code it *prints*, and either tone can
 be retuned without dragging the other along. The styling is uniform too: a known friendly label
 ("Read"), an unknown tool's raw name, and `result` all look the same. The
