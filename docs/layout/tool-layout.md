@@ -231,6 +231,8 @@ One row per consecutive same-type run, in time order. A row's
 
 Example for how finished sub agents should be displayed. The first sub-agent is done and receives a `✓` after the sub agent name ("done" is also printed in the <tool-top-level-details>, The second sub agent is still running in this example.
 
+Each member is marked PER MEMBER, the moment that sub-agent finishes — not when the group as a whole is done. A grouped run reports its results in one burst once every member has joined, so the display follows each delegation's own start/finish instead: the first to report wears its `✓` and its `done` while its siblings are still running, and expanding it shows the report it returned right then. A member that finished with a FAILURE wears no `✓` — its red `<tool-top-level-details>` is the whole of the marking.
+
 ```text
 ✦ Sub-Agent (<group-count>)
   ┝ <tool-type-header> ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶

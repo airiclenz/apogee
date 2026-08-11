@@ -127,6 +127,19 @@ const (
 // rebuilt, so persisting it would append a fresh copy on every resume until the record was a
 // column of "resumed:" notes.
 //
+// phase is the DELEGATION's own lifecycle state on a sub_agent call block, as its child reported it
+// (domain.SubAgentPhaseEvent, addSubAgentPhase): "" for a delegation that is still only requested,
+// started once its child is actually running, finished once that child's report is in hand. It is a
+// different fact from done beside it, and both are kept: done is the CALL/RESULT PAIRING the whole
+// transcript keys on — the result folded in, the run closed — and it lands with the group's trailing
+// result burst, long after an early finisher stopped working (ADR 0039 decision 4). The phase is the
+// timing that burst deliberately does not carry, so the display asks it rather than done wherever the
+// question is "is this delegation over?" (subAgentReported).
+//
+// It is view-only and unpersisted for expanded's reasons: a replayed record's delegations all carry
+// their results already, so a resumed session reads their doneness off the pairing exactly as it did
+// before the phase existed.
+//
 // expanded is the block's VIEW state and nothing else (the kinds hasBlockState admits, setExpanded
 // its one writer): false — the zero value, and therefore the default for every entry however it was
 // born, folded mid-flight or replayed from a record — is the collapsed, compact paint; true paints
@@ -161,7 +174,10 @@ type entry struct {
 	spawnCallID string
 	tool        toolView
 	done        bool
-	expanded    bool // view-only block state: false = collapsed (the default); never persisted
+	// the head of a sub-agent run only: the delegation's lifecycle phase as its child reported it
+	// (domain.SubAgentPhaseEvent); view-only liveness beside done's pairing, never persisted
+	phase    domain.SubAgentPhase
+	expanded bool // view-only block state: false = collapsed (the default); never persisted
 	// view-only state of the TYPE ROW this entry heads inside a super-group; never persisted
 	typeExpanded bool
 	ephemeral    bool // display-only: rendered, never persisted (see encodeTranscript)
@@ -652,7 +668,7 @@ func presentedStatus(v presentedView) string {
 }
 
 // apply folds one engine Event into the transcript (the C6 rule). The switch covers the
-// eight transcript-rendered variants of the eleven-variant Event set, so the rendered set
+// nine transcript-rendered variants of the twelve-variant Event set, so the rendered set
 // stays honest as the engine evolves; the other three append no entry (ReasoningEvent feeds
 // the activity line, AuditEvent nothing in the TUI, and a UsageEvent is a reading rather than
 // a block — it lands ON an entry the run already has, through applyUsage, which foldEvent
@@ -663,7 +679,9 @@ func presentedStatus(v presentedView) string {
 // the buffer its own level owns; a
 // Message commits it (canonical text); the first ToolCall of a Turn finalises the pre-tool
 // narration before recording the call; results, approvals, and recovered faults append
-// their own entries; a MechanismFired is surfaced only in the debug view. It renders only —
+// their own entries; a SubAgentPhase appends none — like a reading it lands ON the block a
+// delegation already has, marking it running or folding in the report its child just returned
+// (addSubAgentPhase); a MechanismFired is surfaced only in the debug view. It renders only —
 // no agent logic (C5).
 func (t *transcript) apply(e domain.Event) {
 	switch e := e.(type) {
@@ -679,6 +697,8 @@ func (t *transcript) apply(e domain.Event) {
 		t.addToolCall(e.Call, run)
 	case domain.ToolResultEvent:
 		t.addToolResult(e.Result, runOf(e.EventBase))
+	case domain.SubAgentPhaseEvent:
+		t.addSubAgentPhase(e)
 	case domain.ApprovalEvent:
 		t.addApproval(e.Request, e.Decision, runOf(e.EventBase))
 	case domain.MechanismFiredEvent:
@@ -917,7 +937,13 @@ func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		e := &t.entries[i]
 		if e.kind == entryToolCall && !e.done && e.callID == result.CallID {
-			e.tool.enrichWithResult(result, t.ws)
+			// A delegation whose finished phase already folded THIS result into the view is enriched
+			// once and no more (addSubAgentPhase): the fold appends the report's lines to the body
+			// (toolBody.with), so a second one would say the whole report twice. Everything else the
+			// pairing does still happens here — the burst is what closes the call and its run.
+			if e.phase != domain.SubAgentFinished {
+				e.tool.enrichWithResult(result, t.ws)
+			}
 			e.done = true
 			// A delegation's result is its run's last word: whatever the child streamed and never
 			// committed is committed now, inside the run, before the block settles (closeRun). The
@@ -933,6 +959,40 @@ func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
 		text = "error: " + text
 	}
 	t.place(entry{kind: entryToolResult, text: text, depth: run.depth, spawnCallID: run.spawn})
+}
+
+// addSubAgentPhase folds a delegation's lifecycle boundary onto the block that delegation IS
+// (domain.SubAgentPhaseEvent): its child started running, or its child finished and the report rides
+// the event. The block is found by the event's own call id — the id of the sub_agent call that
+// spawned the child, which is exactly the id addToolResult pairs the eventual result by — so a
+// delegation is marked wherever it sits, however many siblings are running beside it (ADR 0039).
+//
+// It exists because the result burst is not a liveness signal: a group's results arrive together, in
+// call order, after the last child has joined, so without this a member that finished first would go
+// on reading as working until its siblings caught up. The phase is what the display asks instead
+// (subAgentReported), and the finished phase's payload is what lets that member's report be read the
+// moment it lands rather than at the end of the group.
+//
+// Folding the result here is the ONE thing that must not happen twice: the authoritative
+// ToolResultEvent still follows, and enrichWithResult appends to the body rather than replacing it.
+// The entry's phase is what tells the pairing so (addToolResult). A delegation already paired — a
+// phase arriving after its own result, which the orderings make impossible but the fold does not
+// assume — keeps the view it has and takes the phase alone.
+//
+// Nothing is appended, ever: a phase is a fact about a block the transcript already holds, and an
+// event naming no such block (a phase for a run this view never saw) folds nothing at all.
+func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		en := &t.entries[i]
+		if en.kind != entryToolCall || en.tool.name != subAgentToolName || en.callID != e.CallID {
+			continue
+		}
+		en.phase = e.Phase
+		if e.Phase == domain.SubAgentFinished && !en.done {
+			en.tool.enrichWithResult(e.Result, t.ws)
+		}
+		return
+	}
 }
 
 // hasOpenToolCall reports whether any tool-call entry is still waiting for its result — the

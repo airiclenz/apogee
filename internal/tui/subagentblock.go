@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 )
 
@@ -175,7 +176,7 @@ func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool
 	block := renderToolBlock(th, []toolView{view}, inner, blockState{
 		expanded: head.expanded,
 		elides:   true,
-		live:     !head.done || anyOpenCall(span),
+		live:     !subAgentReported(head) || anyOpenCall(span),
 		blink:    blink,
 		marker:   marker,
 	})
@@ -306,7 +307,22 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 // failedSummary anchors its prefix at the start of the text, so asking it there would answer "not a
 // failure" for every failed delegation in a group.
 func subAgentFinished(head entry) bool {
-	return head.done && !failedSummary(head.tool.Summary.Text)
+	return subAgentReported(head) && !failedSummary(head.tool.Summary.Text)
+}
+
+// subAgentReported is the display's question "is this delegation over?", and the two answers that
+// mean yes are kept apart from each other on purpose. The delegation's own FINISHED phase says its
+// child reached its boundary and handed its report back (domain.SubAgentPhaseEvent, which carries
+// that report with it); the entry's done says the result has been PAIRED with the call. In a fan-out
+// those are far apart in time: results burst together, in call order, once every child has joined
+// (ADR 0039 decision 4), so a member that finished first would read as still working for as long as
+// its slowest sibling ran — which is precisely the defect the phase exists to close.
+//
+// done is still an answer and not merely a fallback: it is the only one a REPLAYED record carries,
+// and the only one a phase-less producer ever emits (a hand-built test transcript, a session written
+// before the event existed). Reading either is what lets one rule serve both.
+func subAgentReported(head entry) bool {
+	return head.done || head.phase == domain.SubAgentFinished
 }
 
 // groupLabelOf is the label a folded group of delegations names itself with: the members' own, off
@@ -418,8 +434,8 @@ func subAgentFill(head entry) string {
 }
 
 // subAgentGist is the second half of a collapsed run's summary, in the two tempi layout.md gives it.
-// While the run works — the head has no result yet — it is the live phrase for the call the span has
-// open: verb and shortened target together (toolPhrase, activity.go), worded from the same view the
+// While the run works — no report in hand yet (subAgentReported) — it is the live phrase for the call
+// the span has open: verb and shortened target together (toolPhrase, activity.go), worded from the same view the
 // status line reads its verb from, but KEEPING the target the status line sheds. Inside a collapsed
 // run the gist is the only live view of what the child is touching, since the block that would have
 // named that target is elided. It is read off the span at paint rather than kept as a second copy of
@@ -432,7 +448,7 @@ func subAgentFill(head entry) string {
 // measure is the width authority the live phrase's target cap is spent through (toolPhrase,
 // activity.go), threaded down from the theme the render layer already carries.
 func subAgentGist(measure widthAuthority, head entry, span []entry) string {
-	if head.done {
+	if subAgentReported(head) {
 		if head.tool.Summary.Text != "" {
 			return head.tool.Summary.Text
 		}

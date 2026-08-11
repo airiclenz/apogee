@@ -20,8 +20,10 @@ package tui
 // The one input a key cannot name is the CONTENT of an entry, so the cache leans on the
 // transcript's own shape: entries are append-only and their content is immutable once committed
 // (transcript.go). The two exceptions are handled rather than assumed — an entry whose innards are
-// rewritten in place flips `done` in the same breath (transcript.addToolResult,
-// schedule.foldScheduleEvent), which the key reads; and transcript.refreshStartup rewrites
+// rewritten in place flips a flag in the same breath — `done` (transcript.addToolResult,
+// schedule.foldScheduleEvent) or, for a delegation whose report arrives on its finished phase ahead
+// of that pairing, `phase` (transcript.addSubAgentPhase) — which the key reads; and
+// transcript.refreshStartup rewrites
 // entries[0].startup with NO flag change at all, which is why an entryStartup block is never
 // cached. The remaining case is wholesale replacement — transcript.reset drops every entry and
 // the caller re-fills the list inside the same Update — and reset clears the cache outright,
@@ -41,7 +43,11 @@ package tui
 // `&transcript{}`) simply renders uncached, and a cold render is always available as the oracle a
 // warm one is checked against.
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/airiclenz/apogee/internal/domain"
+)
 
 // blockShape names which of [transcript.renderView]'s four painter branches produced a paint — the
 // branch itself, not anything derived from it.
@@ -117,8 +123,11 @@ type paintKey struct {
 // The box is one small block at the very top of the scrollback and is not what the cache is for.
 func (k paintKey) cacheable() bool { return k.kind != entryStartup }
 
-// spanFlags packs the per-entry view state the painters read — expanded, done, and the type row's
-// own typeExpanded — into one comparable string, one byte per entry. Every per-entry view FACT
+// spanFlags packs the per-entry view state the painters read — expanded, done, the type row's own
+// typeExpanded, and a delegation's lifecycle phase — into one comparable string, one byte per entry.
+// The phase takes two bits rather than one because it has three states and each is a different paint:
+// a delegation not yet started, one running, and one whose child has reported ahead of the group's
+// result burst (entry.phase). Every per-entry view FACT
 // belongs here, whether or not a painter reads it yet: a state a key ignores is a stale paint served
 // after a click that changed something, and that is a failure no golden can see, since the paint it
 // asserts is the one the painter would have produced anyway.
@@ -140,6 +149,12 @@ func spanFlags(entries []entry) string {
 		}
 		if entries[i].typeExpanded {
 			f |= 4
+		}
+		switch entries[i].phase {
+		case domain.SubAgentStarted:
+			f |= 8
+		case domain.SubAgentFinished:
+			f |= 16
 		}
 		b[i] = f
 	}

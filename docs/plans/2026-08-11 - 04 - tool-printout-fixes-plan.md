@@ -105,9 +105,21 @@ emits the pair; a failing child's `finished` event carries the error result.
 
 Commit: `feat(agent): emit per-delegation lifecycle phase events`
 
-## 3. TUI: per-member done as each sub-agent finishes
+## 3. TUI: per-member done as each sub-agent finishes — ✅ DONE (2026-08-11)
 
 Depends on item 2.
+
+NOTES (2026-08-11): two points beyond the item's literal text. (a) The finished phase does NOT set
+`entry.done`: that flag is the call/result PAIRING the whole transcript keys on, and setting it early
+would send the burst `ToolResultEvent` down `addToolResult`'s orphan branch (a stray result block) and
+skip `closeRun`. The double-apply guard is therefore a phase check inside `addToolResult` —
+`enrichWithResult` appends to the body, so the second fold is the one skipped — and done-ness for
+DISPLAY is read through a new `subAgentReported(head)` (`done || phase == finished`). (b) Three display
+reads take that helper, not just `subAgentFinished`: `subAgentGist` too (else a phase-finished member
+shows no `done` in its slot at all, which the item's own acceptance asks for), and the lone run's
+`live` in `renderSubAgentRun` with the matching `blockKey` call in `render.go` (a ✓ over a blinking
+star would contradict itself). Also corrected `transcript.apply`'s doc-comment variant counts, which
+item 2's new Event variant left stale (eight-of-eleven → nine-of-twelve).
 
 **What:** The transcript tracks the delegation phase per entry: handle
 `SubAgentPhaseEvent` in `transcript.apply` (`internal/tui/transcript.go`, event switch

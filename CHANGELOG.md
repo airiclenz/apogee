@@ -55,6 +55,17 @@ point is a **minor** bump, not a breaking change.
   emit, so a model reaching for it is still recognised as reading. A `tools.disabled` entry still
   naming it starts fine, disables nothing, and draws the standard unknown-name startup notice.
 
+### Fixed
+
+- **A delegation in a fan-out is marked done the moment IT finishes, not when the whole group
+  joins.** The transcript now follows each `sub_agent` block's own lifecycle phase, so the member
+  that reported first wears its ✓ and says `done` while its siblings are still working — and its
+  report can be read inside it right away, because the finished phase carries it. Before this the
+  display could only go by the group's trailing result burst, which by design arrives in call order
+  after the last child has joined, leaving early finishers looking busy for as long as the slowest
+  one ran. Nothing about history changed, and the burst that follows is a no-op on a member already
+  marked: the report is folded in once, never twice.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added

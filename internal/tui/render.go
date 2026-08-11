@@ -338,7 +338,7 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			// (design call 4). A run reaching this branch closes with no ┊ at all: the closer belongs to
 			// a list resuming after one of its members, and a delegation standing here stands alone.
 			key := t.blockKey(shapeSubAgentRun, i, span+1, th, width, blink,
-				!e.done || anyOpenCall(t.entries[i+1:i+1+span]))
+				!subAgentReported(e) || anyOpenCall(t.entries[i+1:i+1+span]))
 			appendBlock(false, e.depth, i, t.paintBlock(i, key, func() blockPaint {
 				return renderSubAgentRun(th, e, t.entries[i+1:i+1+span], width, blink)
 			}))

@@ -1003,6 +1003,82 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 	})
 }
 
+// A fan-out's results arrive as ONE trailing burst, in call order, once every child has joined (ADR
+// 0039 decision 4) — so the pairing that marks a call done says nothing about when that delegation
+// actually stopped working, and a member that finished first would read as working for as long as
+// its slowest sibling ran. Its own finished phase is what says otherwise
+// (domain.SubAgentPhaseEvent), and this is the difference that makes on screen: the ✓ and the "done"
+// appear on THAT row while the sibling beside it is still going, and the report the phase carried is
+// readable inside it — all before either call has been paired.
+//
+// The burst then adds nothing at all, which is the other half of the claim: the payload already rode
+// the phase, and folding it a second time would print the report twice (transcript.addToolResult).
+func TestSubAgentMemberDoneOnItsOwnFinishedPhase(t *testing.T) {
+	// Two lines: the report lays out as the delegation's BODY, which leaves the slot to say the one
+	// word docs/layout/tool-layout.md gives a finished delegation — and gives the open state a body
+	// to show.
+	const report = "found the bug\nin the parser"
+	finish := func(tr *transcript) {
+		tr.apply(domain.SubAgentPhaseEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Phase:     domain.SubAgentFinished,
+			Result:    domain.ToolResult{CallID: "s1", Content: report},
+		})
+	}
+	build := func(t *testing.T, burst bool) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey", 0)
+		readCall(tr, "rs1", "a.go", 1, 5, 1)
+		subAgentCall(tr, "s2", "build", 0)
+		readCall(tr, "rs2", "b.go", 1, 5, 1)
+		finish(tr)
+		if burst {
+			subAgentReport(tr, "s1", report, 0)
+		}
+		return tr
+	}
+	collapsed := strings.Join([]string{
+		"✦ Sub-Agent (2)",
+		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · done"),
+		groupMemberLine("  ┕ build ⋯ 1 tool call"), // still working: no ✓, and no gist of its own
+	}, "\n")
+	opened := strings.Join([]string{
+		"✦ Sub-Agent (2)",
+		leaderEdgeRow("┌─┶ survey ✓ ⋯ done", glyphExpanded),
+		"  │ found the bug", // the report the phase carried, laid out under the member gutter
+		"  │ in the parser",
+		"│",
+		"│ survey", // the span opens with the prompt the delegate was handed
+		"│",
+		"│ ✦ Read",
+		"│   ┕ a.go ⋯ 5 lines",
+		"┊",
+		groupMemberLine("  ┕ build ⋯ 1 tool call"),
+	}, "\n")
+
+	for _, tc := range []struct {
+		name  string
+		burst bool
+	}{
+		{name: "before the trailing result burst", burst: false},
+		{name: "after the trailing result burst", burst: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := renderPlain(build(t, tc.burst), 80); got != collapsed {
+				t.Errorf("collapsed mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
+			}
+			tr := build(t, tc.burst)
+			if !tr.setExpanded(0, true) {
+				t.Fatal("setExpanded(0, true) = false; want the finished delegation open")
+			}
+			if got := renderPlain(tr, 80); got != opened {
+				t.Errorf("opened mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, opened)
+			}
+		})
+	}
+}
+
 // The ┊ has ONE reason to be drawn, and the spec gives it as a rule rather than as a sketch:
 // "`┊` is only displayed if another grouped sub-agent follows after the expanded sub-agent. The last
 // sub-agent in the group (if expanded) does not show this" (docs/layout/tool-layout.md, "Grouped
