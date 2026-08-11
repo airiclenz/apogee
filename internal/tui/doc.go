@@ -584,6 +584,19 @@
 // "next row, same column" by into CR LF — returning the restore closure that gives the shell back
 // the console mode it lent (ADR 0038), altscreen_other.go being the never-nil no-op restore that
 // stands in where there is no console mode word to lend;
+// the renderer itself is nine files rather than one, split along the seams the painters already
+// had once the tool-display overhaul grew render.go past the house ~400-line guideline — a pure
+// file move, nothing renamed and nothing reworded: render.go keeps the transcript walk
+// ([transcript.renderView], [renderEntryLines]) and the [blockPaint] click-mark primitive under
+// it; subagentblock.go the ⤷ label, the run span and the collapsed sub-agent umbrella;
+// userblock.go the full-width prompt block and its skill-span accents; startupbox.go the startup
+// banner beside the presented-block painter; toolblock.go the tool block, group and super-group
+// walk with the member rows they paint; toolleader.go the leader row, the dotted leader and the
+// promote-guard that flexes it; blockstate.go the [blockState] a painter is told and the
+// predicates that decide what a collapsed block hides; toolbranch.go the ┝/┕ branch rows and the
+// detail lines beneath them; wrap.go the hanging-wrap, clip and depth-rail primitives every
+// painter above shares; and chromelayout.go the two frame-arithmetic helpers
+// ([inputContentRows], [clampInt]) the input box and the overlays size themselves with;
 // and doc.go this narration.
 //
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.

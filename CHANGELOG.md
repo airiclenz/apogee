@@ -577,6 +577,14 @@ point is a **minor** bump, not a breaking change.
   enforces, so the navigation aid cannot rot. Nothing about behaviour, ownership or layering moves —
   `internal/config` imports `internal/domain` and never root, `internal/tui` stays flat, and the
   "the binary owns it" stances of ADRs 0024 and 0028 stand.
+- **The transcript renderer is nine files instead of one.** The tool-row work above grew
+  `internal/tui/render.go` to ~2,760 lines, so it was cut along the seams its painters already
+  had: the transcript walk stays in `render.go`, and the sub-agent umbrella, the user block, the
+  start-up box, the tool block and its super-group walk, the leader row and its promote-guard, the
+  collapsed-block state, the branch rows and their details, the wrapping and depth-rail primitives,
+  and the two frame-arithmetic helpers each get a file named for what it holds. A pure move —
+  every line verbatim, nothing renamed, no behaviour changed — with `doc.go`'s file map extended
+  to name all nine, which is what the ADR-0043 guard checks.
 
 ### Fixed
 

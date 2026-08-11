@@ -1,0 +1,246 @@
+package tui
+
+import (
+	"strings"
+
+	lipgloss "charm.land/lipgloss/v2"
+)
+
+// The dotted leader and the room it flexes in (docs/layout/tool-layout.md, "Width and overflow").
+//
+// glyphLeaderDot is one cell of the run that carries the eye from a row's target to the outcome
+// slot at its right edge. leaderGap is the blank held on each side of that run, so the dots never
+// touch the text they run between. leaderMinDots is the floor the run flexes down to before the
+// LEFT target starts giving way — one dot, because a leader that vanished entirely would leave two
+// unrelated words abutting and read as a single phrase.
+const (
+	glyphLeaderDot = "⋯" // U+22EF MIDLINE HORIZONTAL ELLIPSIS — deliberately one glyph per cell, so the run's length IS its cell count
+	leaderGap      = 1
+	leaderMinDots  = 1
+)
+
+// promoteMinTargetCells is the promote-guard's floor (design call 5, docs/layout/tool-layout.md,
+// "Width and overflow"): how many cells of TARGET a row must still be able to show for a one-line
+// tool output to be allowed into its outcome slot at all. Below it the line is demoted back into
+// the body and the presenter's typed stat takes the slot (toolView.demoted).
+//
+// It is the one place the overflow order is not simply "the outcome wins". The order's premise is
+// that what happened is the half worth keeping, and that premise fails for a promotion: a promoted
+// line IS the body, moved up for want of anywhere better, so trading the path or the command that
+// produced it for one more line of that body reads as a row about nothing. Fifteen cells is the
+// span a shortened path's tail needs to still identify a file ("…/render.go" and a little), which
+// is what the guard is protecting rather than any exact count.
+const promoteMinTargetCells = 15
+
+// guardPromotions settles the promote-guard for a whole block, before one row of it is painted: a
+// view whose promoted one-line output would leave the row less than promoteMinTargetCells of target
+// is replaced by its demoted reading, the line back in the body and the typed stat in the slot
+// (toolView.demoted).
+//
+// It runs HERE, at the block's entrance, rather than inside leaderRow, because demotion changes what
+// the block IS and not merely how one row prints: a demoted call has a body, so it now hides
+// something when collapsed, and that is the very question the header's indicator, the click surface
+// and the remainder marker are all answered from (blockHidesWhenCollapsed). A guard applied at the
+// row would leave those three saying the call had nothing to reveal while the paint had just hidden
+// a line.
+//
+// The answer depends on the WIDTH alone and never on the block's state, which is the leader row's
+// standing promise read one level up: a row that promoted its line collapsed and demoted it open
+// would move out from under the click that opened it.
+//
+// The slice is copied only where a view actually changed, so the ordinary block — nothing promoted,
+// or everything promoted comfortably — reaches the painter as the very slice the entries handed
+// over. The copy is shallow and that is enough: demoted rebuilds the body it changes rather than
+// writing through the one the entry shares (toolView.demoted).
+// marker is the frame the block's rows lead with — the closing branch marker for an ordinary block,
+// the deeper nested one inside a super-group's type row (superMemberMarker) — because those cells
+// come off the same row budget the guard is measuring and a member indented one level further has
+// that much less target to protect.
+func guardPromotions(th theme, views []toolView, room int, marker string) []toolView {
+	out, copied := views, false
+	for i, tv := range views {
+		if !guardRefuses(th, tv, room, marker) {
+			continue
+		}
+		if !copied {
+			out, copied = append([]toolView(nil), views...), true
+		}
+		out[i] = tv.demoted()
+	}
+	return out
+}
+
+// guardRefuses asks the promote-guard's question of one call at one width: laid out as leaderRow
+// will lay it out, does the promoted line leave promoteMinTargetCells of target standing beside the
+// floor of one dot? The arithmetic is that function's own — the slot and its gap reserved first,
+// then the gap and the dot the leader may not go below — so the guard and the row cannot come to
+// different answers about the same width.
+//
+// Two calls are never refused. One that promoted nothing has only one reading of its outcome
+// (toolView.promotable), and one with NO TARGET has no branch row at all: its lines are the branches
+// themselves (renderToolBranch), so there is no target for a long line to crowd out and nothing for
+// the guard to protect.
+//
+// The caller passes the CLOSING marker of the block's frame, and either of that frame's two markers
+// would do: both are one glyph in the same cell count (branchMarker, superMemberMarker) — a member's
+// row keeps the same budget wherever in the block it sits, which is what lets one answer settle a
+// block.
+func guardRefuses(th theme, tv toolView, room int, marker string) bool {
+	if !tv.promotable() || tv.Target == "" {
+		return false
+	}
+	avail := room - th.measure.Width(marker)
+	tail := leaderGap + th.measure.Width(tv.Summary.Text)
+	return avail-tail-leaderGap-leaderMinDots < promoteMinTargetCells
+}
+
+// leaderRow paints one call's branch row whole — the shape every single block and every group
+// member takes (docs/layout/tool-layout.md): the branch marker, the call's target, a dotted leader,
+// and the outcome slot flush against the right of room.
+//
+// It returns a painted row rather than text-and-a-style because the row is no longer one voice: the
+// target speaks in the block's state tone, the leader in its own damped `tool-leader` role, and the
+// outcome in whatever its own kind and verdict call for (summaryStyle). A caller that wrapped this
+// afterwards would be wrapping a styled string; nothing needs to, because the row is one row by
+// construction — that is what the overflow order below buys.
+//
+// The order room is spent in IS design call 4, and it is the whole of the arithmetic: the outcome
+// slot is reserved first and always prints whole, the leader then flexes down to leaderMinDots, and
+// only then is the target cut, ending in " …" (clipCells). A row too narrow for even that drops the
+// target outright rather than the outcome — what happened is the half worth keeping, and a row with
+// nothing left to give still says it.
+//
+// expanded reaches the TONES alone (detailTone, summaryStyle): a row is the same shape in both
+// states, which is what lets the same click that opened a member close it without the row moving
+// out from under the pointer.
+func leaderRow(th theme, tv toolView, marker string, room int, expanded bool) string {
+	tone := detailTone(th, expanded)
+	return leaderRowIn(th, expandTabs(tv.Target), func(s string) string { return tone.Render(s) },
+		tv.Summary, marker, room, expanded)
+}
+
+// leaderRowIn is the leader arithmetic itself, with the row's LEFT content handed in rather than
+// read off a call: the plain text it is measured and clipped by, and the painter that dresses
+// whatever survives that clip. It exists because a super-group's TYPE ROW is the same row about a
+// whole run — "Terminal (3)" where a call would put its path — and a second copy of the overflow
+// order would part company with this one the first time either moved (renderSuperGroup).
+//
+// paint receives the CLIPPED text and not the original, because a painted string cannot be cut
+// without cutting its escapes: the row measures plain text, decides what fits, and only then hands
+// the survivor to whoever knows how it should look.
+func leaderRowIn(th theme, left string, paint func(string) string, summary branchSummary,
+	marker string, room int, expanded bool) string {
+	avail := max(1, room-th.measure.Width(marker))
+	slot := summary.Text
+	// The last resort under design call 4, past the point it words: an outcome WIDER than the row
+	// itself is cut too. A slot that printed whole there would not print whole anywhere — it would
+	// run past the frame and the viewport would fold it into a second row, taking the block out of
+	// its budget and the ▶ out from under the pointer. Everything above it still holds: the dots go
+	// first, the target next, and only an outcome with no row left to stand in is touched at all.
+	if slotCells := avail - leaderGap - leaderMinDots; th.measure.Width(slot) > slotCells {
+		slot, _ = clipCells(th, slot, max(1, slotCells))
+	}
+	tail := 0
+	if slot != "" {
+		tail = leaderGap + th.measure.Width(slot)
+	}
+	target := ""
+	if budget := avail - tail - leaderGap - leaderMinDots; budget >= 1 {
+		target, _ = clipCells(th, left, budget)
+		// A budget too narrow to hold even the clip tail comes back WIDER than it was given —
+		// fitClipTail appends the tail whatever room is left — and those cells would push the row
+		// past its width and fold it onto a second line. The target is dropped outright instead,
+		// which is the order above taken one step further: a row this narrow has nothing left to
+		// give up but the target, and what happened is the half worth keeping.
+		if th.measure.Width(target) > budget {
+			target = ""
+		}
+	}
+	lead, leadCells := "", 0
+	if target != "" {
+		lead = paint(target) + strings.Repeat(" ", leaderGap)
+		leadCells = th.measure.Width(target) + leaderGap
+	}
+	dots := max(leaderMinDots, avail-leadCells-tail)
+	row := detailTone(th, expanded).Render(marker) + lead +
+		th.toolLeader.Render(strings.Repeat(glyphLeaderDot, dots))
+	if slot != "" {
+		row += strings.Repeat(" ", leaderGap) + summaryStyle(th, summary, expanded).Render(slot)
+	}
+	return row
+}
+
+// toolRowCells is the room a branch or member row lays itself out in: the block's width less the
+// field the ▶/▼ is held in at its right edge (groupIndicatorCells). The field is reserved on every
+// row, one wearing an indicator or not, so the outcome slots line up down the block's edge whatever
+// each row has to reveal — and so a row does not move sideways the moment it gains something.
+func toolRowCells(th theme, width int) int {
+	return max(1, width-groupIndicatorCells(th))
+}
+
+// summaryStyle is the tone the outcome slot takes. A summary that says the call FAILED is red —
+// design call 11 makes that red the only failure marking, so no glyph and no header changes with it
+// — and every other summary keeps the branch line's own tone, the diff kinds included (detailStyle).
+func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
+	if failedSummary(s.Text) {
+		return th.errorText
+	}
+	return detailStyle(th, s.Kind, expanded)
+}
+
+// failedSummary reads the outcome's own wording for a verdict of failure (errorSummaryPrefix and
+// the two bare verdicts beside it), plus the count a TYPE ROW aggregates its run's failures into
+// ("3 errors", runAggregate). It asks the TEXT because that is where the fact is: a summary carries
+// no verdict flag, and inventing one to be derived from the same words would be a second answer to a
+// question already settled at the presenter's seam.
+//
+// The aggregate is read through the very parser that wrote it (countPhrase), so the two cannot come
+// to disagree, and only a count of one or more reads as a failure — "0 errors" is a clean run, and
+// no aggregate says it anyway.
+func failedSummary(text string) bool {
+	if strings.HasPrefix(text, errorSummaryPrefix) ||
+		text == deniedSummary || text == cancelledSummary {
+		return true
+	}
+	n, noun, ok := countPhrase(text)
+	return ok && n > 0 && strings.TrimSuffix(noun, "s") == errorNoun
+}
+
+// clipCells fits text into ONE row of at most cells columns, ending it in clipTail when it had to
+// cut, and reports the cut. It is clipWrap's arithmetic with no marker and no style — the same
+// hangingPrefixes wrap and the same fitted tail — for the caller that has to keep composing after
+// the clip instead of painting what comes back (leaderRow, which seats a clipped target and a
+// clipped outcome slot in a row it goes on to assemble).
+//
+// It goes through the wrap rather than truncating the string, so a target carrying a newline is cut
+// at its first line like any other overlong one: wrapText keeps the text's own line breaks, and a
+// second row is a cut however it arose.
+func clipCells(th theme, text string, cells int) (string, bool) {
+	rows := hangingPrefixes(th, "", text, cells)
+	if len(rows) <= 1 {
+		return rows[0], false
+	}
+	return fitClipTail(th, rows[0], cells), true
+}
+
+// The GROUPED block's own numbers (docs/layout/tool-layout.md).
+//
+// groupIndicatorGap is the field held clear between a row's outcome slot and its ▶, and it is
+// reserved on every row so the indicators line up down the right edge whether or not each row wears
+// one. A member's own budget is not among these numbers any more: one row is not the group's rule
+// but the row shape's, since a leader row fills its width exactly by construction (leaderRow).
+//
+// groupCountFormat is the "(N)" the header carries beside the label for N ≥ 2 — a lone groupable
+// call is painted as a single block and counts nothing.
+const (
+	groupIndicatorGap = 3
+	groupCountFormat  = "(%d)"
+)
+
+// groupIndicatorCells is how many columns a member row gives up at its right edge to the indicator
+// field: the gap plus the widest of the two glyphs it may show. Both are measured because the field
+// must not change width when a member opens (▶ → ▼, item 5) — a member whose text re-wrapped on
+// being expanded would move under the very click that expanded it.
+func groupIndicatorCells(th theme) int {
+	return groupIndicatorGap + max(th.measure.Width(glyphCollapsed), th.measure.Width(glyphExpanded))
+}

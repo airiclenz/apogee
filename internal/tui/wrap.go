@@ -1,0 +1,246 @@
+package tui
+
+import (
+	"strings"
+
+	lipgloss "charm.land/lipgloss/v2"
+)
+
+// ----------------------------------------------------------------------------
+// Wrapping primitives
+// ----------------------------------------------------------------------------
+
+// hangingWrap word-wraps text under a leading marker, then styles each physical line: the
+// marker leads the first line and a same-width blank indent leads every continuation line, so
+// a wrapped block stays aligned under its marker (the ✦/┝ hanging indent of layout.md). The
+// style colours the whole line; widths are ANSI-agnostic, so styling never perturbs the
+// soft-wrap arithmetic.
+func hangingWrap(th theme, style lipgloss.Style, marker, text string, width int) []string {
+	prefixed := hangingPrefixes(th, marker, text, width)
+	out := make([]string, len(prefixed))
+	for i, ln := range prefixed {
+		out[i] = style.Render(ln)
+	}
+	return out
+}
+
+// hangingPrefixes word-wraps text to the width left of the marker and prepends the marker to
+// the first line and a matching blank indent to the rest, returning the unstyled lines. It is
+// shared by the styled hanging wrap and the user block (which then pads each line to a
+// full-width background).
+func hangingPrefixes(th theme, marker, text string, width int) []string {
+	mw := th.measure.Width(marker)
+	indent := strings.Repeat(" ", mw)
+	lines := wrapText(th, text, max(1, width-mw))
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		if i == 0 {
+			out[i] = marker + ln
+		} else {
+			out[i] = indent + ln
+		}
+	}
+	return out
+}
+
+// clipTail is what a row cut short ends in: one space and one ellipsis, the sketch's own spelling
+// (docs/layout/tool-layout.md). It is a CONTINUATION mark, not a marker — it says "this line goes
+// on", where the "+N more lines" marker says how much never got a line at all.
+const clipTail = " …"
+
+// clipWrap is hangingWrap under a row budget. It wraps and styles exactly as hangingWrap does —
+// the same hangingPrefixes path, so the same wrapText, the same expandTabs and the same hanging
+// continuation indent — and then keeps at most maxRows physical rows, ending the last kept row in
+// clipTail when it dropped any. Handed text that fits, it returns hangingWrap's own lines and
+// clipped false, so a caller can reach for it unconditionally.
+//
+// It REPORTS the clip rather than leaving the caller to infer one. Whether a collapsed block hides
+// anything is width-dependent once a target can be cut, and the indicator, the click target and the
+// paint all have to agree about it; asking this once and passing the answer along is what keeps them
+// from each re-deriving it — and from drifting apart when only one of them is changed.
+//
+// The tail is FITTED, not appended: the kept row is re-cut so the row and its tail together measure
+// within width in the width authority's measure, which is the measure the frame is painted in
+// (ADR 0030). Appending to a row the wrap had already filled to the column would overrun the width
+// by the tail, and the viewport would fold the row into the very second row the budget was spending.
+func clipWrap(th theme, style lipgloss.Style, marker, text string, width, maxRows int) (lines []string, clipped bool) {
+	if maxRows < 1 {
+		return nil, true // no row to spend: everything is hidden, and nothing is left to say so
+	}
+	prefixed := hangingPrefixes(th, marker, text, width)
+	if clipped = len(prefixed) > maxRows; clipped {
+		prefixed = prefixed[:maxRows]
+		prefixed[maxRows-1] = fitClipTail(th, prefixed[maxRows-1], width)
+	}
+	out := make([]string, len(prefixed))
+	for i, ln := range prefixed {
+		out[i] = style.Render(ln)
+	}
+	return out, clipped
+}
+
+// fitClipTail re-cuts one wrapped row so the row plus clipTail measures within width. The row is
+// still unstyled here — the cut lands on the text the wrap produced, before any style has been past
+// it, which is the same order every other measurement in this package takes.
+//
+// It trims the trailing spaces the cut leaves behind: a break can hand back the space it fell on,
+// and "grep  …" reads as a slip where "grep …" reads as a sentence continuing. A width too narrow
+// to seat even the tail leaves the tail alone rather than half of it — a lone "…" one column short
+// of the edge is still the honest mark, and no row can be narrower than what it must say.
+func fitClipTail(th theme, row string, width int) string {
+	room := max(0, width-th.measure.Width(clipTail))
+	return strings.TrimRight(th.measure.Truncate(row, room, ""), " ") + clipTail
+}
+
+// wrapText word-wraps text to limit columns, hard-breaking any word longer than the limit
+// and preserving the text's own newlines. An empty string yields a single empty line so a
+// just-opened assistant buffer still renders its marker.
+//
+// It breaks with the width authority (th.measure.Wrap), so the break is CHOSEN in the same measure
+// the cap below is enforced in and the painter draws in — ADR 0030's rule for this package. It used
+// to break with the package-level ansi.Wrap, which is hard-wired to ansi.GraphemeWidth whatever the
+// painter is doing: on the painter's default WcWidth that measured a VARIATION SELECTOR-16 cluster
+// two cells against the one the terminal paints, so every wrapped surface — transcript prose,
+// pop-up bodies, table cells — took its break a cell earlier than it needed on such a line. On
+// content the two measures agree about (everything without VS16) the two wraps are identical, which
+// is why this is a rename rather than a re-layout. A caller that then pads with a lipgloss Width
+// style hands the gain straight back — lipgloss folds in GraphemeWidth — which is why the user
+// block below squares its own rows and why the pop-up pane still does not (TODO.md).
+//
+// No line it returns is wider than limit in the width authority's measure — layout.md's absolute
+// cap, enforced here rather than assumed. The upstream wrap does not hold it on its own, in either
+// measure: the breakpoint branch lacks the full-line checks its default branch has, on the wcwidth
+// path (x/ansi@v0.11.7/wrap.go:406-419) and on the grapheme path (:352-361) alike, so a run of
+// breakpoints keeps growing a word onto an already-full line — a wrap of "| --- | --- | --- |" at
+// limit 3 comes back with a five-cell first line, and of "----" with a four-cell one. Every line
+// that comes back over the limit is therefore hard-broken down to it, which is also what makes the
+// docstring's "hard-breaking any word longer than the limit" true rather than aspirational. The one
+// thing no break can divide is a single grapheme wider than the limit — a CJK glyph at limit 1 —
+// and that keeps a line to itself.
+func wrapText(th theme, text string, limit int) []string {
+	if limit < 1 {
+		limit = 1
+	}
+	// Tabs are settled BEFORE the break is chosen: a tab the wrap counts as nothing is four cells
+	// once a style has been past the line, and the cap above would then hold in the measure and
+	// break in the paint (expandTabs).
+	text = expandTabs(text)
+	wrapped := strings.Split(th.measure.Wrap(text, limit, ""), "\n")
+	out := make([]string, 0, len(wrapped))
+	for _, ln := range wrapped {
+		if th.measure.Width(ln) <= limit {
+			out = append(out, ln)
+			continue
+		}
+		// preserveSpace keeps this pass purely additive — it inserts breaks and drops nothing, so
+		// a segment's own leading indentation survives the cap. The break the hard wrap opens
+		// ahead of an over-wide leading grapheme would otherwise surface as a blank row.
+		segs := strings.Split(th.measure.Hardwrap(ln, limit, true), "\n")
+		if len(segs) > 1 && segs[0] == "" {
+			segs = segs[1:]
+		}
+		out = append(out, segs...)
+	}
+	return out
+}
+
+// tabCells is how many spaces one TAB becomes when this package expands it: lipgloss's own
+// tabWidthDefault (lipgloss/v2@v2.0.5/style.go:14, maybeConvertTabs), so a line handed to a style
+// with its tabs already expanded paints exactly what that style would have made of it anyway.
+const tabCells = 4
+
+// expandTabs replaces every TAB in s with the spaces a lipgloss style would otherwise put there.
+//
+// A TAB is ZERO cells to the width authority, and zero to the painter too — ultraviolet drops the
+// control byte rather than advancing to a tab stop — so on that pair alone the two agree and there
+// would be nothing to settle. What breaks the agreement is what sits BETWEEN them: every
+// lipgloss.Style.Render rewrites "\t" into tabCells spaces on its way past (maybeConvertTabs), after
+// the authority measured the line and before the painter ever sees it. A user block therefore
+// composed four cells more than it had measured, per tab in the text: the row overran the width the
+// block was given, the viewport folded that one row into two painted ones, and the skill accent —
+// shaded at cells counted in the authority's measure — landed four columns left of the token it
+// names.
+//
+// Expanding before anything measures is what puts the three back in step: the authority counts the
+// spaces, the style finds no tab left to rewrite, and the painter paints the very cells that were
+// counted. This is not the content normalisation ADR 0030 rules out — that ruling is about VS16,
+// where folding the content would change what the user sees and would overrule the terminal's own
+// measure. A tab has no display width for anyone to have an opinion about, and the spaces are what
+// the block was already painting; only the counting of them was wrong.
+func expandTabs(s string) string {
+	if !strings.Contains(s, "\t") {
+		return s
+	}
+	return strings.ReplaceAll(s, "\t", strings.Repeat(" ", tabCells))
+}
+
+// expandTabsInSpans re-bases spans — byte offsets into text — onto expandTabs(text): every TAB
+// before an offset grows the text by tabCells-1 bytes, so the offset moves by that much per tab
+// preceding it. Call it while text still holds its tabs, on the way to handing the expanded text to
+// the wrap and to the accent map, so both address the same string.
+//
+// Offsets are clamped to text before they are counted against, so a span that never went through
+// the transcript boundary's own check (spansWithin) cannot slice out of range here either.
+func expandTabsInSpans(text string, spans []skillSpan) []skillSpan {
+	if len(spans) == 0 || !strings.Contains(text, "\t") {
+		return spans
+	}
+	shift := func(off int) int {
+		off = clampInt(off, 0, len(text))
+		return off + strings.Count(text[:off], "\t")*(tabCells-1)
+	}
+	out := make([]skillSpan, 0, len(spans))
+	for _, sp := range spans {
+		out = append(out, skillSpan{start: shift(sp.start), end: shift(sp.end)})
+	}
+	return out
+}
+
+// railWidth is the column cost of one sub-agent rail gutter ("│ " — the rail glyph plus one
+// space), the amount each nesting level steals from the usable text width (P3.14).
+const railWidth = 2
+
+// railedWidth is the usable text width inside a Depth-level block: the full width less one
+// rail gutter per level. Depth 0 is the common case and returns width unchanged; deeper
+// levels are floored at one column so wrapping never divides by zero.
+func railedWidth(width, depth int) int {
+	if depth <= 0 {
+		return width
+	}
+	return max(1, width-depth*railWidth)
+}
+
+// railSpacer is the one separating line between two adjacent blocks, framed for the run the two
+// of them share: depth is the JOIN of their depths (the shallower one), so the rail is drawn only
+// as deep as both sides reach. Depth 0 — the flat transcript, and either side of a sub-agent run's
+// boundary — is the bare "" the layout has always used, so a top-level transcript renders exactly
+// as before; deeper joins draw the gutter alone, which is what makes a run's frame continuous
+// through its separators instead of breaking at every block.
+//
+// The gutter's trailing space is trimmed BEFORE it is styled, so a spacer's visible text is "│"
+// at depth 1 and "│ │" at depth 2 — never a styled trailing blank, which would leave an invisible
+// SGR run hanging off the right of an otherwise empty row.
+func railSpacer(th theme, depth int) string {
+	if depth <= 0 {
+		return ""
+	}
+	return th.subRail.Render(strings.TrimRight(strings.Repeat(glyphSubRail+" ", depth), " "))
+}
+
+// railLines frames a Depth-level block: it prepends one styled "│ " rail gutter per nesting
+// level to each physical line, so a sub-agent's nested block reads as a vertical-ruled
+// sub-section (P3.14). Depth 0 is the common case and returns the lines untouched, so the
+// flat top-level transcript renders exactly as before. The rail is styled in the subRail role's
+// tool-header gold and sits left of any per-line background (e.g. the user block's), matching
+// the marker hanging indent.
+func railLines(th theme, lines []string, depth int) []string {
+	if depth <= 0 {
+		return lines
+	}
+	gutter := th.subRail.Render(strings.Repeat(glyphSubRail+" ", depth))
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		out[i] = gutter + ln
+	}
+	return out
+}
