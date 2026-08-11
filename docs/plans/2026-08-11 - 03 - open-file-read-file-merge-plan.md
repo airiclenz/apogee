@@ -189,7 +189,17 @@ startup notice, not an error (see Out of scope).
 
 **Commit:** `feat(tools): remove open_file now that read_file carries locate`
 
-## 4. Delete domain.OpenedFile and its remaining consumers
+## 4. Delete domain.OpenedFile and its remaining consumers — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): the hookrun_test helper was RENAMED while being rebuilt —
+`openedFileSummary()` → `locatedReadSummary()`, since a helper named after the deleted tool
+returning a `domain.ReadSpan` would misname itself; both regression tests keep exercising a
+slice-bearing (uncomparable) summary. Line cites had drifted throughout (OpenedFile at
+toolsummary.go:94-102, the presenter's registry entry/stat/target/body at :529-536/:1172/:1529/:1926,
+the open_file presenter cases at toolpresent_test.go:247-281, its stat row :1194, stat-declines
+:1265, `TestOpenFileBodyRecordsTheLocateReport` :1318-1339) — content matched, approach unchanged.
+Two mutation fixtures the item did not enumerate (`hookrun_test.go:99,153`) also had to move to
+ReadSpan; they are the same helper's call sites.
 
 Depends on items 1 and 3.
 

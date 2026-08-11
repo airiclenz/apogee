@@ -135,8 +135,10 @@ var wave4WriteTools = map[string]bool{
 // hand-copying the family's — the drift class this consolidation closes.
 var (
 	// readSpellings is apogee-sim's read-tool set (toolsets.ReadTools @pin: read_file / readFile) plus
-	// apogee's own open_file spelling — open_file.go renderOpenFile is read-only and returns the file
-	// body, so it counts as a file read wherever a read set is consulted.
+	// apogee's own open_file spelling — read_file.go renderFile is read-only and returns the file
+	// body, so it counts as a file read wherever a read set is consulted. "open_file" is a RETIRED
+	// tool name (merged into read_file on 2026-08-11) kept as a spelling a model may still emit,
+	// exactly like "readFile", which was never a registered tool either.
 	readSpellings = []string{"read_file", "readFile", "open_file"}
 
 	// listSpellings is apogee-sim's list-tool set (toolsets.ListTools @pin: list_files / listFiles /

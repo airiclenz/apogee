@@ -1,12 +1,12 @@
 package agent
 
 // Regression cover for the post-tool-result acted probe (R4). The whole-struct compare this
-// replaces panicked with "comparing uncomparable type domain.OpenedFile" whenever a
-// summary-carrying result reached a hook that did not act — the shape every successful
-// open_file produces, and error_enrichment (the only catalogued post-tool-result Mechanism)
-// never acts on a non-error result. No existing test drove a summary-carrying result through
-// dispatch, which is why CI never tripped; these do, through the real Submit → Step →
-// dispatchTools → runPostToolResultHooks path.
+// replaces panicked with "comparing uncomparable type …" whenever a summary-carrying result
+// reached a hook that did not act — the shape every successful read_file produces (ReadSpan
+// carries the []int of located lines), and error_enrichment (the only catalogued
+// post-tool-result Mechanism) never acts on a non-error result. No existing test drove a
+// summary-carrying result through dispatch, which is why CI never tripped; these do, through
+// the real Submit → Step → dispatchTools → runPostToolResultHooks path.
 
 import (
 	"context"
@@ -15,10 +15,10 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// openedFileSummary is the uncomparable summary open_file returns on every successful read:
+// locatedReadSummary is the uncomparable summary read_file returns on every successful read:
 // LocatedOn is a slice, so a struct compare of two ToolResults carrying one panics.
-func openedFileSummary() domain.ToolSummary {
-	return domain.OpenedFile{Lines: 3, Locate: "main", LocatedOn: []int{1, 2}}
+func locatedReadSummary() domain.ToolSummary {
+	return domain.ReadSpan{Start: 1, End: 3, Total: 3, Locate: "main", LocatedOn: []int{1, 2}}
 }
 
 // summaryTool is the "probe" tool driveToolExchange calls, returning a result whose Summary
@@ -31,7 +31,7 @@ func summaryTool() fakeTool {
 			return domain.ToolResult{
 				CallID:  call.ID,
 				Content: "package main\nfunc main() {}\n",
-				Summary: openedFileSummary(),
+				Summary: locatedReadSummary(),
 			}, nil
 		},
 	}
@@ -95,8 +95,10 @@ func TestPostToolResultActedProbe(t *testing.T) {
 			wantFires: 1,
 		},
 		{
-			name:      "a Summary-only mutation books a fire",
-			mutate:    func(r *domain.ToolResult) { r.Summary = domain.OpenedFile{Lines: 99, LocatedOn: []int{7}} },
+			name: "a Summary-only mutation books a fire",
+			mutate: func(r *domain.ToolResult) {
+				r.Summary = domain.ReadSpan{Start: 1, End: 99, Total: 99, LocatedOn: []int{7}}
+			},
 			wantFires: 1,
 		},
 	}
@@ -132,7 +134,7 @@ func TestPostToolResultActedProbe(t *testing.T) {
 // TestPostToolResultChangedFieldByField is the unit half: every field the probe reads is
 // load-bearing, and an equal pair carrying an uncomparable Summary compares without panicking.
 func TestPostToolResultChangedFieldByField(t *testing.T) {
-	base := domain.ToolResult{CallID: "c1", Content: "body", Summary: openedFileSummary()}
+	base := domain.ToolResult{CallID: "c1", Content: "body", Summary: locatedReadSummary()}
 
 	tests := []struct {
 		name  string
@@ -142,15 +144,15 @@ func TestPostToolResultChangedFieldByField(t *testing.T) {
 		{name: "identical", after: base, want: false},
 		{
 			name:  "equal summaries with distinct backing slices",
-			after: domain.ToolResult{CallID: "c1", Content: "body", Summary: openedFileSummary()},
+			after: domain.ToolResult{CallID: "c1", Content: "body", Summary: locatedReadSummary()},
 			want:  false,
 		},
-		{name: "CallID differs", after: domain.ToolResult{CallID: "c2", Content: "body", Summary: openedFileSummary()}, want: true},
-		{name: "Content differs", after: domain.ToolResult{CallID: "c1", Content: "other", Summary: openedFileSummary()}, want: true},
-		{name: "IsError differs", after: domain.ToolResult{CallID: "c1", Content: "body", IsError: true, Summary: openedFileSummary()}, want: true},
+		{name: "CallID differs", after: domain.ToolResult{CallID: "c2", Content: "body", Summary: locatedReadSummary()}, want: true},
+		{name: "Content differs", after: domain.ToolResult{CallID: "c1", Content: "other", Summary: locatedReadSummary()}, want: true},
+		{name: "IsError differs", after: domain.ToolResult{CallID: "c1", Content: "body", IsError: true, Summary: locatedReadSummary()}, want: true},
 		{
 			name:  "Summary differs",
-			after: domain.ToolResult{CallID: "c1", Content: "body", Summary: domain.OpenedFile{Lines: 9}},
+			after: domain.ToolResult{CallID: "c1", Content: "body", Summary: domain.ReadSpan{Start: 1, End: 9, Total: 9}},
 			want:  true,
 		},
 		{name: "Summary cleared", after: domain.ToolResult{CallID: "c1", Content: "body"}, want: true},

@@ -15,7 +15,6 @@ var (
 	_ ToolSummary = MatchedLines{}
 	_ ToolSummary = DiffStat{}
 	_ ToolSummary = SearchHits{}
-	_ ToolSummary = OpenedFile{}
 )
 
 func TestToolSummaryVariantsAreSealed(t *testing.T) {
@@ -31,10 +30,9 @@ func TestToolSummaryVariantsAreSealed(t *testing.T) {
 		MatchedLines{},
 		DiffStat{},
 		SearchHits{},
-		OpenedFile{},
 	}
 
-	const want = 7
+	const want = 6
 	if len(variants) != want {
 		t.Fatalf("ToolSummary variants = %d, want %d", len(variants), want)
 	}

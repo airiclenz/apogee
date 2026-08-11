@@ -310,10 +310,6 @@ type DiffStat = domain.DiffStat
 // SearchHits is web_search's summary: the number of structured results returned.
 type SearchHits = domain.SearchHits
 
-// OpenedFile is open_file's summary: the file body's line count and where an optional
-// locate term was found.
-type OpenedFile = domain.OpenedFile
-
 // ToolRegistry is the injectable set of available tools.
 type ToolRegistry = domain.ToolRegistry
 

@@ -245,41 +245,6 @@ func TestPresentToolCall(t *testing.T) {
 			wantTarget: "main.go", wantDetail: "+1 −0",
 		},
 		{
-			name: "open_file with locate → the Located line, never the content",
-			call: domain.ToolCall{ID: "31", Tool: "open_file", Arguments: []byte(`{"path":"main.go","locate":"func main"}`)},
-			result: domain.ToolResult{CallID: "31", Content: "File: main.go\nLocated \"func main\" on lines: 5\n\npackage main\n…",
-				Summary: domain.OpenedFile{Lines: 2, Locate: "func main", LocatedOn: []int{5}}},
-			wantLabel:  "Open",
-			wantVerb:   "opening",
-			wantTarget: `main.go · locate "func main"`, wantDetail: `Located "func main" on lines: 5`,
-		},
-		{
-			name: "open_file with a locate that matched nothing → on no lines",
-			call: domain.ToolCall{ID: "31b", Tool: "open_file", Arguments: []byte(`{"path":"main.go","locate":"zzz"}`)},
-			result: domain.ToolResult{CallID: "31b", Content: "File: main.go\nLocated \"zzz\" on no lines\n\npackage main\n…",
-				Summary: domain.OpenedFile{Lines: 2, Locate: "zzz"}},
-			wantLabel:  "Open",
-			wantVerb:   "opening",
-			wantTarget: `main.go · locate "zzz"`, wantDetail: `Located "zzz" on no lines`,
-		},
-		{
-			name: "open_file without locate → line count, never the content",
-			call: domain.ToolCall{ID: "32", Tool: "open_file", Arguments: []byte(`{"path":"main.go"}`)},
-			result: domain.ToolResult{CallID: "32", Content: "File: main.go\n\npackage main\n\nfunc main() {}",
-				Summary: domain.OpenedFile{Lines: 3}},
-			wantLabel:  "Open",
-			wantVerb:   "opening",
-			wantTarget: "main.go", wantDetail: "3 lines",
-		},
-		{
-			name:       "open_file with no summary → the verbatim first line",
-			call:       domain.ToolCall{ID: "32b", Tool: "open_file", Arguments: []byte(`{"path":"main.go"}`)},
-			result:     domain.ToolResult{CallID: "32b", Content: "File: main.go\n\npackage main\n\nfunc main() {}"},
-			wantLabel:  "Open",
-			wantVerb:   "opening",
-			wantTarget: "main.go", wantDetail: "File: main.go",
-		},
-		{
 			name: "view_diff → Diff Preview + diffstat",
 			call: domain.ToolCall{ID: "35", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)},
 			result: domain.ToolResult{CallID: "35", Content: "  ctx\n- old line\n+ new line",
@@ -1191,7 +1156,6 @@ func TestToolStat(t *testing.T) {
 		{name: "read words its span as a line count", tool: "read_file", result: domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 100, Total: 120}}, want: "100 lines", wantOK: true},
 		{name: "a one-line read is singular", tool: "read_file", result: domain.ToolResult{Summary: domain.ReadSpan{Start: 7, End: 7, Total: 9}}, want: "1 line", wantOK: true},
 		{name: "an empty file reads zero, never a negative", tool: "read_file", result: domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 0}}, want: "0 lines", wantOK: true},
-		{name: "open words the body's line count", tool: "open_file", result: domain.ToolResult{Summary: domain.OpenedFile{Lines: 3, Locate: "x", LocatedOn: []int{1}}}, want: "3 lines", wantOK: true},
 		{name: "list keeps the fixed 'entries' plural", tool: "list_dir", result: domain.ToolResult{Summary: domain.ListedEntries{Total: 1}}, want: "1 entries", wantOK: true},
 		{name: "grep words hits", tool: "grep", result: domain.ToolResult{Summary: domain.MatchedLines{Total: 3}}, want: "3 hits", wantOK: true},
 		{name: "grep finding nothing is a number", tool: "grep", result: domain.ToolResult{Summary: domain.MatchedLines{Total: 0}}, want: "0 hits", wantOK: true},
@@ -1262,7 +1226,7 @@ func TestToolStat(t *testing.T) {
 // floor stays: a third-party tool (which can never emit a summary — the sum is sealed) renders as
 // it always did.
 func TestToolStatDeclinesWithoutATypedSummary(t *testing.T) {
-	for _, name := range []string{"read_file", "open_file", "list_dir", "grep", "web_search", "view_diff"} {
+	for _, name := range []string{"read_file", "list_dir", "grep", "web_search", "view_diff"} {
 		if _, ok := toolRegistry[name].stat(domain.ToolResult{Content: "prose"}); ok {
 			t.Errorf("%s must decline a summary-less result", name)
 		}
@@ -1310,29 +1274,6 @@ func TestReadFileBodyRecordsTheLocateReport(t *testing.T) {
 	}
 	long := strings.Repeat("x", detailClipRunes+40)
 	clipped := readFileBody(domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 2, Total: 2, Locate: long, LocatedOn: []int{1}}})
-	if len(clipped) != 1 || len([]rune(clipped[0].Text)) != detailClipRunes+1 { // +1 for the ellipsis
-		t.Errorf("locate line is not clipped to %d runes: %+v", detailClipRunes, clipped)
-	}
-}
-
-// open_file's locate report moved off the branch and into the body when the table gave the slot to
-// the line count: the term is in the target, the lines it was found on are here, and an over-long
-// term is clipped like any other detail line so a model asking to locate a minified blob cannot
-// flood the row.
-func TestOpenFileBodyRecordsTheLocateReport(t *testing.T) {
-	matched := openFileBody(domain.ToolResult{Summary: domain.OpenedFile{Lines: 40, Locate: "func main", LocatedOn: []int{5, 9}}})
-	if len(matched) != 1 || matched[0].Text != `Located "func main" on lines: 5, 9` {
-		t.Errorf("located lines = %+v", matched)
-	}
-	missed := openFileBody(domain.ToolResult{Summary: domain.OpenedFile{Lines: 40, Locate: "zzz"}})
-	if len(missed) != 1 || missed[0].Text != `Located "zzz" on no lines` {
-		t.Errorf("a locate that matched nothing = %+v", missed)
-	}
-	if none := openFileBody(domain.ToolResult{Summary: domain.OpenedFile{Lines: 3}}); len(none) != 0 {
-		t.Errorf("a call that asked for no term has no report: %+v", none)
-	}
-	long := strings.Repeat("x", detailClipRunes+40)
-	clipped := openFileBody(domain.ToolResult{Summary: domain.OpenedFile{Lines: 2, Locate: long, LocatedOn: []int{1}}})
 	if len(clipped) != 1 || len([]rune(clipped[0].Text)) != detailClipRunes+1 { // +1 for the ellipsis
 		t.Errorf("locate line is not clipped to %d runes: %+v", detailClipRunes, clipped)
 	}

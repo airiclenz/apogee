@@ -34,7 +34,7 @@ package domain
 // session written before a variant existed reopens unchanged.
 
 // ToolSummary is the sealed sum type of the structured outcomes a tool may report
-// alongside its prose Content. The variants are the seven below; the marker method is
+// alongside its prose Content. The variants are the six below; the marker method is
 // unexported, so no package outside internal/* can add one.
 type ToolSummary interface {
 	isToolSummary() // sealing marker; carries no data
@@ -90,13 +90,3 @@ func (DiffStat) isToolSummary() {}
 type SearchHits struct{ Count int }
 
 func (SearchHits) isToolSummary() {}
-
-// OpenedFile is open_file's outcome: the size of the file body and where an optional
-// locate term was found in it.
-type OpenedFile struct {
-	Lines     int    // lines in the file body
-	Locate    string // the requested locate term; "" when none was
-	LocatedOn []int  // 1-based line numbers it was found on
-}
-
-func (OpenedFile) isToolSummary() {}

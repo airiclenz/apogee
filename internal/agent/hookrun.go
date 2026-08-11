@@ -307,9 +307,9 @@ func callChanged(before, after domain.ToolCall) bool {
 
 // toolResultChanged reports whether the result differs from its pre-fire snapshot — the
 // post-tool-result acted probe (R4). It compares field by field on purpose: ToolResult.Summary
-// is an interface that routinely holds an UNCOMPARABLE value (domain.OpenedFile carries a
-// []int, so every successful open_file produces one), and the whole-struct compare this
-// replaces panicked with "comparing uncomparable type domain.OpenedFile" exactly when the hook
+// is an interface that routinely holds an UNCOMPARABLE value (domain.ReadSpan carries the []int
+// of located line numbers, so every successful read_file produces one), and the whole-struct
+// compare this replaces panicked with "comparing uncomparable type …" exactly when the hook
 // did NOT act — Go short-circuits a struct compare on the first differing field, so only the
 // no-op path reached Summary.
 //

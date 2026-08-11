@@ -405,8 +405,8 @@ type toolPresenter struct {
 
 	// body renders the lines laid out BENEATH the branch when the result's typed summary supplied
 	// the branch line itself. It takes the whole result rather than its prose, because what such
-	// a body is read off differs by tool: view_diff renders its Content, open_file the located
-	// line numbers its domain.OpenedFile carries. A body derived from what the call ASKED for is
+	// a body is read off differs by tool: view_diff renders its Content, read_file the located
+	// line numbers its domain.ReadSpan carries. A body derived from what the call ASKED for is
 	// argBody's instead.
 	body func(res domain.ToolResult) []detailLine
 
@@ -440,8 +440,8 @@ const askUserToolName = "ask_user"
 // the engine cannot supply without growing a wire (design call 14) is a hook returning false,
 // which leaves the tool's own prose floor in the slot rather than inventing a number.
 //
-// Every detail extractor here renders PROSE. The seven tools that report a typed summary
-// (read_file, write_file, list_dir, grep, view_diff, web_search, open_file) word their slot
+// Every detail extractor here renders PROSE. The six tools that report a typed summary
+// (read_file, write_file, list_dir, grep, view_diff, web_search) word their slot
 // from that summary through their stat hook, and keep firstLineDetail as the floor for a result
 // that carries none — a degraded card is that tool's own first line, never a file dumped into the
 // transcript. The rest quote their fixed sentence or hand free-form output (a command run, a
@@ -525,14 +525,6 @@ var toolRegistry = map[string]toolPresenter{
 		detail: firstLineDetail, // floor; the "No changes detected" sentinel renders here too
 		stat:   diffStatStat,
 		body:   viewDiffBody, // the coloured diff beneath a domain.DiffStat branch line
-	},
-	"open_file": {
-		label:  "Open",
-		verb:   "opening",
-		target: openFileTarget, // path, plus `· locate "…"` when a term was asked for
-		detail: firstLineDetail,
-		stat:   openedLinesStat,
-		body:   openFileBody, // the located line numbers, when a term was asked for
 	},
 	"copy_file": {
 		label:  "Copy",
@@ -1070,7 +1062,7 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 // absorbProse fills the two halves from the result's PROSE — the layers that predate the ratified
 // per-tool table, and still the only thing a tool with no typed outcome has. A result carrying a
 // domain.ToolSummary skips them: what its slot says is its stat hook's word, and all such a result
-// leaves here is the body its presenter reads off it (view_diff's diff, open_file's located lines).
+// leaves here is the body its presenter reads off it (view_diff's diff, read_file's located lines).
 func (tv *toolView) absorbProse(p toolPresenter, known bool, result domain.ToolResult) {
 	if result.Summary != nil {
 		if known && p.body != nil {
@@ -1167,17 +1159,6 @@ func readSpanStat(res domain.ToolResult) (string, bool) {
 		n = 0
 	}
 	return plural(n, "line"), true
-}
-
-// openedLinesStat words open_file's slot as the file body's line count. The locate term the call
-// asked for leads the TARGET now (openFileTarget) and the lines it was found on lay out beneath
-// (openFileBody), so the slot says the one thing neither of those does.
-func openedLinesStat(res domain.ToolResult) (string, bool) {
-	v, ok := res.Summary.(domain.OpenedFile)
-	if !ok {
-		return "", false
-	}
-	return plural(v.Lines, "line"), true
 }
 
 // writtenLinesStat words write_file's slot as the number of lines the call WRITES, read off its
@@ -1524,17 +1505,6 @@ func readFileTarget(args map[string]any) string {
 		locate = `locate "` + locate + `"`
 	}
 	return qualifiedTarget(head, locate)
-}
-
-// openFileTarget leads open_file's branch with the path and the locate term the call asked for,
-// quoted the way the table spells it. The lines the term was found on lay out beneath the branch
-// (openFileBody) rather than in the target, which names WHAT was opened and asked for.
-func openFileTarget(args map[string]any) string {
-	locate := stringArg("locate")(args)
-	if locate != "" {
-		locate = `locate "` + locate + `"`
-	}
-	return qualifiedTarget(stringArg("path")(args), locate)
 }
 
 // listDirTarget leads list_dir's branch with the path, marked "· recursive" when the call asked
@@ -1894,7 +1864,7 @@ func commitDetail(content string) toolOutcome {
 
 // viewDiffBody is view_diff's body hook: the coloured diff read off the result's prose, which is
 // where that tool's body lives (diffBody). The result-shaped signature is the registry's
-// (toolPresenter.body) — open_file's body is read off its typed summary instead.
+// (toolPresenter.body) — read_file's body is read off its typed summary instead.
 func viewDiffBody(res domain.ToolResult) []detailLine {
 	return diffBody(res.Content)
 }
@@ -1910,29 +1880,6 @@ func viewDiffBody(res domain.ToolResult) []detailLine {
 // read to locate something.
 func readFileBody(res domain.ToolResult) []detailLine {
 	v, ok := res.Summary.(domain.ReadSpan)
-	if !ok || v.Locate == "" {
-		return nil
-	}
-	if len(v.LocatedOn) == 0 {
-		return []detailLine{{Text: clipDetail(fmt.Sprintf("Located %q on no lines", v.Locate))}}
-	}
-	numbers := make([]string, len(v.LocatedOn))
-	for i, n := range v.LocatedOn {
-		numbers[i] = strconv.Itoa(n)
-	}
-	return []detailLine{{Text: clipDetail(fmt.Sprintf("Located %q on lines: %s", v.Locate, strings.Join(numbers, ", ")))}}
-}
-
-// openFileBody lays open_file's LOCATE REPORT out beneath the branch: the lines the requested term
-// was found on, or the statement that it was found on none — a case only the typed summary can
-// tell apart from "no locate was asked for". A call that asked for no term has no report and so no
-// body: the file's content belongs to the model, and the slot's line count already says its size.
-//
-// The report moved here when the ratified table gave the slot to that count (openedLinesStat) and
-// the term to the target (openFileTarget): three facts, three places, none of them repeating
-// another.
-func openFileBody(res domain.ToolResult) []detailLine {
-	v, ok := res.Summary.(domain.OpenedFile)
 	if !ok || v.Locate == "" {
 		return nil
 	}
