@@ -126,6 +126,15 @@ type Agent struct {
 	// Mechanism, so it stays live under Bypass (D5/D6).
 	tokens *apogeectx.TokenEstimator
 
+	// usage is THIS Agent's cumulative token accounting — the running sum every UsageEvent it
+	// emits is stamped with, so a Driver reads session totals off the latest event per agent
+	// instead of summing a stream (domain.UsageEvent). It counts this Agent's own calls only:
+	// newChildAgent builds a child through newAgent, which gives it a fresh zero tally, so a
+	// sub-agent's events carry CHILD-LOCAL totals and per-agent grouping stays with the observer,
+	// which already has the Depth and CallID stamps to group by. Like tokens and tracker it is
+	// per-Session and NOT serialized — a resumed Agent counts from zero.
+	usage usageTally
+
 	// prompts is the ONE prompt surface this Agent's Steps designate on their context
 	// (domain.PromptSlot): the slot every human gate reached under a Step queues on, whatever KIND
 	// of gate it is — an Approval the loop raises itself, or an ask_user question a tool raises one
@@ -162,6 +171,42 @@ type Agent struct {
 	callID       string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
 	task         string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
 	name         string              // this Agent's display identity in words: the optional short name the spawning sub_agent call supplied, normalised to a trimmed first line; empty = unnamed, and every display falls back to task. Display only, never privilege (ADR 0005)
+}
+
+// usageTally is one Agent's running token accounting: the sums and the call count behind the
+// cumulative fields of every domain.UsageEvent that Agent emits. It is deliberately a plain
+// value struct on the Agent — the loop touches it only from the goroutine driving that Agent
+// (the single-goroutine contract above; a fan-out's children are separate Agents with separate
+// tallies), so it needs no lock, and holding no pointer keeps it copy-safe.
+type usageTally struct {
+	prompt     int
+	completion int
+	total      int
+	calls      int
+}
+
+// record folds one completed upstream call's server-reported usage into the running totals and
+// returns the UsageEvent to emit for it: the call's OWN counts in the fill fields, the UPDATED
+// totals in the cumulative ones. TotalTokens is folded as the server reported it rather than
+// recomputed from the two parts, so the totals stay consistent with the server's own arithmetic
+// (a server may count cached or reasoning tokens the split does not show). A caller accounting
+// for something other than a Turn's completion — Compaction — sets Maintenance on the returned
+// event before emitting it.
+func (t *usageTally) record(base domain.EventBase, prompt, completion, total int) domain.UsageEvent {
+	t.prompt += prompt
+	t.completion += completion
+	t.total += total
+	t.calls++
+	return domain.UsageEvent{
+		EventBase:                  base,
+		PromptTokens:               prompt,
+		CompletionTokens:           completion,
+		TotalTokens:                total,
+		CumulativePromptTokens:     t.prompt,
+		CumulativeCompletionTokens: t.completion,
+		CumulativeTotalTokens:      t.total,
+		CumulativeCalls:            t.calls,
+	}
 }
 
 // New constructs an Agent from cfg. It validates the configuration — including the

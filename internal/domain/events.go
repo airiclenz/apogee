@@ -155,11 +155,32 @@ type ErrorEvent struct {
 // observer reads the latest Depth-0 UsageEvent for the current context fill and times the
 // completion against its own clock for throughput. Like every variant it nests by Depth, so
 // a sub-agent's usage reaches the parent's observer at its nesting level.
+//
+// The Cumulative* fields carry the EMITTING agent's running totals for the whole session —
+// every completion it has accounted for, itself included — so a Driver reports session usage
+// by keeping the LATEST event per agent instead of summing a stream it may have joined late
+// or partially. They obey the same latest-wins rule as the fill fields above. They are
+// per-emitting-agent: a sub-agent counts only its OWN calls (it starts from zero and its
+// totals are never folded into the parent's), so an observer groups them by the Depth and
+// CallID stamps every event already carries and sums the agents it wants.
+//
+// Maintenance marks an accounting event that is NOT a Turn's completion — today the
+// Compaction call, whose tokens are real but whose prompt/completion counts describe the
+// summarizer's own request rather than the conversation's current fill. A reader of the
+// live gauge or a tokens/sec clock MUST skip a Maintenance event; a reader of the
+// cumulative totals accepts it, which is what keeps session usage honest across a fold.
 type UsageEvent struct {
 	EventBase
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
+
+	CumulativePromptTokens     int
+	CumulativeCompletionTokens int
+	CumulativeTotalTokens      int
+	CumulativeCalls            int
+
+	Maintenance bool
 }
 
 // AuditEvent surfaces one append-only audit record — a tool call, the guardrail

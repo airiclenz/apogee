@@ -510,12 +510,11 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 				// Surface the server's token accounting so a streaming observer can light up
 				// the context-usage gauge and time the completion for a tokens/sec readout. A
 				// server that omits usage sends no Usage here, so no event fires (events.go).
-				a.cfg.Events.Emit(domain.UsageEvent{
-					EventBase:        a.base(turn),
-					PromptTokens:     u.PromptTokens,
-					CompletionTokens: u.CompletionTokens,
-					TotalTokens:      u.TotalTokens,
-				})
+				// The same report also folds into this Agent's running tally, which the event
+				// carries in its cumulative fields: a Driver reads session totals off the latest
+				// event per agent rather than summing the stream, and a sub-agent — a separate
+				// Agent with its own tally — reports child-local totals at its own Depth.
+				a.cfg.Events.Emit(a.usage.record(a.base(turn), u.PromptTokens, u.CompletionTokens, u.TotalTokens))
 			}
 		case provider.DeltaError, provider.DeltaContextOverflow:
 			// Both are terminal, but only the overflow says something about the request that

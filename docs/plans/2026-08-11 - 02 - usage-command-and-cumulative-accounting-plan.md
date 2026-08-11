@@ -34,7 +34,7 @@
   reload with zero totals — acceptable), mechanisms/back-off behaviour
   (`internal/mechanisms/library.go` reads `Budget`, not UsageEvent — untouched).
 
-## 1. Engine: per-agent cumulative counters stamped on UsageEvent
+## 1. Engine: per-agent cumulative counters stamped on UsageEvent — ✅ DONE (2026-08-11)
 
 **What:** `domain.UsageEvent` (`internal/domain/events.go:158`) gains additive fields
 `CumulativePromptTokens`, `CumulativeCompletionTokens`, `CumulativeTotalTokens`,
