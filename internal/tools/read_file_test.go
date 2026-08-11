@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -211,7 +212,83 @@ func TestReadFile_Execute_ReportsTheSpanItRendered(t *testing.T) {
 			if !ok {
 				t.Fatalf("Summary = %#v, want a domain.ReadSpan", result.Summary)
 			}
-			if span != tc.wantSummary {
+			// ReadSpan carries a []int since it gained the locate fields, so it is
+			// uncomparable — the whole-struct == this replaces no longer compiles.
+			if !reflect.DeepEqual(span, tc.wantSummary) {
+				t.Errorf("Summary = %+v, want %+v", span, tc.wantSummary)
+			}
+		})
+	}
+}
+
+// TestReadFile_Execute_LocatesASubstring pins the locate parameter read_file absorbed from
+// the retired open_file: one "Located …" line between the header and the content, worded
+// exactly as open_file worded it, plus the same numbers on the summary. The scan covers the
+// WHOLE file even when a range narrows what is returned, so a match the caller cannot see
+// in the body is still reported — with its ABSOLUTE line number.
+func TestReadFile_Execute_LocatesASubstring(t *testing.T) {
+	t.Parallel()
+
+	const body = "alpha\nneedle here\ngamma\ndelta\nneedle again"
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "hay.txt"), []byte(body), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	tool := NewReadFile(root)
+
+	cases := []struct {
+		name        string
+		args        map[string]any
+		wantContent string
+		wantSummary domain.ReadSpan
+	}{
+		{
+			name:        "a hit lists every 1-based line",
+			args:        map[string]any{"path": "hay.txt", "locate": "needle"},
+			wantContent: "[File: hay.txt, 5 lines total, showing lines 1-5]\nLocated \"needle\" on lines: 2, 5\n" + body,
+			wantSummary: domain.ReadSpan{Start: 1, End: 5, Total: 5, Locate: "needle", LocatedOn: []int{2, 5}},
+		},
+		{
+			name:        "a miss says so rather than staying silent",
+			args:        map[string]any{"path": "hay.txt", "locate": "absent"},
+			wantContent: "[File: hay.txt, 5 lines total, showing lines 1-5]\nLocated \"absent\" on no lines\n" + body,
+			// A set Locate with no LocatedOn is what distinguishes "asked, found
+			// nothing" from "never asked" — the prose cannot.
+			wantSummary: domain.ReadSpan{Start: 1, End: 5, Total: 5, Locate: "absent"},
+		},
+		{
+			name:        "no locate leaves the output byte-identical",
+			args:        map[string]any{"path": "hay.txt"},
+			wantContent: "[File: hay.txt, 5 lines total, showing lines 1-5]\n" + body,
+			wantSummary: domain.ReadSpan{Start: 1, End: 5, Total: 5},
+		},
+		{
+			name:        "a match outside the returned range is still reported",
+			args:        map[string]any{"path": "hay.txt", "start_line": 1, "end_line": 2, "locate": "needle again"},
+			wantContent: "[File: hay.txt, 5 lines total, showing lines 1-2]\nLocated \"needle again\" on lines: 5\nalpha\nneedle here",
+			wantSummary: domain.ReadSpan{Start: 1, End: 2, Total: 5, Locate: "needle again", LocatedOn: []int{5}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(), callWith(t, "c1", tc.args))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.Content != tc.wantContent {
+				t.Errorf("Content = %q, want %q", result.Content, tc.wantContent)
+			}
+			span, ok := result.Summary.(domain.ReadSpan)
+			if !ok {
+				t.Fatalf("Summary = %#v, want a domain.ReadSpan", result.Summary)
+			}
+			if !reflect.DeepEqual(span, tc.wantSummary) {
 				t.Errorf("Summary = %+v, want %+v", span, tc.wantSummary)
 			}
 		})

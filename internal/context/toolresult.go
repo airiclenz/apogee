@@ -27,7 +27,7 @@ const (
 // toolResultElisionMarker replaces the elided middle of a truncated result. apogee-sim's marker
 // also carried a codeinfo structural summary (`compress.go:521-526` @pin); codeinfo is DROPPED in
 // apogee (catalogue C7), so the marker is the plain elision note plus the same re-read hint —
-// apogee's read_file tool takes start_line/end_line (`internal/tools/read_file.go:18-19`), so the
+// apogee's read_file tool takes start_line/end_line (`internal/tools/read_file.go:21-22`), so the
 // hint is actionable.
 const toolResultElisionMarker = "\n[truncated to fit the context budget — re-read with start_line/end_line for the omitted range]\n\n"
 

@@ -59,7 +59,12 @@ summary variant, and their TUI presenters are deleted; docs record the merge.
   record; ~50 mentions stay).
 - Per-profile tool rosters; any release act.
 
-## 1. read_file gains `locate` — schema, rendering, ReadSpan fields
+## 1. read_file gains `locate` — schema, rendering, ReadSpan fields — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): `LocatedOn []int` makes `ReadSpan` uncomparable, so the pre-existing
+`TestReadFile_Execute_ReportsTheSpanItRendered` whole-struct `==` (read_file_test.go:214) no
+longer compiled and became `reflect.DeepEqual`. The `toolresult.go` cite did shift (the new
+`strconv` import moved start_line/end_line by one) and is updated to `read_file.go:21-22`.
 
 **What:**
 

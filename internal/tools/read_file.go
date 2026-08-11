@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -11,7 +12,7 @@ import (
 
 var readFileSpec = toolSpec{
 	name:        "read_file",
-	description: "Read the contents of a file by path, optionally restricted to a line range.",
+	description: "Read the contents of a file by path, optionally restricted to a line range, and optionally locating the line numbers where a substring occurs.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path"],
@@ -19,7 +20,8 @@ var readFileSpec = toolSpec{
     "path": {"type": "string", "description": "File path to read, relative to the workspace root or absolute"},
     "start_line": {"type": "integer", "description": "Optional 1-based start line"},
     "end_line": {"type": "integer", "description": "Optional 1-based end line (inclusive)"},
-    "max_lines": {"type": "integer", "description": "Maximum number of lines to return"}
+    "max_lines": {"type": "integer", "description": "Maximum number of lines to return"},
+    "locate": {"type": "string", "description": "Optional substring to locate; the result reports the absolute 1-based line numbers where it occurs. The whole file is always scanned, even when a line range narrows the returned content."}
   }
 }`),
 }
@@ -29,10 +31,11 @@ type readFileArgs struct {
 	StartLine int    `json:"start_line"`
 	EndLine   int    `json:"end_line"`
 	MaxLines  int    `json:"max_lines"`
+	Locate    string `json:"locate"`
 }
 
-// ReadFile reads a file's contents, optionally restricted to a line range. It is a
-// read-only tool scoped to a sandbox root.
+// ReadFile reads a file's contents, optionally restricted to a line range and optionally
+// reporting where a substring occurs. It is a read-only tool scoped to a sandbox root.
 type ReadFile struct {
 	toolSpec
 	root string
@@ -87,6 +90,12 @@ func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 // and the lines shown, mirroring the oracle's read output. It returns the same three
 // numbers the header states as a domain.ReadSpan, so a host reads the span as data
 // instead of parsing it back out of the sentence.
+//
+// When args.Locate is set, the WHOLE file is scanned — not just the selected range — and a
+// single "Located …" line naming the absolute 1-based line numbers is emitted between the
+// header and the content, so a match outside a narrowed span is still reported. The span
+// carries those same numbers as data. An empty Locate means none was requested and the
+// output is byte-identical to a plain read.
 func renderFile(displayPath, content string, args readFileArgs) (string, domain.ReadSpan) {
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
@@ -116,7 +125,34 @@ func renderFile(displayPath, content string, args readFileArgs) (string, domain.
 	header := fmt.Sprintf("[File: %s, %d lines total, showing lines %d-%d]",
 		displayPath, totalLines, start+1, start+len(selected))
 	span := domain.ReadSpan{Start: start + 1, End: start + len(selected), Total: totalLines}
-	return header + "\n" + strings.Join(selected, "\n") + truncated, span
+	body := strings.Join(selected, "\n") + truncated
+
+	if args.Locate == "" {
+		return header + "\n" + body, span
+	}
+
+	span.Locate = args.Locate
+	for i, line := range lines {
+		if strings.Contains(line, args.Locate) {
+			span.LocatedOn = append(span.LocatedOn, i+1)
+		}
+	}
+	return header + "\n" + locateReport(span.Locate, span.LocatedOn) + "\n" + body, span
+}
+
+// locateReport words the one-line locate result: the 1-based line numbers the term was
+// found on, or "on no lines" when it occurs nowhere. The sentence is BUILT from the same
+// numbers the summary carries, so the two can never disagree.
+func locateReport(locate string, locatedOn []int) string {
+	if len(locatedOn) == 0 {
+		return fmt.Sprintf("Located %q on no lines", locate)
+	}
+
+	numbers := make([]string, len(locatedOn))
+	for i, n := range locatedOn {
+		numbers[i] = strconv.Itoa(n)
+	}
+	return fmt.Sprintf("Located %q on lines: %s", locate, strings.Join(numbers, ", "))
 }
 
 // Ensure ReadFile satisfies the domain.Tool contract at compile time. The same guard

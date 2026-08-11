@@ -40,9 +40,24 @@ type ToolSummary interface {
 	isToolSummary() // sealing marker; carries no data
 }
 
-// ReadSpan is read_file's outcome: which lines of the file were returned, and how many
-// lines the file has in total. Start and End are 1-based and inclusive.
-type ReadSpan struct{ Start, End, Total int }
+// ReadSpan is read_file's outcome: which lines of the file were returned, how many lines
+// the file has in total, and where an optional locate term was found in it. Start and End
+// are 1-based and inclusive.
+//
+// The locate fields make ReadSpan UNCOMPARABLE (LocatedOn is a slice), so a host that
+// wants to know whether two results differ must compare field by field rather than with
+// == (see internal/agent/hookrun.go's toolResultChanged).
+type ReadSpan struct {
+	Start, End, Total int
+
+	// Locate is the requested locate term; "" when none was requested.
+	Locate string
+	// LocatedOn holds the ABSOLUTE 1-based line numbers the term was found on. The whole
+	// file is scanned, so a match outside the returned Start–End span is still listed. A
+	// set Locate with an empty LocatedOn means a term was requested and matched nothing,
+	// which the prose cannot distinguish without a prefix test.
+	LocatedOn []int
+}
 
 func (ReadSpan) isToolSummary() {}
 
