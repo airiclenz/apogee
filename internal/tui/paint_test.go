@@ -896,13 +896,13 @@ func TestPaintedTabBearingToolTargetKeepsItsColumn(t *testing.T) {
 // byte-for-byte where a call with no target at all leaves it. The gauge and the exact-window-width
 // assertions stay as the mechanism — they are what a leak would actually break.
 //
-// The history is why these three: statusTargetCells promised the left slot could not push the gauge
-// off the row, and toolPhrase used to spend it in RUNES — so a tab, one rune the screen pays four
+// The history is why these three: a 32-cell cap once promised the left slot could not push the gauge
+// off the row, and the phrase that spent it counted RUNES — so a tab, one rune the screen pays four
 // cells for, bought four times the room the cap thought it was selling. A path of 32 runes clipped
 // to the cap painted 91 cells (probed), statusLeft then truthfully truncated that to the whole
-// window, and the gauge the cap exists to protect was gone from an 80-column row. The cap is now the
-// COLLAPSED run gist's alone (TestToolPhraseClipsTheTarget pins it there, in cells); this row proves
-// the status line no longer depends on it at all.
+// window, and the gauge the cap existed to protect was gone from an 80-column row. Cap and phrase
+// are both gone now — the COLLAPSED run's gist was their last caller and it went quiet while the
+// child works — and this row proves the status line never depended on them in the first place.
 //
 // A target with a tab in it is a real target: a tab is legal in a POSIX filename and the model names
 // the file it wants read, so the status line does not get to assume the name is tame. Both measures

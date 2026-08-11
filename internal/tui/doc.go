@@ -299,11 +299,10 @@
 // asking — with a live activity phrase and an elapsed clock ("thinking · 12s", "reading · 3s",
 // "sub-agent · searching · 6s"). A tool's phrase is the presented VERB and nothing else: the target
 // it used to carry restated the tool-call block one row beneath it and routinely pushed the context
-// gauge off the row, so it stays with the block. [toolPhrase] words verb and target together for a
-// surface that would have no block to read, but no caller spends it that way any more: a collapsed
-// sub-agent run's gist was the last one, and it now says nothing while the child works (see the
-// transcript section above). Dropping the target makes the elapsed clock's key a real
-// question: back-to-back reads
+// gauge off the row, so it stays with the block. No surface words verb and target together any
+// more: a collapsed sub-agent run's gist was the last one that did, and it now says nothing while
+// the child works (see the transcript section above). Dropping the target makes the elapsed clock's
+// key a real question: back-to-back reads
 // both word themselves "reading", so a clock restarted on a change of TEXT would count the first
 // file's call straight through the second. A tool activity therefore carries the id of the call it
 // describes (domain.ToolCall.ID) and restarts when that changes; every other kind keeps the
@@ -653,7 +652,7 @@
 // [transcript.addEphemeralNote], [transcript.addError], [transcript.addApproval] and
 // [transcript.addToolResult]'s orphan branch for the scrollback, [toolView.sanitize] (run by
 // [toolView.finishDisplay], which presentToolCall and enrichWithResult both leave through) for the
-// tool card and everything derived from it (toolActivityVerb, toolPhrase), and each popupRow
+// tool card and everything derived from it (toolActivityVerb, the gist), and each popupRow
 // builder for the overlays, since the popup module strips
 // nothing and truncates ANSI-preservingly. stripEscapes is idempotent and allocation-free on text
 // with nothing to rewrite — no control character, no DEL, no invalid UTF-8 byte — so a producer

@@ -526,7 +526,7 @@ const delegatingSummary = "delegating"
 // become a body, its first line.
 //
 // While the run WORKS it is almost always empty, and that is the point. It used to name the call the
-// span had open, verb and shortened target together (toolPhrase, activity.go), re-read on every
+// span had open, verb and shortened target together under a 32-cell cap, re-read on every
 // frame: a cell that changed several times a second beside two that did not, so the eye was pulled
 // to the least durable thing on the row and the count and fill it sat next to were the harder ones
 // to read. The work it named is not lost, only left where it already stands: every one of those

@@ -145,13 +145,6 @@ func formatElapsed(d time.Duration) string {
 	return fmt.Sprintf("%dm %02ds", secs/secondsPerMinute, secs%secondsPerMinute)
 }
 
-// statusTargetCells caps a tool target in the CELLS the screen spends on it (toolPhrase measures
-// it through the width authority — width.go). It is far tighter than clipDetail's transcript cap:
-// the phrase it bounds rides a COLLAPSED run's single summary line (subAgentGist, render.go),
-// beside that run's own call count and context fill, so a long path or a pasted command must not
-// crowd them off it.
-const statusTargetCells = 32
-
 // toolActivityVerb builds the actTool phrase for a call from the presentation registry: the tool's
 // active verb and nothing else ("reading", "running"). An unregistered (dynamic MCP) tool inherits
 // presentToolCall's "running <raw name>" fallback, so it is still a truthful fragment.
@@ -159,8 +152,9 @@ const statusTargetCells = 32
 // The TARGET is deliberately absent. The status line shares one row with the context gauge, and the
 // path it used to carry was both the thing that pushed the gauge off that row and a restatement of
 // the tool-call block already on screen a line below — so the slot keeps the half only it can say
-// (what is happening right now) and leaves the target to the block. toolPhrase still words the pair
-// for the one surface that has no block to read: a collapsed sub-agent run's gist.
+// (what is happening right now) and leaves the target to the block. Nothing words the pair any more:
+// a collapsed sub-agent run's gist was the last surface that did, and it now says nothing while the
+// child works (subAgentGist, subagentblock.go).
 //
 // It needs no escape-stripping of its own: the phrase is built ONLY from presentToolCall's view,
 // which leaves that function through finishDisplay, so the status line inherits the tool card's
@@ -169,31 +163,6 @@ const statusTargetCells = 32
 // earliest point at which a hostile model's argument reaches the screen.
 func toolActivityVerb(call domain.ToolCall, ws workspaceRoot) string {
 	return presentToolCall(call, ws).Verb
-}
-
-// toolPhrase words a call's view as the sentence fragment naming what it is doing right now, target
-// and all ("reading · main.go", "running · npm test"). It belongs to the COLLAPSED sub-agent run's
-// gist (subAgentGist, render.go) and to that alone: inside a collapsed run the gist is the only live
-// view of what the child is touching, so it keeps the target the status line sheds
-// (toolActivityVerb).
-//
-// It takes the view rather than the call, since the transcript's own entries carry views already
-// sanitized by presentToolCall.
-func toolPhrase(measure widthAuthority, tv toolView) string {
-	if tv.Target == "" {
-		return tv.Verb
-	}
-	// The cap is spent in CELLS, through the width authority (width.go) — the painter's own measure,
-	// so the budget the slot promises is the budget the screen bills. Spent in RUNES it was no budget
-	// at all: a double-width glyph is one rune the screen pays two cells for, so a 32-rune CJK path
-	// painted up to 64 cells and the row carrying it was truthfully truncated whole against the
-	// window. The ellipsis is spent INSIDE the budget (Truncate's tail), so the clipped target totals
-	// at most statusTargetCells cells rather than the cap plus one more.
-	//
-	// The target is EXPANDED before the cap counts it (expandTabs, render.go) and stays so: the gist's
-	// line is wrapped by wrapText, which settles its own tabs — so no tab ever reaches the screen, and
-	// the cap must count the form that does.
-	return tv.Verb + " · " + measure.Truncate(expandTabs(tv.Target), statusTargetCells, "…")
 }
 
 // setActivity moves the model to a new activity that is not an open tool call, keyed on the phrase

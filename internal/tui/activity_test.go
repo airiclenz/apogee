@@ -96,43 +96,6 @@ func TestToolActivityVerb(t *testing.T) {
 	}
 }
 
-// TestToolPhraseClipsTheTarget pins the cap on the phrase that DOES carry a target: a collapsed
-// run's gist (subAgentGist, render.go), which has no block of its own to read the path off.
-//
-// The cap is spent in CELLS, ellipsis included, so the clipped target totals the budget rather
-// than the budget plus a cell — and a double-width path spends the same 32 the ASCII one does,
-// which is the whole point of measuring rather than counting runes.
-func TestToolPhraseClipsTheTarget(t *testing.T) {
-	longPath := "internal/tui/" + strings.Repeat("deeply-nested/", 6) + "main.go"
-
-	measure := newWidthAuthority()
-	for _, tc := range []struct {
-		name string
-		path string
-	}{
-		{"an ASCII path", longPath},
-		{"a double-width path", strings.Repeat("字", 32) + ".go"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := toolPhrase(measure, presentToolCall(domain.ToolCall{
-				Tool:      "read_file",
-				Arguments: []byte(`{"path":"` + tc.path + `"}`),
-			}, workspaceRoot{}))
-			if !strings.HasPrefix(got, "reading · ") {
-				t.Fatalf("clipped phrase lost its verb: %q", got)
-			}
-			target := strings.TrimPrefix(got, "reading · ")
-			if !strings.HasSuffix(target, "…") {
-				t.Errorf("long target %q was not clipped: %q", tc.path, target)
-			}
-			if n := measure.Width(target); n > statusTargetCells {
-				t.Errorf("clipped target paints %d cells, want at most the cap's %d: %q",
-					n, statusTargetCells, target)
-			}
-		})
-	}
-}
-
 // ----------------------------------------------------------------------------
 // The elapsed clock
 // ----------------------------------------------------------------------------

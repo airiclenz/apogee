@@ -696,11 +696,11 @@ func TestStripEscapesDropsControlCharacters(t *testing.T) {
 	}
 }
 
-// The live phrases — the status line's verb (toolActivityVerb) and the collapsed run gist's verb and
-// target (toolPhrase) — are built only from presentToolCall's view, so both inherit the tool card's
-// seam. They are pinned here because foldActivity paints the verb the moment a call is ANNOUNCED —
-// before any approval gate runs — which makes it the earliest point a hostile model's argument
-// reaches the screen.
+// The status line's verb (toolActivityVerb) is built only from presentToolCall's view, so it inherits
+// the tool card's seam rather than re-deriving it — as does the target the same view carries, pinned
+// beside it here because it is the other half a live surface could word. They are pinned because
+// foldActivity paints the verb the moment a call is ANNOUNCED — before any approval gate runs — which
+// makes it the earliest point a hostile model's argument reaches the screen.
 func TestToolActivityVerbCarriesNoEscape(t *testing.T) {
 	call := domain.ToolCall{
 		Tool:      "terminal",
@@ -712,10 +712,10 @@ func TestToolActivityVerbCarriesNoEscape(t *testing.T) {
 		t.Errorf("stripping ate the benign verb text: %q", verb)
 	}
 
-	phrase := toolPhrase(newWidthAuthority(), presentToolCall(call, workspaceRoot{}))
-	assertNoESCIn(t, "the gist phrase", phrase)
-	if !strings.Contains(phrase, "running") || !strings.Contains(phrase, "npm ") {
-		t.Errorf("stripping ate the benign phrase text: %q", phrase)
+	tv := presentToolCall(call, workspaceRoot{})
+	assertNoESCIn(t, "the presented target", tv.Target)
+	if !strings.Contains(tv.Target, "npm ") {
+		t.Errorf("stripping ate the benign target text: %q", tv.Target)
 	}
 
 	unknown := toolActivityVerb(domain.ToolCall{Tool: "mcp" + escCSI + "_thing"}, workspaceRoot{})

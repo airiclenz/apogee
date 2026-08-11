@@ -2110,7 +2110,8 @@ func writtenLines(args map[string]any) []detailLine {
 // most twice the rows the same 160 runes of ASCII take — a wall of double-width text costs scroll,
 // never content. Cell-exactness is the STATUS LINE's requirement, not the transcript's: that row is
 // shared with the context gauge, so an over-wide left slot pushes something the reader needs off the
-// screen, which is why toolPhrase (activity.go) spends its own cap through the width authority. The
+// screen — which is why that row carries the tool's verb alone now (toolActivityVerb, activity.go)
+// rather than a target it would have to cap in cells through the width authority. The
 // transcript shares nothing — a wide line wraps onto rows of its own and the block behind it paints
 // lower down, whole. TestPaintedWideDetailLineWrapsWithoutDisplacement (paint_test.go) is the probe
 // that measured all three of those claims and the pin that keeps them true.

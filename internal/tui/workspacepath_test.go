@@ -354,20 +354,6 @@ func TestUnregisteredToolCardQuotesItsArgumentsVerbatim(t *testing.T) {
 	}
 }
 
-// A collapsed run's live gist words a call from the same view the block does (toolPhrase →
-// presentToolCall), so the phrase on the run's summary line and the branch line inside it can never
-// spell one path two ways. (The status line spells no path at all — toolActivityVerb.)
-func TestToolPhraseSharesTheWorkspaceRelativePath(t *testing.T) {
-	t.Parallel()
-
-	ws := newWorkspaceRoot("/home/me/proj")
-	got := toolPhrase(newWidthAuthority(), presentToolCall(domain.ToolCall{Tool: "read_file",
-		Arguments: []byte(`{"path":"/home/me/proj/docs/plan.md"}`)}, ws))
-	if want := "reading · docs/plan.md"; got != want {
-		t.Errorf("tool phrase = %q, want %q", got, want)
-	}
-}
-
 // The transcript resolves the root once and keeps it across a session reset: /clear opens a new
 // conversation, not a new workspace.
 func TestTranscriptShortensPathsAndKeepsItsRootAcrossReset(t *testing.T) {
