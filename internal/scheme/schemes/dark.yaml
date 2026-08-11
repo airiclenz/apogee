@@ -25,7 +25,7 @@ diff-add: "#3fb950"    # diff "+" lines
 diff-del: "#f85149"    # diff "-" lines
 error: "#f85149"       # recovered-fault notices
 code: "#70BBFF"        # inline `code` + fenced code blocks
-tool-header: "#FFD060" # a tool-call block's header label (Run, List Dir, Sub-Agent, …) and the sub-agent rail that hangs off it — gold, so the blocks apogee ran read apart from the code it prints
+tool-header: "#E0D090" # a tool-call block's header label (Run, List Dir, Sub-Agent, …) and the sub-agent rail that hangs off it — gold, so the blocks apogee ran read apart from the code it prints
 
 # --- autonomy modes ----------------------------------------------------------------
 # The footer's mode markers, warming up the privilege ladder (least → most autonomous).
@@ -35,12 +35,12 @@ mode-allow-edits: "#58a6ff" # allow-edits — blue
 mode-auto: "#f0883e"        # auto — orange
 
 # --- prompt tokens -----------------------------------------------------------------
-skill: "#b1baff"    # skills — violet: the prompt's inline /token accent and its twin inside a sent block
+skill: "#40b0ff"    # skills — the prompt's inline /token accent and its twin inside a sent block
 file-ref: "#cdffa4" # the prompt's inline @file token accent — the tone a reference reads as
 
 # --- chrome accents ----------------------------------------------------------------
 prompt-toggle: "#b0d2ff" # the collapsed prompt's see-more / see-less marker — an apogee affordance that reads as chrome inside the block, not as more of what the human wrote
-tool-marker: "#FFB050"   # a tool block's synthesized "+N more lines" remainder marker — a warm "apogee is talking" line on a body column, so the count never reads as part of the output it counts
+tool-marker: "#E0B080"   # a tool block's synthesized "+N more lines" remainder marker — a warm "apogee is talking" line on a body column, so the count never reads as part of the output it counts
 tool-leader: "#8a8a8a"   # the ⋯ leader carrying a tool row's eye from its target to the outcome slot at the row's edge — seeded from `muted`, the tone the ▶ beside it wears; damp it further to make the dots recede
 
 # --- misc --------------------------------------------------------------------------
