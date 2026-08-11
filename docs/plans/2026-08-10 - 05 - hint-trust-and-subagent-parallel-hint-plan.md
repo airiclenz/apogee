@@ -169,7 +169,7 @@ precedent, test the note-decision function directly).
 
 **Commit:** `feat(provider): startup notice when the configured model is not advertised`
 
-## 3. Gate — tool-display overhaul archived
+## 3. Gate — tool-display overhaul archived — ✅ DONE (2026-08-11)
 
 Depends on item 2. Verification-only gate item; it exists so item 4 cannot start
 while the tool-display overhaul is still in flight (ratified sequencing call).
