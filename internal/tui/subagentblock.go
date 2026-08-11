@@ -131,9 +131,9 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 
 // renderSubAgentRun paints the head block of a sub-agent run — the whole of what a COLLAPSED run
 // shows, since renderView elides its span, and the opening block of an expanded one. The two states
-// differ in exactly what layout.md says they do: collapsed, the head's summary slot carries the
-// cascading summary of the work behind it; expanded, the head shows its full report and opens the
-// frame the span paints inside.
+// differ in exactly what layout.md says they do, and in nothing else: both heads carry the same
+// cascading summary of the work behind them (subAgentSummary), and expanded the head shows its full
+// report as well and opens the frame the span paints inside.
 //
 // A LONE run is drawn in the very shape a grouped one is (design call 3 of
 // docs/plans/"2026-08-11 - 01"): the same ┌─┶ opening its frame when it is open, the same rail down
@@ -158,9 +158,11 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 // star. Either way the block still contains an open call, which is exactly what layout.md makes the
 // star's rule.
 func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool) blockPaint {
-	view := head.tool
-	if !head.expanded {
-		view = collapsedSubAgentView(head, span)
+	// Both readings word the same <tool-top-level-details>; what the fold takes is the report BODY
+	// under it, and nothing else (expandedSubAgentView).
+	view := collapsedSubAgentView(head, span)
+	if head.expanded {
+		view = expandedSubAgentView(head, span)
 	}
 	view.finished = subAgentFinished(head)
 	// An OPEN lone run wears the very frame a grouped one does (design call 3): the ┌─┶ takes the
@@ -274,15 +276,21 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 	for _, m := range members {
 		marker, spanned := branchMarker(m.last), subAgentFramed(m.head, len(m.span))
 		view := m.head.tool
-		// A QUEUED member is neither of the two readings below: it has no work to summarise and
+		// A QUEUED member is none of the readings below: it has no work to summarise and
 		// nothing to open, so it says the one word and takes the ordinary member painter with an
 		// empty body — which is what leaves it without an indicator and without a click target
 		// (scheduledSubAgentView). It cannot be spanned by construction: a delegation with entries
 		// behind it has started.
+		//
+		// The two fold states differ in the BODY alone: an open member keeps the very
+		// <tool-top-level-details> its shut row wore (expandedSubAgentView), so the click that
+		// opened it adds the report without taking the summary of the run away.
 		switch {
 		case subAgentScheduled(m.head, len(m.span)):
 			view = scheduledSubAgentView(m.head)
-		case spanned && !m.head.expanded:
+		case spanned && m.head.expanded:
+			view = expandedSubAgentView(m.head, m.span)
+		case spanned:
 			view = collapsedSubAgentView(m.head, m.span)
 		}
 		// An OPEN delegation's row is the top of a frame rather than a twig of the list: the corner
@@ -423,19 +431,35 @@ func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room 
 	return append(out, subAgentPromptRows(th, tv.task, width)...), true
 }
 
-// collapsedSubAgentView is what a COLLAPSED delegation shows of itself, wherever it is folded: its
-// own header view with the cascading summary in the outcome slot and no body at all. The body is
-// dropped because the summary already carries the report's first line and no block says the same
-// thing twice in two adjacent rows; the copy is a paint-time act on facts the entry keeps whole,
-// which is why expanding shows the report the delegation actually returned.
+// expandedSubAgentView is what an OPEN delegation shows of itself, wherever it is folded: its own
+// header view with the run's cascading summary in the outcome slot (subAgentSummary), over the
+// report body the collapsed reading drops.
+//
+// The slot is the same one in both states BECAUSE the fold is about the body alone. What the head
+// carries of its own — a report gist promoted into the slot by the presenter, or the typed `done`
+// where the report became a body — is not lost by the swap: subAgentSummary's last cell is exactly
+// that text, now behind the count of the work and the delegate's fill. An open row reverting to the
+// raw head view would drop the two cells the collapsed row had just shown, so opening a delegation
+// would tell the reader LESS about it than leaving it shut.
+//
+// The copy is a paint-time act on facts the entry keeps whole, which is why the body it lays out is
+// the report the delegation actually returned.
+func expandedSubAgentView(head entry, span []entry) toolView {
+	view := head.tool
+	view.Summary = subAgentSummary(head, span)
+	return view
+}
+
+// collapsedSubAgentView is what a COLLAPSED delegation shows of itself, wherever it is folded: the
+// open reading above with no body at all. The body is dropped because the summary already carries
+// the report's first line and no block says the same thing twice in two adjacent rows.
 //
 // One reading serves the lone block and the folded group's member row alike (renderSubAgentRun,
 // renderSubAgentGroup): grouping changes the frame a delegation is drawn in, and a second wording
 // of "what does a collapsed delegation say" would part company with this one — taking the per-child
 // live tail a fan-out is observed through (ADR 0039) with it.
 func collapsedSubAgentView(head entry, span []entry) toolView {
-	view := head.tool
-	view.Summary = subAgentSummary(head, span)
+	view := expandedSubAgentView(head, span)
 	view.Details = toolBody{} // the zero body: no lines, and so nothing to lay out beneath
 	return view
 }

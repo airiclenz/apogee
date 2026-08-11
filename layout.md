@@ -837,7 +837,10 @@ with the whole span when it is collapsed, where the blinking head and the status
 `sub-agent · responding` already say a delegate is talking. A preview at the top level would say
 the opposite: that this is the main agent's answer. Expanding the run reveals the report in full
 and the inner blocks *in their own states*, each collapsed unless it was itself clicked open: the
-cascade is this one rule applied at every depth, not a special case.
+cascade is this one rule applied at every depth, not a special case. What expanding does **not**
+do is take the header's summary slot back: the open row carries the same `N tool calls · <fill>`
+and gist the collapsed row carried, and the report, the prompt and the span come out *beneath* it —
+a row that said less once opened than it did shut would punish the click that opened it.
 
 **Concurrent delegates get one run each.** When a reply asks for several delegations at once
 they run concurrently (ADR 0039), and the scrollback shows **one run per child, in the order

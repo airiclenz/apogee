@@ -981,7 +981,8 @@ func runCall(tr *transcript, id, command, output string, depth int) {
 // default the whole run is ONE block reading as ONE summarised line: the rail, the inner blocks and
 // every spacer among them are gone, the report body is gone with them, and the head's summary slot
 // carries the cascading count and gist.
-// Expanded, the head shows the report it actually returned, opens the ┌─┶ frame a grouped
+// Expanded, the head keeps that same summary slot — the fold is about the BODY and nothing else —
+// shows the report it actually returned, opens the ┌─┶ frame a grouped
 // delegation's row opens (design call 3), and the railed span comes back inside it — with each
 // inner block in its OWN state, which is why the umbrella the two inner calls fold under
 // (renderSuperGroup) comes back with both of its type rows still shut. The head has reported, so
@@ -1012,7 +1013,7 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 		"✦ Sub-Agent",
 		// Open, the lone run wears the grouped member's frame: ┌ at column 0, the arm across to its
 		// own branch, the ✓ after the name and the ▼ still at the far edge.
-		leaderEdgeRow("┌─┶ survey the tests ✓ ⋯ done", glyphExpanded),
+		leaderEdgeRow("┌─┶ survey the tests ✓ ⋯ 2 tool calls · 12k/32k · done", glyphExpanded),
 		"    Found 4 gaps",
 		"    in the suite",
 		"    here they are",
@@ -1269,7 +1270,7 @@ func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
-		leaderEdgeRow("┌─┶ survey the repo ✓ ⋯ survey complete", glyphExpanded),
+		leaderEdgeRow("┌─┶ survey the repo ✓ ⋯ 2 tool calls · survey complete", glyphExpanded),
 		"│",
 		"│ survey the repo", // the outer span opens with the prompt the delegate was handed
 		"│",
@@ -1336,7 +1337,7 @@ func TestSubAgentStreamPreviewRailedWhenRunExpanded(t *testing.T) {
 		"✦ Sub-Agent",
 		// No ✓: the delegation has not reported, and the star — settled in a substring render — is
 		// the whole of what says it is working (design call 6).
-		leaderEdgeRow("┌─┶ survey the tests ⋯", glyphExpanded),
+		leaderEdgeRow("┌─┶ survey the tests ⋯ 0 tool calls", glyphExpanded),
 		"│",                  // the frame opens on the prompt the delegate was handed (item 6)…
 		"│ survey the tests", //
 		"│",                  // …and the join is railed, so the stream lands INSIDE the frame
@@ -1401,7 +1402,7 @@ func TestSubAgentStreamFramesAnOpenGroupMember(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Sub-Agent (2)",
-		leaderEdgeRow("┌─┶ survey the tests ⋯", glyphExpanded),
+		leaderEdgeRow("┌─┶ survey the tests ⋯ 0 tool calls", glyphExpanded),
 		"│",
 		"│ survey the tests",
 		"│",
@@ -1495,7 +1496,7 @@ func TestParentMessageKeepsTheDelegatesStreamInsideItsRun(t *testing.T) {
 		"✦ Sub-Agent",
 		// The frame opens on the run being OPEN and not on its being over: this delegate never
 		// reported, so the row wears the ┌─┶ and no ✓ (design call 6).
-		leaderEdgeRow("┌─┶ survey the tests ⋯", glyphExpanded),
+		leaderEdgeRow("┌─┶ survey the tests ⋯ 0 tool calls", glyphExpanded),
 		"│",
 		"│ survey the tests", // the span opens with the prompt, whatever the delegate went on to say
 		"│",

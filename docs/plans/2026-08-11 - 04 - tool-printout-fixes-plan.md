@@ -213,9 +213,23 @@ Update the gist wording in `layout.md:549-552` and the Grouped Sub-agents rules 
 
 Commit: `fix(tui): drop live action text from sub-agent summaries`
 
-## 6. TUI: expanded sub-agents keep their top-level details
+## 6. TUI: expanded sub-agents keep their top-level details — ✅ DONE (2026-08-11)
 
 Depends on item 5.
+
+NOTES (2026-08-11): the rule was taken literally, and two of its consequences are worth stating. (a) An
+open head whose span is still EMPTY — a delegate streaming its first words, nothing committed behind it
+yet — now says `0 tool calls` where the slot used to be blank; that is the same reading its collapsed
+row would give, and narrowing it would be a second wording of the summary the item forbids. (b) At
+narrow widths the promote-guard now bites on the open head: the run summary is a quoted line over the
+`done` stat, so where it leaves the name under 15 cells it demotes to the head's first body row and the
+typed `done` takes the slot (`TestExpandedSubAgentOpensWithItsPrompt`'s 34-column golden). That is the
+existing guard applied to the new slot, and collapsed and open answer it identically since it depends on
+width alone. Structurally, `collapsedSubAgentView` is now the open reading minus its body
+(`expandedSubAgentView`), so one wording of "what does a delegation say" serves both fold states. Docs
+beyond the item's named sketch: `internal/tui/doc.go`'s package map asserted that an open run's header
+row "says only what the delegation IS", and `layout.md`'s expanding sentence was silent on the slot —
+both now state the shipped rule.
 
 **What:** Expanded sub-agent rows currently revert to the raw head view and lose the
 summary slot: `renderSubAgentRun` (`internal/tui/subagentblock.go:159-164`, lone) and

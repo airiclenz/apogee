@@ -210,12 +210,13 @@ One row per consecutive same-type run, in time order. A row's
 - the vertical line on the very left of an expanded sub-agent is colored.
 - `┊` is only displayed if another grouped sub-agent follows after the expanded sub-agent. The last sub-agent in the group (if expanded) does not show this.
 - a RUNNING sub-agent's `<tool-top-level-details>` reads `N tool calls · <used>/<window>` and names no ongoing action. The call in flight is deliberately not spelled there: it changed several times a second while the two cells beside it held still, and each of those calls already has a block of its own inside the run, one click away. The one live word the slot adds is `· delegating`, and only while the most recent call open inside the run is itself a sub-agent — work the child has handed on, which its own blocks cannot show since the nested run is collapsed too. A finished sub-agent's slot is unchanged: its report's first line, or `· done` where the report became a body. This holds for a lone sub-agent exactly as for a grouped member.
+- expanding a sub-agent only ADDS: the open row keeps the very `<tool-top-level-details>` its collapsed row wore — the count, the fill, and the gist or `· done` — and the report, the prompt and the railed span come out beneath it. Opening never takes back what the shut row said, so the two fold states differ in the BODY alone. This holds for a lone sub-agent exactly as for a grouped member, running and finished alike.
 - a sub-agent the engine has not started yet is SCHEDULED: the model asked for it and it is queued behind the `parallel-agents` cap, holding no slot. Its `<tool-top-level-details>` says exactly `scheduled` — no tool-call count, no context fill, no gist, none of which exist yet — and its row carries no indicator and no click target, because there is nothing behind it to open. The moment its child starts, the row becomes an ordinary live sub-agent row and expands like any other. A lone sub-agent starts immediately and never shows this.
 
 ```text
 ✦ Sub-Agent (<group-count>)
   ┝ first-sub-agent-collapsed ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
-┌─┶ sub-agent-expanded ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+┌─┶ sub-agent-expanded ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▼
 │
 │ The initial prompt for the sub agent should be displayed here. If it contains
 │ more than one row, it needs to be wrapped. Markdown needs to be properly

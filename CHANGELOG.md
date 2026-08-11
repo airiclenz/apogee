@@ -85,6 +85,13 @@ point is a **minor** bump, not a breaking change.
   report's first line, or `done`. Lone and grouped delegations read alike, and the status line's own
   activity phrase is unaffected.
 
+- **Expanding a sub-agent no longer wipes its summary.** An open delegation reverted to the raw call
+  row, so the `N tool calls · 12k/32k · done` a reader had just been shown vanished the moment they
+  clicked it — the click that asks for more said less. The open row now carries the same right-hand
+  slot its collapsed row carried, running or finished, lone or grouped, and the report, the delegated
+  prompt and the railed span come out beneath it. Collapsed rows are unchanged; only the body was
+  ever the fold's business.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added

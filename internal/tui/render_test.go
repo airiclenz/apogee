@@ -589,13 +589,15 @@ func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
 		// A member is always a toggle target (its span), so its row always wears the state. Open, it
 		// is the ┌─┶ header of its own frame — the ┕ the last row would have closed the list with
 		// included, since the frame it opens is what that row now says.
-		leaderEdgeRow("┌─┶ first ⋯", glyphExpanded),
+		// Each open head keeps the run's own <tool-top-level-details>, exactly as its shut row
+		// would: these two delegates have streamed words and called nothing yet.
+		leaderEdgeRow("┌─┶ first ⋯ 0 tool calls", glyphExpanded),
 		"│",
 		"│ first", // each span opens with the prompt its own delegation was handed
 		"│",
 		"│ ✦ first child",
 		"┊", // the first run closes here…
-		leaderEdgeRow("┌─┶ second ⋯", glyphExpanded),
+		leaderEdgeRow("┌─┶ second ⋯ 0 tool calls", glyphExpanded),
 		"│", // …and the second opens a frame of its own, touching nothing of the first
 		"│ second",
 		"│",
@@ -963,9 +965,10 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 		want := strings.Join([]string{
 			header,
 			rows[0],
-			// Open, the row shows the delegation's own view — the report it promoted — and opens the
-			// frame: ┌ at column 0, the arm across to the branch, and the ▼ still at the far edge.
-			leaderEdgeRow("┌─┶ build ✓ ⋯ all clear", glyphExpanded),
+			// Open, the row keeps the very <tool-top-level-details> it wore shut — rows[1] word for
+			// word — and opens the frame: ┌ at column 0, the arm across to the branch, and the ▼
+			// still at the far edge. Only the body below it is the fold's business.
+			leaderEdgeRow("┌─┶ build ✓ ⋯ 1 tool call · all clear", glyphExpanded),
 			"│",       // the separator is railed too: the frame does not break under its own corner
 			"│ build", // the span opens with the prompt the delegate was handed (item 6)
 			"│",
@@ -1045,7 +1048,10 @@ func TestSubAgentMemberDoneOnItsOwnFinishedPhase(t *testing.T) {
 	}, "\n")
 	opened := strings.Join([]string{
 		"✦ Sub-Agent (2)",
-		leaderEdgeRow("┌─┶ survey ✓ ⋯ done", glyphExpanded),
+		// The open row says exactly what the collapsed one above it does — the count, then the
+		// finished delegation's one word — and adds the report beneath it, which is the whole of
+		// what the fold ever hid.
+		leaderEdgeRow("┌─┶ survey ✓ ⋯ 1 tool call · done", glyphExpanded),
 		"  │ found the bug", // the report the phase carried, laid out under the member gutter
 		"  │ in the parser",
 		"│",
@@ -1223,7 +1229,7 @@ func TestSubAgentCloserOnlyWhenAnotherGroupedMemberFollows(t *testing.T) {
 	t.Run("first member open: the list resumes, so its span closes with ┊", func(t *testing.T) {
 		want := strings.Join([]string{
 			header,
-			leaderEdgeRow("┌─┶ survey ✓ ⋯ all clear", glyphExpanded),
+			leaderEdgeRow("┌─┶ survey ✓ ⋯ 1 tool call · all clear", glyphExpanded),
 			"│",
 			"│ survey",
 			"│",
@@ -1243,7 +1249,7 @@ func TestSubAgentCloserOnlyWhenAnotherGroupedMemberFollows(t *testing.T) {
 		want := strings.Join([]string{
 			header,
 			groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
-			leaderEdgeRow("┌─┶ build ✓ ⋯ all clear", glyphExpanded),
+			leaderEdgeRow("┌─┶ build ✓ ⋯ 1 tool call · all clear", glyphExpanded),
 			"│",
 			"│ build",
 			"│",
@@ -1297,7 +1303,8 @@ func TestLoneSubAgentRunOpensInTheGroupMembersFrame(t *testing.T) {
 
 		want := strings.Join([]string{
 			"✦ Sub-Agent",
-			leaderEdgeRow("┌─┶ survey ✓ ⋯ all clear", glyphExpanded),
+			// Open, the head keeps the collapsed row's <tool-top-level-details> and adds the span.
+			leaderEdgeRow("┌─┶ survey ✓ ⋯ 1 tool call · all clear", glyphExpanded),
 			"│",        // the separator is railed: the frame does not break under its own corner
 			"│ survey", // the span opens with the prompt the delegate was handed (item 6)
 			"│",
@@ -1338,14 +1345,14 @@ func TestLoneSubAgentRunOpensInTheGroupMembersFrame(t *testing.T) {
 			name   string
 			build  func(tr *transcript)
 			row    string
-			opened string
+			opened string // the same <tool-top-level-details> as row: the fold takes only the body
 			prompt string // the task the fixture delegated, as the open span's first line
 		}{
 			{
 				name:   "still working",
 				build:  func(tr *transcript) { loneDelegation(tr, "s1", "working", "a.go", "") },
 				row:    "  ┕ working ⋯ 1 tool call",
-				opened: "┌─┶ working ⋯",
+				opened: "┌─┶ working ⋯ 1 tool call",
 				prompt: "│ working",
 			},
 			{
@@ -1356,7 +1363,7 @@ func TestLoneSubAgentRunOpensInTheGroupMembersFrame(t *testing.T) {
 						CallID: "s1", Content: "it fell over", IsError: true}})
 				},
 				row:    "  ┕ broken ⋯ 1 tool call · error: it fell over",
-				opened: "┌─┶ broken ⋯ error: it fell over",
+				opened: "┌─┶ broken ⋯ 1 tool call · error: it fell over",
 				prompt: "│ broken",
 			},
 		} {
@@ -1384,6 +1391,92 @@ func TestLoneSubAgentRunOpensInTheGroupMembersFrame(t *testing.T) {
 			})
 		}
 	})
+}
+
+// Opening a delegation ADDS — its report, the prompt it was handed, the whole railed span — and
+// takes nothing away: the open row keeps the very <tool-top-level-details> the shut row wore, the
+// run's own count of the work, the delegate's context fill and its gist
+// (docs/layout/tool-layout.md, Grouped Sub-agents). A head reverting to its raw view on the way
+// open would tell a reader LESS about the delegation than leaving it shut, which is the one thing
+// an expand may never do.
+//
+// The claim is pinned by CONSTRUCTION rather than by two goldens that could drift: the slot text is
+// written once and stands in the collapsed golden and the open one alike, running member and
+// finished member both.
+func TestExpandedSubAgentKeepsItsTopLevelDetails(t *testing.T) {
+	// The first delegation is still working and has a reading of its own; the second has reported.
+	// The usage lands while only the first is open, which is the run it is attributed to.
+	build := func(t *testing.T) *transcript {
+		t.Helper()
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey", 0)
+		readCall(tr, "rs1", "a.go", 1, 5, 1)
+		subAgentUsage(tr, 1, 12000, 32768)
+		subAgentCall(tr, "s2", "build", 0)
+		readCall(tr, "rs2", "b.go", 1, 5, 1)
+		subAgentReport(tr, "s2", "all clear", 0)
+		return tr
+	}
+	const (
+		header  = "✦ Sub-Agent (2)"
+		working = "survey ⋯ 1 tool call · 12k/32k"    // count and fill, and no action phrase
+		done    = "build ✓ ⋯ 1 tool call · all clear" // the same line, closed by the report's gist
+	)
+
+	collapsed := strings.Join([]string{
+		header,
+		groupMemberLine("  ┝ " + working),
+		groupMemberLine("  ┕ " + done),
+	}, "\n")
+	if got := renderPlain(build(t), 80); got != collapsed {
+		t.Errorf("collapsed group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
+	}
+
+	for _, tc := range []struct {
+		name string
+		head int
+		want []string
+	}{
+		{
+			name: "a running member keeps its count and fill",
+			head: 0,
+			want: []string{
+				header,
+				leaderEdgeRow("┌─┶ "+working, glyphExpanded),
+				"│",
+				"│ survey",
+				"│",
+				"│ ✦ Read",
+				"│   ┕ a.go ⋯ 5 lines",
+				"┊",
+				groupMemberLine("  ┕ " + done),
+			},
+		},
+		{
+			name: "a finished member keeps its count and gist",
+			head: 2,
+			want: []string{
+				header,
+				groupMemberLine("  ┝ " + working),
+				leaderEdgeRow("┌─┶ "+done, glyphExpanded),
+				"│",
+				"│ build",
+				"│",
+				"│ ✦ Read",
+				"│   ┕ b.go ⋯ 5 lines",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := build(t)
+			if !tr.setExpanded(tc.head, true) {
+				t.Fatalf("setExpanded(%d, true) = false; want that delegation open", tc.head)
+			}
+			if got, want := renderPlain(tr, 80), strings.Join(tc.want, "\n"); got != want {
+				t.Errorf("open member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
 }
 
 // delegateWithPrompt folds one delegation carrying an ARBITRARY task — newlines, backticks and all
@@ -1428,9 +1521,13 @@ func TestExpandedSubAgentOpensWithItsPrompt(t *testing.T) {
 
 		want := strings.Join([]string{
 			"✦ Sub-Agent",
-			// The one-line report is promoted into the outcome slot at this width, so the head
-			// carries no body of its own and the span's rows begin straight under it.
-			leaderEdgeRow("┌─┶ # Survey ✓ ⋯ all clear", glyphExpanded),
+			// The open head carries the run's own <tool-top-level-details> like any other, and at
+			// 34 columns that line leaves the name too little room to stand in — so the
+			// promote-guard demotes it to the head's first body row and the typed `done` takes the
+			// slot (guardRefuses). The prompt begins under the body it laid out.
+			leaderEdgeRow("┌─┶ # Survey ✓ ⋯ done", glyphExpanded),
+			"    1 tool call · all clear",
+			seeLessFooterLine(t, 34),
 			"│", // the frame's opening row: one blank rail line, never two
 			"│ Survey",
 			"│",
@@ -1500,12 +1597,12 @@ func TestExpandedSubAgentOpensWithItsPrompt(t *testing.T) {
 			task: "",
 			// With no target the block wears the targetless shape: the indicator rides the header
 			// and the one-line report lays out as a body under it (renderToolBlock).
-			head: []string{"✦ Sub-Agent ▼", "  ┕ all clear", seeLessFooterLine(t, 80)},
+			head: []string{"✦ Sub-Agent ▼", "  ┕ 1 tool call · all clear", seeLessFooterLine(t, 80)},
 		},
 		{
 			name: "whitespace alone",
 			task: "  \n\t\n ",
-			head: []string{"✦ Sub-Agent", leaderEdgeRow("┌─┶    ✓ ⋯ all clear", glyphExpanded)},
+			head: []string{"✦ Sub-Agent", leaderEdgeRow("┌─┶    ✓ ⋯ 1 tool call · all clear", glyphExpanded)},
 		},
 	} {
 		t.Run("an empty prompt opens no block: "+tc.name, func(t *testing.T) {
@@ -3568,7 +3665,8 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent"},
-				{line: 1, kind: targetHeader, entry: 0, text: leaderEdgeRow("┌─┶ survey the tests ✓ ⋯ survey complete", glyphExpanded)},
+				{line: 1, kind: targetHeader, entry: 0,
+					text: leaderEdgeRow("┌─┶ survey the tests ✓ ⋯ 1 tool call · survey complete", glyphExpanded)},
 				{line: 2, kind: targetHeader, entry: 0, text: "│"},
 				{line: 3, kind: targetHeader, entry: 0, text: "│ survey the tests"},
 			},
