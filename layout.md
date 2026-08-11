@@ -301,7 +301,7 @@ as LABELLED lines: one `name:` line per argument, the value's own lines hanging 
 the arguments in the order the model wrote them. So a shell call reads
 
 ```
-│ Reason: subprocess execution (confinement unavailable on this host)          │
+│ Reason: subprocess execution                                                 │
 │ command:                                                                     │
 │   cd /workspace/repos/apogee && git status                                   │
 ```

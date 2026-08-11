@@ -443,9 +443,16 @@ the native tool is the *safer* path) while a network tool that does **not** rout
 
 **A `Gate` carries `Reason` + `CacheKey`.** `Reason` is the human-facing why, mapped from the tool's
 class — `network reach` (net), `unfiltered network reach` (3p-net), `unconfinable MCP tool` (mcp),
-`subprocess execution (confinement unavailable on this host)` (subproc), `out-of-workspace write`
-(WS-write), `write` (3p-write); a
-Tier-2-forced gate overrides it with `dangerous-action guard forced approval`. `CacheKey` is the
+`subprocess execution` (subproc), `out-of-workspace write` (WS-write), `write` (3p-write); a
+Tier-2-forced gate overrides it with `dangerous-action guard forced approval`. Subproc is the one
+class with TWO spellings, because it is the only class whose gate has two different causes: a
+mode-driven gate — ask-before, allow-edits, unknown-mode — reads the bare `subprocess execution`,
+since the rung itself asked for the approval and the host's confinement capability plays no part;
+only the **Auto + `confine=true` + caps-insufficient** cell reads
+`subprocess execution (confinement unavailable on this host)`, where the backend genuinely could not
+give the fence ("gate if you can't") and naming it is what points the user at `/confine` — the same
+wording the runtime-demote fallback below carries, deliberately telling that story in the same
+words. `CacheKey` is the
 allow-for-session key — the **tool name** for every class **except mcp**, whose key is the **server
 grain** `mcp-server:<alias>` so approving one of a server's tools clears its siblings for the Session
 (ADR 0012's server-grain promise; the `mcp-server:` prefix keeps the grain collision-proof, and an

@@ -18,7 +18,7 @@ Please refer to the menu system UI-laypout in llama-launcher for reference.
 # User Approval:
 
 ╭────────────────────────── Approve terminal? ───────────────────────────╮
-│ Reason: subprocess execution (confinement unavailable on this  host)   │
+│ Reason: subprocess execution                                           │
 │ command:                                                               │
 │   cd /workspace/repos/apogee && git status                             │
 │                                                                        │

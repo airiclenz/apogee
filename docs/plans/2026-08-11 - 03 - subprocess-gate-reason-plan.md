@@ -111,9 +111,13 @@ and pass after; then `make check`.
 
 **Commit:** `fix(agent): word a subprocess gate by its ladder cell, not its class`
 
-## 2. Docs: the reason mapping and the two pinned mockups
+## 2. Docs: the reason mapping and the two pinned mockups — ✅ DONE (2026-08-11)
 
 Depends on item 1.
+
+NOTES (2026-08-11): the CHANGELOG pointer "line 629" was stale — cutting `## [0.13.0]` moved the
+`## [Unreleased]` `### Fixed` heading to line 66. The bullet went under that heading, as the item's
+text asks; only the line number differed.
 
 **What:** four documentation surfaces record the old class-keyed mapping and must follow the code.
 

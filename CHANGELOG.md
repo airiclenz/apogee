@@ -92,6 +92,17 @@ point is a **minor** bump, not a breaking change.
   prompt and the railed span come out beneath it. Collapsed rows are unchanged; only the body was
   ever the fold's business.
 
+- **An approval prompt for a terminal command no longer blames the host for a gate the autonomy rung
+  asked for.** In `ask-before` or `allow-edits` the prompt read
+  `Reason: subprocess execution (confinement unavailable on this host)` even on a machine whose
+  `/confine status` reported a backend confining perfectly well — two statements out of the same
+  apogee, contradicting each other, and the prompt was the wrong one: those rungs gate the
+  subprocess surface as a mode decision, capable host or not. Such a gate now reads
+  `Reason: subprocess execution`, the bare statement of the reach being authorised, in the family
+  every other class already uses. The confinement wording is kept for the one case that earns it —
+  Auto with `confine-to-workspace` on and a backend that cannot fence — where it is true, and where
+  it is what sends a reader to `/confine`. Which calls gate is unchanged; only what a gate says is.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added
