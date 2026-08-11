@@ -397,13 +397,15 @@ func detailStyle(th theme, kind detailKind, expanded bool) lipgloss.Style {
 
 // detailTone is the plain-detail gray a tool block's text takes in each of its two states — the
 // collapsed dim, or the step brighter an open block reads in (design call 9; the scheme's `muted`
-// and `muted-bright` roles). It is the ONE place the state reaches the colour, so the target, the summary and
+// and `muted-bright` roles). It is the ONE place the state reaches the colour, so the target and
 // the body of one block cannot come to disagree about how loudly they are speaking.
 //
 // It answers for a block's TEXT alone. The chrome — the ▶/▼ indicator, the `+N more lines` marker,
 // an open member's │ gutter — keeps its own role in both states: those are apogee's marks on the
 // block rather than what the block has to say, and brightening them with the content would make the
-// affordances shout exactly where the content was meant to.
+// affordances shout exactly where the content was meant to. The outcome slot is off this ramp
+// entirely: it wears the marker role, which carries a step of its own for the open state
+// (summaryStyle).
 func detailTone(th theme, expanded bool) lipgloss.Style {
 	if expanded {
 		return th.toolDetailBright

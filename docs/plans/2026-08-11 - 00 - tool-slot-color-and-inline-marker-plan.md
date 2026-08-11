@@ -72,7 +72,23 @@ No consumer yet — the TUI binding lands in item 3.
 
 ---
 
-## 3. Paint the outcome slot in tool-marker, brighter when open
+## 3. Paint the outcome slot in tool-marker, brighter when open — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): three additions to the item's literal list, all of them prose the role change
+made stale. (a) TWO CHANGELOG bullets, not one: the second announces `tool-marker-bright` itself,
+since item 2 shipped the role with no entry and a user reading `[Unreleased]` would meet the tone
+in a scheme export with nothing saying where it came from. (b) Four doc comments named the summary
+as a wearer of the detail gray and were amended with the code: `detailTone` and `leaderRow`
+(the "target, summary and body" list), `theme.go`'s `toolDetail`/`toolMarker` entries, and
+`internal/scheme/scheme.go`'s `ToolMarker` / `ToolMarkerBright` role docs — the yamls alone would
+have left the Go-side statement of the same role contradicting them. (c) `layout.md`'s stale
+`#FFB050` for `tool-marker` (the shipped dark value is `#E0B080`) was left alone: not this item's
+to fix, and pinned hexes in prose are a question the schemes-under-tuning call reopens on its own.
+The test side needed one file more than the item named — `TestRenderDiffMatchesLayoutSketch`
+(`render_test.go:1089`) pinned the slot's old open tone, updated under the item's catch-all clause
+— and the leader-row assertion gained a NEGATIVE half (the slot must no longer render in
+`detailTone`), because the issue's complaint was a collision with a tone, which only a
+does-not-wear-it assertion can fail on.
 
 Depends on item 2.
 

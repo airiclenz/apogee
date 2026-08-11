@@ -147,11 +147,22 @@ type theme struct {
 	//
 	// It is the PLAIN detail tone alone — a diff line keeps diffAdded / diffRemoved in both states,
 	// since its colour carries meaning rather than emphasis — and the chrome a block wears
-	// (toolIndicator, toolMarker, the open member's gutter) stays dim in both, because the
-	// affordances are not what the reader opened the block for (detailStyle).
+	// (toolIndicator, the remainder marker, the open member's gutter) stays dim in both, because the
+	// affordances are not what the reader opened the block for (detailStyle). The outcome slot is
+	// not on this ramp at all: it takes the marker role, which has a step of its own for the open
+	// state (toolMarkerBright, summaryStyle).
 	toolDetailBright lipgloss.Style
 	toolLeader       lipgloss.Style // the ⋯ run carrying a tool row's eye from its target to the outcome slot at the row's edge (its own `tool-leader` role, seeded from `muted`): chrome like the ▶ it runs up to, so the dots never read as content — and its own role so a scheme can damp them without moving the indicator with them
-	toolMarker       lipgloss.Style // the synthesized "+N more lines" remainder marker beneath a hidden body: its own `tool-marker` role (a warm orange under `dark`, a cooler blue under `light`), no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "+" — the prompt block's see-more keeps the heavier promptToggle treatment
+	toolMarker       lipgloss.Style // the synthesized "+N more lines" remainder marker beneath a hidden body, and the outcome slot at a tool row's right edge (summaryStyle): its own `tool-marker` role (a warm orange under `dark`, a cooler blue under `light`), no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "+" — the prompt block's see-more keeps the heavier promptToggle treatment
+	// toolMarkerBright is toolMarker's open step, the same one-ramp pair toolDetail /
+	// toolDetailBright models one level down (the scheme's `tool-marker-bright` role): the outcome
+	// slot of an EXPANDED block, a step out of the collapsed slots around it. It is the marker role
+	// and not the detail gray that paints the slot because the slot is apogee's reading of what the
+	// call came to — "12 lines", "exit 0 · 1.2s" — rather than a line of the output itself, so it
+	// speaks in the same voice as the marker that counts the body away (design call 2 of
+	// docs/plans/"2026-08-11 - 00"). A stated role rather than a tone computed at render time, since
+	// every colour on screen is a role a scheme can name (ADR 0040).
+	toolMarkerBright lipgloss.Style
 	subRail          lipgloss.Style // the │ rail and ⤷ label framing a sub-agent (Depth > 0) block (toolLabel's `tool-header` role — one tone for the whole sub-agent frame)
 	skillAccent      lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
 	skillToken       lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)
@@ -278,6 +289,7 @@ func newTheme(s scheme.Scheme) theme {
 		fileRef        = lipgloss.Color(s.FileRef)
 		promptToggleFg = lipgloss.Color(s.PromptToggle)
 		toolMarkerFg   = lipgloss.Color(s.ToolMarker)
+		openMarker     = lipgloss.Color(s.ToolMarkerBright)
 		toolLeaderFg   = lipgloss.Color(s.ToolLeader)
 		gauge          = lipgloss.Color(s.Gauge)
 		selectionFill  = lipgloss.Color(s.Selection)
@@ -301,6 +313,7 @@ func newTheme(s scheme.Scheme) theme {
 		toolDetailBright: lipgloss.NewStyle().Foreground(openDetail),
 		toolLeader:       lipgloss.NewStyle().Foreground(toolLeaderFg),
 		toolMarker:       lipgloss.NewStyle().Foreground(toolMarkerFg),
+		toolMarkerBright: lipgloss.NewStyle().Foreground(openMarker),
 		subRail:          lipgloss.NewStyle().Foreground(toolHeaderFg),
 		// The inline token accents are one act on two fields: the skill's violet moves to the
 		// FOREGROUND and the background stays whatever the token is standing on — the prompt box's

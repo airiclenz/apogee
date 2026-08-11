@@ -100,9 +100,9 @@ func guardRefuses(th theme, tv toolView, room int, marker string) bool {
 //
 // It returns a painted row rather than text-and-a-style because the row is no longer one voice: the
 // target speaks in the block's state tone, the leader in its own damped `tool-leader` role, and the
-// outcome in whatever its own kind and verdict call for (summaryStyle). A caller that wrapped this
-// afterwards would be wrapping a styled string; nothing needs to, because the row is one row by
-// construction — that is what the overflow order below buys.
+// outcome in the `tool-marker` role a failed verdict overrides in red (summaryStyle). A caller that
+// wrapped this afterwards would be wrapping a styled string; nothing needs to, because the row is
+// one row by construction — that is what the overflow order below buys.
 //
 // The order room is spent in IS design call 4, and it is the whole of the arithmetic: the outcome
 // slot is reserved first and always prints whole, the leader then flexes down to leaderMinDots, and
@@ -178,14 +178,30 @@ func toolRowCells(th theme, width int) int {
 	return max(1, width-groupIndicatorCells(th))
 }
 
-// summaryStyle is the tone the outcome slot takes. A summary that says the call FAILED is red —
-// design call 11 makes that red the only failure marking, so no glyph and no header changes with it
-// — and every other summary keeps the branch line's own tone, the diff kinds included (detailStyle).
+// summaryStyle is the tone the outcome slot takes: the `tool-marker` role, one step up once the
+// block is open, with a summary that says the call FAILED overriding both in red — design call 11
+// makes that red the only failure marking, so no glyph and no header changes with it.
+//
+// It is the MARKER role and not the two-tone detail gray the rest of the row wears (design call 2 of
+// docs/plans/"2026-08-11 - 00"). The slot is apogee's reading of what the call came to rather than a
+// line the tool printed — "12 lines", "exit 0 · 1.2s", the quoted line a promotion lifted out of the
+// body — so it speaks in the same voice as the remainder marker that counts the rest of that body
+// away, and never in the tone of the output it is summarising. Under `dark` the old tone was the
+// very hex the leader dots run in, which left the one part of the row that says what HAPPENED as
+// quiet as the filler pointing at it.
+//
+// Every kind takes it, the promoted and quoted ones included: the slot's colour answers for the
+// slot, and a summary that changed voice with the kind of thing it summarises would make the row's
+// right edge a second, quieter place to read a body line from.
 func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
+	slot := th.toolMarker
+	if expanded {
+		slot = th.toolMarkerBright
+	}
 	if failedSummary(s.Text) {
 		return th.errorText
 	}
-	return detailStyle(th, s.Kind, expanded)
+	return slot
 }
 
 // failedSummary reads the outcome's own wording for a verdict of failure (errorSummaryPrefix and

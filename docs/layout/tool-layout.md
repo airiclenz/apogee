@@ -50,6 +50,12 @@ one and design call 14 rules out growing the engine for presentation;
   **whole summary**, whatever kind: a typed stat ("12 lines", "exit 0 · 1.2s",
   "+8 −3"), a promoted one-line output (quoted), or a red `error: …` /
   `denied` / `cancelled`. On a type row it aggregates the run (below).
+  **Colour:** the `tool-marker` role while the block is collapsed and
+  `tool-marker-bright` once it is open — the slot is apogee's reading of what
+  the call came to, so it speaks in the same voice as the `+N more lines`
+  marker rather than in the detail gray of the body it summarises. A failed
+  summary is red (`error`) and that red wins; nothing else overrides the role,
+  and every kind takes it, promoted and quoted ones included.
 
 ## Width and overflow
 
@@ -163,6 +169,37 @@ One row per consecutive same-type run, in time order. A row's
   ┕ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
 ```
 
+## Grouped Sub-agents
+
+- remove exsiting `⤷ sub-agent` from expanded sub agents.
+- the vertical line on the very left of an expanded sub-agents still needs to be colored.
+
+```text
+✦ Sub-Agent (<group-count>)
+  ┝ first-sub-agent-collapsed ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
+┌─┶ sub-agent-expanded ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+│
+│ The initial prompt for the sub agent should be displayed here. IF it contains
+│ more than one row, it needs to be wrapped. Markdown need to be properly
+│ formatted.
+│
+│ ✦ Tools (N calls)
+│   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
+│   ┕ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
+│
+│ ✦ Normal sub-agent response...
+┊
+  ┝ another-collapsed-sub-agent ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
+  ┕ last-grouped-and-collapsed-sub-agent ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
+```
+
+Example for how finished sub agents should be displayed. The first sub-agent is done and receives a `✓` after the sub agent name ("done" is also printed in the <tool-top-level-details>, The second sub agent is still running in this example.
+
+```text
+✦ Sub-Agent (<group-count>)
+  ┝ <tool-type-header> ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
+  ┕ <tool-type-header> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
+```
 
 
 # Display details per tool

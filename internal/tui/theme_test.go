@@ -45,7 +45,7 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 		ModeAllowEdits: "#0c0c0c", ModeAuto: "#0d0d0d", Skill: "#0e0e0e", FileRef: "#0f0f0f",
 		PromptToggle: "#101010", ToolMarker: "#111111", Gauge: "#121212", Selection: "#131313",
 		Spinner1: "#141414", Spinner2: "#151515", Spinner3: "#161616", Spinner4: "#171717",
-		ToolLeader: "#1a1a1a",
+		ToolLeader: "#1a1a1a", ToolMarkerBright: "#1b1b1b",
 	}
 	th := newTheme(s)
 
@@ -80,7 +80,10 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 		{"mdCode fg", th.mdCode.GetForeground(), s.Code},
 		{"gaugeFill fg", th.gaugeFill.GetForeground(), s.Gauge},
 		{"hairline fg", th.hairline.GetForeground(), s.Divider},
+		// The marker role's own two steps — the collapsed slot and the open one. Crossing them
+		// would leave an opened block's outcome sitting at the tone of the closed ones around it.
 		{"toolMarker fg", th.toolMarker.GetForeground(), s.ToolMarker},
+		{"toolMarkerBright fg", th.toolMarkerBright.GetForeground(), s.ToolMarkerBright},
 		// The leader's own role, sampled beside the tone it is SEEDED from: a scheme damping the
 		// dots must be able to move them without the ▶ they run up to, which is the whole reason
 		// `tool-leader` exists as a role of its own rather than as another reader of `muted`.

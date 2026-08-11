@@ -711,13 +711,19 @@ one however short its
 own report is. The `+N more lines` marker is apogee's line too and is painted as one — the
 `tool-marker` role, a warm orange `#FFB050` under `dark`, no background and no bold weight, the
 quieter sibling of the prompt block's `see more` (the `prompt-toggle` role) — so a body line
-that happens to open with `+` can never be mistaken for the affordance beneath it. The sketch at the
+that happens to open with `+` can never be mistaken for the affordance beneath it. **The outcome
+slot wears that same role**, in both states, with an open block's slot taking the role's brighter
+step `tool-marker-bright`: the slot is apogee's reading of what the call came to — `12 lines`,
+`exit 0 · 1.2s`, `+8 −3`, a quoted line lifted out of the body — and not a line the tool printed,
+so it speaks in apogee's voice like the marker does rather than in the detail gray of the output it
+summarises. A failed call's red overrides it and nothing else does; every kind of summary,
+promoted and quoted ones included, takes the marker tone. The sketch at the
 top of this file shows both states side by side: a collapsed `Terminal` row over its remainder
 marker, and a `Diff Preview` and a `Sub-Agent` deliberately drawn open so the shape of a full body
 appears too — the command among them, because collapsed it would show nothing of what it holds.
 
-**An open block reads a step brighter.** The plain detail gray a block paints its target, its
-summary and its body in has two tones, and they are two roles: the dim `muted` (`#8a8a8a` under
+**An open block reads a step brighter.** The plain detail gray a block paints its target and
+its body in has two tones, and they are two roles: the dim `muted` (`#8a8a8a` under
 `dark`) while the block is collapsed, and `muted-bright` (`#b2b2b2`) once it — or, inside a group,
 the member — is open, so what a reader opened stands out from the collapsed blocks around it
 without being another colour. The pair is a **step along one ramp**, which is what every scheme has
@@ -726,7 +732,9 @@ the two. It reaches the block's **text**
 alone. The chrome keeps one tone in both states — the `▶`/`▼`, the `+N more lines` marker, an open
 member's `│` gutter — because those are apogee's marks on the block rather than what the block has
 to say, and brightening them alongside the content would make the affordances shout exactly where
-the content was meant to. Diff-coloured lines keep their red and green in both states too: the
+the content was meant to. The outcome slot is off this ramp entirely (above): it walks the
+`tool-marker` / `tool-marker-bright` pair, the same one step in the same direction, so an opened
+block still lifts as a whole. Diff-coloured lines keep their red and green in both states too: the
 colour already says which way a line went, and an emphasis step layered onto it would be a second
 thing the same colour means.
 

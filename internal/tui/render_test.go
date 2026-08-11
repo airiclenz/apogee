@@ -1056,8 +1056,9 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 }
 
 // The layout.md sketch, rendered: a two-line change shows "+2 −2" in the outcome slot at the right
-// edge of the path's leader row with the diff body beneath it, and the diffstat itself stays plain
-// — only the body is coloured, so the row reads like every other tool's summary. The sketch is the EXPANDED
+// edge of the path's leader row with the diff body beneath it, and the diffstat itself wears the
+// outcome slot's own marker tone rather than the diff's red and green — only the body carries those,
+// so the row reads like every other tool's summary. The sketch is the EXPANDED
 // shape: a collapsed diff hides its body whole like every other block (collapsedBodyRows), so its
 // hunks are what a click reveals.
 func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
@@ -1086,8 +1087,8 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	}
 
 	th := newTheme(scheme.Default())
-	if got, want := tr.renderLines(th, 80)[1], th.toolDetailBright.Render("+2 −2"); !strings.Contains(got, want) {
-		t.Errorf("diffstat branch = %q; want its outcome slot in the plain detail tone of an OPEN block %q", got, want)
+	if got, want := tr.renderLines(th, 80)[1], th.toolMarkerBright.Render("+2 −2"); !strings.Contains(got, want) {
+		t.Errorf("diffstat branch = %q; want its outcome slot in the marker tone of an OPEN block %q", got, want)
 	}
 }
 
@@ -1575,9 +1576,20 @@ func TestLeaderRowSpendsItsRoomInOrder(t *testing.T) {
 			if got := strings.Contains(row, th.errorText.Render(slot)); got != tc.wantFailed {
 				t.Errorf("outcome %q painted in the failure tone = %v, want %v", slot, got, tc.wantFailed)
 			}
-			if !tc.wantFailed && !strings.Contains(row, detailTone(th, tc.expanded).Render(slot)) {
-				t.Errorf("outcome %q does not wear the row's own %s tone: %q",
+			// Design call 2: what did NOT fail wears the `tool-marker` role — the slot is apogee's
+			// reading of the call, not a line of its output — one step up once the block is open.
+			slotTone := th.toolMarker
+			if tc.expanded {
+				slotTone = th.toolMarkerBright
+			}
+			if !tc.wantFailed && !strings.Contains(row, slotTone.Render(slot)) {
+				t.Errorf("outcome %q does not wear the %s marker tone: %q",
 					slot, map[bool]string{true: "open", false: "collapsed"}[tc.expanded], row)
+			}
+			// And never the detail gray it used to borrow, which under `dark` was the leader's own
+			// hex: the whole point of the role change is that the slot stops reading as filler.
+			if !tc.wantFailed && strings.Contains(row, detailTone(th, tc.expanded).Render(slot)) {
+				t.Errorf("outcome %q still wears the row's detail tone: %q", slot, row)
 			}
 		})
 	}

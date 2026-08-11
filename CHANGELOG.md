@@ -297,6 +297,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A tool row's outcome now stands out from the dots that lead to it.** The right-aligned summary
+  at the end of a tool row — `12 lines`, `exit 0 · 1.2s`, `+8 −3`, `[1 files found, showing 1-1]` —
+  used to borrow the same faint gray the row's target and body wear, which under the shipped `dark`
+  scheme was the very tone the leader dots run in: the one part of the row that says what *happened*
+  read as filler. It now wears the `tool-marker` role, the same "apogee is talking" tone the
+  `+N more lines` marker carries, and steps up to the new `tool-marker-bright` while the block is
+  open, so an opened block lifts as a whole. Every kind of summary takes it, promoted one-line
+  outputs included; a failed call's red still overrides everything and remains the only marking a
+  failure leaves on the row.
+
+- **New `tool-marker-bright` scheme role**, the open-block step of `tool-marker`, shipped in both
+  schemes and written by `/color-scheme export` like any other role.
+
 - **The tool rows' dotted leader is now defined beside every other glyph.** The `⋯` the leader is
   built from sat on its own in the leader-row code; it now lives in the one glyph block the branch
   marks, the bullets and the table rules already share, so changing the character is a single edit
