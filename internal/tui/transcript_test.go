@@ -31,7 +31,7 @@ import (
 // length is pure geometry — it flexes to whatever the width less the target and the outcome leaves
 // — so a golden carrying it verbatim would assert the terminal's width in every line and break on
 // any change to a fixture's wording. The shape still shows: a golden reads
-// `┕ main.go ⋯ 12 lines   ▶`, which says target, leader, outcome slot and indicator in the order
+// `┕ main.go ⋯ 12 lines ▶`, which says target, leader, outcome slot and indicator in the order
 // the spec draws them. The geometry itself — the dot floor, the target's truncation, the outcome
 // printing whole — is pinned directly on the painter instead (TestLeaderRowSpendsItsRoomInOrder).
 func renderPlain(tr *transcript, width int) string {

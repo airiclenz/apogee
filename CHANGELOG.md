@@ -10,6 +10,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's
+  right edge was three spaces wide, which read as a gap rather than as the indicator belonging to the
+  row it marks; it is one space everywhere now — `exit 0 · +10 more lines ▶` — for every tool row,
+  grouped member and sub-agent head alike. The two columns the field gives up go back to the row: the
+  dotted leader runs two cells further, and at narrow widths a target that had to be dropped or
+  clipped keeps a little more of itself.
+
 - **`read_file` can now locate a substring while it reads.** An optional `locate` parameter reports
   the absolute 1-based line numbers the substring falls on, as one `Located "…" on lines: 5, 9` line
   directly under the read's header — `on no lines` when it matches nothing. The scan always covers

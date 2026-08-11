@@ -335,7 +335,7 @@ func clipCells(th theme, text string, cells int) (string, bool) {
 // groupCountFormat is the "(N)" the header carries beside the label for N ≥ 2 — a lone groupable
 // call is painted as a single block and counts nothing.
 const (
-	groupIndicatorGap = 3
+	groupIndicatorGap = 1
 	groupCountFormat  = "(%d)"
 )
 

@@ -38,7 +38,15 @@
   - Guided-decomposition batching (`internal/mechanisms/guideddecomposition.go`) — its
     deferred items are not sub-agents and get no "scheduled" display.
 
-## 1. Single-space gap before the fold indicator
+## 1. Single-space gap before the fold indicator — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): `docs/layout/tool-layout.md` already drew a one-space gap, so no sketch there
+needed changing; the three-space gap lived in `layout.md`'s opening sketch (:31, :34, :43, :51)
+instead, and those four rows were updated (the two cells go to the dot leader, right edge unmoved).
+Two goldens changed shape beyond the gap because the two freed cells alter the width arithmetic:
+`TestRenderMarksTheWholeBlock`'s 11-column row now clips its target to `a …` instead of dropping it,
+and `TestExpandedSubAgentOpensWithItsPrompt`'s 34-column head now promotes its one-line report into
+the outcome slot (so it paints no body row and no see-less footer).
 
 **What:** Change `groupIndicatorGap` from 3 to 1 in `internal/tui/toolleader.go`
 (constant near :337; consumed by `groupIndicatorCells` and `indicatorRow` in

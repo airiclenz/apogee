@@ -1233,10 +1233,10 @@ func TestExpandedSubAgentOpensWithItsPrompt(t *testing.T) {
 
 		want := strings.Join([]string{
 			"✦ Sub-Agent",
-			leaderEdgeRow("┌─┶ # Survey ✓ ⋯ done", glyphExpanded),
-			"    all clear",          // the head's own report, above the frame the prompt opens
-			seeLessFooterLine(t, 34), // …and its footer; the span's rows begin under them
-			"│",                      // the frame's opening row: one blank rail line, never two
+			// The one-line report is promoted into the outcome slot at this width, so the head
+			// carries no body of its own and the span's rows begin straight under it.
+			leaderEdgeRow("┌─┶ # Survey ✓ ⋯ all clear", glyphExpanded),
+			"│", // the frame's opening row: one blank rail line, never two
 			"│ Survey",
 			"│",
 			"│ Read the tests and report the",
@@ -1568,7 +1568,7 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 				t.Fatalf("the collapsed block paints %d rows, want its header and one branch:\n%s",
 					len(lines), strings.Join(lines, "\n"))
 			}
-			if !strings.HasSuffix(lines[1], tc.wantCount+"   "+glyphCollapsed) {
+			if !strings.HasSuffix(lines[1], leaderEdgeRow(tc.wantCount, glyphCollapsed)) {
 				t.Errorf("collapsed branch = %q; want its slot to end in the count %q", lines[1], tc.wantCount)
 			}
 		})
@@ -1640,7 +1640,7 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 				if lines := rows(); len(lines) != 2 {
 					t.Errorf("%s paint stands %d rows, want its header and one branch:\n%s",
 						when, len(lines), strings.Join(lines, "\n"))
-				} else if !strings.HasSuffix(lines[1], tc.wantCount+"   "+glyphCollapsed) {
+				} else if !strings.HasSuffix(lines[1], leaderEdgeRow(tc.wantCount, glyphCollapsed)) {
 					t.Errorf("%s branch = %q; want its slot to end in the count %q", when, lines[1], tc.wantCount)
 				}
 			}
@@ -2718,8 +2718,8 @@ func TestSpanlessSubAgentHeadsGroupWithEachOther(t *testing.T) {
 		// The refusal fills the whole outcome slot, so the leader keeps its floor of one dot and
 		// the target gives way entirely — design call 4's order, played out to its end.
 		"✦ Sub-Agent (2)",
-		"  ┝ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper" + clipTail,
-		"  ┕ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper" + clipTail,
+		"  ┝ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper su" + clipTail,
+		"  ┕ ⋯ error: sub-agent depth limit reached (max 2): cannot spawn a deeper su" + clipTail,
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("refused delegations mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -3309,12 +3309,12 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ Git"},
 				{line: 1, kind: targetHeader, entry: 0, text: "  Commit"},
-				// One leader row whatever the width: at eleven columns the target has nothing left
-				// to be cut INTO — a budget narrower than the clip tail itself — so it is dropped
-				// outright and the leader alone runs out to the indicator (design call 4). The
-				// hidden body is counted nowhere either: a row this narrow cannot seat the count
-				// without spending the target's own floor on it (affordableSlot).
-				{line: 2, kind: targetHeader, entry: 0, text: leaderEdgeRow("  ┕ ⋯", glyphCollapsed)},
+				// One leader row whatever the width: at eleven columns the target is cut to a single
+				// column and its clip tail, and the leader runs out to the indicator on the floor of
+				// one dot (design call 4). The hidden body is counted nowhere either: a row this
+				// narrow cannot seat the count without spending the target's own floor on it
+				// (affordableSlot).
+				{line: 2, kind: targetHeader, entry: 0, text: leaderEdgeRow("  ┕ a"+clipTail+" ⋯", glyphCollapsed)},
 			},
 		},
 		{
