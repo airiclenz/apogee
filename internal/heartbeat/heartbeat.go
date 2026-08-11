@@ -48,8 +48,9 @@ type Beat struct {
 	Reachable bool
 	// Failure says why the server could not be read, and is "" when Reachable.
 	Failure string
-	// ActiveModel is the model the Upstream resolves to — the monitor's hint while the server
-	// still serves it, otherwise the first model advertised.
+	// ActiveModel is the model the Upstream resolves to — the monitor's hint whenever one is
+	// configured, trusted verbatim even when the server does not advertise it (provider.Discover's
+	// rule), and the first model advertised only when no hint is configured.
 	ActiveModel string
 	// ContextWindow is the active model's window in tokens, 0 when unknown. It is llama.cpp's
 	// runtime window from GET /props when that probe answered, which overrides the advertised

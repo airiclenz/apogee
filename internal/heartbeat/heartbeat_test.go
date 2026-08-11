@@ -112,17 +112,18 @@ func TestBeatHintPinsActiveWindow(t *testing.T) {
 	}
 }
 
-func TestBeatHintVanishedFallsBack(t *testing.T) {
+func TestBeatUnadvertisedHintStaysActive(t *testing.T) {
 	t.Parallel()
 
 	srv := discoveryServer(t, `{"data":[{"id":"served","context_length":4096},{"id":"other","context_length":8192}]}`, "")
 
 	beat := NewMonitor(srv.URL, "unloaded", "").Beat(context.Background())
 
-	// The pin is a hint, not a claim: once the server stops advertising it, the beat follows
-	// observed reality — the first model the server lists.
-	if beat.ActiveModel != "served" || beat.ContextWindow != 4096 {
-		t.Errorf("active = %q ctx = %d, want served / 4096", beat.ActiveModel, beat.ContextWindow)
+	// The pin is what goes on the wire, so the beat keeps reporting it even when the server
+	// advertises something else — substituting the first advertised model would report a model
+	// nobody asked for and flap the binding every beat. Its window is simply unknown.
+	if beat.ActiveModel != "unloaded" || beat.ContextWindow != 0 {
+		t.Errorf("active = %q ctx = %d, want unloaded / 0", beat.ActiveModel, beat.ContextWindow)
 	}
 }
 

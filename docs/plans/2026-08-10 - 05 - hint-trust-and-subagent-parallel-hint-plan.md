@@ -54,7 +54,18 @@ fan-out unexercised under models that don't batch tool calls on their own.
   description sentence ships here).
 - VERSION / CHANGELOG release headings / tags (see closing note).
 
-## 1. Hybrid hint resolution in toModelInfo
+## 1. Hybrid hint resolution in toModelInfo — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-10): case 5 also required relaxing `discoverModels`' empty-list error
+(`discovery.go`) — it now errors only when there is no hint to trust, otherwise the
+resolution in `toModelInfo` would be unreachable through `Discover`. The empty-hint
+error path (and its existing test) is unchanged.
+
+NOTES (2026-08-10): `internal/heartbeat` asserted the superseded behavior
+(`TestBeatHintVanishedFallsBack` — "once the server stops advertising it, the beat
+follows … the first model the server lists"). Test renamed to
+`TestBeatUnadvertisedHintStaysActive` and inverted, and `Beat.ActiveModel`'s doc
+comment restated, both outside this item's named files.
 
 **What:** Implement the ratified hybrid resolution in
 `internal/provider/discovery.go` `toModelInfo` (func at :192; today's silent

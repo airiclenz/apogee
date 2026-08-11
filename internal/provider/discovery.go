@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -21,6 +22,25 @@ type DiscoveredModel struct {
 	ContextWindow int
 }
 
+// HintResolution records HOW discovery resolved the configured model id (the hint) against
+// the advertised list. It is an observation, not a decision: a caller reads it to explain the
+// outcome — a non-exact grade is what a startup notice reports — without re-deriving the match.
+type HintResolution string
+
+const (
+	// HintFirstAdvertised: nothing was configured, so the first advertised model is active.
+	HintFirstAdvertised HintResolution = "first-advertised"
+	// HintExact: the configured id is advertised verbatim.
+	HintExact HintResolution = "exact"
+	// HintBaseSlug: the configured id is not advertised but the part before its first ':'
+	// is — a variant slug such as "vendor/model:exacto". The FULL configured id stays
+	// active; only the context window comes from the base entry.
+	HintBaseSlug HintResolution = "base-slug"
+	// HintTrusted: the configured id is not advertised and no base entry matched either, so
+	// it is used as configured with an unknown (0) context window.
+	HintTrusted HintResolution = "trusted"
+)
+
 // ModelInfo is the result of discovery: every advertised model, plus the resolved active
 // model and its context window. ContextWindow is the *runtime* window reported by llama.cpp
 // GET /props when available (the -c/--ctx-size the server was actually launched with);
@@ -31,6 +51,10 @@ type ModelInfo struct {
 	AvailableModels []DiscoveredModel
 	ActiveModel     string
 	ContextWindow   int
+
+	// Resolution grades how ActiveModel was reached (see HintResolution). Discover always
+	// sets it; the zero value only occurs on the error returns, which carry no model.
+	Resolution HintResolution
 
 	// RuntimeContextWindow is the window llama.cpp's GET /props reported, and 0 when that
 	// probe found none — a server without /props, or one that did not report n_ctx. It is
@@ -59,8 +83,8 @@ type ModelInfo struct {
 // oracle's llamacpp-props strategy). When /props reports a runtime context window it
 // *overrides* the model's advertised window, because /v1/models on llama.cpp reports the
 // model's *training* context (meta.n_ctx_train) — often far larger than the window the
-// server was actually loaded with. A non-200, an unreachable server, or an empty model list
-// from /v1/models is an error; the /props probe is best-effort (a non-llama.cpp server has
+// server was actually loaded with. A non-200 or an unreachable server is an error, as is an
+// empty model list when nothing is configured to fall back to; the /props probe is best-effort (a non-llama.cpp server has
 // no /props, so any failure there just leaves the /v1/models value untouched). That same probe
 // also reports how many generation slots the server was launched with (ModelInfo.TotalSlots).
 func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
@@ -104,7 +128,10 @@ func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
 	}
 
 	info := decoded.toModelInfo(c.activeModel())
-	if len(info.AvailableModels) == 0 {
+	// An empty list is only fatal when nothing was configured: with a hint there is still a
+	// model to run (trusted as configured), and the list being empty is the server's problem
+	// to report on the next completion.
+	if info.ActiveModel == "" {
 		return ModelInfo{}, errors.New("apogee: model discovery: server returned no models")
 	}
 	return info, nil
@@ -162,7 +189,9 @@ type propsResponse struct {
 // setRuntimeContextWindow overrides the active model's window with the authoritative runtime
 // value from /props, updating both the top-level ContextWindow and the matching
 // AvailableModels entry so a later model-switch reads the same number. It also records the
-// value as the runtime one, so a caller can tell WHICH probe supplied the window.
+// value as the runtime one, so a caller can tell WHICH probe supplied the window. An active
+// model that is not advertised (a base-slug or trusted resolution) matches no entry, so the
+// list sync simply no-ops — the top-level window still carries the /props value.
 func (info *ModelInfo) setRuntimeContextWindow(n int) {
 	info.ContextWindow = n
 	info.RuntimeContextWindow = n
@@ -188,7 +217,7 @@ type modelsResponse struct {
 }
 
 // toModelInfo projects the payload onto ModelInfo, dropping id-less entries and resolving
-// the active model from hint (the configured model), falling back to the first advertised.
+// the active model from hint (the configured model) per resolveHint.
 func (r modelsResponse) toModelInfo(hint string) ModelInfo {
 	var models []DiscoveredModel
 	for _, m := range r.Data {
@@ -207,20 +236,46 @@ func (r modelsResponse) toModelInfo(hint string) ModelInfo {
 	}
 
 	info := ModelInfo{AvailableModels: models}
-	if len(models) == 0 {
-		return info
-	}
+	info.ActiveModel, info.ContextWindow, info.Resolution = resolveHint(models, hint)
+	return info
+}
 
-	active := models[0]
-	if hint != "" {
-		for _, m := range models {
-			if m.ID == hint {
-				active = m
-				break
-			}
+// resolveHint resolves the configured model id against the advertised list and reports the
+// active model, its context window (0 when unknown) and how the two were reached.
+//
+// A configured id is TRUSTED, never substituted: whenever hint is non-empty it is the active
+// model verbatim, so the same hint against the same list always resolves to the same id (the
+// binding observer restates the hint every heartbeat and would otherwise ping-pong). An
+// advertised entry only supplies the window — either the exact entry, or, for a variant slug
+// like "vendor/model:exacto", the entry for the base slug before the first ':'. An unlisted id
+// is used as-is with an unknown window, which leaves Budget and auto-compaction inactive
+// exactly as an advertised model with no window does, and lets a genuinely wrong id fail loud
+// on the next completion instead of silently running someone else's model. Only an empty hint
+// falls back to the first advertised entry.
+func resolveHint(models []DiscoveredModel, hint string) (active string, window int, grade HintResolution) {
+	if hint == "" {
+		if len(models) == 0 {
+			return "", 0, HintFirstAdvertised
+		}
+		return models[0].ID, models[0].ContextWindow, HintFirstAdvertised
+	}
+	if advertised, ok := findAdvertised(models, hint); ok {
+		return hint, advertised.ContextWindow, HintExact
+	}
+	if base, _, hasVariant := strings.Cut(hint, ":"); hasVariant && base != "" {
+		if advertised, ok := findAdvertised(models, base); ok {
+			return hint, advertised.ContextWindow, HintBaseSlug
 		}
 	}
-	info.ActiveModel = active.ID
-	info.ContextWindow = active.ContextWindow
-	return info
+	return hint, 0, HintTrusted
+}
+
+// findAdvertised returns the advertised model with exactly this id.
+func findAdvertised(models []DiscoveredModel, id string) (DiscoveredModel, bool) {
+	for _, m := range models {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return DiscoveredModel{}, false
 }

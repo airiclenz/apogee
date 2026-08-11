@@ -96,6 +96,122 @@ func TestDiscover_HintedActiveModel(t *testing.T) {
 	}
 }
 
+// A configured model id is trusted rather than silently swapped for models[0]: it is always the
+// active model verbatim, and the advertised list only supplies its context window — exactly, via
+// the base slug of a variant like ":exacto", or not at all.
+func TestDiscover_HintResolution(t *testing.T) {
+	t.Parallel()
+
+	const twoModels = `{"data":[{"id":"deepseek/deepseek-v4-pro","context_length":163840},{"id":"small","context_length":4096}]}`
+
+	tests := []struct {
+		name       string
+		payload    string
+		hint       string
+		wantActive string
+		wantWindow int
+		wantGrade  HintResolution
+	}{
+		{
+			name:       "exact match",
+			payload:    twoModels,
+			hint:       "small",
+			wantActive: "small",
+			wantWindow: 4096,
+			wantGrade:  HintExact,
+		},
+		{
+			name:       "variant suffix inherits the base window",
+			payload:    twoModels,
+			hint:       "deepseek/deepseek-v4-pro:exacto",
+			wantActive: "deepseek/deepseek-v4-pro:exacto",
+			wantWindow: 163840,
+			wantGrade:  HintBaseSlug,
+		},
+		{
+			name:       "unlisted hint is trusted with an unknown window",
+			payload:    twoModels,
+			hint:       "my-alias",
+			wantActive: "my-alias",
+			wantWindow: 0,
+			wantGrade:  HintTrusted,
+		},
+		{
+			name:       "unlisted variant whose base is also unlisted is trusted",
+			payload:    twoModels,
+			hint:       "vendor/other:exacto",
+			wantActive: "vendor/other:exacto",
+			wantWindow: 0,
+			wantGrade:  HintTrusted,
+		},
+		{
+			name:       "empty advertised list still runs the hint",
+			payload:    `{"data":[]}`,
+			hint:       "my-alias",
+			wantActive: "my-alias",
+			wantWindow: 0,
+			wantGrade:  HintTrusted,
+		},
+		{
+			name:       "empty hint falls back to the first advertised",
+			payload:    twoModels,
+			hint:       "",
+			wantActive: "deepseek/deepseek-v4-pro",
+			wantWindow: 163840,
+			wantGrade:  HintFirstAdvertised,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv, _ := modelsServer(tt.payload)
+			defer srv.Close()
+
+			info, err := NewClient(srv.URL, tt.hint).Discover(context.Background())
+			if err != nil {
+				t.Fatalf("Discover: %v", err)
+			}
+			if info.ActiveModel != tt.wantActive {
+				t.Errorf("ActiveModel = %q, want %q", info.ActiveModel, tt.wantActive)
+			}
+			if info.ContextWindow != tt.wantWindow {
+				t.Errorf("ContextWindow = %d, want %d", info.ContextWindow, tt.wantWindow)
+			}
+			if info.Resolution != tt.wantGrade {
+				t.Errorf("Resolution = %q, want %q", info.Resolution, tt.wantGrade)
+			}
+		})
+	}
+}
+
+func TestDiscover_PropsWindowLandsOnATrustedActiveModel(t *testing.T) {
+	t.Parallel()
+
+	// The runtime window is a property of the server, not of the advertised entry, so it
+	// reaches a trusted active model too. The AvailableModels sync finds no matching entry
+	// and is left alone — the advertised model keeps its own advertised window.
+	srv, _ := discoveryServer(
+		`{"data":[{"id":"served-under-another-name","context_length":32768}]}`,
+		`{"default_generation_settings":{"n_ctx":8192}}`,
+	)
+	defer srv.Close()
+
+	info, err := NewClient(srv.URL, "my-alias").Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if info.ActiveModel != "my-alias" || info.Resolution != HintTrusted {
+		t.Fatalf("active = %q grade = %q, want my-alias / %q", info.ActiveModel, info.Resolution, HintTrusted)
+	}
+	if info.ContextWindow != 8192 || info.RuntimeContextWindow != 8192 {
+		t.Errorf("ContextWindow = %d RuntimeContextWindow = %d, want 8192 / 8192", info.ContextWindow, info.RuntimeContextWindow)
+	}
+	if info.AvailableModels[0].ContextWindow != 32768 {
+		t.Errorf("advertised entry ContextWindow = %d, want 32768 (no list sync for an unadvertised active model)", info.AvailableModels[0].ContextWindow)
+	}
+}
+
 func TestDiscover_ContextWindowFallbacks(t *testing.T) {
 	t.Parallel()
 
