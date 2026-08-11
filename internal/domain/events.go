@@ -120,6 +120,48 @@ type ToolResultEvent struct {
 	Result ToolResult
 }
 
+// SubAgentPhase names the point in a delegation's life that a SubAgentPhaseEvent reports.
+type SubAgentPhase string
+
+const (
+	// SubAgentStarted reports that the delegation's child agent has BEGUN RUNNING — the instant a
+	// pool worker dequeued it, or, on the serial path, the instant the recursion point was entered.
+	// A delegation whose ToolCallEvent has arrived but whose start has not is queued behind the
+	// Parallel agents cap: it holds no slot yet and has produced nothing.
+	SubAgentStarted SubAgentPhase = "started"
+	// SubAgentFinished reports that the child reached its boundary and its result is known. The
+	// result rides the event, so an observer can show THAT delegation's report the moment it lands
+	// instead of waiting for the group's trailing result burst.
+	SubAgentFinished SubAgentPhase = "finished"
+)
+
+// SubAgentPhaseEvent reports one delegation crossing a lifecycle boundary: its child starting, and
+// its child finishing with the result the parent will eventually see. It exists because the
+// ToolResultEvents of a delegation GROUP are deliberately not a liveness signal — they burst
+// together, in emitted-call order, after every child has joined (ADR 0039 decision 4) — so an
+// observer reading them alone cannot tell a queued delegation from a running one, and cannot show
+// an early-finishing member as done while its siblings still run. This variant carries exactly
+// that missing timing, and carries it ADDITIVELY: the ToolCallEvent burst, the commit order, and
+// the resulting history are untouched.
+//
+// It is OBSERVATION ONLY. An observer that ignores it loses liveness and nothing else: the result
+// still arrives on the delegation's own ToolResultEvent, which remains the authoritative one — so a
+// consumer that applies the payload here must tolerate seeing the same result again.
+//
+// Its EventBase is the CHILD RUN's identity rather than the emitting parent's: Depth is the child's
+// nesting level and CallID the id of the sub_agent call that spawned it — the same stamp every
+// event the child itself emits carries, and the id of the parent's tool-call block the phase is
+// about.
+//
+// Result is the child's ToolResult on SubAgentFinished and the zero value on SubAgentStarted. A
+// delegation the human CANCELLED emits no finished phase at all: the cancelled group is dropped
+// unappended and never becomes a result, so its phase pair stays open exactly as its tool call does.
+type SubAgentPhaseEvent struct {
+	EventBase
+	Phase  SubAgentPhase
+	Result ToolResult
+}
+
 // ApprovalEvent reports that an Approval was requested/decided for a tool call.
 // (The decision is obtained synchronously via the Approver; this event is for
 // observers — TUI display, bench accounting.)

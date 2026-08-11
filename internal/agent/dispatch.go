@@ -243,6 +243,11 @@ func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.Too
 // ctx is handed to every child unchanged, so a cancel reaches all of them at once and each
 // unwinds at its own next boundary; the join below is what "the pool waits" means. A child's
 // failure is ITS result and nothing more — no sibling is cancelled (ADR 0039 decision 4).
+//
+// The worker brackets each child with its lifecycle phases (domain.SubAgentPhaseEvent): started as
+// the job is DEQUEUED — which is what makes a slot-less delegation observably queued rather than
+// silently pending — and finished, carrying the result, as the child returns. They are the group's
+// only per-child timing: the results themselves still burst after the join, in call order.
 func (a *Agent) runDelegationPool(ctx context.Context, turn, width int, slots []fanOutSlot) {
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -251,7 +256,14 @@ func (a *Agent) runDelegationPool(ctx context.Context, turn, width int, slots []
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
+				a.emitSubAgentPhase(turn, slots[i].call, domain.SubAgentStarted, domain.ToolResult{})
 				slots[i].result, slots[i].outcome = a.runDelegation(ctx, turn, slots[i].call)
+				if slots[i].outcome != dispatchCancelled {
+					// A cancelled group is discarded unappended, so its children never finish into
+					// a result: claiming one here would report a delegation the parent Turn is
+					// about to roll back.
+					a.emitSubAgentPhase(turn, slots[i].call, domain.SubAgentFinished, slots[i].result)
+				}
 			}
 		}()
 	}
@@ -285,6 +297,20 @@ func (a *Agent) runDelegation(ctx context.Context, turn int, call domain.ToolCal
 		}
 	}()
 	return a.runSubAgent(ctx, call)
+}
+
+// emitSubAgentPhase surfaces one delegation lifecycle boundary. The event is stamped with the
+// CHILD's identity — one level deeper than this Agent, under the spawning call's id — rather than
+// with the emitting parent's, so it carries the same run identity as the events the child itself
+// emits and names the tool-call block an observer attaches it to.
+//
+// Both delegation paths call it, so a lone (serial) delegation reports the same started/finished
+// pair a pooled one does: nothing that runs is ever left looking queued.
+func (a *Agent) emitSubAgentPhase(turn int, call domain.ToolCall, phase domain.SubAgentPhase, result domain.ToolResult) {
+	base := a.base(turn)
+	base.Depth++
+	base.CallID = call.ID
+	a.cfg.Events.Emit(domain.SubAgentPhaseEvent{EventBase: base, Phase: phase, Result: result})
 }
 
 // commitDelegation lands one finished delegation: the audit record its verdict earns, the
@@ -493,11 +519,17 @@ func (a *Agent) executeConfineFallback(ctx context.Context, turn int, tool domai
 // delegation. runSubAgent keeps its own defensive depth check — belt-and-braces with the
 // resolver's depth-bound row and the withheld-tool floor (ADR 0013 defence in depth) — so the
 // bound holds even if the call is reached by another route.
+//
+// It is the SERIAL path's delegation, so it brackets the child with the same lifecycle phases the
+// pool emits: a delegation that runs alone starts the instant it is reached and finishes with its
+// result, exactly as a pooled sibling does.
 func (a *Agent) executeDelegate(ctx context.Context, turn int, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
+	a.emitSubAgentPhase(turn, call, domain.SubAgentStarted, domain.ToolResult{})
 	result, outcome := a.runSubAgent(ctx, call)
 	if outcome == dispatchCancelled {
 		return result, dispatchCancelled
 	}
+	a.emitSubAgentPhase(turn, call, domain.SubAgentFinished, result)
 	a.recordExecuted(turn, call, verdict.auditDecision, verdict.auditReason, result)
 	return result, dispatchDone
 }

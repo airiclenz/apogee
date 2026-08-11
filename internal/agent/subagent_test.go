@@ -209,6 +209,8 @@ func eventBaseOf(e domain.Event) (domain.EventBase, bool) {
 		return ev.EventBase, true
 	case domain.ToolResultEvent:
 		return ev.EventBase, true
+	case domain.SubAgentPhaseEvent:
+		return ev.EventBase, true // the CHILD run's identity: the delegation's own depth and call id
 	case domain.ApprovalEvent:
 		return ev.EventBase, true
 	case domain.MechanismFiredEvent:

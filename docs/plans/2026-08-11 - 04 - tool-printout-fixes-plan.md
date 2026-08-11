@@ -65,7 +65,20 @@ exactly one space between the slot text and `▶`.
 
 Commit: `fix(tui): single-space gap before the fold indicator`
 
-## 2. Engine: per-delegation lifecycle events
+## 2. Engine: per-delegation lifecycle events — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): two points the item's What left open were settled at write time. (a) The event's
+`EventBase` carries the CHILD run's identity — `Depth` = parent depth + 1 beside the delegation's
+`CallID` — so it is the same stamp the child's own events carry and equals the TUI's `runRef` for
+that run; item 3 still matches the parent's tool-call block by `CallID` alone, exactly as
+`addToolResult` does. (b) A delegation ending in a CANCELLATION emits `started` but no `finished`:
+the cancelled group is dropped unappended and never becomes a result, so a finished phase would
+report a delegation the Turn is about to roll back (the phase pair is left open exactly as the
+tool call is). Two variant-coverage guards had to be taught the new variant, both of which fail
+deliberately on an unknown one: `eventBaseOf` (`internal/agent/subagent_test.go`) and the TUI's
+`foldCases` table (`internal/tui/fold_test.go`), where it is recorded as inert in the view for now —
+item 3 gives it its behavior. Added a CHANGELOG bullet, since a new Event variant is a public-API
+addition per the file's own versioning note.
 
 **What:** Add a new event type in `internal/domain` alongside `ToolResultEvent`:
 `SubAgentPhaseEvent{ EventBase, Phase, Result }` where `EventBase` carries the CallID,

@@ -8,6 +8,21 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- **The engine now reports each delegation starting and finishing, one child at a time.** A new
+  `domain.SubAgentPhaseEvent` brackets every `sub_agent` run with a `started` and a `finished`
+  phase, the finished one carrying that child's result. It fills the gap the tool-result stream
+  leaves by design: a delegation group's results burst together, in call order, only after every
+  child has joined, so an observer reading them alone cannot tell a delegation queued behind the
+  Parallel agents cap from one already running, and cannot show an early finisher as done while
+  its siblings work. Both dispatch paths emit the pair — a lone delegation reports the same
+  timing a pooled one does — and the event carries the CHILD's identity (its depth, under the
+  spawning call's id). Nothing about history changed: the up-front tool-call burst, the commit
+  order, and the trailing result burst are all untouched (ADR 0039 decision 4), and a cancelled
+  group, which never becomes a result, emits no finished phase. Observation only, and additive —
+  a consumer that ignores the variant loses liveness and nothing else.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's

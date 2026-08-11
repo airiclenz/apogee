@@ -103,6 +103,17 @@ func foldCases() []foldCase {
 			wantPhrase:  "thinking",
 		},
 		{
+			name: "SubAgentPhaseEvent moves nothing on a Model with no run to move",
+			// The delegation's lifecycle phase lands ON the sub_agent block its call id names, so
+			// on this fresh Model — which has no such block — it appends nothing, says nothing and
+			// counts nothing. It never appends an entry of its own at any time: the timing it
+			// carries is a property of a block the transcript already holds.
+			event: domain.SubAgentPhaseEvent{
+				EventBase: domain.EventBase{Depth: 1, CallID: "1"},
+				Phase:     domain.SubAgentStarted,
+			},
+		},
+		{
 			name:        "ApprovalEvent is a transcript note and no activity at all",
 			event:       domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow},
 			wantEntries: 1,
