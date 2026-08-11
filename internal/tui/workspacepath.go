@@ -16,8 +16,8 @@ import (
 // So the workspace root is shortened out of the paths a tool block NAMES — the target it acts on,
 // and the one-line summary of its outcome when that summary is the block's own wording — and out of
 // nothing else. What the block QUOTES is not in that set: a body (a diff's hunk lines, an edit's
-// replacement string, an unregistered tool's verbatim arguments) and equally a line promoted onto
-// the branch beside the target — a one-line output, or the answer a human typed into an ask_user
+// replacement string, an unregistered tool's verbatim arguments) and equally a line promoted into
+// the branch row's outcome slot — a one-line output, or the answer a human typed into an ask_user
 // question — where an absolute path is content and has to reach the screen exactly as it was
 // written, or the block misrepresents what a write will land on disk, or what a person actually
 // said. Which lines are quoted is marked where they are built (branchSummary, toolBody),

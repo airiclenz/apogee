@@ -588,8 +588,8 @@ func fireSchedule(t *testing.T, m Model, id, name, prompt string) Model {
 }
 
 // A starting Firing appends one block and no note: its own entry kind, the ScheduleID as the pairing
-// key, the Schedule's name on the branch, the static running marker beside it, and the prompt as the
-// body — open (`!done`) until the run returns.
+// key, the Schedule's name leading the branch row, the static running marker in that row's outcome
+// slot, and the prompt as the body — open (`!done`) until the run returns.
 func TestScheduleFiringOpensABlock(t *testing.T) {
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	before := len(m.transcript.entries)

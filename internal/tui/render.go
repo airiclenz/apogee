@@ -55,7 +55,7 @@ type renderedTranscript struct {
 // for, and never collapses it.
 //
 // targetHeader is named for the line it started on and is no longer only that line: a single tool
-// block wears it on EVERY row it paints — its header, its target rows, its body — and a grouped
+// block wears it on EVERY row it paints — its header, its leader row, its body — and a grouped
 // block's MEMBER rows wear it too, each naming its own call rather than the block's head, which is
 // how a group of ten opens one of them (renderToolBlock, renderToolGroup). What the kind means has
 // not moved: it is the toggle, whatever line it lands on.
@@ -284,7 +284,7 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			}
 		} else if run := toolCallRun(t.entries, i); len(run) > 1 {
 			// Consecutive same-label tool calls fold into one block at render time, so a batch of
-			// reads is one header plus an aligned branch per file. The entry list is untouched: a
+			// reads is one header plus one leader row per file. The entry list is untouched: a
 			// call that arrives mid-stream joins its group on the next repaint for free, and a run
 			// is same-depth by construction, so the label logic above fires exactly as before.
 			//
@@ -1064,10 +1064,10 @@ func startupInfoWidth(th theme, rows []startupInfoRow, labelW int) int {
 // accounting, and the two would drift the first time the shape changed (ADR 0030's rule). That
 // surface is the block WHOLE — its header, the leader row beneath it, and, open, every body line —
 // the shape the prompt block has always had (renderUserBlock): a reader who wants the rest of a
-// Run's output clicks the output, not the one row of the block that happens to be its header. The
-// one exception is the synthesized `+N more lines` marker, which keeps its OPEN-ONLY meaning
-// (targetMarker): it is a line of the collapsed paint alone, so a click there can only mean "show
-// me the rest".
+// Terminal call's output clicks the output, not the one row of the block that happens to be its
+// header. The one exception is the synthesized `+N more lines` marker, which keeps its OPEN-ONLY
+// meaning (targetMarker): it is a line of the collapsed paint alone, so a click there can only mean
+// "show me the rest".
 //
 // The surface exists when the collapsed paint HIDES something — either inside the views
 // (blockHidesWhenCollapsed) or outside them (state.elides, the sub-agent run's span) — because a
@@ -1544,10 +1544,12 @@ func (s blockState) star() string {
 	return glyphAssistant
 }
 
-// stateIndicator is the glyph a TOGGLEABLE header trails its label with: ▼ for an expanded block,
-// ▶ for a collapsed one (layout.md, "Collapsed and expanded blocks"). It answers for the state
-// alone — whether a header wears one at all is the toggle-target rule's, asked once in
-// renderToolBlock — so the two questions stay one condition and one glyph apart.
+// stateIndicator is the glyph a TOGGLEABLE block wears — at its leader row's right edge, past the
+// outcome slot (indicatorRow), or trailing the header's label in the targetless shape, which paints
+// no leader row for it to sit at the edge of: ▼ for an expanded block, ▶ for a collapsed one
+// (layout.md, "Collapsed and expanded blocks"). It answers for the state alone — whether a block
+// wears one at all is the toggle-target rule's, asked once in renderToolBlock — so the two questions
+// stay one condition and one glyph apart.
 func stateIndicator(expanded bool) string {
 	if expanded {
 		return glyphExpanded
@@ -1630,12 +1632,12 @@ func blockHidesWhenCollapsed(th theme, views []toolView, width int) bool {
 //   - a call WITH a target — the branch is the leader row every single block and every group
 //     member takes (leaderRow): the branch marker, the target, a dotted leader, then the call's
 //     Summary in an outcome slot flush against the row's right edge ("┕ main.go ⋯⋯⋯ 154 lines",
-//     "┕ main.go ⋯⋯⋯ +2 -2"). There is no target column to pad to — the leader absorbs whatever
+//     "┕ main.go ⋯⋯⋯ +2 −2"). There is no target column to pad to — the leader absorbs whatever
 //     the targets differ by, which is what puts a block of one and a block of ten's outcomes in
 //     the same place. A call still in flight has no summary yet and lets the dots run to the
 //     row's edge; the block repaints whole once the result folds in. Its Details, if any, are
 //     the block's body and lay out beneath the branch at the branch marker's own width — not as
-//     ┝/┕ branches of their own, because only calls are (a Run's output, a diff body under its
+//     ┝/┕ branches of their own, because only calls are (a Terminal call's output, a diff body under its
 //     diffstat) — painted whole when the block is expanded and not at all when it is collapsed.
 //   - a call with NO target — the only shape with no target line: the header stands alone and
 //     the detail lines are themselves the ┝/┕ branches, the summary last since it has no branch
@@ -1920,15 +1922,15 @@ func toolCallRun(entries []entry, i int) []toolView {
 }
 
 // groupable reports whether a tool call can be shown as one member row of a grouped block: it
-// needs a Target to sit in the aligned column, and it must not be marked solo by the presenter that
+// needs a Target to lead that row, and it must not be marked solo by the presenter that
 // built it (toolView.solo). Nothing else — a body no longer disqualifies a call, because a member
-// row no longer has to hold everything the call has to say: it shows one clipped line and keeps its
-// body behind its own indicator (renderGroupMember, design call 3). So a batch of Runs with output
-// and a batch of edits with their diffs group exactly as a batch of reads always has, which is what
-// a scrollback of ten same-label calls needed most.
+// row no longer has to hold everything the call has to say: it shows one leader row and keeps its
+// body behind its own indicator (renderGroupMember, design call 3). So a batch of Terminal calls
+// with output and a batch of edits with their diffs group exactly as a batch of reads always has,
+// which is what a scrollback of ten same-label calls needed most.
 //
 // A call with NO target still keeps its own block: there the detail lines ARE the branches
-// (renderToolBranch), so there is nothing for the aligned column to align. And solo is the
+// (renderToolBranch), so there is no leader row to lead. And solo is the
 // never-group mechanism the body exclusion used to be by accident — an answered question's record
 // is a card in its own right (askUserAnswerRecord) and a sub-agent call heads a whole run
 // (subAgentToolName), and both now say so instead of relying on the shape rule to keep them out.

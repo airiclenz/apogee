@@ -418,11 +418,11 @@
 // (trimBlankLines) and interior blank runs collapse outside fenced code, so layout.md's "exactly
 // one empty line between blocks" holds; a tool header drops its square brackets for a bold-gold
 // label (the [theme] toolLabel role, styled before the wrap — the markdown.go posture); and
-// consecutive same-label calls at the same depth fold into one aligned block (toolCallRun /
+// consecutive same-label calls at the same depth fold into one block (toolCallRun /
 // groupable) headed by "✦ Label (N)". Grouping is render-time only — the append-only entry list, the
 // call/result pairing, and transcript.hasOpenToolCall are untouched, so a call arriving mid-stream
-// joins its group on the next repaint. What a call CARRIES has stopped mattering to it: a Run and
-// its output group like a batch of reads, each member held to one row with its body behind an
+// joins its group on the next repaint. What a call CARRIES has stopped mattering to it: a Terminal
+// call and its output group like a batch of reads, each member held to one row with its body behind an
 // indicator of its own (renderGroupMember), and a presenter that needs its block left alone says so
 // outright (toolView.solo — the answered ask_user record, and the sub_agent call whose block heads
 // a whole run even when the run came to nothing).
@@ -431,11 +431,12 @@
 // slice of [toolView] — a lone call is a slice of one — and emits a ✦ header carrying the **label
 // alone, never a target**, then one ┝/┕ branch per call led by that call's target
 // ([renderToolBranch]). A call's outcome is split in two, and that split — not any line count —
-// is the grammar: the one-line [toolView] Summary rides the branch beside the target
-// ("┕ main.go 1 - 154", "┕ main.go +2 -2"; an in-flight call has none yet and shows the bare
-// target), while the Details body lays out beneath at the branch marker's width
-// ([renderSubDetails]) rather than sprouting branches of its own — a Run's output, a diff's
-// coloured lines under their diffstat. A call with no target at all is the one shape with no
+// is the grammar: the one-line [toolView] Summary fills the branch row's right-aligned outcome
+// slot, a dotted ⋯ leader flexing between it and the target ("┕ main.go ⋯⋯⋯ 154 lines",
+// "┕ main.go ⋯⋯⋯ +2 −2"; an in-flight call has none yet and lets the dots run to the row's edge),
+// while the Details body lays out beneath at the branch marker's width
+// ([renderSubDetails]) rather than sprouting branches of its own — a Terminal call's output, a
+// diff's coloured lines under their diffstat. A call with no target at all is the one shape with no
 // target line: its body, closed by its summary, is rendered as the branches themselves
 // ([renderDetails] — the stray-result and unregistered-tool fallbacks). One grammar covers both
 // counts — the reason the standalone and grouped paths were converged rather than kept in sync —
@@ -444,7 +445,7 @@
 // block's right edge, and a member opens ALONE — the group header toggles nothing, each member is
 // painted by its own entry's expanded flag and every row it paints is marked back to that entry
 // ([renderToolGroup], [renderExpandedMember], [blockPaint.addFor]) — where a block of one spends up
-// to four rows collapsed and toggles from ANY of them, header, target rows and body alike, the
+// to three rows collapsed and toggles from ANY row it paints, header, leader row and body alike, the
 // whole-surface rule the prompt block already followed. The `+N more lines` marker is the one row
 // that does not: it belongs to the collapsed paint, so a click there only ever opens. Whichever
 // shape it is, opening also lifts the block's TEXT a step out of the collapsed dim

@@ -19,7 +19,8 @@ import (
 //
 // This file turns a tool call+result into a compact, human-facing view: a friendly label for
 // the header line (✦ Read), the target that leads the branch beneath it, and the one-line
-// summary that follows the target on that branch (┕ main.go 1 - 100). It is pure — no lipgloss,
+// summary the branch row seats in its right-aligned outcome slot, a dotted leader running
+// between the two (┕ main.go ⋯⋯⋯ 154 lines). It is pure — no lipgloss,
 // no I/O — so it is trivially table-testable (TestPresentToolCall); render.go owns the styling
 // and the block shape.
 //
@@ -64,14 +65,14 @@ const (
 
 // detailLine is one line of a tool call's outcome — a short summary (detailPlain) or a
 // red/green diff line (detailDiffAdded/detailDiffRemoved). Where a line lands is not its own
-// business but that of the [toolView] field holding it: the Summary rides the branch line
-// beside the target, a Details line lays out beneath it (render.go owns that shape).
+// business but that of the [toolView] field holding it: the Summary rides the branch row's
+// right-aligned outcome slot, a Details line lays out beneath it (render.go owns that shape).
 type detailLine struct {
 	Kind detailKind
 	Text string
 }
 
-// branchSummary is the one-line outcome riding the branch line beside the target, bound to the one
+// branchSummary is the one-line outcome filling the branch row's outcome slot, bound to the one
 // fact the shortening seam depends on: WHOSE words it is. Most summaries are the presenter's own —
 // a typed phrase worded by the tool's stat hook ("154 lines", "+2 −2"), a tool's own report sentence
 // ("replaced text in <path>"), an "error: …" line — and the workspace root is shortened out of the
@@ -166,8 +167,8 @@ func (b *toolBody) stripEscapes() {
 
 // toolView is the presentation model of a tool call (later enriched by its result): a
 // friendly Label, the active Verb for the status line, the Target it acts on (a path, a
-// directory, a pattern), and the outcome split in two — the one-line Summary that rides the
-// branch line beside the target ("1 - 154", "+2 -2", "error: …") and the Details body laid
+// directory, a pattern), and the outcome split in two — the one-line Summary that fills the
+// branch row's outcome slot ("154 lines", "+2 −2", "error: …") and the Details body laid
 // out beneath it (a command's output, a diff's lines). Either half may be empty: an empty
 // Summary.Text means the call has no one-line outcome (one still in flight, a command run),
 // and an empty Details means nothing hangs beneath. That split IS the block's grammar —
@@ -226,7 +227,7 @@ type toolView struct {
 
 	// solo marks a call that must never be folded into a grouped block, however well it matches its
 	// neighbours (groupable, render.go). Grouping's own rule is about the SHAPE of a call — a target
-	// to lead an aligned member row — and says nothing about what the block MEANS; solo is where a
+	// to lead a member's leader row — and says nothing about what the block MEANS; solo is where a
 	// presenter states that meaning, for a record whose block is a thing in its own right rather than
 	// one of a batch. Two calls say it today: the answered ask_user question, whose block keeps the
 	// permanent record of an exchange (askUserAnswerRecord) and reads as a card, not as a row in a
@@ -253,8 +254,8 @@ type toolView struct {
 	args map[string]any
 }
 
-// toolOutcome is what a prose extractor returns: the one-line Summary that rides the branch
-// line beside the target, and the Details body laid out beneath it. Either half may be empty
+// toolOutcome is what a prose extractor returns: the one-line Summary that fills the branch
+// row's outcome slot, and the Details body laid out beneath it. Either half may be empty
 // — a fixed result sentence is summary-only ("HTTP 200 OK") and multi-line free-form output is
 // body-only (every one of its lines). A tool whose result carries a domain.ToolSummary
 // does not come through here at all: its stat hook words the branch line and the presenter's
@@ -284,7 +285,7 @@ type toolOutcome struct {
 }
 
 // summaryOnly is the outcome of a tool whose whole result is one plain line in the PRESENTER's
-// wording — a fixed sentence, a phrase it composed: it rides the branch line beside the target,
+// wording — a fixed sentence, a phrase it composed: it fills the branch row's outcome slot,
 // nothing hangs beneath it, and the shortening seam spells any path it names relative to the
 // workspace.
 func summaryOnly(text string) toolOutcome {
@@ -293,8 +294,8 @@ func summaryOnly(text string) toolOutcome {
 
 // promotedOutput is the outcome of a tool whose one-line result is text it did not WORD — a
 // command's whole output when that came to one line (outputDetail), the answer a human typed into
-// an ask_user question (quotedFirstLineDetail): the line is promoted into the summary slot and
-// rides the branch beside the target. Promotion moves where the text sits and changes nothing about
+// an ask_user question (quotedFirstLineDetail): the line is promoted into the branch row's outcome
+// slot. Promotion moves where the text sits and changes nothing about
 // whose text it is — it is quoted, so it is marked as such and reaches the screen with the spelling
 // it was written with (branchSummary).
 //
@@ -712,8 +713,8 @@ func (tv *toolView) finishDisplay(ws workspaceRoot) {
 	tv.shortenPaths(ws)
 }
 
-// shortenPaths spells the paths the view NAMES relative to the workspace — the target that leads
-// the branch line, and the one-line summary beside it when that summary is the block's OWN wording
+// shortenPaths spells the paths the view NAMES relative to the workspace — the target it acts on,
+// and the one-line summary of its outcome when that summary is the block's OWN wording
 // (workspaceRoot.shorten). It is presentation and nothing else: the model's arguments and the
 // tool's own result are untouched, so the agent's view of a path never changes with the
 // transcript's spelling of it.
@@ -1478,8 +1479,8 @@ func quotedFirstLineDetail(content string) toolOutcome {
 // The record is also what makes the block SOLO (toolOutcome.Solo): an answered question is a card
 // the reader comes back to, not one row of a batch, so it never folds into a group of its
 // neighbours. It used to be kept out of one by the body it carries — grouping admitted only bodiless
-// calls — and now that a Run and its output group like anything else, the exclusion has to be said
-// rather than inherited.
+// calls — and now that a Terminal call and its output group like anything else, the exclusion has
+// to be said rather than inherited.
 func askUserAnswerRecord(args map[string]any, content string) toolOutcome {
 	out := quotedFirstLineDetail(content)
 	out.Details = askExchangeLines(args, content)
@@ -1592,7 +1593,7 @@ func answerLines(content string) []string {
 // report) into the half its own size dictates, keeping EVERY line it was given. Which half it
 // fills follows the same rule as every other extractor: output that comes to exactly ONE
 // non-empty-led line — a single-line result, or none at all — is that call's whole outcome and
-// rides the branch beside the target ("┕ true (no output)"), which is also what keeps such
+// fills the branch row's outcome slot ("┕ true ⋯⋯⋯ (no output)"), which is also what keeps such
 // calls grouping; output with more to say is a body and lays out beneath the target instead,
 // because two lines cannot share a branch (layout.md's Run sketch).
 //
@@ -1672,10 +1673,10 @@ func openFileBody(res domain.ToolResult) []detailLine {
 // starts with "+" always arrives behind a tag. It returns every line: the collapsed paint's cap
 // and its remainder marker are the painter's (collapsedBodyRows, collapsedDetails, render.go).
 //
-// It counts NOTHING. The "+A -R" diffstat riding the branch above it comes from the tool's
-// domain.DiffStat, counted from the diff operations themselves — which is why the stat still
-// describes the whole diff when the collapsed paint stops at the cap, and why a "No changes
-// detected" result (no diff, hence no stat) never reaches here at all. That last rule is also
+// It counts NOTHING. The "+A −R" diffstat in the outcome slot of the branch above it comes from
+// the tool's domain.DiffStat, counted from the diff operations themselves — which is why the
+// stat still describes the whole diff when the collapsed paint stops at the cap, and why a "No
+// changes detected" result (no diff, hence no stat) never reaches here at all. That last rule is also
 // what makes the painter's kind-sniffing exact: a body from here always carries a tagged line.
 func diffBody(content string) []detailLine {
 	lines := splitLines(strings.TrimRight(content, "\n"))
@@ -1860,8 +1861,9 @@ func patchEditPairs(content string) []editPair {
 // pair shape and the same renderer an edit's full-replacement form uses (changedLines), so a write
 // and an edit that say the same thing read the same way.
 //
-// The "+N bytes" the result reports keeps riding the branch beside the target: the summary says how
-// much was written and the body says what, and neither is derived from the other. Content that is
+// The outcome slot on the branch above it says "N lines" instead (writtenLinesStat, the ratified
+// table's wording): the slot says how much was written and the body says what, and neither is
+// derived from the other — both read the same content argument. Content that is
 // absent, empty or of the wrong type yields no body — an empty file is a write with nothing to
 // show, not a body of one blank line.
 func writtenLines(args map[string]any) []detailLine {

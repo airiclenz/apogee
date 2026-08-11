@@ -131,8 +131,9 @@ func TestWorkdirDisplay(t *testing.T) {
 }
 
 // The shortening reaches the two halves of a tool card that NAME a path: the target that leads the
-// branch line, and the one-line summary of the outcome beside it. The call's own arguments are the
-// oracle — what the model asked for is untouched, only its spelling on screen changes.
+// branch row, and the one-line summary of the outcome standing in that row's outcome slot. The
+// call's own arguments are the oracle — what the model asked for is untouched, only its spelling on
+// screen changes.
 func TestToolCardPaintsWorkspaceRelativePaths(t *testing.T) {
 	t.Parallel()
 
@@ -223,10 +224,10 @@ func TestToolCardBodyKeepsTheSpellingOfWhatItQuotes(t *testing.T) {
 }
 
 // The SUMMARY slot is not always a phrase the block wrote. Output that came to exactly one line is
-// PROMOTED into it — the line rides the branch beside the target instead of hanging beneath it —
-// and promotion moves where the text sits, never whose text it is: `cat` on a one-line file puts
-// that file's content on the branch, so an in-workspace absolute path in it must reach the screen
-// with the spelling the file holds, exactly as it would one row lower in a body.
+// PROMOTED into it — the line takes the outcome slot at the branch row's right edge instead of
+// hanging beneath it — and promotion moves where the text sits, never whose text it is: `cat` on a
+// one-line file puts that file's content in the slot, so an in-workspace absolute path in it must
+// reach the screen with the spelling the file holds, exactly as it would one row lower in a body.
 //
 // The other rows are the contrast the rule needs: a sentence the tool reported about a path it
 // acted on, and the typed stat the registry words for a run that printed nothing, are the block's

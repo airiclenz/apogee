@@ -698,8 +698,8 @@ func readCall(tr *transcript, id, path string, from, to, depth int) {
 }
 
 // A batch of reads folds into one block: a single ✦ Read header carrying the member count,
-// ┝ ┝ ┕ rails, and every target padded to the widest one so the detail column lines up — the shape
-// docs/layout/tool-layout.md sketches.
+// ┝ ┝ ┕ rails, and every member row a leader row — target left, dotted leader, outcome flush
+// against the row's right edge — the shape docs/layout/tool-layout.md sketches.
 func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 	tr := &transcript{}
 	readCall(tr, "c1", "README.md", 1, 154, 0)
@@ -784,8 +784,9 @@ func TestRenderSplitsEditFromReplace(t *testing.T) {
 	}
 }
 
-// A member whose result has not landed shows its bare padded target and nothing after it; when the
-// result folds in, the whole block repaints with that member's detail in the aligned column.
+// A member whose result has not landed shows its target and a leader running to the row's edge with
+// nothing in the outcome slot; when the result folds in, the whole block repaints with that member's
+// outcome in the slot.
 func TestRenderGroupWithInFlightMember(t *testing.T) {
 	tr := &transcript{}
 	readCall(tr, "c1", "README.md", 1, 154, 0)
@@ -813,10 +814,11 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 	}
 }
 
-// A lone call renders in the shape a group does — a label header, target leading the branch — and
-// counts nothing: the "(N)" is a group's arithmetic and a block of one has none to state. The
-// ┕-with-no-padding is what "a group of one pads to itself" means, and a second call joins by
-// adding a line rather than by moving the first one's target.
+// A lone call renders in the shape a group does — a label header, target leading the branch, the
+// outcome at the row's right edge behind a leader — and counts nothing: the "(N)" is a group's
+// arithmetic and a block of one has none to state. A second call joins by adding a line rather
+// than by moving the first one's target: there is no column to re-measure, the leader simply
+// absorbs whatever the two targets differ by.
 func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	tr := &transcript{}
 	readCall(tr, "c1", "main.go", 1, 154, 0)
@@ -841,11 +843,11 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	}
 }
 
-// A body-only call keeps the same header and branch: nothing rides beside the target, and the
-// body lays out beneath it at the branch marker's width — those lines are not ┝/┕ branches of
-// their own, because only calls are (layout.md's Run sketch). COLLAPSED, none of them lays out at
-// all: the collapsed block's rows go to its target and the marker counts the body whole
-// (collapsedBodyRows), which is the shape the sketch draws.
+// A call with a BODY keeps the same header and leader row — its typed stat in the outcome slot at
+// the row's right edge — and the body lays out beneath it at the branch marker's width: those lines
+// are not ┝/┕ branches of their own, because only calls are (layout.md's Run sketch). COLLAPSED,
+// none of them lays out at all: the collapsed block's rows go to its leader row and the marker
+// counts the body whole (collapsedBodyRows), which is the shape the sketch draws.
 func TestRenderMultiDetailStandalone(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
@@ -864,8 +866,8 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 	}
 }
 
-// A diff call is the summary-and-body shape layout.md sketches: the diffstat rides the branch
-// beside the path and the coloured body hangs beneath it. The body keeps its red/green
+// A diff call is the summary-and-body shape layout.md sketches: the diffstat fills the outcome
+// slot on the path's leader row and the coloured body hangs beneath it. The body keeps its red/green
 // colouring, which — together with having a body at all — is why it can never fold into a group.
 // Asserted expanded, because a collapsed diff paints no body line at all (collapsedBodyRows) and
 // there would be no colour to see.
@@ -899,9 +901,9 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 	}
 }
 
-// The layout.md sketch, rendered: a two-line change shows "+2 −2" on the branch beside the path
-// with the diff body beneath it, and the diffstat line itself stays plain — only the body is
-// coloured, so the branch reads like every other tool's summary. The sketch is the EXPANDED
+// The layout.md sketch, rendered: a two-line change shows "+2 −2" in the outcome slot at the right
+// edge of the path's leader row with the diff body beneath it, and the diffstat itself stays plain
+// — only the body is coloured, so the row reads like every other tool's summary. The sketch is the EXPANDED
 // shape: a collapsed diff hides its body whole like every other block (collapsedBodyRows), so its
 // hunks are what a click reveals.
 func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
@@ -1871,7 +1873,7 @@ func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
 
 // …and because the collapsed paint now hides something, the block becomes a toggle target by the
 // one predicate that decides both the affordance and the click (blockHidesWhenCollapsed): every row
-// it paints is marked, the header wearing the ▶/▼ indicator, the remainder marker keeping its own
+// it paints is marked, the leader row wearing the ▶/▼ indicator, the remainder marker keeping its own
 // open-only kind, and expanding takes the marker away while the block — the answers it now shows
 // included — keeps the click that closes it again. A question still on the screen hides nothing and
 // is no target at all.
@@ -1920,10 +1922,10 @@ func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 // The record breaks the grouping a question used to fold into, and now SAYS so: the presenter marks
 // an answered record solo (askUserAnswerRecord), so consecutive answered questions each keep a block
 // of their own with the room the exchange needs. It used to be kept apart by the body it carries,
-// back when grouping admitted bodiless calls only; a Run and its output group now, so the exclusion
-// had to become a statement rather than a side effect. Pending questions still group — nothing has
-// been answered, so there is no record to stand alone — which is what keeps this a rule about
-// records and not a rule about Ask User.
+// back when grouping admitted bodiless calls only; a Terminal call and its output group now, so the
+// exclusion had to become a statement rather than a side effect. Pending questions still group —
+// nothing has been answered, so there is no record to stand alone — which is what keeps this a rule
+// about records and not a rule about Ask User.
 func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 	t.Run("answered questions stand alone", func(t *testing.T) {
 		tr := &transcript{}
@@ -2475,14 +2477,15 @@ func blockMarks(t *testing.T, tr *transcript, width int) []blockMark {
 }
 
 // TestRenderMarksTheWholeBlockAndItsMarker pins the whole target rule in one table: a single tool
-// block that hides something is a click surface WHOLE — every row it paints, its header, its target
-// rows and (open) its body, each carrying the index of the entry a click there toggles — its
+// block that hides something is a click surface WHOLE — every row it paints, its header, its leader
+// row and (open) its body, each carrying the index of the entry a click there toggles — its
 // synthesized remainder marker apart, which keeps its own open-only kind. A block that hides nothing
 // marks no row at all. Every case asserts the complete set of marks, so a line that quietly became
 // clickable, or quietly stopped being, fails here.
 //
 // It pins the AFFORDANCE against the same rule, because each mark carries its line's text: a marked
-// block wears the ▶/▼ state indicator on its header and an unmarked one wears none, so the visible
+// block wears the ▶/▼ state indicator at its leader row's right edge (on its header where the block
+// is the targetless shape and paints no leader row) and an unmarked one wears none, so the visible
 // hint and the click target cannot drift apart — a block that grew an indicator without becoming
 // clickable, or became clickable without growing one, fails here too.
 func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
@@ -2502,8 +2505,9 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 		want  []blockMark
 	}{
 		{
-			// ❯ run the tests | (spacer) | ✦ Terminal | ┕ go test ./... | +4 more lines — the header and
-			// the branch line beneath it are one surface, the marker its own open-only kind.
+			// ❯ run the tests | (spacer) | ✦ Terminal | ┕ go test ./... ⋯ exit 0 ▶ | +4 more lines —
+			// the header and the leader row beneath it are one surface, the marker its own
+			// open-only kind.
 			name:  "a hidden body marks the block's rows and its remainder marker",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
@@ -2767,10 +2771,11 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 	}
 }
 
-// The indicator is painted apart from the label: the detail tone, never toolLabel's bold gold, so
-// the affordance reads as chrome beside the tool's name rather than as the last letter of it. The
-// assertion is against the theme's own roles rather than a lipgloss byte-golden, and the second
-// guard catches the opposite failure — an indicator styled into the label's run.
+// The indicator is painted apart from the text it closes: the detail tone, never toolLabel's bold
+// gold, so the affordance reads as chrome at the leader row's right edge rather than as the last
+// word of that row. The assertion is against the theme's own roles rather than a lipgloss
+// byte-golden, and the second guard catches the opposite failure — an indicator styled into the
+// header label's own run, which is where the shape before the leader row put it.
 func TestHeaderIndicatorIsStyledApartFromTheLabel(t *testing.T) {
 	th := newTheme(scheme.Default())
 	tr := &transcript{}
@@ -3175,7 +3180,7 @@ func TestFiringBlockCollapsesToItsRemainderMarker(t *testing.T) {
 			},
 		},
 		{
-			name:   "a one-line answer rides the branch beside the Schedule's name",
+			name:   "a one-line answer fills the outcome slot on the Schedule's row",
 			answer: "the log is clean",
 			wantCollapsed: []string{
 				"⟳ Schedule",
@@ -3280,8 +3285,9 @@ func TestFiringBlockJoinsNoToolGrouping(t *testing.T) {
 }
 
 // A command whose output is a single line puts that line where every other one-line outcome goes:
-// on the branch, beside the command. Nothing hangs beneath — a one-line result is a summary, not a
-// body, and only a command with more to say than one line reshapes into the Run block above.
+// the outcome slot at the right edge of the command's leader row. Nothing hangs beneath — a one-line
+// result is a summary, not a body, and only a command with more to say than one line reshapes into
+// the Terminal block above.
 func TestRenderOneLineOutputRidesTheBranch(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"git rev-parse HEAD"}`)}})
@@ -3296,9 +3302,9 @@ func TestRenderOneLineOutputRidesTheBranch(t *testing.T) {
 	}
 }
 
-// …and because a one-line result leaves the branch line free of a body, consecutive one-line
-// commands still fold into one block with their outputs aligned past the widest command — the
-// grouping a body would (correctly) break.
+// …and because a one-line result leaves the branch row free of a body, consecutive one-line
+// commands still fold into one block, each output standing in the outcome slot at its own row's
+// right edge behind a leader of its own — the grouping a body would (correctly) break.
 func TestRenderGroupsOneLineOutputCalls(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"git rev-parse HEAD"}`)}})
@@ -3316,8 +3322,8 @@ func TestRenderGroupsOneLineOutputCalls(t *testing.T) {
 	}
 }
 
-// A call whose result has not landed shows the bare target on its branch and nothing after it —
-// the same line it will keep once the detail arrives beside it.
+// A call whose result has not landed shows its target and a leader running to the row's edge, the
+// outcome slot empty — the same row it will keep once the outcome arrives to fill that slot.
 func TestRenderInFlightStandalone(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}})
@@ -3647,8 +3653,8 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 	}
 }
 
-// Anything between two same-label calls ends the run, and so does a call with no target to lead an
-// aligned member row. A BODY is no longer among the breakers — that is the flip this test carries,
+// Anything between two same-label calls ends the run, and so does a call with no target to lead a
+// member's leader row. A BODY is no longer among the breakers — that is the flip this test carries,
 // asserted after the table — so the case that used to stand for it stands for what it actually
 // breaks on now: the label. Each case pins the whole scrollback, so a break shows as the separate
 // blocks it must produce.
@@ -3768,22 +3774,24 @@ func TestRenderGroupBreakers(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // TestTranscriptLayoutGolden pins the whole rendered scrollback of one realistic mixed session —
-// a user prompt, narration the model padded with a trailing "\n\n", a batch of reads, a Run whose
-// output hangs beneath its command, a diff whose "+2 −2" rides its branch over a coloured body, two
-// edits showing the lines they change beneath their own reports, a write showing the lines it
-// writes beneath its own byte count, an
+// a user prompt, narration the model padded with a trailing "\n\n", a batch of reads, a Terminal
+// call whose output hangs beneath its command, a diff whose "+2 −2" fills the outcome slot over a
+// coloured body, two edits showing the lines they change beneath their own reports, a write showing
+// the lines it writes beneath the "3 lines" its own slot states, an
 // unregistered tool whose verbatim arguments are its own branches, an
 // approval note, and a sub-agent read — as an exact line sequence, blank lines included. It is the
 // backstop across the layout changes rather than a test of any one of them: the blank-line hygiene
 // shows as the single separator row between every block — empty at the top level, the │ rail
 // gutter inside the sub-agent run — the bracketless bold-gold label as the
-// header text, the grouping as the two counted blocks — three reads aligned under "Read (3)",
+// header text, the grouping as the two counted blocks — three reads under "Read (3)",
 // and the two consecutive edits under "Replace (2)", differently tooled and sharing a label, each
 // held to one member row with its diff behind its own indicator now that a body no longer breaks a
 // run — and the uniform shape as the fact
 // that every header here — grouped, standalone, railed — is a label and nothing else, with the
-// target always leading a branch and the outcome split into the summary beside it and the body
-// beneath. The ▶ on every header that hides something and its absence everywhere else
+// target always leading its own branch row, the summary standing in the outcome slot flush against
+// that row's right edge behind a leader, and the body beneath. The ▶ at the right edge of every
+// leader row whose block hides something — on the HEADER only in the targetless mcp_search block,
+// which paints no leader row for it to sit at the edge of — and its absence everywhere else
 // is the affordance rule in the same picture: exactly the blocks here that hide something say so,
 // the targetless one among them now that it collapses like every other — and in a group it is the
 // MEMBER that says it, the counted header wearing none. A regression in any of

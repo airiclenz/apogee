@@ -52,8 +52,9 @@ const (
 	glyphTableCross     = "┼" // U+253C LIGHT VERTICAL AND HORIZONTAL — where a horizontal rule crosses a column divider (mdtable.go); one cell wide in either method, like the divider it crosses
 )
 
-// The state indicator a tool block wears — after the label on a header, at the block edge on a
-// group member — and its one purpose: saying which of the two states the block is in, and, by being
+// The state indicator a tool block wears — at the right edge of a leader row, past the outcome
+// slot, and after the label on the header of the targetless shape, which paints no leader row —
+// and its one purpose: saying which of the two states the block is in, and, by being
 // there at all, that the block is a click target (layout.md, "Collapsed and expanded blocks"). A
 // block with nothing to reveal wears neither. The shape is the ▶/▼ pair of the owner's sketch
 // (docs/layout/tool-layout.md), full-size rather than the small ▸/▾ these used to be: the indicator
@@ -130,7 +131,7 @@ type theme struct {
 	promptToggle  lipgloss.Style // the see-more / see-less marker a long prompt block carries near its right edge (renderUserBlock): bold light gray-blue on the block's OWN dark-gray field, held a promptMarkerMargin off the edge, so the toggle reads as an affordance sitting inside the block rather than as another row of what the human wrote
 	toolHeader    lipgloss.Style // the ✦ Label target header
 	toolLabel     lipgloss.Style // the tool label inside that header (bold, in the scheme's `tool-header` role — a tone of the header's own, no longer borrowed from the `code` role inline code and fenced blocks carry)
-	toolIndicator lipgloss.Style // the ▶/▼ state indicator trailing that label where the header is a toggle target: the detail tone, deliberately NOT toolLabel's gold, so the affordance reads as chrome beside the label rather than as part of it
+	toolIndicator lipgloss.Style // the ▶/▼ state indicator at the right edge of a toggleable block's leader row (or trailing the label where the targetless shape puts it on the header): the detail tone, deliberately NOT toolLabel's gold, so the affordance reads as chrome beside the text rather than as part of it
 	toolDetail    lipgloss.Style // the ┝/┕ branch detail lines of a COLLAPSED block (dim)
 	// toolDetailBright is toolDetail's open twin: the same lines once the block they belong to is
 	// expanded, a step out of the collapsed dim (the scheme's `muted-bright` role against

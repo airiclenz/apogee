@@ -462,10 +462,10 @@ func closeInterruptedFiring(e *entry) {
 }
 
 // presentFiring builds the view a starting Firing is announced with — presentToolCall's job for a
-// Firing: the Schedule's name leads the branch, the static running marker rides beside it, and the
-// prompt is the body. It leaves through finishDisplay exactly as a tool call does, so the name and
-// the prompt are escape-stripped before they reach the terminal (a Schedule is named from a prompt a
-// human typed, and the prompt is that text itself).
+// Firing: the Schedule's name leads the branch, the static running marker fills the row's outcome
+// slot at its right edge, and the prompt is the body. It leaves through finishDisplay exactly as a
+// tool call does, so the name and the prompt are escape-stripped before they reach the terminal
+// (a Schedule is named from a prompt a human typed, and the prompt is that text itself).
 //
 // The workspace root is deliberately NOT threaded through it: nothing here names a path the way a
 // tool call's target does — the target is a Schedule's name and the body is quoted text — so there
@@ -487,7 +487,7 @@ func presentFiring(ev schedule.Event) toolView {
 //
 // The answer takes the summary slot when it fits on one line and leads the body when it does not
 // (firingAnswer). Which half it lands in is what a collapsed block can show of it: a one-line answer
-// rides the branch beside the Schedule's name and is read without a click, while a longer one sits
+// fills the branch row's outcome slot and is read without a click, while a longer one sits
 // wholly behind the "+N more lines" marker until the block is opened. Everything the block already
 // held — the prompt — keeps its place beneath, and the two facts a human judges a Firing by close
 // it: what it cost, and where the record is.

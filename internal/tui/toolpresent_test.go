@@ -437,12 +437,12 @@ func TestPresentToolCallErrorResult(t *testing.T) {
 }
 
 // TestPresentToolCallOutcomeSplit pins which half of the outcome each kind of producer fills —
-// the split the block's shape is read off. A fixed result header is summary-only (it rides the
-// branch beside the target). Free-form command output fills the half its own size dictates:
-// output of one line (including none at all) rides the branch like any other one-line outcome,
+// the split the block's shape is read off. A fixed result header is summary-only (it fills the
+// branch row's outcome slot). Free-form command output fills the half its own size dictates:
+// output of one line (including none at all) takes that slot like any other one-line outcome,
 // while output with more to say is a body beneath the command (layout.md's Run sketch) — and
 // that body now holds every line, since the collapsed shape's remainder is the painter's act.
-// view_diff is the one producer filling both, a diffstat on the branch over a coloured body.
+// view_diff is the one producer filling both, a diffstat in the slot over a coloured body.
 func TestPresentToolCallOutcomeSplit(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -991,10 +991,9 @@ func TestWriteCallCarriesTheWrittenLines(t *testing.T) {
 }
 
 // A write's two halves say different things and neither is derived from the other: the LINE COUNT
-// its own request states rides the branch beside the target (the ratified table asks for lines,
+// its own request states fills the branch row's outcome slot (the ratified table asks for lines,
 // where the tool reports bytes) and the argument-derived lines hang beneath it — including when
-// there is only one of them. Nothing is promoted onto the branch, because the slot is already
-// taken.
+// there is only one of them. Nothing is promoted into that slot, because it is already taken.
 func TestWriteBodySurvivesItsByteCountSummary(t *testing.T) {
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file",
 		Arguments: []byte(`{"path":"notes.txt","content":"hello"}`)}, workspaceRoot{})
