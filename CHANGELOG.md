@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-08-11
+
 ### Added
 
 - **`/usage` — what this session has spent, agent by agent.** The status gauge is a *fill*: it says
