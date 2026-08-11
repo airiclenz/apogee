@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -428,4 +431,77 @@ func (c *parallelAgentsCap) relist(entries []config.ServerEntry) int {
 	c.mu.Unlock()
 	c.engine.SetParallelAgents(width)
 	return width
+}
+
+// hintObserver remembers how discovery resolved the configured model id on the last beat, so the
+// rebind that follows can say WHY the session is bound to a model the server never advertised. The
+// grade itself is discovery's own observation (provider.HintResolution, carried on every Beat since
+// a hint is trusted rather than substituted); this is the composition root holding the latest one
+// between the goroutine that observes it and the seam that explains it.
+//
+// It is keyed on the model the grade was reached FOR, because a grade is a statement about one id
+// against one advertised list. A human picking another model from `/model` rebinds before any beat
+// has observed that id, and answering that rebind with the retired id's grade would explain a new
+// binding with the old one's evidence; an unmatched read is simply no grade, and the next beat
+// supplies one.
+//
+// Its zero value is the honest cold start — nothing observed, no grade for any model — so it is held
+// by value and needs no constructor. The mutex is parallelAgentsCap's, for its reason: observe runs
+// on the beat goroutine while gradeFor runs on the Update goroutine.
+type hintObserver struct {
+	mu    sync.Mutex
+	model string
+	grade provider.HintResolution
+}
+
+// observe records what a landed beat resolved. A beat that names no model — an unreachable server,
+// or the zero Beat an unbound holder answers with — is dropped rather than written: it is not
+// evidence the hint stopped resolving, only that this beat could not say, the same posture
+// parallelAgentsCap.observe takes toward an unnamed slot count.
+func (o *hintObserver) observe(model string, grade provider.HintResolution) {
+	if model == "" {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.model, o.grade = model, grade
+}
+
+// gradeFor reports how discovery resolved model, and "" when the last beat resolved a different id
+// or none at all — a grade nobody observed says nothing about this binding.
+func (o *hintObserver) gradeFor(model string) provider.HintResolution {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if model == "" || model != o.model {
+		return ""
+	}
+	return o.grade
+}
+
+// hintNotice is the one line a session prints when the model it just bound is not one the server
+// advertises. Discovery no longer substitutes the first advertised model for an unmatched hint — it
+// runs the id as configured — so the human has to be told that, and told what it cost: an unknown
+// context window leaves the Budget and auto-compaction inactive, exactly as an advertised model that
+// reports no window does, and a genuinely wrong id now fails loud on the next completion instead of
+// quietly serving someone else's model. An exact match and the no-hint fallback are silent, because
+// nothing surprising happened.
+//
+// The two windows are the observation and what the rebind actually bound (a `context-window:` pin
+// outranks the observation, ADR 0024), which is why the base entry is named only when ITS number is
+// the one in force: a variant slug inherits its window from the base entry, but a pinned session
+// runs on the pin, and a notice crediting the base for a number the user pinned would be a lie about
+// where the window came from.
+func hintNotice(model string, grade provider.HintResolution, window, bound int) string {
+	if grade != provider.HintBaseSlug && grade != provider.HintTrusted {
+		return ""
+	}
+	notice := "model '" + model + "' is not advertised by the server; using it as configured"
+	switch base, _, _ := strings.Cut(model, ":"); {
+	case grade == provider.HintBaseSlug && window > 0 && bound == window:
+		return notice + " (context window from base '" + base + "': " + format.Tokens(window) + ")"
+	case bound > 0:
+		return notice + " (context window: " + format.Tokens(bound) + ")"
+	default:
+		return notice + " (context window unknown — Budget and auto-compaction inactive)"
+	}
 }

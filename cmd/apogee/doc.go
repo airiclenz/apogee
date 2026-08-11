@@ -62,7 +62,8 @@
 //
 // The session's wiring: upstream.go the holder owning the CURRENT heartbeat Monitor and
 // binding — so a `/server` switch is a composition-root move the renderer never sees —
-// plus the server choices and the parallel-agents cap; title.go the out-of-band
+// plus the server choices, the parallel-agents cap, and the hint-resolution observer
+// behind the "model not advertised" notice; title.go the out-of-band
 // session-naming completion behind [tui.Options.GenerateTitle]; validatedsets.go the
 // startup ladder that decides what the Validated-set surface applies and says this
 // session; launcher.go the only file importing the llama-launcher facade, kept behind

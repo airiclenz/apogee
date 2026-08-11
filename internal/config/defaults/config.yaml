@@ -55,12 +55,16 @@
 #              permissions yourself. apogee reports whether a key was resolved (`apogee probe`,
 #              the upstream block); the value is never printed, and the provider client redacts
 #              it from server-echoed errors.
-#   model      that server's model hint. It is a HINT, not a claim: apogee follows the model the
-#              server actually serves. Optional — leave it out and the first heartbeat binds
-#              whatever is loaded, which is all a single-model server (e.g. llama.cpp's
-#              llama-server) needs — and set it on a multi-model server to say which of them
-#              you mean. Either way, when the server's loaded model changes under a running
-#              session, apogee rebinds to it within ten seconds and says so in the transcript.
+#   model      that server's model hint: which of the models it serves you mean. Optional —
+#              leave it out and the first heartbeat binds whatever is loaded, which is all a
+#              single-model server (e.g. llama.cpp's llama-server) needs; apogee then follows
+#              that server, rebinding within ten seconds whenever the loaded model changes
+#              under a running session and saying so in the transcript. Set it and this id is
+#              what goes on the wire, advertised or not — the server's model list only supplies
+#              the context window, from the matching entry or, for a variant slug like
+#              `vendor/model:exacto`, from its base entry. An id the list cannot place at all
+#              still runs, with the context window unknown (the Budget and auto-compaction then
+#              inactive), and apogee says so once in the transcript at startup.
 #              --model / APOGEE_MODEL overrides it for the server this session starts on.
 #   llama-launcher
 #              lets apogee start, switch and stop THIS server itself, with llama-launcher — the

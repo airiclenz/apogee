@@ -138,6 +138,7 @@ type rootWiring struct {
 	host          *sessionHost
 	holder        *upstreamHolder
 	caps          *parallelAgentsCap
+	hints         hintObserver
 	binder        serverBinder
 	live          *liveSettings
 	externalEdits *externalEdit

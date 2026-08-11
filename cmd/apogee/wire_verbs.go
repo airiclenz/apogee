@@ -35,6 +35,14 @@ func (w *rootWiring) rebind(model string, window int) (tui.RebindResult, error) 
 	if err != nil {
 		return tui.RebindResult{}, err
 	}
+	// The model a session runs is now the id the human configured even when the server never
+	// advertised it (provider's trusted-hint resolution), so the binding that lands on such an id
+	// says so — once, here, where the beat that resolved it and the window it actually bound are
+	// both in hand. It joins the validated-set lines rather than printing itself: a notice is
+	// something the transcript tells the human, and this seam already has that channel.
+	if notice := hintNotice(spec.Model, w.hints.gradeFor(model), window, spec.MaxContextTokens); notice != "" {
+		notices = append(notices, notice)
+	}
 	if err := w.engine.Rebind(spec); err != nil {
 		return tui.RebindResult{}, err
 	}
@@ -68,6 +76,10 @@ func (w *rootWiring) rebind(model string, window int) (tui.RebindResult, error) 
 func (w *rootWiring) beat(ctx context.Context) heartbeat.Beat {
 	observed := w.holder.Beat(ctx)
 	w.caps.observe(observed.TotalSlots)
+	// And the same reading catches the other thing only discovery can say: HOW the configured id
+	// resolved against the advertised list, remembered here so the rebind this beat may trigger can
+	// explain an unadvertised model without re-deriving the match.
+	w.hints.observe(observed.ActiveModel, observed.Resolution)
 	return observed
 }
 

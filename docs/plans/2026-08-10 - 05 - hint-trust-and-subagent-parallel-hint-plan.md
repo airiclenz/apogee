@@ -120,9 +120,22 @@ cases.
 
 **Commit:** `fix(provider): trust an unadvertised model hint instead of swapping in models[0]`
 
-## 2. Startup notice for non-exact hint resolution; close the ISSUES entry
+## 2. Startup notice for non-exact hint resolution; close the ISSUES entry — ✅ DONE (2026-08-11)
 
 Depends on item 1.
+
+NOTES (2026-08-11): the notice is appended at `rootWiring.rebind` (`wire_verbs.go`) rather
+than inside `rebindSpecFor` — same `notices` slice, same `RebindResult.Notices` path — because
+the resolution grade is a DISCOVERY observation the beat carries, and the two other
+`rebindSpecFor` callers (headless, a scheduled Firing) run no discovery at all. Plumbing:
+`heartbeat.Beat` gained `Resolution`, `rootWiring.beat` records it in a `hintObserver` keyed on
+the model it graded, and the rebind reads it back.
+
+NOTES (2026-08-11): `internal/config/defaults/config.yaml`'s `model` key comment still described
+the superseded behavior ("It is a HINT, not a claim: apogee follows the model the server actually
+serves") — rewritten to the shipped semantics (id trusted on the wire, list supplies the window
+only, startup notice when it cannot be placed). Item 1 owns that behavior but is already done, so
+the user-facing usage text is corrected here alongside the notice it describes.
 
 **What:** Emit ONE line when the resolution grade from item 1 is base-slug or
 trusted (exact and first-advertised stay silent). The seam (2026-08-10 scout):

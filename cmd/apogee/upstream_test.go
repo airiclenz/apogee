@@ -14,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -542,5 +543,130 @@ func TestStartupEntryCarriesTheParallelAgentsPin(t *testing.T) {
 	})
 	if entry.ParallelAgents != 4 {
 		t.Errorf("startupEntry().ParallelAgents = %d, want the resolved startup entry's 4", entry.ParallelAgents)
+	}
+}
+
+// The notice a rebind adds when the model it bound is one the server never advertised. Silence is
+// half the contract: an advertised model and a no-hint start are ordinary, and a line printed about
+// them would teach the human to ignore the one that matters.
+func TestHintNoticeSpeaksOnlyForAnUnadvertisedModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		model        string
+		grade        provider.HintResolution
+		window       int
+		bound        int
+		want         string
+		wantContains []string
+	}{
+		{
+			name:   "an advertised model is unremarkable",
+			model:  "served",
+			grade:  provider.HintExact,
+			window: 128000,
+			bound:  128000,
+			want:   "",
+		},
+		{
+			name:   "so is the model a session with no hint fell back to",
+			model:  "first",
+			grade:  provider.HintFirstAdvertised,
+			window: 4096,
+			bound:  4096,
+			want:   "",
+		},
+		{
+			name:   "no beat has graded this model yet",
+			model:  "picked",
+			grade:  "",
+			window: 4096,
+			bound:  4096,
+			want:   "",
+		},
+		{
+			// The live OpenRouter case: the variant slug is on the wire, the base entry supplied
+			// the window, and the notice says both.
+			name:         "a variant slug credits the base entry it inherited its window from",
+			model:        "deepseek/deepseek-v4-pro:exacto",
+			grade:        provider.HintBaseSlug,
+			window:       1048576,
+			bound:        1048576,
+			wantContains: []string{"deepseek/deepseek-v4-pro:exacto", "not advertised", "base 'deepseek/deepseek-v4-pro'", "1M"},
+		},
+		{
+			// A pin outranks the observation, so the base entry no longer supplied the number in
+			// force and must not be credited with it.
+			name:         "a pinned window is reported as the window, not as the base's",
+			model:        "deepseek/deepseek-v4-pro:exacto",
+			grade:        provider.HintBaseSlug,
+			window:       1048576,
+			bound:        200000,
+			wantContains: []string{"not advertised", "context window: 195k"},
+		},
+		{
+			name:         "an unlisted id is used as configured with no window at all",
+			model:        "my-alias",
+			grade:        provider.HintTrusted,
+			window:       0,
+			bound:        0,
+			wantContains: []string{"my-alias", "not advertised", "unknown", "Budget"},
+		},
+		{
+			name:         "an unlisted id under a pin still has a window to report",
+			model:        "my-alias",
+			grade:        provider.HintTrusted,
+			window:       0,
+			bound:        32768,
+			wantContains: []string{"my-alias", "not advertised", "context window: 32k"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := hintNotice(tt.model, tt.grade, tt.window, tt.bound)
+			if len(tt.wantContains) == 0 {
+				if got != tt.want {
+					t.Fatalf("hintNotice(%q, %q) = %q, want silence", tt.model, tt.grade, got)
+				}
+				return
+			}
+			for _, want := range tt.wantContains {
+				if !strings.Contains(got, want) {
+					t.Errorf("hintNotice(%q, %q) = %q, want it to name %q", tt.model, tt.grade, got, want)
+				}
+			}
+		})
+	}
+}
+
+// The grade is a statement about ONE id against one advertised list, so the observer answers for the
+// model it was observed for and for no other: a human picking another model rebinds before any beat
+// has graded it, and inheriting the retired id's grade would explain that binding with the wrong
+// evidence — the very "not advertised" line an advertised pick must never print.
+func TestHintObserverAnswersOnlyForTheModelItObserved(t *testing.T) {
+	t.Parallel()
+
+	var hints hintObserver
+
+	if got := hints.gradeFor("anything"); got != "" {
+		t.Errorf("gradeFor before any beat = %q, want no grade", got)
+	}
+
+	hints.observe("my-alias", provider.HintTrusted)
+	if got := hints.gradeFor("my-alias"); got != provider.HintTrusted {
+		t.Errorf("gradeFor(observed) = %q, want %q", got, provider.HintTrusted)
+	}
+	if got := hints.gradeFor("served"); got != "" {
+		t.Errorf("gradeFor(another model) = %q, want no grade", got)
+	}
+
+	// An unreachable beat names no model; it is not evidence the hint stopped resolving.
+	hints.observe("", provider.HintFirstAdvertised)
+	if got := hints.gradeFor("my-alias"); got != provider.HintTrusted {
+		t.Errorf("gradeFor after a silent beat = %q, want the last real observation %q", got, provider.HintTrusted)
 	}
 }

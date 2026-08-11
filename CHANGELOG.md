@@ -588,6 +588,26 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The model you configure is the model you get, even when the server does not list it.**
+  Discovery used to match `model:` against `/v1/models` by exact id and, on no match, silently bind
+  the server's FIRST advertised model instead — so a hint that is perfectly valid on the wire but
+  absent from the list ran someone else's model without a word. It is trusted now: the configured id
+  always goes out as configured, and the advertised list only supplies the context window. An exact
+  entry supplies it as before; a variant slug such as `deepseek/deepseek-v4-pro:exacto` inherits the
+  window of its base entry (the part before the first `:`), which is exactly the OpenRouter case
+  that surfaced this — variants are served but never listed. An id that matches nothing at all still
+  runs, with the window unknown, which leaves the Budget and auto-compaction inactive exactly as an
+  advertised model that reports no window does, and lets a genuinely wrong id fail loudly on the
+  next request instead of quietly serving a different model. An empty model list is no longer fatal
+  when something is configured to run.
+  - **A session bound to a model that is not advertised now says so, once, at startup**:
+    one transcript note naming the id and what the window came to — the base entry it was inherited
+    from, or unknown with the Budget and auto-compaction it costs. An advertised model, and a start
+    with no `model:` at all, stay silent.
+  - Per-model configuration keys on the id you configured. `system-prompt-models:`, the
+    Validated-set identity and the `apogee probe model` record are all keyed on the RESOLVED model,
+    which is now the full configured id rather than whatever the server happened to list first —
+    write per-model entries against the id you wrote in `model:`.
 - **An upstream failure can no longer arrive as a silent empty reply.** OpenAI-compatible
   aggregators deliver a provider's failure *in band*: an HTTP 200 whose JSON body — or whose SSE
   stream — carries `{"error": {…}}` and no usable choices. apogee's wire structs ignored that

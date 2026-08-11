@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // discoveryServer serves the two paths one beat reads — GET /v1/models and llama.cpp's GET
@@ -124,6 +126,11 @@ func TestBeatUnadvertisedHintStaysActive(t *testing.T) {
 	// nobody asked for and flap the binding every beat. Its window is simply unknown.
 	if beat.ActiveModel != "unloaded" || beat.ContextWindow != 0 {
 		t.Errorf("active = %q ctx = %d, want unloaded / 0", beat.ActiveModel, beat.ContextWindow)
+	}
+	// And the beat says HOW it got there, because the host's "not advertised" notice is emitted
+	// from the grade rather than re-derived from the list.
+	if beat.Resolution != provider.HintTrusted {
+		t.Errorf("resolution = %q, want %q", beat.Resolution, provider.HintTrusted)
 	}
 }
 

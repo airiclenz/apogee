@@ -65,6 +65,13 @@ type Beat struct {
 	TotalSlots int
 	// AvailableModels is every advertised model, in the order the server listed them.
 	AvailableModels []ModelSummary
+	// Resolution grades HOW discovery reached ActiveModel — advertised verbatim, matched on the
+	// base slug of a variant hint, trusted as configured, or the first advertised model when
+	// nothing is configured (provider.HintResolution). It rides the beat because only discovery
+	// can say it and only the host can act on it: a hint is now trusted rather than substituted,
+	// so a non-exact grade is what a host's "not advertised" notice is emitted from, without the
+	// host re-deriving the match against AvailableModels.
+	Resolution provider.HintResolution
 }
 
 // Monitor is the production beat source: one provider client, beaten on demand by whoever
@@ -123,6 +130,7 @@ func (m *Monitor) Beat(ctx context.Context) Beat {
 		ActiveModel:     info.ActiveModel,
 		ContextWindow:   info.ContextWindow,
 		TotalSlots:      info.TotalSlots,
+		Resolution:      info.Resolution,
 		AvailableModels: make([]ModelSummary, 0, len(info.AvailableModels)),
 	}
 	for _, model := range info.AvailableModels {
