@@ -710,7 +710,7 @@ affordance and the click-target rule are **one predicate**: an indicator appears
 click toggles something, so a row that hides nothing wears none, and a sub-agent run's head wears
 one however short its
 own report is. The `+N more lines` count is apogee's own word too and is painted as one — the
-`tool-marker` role, a warm orange `#FFB050` under `dark`, no background and no bold weight, the
+`tool-marker` role, a warm orange `#E0B080` under `dark`, no background and no bold weight, the
 quieter sibling of the prompt block's `see more` (the `prompt-toggle` role) — so a body line
 that happens to open with `+` can never be mistaken for it. It is **no longer a line**: it joins
 the outcome slot on the leader row, after the middle dot the typed stats already speak in
