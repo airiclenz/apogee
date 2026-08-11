@@ -241,7 +241,13 @@ summary is the item's key evidence.
 
 **Commit:** `refactor(domain): drop the OpenedFile summary variant and its presenters`
 
-## 5. Docs closeout — CONTEXT.md, tool-layout, TODO item (c), CHANGELOG
+## 5. Docs closeout — CONTEXT.md, tool-layout, TODO item (c), CHANGELOG — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): the tool-layout open_file row is at :250, not :233, and TODO item (c) at
+:770-771 (content matched; CONTEXT.md :856-858 was exact). "House style for resolved entries" was
+read as the in-entry precedent (`TODO.md:25` — a bullet of a still-live entry annotated in place),
+not the bottom "Closed entries" trail, which takes whole entries: (c) is one lettered arm of the
+still-open Tool-surface findings entry, so moving it out would strand the other five.
 
 Depends on items 3 and 4.
 

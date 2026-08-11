@@ -767,8 +767,16 @@ experiment, not a decision:
 
 - **(a)** remove `single_find_and_replace` — flagged in all four polls.
 - **(b)** patch-only vs find-replace editing — Qwen vs both Gemmas, a falsifiable disagreement.
-- **(c)** `open_file`/`read_file` merge — lean: keep `read_file`, add a `locate` parameter (Qwen
-  chose `read_file` as the survivor in both sessions).
+- **(c)** `open_file`/`read_file` merge — **RESOLVED 2026-08-11 by owner call, and shipped WITHOUT
+  the bench experiment this section otherwise requires** — an owner-ratified exception for this arm
+  alone; the standing rule above still binds (a), (b), (d), (e) and (f). The recorded lean is what
+  shipped: `read_file` kept and given a `locate` parameter (whole-file scan, absolute 1-based line
+  numbers), `open_file` removed along with its summary variant and presenters — full record in
+  `docs/plans/2026-08-11 - 03 - open-file-read-file-merge-plan.md` and the CHANGELOG. **Watch-item:**
+  the very thing the skipped experiment would have measured is untested — whether sub-35B models find
+  a locate *parameter* as readily as they found an `open_file` *name*. Method lesson 2 below says
+  they may not; `read_file`'s description advertises locate by name to hedge it, and a sighting of
+  models no longer locating reopens this arm rather than re-filing it as a gap.
 - **(d)** measure whether sub-35B models use `view_diff` at all.
 - **(e)** `web_fetch` → `http_request` merge — the real question is whether sub-35B models
   distinguish GET from POST; if they don't, the separate named GET tool earns its slot. Both are

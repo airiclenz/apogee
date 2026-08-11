@@ -8,6 +8,31 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Changed
+
+- **`read_file` can now locate a substring while it reads.** An optional `locate` parameter reports
+  the absolute 1-based line numbers the substring falls on, as one `Located "…" on lines: 5, 9` line
+  directly under the read's header — `on no lines` when it matches nothing. The scan always covers
+  the **whole file**, even when `start_line`/`end_line`/`max_lines` narrow the content that comes
+  back, so a match outside the returned span is still reported at its true line number: the parameter
+  answers "where is this?", not "is it in the part you showed me?". A read that asks for no locate
+  renders byte-identical to before. The tool's description advertises the affordance by name, because
+  small models discover capabilities by name rather than by reading a parameter schema. The TUI says
+  it on the row too — the target picks up a `· locate "…"` qualifier beside any range it already
+  shows (`path:12–80 · locate "…"`) — and the located lines ride the tool summary as data rather than
+  as a sentence a host has to parse back out.
+
+### Removed
+
+- **`open_file` is gone, merged into `read_file`.** It was the read-and-locate twin of a tool that
+  already read files, and the roster is itself a discovery surface: a second name for one job costs
+  more than it buys. Everything it did survives as `read_file`'s `locate` parameter above, and the
+  `domain.OpenedFile` summary variant went with it — `ReadSpan` carries the locate facts now. Nothing
+  else about `read_file` moved: same label, same stat, same output when no locate is asked for.
+  `"open_file"` stays in the Mechanisms' read-spelling family as a retired name models may still
+  emit, so a model reaching for it is still recognised as reading. A `tools.disabled` entry still
+  naming it starts fine, disables nothing, and draws the standard unknown-name startup notice.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added
