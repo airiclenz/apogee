@@ -247,7 +247,22 @@ expanded done member/lone run shows `… · done`; collapsed rendering unchanged
 
 Commit: `fix(tui): keep top-level details on expanded sub-agents`
 
-## 7. TUI: blank line between sub-agent name and initial prompt
+## 7. TUI: blank line between sub-agent name and initial prompt — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): closed as a GOLDEN-LOCK — the item's own second branch. Reproduction found the
+railed blank standing in every expanded rendering: a sweep of 5 fixture shapes (lone, grouped first /
+grouped last, nested, streaming-only) × 5 prompt shapes (one-liner, markdown, leading blanks, fenced,
+list) × 3 report shapes (none, promoted gist, laid-out body) × 5 widths (20/34/48/80/120), rendered
+both cold and through a warmed paint cache, put a spacer immediately before the prompt in all of them,
+and removing the `railSpacer` from `subAgentPromptRows` fails all six new goldens. One thing the
+reproduction did turn up: a fixture whose child work is NOT stamped with the spawning call id lands
+that work behind whichever delegation was announced last, leaving the earlier member spanless,
+unframed and so prompt-less — an artifact of hand-built transcripts only (the engine stamps every
+child event, `Agent.base`), and the reason the new fixture stamps it too. A delegation that genuinely
+produced no span (refused at the depth bound, failed by a hook) still shows no prompt at all when
+opened; that is `subAgentFramed`'s rule, identical in the lone and grouped paths, and not a blank-line
+defect. No CHANGELOG bullet: nothing user-visible changed. No spec change either — the Grouped
+Sub-agents sketch in `docs/layout/tool-layout.md` already draws the blank row under the `┌─┶` header.
 
 **What:** The owner reports no blank line between an expanded sub-agent's name row and
 the delegated prompt. The code intends one (`railSpacer` prepended in

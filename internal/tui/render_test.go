@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math/rand"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1616,6 +1617,161 @@ func TestExpandedSubAgentOpensWithItsPrompt(t *testing.T) {
 				"│   ┕ a.go ⋯ 5 lines"), "\n")
 			if got := renderPlain(tr, 80); got != want {
 				t.Errorf("empty-prompt mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
+// delegateAsked folds one delegation the way the engine emits it: the sub_agent call carrying an
+// arbitrary prompt, the started phase a worker emits the instant it takes the job, and one nested
+// call the child made — stamped with the SPAWNING call's id, which is what keeps that work in this
+// delegation's own stretch of the entry list while siblings run at once (transcript.place, ADR
+// 0039). Without the stamp a fan-out's child work lands behind whichever delegation was announced
+// last, and the member under test would be left with no span to open at all.
+//
+// report closes the run; "" leaves it working, so ONE fixture serves both halves of every pair
+// below rather than a running shape and a finished one being built by two different hands.
+func delegateAsked(t *testing.T, tr *transcript, id, task, report string) {
+	t.Helper()
+	args, err := json.Marshal(map[string]string{"task": task})
+	if err != nil {
+		t.Fatalf("marshal the delegated task: %v", err)
+	}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: id, Tool: "sub_agent", Arguments: args}})
+	subAgentStarted(tr, id, 1)
+	childCall(tr, id, "r"+id, "a.go")
+	if report != "" {
+		subAgentReport(tr, id, report, 0)
+	}
+}
+
+// Exactly ONE railed blank line stands between an expanded delegation's own rows and the prompt it
+// was handed (docs/layout/tool-layout.md, "Grouped Sub-agents") — never none, and never two. It is
+// the spacer [subAgentPromptRows] opens the span with, and what it parts is the two halves of the
+// frame: what the delegation SAYS of itself above, what it was ASKED below.
+//
+// The claim is pinned across the whole matrix of expanded readings because the rows directly above
+// that spacer are different in every one of them and the spacer must not be. A lone run and a
+// grouped member wear different frames; a run still working has no report at all; a short report is
+// promoted into the header's summary slot and leaves no body behind it, while a long one lays out
+// as one — flush under a lone head, behind the member gutter when the delegation is folded into a
+// list. Six shapes, one blank line, in the same place in each.
+func TestExpandedSubAgentPromptOpensOnOneBlankRailLine(t *testing.T) {
+	const task = "Survey the tests\n\nReport every gap you find, and be brief about it."
+	// A report too long for the summary slot becomes the head's BODY, which is what puts rows
+	// between the header row and the prompt's spacer.
+	longReport := strings.Repeat("the tests cover the parser and nothing else at all. ", 3)
+
+	// The prompt as it stands inside the frame — the spacer, then the task's two paragraphs rendered
+	// as markdown behind the rail — and the span opening under it. Both are stated once, so what a
+	// case below carries of its own is only ever the head's rows.
+	prompt := []string{
+		"│",
+		"│ Survey the tests",
+		"│",
+		"│ Report every gap you find, and be brief about it.",
+	}
+	span := []string{"│", "│ ✦ Read", "│   ┕ a.go ⋯ 1 - 10"}
+	// The list resumes after the open member's span: the ┊ closing it, then the sibling's own row.
+	sibling := []string{"┊", groupMemberLine("  ┕ survey the docs ⋯ 1 tool call")}
+
+	for _, tc := range []struct {
+		name  string
+		build func(t *testing.T) *transcript
+		want  []string
+	}{
+		{
+			name: "a lone run still working",
+			build: func(t *testing.T) *transcript {
+				tr := &transcript{}
+				delegateAsked(t, tr, "s1", task, "")
+				return tr
+			},
+			want: slices.Concat([]string{
+				"✦ Sub-Agent",
+				leaderEdgeRow("┌─┶ Survey the tests ⋯ 1 tool call", glyphExpanded),
+			}, prompt, span),
+		},
+		{
+			name: "a lone run whose report was promoted into the slot",
+			build: func(t *testing.T) *transcript {
+				tr := &transcript{}
+				delegateAsked(t, tr, "s1", task, "all clear")
+				return tr
+			},
+			want: slices.Concat([]string{
+				"✦ Sub-Agent",
+				leaderEdgeRow("┌─┶ Survey the tests ✓ ⋯ 1 tool call · all clear", glyphExpanded),
+			}, prompt, span),
+		},
+		{
+			name: "a lone run whose report became a body",
+			build: func(t *testing.T) *transcript {
+				tr := &transcript{}
+				delegateAsked(t, tr, "s1", task, longReport)
+				return tr
+			},
+			want: slices.Concat([]string{
+				"✦ Sub-Agent",
+				leaderEdgeRow("┌─┶ Survey the tests ✓ ⋯ done", glyphExpanded),
+				"    1 tool call · the tests cover the parser and nothing else at all. the tests",
+				"    cover the parser and nothing else at all. the tests cover the parser and",
+				"    nothing else at all.",
+				seeLessFooterLine(t, 80),
+			}, prompt, span),
+		},
+		{
+			name: "a grouped member still working",
+			build: func(t *testing.T) *transcript {
+				tr := &transcript{}
+				delegateAsked(t, tr, "s1", task, "")
+				delegateAsked(t, tr, "s2", "survey the docs", "")
+				return tr
+			},
+			want: slices.Concat([]string{
+				"✦ Sub-Agent (2)",
+				leaderEdgeRow("┌─┶ Survey the tests ⋯ 1 tool call", glyphExpanded),
+			}, prompt, span, sibling),
+		},
+		{
+			name: "a grouped member whose report was promoted into the slot",
+			build: func(t *testing.T) *transcript {
+				tr := &transcript{}
+				delegateAsked(t, tr, "s1", task, "all clear")
+				delegateAsked(t, tr, "s2", "survey the docs", "")
+				return tr
+			},
+			want: slices.Concat([]string{
+				"✦ Sub-Agent (2)",
+				leaderEdgeRow("┌─┶ Survey the tests ✓ ⋯ 1 tool call · all clear", glyphExpanded),
+			}, prompt, span, sibling),
+		},
+		{
+			name: "a grouped member whose report became a body",
+			build: func(t *testing.T) *transcript {
+				tr := &transcript{}
+				delegateAsked(t, tr, "s1", task, longReport)
+				delegateAsked(t, tr, "s2", "survey the docs", "")
+				return tr
+			},
+			// The body sits behind the member gutter, and the spacer under it is railed at the run's
+			// own depth: two different columns, one blank line between them and the prompt.
+			want: slices.Concat([]string{
+				"✦ Sub-Agent (2)",
+				leaderEdgeRow("┌─┶ Survey the tests ✓ ⋯ done", glyphExpanded),
+				"  │ 1 tool call · the tests cover the parser and nothing else at all. the",
+				"  │ tests cover the parser and nothing else at all. the tests cover the parser",
+				"  │ and nothing else at all.",
+			}, prompt, span, sibling),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := tc.build(t)
+			if !tr.setExpanded(0, true) {
+				t.Fatal("setExpanded(0, true) = false; want the delegation open")
+			}
+			if got, want := renderPlain(tr, 80), strings.Join(tc.want, "\n"); got != want {
+				t.Errorf("expanded prompt frame mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 			}
 		})
 	}
