@@ -111,7 +111,31 @@ Depends on item 2.
 
 ---
 
-## 4. Fold the +N-more-lines marker into the outcome slot (lone-call collapsed shape)
+## 4. Fold the +N-more-lines marker into the outcome slot (lone-call collapsed shape) — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): three departures from the item's literal text, each forced by the code.
+(a) The TARGETLESS shape drops its marker row and gains nothing: it paints no leader row and so has
+no slot for the text to join (the item's "for both shapes" reaches the row's removal, not its
+relocation). Its ▶ is what now says there is more, and the docs say so in both specs. That is also
+what makes `targetMarker` dead, so the stop was removed outright under the item's own
+"if nothing does" clause — with it, `blockcursor.go`/`transcript.go`/`mouse.go`/`render.go` prose
+about the one open-only line. (b) The count is the row's FIRST concession (`affordableSlot`), not a
+plain passenger in the existing order: reserved unconditionally it ate the very cells design call 5
+protects — `TestPromoteGuardHoldsFifteenCellsOfTarget` failed with a demoted row showing no target
+at all — so it is dropped when seating it would cut the target below `promoteMinTargetCells` (or
+below a shorter target's own width). `docs/layout/tool-layout.md`'s "Width and overflow" gained the
+step. (c) Beyond the named tests, six more pinned the old shape and were updated the same way
+(`TestRenderNoTargetStandalone`, `TestUnregisteredCallLabelsItsArguments`, `TestTranscriptLayoutGolden`,
+`TestAnsweredAskUserBlock*`, `TestFiringBlock*`, `transcriptcodec_test.go`), and
+`TestTranscriptClickTogglesTheBlock`'s clipped-target case pinned "the row is identical open and
+closed", which this change necessarily breaks — a collapsed row carries a count an open one has
+nothing to count — so it now asserts what survives: one row, same place, still a toggle. Four tests
+whose NAMES stated the retired invariant were renamed (the precedent of the archived
+`2026-08-06 - 03` plan). `layout.md` needed the same statement fixed in six places, its budget headline ("the header, and at
+most two content rows" — three screen rows, not four) and its two collapsed sketches included, not
+the one bullet the item names. The same arithmetic is the shape test's: the bound of
+`TestEveryToolShapeCollapsesInsideTheRowBudget` is `1+collapsedBodyCap`, the marker row no longer
+among the rows a collapsed block may spend.
 
 Depends on item 3 (the slot's color now covers the inline marker; the same tests move again).
 

@@ -245,7 +245,7 @@ func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room 
 	if !spanned {
 		return renderGroupMember(th, tv, marker, memberGutter, width, room, expanded)
 	}
-	row := leaderRow(th, tv, marker, room, expanded)
+	row := leaderRow(th, tv, marker, room, expanded, noRemainder)
 	if !expanded {
 		return []string{indicatorRow(th, row, width, glyphCollapsed)}, true
 	}

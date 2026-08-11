@@ -50,6 +50,13 @@ one and design call 14 rules out growing the engine for presentation;
   **whole summary**, whatever kind: a typed stat ("12 lines", "exit 0 · 1.2s",
   "+8 −3"), a promoted one-line output (quoted), or a red `error: …` /
   `denied` / `cancelled`. On a type row it aggregates the run (below).
+  **Remainder:** while a lone call is collapsed the slot also carries the count
+  of the body behind it, after the same middle dot the stats use —
+  `exit 0 · +3 more lines` — so the block is its header and one row and the
+  count never spends a row of its own. It is the first thing the row gives up
+  when the width will not seat it (below), and an open block drops it, having
+  nothing left to count. A grouped member and a type row never carry one: a
+  member's body is reached by opening the member.
   **Colour:** the `tool-marker` role while the block is collapsed and
   `tool-marker-bright` once it is open — the slot is apogee's reading of what
   the call came to, so it speaks in the same voice as the `+N more lines`
@@ -59,7 +66,11 @@ one and design call 14 rules out growing the engine for presentation;
 
 ## Width and overflow
 
-- The dotted filler flexes first, down to a floor of **1** `⋯`.
+- The `+N more lines` remainder goes first: it joins the slot only while the row
+  can seat it and still show ~15 cells of target (a shorter target: all of it).
+  A row that gave up its path or its command to count what it is not showing
+  would be a row about nothing — the same floor the promote-guard holds below.
+- The dotted filler flexes next, down to a floor of **1** `⋯`.
 - Then the **left** `<tool-details>` truncates with `…`.
 - The right slot always prints whole — with one guard: a one-line output is
   **promoted** into it only if the row keeps ≥ ~15 cells of target + 1 dot;
@@ -68,9 +79,10 @@ one and design call 14 rules out growing the engine for presentation;
 
 ## Fold states and interaction
 
-- Exactly **two states** per call: collapsed (capped preview + count, as
-  today) and expanded (the whole body) with a `see less…` footer as an extra
-  collapse target. No third stage; scrollback handles long bodies.
+- Exactly **two states** per call: collapsed (capped preview + count in the
+  outcome slot, as today) and expanded (the whole body) with a `see less…`
+  footer as an extra collapse target. No third stage; scrollback handles long
+  bodies.
 - The umbrella's floor is its type rows — it never folds to one line.
   Clicking the umbrella header **closes all open children**.
 - Failure marking: the red right-slot summary only; no glyph or header color
@@ -94,6 +106,13 @@ available space / width: ||||||||||||||||||||||||||||||||||||||||||||||||||||||
 ```text
 ✦ <tool-header>
   ┕ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
+```
+
+where a collapsed call that hides body counts it in that same slot:
+
+```text
+✦ Terminal
+  ┕ go test ./... ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 · +3 more lines ▶
 ```
 
 ## Single tool expanded

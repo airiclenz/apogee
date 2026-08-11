@@ -43,9 +43,9 @@ type blockCursor struct {
 // lines one at a time would instead make ⌥↑ crawl through a forty-line body to reach the block
 // above it. One stop per surface, and the surface's first line is the one that names it.
 //
-// [lineTarget] is compared whole, so two adjacent blocks (different entries) and a marker sitting
-// under its own block's header (same entry, different kind) stay separate stops — both are separate
-// things to a click, and this is exactly the mouse's own map read back.
+// [lineTarget] is compared whole, so two adjacent blocks (different entries) and a member row
+// beside its neighbour inside one group (different entries, same kind) stay separate stops — both
+// are separate things to a click, and this is exactly the mouse's own map read back.
 func cursorStops(targets []lineTarget) []int {
 	var stops []int
 	prev := lineTarget{}
@@ -68,9 +68,8 @@ func cursorStops(targets []lineTarget) []int {
 // hazard with a keypress behind it instead of a pointer.
 //
 // A line that is no longer a stop falls back to the stop BEFORE it, which is where the reader was
-// looking: expanding a block through its `+N more lines` marker dissolves that marker into the body
-// it was counting, and the stop before it is the block's own header — the thing the human just
-// opened.
+// looking: opening a member of a group moves every stop below it down the body that appeared, and
+// the stop before is the surface the human was standing on when they pressed ⏎.
 func (c blockCursor) clamp(targets []lineTarget) blockCursor {
 	if !c.active {
 		return blockCursor{}

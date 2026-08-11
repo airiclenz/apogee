@@ -40,9 +40,9 @@ const promoteMinTargetCells = 15
 // It runs HERE, at the block's entrance, rather than inside leaderRow, because demotion changes what
 // the block IS and not merely how one row prints: a demoted call has a body, so it now hides
 // something when collapsed, and that is the very question the header's indicator, the click surface
-// and the remainder marker are all answered from (blockHidesWhenCollapsed). A guard applied at the
-// row would leave those three saying the call had nothing to reveal while the paint had just hidden
-// a line.
+// and the slot's remainder count are all answered from (blockHidesWhenCollapsed). A guard applied at
+// the row would leave those three saying the call had nothing to reveal while the paint had just
+// hidden a line.
 //
 // The answer depends on the WIDTH alone and never on the block's state, which is the leader row's
 // standing promise read one level up: a row that promoted its line collapsed and demoted it open
@@ -110,13 +110,20 @@ func guardRefuses(th theme, tv toolView, room int, marker string) bool {
 // target outright rather than the outcome — what happened is the half worth keeping, and a row with
 // nothing left to give still says it.
 //
-// expanded reaches the TONES alone (detailTone, summaryStyle): a row is the same shape in both
+// expanded reaches the TONES (detailTone, summaryStyle) and, through what the caller hands as
+// remainder, the count in the slot. It never reaches the GEOMETRY: the row is one row in both
 // states, which is what lets the same click that opened a member close it without the row moving
-// out from under the pointer.
-func leaderRow(th theme, tv toolView, marker string, room int, expanded bool) string {
+// out from under the pointer. What an open row loses is the count itself — it hides nothing to
+// count — and the cells that frees go back to the target the collapse had cut.
+//
+// remainder is the collapsed paint's "+N more lines" — empty whenever the paint hides nothing, and
+// on every row of a shape that never hides body of its own (a group member, a type row). It rides
+// the outcome slot rather than a row beneath it (slotText), which is what makes a collapsed lone
+// call ONE row of block plus its header.
+func leaderRow(th theme, tv toolView, marker string, room int, expanded bool, remainder string) string {
 	tone := detailTone(th, expanded)
 	return leaderRowIn(th, expandTabs(tv.Target), func(s string) string { return tone.Render(s) },
-		tv.Summary, marker, room, expanded)
+		tv.Summary, marker, room, expanded, remainder)
 }
 
 // leaderRowIn is the leader arithmetic itself, with the row's LEFT content handed in rather than
@@ -128,10 +135,16 @@ func leaderRow(th theme, tv toolView, marker string, room int, expanded bool) st
 // paint receives the CLIPPED text and not the original, because a painted string cannot be cut
 // without cutting its escapes: the row measures plain text, decides what fits, and only then hands
 // the survivor to whoever knows how it should look.
+//
+// remainder is the collapsed paint's count of what the block is hiding, joined onto the summary in
+// the slot (affordableSlot) instead of standing on a row of its own. Once it is in, it reaches the
+// ARITHMETIC as part of the slot — measured, reserved and, at the last resort, clipped with it — and
+// the styling not at all: the whole slot takes one style off the summary alone (summaryStyle), so a
+// failed call's red still governs the row's right edge whatever the count says.
 func leaderRowIn(th theme, left string, paint func(string) string, summary branchSummary,
-	marker string, room int, expanded bool) string {
+	marker string, room int, expanded bool, remainder string) string {
 	avail := max(1, room-th.measure.Width(marker))
-	slot := summary.Text
+	slot := affordableSlot(th, left, summary.Text, remainder, avail)
 	// The last resort under design call 4, past the point it words: an outcome WIDER than the row
 	// itself is cut too. A slot that printed whole there would not print whole anywhere — it would
 	// run past the frame and the viewport would fold it into a second row, taking the block out of
@@ -170,6 +183,61 @@ func leaderRowIn(th theme, left string, paint func(string) string, summary branc
 	return row
 }
 
+// slotSeparator is what the outcome slot joins its two halves with — the middle dot the typed stats
+// already speak in ("exit 0 · 1.2s", `· recursive` on a target: qualifiedTarget) — so a slot that
+// gained a remainder count reads as one phrase in one voice rather than as two marks that happened
+// to land in the same column (design call 4 of docs/plans/"2026-08-11 - 00").
+const slotSeparator = " · "
+
+// affordableSlot is the outcome slot's text at THIS width: the summary, and the remainder count
+// joined onto it while the row can seat both and still identify itself — promoteMinTargetCells of
+// target, or the whole of a target shorter than that floor.
+//
+// The count is the row's FIRST concession, ahead of the dots and the target both, because it is the
+// least of what the row has to say: the ▶ at its edge already announces that something is hidden,
+// and the block opens onto the lines themselves. A row that gave up its path or its command to print
+// a count of what it is not showing would be a row about nothing — the very shape the promote-guard
+// refuses a one-line output (guardRefuses, design call 5), and refusing it here keeps that guard's
+// promise on the demoted row, whose body is exactly what this count counts.
+//
+// The floor is measured against the arithmetic below, in the same terms: the slot and its gap
+// reserved first, then the gap and the dot the leader may not go below.
+func affordableSlot(th theme, left, summary, remainder string, avail int) string {
+	if remainder == "" {
+		return summary
+	}
+	joined := slotText(summary, remainder)
+	floor := min(th.measure.Width(left), promoteMinTargetCells)
+	if avail-leaderGap-th.measure.Width(joined)-leaderGap-leaderMinDots < floor {
+		return summary
+	}
+	return joined
+}
+
+// noRemainder is what a row with nothing to count hands the leader row for its slot's tail: a group
+// member and a super-group's type row, neither of which hides body of its own on the row it paints
+// (renderGroupMember, renderSuperGroup), and any row of an OPEN block, which hides nothing at all.
+// It is named rather than left a bare "" at those call sites, where an empty string says nothing
+// about which of the row's several strings it is.
+const noRemainder = ""
+
+// slotText is the outcome slot's whole text: what the call came to, and — on a collapsed paint that
+// hides body — the count of what it is hiding, as "12 lines · +5 more lines". The count rides the
+// slot rather than a row beneath it, so a collapsed lone call spends its header and ONE row and a
+// scrollback of them reads as a list (ISSUES.md, 2026-08-11).
+//
+// Either half alone is that half alone, with no separator to trail or to open on: a call still in
+// flight has no summary yet and a block that hides nothing has no count, and both are ordinary.
+func slotText(summary, remainder string) string {
+	switch {
+	case remainder == "":
+		return summary
+	case summary == "":
+		return remainder
+	}
+	return summary + slotSeparator + remainder
+}
+
 // toolRowCells is the room a branch or member row lays itself out in: the block's width less the
 // field the ▶/▼ is held in at its right edge (groupIndicatorCells). The field is reserved on every
 // row, one wearing an indicator or not, so the outcome slots line up down the block's edge whatever
@@ -185,10 +253,13 @@ func toolRowCells(th theme, width int) int {
 // It is the MARKER role and not the two-tone detail gray the rest of the row wears (design call 2 of
 // docs/plans/"2026-08-11 - 00"). The slot is apogee's reading of what the call came to rather than a
 // line the tool printed — "12 lines", "exit 0 · 1.2s", the quoted line a promotion lifted out of the
-// body — so it speaks in the same voice as the remainder marker that counts the rest of that body
-// away, and never in the tone of the output it is summarising. Under `dark` the old tone was the
-// very hex the leader dots run in, which left the one part of the row that says what HAPPENED as
-// quiet as the filler pointing at it.
+// body — and it is the very role the "+N more lines" count it now carries has always worn
+// (slotText), never the tone of the output it is summarising. Under `dark` the old tone was the very
+// hex the leader dots run in, which left the one part of the row that says what HAPPENED as quiet as
+// the filler pointing at it.
+//
+// The verdict is read off the SUMMARY and never off the joined slot: a remainder count appended to
+// "denied" must not be able to talk the row out of its red (failedSummary matches the whole word).
 //
 // Every kind takes it, the promoted and quoted ones included: the slot's colour answers for the
 // slot, and a summary that changed voice with the kind of thing it summarises would make the row's

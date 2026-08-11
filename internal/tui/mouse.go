@@ -497,10 +497,8 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 }
 
 // toggleBlockAt changes the state of the block whose click surface a MOTIONLESS click landed on
-// (layout.md, "Collapsed and expanded blocks"): a toggle line flips what it names, and a
-// `+N more lines` marker expands the block whose body it is counting for — never collapses it,
-// because the marker is a line of the collapsed paint alone, so a click there can only mean "show
-// me the rest". A line that is neither is left exactly as it was: everywhere else in the transcript
+// (layout.md, "Collapsed and expanded blocks"): a toggle line flips what it names. A line that is
+// not one is left exactly as it was: everywhere else in the transcript
 // a click keeps its selection meaning, which is the overwhelmingly common case and the one this
 // returns on first.
 //
@@ -553,10 +551,6 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 	switch target.kind {
 	case targetHeader:
 		if !m.transcript.toggleExpanded(target.entry) {
-			return m, nil
-		}
-	case targetMarker:
-		if !m.transcript.setExpanded(target.entry, true) {
 			return m, nil
 		}
 	case targetType:

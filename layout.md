@@ -28,8 +28,7 @@
   ┕ ISSUES.md ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 8 lines
 
 ✦ Terminal
-  ┕ go test ./... ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0   ▶
-    +3 more lines
+  ┕ go test ./... ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 · +3 more lines   ▶
 
 ✦ Diff Preview
   ┕ main.go ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ +2 -2   ▼
@@ -49,8 +48,7 @@
 │   ┕ a.go ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 5 lines
 │
 │ ✦ Terminal
-│   ┕ go test ./... ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0   ▶
-│     +3 more lines
+│   ┕ go test ./... ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 · +3 more lines   ▶
 
 ✦ This is the last message from the LLM. There must always be one empty line between
   chat content and the bottom prompt/information section like displayed here.
@@ -640,20 +638,22 @@ sub-agent run is the one block whose collapsed paint goes further, eliding its r
 with the whole span behind it (below). Truncation is thereby a **render-time act on retained
 facts**: the entry keeps every line, and the cap applies at paint, not at build.
 
-**One budget, and every tool-shaped block spends it: the header, and at most three content rows.**
-So a collapsed block stands no taller than four screen rows, whatever tool filled it and however
+**One budget, and every tool-shaped block spends it: the header, and at most two content rows.**
+So a collapsed block stands no taller than three screen rows, whatever tool filled it and however
 long its target is — which is the point, because a scrollback of tool calls should read as a list
-and not as a wall. Where the three rows go is the only thing the shape decides:
+and not as a wall. Where the two rows go is the only thing the shape decides:
 
-- **A call with a target** spends **one** of them on its row — the leader shape fills the width
-  exactly and cuts the target to make it — and the next on the `+N more lines` marker. **No line of
+- **A call with a target** spends **one** of them on its row, and only that one — the leader shape
+  fills the width exactly and cuts the target to make it, and the `+N more lines` count of what it
+  is hiding rides that row's own outcome slot (below) rather than a row beneath it. **No line of
   the body is shown collapsed.** One preview line out of a hundred said very little and cost every
-  block in the scrollback a row; the marker counts the body **whole** — five hidden lines over a
-  five-line output — and says that much in a row the block was going to spend anyway.
+  block in the scrollback a row; the count says the body **whole** — five hidden lines over a
+  five-line output — in cells the row had spare.
 - **A call with no target** has no body to hide, so the cap falls on its branch list instead: the
-  first **two** branch lines, each clipped to a single row, then the marker counting every line
-  behind them. Clipping each line is what holds this shape to the budget at all — unclipped, one
-  MCP call's argument blob soft-wraps a block as tall as the terminal is narrow.
+  first **two** branch lines, each clipped to a single row. It counts what it cut nowhere, having no
+  outcome slot for a count to ride; its `▶` is what says there is more behind it. Clipping each line
+  is what holds this shape to the budget at all — unclipped, one MCP call's argument blob soft-wraps
+  a block as tall as the terminal is narrow.
 - **A member of a group** gets **one** row and no marker, because a list's rows are one line each
   and what a member hides is reached by opening that member.
 
@@ -692,8 +692,9 @@ a collapsed prompt is: a reader who wants the rest of a command's output puts th
 output rather than hunting for the one row that happens to be the header. Which element a click
 lands on inside a nested block — a member, a type row, the umbrella header — is the canon spec's
 deepest-wins rule, and the keyboard reaches those same targets through the block cursor the spec
-specs. The one line with a meaning of its own is the `+N more lines` marker: it is a line of the
-collapsed paint, so a click there can only ever **open**. A block that hides
+specs. Every row a block paints means the one thing: the `+N more lines` count rides the leader
+row's outcome slot rather than a line of its own, so no row is left whose click could only ever
+open. A block that hides
 nothing in either state marks no rows, and a click on it keeps its selection meaning — as a click
 does everywhere else in the transcript. Any drag is a drag-select wherever it starts, marked rows
 included: motion is what arbitrates, exactly as it already separates click-to-position from drag in
@@ -708,10 +709,14 @@ name instead of as the last letter of it. Its presence *is* the clickability hin
 affordance and the click-target rule are **one predicate**: an indicator appears exactly where a
 click toggles something, so a row that hides nothing wears none, and a sub-agent run's head wears
 one however short its
-own report is. The `+N more lines` marker is apogee's line too and is painted as one — the
+own report is. The `+N more lines` count is apogee's own word too and is painted as one — the
 `tool-marker` role, a warm orange `#FFB050` under `dark`, no background and no bold weight, the
 quieter sibling of the prompt block's `see more` (the `prompt-toggle` role) — so a body line
-that happens to open with `+` can never be mistaken for the affordance beneath it. **The outcome
+that happens to open with `+` can never be mistaken for it. It is **no longer a line**: it joins
+the outcome slot on the leader row, after the middle dot the typed stats already speak in
+(`exit 0 · +3 more lines`), so a collapsed lone call is its header and one row. It is also the
+first thing that row gives up — ahead of the dots and the target both — on a width too narrow to
+seat it beside a target still worth reading; the `▶` says there is more either way. **The outcome
 slot wears that same role**, in both states, with an open block's slot taking the role's brighter
 step `tool-marker-bright`: the slot is apogee's reading of what the call came to — `12 lines`,
 `exit 0 · 1.2s`, `+8 −3`, a quoted line lifted out of the body — and not a line the tool printed,
@@ -729,7 +734,7 @@ the member — is open, so what a reader opened stands out from the collapsed bl
 without being another colour. The pair is a **step along one ramp**, which is what every scheme has
 to preserve rather than the direction of the step: under a light scheme "brighter" is the darker of
 the two. It reaches the block's **text**
-alone. The chrome keeps one tone in both states — the `▶`/`▼`, the `+N more lines` marker, an open
+alone. The chrome keeps one tone in both states — the `▶`/`▼`, the `see less…` marker, an open
 member's `│` gutter — because those are apogee's marks on the block rather than what the block has
 to say, and brightening them alongside the content would make the affordances shout exactly where
 the content was meant to. The outcome slot is off this ramp entirely (above): it walks the
@@ -741,8 +746,8 @@ thing the same colour means.
 **An answered question is an ordinary block, and that is the whole rule.** Once the human has
 answered, the `Ask User` block carries the record of the exchange as its body (above), so
 everything in this section falls on it with nothing added: its row wears the `▶`/`▼` indicator at
-the edge, every row it paints is a toggle target, collapsed it shows its clipped row over the
-`+N more lines` remainder and expanded it paints the whole record. It never folds into a group with
+the edge, every row it paints is a toggle target, collapsed it is that one clipped row with the
+`+N more lines` remainder in its slot and expanded it paints the whole record. It never folds into a group with
 the question before it either — and that is now *said*, by the never-group flag its presenter sets
 on the record, rather than falling out of the body it happens to carry. None of that is true while
 the question is still on the screen, because the block has no body yet: it groups like any other
@@ -811,7 +816,7 @@ count it is **not transitive**: each agent fills a window of its own, so a neste
 rides that nested block and never accrues to the run above it. A collapsed run is thereby the one
 block that reads as a single summarised line: its own **report body is elided along with the
 span**, because the summary slot already says that report's first line and no block prints the
-same text twice in two adjacent rows. It grows no `+N more lines` marker either — the transitive
+same text twice in two adjacent rows. It counts no `+N more lines` either — the transitive
 count is what says there is work behind the header, and the header is a toggle target however
 short the report is, so nothing is unreachable. **A run's live text is inside the run from its
 first token**: while the delegate is generating, the streamed preview paints at the depth that
@@ -860,8 +865,8 @@ prompt as its body, and the *same* block is enriched in place when the run retur
 it was announced rather than moving to where it finished. The payoff is the run's **answer**, split
 by the ordinary two-halves rule — an answer that comes to one line fills the row's outcome slot,
 quoted; a
-longer one leads the body with that slot left empty, so the collapsed block shows the
-Schedule's name over a `+N more lines` counting the answer with everything else behind it, and a
+longer one leads the body with that slot holding the `+N more lines` alone, so the collapsed block
+is the Schedule's name and a count of the answer with everything else behind it, and a
 click is what shows the answer itself. Beneath the branch the body carries the
 prompt (its first line led by `prompt: `, the one word that tells the two quoted voices apart), one
 stats line (`2 turns · 4s`, and a `· N denied` cell only when a gated action was actually refused),

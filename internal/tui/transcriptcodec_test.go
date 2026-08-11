@@ -280,12 +280,10 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 
 		want := strings.Join([]string{
 			"✦ Ask User",
-			groupMemberLine("  ┕ Ship it? ⋯ Yes"),
-			"    +3 more lines",
+			groupMemberLine("  ┕ Ship it? ⋯ Yes · +3 more lines"),
 			"",
 			"✦ Ask User",
-			groupMemberLine("  ┕ Tag it? ⋯ No"),
-			"    +3 more lines",
+			groupMemberLine("  ┕ Tag it? ⋯ No · +3 more lines"),
 		}, "\n")
 		if out := renderPlain(&transcript{entries: got}, 80); out != want {
 			t.Errorf("replayed questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)

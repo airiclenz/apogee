@@ -297,6 +297,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A collapsed tool call is one row shorter: the `+N more lines` count moved into the row itself.**
+  The remainder a collapsed block counts — the output, the diff, the record of an answered question
+  — used to hang on a line of its own under the branch. It now rides the outcome slot at that
+  branch's right edge, after the middle dot the stats already speak in: `go test ./... ⋯ exit 0 ·
+  +3 more lines`. A lone `Terminal`, `Ask User` or `Diff Preview` call therefore collapses to its
+  header and exactly one row, and a scrollback of them reads as a list rather than as a wall. The
+  count wears whatever the slot wears, red included on a call that failed, and an expanded block
+  drops it, having nothing left to count. On a row too narrow to seat the count beside a target
+  still worth reading, the count is what gives way first — the `▶` at the edge says there is more
+  either way. The row it left behind was also the one place in the transcript where a click could
+  only ever *open*; with it gone, every row of a block toggles, wherever the pointer is.
+
 - **A tool row's outcome now stands out from the dots that lead to it.** The right-aligned summary
   at the end of a tool row — `12 lines`, `exit 0 · 1.2s`, `+8 −3`, `[1 files found, showing 1-1]` —
   used to borrow the same faint gray the row's target and body wear, which under the shipped `dark`

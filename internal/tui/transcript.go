@@ -953,9 +953,12 @@ func hasBlockState(kind entryKind) bool {
 // no-copy type on the Model. Nothing here touches the engine, the call/result pairing, or the
 // session record — an expanded block is a way of looking at the scrollback, not a change to it.
 //
-// It is stated as a SET rather than only a flip because the two click surfaces mean different
-// things (layout.md, "Collapsed and expanded blocks"): a header toggles its block, while a
-// `+N more lines` marker asks to see the rest and can only ever open one.
+// It is stated as a SET rather than only a flip because the flip is composed from it
+// (toggleExpanded), which keeps one writer and one pair of guards behind both, and because a caller
+// that knows which state it wants says so rather than flipping and hoping. No click surface asks for
+// one direction any more: the `+N more lines` count that could only ever open now rides the leader
+// row's outcome slot instead of a line of its own (collapsedRemainder), and every marked line is a
+// toggle.
 //
 // Holding the state is not the same as showing it. What an expanded block actually paints is the
 // painter's business (render.go), and a block with nothing to hide — a prompt that fits inside the

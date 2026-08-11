@@ -808,8 +808,7 @@ func TestTranscriptBareClickCopiesNothing(t *testing.T) {
 
 // modelWithToolBlock builds a ready idle model holding one user prompt and one tool block whose
 // result is output. A multi-line body is what gives the block something to reveal, and therefore
-// what makes its header and its `+N more lines` marker click targets at all (render.go's target
-// rule). The seeded start-up box is dropped so the block sits high enough to be on screen at any
+// what makes every row it paints a click target at all (render.go's target rule). The seeded start-up box is dropped so the block sits high enough to be on screen at any
 // scroll position the tests park at.
 func modelWithToolBlock(t *testing.T, output string) Model {
 	t.Helper()
@@ -855,8 +854,9 @@ func clickCell(t *testing.T, m Model, x, y int) Model {
 }
 
 // TestTranscriptClickTogglesTheBlock is the rule itself: a motionless click anywhere on a block that
-// hides something toggles it — its header, its target row, its body once the body is on the screen —
-// and a click on the remainder marker opens it and only ever opens it.
+// hides something toggles it — its header, its target row, its body once the body is on the screen.
+// Every row means the one thing now that the `+N more lines` count rides the leader row's outcome
+// slot instead of a line of its own (collapsedRemainder).
 func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 	const output = "ok   a\nok   b\nok   c\nPASS"
 
@@ -884,18 +884,27 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 		}
 	})
 
-	t.Run("a remainder marker expands", func(t *testing.T) {
+	// The leader row is where the remainder count now lives, and it is the block's row like any
+	// other: the click that used to land on a marker beneath it lands here and TOGGLES, so the same
+	// spot closes the block again (collapsedRemainder).
+	t.Run("the leader row carrying the count toggles", func(t *testing.T) {
 		m := modelWithToolBlock(t, output)
-		marker := markedLine(t, m, targetMarker)
-
-		m = clickCell(t, m, 6, screenRow(t, m, marker))
-		if !blockExpanded(t, m, markedLine(t, m, targetHeader)) {
-			t.Fatal("a click on the `+N more lines` marker did not expand the block")
+		header := markedLine(t, m, targetHeader)
+		leader := header + 1
+		if got := m.lineTargets[leader]; got.kind != targetHeader || got.entry != m.lineTargets[header].entry {
+			t.Fatalf("setup: line %d is marked %+v, not the block's own leader row", leader, got)
 		}
-		for _, target := range m.lineTargets {
-			if target.kind == targetMarker {
-				t.Fatal("the expanded paint still carries a remainder marker")
-			}
+		if !strings.Contains(strip(m.lines[leader]), "+4 more lines") {
+			t.Fatalf("setup: the leader row is %q, without the remainder count in its slot", strip(m.lines[leader]))
+		}
+
+		m = clickCell(t, m, 6, screenRow(t, m, leader))
+		if !blockExpanded(t, m, header) {
+			t.Fatal("a click on the leader row did not expand the block")
+		}
+		m = clickCell(t, m, 6, screenRow(t, m, leader))
+		if blockExpanded(t, m, header) {
+			t.Fatal("a second click on the leader row did not collapse the block again")
 		}
 	})
 
@@ -953,9 +962,10 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 
 	// A collapsed block's TARGET row is the same surface from the other side: the row a reader is
 	// looking at when they want the rest is the clipped path itself, not the label above it. The
-	// row does not move when the click lands, either — a leader row is the same one row open and
-	// closed (leaderRow, render.go), so the target it could not fit stays cut in both states and
-	// the pointer is still over the surface that toggles it back.
+	// row does not MOVE when the click lands, either — a leader row is the same one row open and
+	// closed (leaderRow, render.go) — so the pointer is still over the surface that toggles it
+	// back. What the row says changes: the open block hides nothing, so its slot gives up the
+	// "+N more lines" it was counting (collapsedRemainder) and the target takes the cells back.
 	t.Run("a clipped target row toggles the block", func(t *testing.T) {
 		m := modelWithClippedToolBlock(t)
 		rows := markedRows(t, m, targetHeader)
@@ -968,6 +978,9 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 			t.Fatalf("setup: line %d is %q, not a clipped target row", target, strip(m.lines[target]))
 		}
 		before := strip(m.lines[target])
+		if !strings.Contains(before, "more line") {
+			t.Fatalf("setup: the collapsed row is %q, without the count of the body behind it", before)
+		}
 
 		m = clickCell(t, m, 6, screenRow(t, m, target))
 		if !blockExpanded(t, m, rows[0]) {
@@ -976,8 +989,13 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 		if painted := strings.Join(m.lines, "\n"); !strings.Contains(painted, "PASS") {
 			t.Fatalf("the expanded paint revealed no body:\n%s", painted)
 		}
-		if got := strip(m.lines[target]); got != swapIndicator(before) {
-			t.Errorf("the target row moved under the pointer: %q became %q; want the same row wearing ▼", before, got)
+		after := strip(m.lines[target])
+		if !strings.HasSuffix(after, glyphExpanded) || strings.Contains(after, "more line") {
+			t.Errorf("the row under the pointer is %q; want the same leader row wearing %q and counting nothing",
+				after, glyphExpanded)
+		}
+		if got := m.lineTargets[target]; got.kind != targetHeader || got.entry != m.lineTargets[rows[0]].entry {
+			t.Errorf("line %d is marked %+v once the block is open, not the block's own row any more", target, got)
 		}
 
 		m = clickCell(t, m, 6, screenRow(t, m, target))
@@ -985,12 +1003,6 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 			t.Fatal("a second click on the clipped target row did not collapse the block")
 		}
 	})
-}
-
-// swapIndicator rewrites a row's ▶ as the ▼ it wears once the block is open, so a caller can assert
-// that NOTHING ELSE about the row changed with the state.
-func swapIndicator(row string) string {
-	return strings.Replace(row, glyphCollapsed, glyphExpanded, 1)
 }
 
 // modelWithClippedToolBlock builds a ready idle model whose one tool block carries a command far too

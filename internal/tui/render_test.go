@@ -999,8 +999,8 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 // the row's right edge — and the body lays out beneath it at the branch marker's width: those lines
 // are not ┝/┕ branches of their own, because only calls are (docs/layout/tool-layout.md,
 // "Single tool expanded"). COLLAPSED,
-// none of them lays out at all: the collapsed block's rows go to its leader row and the marker
-// counts the body whole (collapsedBodyRows), which is the shape the sketch draws.
+// none of them lays out at all: the block spends its one row on the leader and that row's own slot
+// counts the body whole (collapsedBodyRows, collapsedRemainder), which is the shape the sketch draws.
 func TestRenderMultiDetailStandalone(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
@@ -1011,8 +1011,7 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Terminal", // a hidden body is something to reveal, and the branch row's ▶ says so
-		groupMemberLine("  ┕ go test ./... ⋯ exit 0"),
-		"    +3 more lines",
+		groupMemberLine("  ┕ go test ./... ⋯ exit 0 · +3 more lines"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("multi-detail block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -1093,7 +1092,7 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 }
 
 // A diff whose body is hidden still names the whole change on its branch: the diffstat counts
-// every line, and the marker beneath counts every line the collapsed paint withheld.
+// every line, and the count beside it in the same slot says how many the collapsed paint withheld.
 func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
 	const longDiff = 25 // well past the collapsed budget, so the stat and the paint cannot agree by luck
 	tr := &transcript{}
@@ -1105,11 +1104,13 @@ func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
 	}})
 
 	lines := strings.Split(renderPlain(tr, 80), "\n")
-	if got, want := lines[1], groupMemberLine("  ┕ main.go ⋯ +"+strconv.Itoa(longDiff)+" −0"); got != want {
+	hidden := strconv.Itoa(longDiff)
+	if got, want := lines[1], groupMemberLine("  ┕ main.go ⋯ +"+hidden+" −0 · +"+hidden+" more lines"); got != want {
 		t.Errorf("capped diff branch = %q, want %q (the stat spans the whole diff)", got, want)
 	}
-	if got, want := lines[len(lines)-1], "    +"+strconv.Itoa(longDiff)+" more lines"; got != want {
-		t.Errorf("capped diff body ends %q, want %q", got, want)
+	if len(lines) != 2 {
+		t.Errorf("the collapsed diff paints %d rows, want its header and one branch:\n%s",
+			len(lines), strings.Join(lines, "\n"))
 	}
 }
 
@@ -1118,8 +1119,8 @@ func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
 // synthesizing the "+N more lines" remainder the outcome builders used to bake in (layout.md,
 // "Collapsed and expanded blocks" — truncation is a render-time act on retained facts). One budget
 // answers for every body kind: a command's output and a diff alike paint NO body line collapsed
-// (collapsedBodyRows) and the marker counts the body whole, down to a body of one line — there is
-// no length at which a collapsed block starts previewing its output.
+// (collapsedBodyRows) and the branch row's own slot counts the body whole, down to a body of one
+// line — there is no length at which a collapsed block starts previewing its output.
 func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 	diffLines := func(n int) string {
 		return strings.TrimSuffix(strings.Repeat("+ added\n", n), "\n")
@@ -1127,8 +1128,8 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 	cases := []struct {
 		name      string
 		build     func(tr *transcript)
-		wantKept  int      // body lines the entry retains
-		wantPaint []string // the body the collapsed block paints, marker included
+		wantKept  int    // body lines the entry retains
+		wantCount string // what the branch row's slot says about the lines it withheld
 	}{
 		{
 			name: "free-form output paints no line and counts them all",
@@ -1137,7 +1138,7 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
 			},
 			wantKept:  4,
-			wantPaint: []string{"    +4 more lines"},
+			wantCount: "+4 more lines",
 		},
 		{
 			name: "a diff body spends the same budget and is counted the same way",
@@ -1147,7 +1148,7 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 					Content: diffLines(4), Summary: domain.DiffStat{Added: 4}}})
 			},
 			wantKept:  4,
-			wantPaint: []string{"    +4 more lines"},
+			wantCount: "+4 more lines",
 		},
 		{
 			name: "a body of one line is hidden and counted like any other",
@@ -1157,7 +1158,7 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 					Content: "+ new line", Summary: domain.DiffStat{Added: 1}}})
 			},
 			wantKept:  1,
-			wantPaint: []string{"    +1 more line"},
+			wantCount: "+1 more line",
 		},
 	}
 	for _, tc := range cases {
@@ -1167,19 +1168,23 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 			if got := tr.entries[0].tool.Details.len(); got != tc.wantKept {
 				t.Errorf("retained body = %d lines, want the whole %d", got, tc.wantKept)
 			}
-			// The block is a header, a branch line, then its body: everything past the branch is
-			// what the collapsed paint made of the retained lines.
+			// The collapsed block is a header and a branch line and nothing else: what it made of
+			// the retained lines is the count in that branch's outcome slot.
 			lines := strings.Split(renderPlain(tr, 80), "\n")
-			if got, want := strings.Join(lines[2:], "\n"), strings.Join(tc.wantPaint, "\n"); got != want {
-				t.Errorf("collapsed body mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			if len(lines) != 2 {
+				t.Fatalf("the collapsed block paints %d rows, want its header and one branch:\n%s",
+					len(lines), strings.Join(lines, "\n"))
+			}
+			if !strings.HasSuffix(lines[1], tc.wantCount+"   "+glyphCollapsed) {
+				t.Errorf("collapsed branch = %q; want its slot to end in the count %q", lines[1], tc.wantCount)
 			}
 		})
 	}
 }
 
 // TestExpandedBlockPaintsItsWholeBody pins what the expanded state is FOR: the block paints every
-// body line the entry retained and grows no remainder marker, and collapsing it again paints
-// exactly the compact shape back. The round trip runs over one transcript rather than two
+// body line the entry retained and counts nothing — its leader row gives the count up with the last
+// hidden line — and collapsing it again paints exactly the compact shape back. The round trip runs over one transcript rather than two
 // fixtures, because that is the claim — nothing about the entry changes but the flag the painter
 // reads (layout.md, "Collapsed and expanded blocks").
 func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
@@ -1192,10 +1197,10 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 		return out
 	}
 	cases := []struct {
-		name          string
-		build         func(tr *transcript)
-		wantCollapsed []string
-		wantExpanded  []string
+		name         string
+		build        func(tr *transcript)
+		wantCount    string // the collapsed branch row's count of the body behind it
+		wantExpanded []string
 	}{
 		{
 			name: "free-form output expands from nothing to all of it",
@@ -1203,18 +1208,18 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
 			},
-			wantCollapsed: []string{"    +4 more lines"},
-			wantExpanded:  []string{"    ok   a", "    ok   b", "    ok   c", "    PASS"},
+			wantCount:    "+4 more lines",
+			wantExpanded: []string{"    ok   a", "    ok   b", "    ok   c", "    PASS"},
 		},
 		{
-			name: "a diff body expands from its marker to its hunks",
+			name: "a diff body expands from its counted slot to its hunks",
 			build: func(tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
 					Content: diffContent(4), Summary: domain.DiffStat{Added: 4}}})
 			},
-			wantCollapsed: []string{"    +4 more lines"},
-			wantExpanded:  paintedDiff(4),
+			wantCount:    "+4 more lines",
+			wantExpanded: paintedDiff(4),
 		},
 		{
 			// The written lines are the body from the moment the call is announced, so this one
@@ -1224,8 +1229,8 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "write_file",
 					Arguments: []byte(`{"path":"notes.txt","content":"alpha\nbeta\ngamma\ndelta"}`)}})
 			},
-			wantCollapsed: []string{"    +4 more lines"},
-			wantExpanded:  []string{"    + alpha", "    + beta", "    + gamma", "    + delta"},
+			wantCount:    "+4 more lines",
+			wantExpanded: []string{"    + alpha", "    + beta", "    + gamma", "    + delta"},
 		},
 	}
 	for _, tc := range cases {
@@ -1233,15 +1238,21 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 			tr := &transcript{}
 			tc.build(tr)
 			// The block is a header, a branch line, then its body: everything past the branch is
-			// what the block's state made of the retained lines.
-			body := func() string {
-				lines := strings.Split(renderPlain(tr, 80), "\n")
-				return strings.Join(lines[2:], "\n")
+			// what the block's state made of the retained lines — nothing at all while it is
+			// collapsed, the count for it riding the branch row's own slot.
+			rows := func() []string { return strings.Split(renderPlain(tr, 80), "\n") }
+			body := func() string { return strings.Join(rows()[2:], "\n") }
+			collapsed := func(t *testing.T, when string) {
+				t.Helper()
+				if lines := rows(); len(lines) != 2 {
+					t.Errorf("%s paint stands %d rows, want its header and one branch:\n%s",
+						when, len(lines), strings.Join(lines, "\n"))
+				} else if !strings.HasSuffix(lines[1], tc.wantCount+"   "+glyphCollapsed) {
+					t.Errorf("%s branch = %q; want its slot to end in the count %q", when, lines[1], tc.wantCount)
+				}
 			}
 
-			if got, want := body(), strings.Join(tc.wantCollapsed, "\n"); got != want {
-				t.Errorf("default paint mismatch (collapsed is the default):\n--- got ---\n%s\n--- want ---\n%s", got, want)
-			}
+			collapsed(t, "default (collapsed is the default)")
 			if !tr.toggleExpanded(0) {
 				t.Fatal("toggleExpanded(0) = false; want the tool-call entry toggled")
 			}
@@ -1251,15 +1262,13 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 			if got, want := body(), strings.Join(wantExpanded, "\n"); got != want {
 				t.Errorf("expanded paint mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 			}
-			if strings.Contains(body(), "more line") {
-				t.Errorf("the expanded body kept a remainder marker:\n%s", body())
+			if painted := strings.Join(rows(), "\n"); strings.Contains(painted, "more line") {
+				t.Errorf("the expanded block kept a remainder count:\n%s", painted)
 			}
 			if !tr.toggleExpanded(0) {
 				t.Fatal("toggleExpanded(0) = false on the way back; want the entry toggled")
 			}
-			if got, want := body(), strings.Join(tc.wantCollapsed, "\n"); got != want {
-				t.Errorf("re-collapsed paint mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
-			}
+			collapsed(t, "re-collapsed")
 		})
 	}
 }
@@ -1379,16 +1388,16 @@ func TestDiffLinesKeepTheirColourInBothBlockStates(t *testing.T) {
 	}
 }
 
-// TestCollapsedBlockStandsAtMostThreeRows is the cap itself, asked of the case that used to break
+// TestCollapsedBlockStandsAtMostTwoRows is the cap itself, asked of the case that used to break
 // it: a 400-character command soft-wrapped over five rows before the row budget existed, and the
-// block it led stood seven rows tall in a scrollback of them. Now the block is its header, ONE
-// leader row with the clip's " …" saying the target goes on, and the marker counting the body —
-// three rows, whatever the target's length and whatever the body's (docs/layout/tool-layout.md).
+// block it led stood seven rows tall in a scrollback of them. Now the block is its header and ONE
+// leader row — the clip's " …" saying the target goes on, that row's own slot counting the body
+// behind it — whatever the target's length and whatever the body's (docs/layout/tool-layout.md).
 //
 // The width bound is asserted on every row rather than assumed from the wrap: the clip re-cuts the
-// row it ends, and a tail appended past the column would fold that row in two and spend a fourth row
-// the budget does not have (clipWrap).
-func TestCollapsedBlockStandsAtMostThreeRows(t *testing.T) {
+// row it ends, and a tail appended past the column would fold that row in two and spend a row the
+// budget does not have (clipWrap).
+func TestCollapsedBlockStandsAtMostTwoRows(t *testing.T) {
 	const width = 80
 	command := strings.Repeat("cd . && head -3 go.mod && ", 16)[:400]
 
@@ -1398,8 +1407,8 @@ func TestCollapsedBlockStandsAtMostThreeRows(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok\nPASS\ndone"}})
 
 	lines := strings.Split(renderPlain(tr, width), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("the collapsed block stands %d rows tall, want the budget's 3:\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 2 {
+		t.Fatalf("the collapsed block stands %d rows tall, want the budget's 2:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
 	if want := "✦ Terminal"; lines[0] != want {
 		t.Errorf("header = %q, want %q — the indicator rides the branch row now", lines[0], want)
@@ -1408,8 +1417,8 @@ func TestCollapsedBlockStandsAtMostThreeRows(t *testing.T) {
 		t.Errorf("branch row = %q, want the target cut short with %q and the row wearing %q",
 			lines[1], clipTail, glyphCollapsed)
 	}
-	if want := "    +3 more lines"; lines[2] != want {
-		t.Errorf("marker row = %q, want %q", lines[2], want)
+	if want := "+3 more lines"; !strings.Contains(lines[1], want) {
+		t.Errorf("branch row = %q, want its slot to count the hidden body with %q", lines[1], want)
 	}
 	th := newTheme(scheme.Default())
 	for i, ln := range lines {
@@ -1477,11 +1486,12 @@ func TestLeaderRowSpendsItsRoomInOrder(t *testing.T) {
 
 	th := newTheme(scheme.Default())
 	for _, tc := range []struct {
-		name     string
-		target   string
-		summary  string
-		room     int
-		expanded bool
+		name      string
+		target    string
+		summary   string
+		remainder string // the collapsed paint's "+N more lines", which rides the slot (slotText)
+		room      int
+		expanded  bool
 
 		wantTarget  string // the target text the row must carry whole, or "" when it is cut or dropped
 		wantSlot    string // the outcome text the row must END in
@@ -1529,12 +1539,24 @@ func TestLeaderRowSpendsItsRoomInOrder(t *testing.T) {
 		name:   "an open row keeps the shape and changes tone",
 		target: short, summary: stat, room: 20, expanded: true,
 		wantTarget: short, wantSlot: stat, wantFloor: true,
+	}, {
+		// The remainder joins the OUTCOME instead of standing on a row beneath it, in the slot's own
+		// separator, and the whole slot is reserved and painted as one (slotText).
+		name:   "a collapsed row counts its hidden body inside the slot",
+		target: short, summary: stat, remainder: "+3 more lines", room: 60,
+		wantTarget: short, wantSlot: stat + " · +3 more lines",
+	}, {
+		// Error dominance, unchanged by the tail: the count says nothing about the verdict, so the
+		// whole slot stays red on a call that failed with body behind it.
+		name:   "a failed outcome keeps its red with the count appended",
+		target: short, summary: "error: exit 1", remainder: "+3 more lines", room: 60,
+		wantTarget: short, wantSlot: "error: exit 1 · +3 more lines", wantFailed: true,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			tv := toolView{Target: tc.target, Summary: namedSummary(detailLine{Text: tc.summary})}
-			row := leaderRow(th, tv, marker, tc.room, tc.expanded)
+			row := leaderRow(th, tv, marker, tc.room, tc.expanded, tc.remainder)
 			plain := strip(row)
 
 			if got := th.measure.Width(plain); got != tc.room {
@@ -1638,6 +1660,7 @@ func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
 		expanded bool
 
 		wantSlot     string // the outcome slot's text on the branch row
+		wantCount    string // the remainder count the slot must carry, or "" when the row cannot seat one
 		wantBodyLine string // the row the body must carry, or "" when the block keeps none
 	}{{
 		// At the threshold exactly the line is promoted: the target still has its fifteen cells.
@@ -1646,10 +1669,13 @@ func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
 		wantSlot: output,
 	}, {
 		// One cell narrower and the guard refuses: the stat says what happened and the line drops
-		// into the body, where a collapsed block counts it rather than painting it.
+		// into the body, which a collapsed block counts rather than paints. At THIS width the count
+		// cannot ride the slot either — seating it would spend the very cells of target the guard
+		// just protected — so the row gives it up first and the ▶ carries the news alone
+		// (affordableSlot).
 		name: "one cell short and the line goes back to the body",
 		view: promoted, width: edge - 1,
-		wantSlot: stat, wantBodyLine: "+1 more line",
+		wantSlot: stat,
 	}, {
 		// The same block open: the demoted line is one click away, whole, which is what makes the
 		// guard a MOVE rather than a truncation.
@@ -1664,7 +1690,7 @@ func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
 		view: toolView{Label: "Terminal", Target: target, stat: stat,
 			Summary: quotedSummary(detailLine{Text: strings.Repeat("x", 300)})},
 		width:    120,
-		wantSlot: stat, wantBodyLine: "+1 more line",
+		wantSlot: stat, wantCount: "+1 more line",
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -1680,10 +1706,18 @@ func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
 				t.Errorf("branch row = %q leaves the target %d cells, below the guard's %d",
 					branch, got, promoteMinTargetCells)
 			}
+			// The demoted line is counted in the slot, not on a row beneath it — and only while the
+			// row can seat the count without eating into that same floor.
+			if tc.wantCount != "" && !strings.Contains(branch, tc.wantCount) {
+				t.Errorf("branch row = %q; want the remainder count %q in its slot", branch, tc.wantCount)
+			}
+			if tc.wantCount == "" && strings.Contains(branch, "more line") {
+				t.Errorf("branch row = %q carries a remainder count it has no room for", branch)
+			}
 			body := strip(strings.Join(lines[2:], "\n"))
 			if tc.wantBodyLine == "" {
 				if len(lines) != 2 {
-					t.Errorf("promoted block paints %d rows, want the header and its branch alone:\n%s",
+					t.Errorf("the block paints %d rows, want the header and its branch alone:\n%s",
 						len(lines), strip(strings.Join(lines, "\n")))
 				}
 				return
@@ -2106,7 +2140,7 @@ func askUserCall(tr *transcript, id, args, answer string) {
 
 // TestAnsweredAskUserBlockPaintsTheRecord walks the answered question through both block states:
 // the record is a body like any other, so the collapsed block withholds it whole behind the
-// remainder marker and the expanded one paints it, with the answer riding the branch throughout. No
+// remainder count in its slot and the expanded one paints it, with the answer riding the branch throughout. No
 // painter rule is new here — that is the claim. Once the presenter hands the block a body, the
 // machinery already in place gives the exchange its permanent shape.
 func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
@@ -2115,8 +2149,7 @@ func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
 
 	collapsed := strings.Join([]string{
 		"✦ Ask User",
-		groupMemberLine("  ┕ Which mode? ⋯ Ask before"),
-		"    +4 more lines",
+		groupMemberLine("  ┕ Which mode? ⋯ Ask before · +4 more lines"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != collapsed {
 		t.Errorf("collapsed record mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
@@ -2148,21 +2181,21 @@ func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
 
 // …and because the collapsed paint now hides something, the block becomes a toggle target by the
 // one predicate that decides both the affordance and the click (blockHidesWhenCollapsed): every row
-// it paints is marked, the leader row wearing the ▶/▼ indicator, the remainder marker keeping its own
-// open-only kind, and expanding takes the marker away while the block — the answers it now shows
+// it paints is marked, the leader row wearing the ▶/▼ indicator and, collapsed, the count of the
+// record behind it, and expanding takes that count away while the block — the answers it now shows
 // included — keeps the click that closes it again. A question still on the screen hides nothing and
 // is no target at all.
 func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 	const question = `{"question":"Which mode?","choices":["Plan","Ask before","Auto"]}`
 
-	t.Run("an answered question marks its rows and its marker", func(t *testing.T) {
+	t.Run("an answered question marks its rows", func(t *testing.T) {
 		tr := &transcript{}
 		askUserCall(tr, "c1", question, "Ask before")
 
 		want := []blockMark{
 			{line: 0, kind: targetHeader, entry: 0, text: "✦ Ask User"},
-			{line: 1, kind: targetHeader, entry: 0, text: groupMemberLine("  ┕ Which mode? ⋯ Ask before")},
-			{line: 2, kind: targetMarker, entry: 0, text: "    +4 more lines"},
+			{line: 1, kind: targetHeader, entry: 0,
+				text: groupMemberLine("  ┕ Which mode? ⋯ Ask before · +4 more lines")},
 		}
 		if got := blockMarks(t, tr, 80); !reflect.DeepEqual(got, want) {
 			t.Errorf("collapsed marks mismatch:\n--- got ---\n%+v\n--- want ---\n%+v", got, want)
@@ -2214,12 +2247,10 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 
 		want := strings.Join([]string{
 			"✦ Ask User",
-			groupMemberLine("  ┕ Ship it? ⋯ Yes"),
-			"    +3 more lines",
+			groupMemberLine("  ┕ Ship it? ⋯ Yes · +3 more lines"),
 			"",
 			"✦ Ask User",
-			groupMemberLine("  ┕ Tag it? ⋯ No"),
-			"    +3 more lines",
+			groupMemberLine("  ┕ Tag it? ⋯ No · +3 more lines"),
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("answered questions mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -2752,10 +2783,11 @@ func blockMarks(t *testing.T, tr *transcript, width int) []blockMark {
 	return marks
 }
 
-// TestRenderMarksTheWholeBlockAndItsMarker pins the whole target rule in one table: a single tool
+// TestRenderMarksTheWholeBlock pins the whole target rule in one table: a single tool
 // block that hides something is a click surface WHOLE — every row it paints, its header, its leader
-// row and (open) its body, each carrying the index of the entry a click there toggles — its
-// synthesized remainder marker apart, which keeps its own open-only kind. A block that hides nothing
+// row and (open) its body, each carrying the index of the entry a click there toggles, and each
+// meaning the one thing now that the remainder count rides the leader row rather than a marker line
+// of its own (collapsedRemainder). A block that hides nothing
 // marks no row at all. Every case asserts the complete set of marks, so a line that quietly became
 // clickable, or quietly stopped being, fails here.
 //
@@ -2764,7 +2796,7 @@ func blockMarks(t *testing.T, tr *transcript, width int) []blockMark {
 // is the targetless shape and paints no leader row) and an unmarked one wears none, so the visible
 // hint and the click target cannot drift apart — a block that grew an indicator without becoming
 // clickable, or became clickable without growing one, fails here too.
-func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
+func TestRenderMarksTheWholeBlock(t *testing.T) {
 	// run folds a terminal call and its multi-line output — the block with a body, and therefore
 	// the block with something to reveal.
 	run := func(tr *transcript, id, command, output string, depth int) {
@@ -2781,10 +2813,10 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 		want  []blockMark
 	}{
 		{
-			// ❯ run the tests | (spacer) | ✦ Terminal | ┕ go test ./... ⋯ exit 0 ▶ | +4 more lines —
-			// the header and the leader row beneath it are one surface, the marker its own
-			// open-only kind.
-			name:  "a hidden body marks the block's rows and its remainder marker",
+			// ❯ run the tests | (spacer) | ✦ Terminal | ┕ go test ./... ⋯ exit 0 · +4 more lines ▶ —
+			// the header and the leader row beneath it are one surface, and the count of the body
+			// behind it rides that row's outcome slot rather than a line of its own.
+			name:  "a hidden body marks the block's rows",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				tr.addUser("run the tests", nil)
@@ -2792,16 +2824,17 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 2, kind: targetHeader, entry: 1, text: "✦ Terminal"},
-				{line: 3, kind: targetHeader, entry: 1, text: groupMemberLine("  ┕ go test ./... ⋯ exit 0")},
-				{line: 4, kind: targetMarker, entry: 1, text: "    +4 more lines"},
+				{line: 3, kind: targetHeader, entry: 1,
+					text: groupMemberLine("  ┕ go test ./... ⋯ exit 0 · +4 more lines")},
 			},
 		},
 		{
 			// The state does not decide the target: an expanded block keeps every row marked — that
 			// is the click that collapses it again, wherever in the output the pointer happens to be
-			// — and has no marker left to mark. The see-less footer closing the body is marked with
-			// the rest: it is the one row that exists ONLY to be clicked (seeLessFooter).
-			name:  "an expanded block marks its body too and loses its marker",
+			// — and its leader row loses the count, there being nothing left hidden to count. The
+			// see-less footer closing the body is marked with the rest: it is the one row that
+			// exists ONLY to be clicked (seeLessFooter).
+			name:  "an expanded block marks its body too and loses its count",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				tr.addUser("run the tests", nil)
@@ -2844,9 +2877,10 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 		},
 		{
 			// The targetless shape is capped like every other: an unregistered tool's verbatim
-			// arguments ARE its branches, and a blob that overflows the cap makes the header a
-			// target with a marker beneath it, exactly as a body would.
-			name:  "a targetless block over the cap marks its header and its marker",
+			// arguments ARE its branches, and a blob that overflows the cap makes the block a
+			// target, exactly as a body would. It counts what it cut nowhere — the count rides an
+			// outcome slot and this shape paints none — so its ▶ is what says there is more.
+			name:  "a targetless block over the cap marks its rows",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
@@ -2856,7 +2890,6 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ weird_tool ▶"},
 				{line: 1, kind: targetHeader, entry: 0, text: "  ┝ a:"},
 				{line: 2, kind: targetHeader, entry: 0, text: "  ┕   1"},
-				{line: 3, kind: targetMarker, entry: 0, text: "    +4 more lines"},
 			},
 		},
 		{
@@ -2871,9 +2904,9 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 			want: nil,
 		},
 		{
-			// Narrow enough that both the header and the marker wrap: the click lands on the
-			// header, not on its first row, so EVERY physical line of each is marked.
-			name:  "a wrapped header and a wrapped marker mark all their physical lines",
+			// Narrow enough that the header wraps: the click lands on the header, not on its first
+			// row, so EVERY physical line of it is marked.
+			name:  "a wrapped header marks all its physical lines",
 			width: 11,
 			build: func(t *testing.T, tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
@@ -2885,14 +2918,14 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				{line: 1, kind: targetHeader, entry: 0, text: "  Commit"},
 				// One leader row whatever the width: at eleven columns the target has nothing left
 				// to be cut INTO — a budget narrower than the clip tail itself — so it is dropped
-				// outright and the leader alone runs out to the indicator (design call 4).
+				// outright and the leader alone runs out to the indicator (design call 4). The
+				// hidden body is counted nowhere either: a row this narrow cannot seat the count
+				// without spending the target's own floor on it (affordableSlot).
 				{line: 2, kind: targetHeader, entry: 0, text: leaderEdgeRow("  ┕ ⋯", glyphCollapsed)},
-				{line: 3, kind: targetMarker, entry: 0, text: "    +3 more"},
-				{line: 4, kind: targetMarker, entry: 0, text: "    lines"},
 			},
 		},
 		{
-			// Two blocks of the same shape: each header and marker names its OWN head entry, which
+			// Two blocks of the same shape: each block's rows name its OWN head entry, which
 			// is the whole of what the index is for. The approval note between them is what keeps
 			// them two blocks — two same-label calls are one group now, however much body they
 			// carry (groupable) — and it makes the second block's index 2, which a mark that
@@ -2906,11 +2939,11 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ Terminal"},
-				{line: 1, kind: targetHeader, entry: 0, text: groupMemberLine("  ┕ go build ./... ⋯ exit 0")},
-				{line: 2, kind: targetMarker, entry: 0, text: "    +3 more lines"},
-				{line: 6, kind: targetHeader, entry: 2, text: "✦ Terminal"},
-				{line: 7, kind: targetHeader, entry: 2, text: groupMemberLine("  ┕ go vet ./... ⋯ exit 0")},
-				{line: 8, kind: targetMarker, entry: 2, text: "    +2 more lines"},
+				{line: 1, kind: targetHeader, entry: 0,
+					text: groupMemberLine("  ┕ go build ./... ⋯ exit 0 · +3 more lines")},
+				{line: 5, kind: targetHeader, entry: 2, text: "✦ Terminal"},
+				{line: 6, kind: targetHeader, entry: 2,
+					text: groupMemberLine("  ┕ go vet ./... ⋯ exit 0 · +2 more lines")},
 			},
 		},
 		{
@@ -2957,8 +2990,8 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 			},
 			want: []blockMark{
 				{line: 2, kind: targetHeader, entry: 0, text: "│ ✦ Terminal"},
-				{line: 3, kind: targetHeader, entry: 0, text: leaderEdgeRow("│   ┕ go test ⋯ exit 0", glyphCollapsed)},
-				{line: 4, kind: targetMarker, entry: 0, text: "│     +3 more lines"},
+				{line: 3, kind: targetHeader, entry: 0,
+					text: leaderEdgeRow("│   ┕ go test ⋯ exit 0 · +3 more lines", glyphCollapsed)},
 			},
 		},
 	}
@@ -3071,11 +3104,12 @@ func TestHeaderIndicatorIsStyledApartFromTheLabel(t *testing.T) {
 	}
 }
 
-// The synthesized "+N more lines" marker carries its OWN style role rather than the body's: it is
-// apogee's line, not the tool's, and a body line that happens to open with "…" must not be able to
-// look like one. The two roles are asserted to differ as well as to be applied, so a marker style
-// that quietly became detailStyle's twin fails here rather than passing silently.
-func TestRemainderMarkerCarriesItsOwnStyle(t *testing.T) {
+// The "+N more lines" count RIDES the outcome slot rather than standing on a row of its own, and it
+// is painted with that slot in one style — apogee's own marker role, never the body's tone, because
+// the count is apogee's reading of the block and not a line the tool wrote (ISSUES.md, 2026-08-11).
+// The negative half is the whole point of the fold: a collapsed lone call paints its header and one
+// row, so no marker line is left for a body line opening with "+" to be mistaken for.
+func TestRemainderCountRidesTheOutcomeSlot(t *testing.T) {
 	th := newTheme(scheme.Default())
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
@@ -3083,22 +3117,22 @@ func TestRemainderMarkerCarriesItsOwnStyle(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nok   b\nPASS"}})
 
 	rendered := tr.renderView(th, 80, false)
-	var marker string
-	for i, target := range rendered.targets {
-		if target.kind == targetMarker {
-			marker = rendered.lines[i]
+	if len(rendered.lines) != 2 {
+		t.Fatalf("the collapsed block paints %d rows, want its header and one leader row:\n%s",
+			len(rendered.lines), ansi.Strip(strings.Join(rendered.lines, "\n")))
+	}
+	const slot = "exit 0 · +3 more lines"
+	row := rendered.lines[1]
+	if want := th.toolMarker.Render(slot); !strings.Contains(row, want) {
+		t.Errorf("leader row = %q; want its slot painted as the marker role's %q", row, want)
+	}
+	if asABodyLine := th.toolDetail.Render(slot); strings.Contains(row, asABodyLine) {
+		t.Errorf("leader row %q paints its slot exactly as a body line, so the two cannot be told apart", row)
+	}
+	for _, ln := range rendered.lines {
+		if plain := strings.TrimSpace(ansi.Strip(ln)); plain == "+3 more lines" {
+			t.Errorf("the block still paints the remainder on a row of its own: %q", plain)
 		}
-	}
-	if marker == "" {
-		t.Fatal("the block painted no remainder marker to check")
-	}
-
-	plain := ansi.Strip(marker)
-	if want := th.toolMarker.Render(plain); marker != want {
-		t.Errorf("marker line = %q; want the marker role's paint %q", marker, want)
-	}
-	if asABodyLine := th.toolDetail.Render(plain); marker == asABodyLine {
-		t.Errorf("marker line %q is painted exactly as a body line, so the two cannot be told apart", marker)
 	}
 }
 
@@ -3196,7 +3230,7 @@ func TestBlockMarksAgreeWithTheMouseMapping(t *testing.T) {
 		}
 	}
 
-	t.Run("a single block's header and marker", func(t *testing.T) {
+	t.Run("a single block's rows", func(t *testing.T) {
 		m := newTestModel(t)
 		m.transcript.reset() // drop the seeded start-up box: the block under test opens at line 0
 		m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
@@ -3206,22 +3240,20 @@ func TestBlockMarksAgreeWithTheMouseMapping(t *testing.T) {
 		m.refreshViewport()
 		lockstep(t, m)
 
-		for _, want := range []targetKind{targetHeader, targetMarker} {
-			marked := -1
-			for i, target := range m.lineTargets {
-				if target.kind == want {
-					marked = i
-					break
-				}
+		marked := 0
+		for i, target := range m.lineTargets {
+			if target.kind != targetHeader {
+				continue
 			}
-			if marked < 0 {
-				t.Fatalf("no line marked %v in the stashed map", want)
-			}
-			resolves(t, m, marked)
-			if entry := m.lineTargets[marked].entry; m.transcript.entries[entry].kind != entryToolCall {
-				t.Errorf("line %d is marked %v but names entry %d, a %v", marked, want, entry,
+			marked++
+			resolves(t, m, i)
+			if entry := target.entry; m.transcript.entries[entry].kind != entryToolCall {
+				t.Errorf("line %d is marked %v but names entry %d, a %v", i, target.kind, entry,
 					m.transcript.entries[entry].kind)
 			}
+		}
+		if marked != 2 {
+			t.Fatalf("%d lines marked in the stashed map, want the block's header and its leader row", marked)
 		}
 	})
 
@@ -3447,12 +3479,12 @@ func firingBlock(answer string) *transcript {
 }
 
 // The two states a Firing's reader cares about, in the shape layout.md gives them: collapsed, the
-// block is its header, its branch and the `+N more lines` remainder counting everything beneath —
+// block is its header and its branch, that branch's slot counting everything beneath it —
 // what rode the BRANCH still shows, which is the whole point of following the outcome's two-halves
 // grammar — and expanded, the block shows the answer whole with the prompt, the stats and the record
 // pointer beneath it. It is one transcript toggled rather than two fixtures, because that is the
 // claim: nothing about the entry changes but the flag the painter reads.
-func TestFiringBlockCollapsesToItsRemainderMarker(t *testing.T) {
+func TestFiringBlockCollapsesToItsRemainderCount(t *testing.T) {
 	cases := []struct {
 		name                        string
 		answer                      string
@@ -3463,8 +3495,7 @@ func TestFiringBlockCollapsesToItsRemainderMarker(t *testing.T) {
 			answer: "found 3 stale entries\nremoved them",
 			wantCollapsed: []string{
 				"⟳ Schedule",
-				groupMemberLine("  ┕ nightly tidy ⋯"),
-				"    +5 more lines",
+				groupMemberLine("  ┕ nightly tidy ⋯ +5 more lines"),
 			},
 			wantExpanded: []string{
 				"⟳ Schedule",
@@ -3481,8 +3512,7 @@ func TestFiringBlockCollapsesToItsRemainderMarker(t *testing.T) {
 			answer: "the log is clean",
 			wantCollapsed: []string{
 				"⟳ Schedule",
-				groupMemberLine("  ┕ nightly tidy ⋯ the log is clean"),
-				"    +3 more lines",
+				groupMemberLine("  ┕ nightly tidy ⋯ the log is clean · +3 more lines"),
 			},
 			wantExpanded: []string{
 				"⟳ Schedule",
@@ -3640,8 +3670,9 @@ func TestRenderInFlightStandalone(t *testing.T) {
 // The one shape with no target line: an unregistered tool has nothing to lead a branch with, so
 // the header stands alone and its LABELLED arguments — one `name:` line with the value's own lines
 // beneath it, the same rendering the approval prompt shows — are themselves the ┝/┕ branches.
-// Collapsed, that branch list is capped like any other block's body and the remainder
-// marker counts what is behind it; expanded, every line the model sent is back — the approval
+// Collapsed, that branch list is capped like any other block's body and the header's ▶ is what
+// says there is more behind it — this shape has no outcome slot for a count to ride
+// (collapsedRemainder); expanded, every line the model sent is back — the approval
 // popup is where a human approves an action, the transcript block is the record (layout.md,
 // "Collapsed and expanded blocks").
 func TestRenderNoTargetStandalone(t *testing.T) {
@@ -3652,7 +3683,6 @@ func TestRenderNoTargetStandalone(t *testing.T) {
 		"✦ mcp_thing ▶",
 		"  ┝ a:",
 		"  ┕   1",
-		"    +2 more lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("collapsed targetless block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -3699,10 +3729,11 @@ func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 
 // TestTargetlessBlocksCollapseToTheBudget pins the reversal of layout.md's old never-hide rule
 // across all three targetless shapes: the unregistered/MCP argument dump, a registered call whose
-// target argument never arrived, and a stray result. Each collapses to the house budget with a
-// remainder marker and a ▶ header — two branch rows and the marker, whatever it is hiding, which is
-// the whole of the ask — and each expands to every line it retained. The 60-line blob is the case
-// the old rule made 61 permanent rows.
+// target argument never arrived, and a stray result. Each collapses to the house budget under a ▶
+// header — two branch rows, whatever it is hiding, which is the whole of the ask — and each expands
+// to every line it retained. This shape counts what it withheld nowhere: the count rides an outcome
+// slot and a targetless block paints none (collapsedRemainder), so its ▶ carries the news alone. The
+// 60-line blob is the case the old rule made 61 permanent rows.
 func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 	blob := func(lines int) []byte {
 		items := make([]string, lines)
@@ -3723,7 +3754,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 					ID: "c1", Tool: "mcp_search", Arguments: blob(58)}})
 			},
-			wantCollapsed: []string{"✦ mcp_search ▶", "  ┝ [", `  ┕   "arg0",`, "    +58 more lines"},
+			wantCollapsed: []string{"✦ mcp_search ▶", "  ┝ [", `  ┕   "arg0",`},
 			wantExpanded:  62,
 		},
 		{
@@ -3735,8 +3766,8 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 					CallID: "c1", Content: "one\ntwo\nthree\nfour"}})
 			},
 			// The typed stat has nowhere to ride on a targetless block, so it lands as the last
-			// branch of the list — one more row for the collapsed cap to count.
-			wantCollapsed: []string{"✦ Terminal ▶", "  ┝ one", "  ┕ two", "    +3 more lines"},
+			// branch of the list — one more row for the collapsed cap to cut.
+			wantCollapsed: []string{"✦ Terminal ▶", "  ┝ one", "  ┕ two"},
 			wantExpanded:  7,
 		},
 		{
@@ -3745,7 +3776,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 					CallID: "gone", Content: "one\ntwo\nthree"}})
 			},
-			wantCollapsed: []string{"✦ result ▶", "  ┝ one", "  ┕ two", "    +1 more line"},
+			wantCollapsed: []string{"✦ result ▶", "  ┝ one", "  ┕ two"},
 			wantExpanded:  5,
 		},
 	}
@@ -3770,7 +3801,7 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 			}
 			for _, ln := range got {
 				if strings.Contains(ln, "more line") {
-					t.Errorf("an expanded block kept a remainder marker: %q", ln)
+					t.Errorf("an expanded block kept a remainder count: %q", ln)
 				}
 			}
 		})
@@ -3781,9 +3812,10 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 // wears the tool block, at a width narrow enough that each one's content soft-wraps if nothing stops
 // it: a targeted call with a long target and a long body, a targetless argument blob, a stray
 // result, a scheduled Firing and a collapsed sub-agent run. Collapsed, none of them may stand taller
-// than its header plus three content rows or wider than the column it was painted in — that is the
-// whole of the budget, and the point of it is that a reader can predict a block's height without
-// knowing which tool filled it (docs/layout/tool-layout.md).
+// than its header plus collapsedBodyCap content rows — two, since the remainder count rides the
+// leader row's outcome slot and no longer spends a row of its own — or wider than the column it was
+// painted in. That is the whole of the budget, and the point of it is that a reader can predict a
+// block's height without knowing which tool filled it (docs/layout/tool-layout.md).
 //
 // It asserts the SHAPE rather than the text, which the per-shape tests above pin line by line: what
 // would regress here is a path that still soft-wraps unbounded, and that shows as a row count.
@@ -3851,9 +3883,9 @@ func TestEveryToolShapeCollapsesInsideTheRowBudget(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			lines := strings.Split(renderPlain(tc.build(), width), "\n")
-			if len(lines) > 1+collapsedBodyCap+1 {
+			if len(lines) > 1+collapsedBodyCap {
 				t.Errorf("collapsed block is %d rows, want at most %d:\n%s",
-					len(lines), 1+collapsedBodyCap+1, strings.Join(lines, "\n"))
+					len(lines), 1+collapsedBodyCap, strings.Join(lines, "\n"))
 			}
 			for i, ln := range lines {
 				if w := th.measure.Width(ln); w > width {
@@ -3895,7 +3927,6 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 				"✦ mcp_search ▶",
 				"  ┝ query:",
 				"  ┕   collapse",
-				"    +4 more lines",
 			},
 			wantExpanded: []string{
 				"✦ mcp_search ▼",
@@ -3914,7 +3945,6 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 				"✦ mcp_search ▶",
 				"  ┝ script:",
 				"  ┕   cd /ws",
-				"    +2 more lines",
 			},
 			wantExpanded: []string{
 				"✦ mcp_search ▼",
@@ -4166,7 +4196,6 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"✦ mcp_search ▶",
 		"  ┝ query:",
 		"  ┕   collapse",
-		"    +2 more lines",
 		"",
 		"· approval allow: terminal",
 		"",

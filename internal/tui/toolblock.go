@@ -46,9 +46,8 @@ import (
 // surface is the block WHOLE — its header, the leader row beneath it, and, open, every body line —
 // the shape the prompt block has always had (renderUserBlock): a reader who wants the rest of a
 // Terminal call's output clicks the output, not the one row of the block that happens to be its
-// header. The one exception is the synthesized `+N more lines` marker, which keeps its OPEN-ONLY
-// meaning (targetMarker): it is a line of the collapsed paint alone, so a click there can only mean
-// "show me the rest".
+// header. It has no exception: the `+N more lines` count rides the leader row's outcome slot
+// (collapsedRemainder), so the block emits no line that means anything other than "toggle me".
 //
 // The surface exists when the collapsed paint HIDES something — either inside the views
 // (blockHidesWhenCollapsed) or outside them (state.elides, the sub-agent run's span) — because a
@@ -203,7 +202,7 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState)
 	for i, r := range runs {
 		views := guardPromotions(th, r.views, room, superMemberMarker(true))
 		row := leaderRowIn(th, typeRowText(views), typeRowPaint(th, views),
-			runAggregate(views), branchMarker(i == len(runs)-1), room, r.expanded)
+			runAggregate(views), branchMarker(i == len(runs)-1), room, r.expanded, noRemainder)
 		rows.addFor(at, []string{indicatorRow(th, row, width, stateIndicator(r.expanded))}, targetType)
 		if r.expanded {
 			open = true
@@ -317,7 +316,7 @@ func superRunViews(entries []entry, g superGroup) []toolRunView {
 // row sits one level deeper than a member of a plain group and both frames have to reach the same
 // painter (superMemberMarker, renderSuperGroup).
 func renderGroupMember(th theme, tv toolView, marker, gutter string, width, room int, expanded bool) (lines []string, hides bool) {
-	row := leaderRow(th, tv, marker, room, expanded)
+	row := leaderRow(th, tv, marker, room, expanded, noRemainder)
 	if hides = tv.Details.len() > 0; !hides {
 		return []string{row}, false
 	}
@@ -349,7 +348,7 @@ func renderGroupMember(th theme, tv toolView, marker, gutter string, width, room
 // paint leaves nothing out. The see-less marker closes it instead, worded from the prompt block's
 // own constant so the transcript has one vocabulary for "close this" (design call 7).
 func renderExpandedMember(th theme, tv toolView, marker, gutter string, width, room int) []string {
-	row := leaderRow(th, tv, marker, room, true)
+	row := leaderRow(th, tv, marker, room, true, noRemainder)
 	out := []string{indicatorRow(th, row, width, glyphExpanded)}
 	for _, d := range tv.Details.all() {
 		out = append(out, gutteredWrap(th, detailStyle(th, d.Kind, true), gutter, gutter, d.Text, room)...)

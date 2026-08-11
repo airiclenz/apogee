@@ -39,10 +39,11 @@ type renderedTranscript struct {
 }
 
 // targetKind says what one rendered line is to a motionless click (layout.md, "Collapsed and
-// expanded blocks"): nothing at all — the overwhelmingly common case, and the zero value — a
-// TOGGLE line, or a synthesized remainder MARKER line. A click on a toggle line flips the state of
-// the entry the mark names; a click on a marker expands the block whose body the marker is counting
-// for, and never collapses it.
+// expanded blocks"): nothing at all — the overwhelmingly common case, and the zero value — or a
+// TOGGLE line, which flips the state of the entry the mark names. Every line a block paints carries
+// the one meaning: the collapsed paint's "+N more lines" used to be a line of its own with an
+// open-only click, and it now rides the leader row's outcome slot instead (collapsedRemainder), so
+// there is no longer a row whose click could only ever open.
 //
 // targetHeader is named for the line it started on and is no longer only that line: a single tool
 // block wears it on EVERY row it paints — its header, its leader row, its body — and a grouped
@@ -61,7 +62,6 @@ type targetKind int
 const (
 	targetNone targetKind = iota
 	targetHeader
-	targetMarker
 	targetType
 	targetUmbrella
 )

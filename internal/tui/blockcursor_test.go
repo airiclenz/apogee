@@ -49,37 +49,42 @@ func TestBlockCursorEntersAtTheEndItsKeyPointsAwayFrom(t *testing.T) {
 
 // TestBlockCursorWalksOneStopPerSurface is the difference between a pointer and a cursor: a block
 // marks every line it paints for its own entry, so a click lands anywhere on it, but the walk stops
-// ONCE per surface rather than crawling line by line through a body. The single block's two
-// surfaces — the block itself and the `+N more lines` marker under it — are therefore two stops, and
-// the branch row between them is not a third. Movement clamps at both ends instead of wrapping.
+// ONCE per surface rather than crawling line by line through it. A single tool block IS one surface
+// — its header, its leader row and, open, every body row and the see-less footer closing them — so
+// it offers exactly one stop in either state, and movement clamps there instead of wrapping. The
+// collapsed paint no longer offers a second one: the `+N more lines` count rides the leader row's
+// outcome slot now rather than a marker line of its own (collapsedRemainder).
 func TestBlockCursorWalksOneStopPerSurface(t *testing.T) {
 	t.Parallel()
 
 	m := modelWithToolBlock(t, "ok   a\nok   b\nok   c\nPASS")
-	header, marker := markedLine(t, m, targetHeader), markedLine(t, m, targetMarker)
-	if marker != header+2 {
-		t.Fatalf("setup: the marker is at line %d, not two rows under the header at %d", marker, header)
+	header := markedLine(t, m, targetHeader)
+	if got := cursorStops(m.lineTargets); len(got) != 1 || got[0] != header {
+		t.Fatalf("the collapsed block offers stops %v, want the block's header at %d alone", got, header)
 	}
 
 	m = step(t, m, keyAltUp())
-	if got := cursorLine(t, m); got != marker {
-		t.Fatalf("⌥↑ entered at line %d, want the marker at %d", got, marker)
+	if got := cursorLine(t, m); got != header {
+		t.Fatalf("⌥↑ entered at line %d, want the block's only stop at %d", got, header)
+	}
+
+	m = step(t, m, keyEnter())
+	if !blockExpanded(t, m, header) {
+		t.Fatal("⏎ on the block's stop did not open it")
+	}
+	if got := cursorStops(m.lineTargets); len(got) != 1 || got[0] != header {
+		t.Errorf("the open block offers stops %v, want its header at %d alone — its body rows are the same surface",
+			got, header)
 	}
 
 	m = step(t, m, keyUp())
 	if got := cursorLine(t, m); got != header {
-		t.Errorf("↑ from the marker stopped at line %d, want the block's header at %d — the branch row is the same surface", got, header)
+		t.Errorf("↑ at the only stop moved to line %d, want it clamped at %d", got, header)
 	}
 
-	m = step(t, m, keyUp())
+	m = step(t, m, keyDown())
 	if got := cursorLine(t, m); got != header {
-		t.Errorf("↑ at the first stop moved to line %d, want it clamped at %d", got, header)
-	}
-
-	m = step(t, m, keyDown())
-	m = step(t, m, keyDown())
-	if got := cursorLine(t, m); got != marker {
-		t.Errorf("↓ at the last stop moved to line %d, want it clamped at %d", got, marker)
+		t.Errorf("↓ at the only stop moved to line %d, want it clamped at %d", got, header)
 	}
 }
 
