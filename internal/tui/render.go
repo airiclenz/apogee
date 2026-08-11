@@ -1113,7 +1113,7 @@ func renderToolBlock(th theme, views []toolView, width int, state blockState) bl
 	return out
 }
 
-// renderToolGroup paints a folded run of same-label calls — the sketch's "✦ Run (3)" block
+// renderToolGroup paints a folded run of same-label calls — the sketch's "✦ Terminal (3)" block
 // (docs/layout/tool-layout.md). It is a list, and everything about the shape follows from that: the
 // header names the label and how many calls carry it, and a COLLAPSED member gets exactly ONE row
 // so ten grouped calls read as ten lines rather than as ten blocks that happen to share a star.
@@ -1894,7 +1894,7 @@ func renderSubDetails(th theme, details []detailLine, indent, width int) []strin
 // grouped block, as their presentation views: same sub-agent depth, same friendly Label, every
 // member groupable. Any other entry between two calls — narration, a note, an approval, an error —
 // ends the run, since the scan only ever walks forward over adjacent entries. Two different tools
-// sharing a label (a single and a multi find-and-replace are both "Edit File") do group: the reader
+// sharing a label (a single and a multi find-and-replace are both "Replace") do group: the reader
 // groups by what the header says, not by tool id. It returns nil when entries[i] is not a groupable
 // tool call, and a one-view run when nothing follows it — the caller renders both as single blocks.
 func toolCallRun(entries []entry, i int) []toolView {

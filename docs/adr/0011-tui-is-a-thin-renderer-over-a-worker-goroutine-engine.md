@@ -223,7 +223,7 @@ package that changed. It was also resting on a coincidence — `clampToolResult`
 
 The fact now travels as data: a tool attaches a sealed `domain.ToolSummary`
 ([ADR 0002](0002-tools-are-an-open-extension-point-mechanisms-are-curated.md)'s 2026-07-25 note)
-and `summaryLine` renders it in one exhaustive type switch. **This makes the ADR *more* true, not
+and the registry's per-tool stat hook words it. **This makes the ADR *more* true, not
 less** — the renderer that stops parsing is thinner than the one that parsed — and it is the
 Event-fold posture applied to a second stream: the engine hands the view typed values; the view
 words them.

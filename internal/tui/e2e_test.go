@@ -359,7 +359,7 @@ func TestE2EConversationThroughTUI(t *testing.T) {
 	// The transcript folded the whole real event stream: the narration, the tool call (name
 	// and arguments), and the final message.
 	transcript := plainTranscript(m)
-	for _, want := range []string{"I'll create greeting.txt", "Write File", greetingFileName, finalMessageText} {
+	for _, want := range []string{"I'll create greeting.txt", "Write", greetingFileName, finalMessageText} {
 		if !strings.Contains(transcript, want) {
 			t.Errorf("transcript missing %q:\n%s", want, transcript)
 		}

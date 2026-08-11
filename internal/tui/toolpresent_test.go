@@ -49,45 +49,45 @@ func TestPresentToolCall(t *testing.T) {
 		wantDetail string // a substring expected in the view's detail lines
 	}{
 		{
-			name: "read_file → Read File + line range",
+			name: "read_file → Read + the line count of the span",
 			call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
 			result: domain.ToolResult{CallID: "1", Content: "[File: main.go, 120 lines total, showing lines 1-100]\npackage main",
 				Summary: domain.ReadSpan{Start: 1, End: 100, Total: 120}},
-			wantLabel:  "Read File",
+			wantLabel:  "Read",
 			wantVerb:   "reading",
-			wantTarget: "main.go", wantDetail: "1 - 100",
+			wantTarget: "main.go", wantDetail: "100 lines",
 		},
 		{
 			name:       "read_file with no summary → the verbatim first line",
 			call:       domain.ToolCall{ID: "1b", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
 			result:     domain.ToolResult{CallID: "1b", Content: "[File: main.go, 120 lines total, showing lines 1-100]\npackage main"},
-			wantLabel:  "Read File",
+			wantLabel:  "Read",
 			wantVerb:   "reading",
 			wantTarget: "main.go", wantDetail: "[File: main.go, 120 lines total, showing lines 1-100]",
 		},
 		{
-			name: "write_file → Write File + byte count",
+			name: "write_file → Write + the line count of what it writes",
 			call: domain.ToolCall{ID: "2", Tool: "write_file", Arguments: []byte(`{"path":"notes.txt","content":"hello"}`)},
 			result: domain.ToolResult{CallID: "2", Content: "wrote 5 bytes to notes.txt",
 				Summary: domain.WroteBytes{Bytes: 5}},
-			wantLabel:  "Write File",
+			wantLabel:  "Write",
 			wantVerb:   "writing",
-			wantTarget: "notes.txt", wantDetail: "+5 bytes",
+			wantTarget: "notes.txt", wantDetail: "1 line",
 		},
 		{
-			name:       "write_file with no summary → the verbatim first line",
+			name:       "write_file with no summary → still the line count its own request states",
 			call:       domain.ToolCall{ID: "2b", Tool: "write_file", Arguments: []byte(`{"path":"notes.txt","content":"hello"}`)},
 			result:     domain.ToolResult{CallID: "2b", Content: "wrote 5 bytes to notes.txt"},
-			wantLabel:  "Write File",
+			wantLabel:  "Write",
 			wantVerb:   "writing",
-			wantTarget: "notes.txt", wantDetail: "wrote 5 bytes to notes.txt",
+			wantTarget: "notes.txt", wantDetail: "1 line",
 		},
 		{
-			name: "list_dir → List Dir + entry count",
+			name: "list_dir → List + entry count",
 			call: domain.ToolCall{ID: "3", Tool: "list_dir", Arguments: []byte(`{"path":"src"}`)},
 			result: domain.ToolResult{CallID: "3", Content: "[12 entries total]\nfoo\nbar",
 				Summary: domain.ListedEntries{Total: 12}},
-			wantLabel:  "List Dir",
+			wantLabel:  "List",
 			wantVerb:   "listing",
 			wantTarget: "src", wantDetail: "12 entries",
 		},
@@ -95,43 +95,43 @@ func TestPresentToolCall(t *testing.T) {
 			name:       "list_dir with no summary → the verbatim first line",
 			call:       domain.ToolCall{ID: "3b", Tool: "list_dir", Arguments: []byte(`{"path":"src"}`)},
 			result:     domain.ToolResult{CallID: "3b", Content: "[12 entries total]\nfoo\nbar"},
-			wantLabel:  "List Dir",
+			wantLabel:  "List",
 			wantVerb:   "listing",
 			wantTarget: "src", wantDetail: "[12 entries total]",
 		},
 		{
-			name: "grep → Search + match count",
+			name: "grep → Grep + hit count",
 			call: domain.ToolCall{ID: "4", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)},
 			result: domain.ToolResult{CallID: "4", Content: "[3 total matches, showing 1-3]\na\nb\nc",
 				Summary: domain.MatchedLines{Total: 3}},
-			wantLabel:  "Search",
+			wantLabel:  "Grep",
 			wantVerb:   "searching",
-			wantTarget: "TODO", wantDetail: "3 matches",
+			wantTarget: "TODO", wantDetail: "3 hits",
 		},
 		{
-			name: "grep with no matches → 0 matches",
+			name: "grep with no matches → 0 hits",
 			call: domain.ToolCall{ID: "5", Tool: "grep", Arguments: []byte(`{"pattern":"zzz"}`)},
 			result: domain.ToolResult{CallID: "5", Content: "No matches found",
 				Summary: domain.MatchedLines{Total: 0}},
-			wantLabel:  "Search",
+			wantLabel:  "Grep",
 			wantVerb:   "searching",
 			wantTarget: "zzz",
-			wantDetail: "0 matches",
+			wantDetail: "0 hits",
 		},
 		{
 			name:       "grep with no summary → the verbatim first line",
 			call:       domain.ToolCall{ID: "5b", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)},
 			result:     domain.ToolResult{CallID: "5b", Content: "[3 total matches, showing 1-3]\na\nb\nc"},
-			wantLabel:  "Search",
+			wantLabel:  "Grep",
 			wantVerb:   "searching",
 			wantTarget: "TODO", wantDetail: "[3 total matches, showing 1-3]",
 		},
 		{
-			name: "web_search → Web Search + result count, never the results",
+			name: "web_search → Search + result count, never the results",
 			call: domain.ToolCall{ID: "20", Tool: "web_search", Arguments: []byte(`{"query":"golang testing"}`)},
 			result: domain.ToolResult{CallID: "20", Content: "1. Go Testing\n   https://go.dev\n   snippet\n\n2. More\n   https://x.dev",
 				Summary: domain.SearchHits{Count: 2}},
-			wantLabel:  "Web Search",
+			wantLabel:  "Search",
 			wantVerb:   "searching the web",
 			wantTarget: "golang testing", wantDetail: "2 results",
 		},
@@ -139,15 +139,15 @@ func TestPresentToolCall(t *testing.T) {
 			name:       "web_search with no results → the sentinel line",
 			call:       domain.ToolCall{ID: "21", Tool: "web_search", Arguments: []byte(`{"query":"zzz"}`)},
 			result:     domain.ToolResult{CallID: "21", Content: "No results found for: zzz"},
-			wantLabel:  "Web Search",
+			wantLabel:  "Search",
 			wantVerb:   "searching the web",
 			wantTarget: "zzz", wantDetail: "No results found for: zzz",
 		},
 		{
-			name:       "web_fetch → Web Fetch + status line, never the body",
+			name:       "web_fetch → Fetch + status line, never the body",
 			call:       domain.ToolCall{ID: "22", Tool: "web_fetch", Arguments: []byte(`{"url":"https://go.dev"}`)},
 			result:     domain.ToolResult{CallID: "22", Content: "HTTP 200 OK\nContent-Type: text/html\n\n<html>…</html>"},
-			wantLabel:  "Web Fetch",
+			wantLabel:  "Fetch",
 			wantVerb:   "fetching",
 			wantTarget: "https://go.dev", wantDetail: "HTTP 200 OK",
 		},
@@ -155,7 +155,7 @@ func TestPresentToolCall(t *testing.T) {
 			name:       "http_request → METHOD url target + status line",
 			call:       domain.ToolCall{ID: "23", Tool: "http_request", Arguments: []byte(`{"url":"https://api.example.com","method":"post"}`)},
 			result:     domain.ToolResult{CallID: "23", Content: "HTTP 201 Created\nLocation: /things/1\n\n{}"},
-			wantLabel:  "HTTP Request",
+			wantLabel:  "HTTP",
 			wantVerb:   "requesting",
 			wantTarget: "POST https://api.example.com", wantDetail: "HTTP 201 Created",
 		},
@@ -163,23 +163,23 @@ func TestPresentToolCall(t *testing.T) {
 			name:       "terminal → Run + the whole output body (the paint compresses it, not the view)",
 			call:       domain.ToolCall{ID: "24", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)},
 			result:     domain.ToolResult{CallID: "24", Content: "ok   pkg/a 0.1s\nok   pkg/b 0.2s\nok   pkg/c 0.3s"},
-			wantLabel:  "Run",
+			wantLabel:  "Terminal",
 			wantVerb:   "running",
 			wantTarget: "go test ./...", wantDetail: "ok   pkg/c 0.3s",
 		},
 		{
-			name:       "terminal with empty output → (no output)",
+			name:       "terminal with empty output → the bare exit code",
 			call:       domain.ToolCall{ID: "25", Tool: "terminal", Arguments: []byte(`{"command":"true"}`)},
 			result:     domain.ToolResult{CallID: "25", Content: "\n"},
-			wantLabel:  "Run",
+			wantLabel:  "Terminal",
 			wantVerb:   "running",
-			wantTarget: "true", wantDetail: "(no output)",
+			wantTarget: "true", wantDetail: "exit 0",
 		},
 		{
-			name:       "python_exec → Run Python + first code line as target",
+			name:       "python_exec → Python + first code line as target",
 			call:       domain.ToolCall{ID: "26", Tool: "python_exec", Arguments: []byte(`{"code":"print('hi')\nprint('there')"}`)},
 			result:     domain.ToolResult{CallID: "26", Content: "hi\nthere"},
-			wantLabel:  "Run Python",
+			wantLabel:  "Python",
 			wantVerb:   "running python",
 			wantTarget: "print('hi')", wantDetail: "hi",
 		},
@@ -208,37 +208,37 @@ func TestPresentToolCall(t *testing.T) {
 			wantTarget: "main...feature-x", wantDetail: "+added",
 		},
 		{
-			name:       "edit_existing_file → Edit File + fixed result line",
+			name:       "edit_existing_file → Edit + the diffstat of what it sends",
 			call:       domain.ToolCall{ID: "30", Tool: "edit_existing_file", Arguments: []byte(`{"path":"main.go","content":"x"}`)},
 			result:     domain.ToolResult{CallID: "30", Content: "applied patch to main.go (2 hunks)"},
-			wantLabel:  "Edit File",
+			wantLabel:  "Edit",
 			wantVerb:   "editing",
-			wantTarget: "main.go", wantDetail: "applied patch to main.go (2 hunks)",
+			wantTarget: "main.go", wantDetail: "+1 −0",
 		},
 		{
 			name: "open_file with locate → the Located line, never the content",
 			call: domain.ToolCall{ID: "31", Tool: "open_file", Arguments: []byte(`{"path":"main.go","locate":"func main"}`)},
 			result: domain.ToolResult{CallID: "31", Content: "File: main.go\nLocated \"func main\" on lines: 5\n\npackage main\n…",
 				Summary: domain.OpenedFile{Lines: 2, Locate: "func main", LocatedOn: []int{5}}},
-			wantLabel:  "Open File",
+			wantLabel:  "Open",
 			wantVerb:   "opening",
-			wantTarget: "main.go", wantDetail: `Located "func main" on lines: 5`,
+			wantTarget: `main.go · locate "func main"`, wantDetail: `Located "func main" on lines: 5`,
 		},
 		{
 			name: "open_file with a locate that matched nothing → on no lines",
 			call: domain.ToolCall{ID: "31b", Tool: "open_file", Arguments: []byte(`{"path":"main.go","locate":"zzz"}`)},
 			result: domain.ToolResult{CallID: "31b", Content: "File: main.go\nLocated \"zzz\" on no lines\n\npackage main\n…",
 				Summary: domain.OpenedFile{Lines: 2, Locate: "zzz"}},
-			wantLabel:  "Open File",
+			wantLabel:  "Open",
 			wantVerb:   "opening",
-			wantTarget: "main.go", wantDetail: `Located "zzz" on no lines`,
+			wantTarget: `main.go · locate "zzz"`, wantDetail: `Located "zzz" on no lines`,
 		},
 		{
 			name: "open_file without locate → line count, never the content",
 			call: domain.ToolCall{ID: "32", Tool: "open_file", Arguments: []byte(`{"path":"main.go"}`)},
 			result: domain.ToolResult{CallID: "32", Content: "File: main.go\n\npackage main\n\nfunc main() {}",
 				Summary: domain.OpenedFile{Lines: 3}},
-			wantLabel:  "Open File",
+			wantLabel:  "Open",
 			wantVerb:   "opening",
 			wantTarget: "main.go", wantDetail: "3 lines",
 		},
@@ -246,24 +246,24 @@ func TestPresentToolCall(t *testing.T) {
 			name:       "open_file with no summary → the verbatim first line",
 			call:       domain.ToolCall{ID: "32b", Tool: "open_file", Arguments: []byte(`{"path":"main.go"}`)},
 			result:     domain.ToolResult{CallID: "32b", Content: "File: main.go\n\npackage main\n\nfunc main() {}"},
-			wantLabel:  "Open File",
+			wantLabel:  "Open",
 			wantVerb:   "opening",
 			wantTarget: "main.go", wantDetail: "File: main.go",
 		},
 		{
-			name: "view_diff → View Diff + diffstat",
+			name: "view_diff → Diff Preview + diffstat",
 			call: domain.ToolCall{ID: "35", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)},
 			result: domain.ToolResult{CallID: "35", Content: "  ctx\n- old line\n+ new line",
 				Summary: domain.DiffStat{Added: 1, Removed: 1}},
-			wantLabel:  "View Diff",
+			wantLabel:  "Diff Preview",
 			wantVerb:   "diffing",
-			wantTarget: "main.go", wantDetail: "+1 -1",
+			wantTarget: "main.go", wantDetail: "+1 −1",
 		},
 		{
 			name:       "view_diff with no changes carries no summary → the sentinel line",
 			call:       domain.ToolCall{ID: "36", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)},
 			result:     domain.ToolResult{CallID: "36", Content: "No changes detected"},
-			wantLabel:  "View Diff",
+			wantLabel:  "Diff Preview",
 			wantVerb:   "diffing",
 			wantTarget: "main.go", wantDetail: "No changes detected",
 		},
@@ -460,13 +460,13 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
 			result: domain.ToolResult{CallID: "1", Content: "[File: main.go, 154 lines total, showing lines 1-154]\npackage main",
 				Summary: domain.ReadSpan{Start: 1, End: 154, Total: 154}},
-			wantSummary: "1 - 154",
+			wantSummary: "154 lines",
 		},
 		{
-			name:        "multi-line terminal output is body-only",
+			name:        "multi-line terminal output is a body under the typed exit code",
 			call:        domain.ToolCall{ID: "2", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)},
 			result:      domain.ToolResult{CallID: "2", Content: "ok   apogee/internal/tui   0.412s\nok   apogee/internal/agent   1.203s\nPASS"},
-			wantSummary: "",
+			wantSummary: "exit 0",
 			wantBody:    []string{"ok   apogee/internal/tui   0.412s", "ok   apogee/internal/agent   1.203s", "PASS"},
 		},
 		{
@@ -474,20 +474,20 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			call:        domain.ToolCall{ID: "3", Tool: "terminal", Arguments: []byte(`{"command":"git rev-parse HEAD"}`)},
 			result:      domain.ToolResult{CallID: "3", Content: "abc1234\n"},
 			wantSummary: "abc1234",
-			wantStat:    "1 line",
+			wantStat:    "exit 0",
 		},
 		{
-			name:        "empty terminal output is summary-only",
+			name:        "empty terminal output is the exit code alone",
 			call:        domain.ToolCall{ID: "4", Tool: "terminal", Arguments: []byte(`{"command":"true"}`)},
 			result:      domain.ToolResult{CallID: "4", Content: "\n"},
-			wantSummary: "(no output)",
+			wantSummary: "exit 0",
 		},
 		{
 			name: "view_diff is both",
 			call: domain.ToolCall{ID: "5", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)},
 			result: domain.ToolResult{CallID: "5", Content: "  ctx\n- old line\n+ new line",
 				Summary: domain.DiffStat{Added: 1, Removed: 1}},
-			wantSummary: "+1 -1",
+			wantSummary: "+1 −1",
 			wantBody:    []string{"  ctx", "- old line", "+ new line"},
 		},
 	}
@@ -545,7 +545,7 @@ func TestPromotionCarriesBothReadingsOfTheOutcome(t *testing.T) {
 	}{{
 		name:           "a one-line output demotes into the body",
 		view:           present(terminal, "abc1234\n"),
-		wantPromotable: true, wantSummary: "1 line", wantBody: []string{"abc1234"},
+		wantPromotable: true, wantSummary: "exit 0", wantBody: []string{"abc1234"},
 	}, {
 		// The line lands at the HEAD of whatever body the call already had — where the tool printed
 		// it — rather than after it.
@@ -555,7 +555,7 @@ func TestPromotionCarriesBothReadingsOfTheOutcome(t *testing.T) {
 			tv.Details = tv.Details.with([]detailLine{{Text: "an earlier line"}})
 			return tv
 		}(),
-		wantPromotable: true, wantSummary: "1 line",
+		wantPromotable: true, wantSummary: "exit 0",
 		wantBody: []string{"abc1234", "an earlier line"},
 	}, {
 		name:        "a summary the block worded is not a promotion",
@@ -990,18 +990,19 @@ func TestWriteCallCarriesTheWrittenLines(t *testing.T) {
 	}
 }
 
-// A write's two halves say different things and neither is derived from the other: the result's
-// "+N bytes" rides the branch beside the target and the argument-derived lines hang beneath it —
-// including when there is only one of them. Nothing is promoted onto the branch, because the slot
-// is already taken by the count the tool reported.
+// A write's two halves say different things and neither is derived from the other: the LINE COUNT
+// its own request states rides the branch beside the target (the ratified table asks for lines,
+// where the tool reports bytes) and the argument-derived lines hang beneath it — including when
+// there is only one of them. Nothing is promoted onto the branch, because the slot is already
+// taken.
 func TestWriteBodySurvivesItsByteCountSummary(t *testing.T) {
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file",
 		Arguments: []byte(`{"path":"notes.txt","content":"hello"}`)}, workspaceRoot{})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "wrote 5 bytes to notes.txt",
 		Summary: domain.WroteBytes{Bytes: 5}}, workspaceRoot{})
 
-	if got := tv.Summary.Text; got != "+5 bytes" {
-		t.Errorf("summary = %q, want the reported byte count on the branch", got)
+	if got := tv.Summary.Text; got != "1 line" {
+		t.Errorf("summary = %q, want the written line count on the branch", got)
 	}
 	if got := changedBody(t, tv); len(got) != 1 || got[0] != "+ hello" {
 		t.Errorf("body = %q, want the one written line beneath the branch", got)
@@ -1019,7 +1020,7 @@ func TestDiffStatSpansTheWholeDiff(t *testing.T) {
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, workspaceRoot{})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: long, Summary: domain.DiffStat{Added: longDiff}}, workspaceRoot{})
 
-	if want := "+" + strconv.Itoa(longDiff) + " -0"; tv.Summary.Text != want {
+	if want := "+" + strconv.Itoa(longDiff) + " −0"; tv.Summary.Text != want {
 		t.Errorf("diffstat = %q, want %q", tv.Summary.Text, want)
 	}
 	if tv.Details.len() != longDiff {
@@ -1042,76 +1043,135 @@ func TestViewDiffNoChangesRendersAsProse(t *testing.T) {
 	}
 }
 
-// TestSummaryLine is the view's whole vocabulary for a typed outcome, in one table: every
-// domain.ToolSummary variant and the line it words. Two rows are traps worth naming — the
-// "entries" and "matches" forms are count-INDEPENDENT (they read "1 entries", which is what
-// the card has always shown, and plural() would render "matchs" for the singular) — and the
-// three OpenedFile rows cover the distinction only the typed summary can make: a locate that
-// matched nothing versus no locate requested at all.
-func TestSummaryLine(t *testing.T) {
+// TestToolStat is the ratified table's `<tool-top-level-details>` column in one place: for each
+// tool, the arguments and the result its slot is worded from, and the phrase that must come out
+// (docs/layout/tool-layout.md). The rows fall in the three kinds the hooks come in — read off a
+// typed domain.ToolSummary, read off the call's own arguments, read off a header the tool wrote —
+// plus the two answers that are not a phrase at all: the deliberate blank (`—`) and the decline
+// that leaves a tool's prose floor in the slot.
+func TestToolStat(t *testing.T) {
 	cases := []struct {
-		name    string
-		summary domain.ToolSummary
-		want    string
+		name   string
+		tool   string
+		args   map[string]any
+		result domain.ToolResult
+		want   string
+		wantOK bool
 	}{
-		{name: "read span", summary: domain.ReadSpan{Start: 1, End: 100, Total: 120}, want: "1 - 100"},
-		{name: "wrote bytes", summary: domain.WroteBytes{Bytes: 5}, want: "+5 bytes"},
-		{name: "listed entries", summary: domain.ListedEntries{Total: 12, Skipped: 4}, want: "12 entries"},
-		{name: "one entry is still the plural form", summary: domain.ListedEntries{Total: 1}, want: "1 entries"},
-		{name: "matched lines", summary: domain.MatchedLines{Total: 3}, want: "3 matches"},
-		{name: "one match is still the plural form", summary: domain.MatchedLines{Total: 1}, want: "1 matches"},
-		{name: "no matches is a number, not a prefix test", summary: domain.MatchedLines{Total: 0}, want: "0 matches"},
-		{name: "diffstat names both counts", summary: domain.DiffStat{Added: 2, Removed: 0}, want: "+2 -0"},
-		{name: "search hits", summary: domain.SearchHits{Count: 2}, want: "2 results"},
-		{name: "one search hit is singular", summary: domain.SearchHits{Count: 1}, want: "1 result"},
-		{
-			name:    "opened file with a locate that matched",
-			summary: domain.OpenedFile{Lines: 40, Locate: "func main", LocatedOn: []int{5, 9}},
-			want:    `Located "func main" on lines: 5, 9`,
-		},
-		{
-			name:    "opened file with a locate that matched nothing",
-			summary: domain.OpenedFile{Lines: 40, Locate: "zzz"},
-			want:    `Located "zzz" on no lines`,
-		},
-		{name: "opened file with no locate", summary: domain.OpenedFile{Lines: 3}, want: "3 lines"},
-		{name: "one line is singular", summary: domain.OpenedFile{Lines: 1}, want: "1 line"},
+		// Typed summaries.
+		{name: "read words its span as a line count", tool: "read_file", result: domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 100, Total: 120}}, want: "100 lines", wantOK: true},
+		{name: "a one-line read is singular", tool: "read_file", result: domain.ToolResult{Summary: domain.ReadSpan{Start: 7, End: 7, Total: 9}}, want: "1 line", wantOK: true},
+		{name: "an empty file reads zero, never a negative", tool: "read_file", result: domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 0}}, want: "0 lines", wantOK: true},
+		{name: "open words the body's line count", tool: "open_file", result: domain.ToolResult{Summary: domain.OpenedFile{Lines: 3, Locate: "x", LocatedOn: []int{1}}}, want: "3 lines", wantOK: true},
+		{name: "list keeps the fixed 'entries' plural", tool: "list_dir", result: domain.ToolResult{Summary: domain.ListedEntries{Total: 1}}, want: "1 entries", wantOK: true},
+		{name: "grep words hits", tool: "grep", result: domain.ToolResult{Summary: domain.MatchedLines{Total: 3}}, want: "3 hits", wantOK: true},
+		{name: "grep finding nothing is a number", tool: "grep", result: domain.ToolResult{Summary: domain.MatchedLines{Total: 0}}, want: "0 hits", wantOK: true},
+		{name: "search words results", tool: "web_search", result: domain.ToolResult{Summary: domain.SearchHits{Count: 1}}, want: "1 result", wantOK: true},
+		{name: "diff preview words the typed diffstat", tool: "view_diff", result: domain.ToolResult{Summary: domain.DiffStat{Added: 8, Removed: 3}}, want: "+8 −3", wantOK: true},
+		{name: "a summary-less diff keeps its sentence", tool: "view_diff", result: domain.ToolResult{Content: "No changes detected"}, wantOK: false},
+
+		// Facts about the REQUEST.
+		{name: "write counts the lines it writes", tool: "write_file", args: map[string]any{"content": "a\nb\nc\n"}, want: "3 lines", wantOK: true},
+		{name: "edit counts the patch it sends", tool: "edit_existing_file", args: map[string]any{"content": "*** Begin Patch\n@@\n-old\n+new\n+extra\n"}, want: "+2 −1", wantOK: true},
+		{name: "edit with whole content removes nothing", tool: "edit_existing_file", args: map[string]any{"content": "a\nb\n"}, want: "+2 −0", wantOK: true},
+		{name: "replace counts its one pair", tool: "single_find_and_replace", args: map[string]any{"oldText": "a\nb", "newText": "c"}, want: "+1 −2", wantOK: true},
+		{name: "an empty replace keeps its prose floor", tool: "single_find_and_replace", args: map[string]any{"path": "a.go"}, wantOK: false},
+		{name: "a batch replace counts changes, not lines", tool: "multi_find_and_replace", args: map[string]any{"replacements": []any{map[string]any{"oldText": "a", "newText": "b"}, map[string]any{"oldText": "c", "newText": "d"}}}, want: "2 changes", wantOK: true},
+
+		// Structural facts about the call.
+		{name: "a terminal result that is not an error exited zero", tool: "terminal", result: domain.ToolResult{Content: "hi"}, want: "exit 0", wantOK: true},
+		{name: "python reads the same way", tool: "python_exec", result: domain.ToolResult{Content: "42"}, want: "exit 0", wantOK: true},
+		{name: "diagnostics with no findings is clean", tool: "diagnostics", result: domain.ToolResult{Content: "No diagnostics: a.go looks clean."}, want: "clean", wantOK: true},
+		{name: "a delegation that returned is done", tool: "sub_agent", result: domain.ToolResult{Content: "report"}, want: "done", wantOK: true},
+
+		// The table's `—`.
+		{name: "copy states a blank slot", tool: "copy_file", result: domain.ToolResult{Content: "copied a.txt to b.txt"}, want: "", wantOK: true},
+		{name: "move states a blank slot", tool: "move_file", result: domain.ToolResult{Content: "moved a.txt to b.txt"}, want: "", wantOK: true},
+		{name: "delete states a blank slot", tool: "delete_file", result: domain.ToolResult{Content: "deleted a.txt"}, want: "", wantOK: true},
+		{name: "git branch states a blank slot", tool: "git_branch", result: domain.ToolResult{Content: "* main"}, want: "", wantOK: true},
+		{name: "present states a blank slot", tool: "present_document", result: domain.ToolResult{Content: "Presented a.md"}, want: "", wantOK: true},
+
+		// Headers the tools write themselves.
+		{name: "tests word the bare verdict", tool: "run_tests", result: domain.ToolResult{Content: "PASS (go test)\nok  \tpkg\t0.4s"}, want: "PASS", wantOK: true},
+		{name: "a failing run words FAIL", tool: "run_tests", result: domain.ToolResult{Content: "FAIL (pytest) — 3 failing tests"}, want: "FAIL", wantOK: true},
+		{name: "output in no verdict shape keeps its floor", tool: "run_tests", result: domain.ToolResult{Content: "go: no test files"}, wantOK: false},
+		{name: "find files reads its own total", tool: "find_files", result: domain.ToolResult{Content: "[12 files found, showing 1-12]\na.go"}, want: "12 files", wantOK: true},
+		{name: "find files states the empty case", tool: "find_files", result: domain.ToolResult{Content: "No files found"}, want: "0 files", wantOK: true},
+		{name: "git status sums its section counts", tool: "git_status", result: domain.ToolResult{Content: "On branch main\n\nStaged (2):\n  a.go\n  b.go\n\nUntracked (1):\n  c.go"}, want: "3 changed", wantOK: true},
+		{name: "a clean tree changed nothing", tool: "git_status", result: domain.ToolResult{Content: "On branch main\n\nWorking tree clean"}, want: "0 changed", wantOK: true},
+		{name: "git log counts its commit lines", tool: "git_log", result: domain.ToolResult{Content: "a1b2c3d 2026-08-10 first\ne4f5a6b 2026-08-09 second"}, want: "2 commits", wantOK: true},
+		{name: "git log states the empty case", tool: "git_log", result: domain.ToolResult{Content: "No commits found"}, want: "0 commits", wantOK: true},
+		{name: "git commit words the short hash of the oneline it returns", tool: "git_commit", result: domain.ToolResult{Content: "6fd6ff7 add the thing"}, want: "6fd6ff7", wantOK: true},
+		{name: "git commit reads the hash of git's own output on the fallback branch", tool: "git_commit", result: domain.ToolResult{Content: "[main a1b2c3d] add the thing\n 2 files changed"}, want: "a1b2c3d", wantOK: true},
+		{name: "a commit in another shape keeps its floor", tool: "git_commit", result: domain.ToolResult{Content: "nothing to commit, working tree clean"}, wantOK: false},
+		{name: "git diff counts its tagged lines, not its file headers", tool: "git_diff_range", result: domain.ToolResult{Content: "--- a/x.go\n+++ b/x.go\n@@ -1 +1,2 @@\n-old\n+new\n+more"}, want: "+2 −1", wantOK: true},
+		{name: "a --stat diff has no tagged lines and keeps its floor", tool: "git_diff_range", result: domain.ToolResult{Content: " x.go | 3 +++\n 1 file changed"}, wantOK: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			line, ok := summaryLine(tc.summary)
-			if !ok {
-				t.Fatalf("summaryLine(%#v) reported no line", tc.summary)
+			p, known := toolRegistry[tc.tool]
+			if !known || (p.stat == nil && p.argStat == nil) {
+				t.Fatalf("%s has no stat hook — the table gives it a slot", tc.tool)
 			}
-			if line.Text != tc.want {
-				t.Errorf("summaryLine(%#v) = %q, want %q", tc.summary, line.Text, tc.want)
+			got, ok := "", false
+			if p.argStat != nil {
+				got, ok = p.argStat(tc.args)
+			} else {
+				got, ok = p.stat(tc.result)
 			}
-			if line.Kind != detailPlain {
-				t.Errorf("summary kind = %v, want detailPlain", line.Kind)
+			if ok != tc.wantOK {
+				t.Fatalf("%s stat ok = %v, want %v (got %q)", tc.tool, ok, tc.wantOK, got)
+			}
+			if ok && got != tc.want {
+				t.Errorf("%s stat = %q, want %q", tc.tool, got, tc.want)
 			}
 		})
 	}
 }
 
-// A nil summary is the prose signal: summaryLine declines, and enrichWithResult falls through
-// to the registry's extractor. That is the D6 floor, and it is what keeps a third-party tool
-// (which can never emit a summary — the sum is sealed) rendering as it always did.
-func TestSummaryLineNilFallsToProse(t *testing.T) {
-	if line, ok := summaryLine(nil); ok {
-		t.Errorf("a nil summary must report no line, got %q", line.Text)
+// A tool whose result carries no typed summary declines rather than inventing one, so the prose
+// floor stays: a third-party tool (which can never emit a summary — the sum is sealed) renders as
+// it always did.
+func TestToolStatDeclinesWithoutATypedSummary(t *testing.T) {
+	for _, name := range []string{"read_file", "open_file", "list_dir", "grep", "web_search", "view_diff"} {
+		if _, ok := toolRegistry[name].stat(domain.ToolResult{Content: "prose"}); ok {
+			t.Errorf("%s must decline a summary-less result", name)
+		}
 	}
 }
 
-// An over-long locate term is clipped like any other detail line, so a model that asks to
-// locate a minified blob cannot flood the row.
-func TestSummaryLineClipsLongLocate(t *testing.T) {
-	long := strings.Repeat("x", detailClipRunes+40)
-	line, ok := summaryLine(domain.OpenedFile{Lines: 2, Locate: long, LocatedOn: []int{1}})
-	if !ok {
-		t.Fatal("an OpenedFile summary must render a line")
+// A stat that DECLINES leaves the prose floor exactly where it was — the degraded card is the
+// tool's own words, never a blank slot or an invented number. git_log run against a ref with
+// nothing to show is that floor end to end: its stat recognises no commit lines, so the extractor's
+// own "(no output)" phrase keeps the slot.
+func TestDecliningStatKeepsTheProseFloor(t *testing.T) {
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "git_log", Arguments: []byte(`{"ref":"HEAD"}`)}, workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "\n"}, workspaceRoot{})
+	if tv.Summary.Text != "(no output)" {
+		t.Errorf("summary = %q, want the extractor's own phrase", tv.Summary.Text)
 	}
-	if len([]rune(line.Text)) != detailClipRunes+1 { // +1 for the ellipsis
-		t.Errorf("locate line is %d runes, want it clipped to %d", len([]rune(line.Text)), detailClipRunes+1)
+}
+
+// open_file's locate report moved off the branch and into the body when the table gave the slot to
+// the line count: the term is in the target, the lines it was found on are here, and an over-long
+// term is clipped like any other detail line so a model asking to locate a minified blob cannot
+// flood the row.
+func TestOpenFileBodyRecordsTheLocateReport(t *testing.T) {
+	matched := openFileBody(domain.ToolResult{Summary: domain.OpenedFile{Lines: 40, Locate: "func main", LocatedOn: []int{5, 9}}})
+	if len(matched) != 1 || matched[0].Text != `Located "func main" on lines: 5, 9` {
+		t.Errorf("located lines = %+v", matched)
+	}
+	missed := openFileBody(domain.ToolResult{Summary: domain.OpenedFile{Lines: 40, Locate: "zzz"}})
+	if len(missed) != 1 || missed[0].Text != `Located "zzz" on no lines` {
+		t.Errorf("a locate that matched nothing = %+v", missed)
+	}
+	if none := openFileBody(domain.ToolResult{Summary: domain.OpenedFile{Lines: 3}}); len(none) != 0 {
+		t.Errorf("a call that asked for no term has no report: %+v", none)
+	}
+	long := strings.Repeat("x", detailClipRunes+40)
+	clipped := openFileBody(domain.ToolResult{Summary: domain.OpenedFile{Lines: 2, Locate: long, LocatedOn: []int{1}}})
+	if len(clipped) != 1 || len([]rune(clipped[0].Text)) != detailClipRunes+1 { // +1 for the ellipsis
+		t.Errorf("locate line is not clipped to %d runes: %+v", detailClipRunes, clipped)
 	}
 }
 

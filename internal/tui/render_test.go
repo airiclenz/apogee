@@ -498,10 +498,10 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 			want: []string{
 				"│ ⤷ sub-agent",
 				"│",
-				"│ ✦ Read File",
-				"│   ┕ a.go ⋯ 1 - 5",
+				"│ ✦ Read",
+				"│   ┕ a.go ⋯ 5 lines",
 				"│", // both sides sit at depth 1: the rail runs straight through
-				"│ ✦ Run",
+				"│ ✦ Terminal",
 				"│   ┕ go test ⋯",
 			},
 		},
@@ -654,17 +654,17 @@ func TestSubRailPaintedInToolHeaderGold(t *testing.T) {
 // below it catches the opposite failure, a toolLabel role that paints nothing at all.
 func TestToolHeaderLabelStyled(t *testing.T) {
 	th := newTheme(scheme.Default())
-	block := renderToolBlock(th, []toolView{{Label: "Read File", Target: "main.go"}}, 80, blockState{}).lines
+	block := renderToolBlock(th, []toolView{{Label: "Read", Target: "main.go"}}, 80, blockState{}).lines
 	head := block[0]
 
-	if got, want := ansi.Strip(head), "✦ Read File"; got != want {
+	if got, want := ansi.Strip(head), "✦ Read"; got != want {
 		t.Errorf("header text = %q; want %q (no brackets, and never a target)", got, want)
 	}
 	if got, want := ansi.Strip(block[1]), "  ┕ main.go "; !strings.HasPrefix(got, want) {
 		t.Errorf("branch text = %q; want it to open %q (the target leads the branch)", got, want)
 	}
-	styled := th.toolLabel.Render("Read File")
-	if styled == "Read File" {
+	styled := th.toolLabel.Render("Read")
+	if styled == "Read" {
 		t.Fatal("the toolLabel role renders no escape sequence; the header would be unstyled")
 	}
 	if !strings.Contains(head, styled) {
@@ -697,7 +697,7 @@ func readCall(tr *transcript, id, path string, from, to, depth int) {
 	})
 }
 
-// A batch of reads folds into one block: a single ✦ Read File header carrying the member count,
+// A batch of reads folds into one block: a single ✦ Read header carrying the member count,
 // ┝ ┝ ┕ rails, and every target padded to the widest one so the detail column lines up — the shape
 // docs/layout/tool-layout.md sketches.
 func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
@@ -707,10 +707,10 @@ func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 	readCall(tr, "c3", "ISSUES.md", 1, 8, 0)
 
 	want := strings.Join([]string{
-		"✦ Read File (3)",
-		"  ┝ README.md ⋯ 1 - 154",
-		"  ┝ TODO.md ⋯ 1 - 408",
-		"  ┕ ISSUES.md ⋯ 1 - 8",
+		"✦ Read (3)",
+		"  ┝ README.md ⋯ 154 lines",
+		"  ┝ TODO.md ⋯ 408 lines",
+		"  ┕ ISSUES.md ⋯ 8 lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("grouped block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -728,9 +728,9 @@ func TestRenderGroupsInsideSubAgent(t *testing.T) {
 	want := strings.Join([]string{
 		"│ ⤷ sub-agent",
 		"│",
-		"│ ✦ Read File (2)",
-		"│   ┝ a.go ⋯ 1 - 5",
-		"│   ┕ bb.go ⋯ 1 - 9",
+		"│ ✦ Read (2)",
+		"│   ┝ a.go ⋯ 5 lines",
+		"│   ┕ bb.go ⋯ 9 lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("railed group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -747,12 +747,40 @@ func TestRenderGroupsDifferentToolsSharingALabel(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "applied 2 replacements to bb.go"}})
 
 	want := strings.Join([]string{
-		"✦ Edit File (2)",
+		"✦ Replace (2)",
 		"  ┝ a.go ⋯ replaced text in a.go",
 		"  ┕ bb.go ⋯ applied 2 replacements to bb.go",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("shared-label group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// The flip side of the rule, and the ratified table's doing: grouping keys on the LABEL, so the
+// table's split of "Edit File" into Edit (edit_existing_file) and Replace (the find-and-replace
+// pair) splits the block too. Two adjacent calls that used to read as one "Edit File (2)" now head
+// two blocks — which is the point of the rename: a patch and a find-and-replace are different acts,
+// and a reader scanning the left edge should be told which one ran.
+func TestRenderSplitsEditFromReplace(t *testing.T) {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "edit_existing_file",
+		Arguments: []byte(`{"path":"a.go","content":"x"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "updated a.go"}})
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "single_find_and_replace",
+		Arguments: []byte(`{"path":"a.go","oldText":"x","newText":"y"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "replaced text in a.go"}})
+
+	if run := toolCallRun(tr.entries, 0); len(run) != 1 {
+		t.Fatalf("toolCallRun over Edit then Replace = %d views, want 1 — the labels differ", len(run))
+	}
+	got := renderPlain(tr, 80)
+	for _, want := range []string{"✦ Edit", "✦ Replace"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("painted transcript is missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "(2)") {
+		t.Errorf("the two calls were grouped under one header:\n%s", got)
 	}
 }
 
@@ -764,8 +792,8 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "read_file", Arguments: []byte(`{"path":"TODO.md"}`)}})
 
 	want := strings.Join([]string{
-		"✦ Read File (2)",
-		"  ┝ README.md ⋯ 1 - 154",
+		"✦ Read (2)",
+		"  ┝ README.md ⋯ 154 lines",
 		"  ┕ TODO.md ⋯",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -776,9 +804,9 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 		Content: "[File: TODO.md, 408 lines total, showing lines 1-408]\n…",
 		Summary: domain.ReadSpan{Start: 1, End: 408, Total: 408}}})
 	want = strings.Join([]string{
-		"✦ Read File (2)",
-		"  ┝ README.md ⋯ 1 - 154",
-		"  ┕ TODO.md ⋯ 1 - 408",
+		"✦ Read (2)",
+		"  ┝ README.md ⋯ 154 lines",
+		"  ┕ TODO.md ⋯ 408 lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("re-rendered group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -794,8 +822,8 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	readCall(tr, "c1", "main.go", 1, 154, 0)
 
 	want := strings.Join([]string{
-		"✦ Read File",
-		"  ┕ main.go ⋯ 1 - 154",
+		"✦ Read",
+		"  ┕ main.go ⋯ 154 lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("single-call block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -804,9 +832,9 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 	// …and a second call joins it by adding a line, not by moving the first one's target.
 	readCall(tr, "c2", "a-much-longer-name.go", 1, 9, 0)
 	want = strings.Join([]string{
-		"✦ Read File (2)",
-		"  ┝ main.go ⋯ 1 - 154",
-		"  ┕ a-much-longer-name.go ⋯ 1 - 9",
+		"✦ Read (2)",
+		"  ┝ main.go ⋯ 154 lines",
+		"  ┕ a-much-longer-name.go ⋯ 9 lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("grown block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -827,8 +855,8 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 	}})
 
 	want := strings.Join([]string{
-		"✦ Run", // a hidden body is something to reveal, and the branch row's ▶ says so
-		groupMemberLine("  ┕ go test ./... ⋯"),
+		"✦ Terminal", // a hidden body is something to reveal, and the branch row's ▶ says so
+		groupMemberLine("  ┕ go test ./... ⋯ exit 0"),
 		"    +3 more lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -852,8 +880,8 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ View Diff",
-		leaderEdgeRow("  ┕ main.go ⋯ +1 -1", glyphExpanded),
+		"✦ Diff Preview",
+		leaderEdgeRow("  ┕ main.go ⋯ +1 −1", glyphExpanded),
 		"    - a removed line",
 		"    + an added line",
 	}, "\n")
@@ -871,7 +899,7 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 	}
 }
 
-// The layout.md sketch, rendered: a two-line change shows "+2 -2" on the branch beside the path
+// The layout.md sketch, rendered: a two-line change shows "+2 −2" on the branch beside the path
 // with the diff body beneath it, and the diffstat line itself stays plain — only the body is
 // coloured, so the branch reads like every other tool's summary. The sketch is the EXPANDED
 // shape: a collapsed diff hides its body whole like every other block (collapsedBodyRows), so its
@@ -889,8 +917,8 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ View Diff",
-		leaderEdgeRow("  ┕ main.go ⋯ +2 -2", glyphExpanded),
+		"✦ Diff Preview",
+		leaderEdgeRow("  ┕ main.go ⋯ +2 −2", glyphExpanded),
 		"    - a code line that has been removed",
 		"    - a second removed line",
 		"    + a new code line",
@@ -901,7 +929,7 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	}
 
 	th := newTheme(scheme.Default())
-	if got, want := tr.renderLines(th, 80)[1], th.toolDetailBright.Render("+2 -2"); !strings.Contains(got, want) {
+	if got, want := tr.renderLines(th, 80)[1], th.toolDetailBright.Render("+2 −2"); !strings.Contains(got, want) {
 		t.Errorf("diffstat branch = %q; want its outcome slot in the plain detail tone of an OPEN block %q", got, want)
 	}
 }
@@ -919,7 +947,7 @@ func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
 	}})
 
 	lines := strings.Split(renderPlain(tr, 80), "\n")
-	if got, want := lines[1], groupMemberLine("  ┕ main.go ⋯ +"+strconv.Itoa(longDiff)+" -0"); got != want {
+	if got, want := lines[1], groupMemberLine("  ┕ main.go ⋯ +"+strconv.Itoa(longDiff)+" −0"); got != want {
 		t.Errorf("capped diff branch = %q, want %q (the stat spans the whole diff)", got, want)
 	}
 	if got, want := lines[len(lines)-1], "    +"+strconv.Itoa(longDiff)+" more lines"; got != want {
@@ -1210,7 +1238,7 @@ func TestCollapsedBlockStandsAtMostThreeRows(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("the collapsed block stands %d rows tall, want the budget's 3:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	if want := "✦ Run"; lines[0] != want {
+	if want := "✦ Terminal"; lines[0] != want {
 		t.Errorf("header = %q, want %q — the indicator rides the branch row now", lines[0], want)
 	}
 	if !strings.HasSuffix(lines[1], glyphCollapsed) || !strings.Contains(lines[1], clipTail) {
@@ -1413,7 +1441,7 @@ func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
 		stat   = "1 line"
 	)
 	th := newTheme(scheme.Default())
-	promoted := toolView{Label: "Run", Target: target, stat: stat,
+	promoted := toolView{Label: "Terminal", Target: target, stat: stat,
 		Summary: quotedSummary(detailLine{Text: output})}
 
 	// The narrowest width at which the promoted line still leaves the target its floor: the room a
@@ -1459,7 +1487,7 @@ func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
 		// reaches the slot at any width a terminal has, and the collapsed block counts it as the one
 		// body line it is — however many rows it would take to print.
 		name: "a monster one-line output stays a body",
-		view: toolView{Label: "Run", Target: target, stat: stat,
+		view: toolView{Label: "Terminal", Target: target, stat: stat,
 			Summary: quotedSummary(detailLine{Text: strings.Repeat("x", 300)})},
 		width:    120,
 		wantSlot: stat, wantBodyLine: "+1 more line",
@@ -1518,7 +1546,7 @@ func TestDemotedLineKeepsTheSpellingItWasWrittenWith(t *testing.T) {
 	lines := renderToolBlock(th, []toolView{tv}, width, blockState{expanded: true}).lines
 	branch, body := strip(lines[1]), strip(strings.Join(lines[2:], "\n"))
 
-	if !strings.Contains(branch, "1 line") {
+	if !strings.Contains(branch, "exit 0") {
 		t.Errorf("branch row = %q; want the typed stat in the slot at width %d", branch, width)
 	}
 	if !strings.Contains(body, printed) {
@@ -1560,7 +1588,7 @@ func memberEdgeRow(t *testing.T, text, mark string, width int) string {
 }
 
 // runGroup folds a batch of same-label terminal calls, each with its output, into a fresh
-// transcript at depth — the sketch's "✦ Run (3)" fixture (docs/layout/tool-layout.md). Each call is
+// transcript at depth — the sketch's "✦ Terminal (3)" fixture (docs/layout/tool-layout.md). Each call is
 // a {command, output} pair. They carry bodies deliberately: that is what gives every member
 // something to reveal and so a state of its own to be opened.
 func runGroup(depth int, calls ...[2]string) *transcript {
@@ -1594,10 +1622,10 @@ func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ Run (3)",
-		groupMemberLine("  ┝ go build ./... ⋯"),
-		groupMemberLine("  ┝ go vet ./... ⋯"),
-		groupMemberLine("  ┕ go test ./... ⋯"),
+		"✦ Terminal (3)",
+		groupMemberLine("  ┝ go build ./... ⋯ exit 0"),
+		groupMemberLine("  ┝ go vet ./... ⋯ exit 0"),
+		groupMemberLine("  ┕ go test ./... ⋯ exit 0"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("body-carrying group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -1621,7 +1649,7 @@ func TestGroupHeaderCountIsFaintAndInert(t *testing.T) {
 	if want := th.toolIndicator.Render("(2)"); !strings.Contains(header, want) {
 		t.Errorf("header %q does not carry the faint-styled count %q", header, want)
 	}
-	if styled := th.toolLabel.Render("Read File (2)"); strings.Contains(header, styled) {
+	if styled := th.toolLabel.Render("Read (2)"); strings.Contains(header, styled) {
 		t.Errorf("header %q paints the count in the label's own style", header)
 	}
 	if strings.ContainsAny(strip(header), glyphCollapsed+glyphExpanded) {
@@ -1703,14 +1731,14 @@ func TestExpandedGroupMemberPaintsTheSketchShape(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ Run (3)",
-		groupMemberLine("  ┝ go build ./... ⋯"),
-		leaderEdgeRow("  ┝ go vet ./... ⋯", glyphExpanded),
+		"✦ Terminal (3)",
+		groupMemberLine("  ┝ go build ./... ⋯ exit 0"),
+		leaderEdgeRow("  ┝ go vet ./... ⋯ exit 0", glyphExpanded),
 		"  │ clean",
 		"  │ no findings",
 		"  │ done",
 		memberEdgeRow(t, "  │ ", promptSeeLess, width),
-		groupMemberLine("  ┕ go test ./... ⋯"),
+		groupMemberLine("  ┕ go test ./... ⋯ exit 0"),
 	}, "\n")
 	got := renderPlain(tr, width)
 	if got != want {
@@ -2474,7 +2502,7 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 		want  []blockMark
 	}{
 		{
-			// ❯ run the tests | (spacer) | ✦ Run | ┕ go test ./... | +4 more lines — the header and
+			// ❯ run the tests | (spacer) | ✦ Terminal | ┕ go test ./... | +4 more lines — the header and
 			// the branch line beneath it are one surface, the marker its own open-only kind.
 			name:  "a hidden body marks the block's rows and its remainder marker",
 			width: 80,
@@ -2483,8 +2511,8 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				run(tr, "c1", "go test ./...", "ok   a\nok   b\nok   c\nPASS", 0)
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run"},
-				{line: 3, kind: targetHeader, entry: 1, text: groupMemberLine("  ┕ go test ./... ⋯")},
+				{line: 2, kind: targetHeader, entry: 1, text: "✦ Terminal"},
+				{line: 3, kind: targetHeader, entry: 1, text: groupMemberLine("  ┕ go test ./... ⋯ exit 0")},
 				{line: 4, kind: targetMarker, entry: 1, text: "    +4 more lines"},
 			},
 		},
@@ -2502,8 +2530,8 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				}
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 1, text: "✦ Run"},
-				{line: 3, kind: targetHeader, entry: 1, text: leaderEdgeRow("  ┕ go test ./... ⋯", glyphExpanded)},
+				{line: 2, kind: targetHeader, entry: 1, text: "✦ Terminal"},
+				{line: 3, kind: targetHeader, entry: 1, text: leaderEdgeRow("  ┕ go test ./... ⋯ exit 0", glyphExpanded)},
 				{line: 4, kind: targetHeader, entry: 1, text: "    ok   a"},
 				{line: 5, kind: targetHeader, entry: 1, text: "    ok   b"},
 				{line: 6, kind: targetHeader, entry: 1, text: "    ok   c"},
@@ -2567,12 +2595,12 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 			width: 11,
 			build: func(t *testing.T, tr *transcript) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
-					ID: "c1", Tool: "python_exec", Arguments: []byte(`{"code":"print(1)"}`)}})
+					ID: "c1", Tool: "git_commit", Arguments: []byte(`{"message":"a much longer commit subject"}`)}})
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "1\n2\n3"}})
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run"},
-				{line: 1, kind: targetHeader, entry: 0, text: "  Python"},
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Git"},
+				{line: 1, kind: targetHeader, entry: 0, text: "  Commit"},
 				// One leader row whatever the width: at eleven columns the target has nothing left
 				// to be cut INTO — a budget narrower than the clip tail itself — so it is dropped
 				// outright and the leader alone runs out to the indicator (design call 4).
@@ -2595,11 +2623,11 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				run(tr, "c2", "go vet ./...", "x\ny", 0)
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Run"},
-				{line: 1, kind: targetHeader, entry: 0, text: groupMemberLine("  ┕ go build ./... ⋯")},
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Terminal"},
+				{line: 1, kind: targetHeader, entry: 0, text: groupMemberLine("  ┕ go build ./... ⋯ exit 0")},
 				{line: 2, kind: targetMarker, entry: 0, text: "    +3 more lines"},
-				{line: 6, kind: targetHeader, entry: 2, text: "✦ Run"},
-				{line: 7, kind: targetHeader, entry: 2, text: groupMemberLine("  ┕ go vet ./... ⋯")},
+				{line: 6, kind: targetHeader, entry: 2, text: "✦ Terminal"},
+				{line: 7, kind: targetHeader, entry: 2, text: groupMemberLine("  ┕ go vet ./... ⋯ exit 0")},
 				{line: 8, kind: targetMarker, entry: 2, text: "    +2 more lines"},
 			},
 		},
@@ -2646,8 +2674,8 @@ func TestRenderMarksTheWholeBlockAndItsMarker(t *testing.T) {
 				run(tr, "c1", "go test", "a\nb\nc", 1)
 			},
 			want: []blockMark{
-				{line: 2, kind: targetHeader, entry: 0, text: "│ ✦ Run"},
-				{line: 3, kind: targetHeader, entry: 0, text: leaderEdgeRow("│   ┕ go test ⋯", glyphCollapsed)},
+				{line: 2, kind: targetHeader, entry: 0, text: "│ ✦ Terminal"},
+				{line: 3, kind: targetHeader, entry: 0, text: leaderEdgeRow("│   ┕ go test ⋯ exit 0", glyphCollapsed)},
 				{line: 4, kind: targetMarker, entry: 0, text: "│     +3 more lines"},
 			},
 		},
@@ -2691,7 +2719,7 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok\na\nb"}})
 				return tr
 			},
-			wantHeader:    "✦ Run",
+			wantHeader:    "✦ Terminal",
 			wantCollapsed: glyphCollapsed, wantExpanded: glyphExpanded,
 		},
 		{
@@ -3007,7 +3035,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 		{
 			name:    "a call still awaiting its result blinks",
 			build:   func(_ *testing.T, tr *transcript) { openRun(tr, "c1", "go test ./...") },
-			settled: "✦ Run", flipped: "  Run",
+			settled: "✦ Terminal", flipped: "  Terminal",
 		},
 		{
 			name: "a landed result settles the star",
@@ -3015,7 +3043,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				openRun(tr, "c1", "go test ./...")
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "PASS"}})
 			},
-			settled: "✦ Run", flipped: "✦ Run",
+			settled: "✦ Terminal", flipped: "✦ Terminal",
 		},
 		{
 			// The state is none of the star's business: expanding a block shows more of it, it does
@@ -3027,7 +3055,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 					t.Fatal("setExpanded(0, true) = false; want the in-flight call expanded")
 				}
 			},
-			settled: "✦ Run", flipped: "  Run",
+			settled: "✦ Terminal", flipped: "  Terminal",
 		},
 		{
 			// A group has ONE header for many calls, so its star answers for all of them: a batch
@@ -3037,7 +3065,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				openRead(tr, "c2", "util.go", 0)
 			},
-			settled: "✦ Read File (2)", flipped: "  Read File (2)",
+			settled: "✦ Read (2)", flipped: "  Read (2)",
 		},
 		{
 			name: "a group whose calls have all landed settles",
@@ -3045,7 +3073,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				readCall(tr, "c2", "util.go", 1, 42, 0)
 			},
-			settled: "✦ Read File (2)", flipped: "✦ Read File (2)",
+			settled: "✦ Read (2)", flipped: "✦ Read (2)",
 		},
 		{
 			// A run is live until its REPORT lands, whatever the span has already finished.
@@ -3260,7 +3288,7 @@ func TestRenderOneLineOutputRidesTheBranch(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "abc1234\n"}})
 
 	want := strings.Join([]string{
-		"✦ Run",
+		"✦ Terminal",
 		"  ┕ git rev-parse HEAD ⋯ abc1234",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -3279,7 +3307,7 @@ func TestRenderGroupsOneLineOutputCalls(t *testing.T) {
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c2", Content: "/workspace/repos/apogee"}})
 
 	want := strings.Join([]string{
-		"✦ Run (2)",
+		"✦ Terminal (2)",
 		"  ┝ git rev-parse HEAD ⋯ abc1234",
 		"  ┕ pwd ⋯ /workspace/repos/apogee",
 	}, "\n")
@@ -3295,7 +3323,7 @@ func TestRenderInFlightStandalone(t *testing.T) {
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}})
 
 	want := strings.Join([]string{
-		"✦ Read File",
+		"✦ Read",
 		"  ┕ main.go ⋯",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -3398,8 +3426,10 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 					CallID: "c1", Content: "one\ntwo\nthree\nfour"}})
 			},
-			wantCollapsed: []string{"✦ Run ▶", "  ┝ one", "  ┕ two", "    +2 more lines"},
-			wantExpanded:  5,
+			// The typed stat has nowhere to ride on a targetless block, so it lands as the last
+			// branch of the list — one more row for the collapsed cap to count.
+			wantCollapsed: []string{"✦ Terminal ▶", "  ┝ one", "  ┕ two", "    +3 more lines"},
+			wantExpanded:  6,
 		},
 		{
 			name: "a stray result that matched no call",
@@ -3637,15 +3667,15 @@ func TestRenderGroupBreakers(t *testing.T) {
 				readCall(tr, "c3", "b.go", 1, 9, 0)
 			},
 			want: []string{
-				"✦ Read File",
-				"  ┕ a.go ⋯ 1 - 5",
+				"✦ Read",
+				"  ┕ a.go ⋯ 5 lines",
 				"",
-				"✦ Run",
-				groupMemberLine("  ┕ go test ⋯"),
+				"✦ Terminal",
+				groupMemberLine("  ┕ go test ⋯ exit 0"),
 				"    +3 more lines",
 				"",
-				"✦ Read File",
-				"  ┕ b.go ⋯ 1 - 9",
+				"✦ Read",
+				"  ┕ b.go ⋯ 9 lines",
 			},
 		},
 		{
@@ -3656,13 +3686,13 @@ func TestRenderGroupBreakers(t *testing.T) {
 				readCall(tr, "c2", "b.go", 1, 9, 0)
 			},
 			want: []string{
-				"✦ Read File",
-				"  ┕ a.go ⋯ 1 - 5",
+				"✦ Read",
+				"  ┕ a.go ⋯ 5 lines",
 				"",
 				"· approval allow: read_file",
 				"",
-				"✦ Read File",
-				"  ┕ b.go ⋯ 1 - 9",
+				"✦ Read",
+				"  ┕ b.go ⋯ 9 lines",
 			},
 		},
 		{
@@ -3672,13 +3702,13 @@ func TestRenderGroupBreakers(t *testing.T) {
 				readCall(tr, "c2", "b.go", 1, 9, 1)
 			},
 			want: []string{
-				"✦ Read File",
-				"  ┕ a.go ⋯ 1 - 5",
+				"✦ Read",
+				"  ┕ a.go ⋯ 5 lines",
 				"", // the descent's own spacer joins at depth 0: the rail starts at the label
 				"│ ⤷ sub-agent",
 				"│",
-				"│ ✦ Read File",
-				"│   ┕ b.go ⋯ 1 - 9",
+				"│ ✦ Read",
+				"│   ┕ b.go ⋯ 9 lines",
 			},
 		},
 		{
@@ -3691,11 +3721,11 @@ func TestRenderGroupBreakers(t *testing.T) {
 					Summary: domain.ReadSpan{Start: 1, End: 1, Total: 1}}})
 			},
 			want: []string{
-				"✦ Read File",
-				"  ┕ a.go ⋯ 1 - 5",
+				"✦ Read",
+				"  ┕ a.go ⋯ 5 lines",
 				"",
-				"✦ Read File",
-				"  ┕ 1 - 1",
+				"✦ Read",
+				"  ┕ 1 line",
 			},
 		},
 	}
@@ -3723,9 +3753,9 @@ func TestRenderGroupBreakers(t *testing.T) {
 			t.Fatalf("toolCallRun over the two Runs = %d views, want 2 — a body no longer breaks a run", len(run))
 		}
 		want := strings.Join([]string{
-			"✦ Run (2)",
+			"✦ Terminal (2)",
 			"  ┝ go build ⋯ done",
-			groupMemberLine("  ┕ go test ⋯"),
+			groupMemberLine("  ┕ go test ⋯ exit 0"),
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
 			t.Errorf("joined group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -3739,7 +3769,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 
 // TestTranscriptLayoutGolden pins the whole rendered scrollback of one realistic mixed session —
 // a user prompt, narration the model padded with a trailing "\n\n", a batch of reads, a Run whose
-// output hangs beneath its command, a diff whose "+2 -2" rides its branch over a coloured body, two
+// output hangs beneath its command, a diff whose "+2 −2" rides its branch over a coloured body, two
 // edits showing the lines they change beneath their own reports, a write showing the lines it
 // writes beneath its own byte count, an
 // unregistered tool whose verbatim arguments are its own branches, an
@@ -3747,8 +3777,8 @@ func TestRenderGroupBreakers(t *testing.T) {
 // backstop across the layout changes rather than a test of any one of them: the blank-line hygiene
 // shows as the single separator row between every block — empty at the top level, the │ rail
 // gutter inside the sub-agent run — the bracketless bold-gold label as the
-// header text, the grouping as the two counted blocks — three reads aligned under "Read File (3)",
-// and the two consecutive edits under "Edit File (2)", differently tooled and sharing a label, each
+// header text, the grouping as the two counted blocks — three reads aligned under "Read (3)",
+// and the two consecutive edits under "Replace (2)", differently tooled and sharing a label, each
 // held to one member row with its diff behind its own indicator now that a body no longer breaks a
 // run — and the uniform shape as the fact
 // that every header here — grouped, standalone, railed — is a label and nothing else, with the
@@ -3798,25 +3828,25 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"",
 		"✦ Reading the docs first.",
 		"",
-		"✦ Read File (3)",
-		"  ┝ README.md ⋯ 1 - 154",
-		"  ┝ TODO.md ⋯ 1 - 408",
-		"  ┕ ISSUES.md ⋯ 1 - 8",
+		"✦ Read (3)",
+		"  ┝ README.md ⋯ 154 lines",
+		"  ┝ TODO.md ⋯ 408 lines",
+		"  ┕ ISSUES.md ⋯ 8 lines",
 		"",
-		"✦ Run",
-		groupMemberLine("  ┕ go test ./... ⋯"),
+		"✦ Terminal",
+		groupMemberLine("  ┕ go test ./... ⋯ exit 0"),
 		"    +3 more lines",
 		"",
-		"✦ View Diff",
-		groupMemberLine("  ┕ main.go ⋯ +2 -2"),
+		"✦ Diff Preview",
+		groupMemberLine("  ┕ main.go ⋯ +2 −2"),
 		"    +6 more lines",
 		"",
-		"✦ Edit File (2)",
-		groupMemberLine("  ┝ main.go ⋯ replaced text in main.go"),
-		groupMemberLine("  ┕ main.go ⋯ applied 1 replacement to main.go"),
+		"✦ Replace (2)",
+		groupMemberLine("  ┝ main.go ⋯ +1 −1"),
+		groupMemberLine("  ┕ main.go ⋯ 1 change"),
 		"",
-		"✦ Write File",
-		groupMemberLine("  ┕ notes.md ⋯ +25 bytes"),
+		"✦ Write",
+		groupMemberLine("  ┕ notes.md ⋯ 3 lines"),
 		"    +3 more lines",
 		"",
 		"✦ mcp_search ▶",
@@ -3828,8 +3858,8 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"",
 		"│ ⤷ sub-agent",
 		"│",
-		"│ ✦ Read File",
-		"│   ┕ main.go ⋯ 1 - 154",
+		"│ ✦ Read",
+		"│   ┕ main.go ⋯ 154 lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("transcript layout mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)

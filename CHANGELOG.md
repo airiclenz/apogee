@@ -12,7 +12,7 @@ point is a **minor** bump, not a breaking change.
 
 - **Tool rows now read left-to-right: what was touched, a dotted leader, what came of it.** A tool
   call's branch line puts its target on the left, runs a faint `⋯` leader across the gap, and sets
-  the outcome — `12 lines`, `+2 -2`, `exit 0`, a red `error: …` — flush against the block's right
+  the outcome — `12 lines`, `+2 −2`, `exit 0`, a red `error: …` — flush against the block's right
   edge, with the `▶`/`▼` in a field reserved past it. Every row fills its width exactly, so the
   outcomes line up down the edge of a group instead of drifting with the length of each target, and
   a row is the same shape open and closed: clicking one no longer moves it out from under the
@@ -35,6 +35,33 @@ point is a **minor** bump, not a breaking change.
   - **New `tool-leader` scheme role** for the dots, seeded in both shipped schemes from the same
     faint tone the `▶` beside them wears. It is its own role so a scheme can damp the leader without
     dragging the indicator's tone along with it; `/color-scheme export` writes it like any other.
+- **Every tool now says the one thing worth saying about itself.** The tool cards were brought to
+  the ratified per-tool table (`docs/layout/tool-layout.md`): each tool has a short label, a target
+  that leads its row, and an outcome slot worded for that tool alone. Labels lost their filler —
+  `Read File` is `Read`, `List Dir` is `List`, `Run` is `Terminal`, `Run Python` is `Python`,
+  `Run Tests` is `Tests`, `View Diff` is `Diff Preview`, `Web Search` is `Search`, and `grep` is
+  `Grep` rather than the `Search` it used to share with it.
+  - **`Edit File` split into `Edit` and `Replace`.** A patch (`edit_existing_file`) and a
+    find-and-replace are different acts, and blocks group by label, so two adjacent calls of the two
+    kinds now head two blocks instead of reading as one `Edit File (2)`.
+  - **Targets carry the qualifier that changes what a call did**: a read's line range
+    (`main.go:12–80`), an open's `· locate "…"`, a listing's `· recursive`, a grep's include glob, a
+    test run's filter. A presented document leads with its title rather than its path.
+  - **Outcome slots are per-tool.** A read, an open and a write say `154 lines`; an edit or a diff
+    preview says `+8 −3` and a batch replace `2 changes`; a grep says `12 hits`, a listing
+    `40 entries`, a search `3 results`, a find `12 files`; a command says `exit 0`, a test run
+    `PASS`/`FAIL`, a diagnosis `clean`, a delegation `done`; git says `3 changed`, `12 commits` or
+    the short hash it just wrote. Copies, moves, deletes, branch switches and presentations say
+    nothing at all — their row already does — and the dots simply run to the `▶`.
+  - A one-line output still takes the slot where it fits, with the typed stat behind it as the
+    narrow-row fallback, so a command that printed one line reads as that line and a command that
+    printed forty reads as `exit 0` with the output a click away.
+  - Nothing was added to any tool result or crossed any wire for this: a write's line count and an
+    edit's diffstat are read off the call's own arguments, and a stat that cannot be had honestly
+    leaves the tool's own first line in the slot rather than inventing a number.
+  - `open_file`'s locate report moved off the branch into the block's body, where the line numbers
+    sit under the path and term that asked for them.
+
 - **`<u>…</u>` renders as underlined text.** Markdown spells no underline of its own — CommonMark
   spends `__` on strong emphasis — so the renderer recognises the one HTML pair a model actually
   reaches for, and assistant text saying `press <u>Enter</u>` now shows *Enter* underlined with the

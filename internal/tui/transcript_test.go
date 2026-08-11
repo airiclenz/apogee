@@ -103,11 +103,11 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 	if !tool.done {
 		t.Error("tool call not marked done after its result folded in")
 	}
-	if tool.tool.Label != "Read File" || tool.tool.Target != "main.go" {
-		t.Errorf("tool view = %+v; want a Read File / main.go header", tool.tool)
+	if tool.tool.Label != "Read" || tool.tool.Target != "main.go" {
+		t.Errorf("tool view = %+v; want a Read / main.go header", tool.tool)
 	}
-	if tool.tool.Summary.Text != "1 - 1" || tool.tool.Details.len() != 0 {
-		t.Errorf("tool outcome = %+v / %+v; want a \"1 - 1\" summary and no body", tool.tool.Summary, tool.tool.Details)
+	if tool.tool.Summary.Text != "1 line" || tool.tool.Details.len() != 0 {
+		t.Errorf("tool outcome = %+v / %+v; want a \"1 line\" summary and no body", tool.tool.Summary, tool.tool.Details)
 	}
 
 	// (b) render snapshot: the grouped block in the new look — ✦-prefixed, one blank line
@@ -117,8 +117,8 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 		"",
 		"✦ Let me read it.",
 		"",
-		"✦ Read File",
-		"  ┕ main.go ⋯ 1 - 1",
+		"✦ Read",
+		"  ┕ main.go ⋯ 1 line",
 		"",
 		"✦ It is a Go file.",
 	}, "\n")
@@ -146,7 +146,7 @@ func TestTranscriptToolCallFinalisesNarration(t *testing.T) {
 	if !strings.Contains(got, "✦ Checking the file.") {
 		t.Errorf("pre-tool narration not committed:\n%s", got)
 	}
-	if !strings.Contains(got, "✦ Read File") {
+	if !strings.Contains(got, "✦ Read") {
 		t.Errorf("tool call not rendered:\n%s", got)
 	}
 	if n := len(tr.entries); n != 2 { // assistant narration + tool call
@@ -361,7 +361,7 @@ func TestTranscriptTrimsNarrationBlankLines(t *testing.T) {
 	want := strings.Join([]string{
 		"✦ Reading it.",
 		"",
-		"✦ Read File",
+		"✦ Read",
 		"  ┕ main.go ⋯",
 	}, "\n")
 	if got := plainRender(tr); got != want {
@@ -989,7 +989,7 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 
 	collapsed := strings.Join([]string{
 		"✦ Sub-Agent",
-		groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls · 12k/32k · Found 4 gaps"),
+		groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls · 12k/32k · done"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != collapsed {
 		t.Errorf("collapsed run mismatch (collapsed is the default):\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
@@ -1003,18 +1003,18 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	}
 	expanded := strings.Join([]string{
 		"✦ Sub-Agent",
-		leaderEdgeRow("  ┕ survey the tests ⋯", glyphExpanded),
+		leaderEdgeRow("  ┕ survey the tests ⋯ done", glyphExpanded),
 		"    Found 4 gaps",
 		"    in the suite",
 		"    here they are",
 		"",
 		"│ ⤷ sub-agent",
 		"│",
-		"│ ✦ Read File",
-		"│   ┕ a.go ⋯ 1 - 5",
+		"│ ✦ Read",
+		"│   ┕ a.go ⋯ 5 lines",
 		"│",
-		"│ ✦ Run",
-		leaderEdgeRow("│   ┕ go test ⋯", glyphCollapsed),
+		"│ ✦ Terminal",
+		leaderEdgeRow("│   ┕ go test ⋯ exit 0", glyphCollapsed),
 		"│     +3 more lines",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != expanded {
@@ -1042,9 +1042,14 @@ func TestCollapsedRunSaysItsGistOnce(t *testing.T) {
 	cases := []struct {
 		name   string
 		report string
+		// wantGist is how many painted lines may carry the gist. A one-line report is PROMOTED
+		// into the slot and so appears exactly once; a report long enough to be a body is
+		// summarised by the ratified table's verdict instead ("done"), and its own words wait
+		// behind the fold — which is the same claim from the other side: never twice.
+		wantGist int
 	}{
-		{name: "a long report, which the outcome kept as a body", report: gist + "\nin the suite\nhere they are"},
-		{name: "a one-line report, which the outcome kept as a summary", report: gist},
+		{name: "a long report, which the outcome kept as a body", report: gist + "\nin the suite\nhere they are", wantGist: 0},
+		{name: "a one-line report, which the outcome kept as a summary", report: gist, wantGist: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1063,8 +1068,8 @@ func TestCollapsedRunSaysItsGistOnce(t *testing.T) {
 					hits++
 				}
 			}
-			if hits != 1 {
-				t.Errorf("the gist %q appears on %d lines; want 1 (the summary slot alone):\n%s", gist, hits, painted)
+			if hits != tc.wantGist {
+				t.Errorf("the gist %q appears on %d lines; want %d:\n%s", gist, hits, tc.wantGist, painted)
 			}
 			if len(lines) != 2 {
 				t.Errorf("collapsed run = %d lines; want 2 (the header and its one summarised line):\n%s", len(lines), painted)
@@ -1116,13 +1121,13 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · Found 4 gaps"),
 		},
 		{
-			name: "finished: the count plus the first line of a report long enough to be a body",
+			name: "finished: the count plus the verdict, the report itself being a body",
 			build: func(tr *transcript) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				subAgentReport(tr, "s1", "Found 4 gaps\nand here they are", 0)
 			},
-			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · Found 4 gaps"),
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · done"),
 		},
 		{
 			name: "working, having reported: the fill sits between the count and the live phrase",
@@ -1590,8 +1595,8 @@ func TestToolResultGroupsByCallID(t *testing.T) {
 	if !b.done {
 		t.Fatal("call b's result did not fold into it")
 	}
-	if b.tool.Summary.Text != "1 - 10" || b.tool.Details.len() != 0 {
-		t.Errorf("call b outcome = %+v / %+v; want a \"1 - 10\" summary and no body", b.tool.Summary, b.tool.Details)
+	if b.tool.Summary.Text != "10 lines" || b.tool.Details.len() != 0 {
+		t.Errorf("call b outcome = %+v / %+v; want a \"10 lines\" summary and no body", b.tool.Summary, b.tool.Details)
 	}
 
 	// Call a's result arrives later and folds into a — still two entries, no orphan.

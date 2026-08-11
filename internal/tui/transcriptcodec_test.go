@@ -28,7 +28,7 @@ import (
 // DeepEqual would then pass or fail on the fixture's shortcut instead of on the codec.
 func mixedEntries() []entry {
 	toolCard := toolView{
-		Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
+		Label: "Read", Verb: "reading", Target: "main.go", name: "read_file",
 		Summary: namedSummary(detailLine{Text: "1 - 100"}),
 		Details: newToolBody([]detailLine{
 			{Kind: detailDiffAdded, Text: "+ added line"},
@@ -172,7 +172,7 @@ func TestTranscriptCodecDecodesALegacyBlobUnchanged(t *testing.T) {
 	t.Parallel()
 	data := []byte(`{"version":1,"entries":[` +
 		`{"kind":"user","text":"read main.go","skills":["reviewer"]},` +
-		`{"kind":"toolCall","callID":"c1","done":true,"tool":{"label":"Read File","verb":"reading",` +
+		`{"kind":"toolCall","callID":"c1","done":true,"tool":{"label":"Read","verb":"reading",` +
 		`"target":"main.go","name":"read_file","summary":{"text":"1 - 100"},"details":[{"kind":1,"text":"+x"}]}},` +
 		`{"kind":"note","text":"cancelled"}` +
 		`]}`)
@@ -183,7 +183,7 @@ func TestTranscriptCodecDecodesALegacyBlobUnchanged(t *testing.T) {
 	want := []entry{
 		{kind: entryUser, text: "read main.go"},
 		{kind: entryToolCall, callID: "c1", done: true, tool: toolView{
-			Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
+			Label: "Read", Verb: "reading", Target: "main.go", name: "read_file",
 			Summary: namedSummary(detailLine{Text: "1 - 100"}),
 			Details: newToolBody([]detailLine{{Kind: detailDiffAdded, Text: "+x"}}),
 		}},
@@ -586,18 +586,18 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 		if err != nil {
 			t.Fatalf("encodeTranscript: %v", err)
 		}
-		if want := `"stat":"1 line"`; !strings.Contains(string(data), want) {
+		if want := `"stat":"exit 0"`; !strings.Contains(string(data), want) {
 			t.Errorf("wire blob does not carry %s:\n%s", want, data)
 		}
 		got, err := decodeTranscript(data)
 		if err != nil {
 			t.Fatalf("decodeTranscript: %v", err)
 		}
-		if len(got) != 1 || got[0].tool.stat != "1 line" {
+		if len(got) != 1 || got[0].tool.stat != "exit 0" {
 			t.Fatalf("decoded %+v; want the one call with its typed stat", got)
 		}
 		// The fixture is only worth anything if the guard actually bites at this width.
-		if live := renderPlain(tr, narrow); !strings.Contains(live, "1 line") {
+		if live := renderPlain(tr, narrow); !strings.Contains(live, "exit 0") {
 			t.Fatalf("fixture: the guard does not demote at width %d:\n%s", narrow, live)
 		}
 		if replayed, live := renderPlain(&transcript{entries: got}, narrow), renderPlain(tr, narrow); replayed != live {
@@ -608,7 +608,7 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 
 	t.Run("a line the block worded stays unquoted and writes no member", func(t *testing.T) {
 		card := toolView{
-			Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
+			Label: "Read", Verb: "reading", Target: "main.go", name: "read_file",
 			Summary: namedSummary(detailLine{Text: "1 - 100"}),
 		}
 		card.sanitize()
@@ -1090,7 +1090,7 @@ func TestTranscriptCodecGoldenV1(t *testing.T) {
 		entry{
 			kind: entryToolCall, callID: "c1", done: true,
 			tool: toolView{
-				Label: "Read File", Verb: "reading", Target: "main.go", name: "read_file",
+				Label: "Read", Verb: "reading", Target: "main.go", name: "read_file",
 				Summary: namedSummary(detailLine{Text: "1 - 10"}),
 				Details: newToolBody([]detailLine{{Kind: detailDiffAdded, Text: "+x"}}),
 			},
@@ -1108,7 +1108,7 @@ func TestTranscriptCodecGoldenV1(t *testing.T) {
 	const golden = `{"version":1,"entries":[` +
 		`{"kind":"user","text":"hi"},` +
 		`{"kind":"assistant","text":"hello","depth":1},` +
-		`{"kind":"toolCall","callID":"c1","done":true,"tool":{"label":"Read File","verb":"reading","target":"main.go","name":"read_file","summary":{"text":"1 - 10"},"details":[{"kind":1,"text":"+x"}]}},` +
+		`{"kind":"toolCall","callID":"c1","done":true,"tool":{"label":"Read","verb":"reading","target":"main.go","name":"read_file","summary":{"text":"1 - 10"},"details":[{"kind":1,"text":"+x"}]}},` +
 		`{"kind":"presented","presented":{"title":"Report","path":"out/report.md","method":"shown"}},` +
 		`{"kind":"note","text":"cancelled"}` +
 		`]}`

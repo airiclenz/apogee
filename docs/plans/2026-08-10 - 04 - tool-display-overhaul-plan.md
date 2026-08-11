@@ -144,9 +144,55 @@ one-line output staying a body, quoted-line respell-protection unchanged
 
 **Commit:** `feat(tui): width-aware promote-guard for one-line outputs`
 
-## 3. Per-tool registry conformance to the ratified table
+## 3. Per-tool registry conformance to the ratified table — ✅ DONE (2026-08-11)
 
 Depends on item 1.
+
+NOTES (2026-08-10): label CASING follows the item's own enumeration (Title Case: `Find Files`,
+`Git Status`, `Diff Preview`, `Ask User`, `Sub-Agent`) rather than the table's sentence case
+(`Find files`, `Git status`, …). The spec contradicts itself here — its Rules section writes the
+sub-agent group header `✦ Sub-Agent (N)`, which item 7 also uses — and Title Case is what every
+other label in the app already reads as. The RENAMES themselves are the table's, unchanged.
+
+NOTES (2026-08-10): `git_diff_range`'s target stays `base...head` (three dots) where the table
+writes `base..head`. The tool actually runs `git diff base...head`, so the two-dot spelling would
+misstate which diff was taken; the table's cell is read as notation for "the two refs joined",
+not as a change of git semantics.
+
+NOTES (2026-08-10): five stats are worded off a HEADER the tool writes into its own output —
+`run_tests` (`PASS`/`FAIL`), `find_files` (`N files`), `git_status` (`N changed`), `git_log`
+(`N commits`), `git_commit` (short hash), `git_diff_range` (`+A −R`). `toolpresent.go`'s opening
+note argues against re-deriving facts from prose, but design call 14 rules out growing the engine
+for presentation, so prose is the only source left. Each derivation is anchored on a token the tool
+formats deliberately and each is TOTAL: an unrecognised shape returns false and the tool's own
+first line stays in the slot, so a wording change in `internal/tools` degrades such a card to what
+it showed before rather than to something untrue. The table's unavailable halves degrade the same
+way: no duration anywhere, no `M files` beside grep's hits, no `size` beside an HTTP status, no
+`N steps` beside a delegation's `done` (design call 14).
+
+NOTES (2026-08-11): correction to the note above — `git_commit` is the one of those six that is NOT
+read off a header the tool writes. On success `git_commit` discards git's `[branch hash] subject`
+output and returns `git log -1 --oneline` instead (`internal/tools/git.go`), so the slot is read off
+git's own oneline (`^a1b2c3d subject`); the bracketed shape is kept as a second alternative because
+the tool still falls back to it when the summary command fails. Both shapes stay TOTAL in the same
+way: any other content returns false and keeps the prose floor.
+
+NOTES (2026-08-10): three calls the item's text does not word.
+(a) `ask_user` gets NO stat hook, so its slot keeps the human's answer rather than reading
+`answered`/`pending`. Item 2 ratified that promotion as never-demotable because the block's body is
+the RECORD of the exchange — the answer would be repeated above it, or duplicated against a ticked
+choice — and design call 3 lets a promoted line be the whole summary. The table's cell is the one
+deviation of substance here.
+(b) The stat column is TWO hooks, not one: `stat` reads the result, `argStat` reads the call's own
+arguments and is settled at presentation time (write_file, the three edit tools). Handing the
+arguments to a result-time hook instead would have meant retaining a write's whole file content on
+the view for the life of the session — the thing `toolView.args` exists to avoid — and the argument
+half is knowable before the result lands anyway, so a write's `3 lines` now shows from the moment
+the call is announced.
+(c) `open_file`'s locate report moved from the slot to the block's BODY (a new result-shaped `body`
+hook, which view_diff now shares). The table gives the slot to `N lines` and the term to the target;
+without this the located line numbers would have reached the screen nowhere. `summaryLine` and
+`openedFileLine` are gone with it — every typed summary is now worded by its own tool's hook.
 
 **What:** Bring the presenter registry (`internal/tui/toolpresent.go`) to the ratified
 "Display details per tool" table in `docs/layout/tool-layout.md`: new labels (Read,

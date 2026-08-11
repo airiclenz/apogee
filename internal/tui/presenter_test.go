@@ -550,18 +550,29 @@ func TestUpdateFoldsPresentedMsg(t *testing.T) {
 }
 
 // TestPresentDocumentToolCard proves the tool call itself still renders as an ordinary card
-// (label, verb, target) — the presentation entry is additional to it, not a replacement.
+// (label, verb, target) — the presentation entry is additional to it, not a replacement. The
+// ratified table leads the row with the document's TITLE and leaves the outcome slot blank: what
+// the call did is already said by the header and the title, so there is nothing for a slot to add.
 func TestPresentDocumentToolCard(t *testing.T) {
 	t.Parallel()
 	tv := presentToolCall(domain.ToolCall{
 		Tool:      "present_document",
 		Arguments: []byte(`{"path":"docs/review.html","title":"Architecture review"}`),
 	}, workspaceRoot{})
-	if tv.Label != "Present" || tv.Verb != "presenting" || tv.Target != "docs/review.html" {
-		t.Errorf("view = %+v; want the Present/presenting/path registry entry", tv)
+	if tv.Label != "Present" || tv.Verb != "presenting" || tv.Target != "Architecture review" {
+		t.Errorf("view = %+v; want the Present/presenting/title registry entry", tv)
 	}
 	tv.enrichWithResult(domain.ToolResult{Content: "Presented docs/review.html: opened on the user's machine."}, workspaceRoot{})
-	if tv.Summary.Text != "Presented docs/review.html: opened on the user's machine." {
-		t.Errorf("summary = %q; want the result's first line", tv.Summary.Text)
+	if tv.Summary.Text != "" {
+		t.Errorf("summary = %q; want the table's blank slot", tv.Summary.Text)
+	}
+
+	// A call that named no title still says which document was presented.
+	untitled := presentToolCall(domain.ToolCall{
+		Tool:      "present_document",
+		Arguments: []byte(`{"path":"docs/review.html"}`),
+	}, workspaceRoot{})
+	if untitled.Target != "docs/review.html" {
+		t.Errorf("untitled target = %q; want the path fallback", untitled.Target)
 	}
 }

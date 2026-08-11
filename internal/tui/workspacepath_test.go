@@ -229,8 +229,8 @@ func TestToolCardBodyKeepsTheSpellingOfWhatItQuotes(t *testing.T) {
 // with the spelling the file holds, exactly as it would one row lower in a body.
 //
 // The other rows are the contrast the rule needs: a sentence the tool reported about a path it
-// acted on, and the same extractor's own "(no output)" phrase, are the block's words and still
-// shorten. That is why the slot cannot be judged by its text — the mark travels with the line
+// acted on, and the typed stat the registry words for a run that printed nothing, are the block's
+// words and still shorten. That is why the slot cannot be judged by its text — the mark travels with the line
 // (branchSummary), set where the line was put there.
 func TestToolCardSummaryQuotesPromotedOutputOnly(t *testing.T) {
 	t.Parallel()
@@ -258,11 +258,11 @@ func TestToolCardSummaryQuotesPromotedOutputOnly(t *testing.T) {
 			wantSummary: "replaced text in main.go",
 		},
 		{
-			name:        "the extractor's own phrase for no output is the block's words",
+			name:        "the typed stat in the slot is the block's own words",
 			call:        domain.ToolCall{ID: "3", Tool: "terminal", Arguments: []byte(`{"command":"touch /home/me/proj/new.txt"}`)},
 			res:         domain.ToolResult{CallID: "3", Content: "\n"},
 			wantTarget:  "touch new.txt",
-			wantSummary: "(no output)",
+			wantSummary: "exit 0",
 		},
 	}
 	for _, tc := range cases {

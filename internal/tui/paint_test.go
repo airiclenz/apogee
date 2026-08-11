@@ -218,7 +218,7 @@ func TestTableDividerHoldsOneColumn(t *testing.T) {
 	source := strings.Join([]string{
 		"| Tool | Calls | Notes |",
 		"|:--|--:|:-:|",
-		"| Read File | 12 | danger " + vs16Warning + " |",
+		"| Read | 12 | danger " + vs16Warning + " |",
 		"| Run | 3 | `go test ./...` |",
 	}, "\n")
 
@@ -853,8 +853,8 @@ func TestPaintedTabBearingToolTargetKeepsItsColumn(t *testing.T) {
 	// The em dash opens each summary and appears in neither target, so it names the column the
 	// summary starts in on any row.
 	views := []toolView{
-		{Label: "Read File", Target: "a\tb", Summary: namedSummary(detailLine{Text: "— tabbed"})},
-		{Label: "Read File", Target: "eight_ok", Summary: namedSummary(detailLine{Text: "— plain"})},
+		{Label: "Read", Target: "a\tb", Summary: namedSummary(detailLine{Text: "— tabbed"})},
+		{Label: "Read", Target: "eight_ok", Summary: namedSummary(detailLine{Text: "— plain"})},
 	}
 
 	for _, tc := range paintMethods {
@@ -1067,7 +1067,7 @@ func paintedDetailRows(t *testing.T, method ansi.Method, fill string) paintedDet
 			out.detail = append(out.detail, strip(row))
 			out.lastDetail = i
 		}
-		if strings.Contains(strip(row), "Read File") {
+		if strings.Contains(strip(row), "Read") {
 			out.after = i
 		}
 	}

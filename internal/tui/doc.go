@@ -465,9 +465,9 @@
 // contract with no type (this package does not import internal/tools), so a wording change over
 // there silently degraded a card here, with no compiler nudge and no failing test in the package
 // that changed. A tool now attaches a sealed [domain.ToolSummary] beside its prose Content and
-// [summaryLine] words it in one exhaustive type switch, with [diffBody] drawing view_diff's
+// the registry's per-tool stat hook words it, with [diffBody] drawing view_diff's
 // coloured body beneath its stat. What the registry keeps is presentation vocabulary — label,
-// verb, target — plus the detail extractor that stays the FLOOR for a result carrying no summary:
+// verb, target, stat — plus the detail extractor that stays the FLOOR for a result carrying no summary:
 // a third-party tool, or any built-in that attaches none, still renders its first line exactly as
 // before. The wording stays the view's own; that several lines read like the tool's own header is
 // what made "the rendered output does not change, byte for byte" a checkable oracle for the

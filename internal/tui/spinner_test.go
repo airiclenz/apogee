@@ -746,7 +746,7 @@ func TestTickRepaintReachesADetachedViewport(t *testing.T) {
 	if m.viewport.AtBottom() {
 		t.Fatal("precondition: the held offset is already at the bottom")
 	}
-	if before := plain(m.View()); !strings.Contains(before, "✦ Run") {
+	if before := plain(m.View()); !strings.Contains(before, "✦ Terminal") {
 		t.Fatalf("precondition: the settled star is not on screen:\n%s", before)
 	}
 
@@ -756,7 +756,7 @@ func TestTickRepaintReachesADetachedViewport(t *testing.T) {
 	if !m.detached {
 		t.Error("the tick's repaint re-attached a scrolled-up view")
 	}
-	if after := plain(m.View()); strings.Contains(after, "✦ Run") {
+	if after := plain(m.View()); strings.Contains(after, "✦ Terminal") {
 		t.Errorf("the flipped-out star never reached the detached viewport:\n%s", after)
 	}
 }

@@ -18,7 +18,7 @@ import (
 // ----------------------------------------------------------------------------
 //
 // This file turns a tool call+result into a compact, human-facing view: a friendly label for
-// the header line (✦ Read File), the target that leads the branch beneath it, and the one-line
+// the header line (✦ Read), the target that leads the branch beneath it, and the one-line
 // summary that follows the target on that branch (┕ main.go 1 - 100). It is pure — no lipgloss,
 // no I/O — so it is trivially table-testable (TestPresentToolCall); render.go owns the styling
 // and the block shape.
@@ -26,10 +26,13 @@ import (
 // What lives here is PRESENTATION vocabulary: labels, verbs, targets, and the wording of the
 // one-line outcome. What does NOT live here is the outcome's facts. A tool that computed
 // something worth showing reports it as a typed domain.ToolSummary beside the prose Content
-// (internal/tools), and summaryLine below renders that value. The view never parses a result
-// string to find out what a tool did: prose written for the MODEL is not an interface, and
-// re-deriving facts from it meant a wording change in internal/tools silently degraded a card
-// with no compiler nudge and no failing test in the package that changed.
+// (internal/tools), and that tool's own stat hook below words the value. The view prefers not to
+// parse a result string to find out what a tool did: prose written for the MODEL is not an
+// interface, and re-deriving facts from it meant a wording change in internal/tools silently
+// degraded a card with no compiler nudge and no failing test in the package that changed. Where
+// the ratified table asks for a fact no typed summary carries and design call 14 forbids growing
+// one, a stat hook does read a header the tool formats deliberately — anchored, and total, so an
+// unrecognised shape falls back to that tool's own first line rather than to a wrong number.
 //
 // The two halves stay independent. The wording is the view's own — that several of these
 // lines read like the tool's own header today is what makes the change checkable, not a
@@ -39,8 +42,8 @@ import (
 // count). Quoting or compressing is rendering; re-deriving a number from a sentence was not.
 //
 // The label+extractor map is an OPEN, name-keyed registry, not a closed switch: the Phase-3
-// tool fan-out (P3.7–P3.11, ~30 tools, ADR 0002) adds one entry per tool (terminal→"Run",
-// git→"Git", find_replace→"Edit File", …) rather than editing a control-flow statement. An
+// tool fan-out (P3.7–P3.11, ~30 tools, ADR 0002) adds one entry per tool (terminal→"Terminal",
+// git→"Git Status", find_replace→"Replace", …) rather than editing a control-flow statement. An
 // unknown tool falls back to its raw name and labelled arguments (argumentDetails), so a tool
 // with no registry entry still renders legibly.
 //
@@ -70,7 +73,7 @@ type detailLine struct {
 
 // branchSummary is the one-line outcome riding the branch line beside the target, bound to the one
 // fact the shortening seam depends on: WHOSE words it is. Most summaries are the presenter's own —
-// a typed phrase worded by summaryLine ("1 - 154", "+2 -2"), a tool's own report sentence
+// a typed phrase worded by the tool's stat hook ("154 lines", "+2 −2"), a tool's own report sentence
 // ("replaced text in <path>"), an "error: …" line — and the workspace root is shortened out of the
 // paths those NAME (toolView.shortenPaths). Some are not: a line the block did not word is PROMOTED
 // into this slot as it stands (promotedOutput), and it is quoted content, no different from a body.
@@ -197,6 +200,15 @@ type toolView struct {
 	// in for, because it reaches the very same slot.
 	stat string
 
+	// argStat is the slot phrase this call's own ARGUMENTS word (toolPresenter.argStat): a write's
+	// line count, an edit's diffstat. It is settled when the call is presented — the facts are in
+	// the request — and kept so the arriving result cannot quietly change what the slot says: the
+	// prose layers write a result sentence into the summary, and this is re-applied over it.
+	//
+	// It holds the ANSWER rather than the arguments it was read from, which is what keeps a
+	// write_file's whole file content out of the view for the life of the session.
+	argStat string
+
 	name string
 
 	// agentName is the short name a delegation was given (the sub_agent call's optional `name`
@@ -245,8 +257,8 @@ type toolView struct {
 // line beside the target, and the Details body laid out beneath it. Either half may be empty
 // — a fixed result sentence is summary-only ("HTTP 200 OK") and multi-line free-form output is
 // body-only (every one of its lines). A tool whose result carries a domain.ToolSummary
-// does not come through here at all: summaryLine words the branch line and the presenter's
-// body renderer (view_diff's alone) fills the half beneath it. An edit's body — and a write's —
+// does not come through here at all: its stat hook words the branch line and the presenter's
+// body renderer fills the half beneath it. An edit's body — and a write's —
 // comes from neither half of the result: it was derived from the call's arguments before it
 // (argBody).
 //
@@ -309,7 +321,7 @@ func promotedOutput(text, stat string) toolOutcome {
 // nothing in its request worth showing).
 //
 // label and verb are two views of the same tool for two places: label titles the finished
-// header line ("Read File"), verb is the lowercase present participle the live status line
+// header line ("Read"), verb is the lowercase present participle the live status line
 // reads as a sentence fragment ("reading main.go") — never a title.
 type toolPresenter struct {
 	label  string
@@ -333,11 +345,37 @@ type toolPresenter struct {
 	// record is a render-time act and the engine stays wire-silent (ADR 0031).
 	outcome func(args map[string]any, content string) toolOutcome
 
-	// body renders the lines laid out BENEATH the branch when the summary supplied the
-	// branch line itself. Exactly one entry sets it — view_diff, the only tool whose body is
-	// read off its RESULT — so the asymmetry is intentional, not an oversight. A body derived
-	// from what the call ASKED for is argBody's instead.
-	body func(content string) []detailLine
+	// stat words the right-hand outcome slot — the `<tool-top-level-details>` column of the
+	// ratified table (docs/layout/tool-layout.md) — from the RESULT: the typed domain.ToolSummary
+	// the tool reports, or a header it wrote into its own output.
+	//
+	// The bool is the difference between "this tool has nothing typed to say HERE" and "this
+	// tool's slot is deliberately blank". False leaves whatever the prose layers put in the slot
+	// untouched — the degraded floor a summary-less result still renders from — while true with
+	// an empty string is the table's `—`: the slot prints nothing and the dots run to the `▶`.
+	//
+	// A stat never takes the slot back from a PROMOTED line: a one-line output that reached the
+	// slot as the tool's own words keeps it, and the stat becomes the phrase the promote-guard
+	// swaps in when the row is too narrow for both (toolView.stat, design call 5).
+	stat func(res domain.ToolResult) (string, bool)
+
+	// argStat words the same slot from the call's OWN ARGUMENTS, at the moment the call is
+	// presented — the request half of the table's stat column, and argBody's counterpart: a
+	// write's line count and an edit's diffstat are facts about what was ASKED FOR, so the slot
+	// can say them before the result lands, without the tool reporting anything and without a
+	// byte more crossing the wire (ADR 0031).
+	//
+	// Its answer is kept on the view (toolView.argStat) rather than re-read later, so the
+	// arguments themselves need not be retained for the life of the session: a write's whole file
+	// content stays out of memory behind a field that only ever yields one short phrase.
+	argStat func(args map[string]any) (string, bool)
+
+	// body renders the lines laid out BENEATH the branch when the result's typed summary supplied
+	// the branch line itself. It takes the whole result rather than its prose, because what such
+	// a body is read off differs by tool: view_diff renders its Content, open_file the located
+	// line numbers its domain.OpenedFile carries. A body derived from what the call ASKED for is
+	// argBody's instead.
+	body func(res domain.ToolResult) []detailLine
 
 	// argBody renders the body from the call's OWN ARGUMENTS, at the moment the call is
 	// presented: before any result exists, and never touching one. The edit tools and write_file
@@ -362,10 +400,17 @@ const askUserToolName = "ask_user"
 // (internal/tools DefaultToolsWithHost); only a dynamic tool (an MCP server's) falls to the
 // raw-name fallback.
 //
+// Every entry's LABEL, target and stat are the ratified table's three display columns
+// (docs/layout/tool-layout.md, "Display details per tool"): the label heads the block, the
+// target leads its branch row, and the stat words the right-aligned outcome slot. A cell the
+// table spells `—` is a stat hook returning ("", true) — a deliberately blank slot — and a cell
+// the engine cannot supply without growing a wire (design call 14) is a hook returning false,
+// which leaves the tool's own prose floor in the slot rather than inventing a number.
+//
 // Every detail extractor here renders PROSE. The seven tools that report a typed summary
-// (read_file, write_file, list_dir, grep, view_diff, web_search, open_file) get their branch
-// line from summaryLine instead, and keep firstLineDetail as the floor for a result that
-// carries none — a degraded card is that tool's own first line, never a file dumped into the
+// (read_file, write_file, list_dir, grep, view_diff, web_search, open_file) word their slot
+// from that summary through their stat hook, and keep firstLineDetail as the floor for a result
+// that carries none — a degraded card is that tool's own first line, never a file dumped into the
 // transcript. The rest quote their fixed sentence or hand free-form output (a command run, a
 // sub-agent report) on as a body the collapsed paint shows the gist of: the chat compresses it
 // to a first line plus a remainder count until the block is expanded, and the model gets the
@@ -380,167 +425,192 @@ const askUserToolName = "ask_user"
 // -/+ lines (changedLines) and the block shows the change from the moment the call is announced.
 var toolRegistry = map[string]toolPresenter{
 	"read_file": {
-		label:  "Read File",
+		label:  "Read",
 		verb:   "reading",
-		target: stringArg("path"),
-		detail: firstLineDetail, // floor; the span comes from domain.ReadSpan
+		target: readFileTarget,  // path, plus ":12–80" when the call asked for a range
+		detail: firstLineDetail, // floor; the slot's line count comes from domain.ReadSpan
+		stat:   readSpanStat,
 	},
 	"write_file": {
-		label:   "Write File",
+		label:   "Write",
 		verb:    "writing",
 		target:  stringArg("path"),
-		detail:  firstLineDetail, // floor; the count comes from domain.WroteBytes
-		argBody: writtenLines,    // the content the call writes, as + lines
+		detail:  firstLineDetail,  // floor; the tool's own "+N bytes" header
+		argStat: writtenLinesStat, // the lines the REQUEST writes — the result reports bytes
+		argBody: writtenLines,     // the content the call writes, as + lines
 	},
 	"list_dir": {
-		label:  "List Dir",
+		label:  "List",
 		verb:   "listing",
-		target: stringArg("path"),
-		detail: firstLineDetail, // floor; the count comes from domain.ListedEntries
+		target: listDirTarget, // path, plus "· recursive" when the call asked for one
+		detail: firstLineDetail,
+		stat:   listedEntriesStat,
 	},
 	"grep": {
-		label:  "Search",
+		label:  "Grep",
 		verb:   "searching",
-		target: stringArg("pattern"),
-		detail: firstLineDetail, // floor; the count comes from domain.MatchedLines
+		target: grepTarget, // pattern, plus "· <glob>" when the call scoped it
+		detail: firstLineDetail,
+		stat:   matchedLinesStat, // "N hits"; the table's "· M files" is not on the result
 	},
 	"find_files": {
 		label:  "Find Files",
 		verb:   "finding",
 		target: stringArg("pattern"),
 		detail: firstLineDetail, // the tool's own header: "[N files found, showing …]"
+		stat:   foundFilesStat,
 	},
 	"single_find_and_replace": {
-		label:   "Edit File",
+		label:   "Replace",
 		verb:    "editing",
 		target:  stringArg("path"),
 		detail:  firstLineDetail,       // "replaced text in <path>"
+		argStat: singleReplacementStat, // "+A −R", counted off the pair the call asks for
 		argBody: singleReplacementBody, // the one oldText → newText pair, as -/+ lines
 	},
 	"multi_find_and_replace": {
-		label:   "Edit File",
+		label:   "Replace",
 		verb:    "editing",
 		target:  stringArg("path"),
 		detail:  firstLineDetail,      // "applied N replacements to <path>"
+		argStat: multiReplacementStat, // "N changes" — one per replacement the call lists
 		argBody: multiReplacementBody, // one -/+ pair per replacement, in argument order
 	},
 	"edit_existing_file": {
-		label:   "Edit File",
+		label:   "Edit",
 		verb:    "editing",
 		target:  stringArg("path"),
 		detail:  firstLineDetail, // "applied patch to <path> (N hunks)" / "updated <path>"
+		argStat: fileEditStat,    // "+A −R", counted off the patch (or content) the call sends
 		argBody: fileEditBody,    // a patch's hunks, or full replacement content as + lines
 	},
 	"view_diff": {
-		label:  "View Diff",
+		label:  "Diff Preview",
 		verb:   "diffing",
 		target: stringArg("path"),
 		detail: firstLineDetail, // floor; the "No changes detected" sentinel renders here too
-		body:   diffBody,        // the coloured diff beneath a domain.DiffStat branch line
+		stat:   diffStatStat,
+		body:   viewDiffBody, // the coloured diff beneath a domain.DiffStat branch line
 	},
 	"open_file": {
-		label:  "Open File",
+		label:  "Open",
 		verb:   "opening",
-		target: stringArg("path"),
-		detail: firstLineDetail, // floor; the locate report comes from domain.OpenedFile
+		target: openFileTarget, // path, plus `· locate "…"` when a term was asked for
+		detail: firstLineDetail,
+		stat:   openedLinesStat,
+		body:   openFileBody, // the located line numbers, when a term was asked for
 	},
 	"copy_file": {
-		label:  "Copy File",
+		label:  "Copy",
 		verb:   "copying",
 		target: sourceDestinationTarget,
 		detail: firstLineDetail, // "copied a.txt to b.txt"
+		stat:   blankStat,       // the table's `—`: the target already says what happened
 	},
 	"move_file": {
-		label:  "Move File",
+		label:  "Move",
 		verb:   "moving",
 		target: sourceDestinationTarget,
 		detail: firstLineDetail, // "moved a.txt to b.txt"
+		stat:   blankStat,
 	},
 	"delete_file": {
-		label:  "Delete File",
+		label:  "Delete",
 		verb:   "deleting",
 		target: stringArg("path"),
 		detail: firstLineDetail, // "deleted a.txt"
+		stat:   blankStat,
 	},
 	"terminal": {
-		label:  "Run",
+		label:  "Terminal",
 		verb:   "running",
 		target: stringArg("command"),
 		detail: outputDetail,
+		stat:   exitCodeStat,
 	},
 	"python_exec": {
-		label:  "Run Python",
+		label:  "Python",
 		verb:   "running python",
 		target: firstLineArg("code"),
 		detail: outputDetail,
+		stat:   exitCodeStat,
 	},
 	"git_branch": {
 		label:  "Git Branch",
 		verb:   "branching",
 		target: joinedArgs("action", "name"),
 		detail: outputDetail, // a branch list is multi-line; create/switch is one line
+		stat:   blankStat,
 	},
 	"git_commit": {
 		label:  "Git Commit",
 		verb:   "committing",
 		target: firstLineArg("message"),
 		detail: outputDetail, // "[main abc1234] subject" + the diffstat lines
+		stat:   commitHashStat,
 	},
 	"git_diff_range": {
 		label:  "Git Diff",
 		verb:   "diffing",
 		target: refRangeTarget,
 		detail: outputDetail,
+		stat:   diffLinesStat, // "+A −R", counted off the unified diff the tool printed
 	},
 	"git_status": {
 		label: "Git Status",
 		verb:  "checking",
 		// No target: the tool takes no arguments — the repository IS the target.
 		detail: outputDetail, // the branch line plus the staged/unstaged/untracked sections
+		stat:   changedFilesStat,
 	},
 	"git_log": {
 		label:  "Git Log",
 		verb:   "reading",
 		target: gitLogTarget,
 		detail: outputDetail, // one line per commit
+		stat:   commitCountStat,
 	},
 	"diagnostics": {
 		label:  "Diagnostics",
 		verb:   "checking",
 		target: stringArg("path"),
 		detail: outputDetail,
+		stat:   cleanStat, // findings come back as an error result, so a success IS clean
 	},
 	"run_tests": {
-		label: "Run Tests",
+		label: "Tests",
 		verb:  "running tests",
 		// Both arguments are optional and the common call carries neither — the whole suite is
-		// the target then, and joinedArgs renders the empty target a bare "running tests" needs.
-		target: joinedArgs("path", "filter"),
+		// the target then, and runTestsTarget renders the empty target a bare "running tests" needs.
+		target: runTestsTarget,
 		detail: firstLineDetail, // the tool's own verdict line: "PASS (go test)" / "FAIL …"
+		stat:   testVerdictStat,
 	},
 	"web_fetch": {
-		label:  "Web Fetch",
+		label:  "Fetch",
 		verb:   "fetching",
 		target: stringArg("url"),
 		detail: firstLineDetail, // "HTTP 200 OK" — the body never floods the chat
 	},
 	"http_request": {
-		label:  "HTTP Request",
+		label:  "HTTP",
 		verb:   "requesting",
 		target: methodURLTarget,
 		detail: firstLineDetail, // "HTTP 200 OK"
 	},
 	"web_search": {
-		label:  "Web Search",
+		label:  "Search",
 		verb:   "searching the web",
 		target: stringArg("query"),
-		detail: firstLineDetail, // floor; a hit count comes from domain.SearchHits
+		detail: firstLineDetail,
+		stat:   searchHitsStat,
 	},
 	"sub_agent": {
 		label:  "Sub-Agent",
 		verb:   "delegating",
 		target: subAgentTarget, // the delegation's name when it was given one, else the task's first line
 		detail: outputDetail,   // the report's gist; the nested run already rendered railed
+		stat:   delegationStat, // "done"; a failed delegation is an error result and reads red
 	},
 	askUserToolName: {
 		label:   "Ask User",
@@ -551,8 +621,9 @@ var toolRegistry = map[string]toolPresenter{
 	"present_document": {
 		label:  "Present",
 		verb:   "presenting",
-		target: stringArg("path"),
-		detail: firstLineDetail, // "Presented <path>: opened on the user's machine."
+		target: presentDocumentTarget, // the document's title, falling back to its path
+		detail: firstLineDetail,       // "Presented <path>: opened on the user's machine."
+		stat:   blankStat,
 	},
 }
 
@@ -608,6 +679,15 @@ func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
 	}
 	if p.argBody != nil {
 		tv.Details = newToolBody(p.argBody(args))
+	}
+	// The request half of the outcome slot, settled now: what a write puts in a file and what an
+	// edit changes are stated in the call, so the block says them from the moment it is announced
+	// rather than waiting for a result to repeat them back (toolPresenter.argStat).
+	if p.argStat != nil {
+		if s, ok := p.argStat(args); ok {
+			tv.argStat = s
+			tv.Summary = namedSummary(detailLine{Text: s})
+		}
 	}
 	if p.outcome != nil {
 		tv.args = args // the request this presenter's result hook reads back (toolView.args)
@@ -741,8 +821,8 @@ func (tv toolView) demoted() toolView {
 // enrichWithResult folds a tool's result into the view, in four layers. An error result
 // (the tool flagged it IsError — a normal in-band outcome the model reacts to) is the
 // one-line summary, so an errored call still groups with its neighbours. A result carrying a
-// typed domain.ToolSummary is worded by summaryLine, with the presenter's body renderer
-// filling the half beneath it (view_diff alone). Everything else falls to prose, through one of
+// typed domain.ToolSummary skips the prose layers, its body coming from the presenter's `body`
+// hook and its slot from its stat hook. Everything else falls to prose, through one of
 // two extractor shapes: a presenter's `outcome` hook reads the retained REQUEST beside the result
 // (ask_user alone — its block records the question the answer replies to), and a plain `detail`
 // extractor reads the result alone. An unknown tool's result is shown raw as body lines, so
@@ -765,10 +845,26 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 		return
 	}
 	p, known := toolRegistry[tv.name]
-	if line, ok := summaryLine(result.Summary); ok {
-		tv.Summary = namedSummary(line)
+	tv.absorbProse(p, known, result)
+	// The request-derived stat is re-applied because the prose layers may have written over it
+	// with a result sentence; it is the same phrase the call was presented with, so a block does
+	// not change what its slot says when its result lands.
+	if tv.argStat != "" {
+		tv.applyStat(tv.argStat, true)
+	}
+	if known && p.stat != nil {
+		tv.applyStat(p.stat(result))
+	}
+}
+
+// absorbProse fills the two halves from the result's PROSE — the layers that predate the ratified
+// per-tool table, and still the only thing a tool with no typed outcome has. A result carrying a
+// domain.ToolSummary skips them: what its slot says is its stat hook's word, and all such a result
+// leaves here is the body its presenter reads off it (view_diff's diff, open_file's located lines).
+func (tv *toolView) absorbProse(p toolPresenter, known bool, result domain.ToolResult) {
+	if result.Summary != nil {
 		if known && p.body != nil {
-			tv.Details = tv.Details.with(p.body(result.Content))
+			tv.Details = tv.Details.with(p.body(result))
 		}
 		return
 	}
@@ -796,52 +892,333 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 	tv.Details = tv.Details.with(lines)
 }
 
-// summaryLine words a tool's structured outcome as the one-line summary that rides the
-// branch beside the target. It is the view's ONE switch over domain.ToolSummary, and ok is
-// false for a nil summary and for a variant this view has no line for — either way the caller
-// falls through to the prose path, so a tool that reports nothing structured (and a variant
-// added before this view knows what to say about it) renders exactly as it always did.
+// applyStat settles the right-hand outcome slot from a stat hook's answer (toolPresenter.stat).
+// Three outcomes, and each is a different thing the table can say about a tool:
 //
-// The wording is the VIEW's. A summary carries numbers; what a card says about them is
-// presentation, and this file may reword any line here without touching internal/tools.
-func summaryLine(s domain.ToolSummary) (detailLine, bool) {
-	switch v := s.(type) {
-	case domain.ReadSpan:
-		return detailLine{Text: strconv.Itoa(v.Start) + " - " + strconv.Itoa(v.End)}, true
-	case domain.WroteBytes:
-		return detailLine{Text: "+" + strconv.Itoa(v.Bytes) + " bytes"}, true
-	case domain.ListedEntries:
-		// "entries" and "matches" are FIXED plurals, deliberately not plural(): the card has
-		// always read "1 entries", and plural() would both change that and render "matchs".
-		return detailLine{Text: strconv.Itoa(v.Total) + " entries"}, true
-	case domain.MatchedLines:
-		return detailLine{Text: strconv.Itoa(v.Total) + " matches"}, true
-	case domain.DiffStat:
-		return detailLine{Text: "+" + strconv.Itoa(v.Added) + " -" + strconv.Itoa(v.Removed)}, true
-	case domain.SearchHits:
-		return detailLine{Text: plural(v.Count, "result")}, true
-	case domain.OpenedFile:
-		return detailLine{Text: openedFileLine(v)}, true
+//   - ok false — the tool had nothing typed to say about THIS result (no summary on it, no
+//     recognisable header in its output). Whatever the prose layers put in the slot stays, which
+//     is the degraded floor: a tool's own first line, never a blank where a fact used to be.
+//   - the slot already holds a PROMOTED line — the tool's own one-line output, quoted. It keeps
+//     the slot, because a line the tool printed says more than a phrase about it; the stat becomes
+//     the fallback the promote-guard swaps in on a row too narrow for both (design call 5).
+//   - otherwise the stat IS the slot, empty string included: the table's `—` is a blank slot with
+//     the dots running to the `▶`, and it is stated rather than left over from a prose sentence.
+func (tv *toolView) applyStat(text string, ok bool) {
+	if !ok {
+		return
 	}
-	return detailLine{}, false
+	if tv.Summary.quoted && tv.Summary.Text != "" {
+		tv.stat = text
+		return
+	}
+	tv.Summary = namedSummary(detailLine{Text: text})
+	tv.stat = ""
 }
 
-// openedFileLine words open_file's outcome: the locate report when a term was requested —
-// including the "on no lines" case, which only the typed summary can tell apart from "no
-// locate was asked for" — and otherwise the body's line count, since the file's content
-// belongs to the model and the header would only repeat the target.
-func openedFileLine(v domain.OpenedFile) string {
-	if v.Locate == "" {
-		return plural(v.Lines, "line")
+// ----------------------------------------------------------------------------
+// Outcome-slot stats — the table's `<tool-top-level-details>` column, one hook per tool
+// ----------------------------------------------------------------------------
+//
+// Each of these words ONE tool's right-hand slot (toolPresenter.stat). They come in three kinds,
+// and the kind is the honest answer to "where does this fact live?":
+//
+//   - off the typed domain.ToolSummary the tool already reports (readSpanStat, listedEntriesStat,
+//     …) — the contract that exists precisely so a host need not read a sentence;
+//   - off the call's OWN ARGUMENTS (writtenLinesStat, the edit stats) — a write's line count and
+//     an edit's diffstat are facts about the REQUEST, so the slot can say them without the tool
+//     reporting anything and without a byte more crossing the wire (ADR 0031);
+//   - off a fixed HEADER the tool writes into its own output (testVerdictStat, foundFilesStat,
+//     changedFilesStat, commitCountStat, commitHashStat, diffLinesStat). This is the reading the
+//     file's opening note warns about, and it is taken only because design call 14 rules out
+//     growing the engine for presentation. Every one of them is anchored on a token the tool
+//     formats deliberately and every one is TOTAL: a shape it does not recognise returns false,
+//     which leaves that tool's prose floor in the slot rather than a wrong number. A wording
+//     change in internal/tools degrades such a card to what it showed before this existed.
+//
+// A stat is the block's OWN wording, so the shortening seam spells any path it names relative to
+// the workspace (shortenPaths) — the same treatment every phrase this file writes gets.
+
+// blankStat is the table's `—`: a tool whose outcome is already fully said by its header and
+// target (a copy's two paths, a delete's one). The slot prints nothing and the dots run to the
+// `▶`. It is stated rather than left empty by omission, because omitting the hook would leave the
+// tool's prose sentence in a slot the table says is blank.
+func blankStat(domain.ToolResult) (string, bool) { return "", true }
+
+// readSpanStat words read_file's slot as the number of lines the call returned, counted off the
+// span the tool reports (domain.ReadSpan, 1-based and inclusive). A file with no lines at all
+// yields a span whose End precedes its Start, which is 0 lines rather than a negative count.
+func readSpanStat(res domain.ToolResult) (string, bool) {
+	v, ok := res.Summary.(domain.ReadSpan)
+	if !ok {
+		return "", false
 	}
-	if len(v.LocatedOn) == 0 {
-		return clipDetail(fmt.Sprintf("Located %q on no lines", v.Locate))
+	n := v.End - v.Start + 1
+	if n < 0 {
+		n = 0
 	}
-	numbers := make([]string, len(v.LocatedOn))
-	for i, n := range v.LocatedOn {
-		numbers[i] = strconv.Itoa(n)
+	return plural(n, "line"), true
+}
+
+// openedLinesStat words open_file's slot as the file body's line count. The locate term the call
+// asked for leads the TARGET now (openFileTarget) and the lines it was found on lay out beneath
+// (openFileBody), so the slot says the one thing neither of those does.
+func openedLinesStat(res domain.ToolResult) (string, bool) {
+	v, ok := res.Summary.(domain.OpenedFile)
+	if !ok {
+		return "", false
 	}
-	return clipDetail(fmt.Sprintf("Located %q on lines: %s", v.Locate, strings.Join(numbers, ", ")))
+	return plural(v.Lines, "line"), true
+}
+
+// writtenLinesStat words write_file's slot as the number of lines the call WRITES, read off its
+// own content argument — the table asks for lines and the tool reports bytes (domain.WroteBytes),
+// and the request already holds the answer. It is the same reading the body takes (writtenLines),
+// so the two cannot disagree about what the call puts in the file.
+func writtenLinesStat(args map[string]any) (string, bool) {
+	content, ok := args["content"].(string)
+	if !ok {
+		return "", false
+	}
+	return plural(len(editLines(content)), "line"), true
+}
+
+// listedEntriesStat words list_dir's slot as the directory's total entry count. "entries" is a
+// FIXED plural, deliberately not plural(): the card has always read "1 entries".
+func listedEntriesStat(res domain.ToolResult) (string, bool) {
+	v, ok := res.Summary.(domain.ListedEntries)
+	if !ok {
+		return "", false
+	}
+	return strconv.Itoa(v.Total) + " entries", true
+}
+
+// matchedLinesStat words grep's slot as its hit count. The table also asks for the number of FILES
+// those hits fall in; no result carries it (domain.MatchedLines is a total alone), so the slot
+// says the half that exists rather than a second number derived from a listing (design call 14).
+func matchedLinesStat(res domain.ToolResult) (string, bool) {
+	v, ok := res.Summary.(domain.MatchedLines)
+	if !ok {
+		return "", false
+	}
+	return plural(v.Total, "hit"), true
+}
+
+// searchHitsStat words web_search's slot as its result count.
+func searchHitsStat(res domain.ToolResult) (string, bool) {
+	v, ok := res.Summary.(domain.SearchHits)
+	if !ok {
+		return "", false
+	}
+	return plural(v.Count, "result"), true
+}
+
+// diffStatStat words view_diff's slot as the diffstat the tool counted off its own operations. A
+// "No changes detected" result carries no domain.DiffStat and so keeps its sentence.
+func diffStatStat(res domain.ToolResult) (string, bool) {
+	v, ok := res.Summary.(domain.DiffStat)
+	if !ok {
+		return "", false
+	}
+	return diffCounts(v.Added, v.Removed), true
+}
+
+// diffCounts is the house spelling of a diffstat — "+8 −3", with the table's typographic minus
+// (U+2212) rather than a hyphen, so the two halves read as a matched pair at any weight. Every
+// slot that carries one goes through here: view_diff's typed stat, the edit tools' argument-
+// derived one, git_diff's counted one.
+func diffCounts(added, removed int) string {
+	return "+" + strconv.Itoa(added) + " −" + strconv.Itoa(removed)
+}
+
+// pairCounts totals what a set of edit pairs adds and removes — the same pairs the body renders
+// (changedLines), so an edit's slot and its lines are two readings of one answer.
+func pairCounts(pairs []editPair) (added, removed int) {
+	for _, p := range pairs {
+		added += len(p.inserted)
+		removed += len(p.removed)
+	}
+	return added, removed
+}
+
+// singleReplacementStat words single_find_and_replace's slot as the diffstat of the one pair the
+// call asks for. A call with neither side is not an edit at all and keeps its prose floor.
+func singleReplacementStat(args map[string]any) (string, bool) {
+	removed, _ := args["oldText"].(string)
+	inserted, _ := args["newText"].(string)
+	if removed == "" && inserted == "" {
+		return "", false
+	}
+	a, r := pairCounts([]editPair{replacedText(removed, inserted)})
+	return diffCounts(a, r), true
+}
+
+// multiReplacementStat words multi_find_and_replace's slot as the NUMBER OF CHANGES the call
+// lists, which is what the table asks of it — a batch's shape is how many edits it makes, and the
+// lines they touch are beneath (multiReplacementBody). Malformed arguments keep the prose floor.
+func multiReplacementStat(args map[string]any) (string, bool) {
+	list, ok := args["replacements"].([]any)
+	if !ok {
+		return "", false
+	}
+	return plural(len(list), "change"), true
+}
+
+// fileEditStat words edit_existing_file's slot as the diffstat of what the call sends: a patch's
+// hunks, or full replacement content that removes nothing and inserts the lot — the same two
+// readings its body takes (fileEditBody).
+func fileEditStat(args map[string]any) (string, bool) {
+	content, ok := args["content"].(string)
+	if !ok {
+		return "", false
+	}
+	pairs := []editPair{replacedText("", content)}
+	if isPatchArgument(content) {
+		pairs = patchEditPairs(content)
+	}
+	a, r := pairCounts(pairs)
+	return diffCounts(a, r), true
+}
+
+// exitCodeStat words the slot of the two tools that run a process. A non-zero exit is an ERROR
+// result (internal/tools: terminal and python_exec both flag it), which reads red from the error
+// layer above — so a result reaching here exited cleanly, and the slot says so. The table asks
+// for a duration beside it; no result carries one, so the code stands alone (design call 14).
+func exitCodeStat(domain.ToolResult) (string, bool) { return "exit 0", true }
+
+// cleanStat words diagnostics' slot. Findings come back flagged as an error result, so a result
+// that reaches here found none — the table's `clean` half; its `N issues` half is the red error
+// line the failure layer already paints.
+func cleanStat(domain.ToolResult) (string, bool) { return "clean", true }
+
+// delegationStat words a sub-agent's slot. A delegation that failed comes back as an error result
+// and reads red, so a result reaching here is one that finished. The table asks for a step count
+// beside the verdict; the engine exposes none on the result (design call 14), so the verdict
+// stands alone.
+func delegationStat(domain.ToolResult) (string, bool) { return "done", true }
+
+// testVerdictHead matches the verdict token run_tests opens its condensed report with — "PASS (go
+// test)", "FAIL (pytest) — 3 failing tests" — anchored at the start so a later line reading "FAIL"
+// cannot be mistaken for the header.
+var testVerdictHead = regexp.MustCompile(`^(PASS|FAIL)\b`)
+
+// testVerdictStat words run_tests' slot as its bare verdict. The table asks for a duration beside
+// it; the result carries none (design call 14), so the verdict stands alone. Output the tool
+// worded some other way keeps its own first line in the slot.
+func testVerdictStat(res domain.ToolResult) (string, bool) {
+	m := testVerdictHead.FindStringSubmatch(strings.TrimSpace(firstLine(res.Content)))
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// foundFilesHead matches the header find_files opens its listing with — "[12 files found, showing
+// 1-12]", the count being the FULL total rather than the page.
+var foundFilesHead = regexp.MustCompile(`^\[(\d+) files found\b`)
+
+// foundFilesStat words find_files' slot as that total, and reads the tool's own empty-result
+// sentence as the zero it states.
+func foundFilesStat(res domain.ToolResult) (string, bool) {
+	head := strings.TrimSpace(firstLine(res.Content))
+	if head == "No files found" {
+		return plural(0, "file"), true
+	}
+	m := foundFilesHead.FindStringSubmatch(head)
+	if m == nil {
+		return "", false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return "", false
+	}
+	return plural(n, "file"), true
+}
+
+// gitStatusSection matches one section header of git_status' report — "Staged (3):" — whose count
+// is the FULL one even where the list beneath it was capped.
+var gitStatusSection = regexp.MustCompile(`(?m)^(?:Staged|Unstaged|Untracked) \((\d+)\):`)
+
+// changedFilesStat words git_status' slot as how many files the working tree has changed: the sum
+// of the three section counts, or the zero its clean-tree sentence states. A report in neither
+// shape keeps its prose floor.
+func changedFilesStat(res domain.ToolResult) (string, bool) {
+	if strings.Contains(res.Content, "Working tree clean") {
+		return "0 changed", true
+	}
+	sections := gitStatusSection.FindAllStringSubmatch(res.Content, -1)
+	if len(sections) == 0 {
+		return "", false
+	}
+	total := 0
+	for _, s := range sections {
+		n, err := strconv.Atoi(s[1])
+		if err != nil {
+			return "", false
+		}
+		total += n
+	}
+	return strconv.Itoa(total) + " changed", true
+}
+
+// commitCountStat words git_log's slot as how many commits it listed. The tool prints one line per
+// commit ("--format=%h %ad %s", a subject being single-line by construction), so the lines ARE the
+// count; its empty-result sentence states the zero.
+func commitCountStat(res domain.ToolResult) (string, bool) {
+	trimmed := strings.TrimSpace(res.Content)
+	if trimmed == "" {
+		return "", false
+	}
+	if trimmed == "No commits found" {
+		return plural(0, "commit"), true
+	}
+	n := 0
+	for _, ln := range splitLines(trimmed) {
+		if strings.TrimSpace(ln) != "" {
+			n++
+		}
+	}
+	return plural(n, "commit"), true
+}
+
+// commitHashHead matches the short hash in either shape git_commit returns: the
+// `git log -1 --oneline` line it reports on success — "a1b2c3d subject" — and, on the fallback
+// branch that relays git's own commit output, "[main a1b2c3d] subject" or
+// "[detached HEAD a1b2c3d] subject". Anchored at the line's start in both cases.
+var commitHashHead = regexp.MustCompile(`^(?:\[[^\]]*\b([0-9a-f]{7,40})\]|([0-9a-f]{7,40})) `)
+
+// commitHashStat words git_commit's slot as that short hash — the one thing a later call needs and
+// the header line does not repeat. A result in another shape (nothing to commit, a hook's message)
+// keeps its prose floor.
+func commitHashStat(res domain.ToolResult) (string, bool) {
+	m := commitHashHead.FindStringSubmatch(strings.TrimSpace(firstLine(res.Content)))
+	if m == nil {
+		return "", false
+	}
+	if m[1] != "" {
+		return m[1], true
+	}
+	return m[2], true
+}
+
+// diffLinesStat words git_diff_range's slot as the diffstat of the unified diff the tool printed,
+// counting the tagged lines and skipping the "+++"/"---" file headers that are not content. A call
+// asking for `--stat` or `--name-only` prints no tagged lines at all and keeps its prose floor,
+// which is the honest answer: that output states its own totals.
+func diffLinesStat(res domain.ToolResult) (string, bool) {
+	added, removed := 0, 0
+	for _, ln := range splitLines(res.Content) {
+		switch {
+		case strings.HasPrefix(ln, "+++"), strings.HasPrefix(ln, "---"):
+		case strings.HasPrefix(ln, "+"):
+			added++
+		case strings.HasPrefix(ln, "-"):
+			removed++
+		}
+	}
+	if added == 0 && removed == 0 {
+		return "", false
+	}
+	return diffCounts(added, removed), true
 }
 
 // ----------------------------------------------------------------------------
@@ -870,6 +1247,98 @@ func firstLineArg(key string) func(map[string]any) string {
 		}
 		return ""
 	}
+}
+
+// intArg reads one whole-number argument by key. JSON has no integer type, so a count the model
+// sent arrives as a float64 and is read as one; anything else — absent, a string, a fraction that
+// is not one — is not a number this view will act on and yields 0, the "not given" answer every
+// caller here already has a rendering for.
+func intArg(args map[string]any, key string) int {
+	v, ok := args[key].(float64)
+	if !ok || v != float64(int(v)) {
+		return 0
+	}
+	return int(v)
+}
+
+// qualifiedTarget joins a target's head with the QUALIFIER a call put on it — "· recursive",
+// `· locate "x"` — in the table's own separator. It is one function rather than four spellings of
+// the same concatenation so every qualified target reads alike; an unqualified call is the head
+// alone, and a call with a qualifier but no head (a filter with no path) is the qualifier alone
+// rather than a row opening on a stray separator.
+func qualifiedTarget(head, qualifier string) string {
+	switch {
+	case qualifier == "":
+		return head
+	case head == "":
+		return qualifier
+	}
+	return head + " · " + qualifier
+}
+
+// readFileTarget leads read_file's branch with the path, carrying the LINE RANGE the call asked
+// for ("main.go:12–80") when it asked for one — the table's ranged form, which is what tells two
+// reads of one file apart in a group. A half-open request states the half it gave: a start with no
+// end reads "…:12–", an end with no start "…:–80". A plain read is the bare path.
+func readFileTarget(args map[string]any) string {
+	path, _ := args["path"].(string)
+	start, end := intArg(args, "start_line"), intArg(args, "end_line")
+	if start <= 0 && end <= 0 {
+		return path
+	}
+	span := ""
+	if start > 0 {
+		span = strconv.Itoa(start)
+	}
+	span += "–"
+	if end > 0 {
+		span += strconv.Itoa(end)
+	}
+	return path + ":" + span
+}
+
+// openFileTarget leads open_file's branch with the path and the locate term the call asked for,
+// quoted the way the table spells it. The lines the term was found on lay out beneath the branch
+// (openFileBody) rather than in the target, which names WHAT was opened and asked for.
+func openFileTarget(args map[string]any) string {
+	locate := stringArg("locate")(args)
+	if locate != "" {
+		locate = `locate "` + locate + `"`
+	}
+	return qualifiedTarget(stringArg("path")(args), locate)
+}
+
+// listDirTarget leads list_dir's branch with the path, marked "· recursive" when the call asked
+// for a walk rather than a listing — the one argument that changes what the entry count means.
+func listDirTarget(args map[string]any) string {
+	recursive := ""
+	if v, _ := args["recursive"].(bool); v {
+		recursive = "recursive"
+	}
+	return qualifiedTarget(stringArg("path")(args), recursive)
+}
+
+// grepTarget leads grep's branch with the pattern and the include glob that scoped it — a search
+// of one file type is a different search, and the hit count in the slot is only readable beside it.
+func grepTarget(args map[string]any) string {
+	return qualifiedTarget(stringArg("pattern")(args), stringArg("include")(args))
+}
+
+// runTestsTarget leads run_tests' branch with the package path and the filter that narrowed the
+// run. Both arguments are optional and the common call carries neither — the whole suite is the
+// target then, and the empty target a bare "running tests" needs is what comes back.
+func runTestsTarget(args map[string]any) string {
+	return qualifiedTarget(stringArg("path")(args), stringArg("filter")(args))
+}
+
+// presentDocumentTarget leads present_document's branch with the document's TITLE — what the human
+// was shown — falling back to its path when the call named no title, so the row always says which
+// document was presented.
+func presentDocumentTarget(args map[string]any) string {
+	if title := stringArg("title")(args); title != "" {
+		return title
+	}
+	return stringArg("path")(args)
 }
 
 // subAgentName reads the optional short name off a sub_agent call's arguments, normalised the way
@@ -1164,6 +1633,36 @@ func outputDetail(content string) toolOutcome {
 		details = append(details, detailLine{Text: clipDetail(ln)})
 	}
 	return toolOutcome{Details: details}
+}
+
+// viewDiffBody is view_diff's body hook: the coloured diff read off the result's prose, which is
+// where that tool's body lives (diffBody). The result-shaped signature is the registry's
+// (toolPresenter.body) — open_file's body is read off its typed summary instead.
+func viewDiffBody(res domain.ToolResult) []detailLine {
+	return diffBody(res.Content)
+}
+
+// openFileBody lays open_file's LOCATE REPORT out beneath the branch: the lines the requested term
+// was found on, or the statement that it was found on none — a case only the typed summary can
+// tell apart from "no locate was asked for". A call that asked for no term has no report and so no
+// body: the file's content belongs to the model, and the slot's line count already says its size.
+//
+// The report moved here when the ratified table gave the slot to that count (openedLinesStat) and
+// the term to the target (openFileTarget): three facts, three places, none of them repeating
+// another.
+func openFileBody(res domain.ToolResult) []detailLine {
+	v, ok := res.Summary.(domain.OpenedFile)
+	if !ok || v.Locate == "" {
+		return nil
+	}
+	if len(v.LocatedOn) == 0 {
+		return []detailLine{{Text: clipDetail(fmt.Sprintf("Located %q on no lines", v.Locate))}}
+	}
+	numbers := make([]string, len(v.LocatedOn))
+	for i, n := range v.LocatedOn {
+		numbers[i] = strconv.Itoa(n)
+	}
+	return []detailLine{{Text: clipDetail(fmt.Sprintf("Located %q on lines: %s", v.Locate, strings.Join(numbers, ", ")))}}
 }
 
 // diffBody renders view_diff's unified output as the coloured body beneath the branch — "+ "

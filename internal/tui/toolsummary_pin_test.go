@@ -77,13 +77,13 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 			name: "read_file",
 			tool: tools.NewReadFile(root),
 			args: `{"path":"main.go"}`,
-			want: "1 - 3",
+			want: "3 lines",
 		},
 		{
 			name: "write_file",
 			tool: tools.NewWriteFile(root),
 			args: `{"path":"notes.txt","content":"hello"}`,
-			want: "+5 bytes",
+			want: "1 line", // the table asks for lines; the tool reports bytes, the request states lines
 		},
 		{
 			name: "list_dir",
@@ -95,13 +95,13 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 			name: "grep",
 			tool: tools.NewGrep(root),
 			args: `{"pattern":"func main","path":"main.go"}`,
-			want: "1 matches", // the fixed plural the card has always shown, not plural()
+			want: "1 hit",
 		},
 		{
 			name: "view_diff",
 			tool: tools.NewViewDiff(root),
 			args: `{"path":"main.go","newContent":"package main\n\nfunc other() {}"}`,
-			want: "+1 -1",
+			want: "+1 −1",
 		},
 		{
 			name: "web_search",
@@ -113,7 +113,7 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 			name: "open_file",
 			tool: tools.NewOpenFile(root),
 			args: `{"path":"main.go","locate":"func main"}`,
-			want: `Located "func main" on lines: 3`,
+			want: "3 lines", // the locate report moved to the body; the slot carries the size
 		},
 	}
 
