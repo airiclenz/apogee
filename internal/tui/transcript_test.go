@@ -1280,6 +1280,12 @@ func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
 // that opened the level. Its RAIL is the whole of what announces the descent: the label that used
 // to stand above the preview is gone (item 5), and nothing replaces it, the head above having
 // already named the delegate.
+//
+// The frame is the LIVE one (design call 4 of docs/plans/"2026-08-11 - 01"): the delegate has
+// streamed and committed nothing, so the run has no span at all, and the head still opens the ┌─┶
+// its span will paint inside (subAgentFramed). Nothing about the shape waits for the words to
+// settle — that is what makes settling into the committed run a matter of the ✓ appearing and
+// nothing else. No ┊ closes it while it is going: the run has not been left.
 func TestSubAgentStreamPreviewRailedWhenRunExpanded(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
@@ -1291,12 +1297,79 @@ func TestSubAgentStreamPreviewRailedWhenRunExpanded(t *testing.T) {
 
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
-		"  ┕ survey the tests ⋯",
-		"", // the join dips to the parent's depth, so the separator is the flat one
+		// No ✓: the delegation has not reported, and the star — settled in a substring render — is
+		// the whole of what says it is working (design call 6).
+		leaderEdgeRow("┌─┶ survey the tests ⋯", glyphExpanded),
+		"│",                  // the frame opens on the prompt the delegate was handed (item 6)…
+		"│ survey the tests", //
+		"│",                  // …and the join is railed, so the stream lands INSIDE the frame
 		"│ ✦ child words",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("expanded run's live preview mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// TestSubAgentStreamSettlesWithoutMovingTheFrame is design call 4's other claim, which the preview
+// golden alone cannot make: what the LIVE paint draws is exactly what the committed paint draws. The
+// same delegation is rendered twice — once while the delegate's words are still in the buffer, once
+// after its MessageEvent has folded those same words into an entry of the run — and the two paints
+// must be identical to the byte.
+//
+// It is the claim the old shape could not have made: the frame used to wait for the first committed
+// entry, so this hand-over moved the header from a flat ┕ row to a ┌─┶ one and re-indented
+// everything under it. Nothing the reader is watching may jump when a token stops streaming and
+// starts being scrollback. The ✓ is the one thing that does appear later, and it appears with the
+// REPORT rather than here (design call 6, pinned by TestSubAgentRunCollapsesToItsCallBlock).
+func TestSubAgentStreamSettlesWithoutMovingTheFrame(t *testing.T) {
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	streamAt(tr, 1, "child words")
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the run expanded")
+	}
+	live := renderPlain(tr, 80)
+
+	// The delegate's Turn ends: the streamed words commit as an entry of its run, and the run itself
+	// is still open — it has not reported.
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "child words"})
+
+	if settled := renderPlain(tr, 80); settled != live {
+		t.Errorf("the frame moved when the delegate's stream committed:\n--- live ---\n%s\n--- settled ---\n%s",
+			live, settled)
+	}
+}
+
+// TestSubAgentStreamFramesAnOpenGroupMember is the live shape where a delegation was FOLDED into a
+// list: the open member's row is the top of its frame while it is still talking, the delegate's
+// stream stands inside that frame, and the ┊ closes it where the list picks its remaining rows back
+// up. Folding changes the frame around a delegation and never the delegation, so the live rule
+// cannot be one the lone shape has and a member of a group has not.
+//
+// The stream is stamped with its SPAWNING call (ADR 0039), which is what lands the preview inside
+// the child that is talking rather than after the sibling announced last (transcript.runEnd).
+func TestSubAgentStreamFramesAnOpenGroupMember(t *testing.T) {
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	subAgentCall(tr, "s2", "survey the docs", 0)
+	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
+
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setExpanded(0, true) = false; want the first delegation expanded")
+	}
+
+	want := strings.Join([]string{
+		"✦ Sub-Agent (2)",
+		leaderEdgeRow("┌─┶ survey the tests ⋯", glyphExpanded),
+		"│",
+		"│ survey the tests",
+		"│",
+		"│ ✦ child words",
+		"┊",                     // the frame closes where the list resumes…
+		"  ┕ survey the docs ⋯", // …and the sibling still working is a plain twig of it
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("open group member's live frame mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 

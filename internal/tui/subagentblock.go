@@ -35,6 +35,31 @@ func subAgentSpan(entries []entry, i int) int {
 	return n
 }
 
+// subAgentFramed reports whether a delegation is drawn as a RUN — the ┌─┶ opening its header row,
+// the rail down everything beneath it, the ┊ closing it — rather than as the ordinary tool block a
+// delegation with nothing behind it is. It is asked of the head and its span length, which are the
+// two facts the answer turns on, so [transcript.renderView] and [renderSubAgentGroup] frame a
+// delegation by one rule instead of each wording one of its own.
+//
+// Committed entries behind it are one answer. The other is the LIVE one: an OPEN delegation that has
+// been expanded frames its span before that span exists, because the first thing standing inside the
+// rail is the delegate's streamed text — which the buffer holds and no entry carries yet
+// (renderView's preview), so subAgentSpan answers 0 for it however much the child has said. Waiting
+// for the first committed entry would announce the descent twice: a flat ┕ row while the child
+// talks, and the frame snapping open beneath it the moment those words settle. Design call 4 of
+// docs/plans/"2026-08-11 - 01" is the rule — settling into the committed run changes nothing
+// visually beyond the ✓ appearing.
+//
+// A delegation that is OVER and left nothing behind it — a child refused at the depth bound, one
+// that faulted before its first event — is framed by neither answer, and must not be: a frame opened
+// there would enclose nothing at all, and the next block would close it again in the very next row.
+func subAgentFramed(head entry, span int) bool {
+	if head.kind != entryToolCall || head.tool.name != subAgentToolName {
+		return false
+	}
+	return span > 0 || (head.expanded && !head.done)
+}
+
 // insideCollapsedRun reports whether a block about to be painted at depth would land inside a
 // sub-agent run that is currently COLLAPSED — the question subAgentSpan answers for committed
 // entries, asked on behalf of the one block that is not in the list: the live streaming preview
@@ -245,7 +270,7 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 	}
 	room := toolRowCells(th, width)
 	for _, m := range members {
-		marker, spanned := branchMarker(m.last), len(m.span) > 0
+		marker, spanned := branchMarker(m.last), subAgentFramed(m.head, len(m.span))
 		view := m.head.tool
 		if spanned && !m.head.expanded {
 			view = collapsedSubAgentView(th.measure, m.head, m.span)

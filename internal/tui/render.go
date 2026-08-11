@@ -312,7 +312,7 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			} else {
 				prevBlockDepth = e.depth + 1
 			}
-		} else if span := subAgentSpan(t.entries, i); span > 0 {
+		} else if span := subAgentSpan(t.entries, i); subAgentFramed(e, span) {
 			// A sub-agent run is ONE block while it is collapsed (layout.md): its head paints with the
 			// cascading summary and the whole span is then skipped outright, which is what elides the
 			// inner blocks and every rail and spacer among them — nothing is painted and afterwards
@@ -323,6 +323,12 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			// The paint covers the head AND its span: the collapsed summary counts the work behind
 			// the header (subAgentSummary) and the star asks the span whether anything is still open,
 			// so a nested entry arriving or landing its result is a different block (paintcache.go).
+			//
+			// An OPEN delegation reaches this branch with a span of nothing (subAgentFramed): its
+			// frame is drawn live, and prevBlockDepth below hands the join the level the frame stands
+			// at, which is what lays the streaming preview inside the rail rather than flat beside it
+			// (design call 4). Its ┊ is not drawn with it — a closer is a join's answer, and a run
+			// that nothing follows yet has not been left.
 			key := t.blockKey(shapeSubAgentRun, i, span+1, th, width, blink,
 				!e.done || anyOpenCall(t.entries[i+1:i+1+span]))
 			appendBlock(false, e.depth, i, t.paintBlock(i, key, func() blockPaint {

@@ -53,7 +53,10 @@
 // separator that is not a spacer: it is the ┊ closing each run left behind, one per level
 // (docs/layout/tool-layout.md, "Grouped Sub-agents"). Nothing announces a DESCENT any more — the
 // delegation's own ┌─┶ header row opens the frame and the rail runs down from it, on the live
-// preview's path as much as on the committed one. The whole frame —
+// preview's path as much as on the committed one. What opens it is the delegation being OPEN and not
+// its having produced anything yet ([subAgentFramed]): a delegate's first words are in the streaming
+// buffer and in no entry at all, so a frame waiting for the span to exist would snap open under the
+// reader the moment those words settled. The whole frame —
 // rail, corner and closer alike — is one style role (theme's subRail) in the tool-header gold (the
 // scheme's `tool-header` role), coherent with the gold ✦ tool markers; the arm and tee reaching
 // across to the delegation's branch stay in that row's own detail tone ([paintRowMarker]). A run's stretch stays CONTIGUOUS however its events

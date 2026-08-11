@@ -239,7 +239,21 @@ back to no prompt block (no stray blank lines).
 
 **Commit:** `feat(tui): expanded sub-agents open with their markdown-rendered prompt`
 
-## 7. Live view wears the new shape
+## 7. Live view wears the new shape — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): three deviations. (a) The live-preview path the item names (`render.go`
+`paintPreview`) needed no change at all — item 5 already took the `⤷` off it and the preview has
+always been railed at the depth that filled it. What was missing was the HEAD's frame: `subAgentSpan`
+answers 0 for a delegate whose words are still in the streaming buffer, so `renderView` routed an
+open expanded delegation to the ordinary tool-block branch and the frame snapped open only once the
+first entry committed. The gate is now one predicate, `subAgentFramed` (`subagentblock.go`), read by
+`renderView`'s run branch and by `renderSubAgentGroup`'s `spanned` — the grouped shape had the same
+gap for the same reason, and two wordings of "is this delegation framed" is exactly how the lone and
+grouped live shapes would come to disagree. (b) The `TestSubAgentStream*` family gained two cases
+beyond the re-pinned preview golden: an open GROUP member's live frame, and the settling claim
+itself — the live paint and the committed paint compared byte for byte, which is the half of design
+call 4 no single golden can state. (c) `doc.go`'s rail narration already claimed the frame opened on
+the live path; it now says what opens it, since that sentence was aspirational until this item.
 
 Depends on items 4, 5.
 
