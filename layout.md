@@ -109,7 +109,8 @@ are load-bearing rather than decorative and every shipped scheme is tested for t
 ## What "height" means: one row budget, and the transcript pays it
 
 **Every pane above the input box takes its rows from the transcript.** The approval and ask
-prompts, the `/sessions` browser, the `/model` | `/server` picker, the `/settings` pane, the `/` and
+prompts, the `/sessions` browser, the `/model` | `/server` picker, the `/settings` pane, the
+`/usage` report, the `/` and
 `@` dropdown, and the staged-interjection band all sit in the frame between the session area and the bottom chrome,
 and the session area is what shrinks to seat them. The frame is composed from ONE derivation of
 how many rows are left over, so the rows the transcript is drawn on, the rows a mouse click may
@@ -146,7 +147,8 @@ up because they are typing.
 **So the surfaces give way in a fixed order, and the order is a claim about what the human is
 doing.** The **session area** goes first and goes to nothing; then the **staged band**, which is a
 reminder rather than a control, and whose count the status line is carrying anyway; then the
-**`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the
+**`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the **`/usage`
+report**, a question already answered; then the
 **`/settings` pane**; then the **`/sessions` browser and the picker**; and last the **approval or ask
 prompt**, which the run itself is blocked on. The footer is not in the division at all, and the input box is in it only at
 its very end, and only for the prompt (below). Two panes can want the same rows, and on a window
@@ -1260,6 +1262,46 @@ readout is separate too, and reads the same count from the same queue.
 
 ---
 
+## The `/usage` popup
+
+**What it answers, and why the gauge cannot.** `/usage` opens a bordered pane in the transcript-side
+slot, listing what this session has **spent**: one row for the main agent, one for every sub-agent
+that reported a count, and a session total. The status gauge is a *fill* — how full the window
+stands right now — and a fill says nothing about the tokens a long run burned through and compacted
+away, nor anything at all about a delegate whose window closed when its run ended. Both readings are
+on the screen for the same session and they are different questions.
+
+**Six columns, one row per agent.** `agent · calls · prompt · completion · total · ctx`, under a
+header row painted a weight above the rows so the labels are found without being read. `main` comes
+first, then each delegate **in transcript order** — indented under it, named by the delegation's own
+name or, unnamed, the first line of its task, clipped where it is longer than the column — and last
+a `session` row, the agents above it added up. The counts are spelled in the coarse form the gauge
+and a run's own reading already use (`21k`), a zero leaving its cell empty rather than printing a
+`0` the column has to be scanned past; the `ctx` cell is the percentage the gauge labels its bar
+with, clamped at 100 exactly as that one is. Two facts have no cell: a delegate that reported no
+fill leaves `ctx` blank, because a fill without its limit is a number with no scale, and the
+`session` row leaves it blank always, because two windows do not add up to a third.
+
+**The total row appears only where there is something to total.** With no delegate the main row IS
+the session, and a second row restating it would be noise. A delegate that never reported a count is
+not listed at all: a run whose child got no usage back is a fact about the server rather than a
+spend, and a row of empty cells under the totals would read as one.
+
+**Nothing counted yet is a sentence, not an empty table.** Before any completion has come back with
+a token count — a fresh session, or a server that omits usage — the pane shows one line of prose
+saying so, with no header row and no columns.
+
+**It is the lightest pane in the frame.** No filter, no selection, and `esc` its only key: it is a
+question already answered rather than a decision surface, so the input box behind it stays live and
+every other key goes where it always went. Its verb is safe while the agent works — the pane reads
+what the frame already holds and calls nothing — which is exactly when the question gets asked, so
+it is the one pane that can be up beside an approval or ask prompt, seated below it, nearest the
+chrome. In the give-way order it sits between the `/settings` pane and the dropdown: it yields to
+every surface the human is acting **in**, and the dropdown, which the next keystroke re-derives,
+yields before it.
+
+---
+
 ## The prompt box's mini-language
 
 **One dropdown for `/`.** Typing a `/` token opens ONE suggestion pane above the box — the same
@@ -1472,7 +1514,8 @@ quiescent engine is not hidden — its row fills the menu's `— idle only` colu
 unselected style, and accepting it anyway prints the note and leaves the draft exactly as it was.
 The tag belongs to the moment rather than to the verb: while the engine is idle no row fills that
 cell, so the column collapses and the menu reads exactly as it does when nothing can be gated. The
-verbs that only report (`/version`, `/skills`, `/confine` with no arguments) run there and then, and
+verbs that only report (`/version`, `/skills`, `/usage`, `/confine` with no arguments) run there and
+then, and
 so do `/schedule` and `/schedule-stop`, which touch no engine at all: a schedule fires as a run of
 its own, so creating or stopping one needs no quiet moment in this session.
 

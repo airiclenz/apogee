@@ -120,9 +120,19 @@ then `make check`.
 
 **Commit:** `feat(tui): fold cumulative usage per agent and persist it with the session`
 
-## 4. TUI: /usage command + popup pane
+## 4. TUI: /usage command + popup pane — ✅ DONE (2026-08-11)
 
 Depends on item 3.
+
+NOTES (2026-08-11): two additions beyond the item's literal row list. (a) The rows open with a COLUMN
+HEADER row (`agent · calls · prompt · completion · total · ctx`, `popupRowHeading` kind, the /settings
+section-label precedent) — six numeric columns are unreadable unlabelled; it is dropped with the rows
+in the empty state. (b) `esc` is claimed just BELOW the autocomplete claim rather than beside the modal
+ones at `model.go:987-1005`: the pane is not modal (it owns no other key and the box behind it stays
+live), so a dropdown the human opened over it must answer its own esc first. Three existing enumerations
+gained the new pane for accuracy — the framePane give-way comment, `frameOverlays`'s doc, and
+layout.md's two pane lists — and `command_test.go`'s two pinned verb sets (parser order, noRecall set)
+were extended, which is what those guards are for.
 
 **What:**
 - Command: add `{name: "usage", summary: "session token usage — main agent and every sub-agent", whileRunning: true, noRecall: true}`

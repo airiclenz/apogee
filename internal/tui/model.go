@@ -126,6 +126,13 @@ type Model struct {
 	// is driven only at idle, and it is the frame's one full-height pane (frameRowPlan).
 	settings settingsPane
 
+	// usagePane is the /usage report overlay's state (usage.go): whether it is up, and nothing else —
+	// its rows are derived at render time from the folds that already hold the per-agent totals, so
+	// the value is one bool and its zero value is "closed", the settings posture (ADR 0011). Unlike
+	// the panes above it, it is driven in every state: the verb is whileRunning and the pane reads
+	// Model state only.
+	usagePane usagePane
+
 	// settingEdits is the journal of every config key this SESSION changed through the settings surface
 	// — the fact behind each row's ` *` marker (ADR 0037 decision 8). It lives here rather than on the
 	// pane above because its lifetime is the session's and the pane's is one overlay: the human opens
@@ -1027,6 +1034,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if handled, nm, cmd := m.autocompleteKey(msg); handled {
 			return nm, cmd
 		}
+	}
+
+	// The /usage report claims esc and nothing else (usage.go). It is not modal — it says something
+	// rather than asking, so the box behind it stays live and every other key goes where it always
+	// went — and the claim sits below the overlays above precisely because they ARE modal: a pane
+	// that owns the keyboard answers its own esc first. Below the dropdown for the same reason one
+	// rung down: a menu a keystroke opened is dismissed by the esc the human means for it.
+	if m.usagePane.open && msg.String() == "esc" {
+		return m.closeUsagePane()
 	}
 
 	// The transcript's modal block cursor claims its keys here, ahead of the switch below, because
@@ -2300,11 +2316,11 @@ func (m *Model) refreshViewportAnchored(line, row int) {
 
 // frameOverlays holds the blocks View stacks between the transcript and the input box: the
 // approval or ask prompt, the /sessions browser, the /model | /server picker, the /settings
-// configuration pane, the autocomplete dropdown, and the staged-interjection strip. Each field is
-// "" when its overlay is closed.
+// configuration pane, the /usage report, the autocomplete dropdown, and the staged-interjection
+// strip. Each field is "" when its overlay is closed.
 //
 // They sit in two slots, and every one of them is FLUSH on the chrome its slot abuts: the first
-// four go directly above the ▔ hairline (the frame's blank gap row falls above them, not between
+// five go directly above the ▔ hairline (the frame's blank gap row falls above them, not between
 // them and the chrome), the last two directly above the input box.
 //
 // They are gathered as ONE value because two readers need them and must never disagree: View
@@ -2319,6 +2335,7 @@ type frameOverlays struct {
 	browser  string // the /sessions history browser
 	picker   string // the /model | /server picker
 	settings string // the /settings configuration pane (full-height — frameRowPlan)
+	usage    string // the /usage token-accounting report (usage.go)
 	dropdown string // the command / @file / skill autocomplete
 	queued   string // the staged-interjection strip (ADR 0025)
 }
@@ -2328,7 +2345,7 @@ type frameOverlays struct {
 // rather than measured.
 func (o frameOverlays) height() int {
 	rows := 0
-	for _, block := range []string{o.prompt, o.browser, o.picker, o.settings, o.dropdown, o.queued} {
+	for _, block := range []string{o.prompt, o.browser, o.picker, o.settings, o.usage, o.dropdown, o.queued} {
 		if block != "" {
 			rows += lipgloss.Height(block)
 		}
@@ -2358,6 +2375,7 @@ func (m Model) frameOverlays() frameOverlays {
 	o.browser = m.renderSessionBrowser()
 	o.picker = m.renderPicker()
 	o.settings = m.renderSettings()
+	o.usage = m.renderUsage()
 	o.dropdown = m.renderAutocomplete()
 	o.queued = m.renderPendingInterjections()
 	return o
@@ -2457,6 +2475,13 @@ func (m Model) View() tea.View {
 	// whole budget (frameRowPlan), so the block above it is usually nothing at all.
 	if ov.settings != "" {
 		rows = append(rows, ov.settings)
+	}
+	// The /usage report shares the slot as well, and it is the one pane there that can be up beside
+	// another: its verb is whileRunning, so it can be opened over an approval or ask prompt the run
+	// is blocked on. It goes last in the slot — nearest the chrome — so the surface the human is
+	// answering keeps the position it has when the report is not up.
+	if ov.usage != "" {
+		rows = append(rows, ov.usage)
 	}
 	// Then the ▔ top-edge hairline capping the chrome, the status line, the autocomplete overlay
 	// (when open), the input box, the footer, and the ▁ hairline closing the screen under it.
@@ -3357,6 +3382,11 @@ const transcriptReserve = 3
 // is the order the panes GIVE WAY in, last first: on a window that cannot seat every open pane the
 // dropdown loses its rows before the picker or the browser, and the modal approval or ask prompt —
 // the one the run is blocked on — keeps its rows last of all.
+//
+// The /usage report sits at the transient end beside the dropdown, and above it: it is a pane
+// nothing is being decided on — a question already answered, dismissed by the esc that is its only
+// key — so it yields to every surface the human is acting IN, while the dropdown, which the next
+// keystroke re-derives anyway, yields before it.
 type framePane int
 
 const (
@@ -3364,6 +3394,7 @@ const (
 	paneBrowser                   // the /sessions history browser
 	panePicker                    // the /model | /server picker
 	paneSettings                  // the /settings configuration pane — the frame's one full-height pane
+	paneUsage                     // the /usage token-accounting report
 	paneDropdown                  // the command / @file / skill autocomplete
 	paneKinds                     // not a pane: the count, so a plan can hold one grant per kind
 )
@@ -3395,6 +3426,9 @@ func (m Model) openPanes() framePaneSet {
 	}
 	if m.settings.open {
 		s = s.with(paneSettings)
+	}
+	if m.usagePane.open {
+		s = s.with(paneUsage)
 	}
 	if m.autocomplete.active && len(m.autocomplete.items) > 0 {
 		s = s.with(paneDropdown)

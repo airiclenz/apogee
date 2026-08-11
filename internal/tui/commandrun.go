@@ -270,6 +270,12 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// worker, no engine call and no file I/O of its own.
 		return m.runSettingsCommand()
 
+	case "usage":
+		// Open the per-agent token report (usage.go). The /settings shape with none of its caveats:
+		// synchronous, no engine call and no worker — and safe mid-Exchange, because every number it
+		// shows is already folded onto this Model.
+		return m.runUsageCommand()
+
 	case "color-scheme":
 		// List, switch or export a colour scheme (colorscheme.go, ADR 0040). Synchronous and
 		// idle-safe like /settings, whose write and apply seams the switch form reuses in full: no

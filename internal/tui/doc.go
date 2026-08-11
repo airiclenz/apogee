@@ -564,8 +564,11 @@
 // while the binary owns the file AND what a key may hold: a value it refuses comes back as an error
 // the row carries, with the buffer still open to correct. `mode` is the one edit that also applies
 // live, through the Engine.SetMode seam Shift+Tab drives (ADR 0035); and
-// popup.go the one bordered pane every overlay — those three, the autocomplete dropdown, the ask
-// and approval prompts — is painted through; logo.go the embedded start-up wordmark;
+// usage.go the /usage report — one row per agent of what this session has SPENT, read off the
+// per-agent totals the folds already keep (the Model's for the main agent, each run head's for a
+// delegate) rather than summed here, and the lightest pane in the frame: no filter, no selection,
+// esc its only key; popup.go the one bordered pane every overlay — those three, the autocomplete
+// dropdown, the ask and approval prompts — is painted through; logo.go the embedded start-up wordmark;
 // actuation.go the launcher-verb latch and the folds that close one out (ADR 0029) — at most one
 // world-changing call in flight per address, narrated while it blocks, with the next Beat rather
 // than the call's own return deciding what the world became; skills.go the browsing half of the

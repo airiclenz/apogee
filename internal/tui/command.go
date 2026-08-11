@@ -135,6 +135,12 @@ type commandSpec struct {
 // /sessions, and noRecall like the reset pair — it opens a surface rather than saying anything to the
 // model, so a recalled invocation would only spend a walk step.
 //
+// /usage opens the token-accounting report (usage.go): what the main agent and every sub-agent have
+// spent this session, and the session's own total. It is noRecall for /settings' reason — it opens a
+// surface rather than saying anything to the model — but, unlike every other pane-opening verb, it is
+// safe while a worker works: it reads the folds the Model already holds, calls nothing, and the
+// question it answers is one a human asks precisely while an agent is burning tokens.
+//
 // Order is display order, and it is ALPHABETICAL — declared here in the literal rather than sorted
 // at render time, because this table is the registry and the order the dropdown reads is one of the
 // things it declares. A menu the human can scan without knowing the table is worth more than any
@@ -158,6 +164,7 @@ var commandSpecs = []commandSpec{
 	{name: "skills", summary: "list the available skills", whileRunning: true},
 	{name: "stop-server", summary: "stop the server this session is on"},
 	{name: "unload-model", summary: "free the model of the server this session is on"},
+	{name: "usage", summary: "session token usage — main agent and every sub-agent", whileRunning: true, noRecall: true},
 	{name: "version", summary: "show the apogee version", whileRunning: true},
 }
 
