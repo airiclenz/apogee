@@ -203,6 +203,9 @@ expand carries no indicator at all.
 | sub_agent | Sub-agent | its name (task head fallback) | `N steps · done/failed` | task text + result summary |
 
 Notes:
+- git_commit never promotes its one-line output into the slot at any width: the
+  line repeats the subject the row already leads with, so the slot holds the
+  short hash above and the line lays out in the body.
 - ask_user renders as the live prompt while pending; this table describes its
   transcript form after the answer.
 - sub_agent deliberately shows *different* data collapsed (its name) vs

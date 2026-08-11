@@ -484,6 +484,25 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			wantSummary: "exit 0",
 		},
 		{
+			// git_commit is the one tool that never promotes: its one-line output repeats the
+			// subject the row already leads with, so the line is a body and the hash — the table's
+			// slot for this tool — has no other reading to be swapped for (commitDetail).
+			name:        "a commit's one-line output is a body under its hash",
+			call:        domain.ToolCall{ID: "6", Tool: "git_commit", Arguments: []byte(`{"message":"add the thing"}`)},
+			result:      domain.ToolResult{CallID: "6", Content: "6fd6ff7 add the thing\n"},
+			wantSummary: "6fd6ff7",
+			wantBody:    []string{"6fd6ff7 add the thing"},
+		},
+		{
+			// The prose floor is untouched: a shape with no hash for the slot keeps the promotion
+			// it always had, because blanking the slot would say less than the tool did.
+			name:        "a commit in another shape keeps its promoted line",
+			call:        domain.ToolCall{ID: "7", Tool: "git_commit", Arguments: []byte(`{"message":"add the thing"}`)},
+			result:      domain.ToolResult{CallID: "7", Content: "nothing to commit, working tree clean\n"},
+			wantSummary: "nothing to commit, working tree clean",
+			wantStat:    "1 line",
+		},
+		{
 			name: "view_diff is both",
 			call: domain.ToolCall{ID: "5", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)},
 			result: domain.ToolResult{CallID: "5", Content: "  ctx\n- old line\n+ new line",

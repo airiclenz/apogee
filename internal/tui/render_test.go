@@ -1721,6 +1721,63 @@ func TestDemotedLineKeepsTheSpellingItWasWrittenWith(t *testing.T) {
 	}
 }
 
+// TestGitCommitSlotIsTheShortHashAtEveryWidth pins the one tool whose one-line output never reaches
+// the outcome slot (commitDetail). A commit's line is "6fd6ff7 feat: x" and the target leading the
+// row is already "feat: x", so a promotion would print the subject twice and hide the hash the
+// ratified table gives this slot (docs/layout/tool-layout.md, "git_commit … short hash"). The two
+// widths straddle the promote-guard's own boundary, so the test would fail the moment the hash held
+// the slot only on the narrow row — which is exactly what a demotion-dependent reading looked like.
+func TestGitCommitSlotIsTheShortHashAtEveryWidth(t *testing.T) {
+	t.Parallel()
+
+	const (
+		subject = "add the thing"
+		hash    = "6fd6ff7"
+		output  = hash + " " + subject
+	)
+	th := newTheme(scheme.Default())
+
+	// The narrowest width at which the guard would still have promoted a line this long — the
+	// arithmetic is leaderRow's, borrowed so the cases sit either side of a boundary this tool no
+	// longer has (guardRefuses, TestPromoteGuardHoldsFifteenCellsOfTarget).
+	edge := promoteMinTargetCells + th.measure.Width(output) + 2*leaderGap + leaderMinDots +
+		th.measure.Width(branchMarker(true)) + groupIndicatorCells(th)
+
+	for _, tc := range []struct {
+		name  string
+		width int
+	}{
+		{name: "wide enough for the guard to have promoted", width: edge + 40},
+		{name: "one cell under the guard's boundary", width: edge - 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "git_commit",
+				Arguments: []byte(`{"message":"` + subject + `"}`)}, workspaceRoot{})
+			tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: output + "\n"}, workspaceRoot{})
+
+			lines := renderToolBlock(th, []toolView{tv}, tc.width, blockState{expanded: true}).lines
+			branch, body := strip(lines[1]), strip(strings.Join(lines[2:], "\n"))
+
+			if !strings.Contains(branch, hash) {
+				t.Errorf("branch row = %q; want the short hash in the slot at width %d", branch, tc.width)
+			}
+			if strings.Contains(branch, output) {
+				t.Errorf("branch row = %q carries the whole one-line output beside its target", branch)
+			}
+			if n := strings.Count(branch, subject); n > 1 {
+				t.Errorf("branch row = %q spells the subject %d times", branch, n)
+			}
+			// Nothing is lost by withholding the promotion: the line the slot refused is the body's
+			// first row, whole, exactly where the guard would have put it.
+			if !strings.Contains(body, output) {
+				t.Errorf("body = %q; want the commit's own line %q beneath the branch", body, output)
+			}
+		})
+	}
+}
+
 // groupMemberLine composes a collapsed member row the way the painter lays it out: the row's own
 // text, then the ▶ flush against the block's right edge.
 func groupMemberLine(text string) string { return leaderEdgeRow(text, glyphCollapsed) }

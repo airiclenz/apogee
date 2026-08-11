@@ -55,7 +55,9 @@ point is a **minor** bump, not a breaking change.
     nothing at all — their row already does — and the dots simply run to the `▶`.
   - A one-line output still takes the slot where it fits, with the typed stat behind it as the
     narrow-row fallback, so a command that printed one line reads as that line and a command that
-    printed forty reads as `exit 0` with the output a click away.
+    printed forty reads as `exit 0` with the output a click away. A commit is the exception: its
+    line (`6fd6ff7 feat: x`) repeats the subject its row already leads with, so the slot keeps the
+    short hash at every width and the line lays out in the body.
   - Nothing was added to any tool result or crossed any wire for this: a write's line count and an
     edit's diffstat are read off the call's own arguments, and a stat that cannot be had honestly
     leaves the tool's own first line in the slot rather than inventing a number.

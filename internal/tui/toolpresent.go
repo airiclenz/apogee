@@ -547,7 +547,9 @@ var toolRegistry = map[string]toolPresenter{
 		label:  "Git Commit",
 		verb:   "committing",
 		target: firstLineArg("message"),
-		detail: outputDetail, // "[main abc1234] subject" + the diffstat lines
+		// "[main abc1234] subject" + the diffstat lines, with the one-line shape kept out of the
+		// slot so the hash holds it at every width (commitDetail).
+		detail: commitDetail,
 		stat:   commitHashStat,
 	},
 	"git_diff_range": {
@@ -1355,11 +1357,13 @@ func commitCountStat(res domain.ToolResult) (string, bool) {
 // "[detached HEAD a1b2c3d] subject". Anchored at the line's start in both cases.
 var commitHashHead = regexp.MustCompile(`^(?:\[[^\]]*\b([0-9a-f]{7,40})\]|([0-9a-f]{7,40})) `)
 
-// commitHashStat words git_commit's slot as that short hash — the one thing a later call needs and
-// the header line does not repeat. A result in another shape (nothing to commit, a hook's message)
-// keeps its prose floor.
-func commitHashStat(res domain.ToolResult) (string, bool) {
-	m := commitHashHead.FindStringSubmatch(strings.TrimSpace(firstLine(res.Content)))
+// commitHashOf reads that hash off a commit result's own output. It is the ONE derivation of it,
+// shared by the two halves that have to agree about it: the slot's stat (commitHashStat) and the
+// prose half that withholds its promotion whenever the slot is going to say it (commitDetail). Were
+// they to read it apart they could disagree on a shape neither anticipated — the promotion withheld
+// and the slot left blank — so they read it here.
+func commitHashOf(content string) (string, bool) {
+	m := commitHashHead.FindStringSubmatch(strings.TrimSpace(firstLine(content)))
 	if m == nil {
 		return "", false
 	}
@@ -1367,6 +1371,13 @@ func commitHashStat(res domain.ToolResult) (string, bool) {
 		return m[1], true
 	}
 	return m[2], true
+}
+
+// commitHashStat words git_commit's slot as that short hash — the one thing a later call needs and
+// the header line does not repeat. A result in another shape (nothing to commit, a hook's message)
+// keeps its prose floor.
+func commitHashStat(res domain.ToolResult) (string, bool) {
+	return commitHashOf(res.Content)
 }
 
 // diffLinesStat words git_diff_range's slot as the diffstat of the unified diff the tool printed,
@@ -1802,6 +1813,34 @@ func outputDetail(content string) toolOutcome {
 		details = append(details, detailLine{Text: clipDetail(ln)})
 	}
 	return toolOutcome{Details: details}
+}
+
+// commitDetail is git_commit's prose half: outputDetail's split with its one-line PROMOTION
+// withheld whenever that line carries the hash the slot is about to say (commitHashOf). A commit's
+// one-line output is "6fd6ff7 feat: x" and the target leading the row beside it is already
+// "feat: x", so promoting it spells the subject twice and leaves the hash — the one fact the header
+// does NOT repeat, and what the ratified table gives this tool's slot
+// (docs/layout/tool-layout.md) — showing only on a row too narrow to promote. Withheld, the line
+// lays out as the body's first row, exactly where the promote-guard would have put it
+// (toolView.demoted), and the hash takes the slot at EVERY width.
+//
+// Refusing the promotion is the promoter's call and not the stat's: a stat never takes the slot
+// back from a promoted line (applyStat), and the answer for a line that should not have been
+// offered is to not offer it — which leaves the guard's own rule untouched for every tool that
+// still has two readings of its outcome.
+//
+// A result in another shape — "nothing to commit", a hook's message — has no hash for the slot, so
+// its promotion stands: that prose floor is all such a block has to say, and blanking the slot to
+// enforce a hash that is not there would say less than the tool did.
+func commitDetail(content string) toolOutcome {
+	out := outputDetail(content)
+	if !out.Summary.quoted || out.Summary.Text == "" {
+		return out
+	}
+	if _, ok := commitHashOf(content); !ok {
+		return out
+	}
+	return toolOutcome{Details: []detailLine{out.Summary.detailLine}}
 }
 
 // viewDiffBody is view_diff's body hook: the coloured diff read off the result's prose, which is
