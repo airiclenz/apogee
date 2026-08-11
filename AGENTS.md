@@ -1,6 +1,6 @@
-# Apogee — agent guide
+# apogee — agent guide
 
-Apogee is a terminal coding agent (Go, Bubble Tea TUI) built to run small, locally hosted LLMs (~4B–35B) against a full agentic tool-use loop. Its hard invariant: the gated **Mechanisms** that keep small models on track must never make a model perform worse than the same agent with Mechanisms off (**Bypass mode** is that floor). This file is the agent-facing counterpart to `README.md`: it maps where knowledge lives and states the conventions you cannot derive from the code.
+"apogee" (spelled lower-case) is a terminal coding agent (Go, Bubble Tea TUI) built to run small, locally hosted LLMs (~4B–35B) against a full agentic tool-use loop. Its hard invariant: the gated **Mechanisms** that keep small models on track must never make a model perform worse than the same agent with Mechanisms off (**Bypass mode** is that floor). This file is the agent-facing counterpart to `README.md`: it maps where knowledge lives and states the conventions you cannot derive from the code.
 
 ## Where knowledge lives
 
