@@ -40,8 +40,9 @@ func (overflowResponder) Stream(context.Context, provider.Request) iter.Seq[prov
 // the prompt itself exceeds the window) exactly when the request's estimated prompt tokens exceed
 // window, and otherwise echoes reply. It records the last request so a test can assert what the
 // budgeted summary call actually carried. It uses the same 4-chars-per-token estimate the Agent's
-// uncalibrated budget does (context.DefaultCharsPerToken — the summary call emits no UsageEvent, so
-// the estimator never leaves the default here), so the responder and the reducer agree on when a
+// uncalibrated budget does (context.DefaultCharsPerToken — only the regular turn path calibrates
+// the estimator; compaction accounts its usage but never calibrates it, so in these fold-only
+// tests the ratio never leaves the default), so the responder and the reducer agree on when a
 // prompt fits.
 type windowResponder struct {
 	window int
