@@ -257,7 +257,25 @@ member only.
 
 **Commit:** `feat(tui): click-anywhere toggle and see-less footer on tool blocks`
 
-## 5. Super-group modeling in the transcript
+## 5. Super-group modeling in the transcript — ✅ DONE (2026-08-11)
+
+NOTES (2026-08-11): four calls the item's text does not word.
+(a) One file outside `transcript.go` was touched for the RULE's sake: `toolCallRun` (render.go) now
+delegates to the new `sameLabelRun` instead of restating the same walk. The umbrella lists runs as
+its rows and the same-label group IS one run, so two copies of "where does a run end" would drift the
+first time either changed. Nothing about the function's answer moved (no rendering in this item).
+(b) Breakers include any call that cannot BE a member row, not only the two the design call names: a
+targetless call has no target to lead a row (`groupable`), and that is the same mechanism the
+sub-agent block breaks through (`toolView.solo`), so the umbrella's rule is stated once as "anything
+that is not a run opening at the umbrella's own depth".
+(c) `spanFlags` (paintcache.go) gained bit 2 for the new `typeExpanded`. It is the one place
+per-entry view state enters the paint key, and a state the key ignores is a stale paint served after
+the click that changed it — a failure item 6's goldens could not see, since they assert the paint the
+painter would have produced anyway.
+(d) `setTypeExpanded` gates on the KIND (a tool call) and never on the live derivation: whether an
+entry heads a run today depends on what the model called next, and a click that succeeded or failed
+by that would lose an open type row the moment a call appended behind it. No CHANGELOG entry —
+nothing painted changes until item 6.
 
 **What:** Model the umbrella in `internal/tui/transcript.go`: 2+ adjacent same-depth
 runs of different labels fold under one super-group entry (a lone call counts as a run

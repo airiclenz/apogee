@@ -1663,6 +1663,244 @@ func TestToggleExpandedTargetsCollapsibleKinds(t *testing.T) {
 	}
 }
 
+// toolCallCard is one committed tool call as the grouping model reads it: the friendly label the
+// rows group by, the target that would lead its member row, and the depth it stands at. Nothing else
+// on a call reaches the model, which is why the fixture states nothing else.
+func toolCallCard(label, target string, depth int) entry {
+	return entry{kind: entryToolCall, depth: depth, tool: toolView{Label: label, Target: target}}
+}
+
+// subAgentCard is a sub-agent call entry built by the PRESENTER, so the solo mark that keeps it out
+// of every folded block is the one the live path sets rather than a fact this test asserts about
+// itself (presentToolCall, toolView.solo).
+func subAgentCard(name string, depth int) entry {
+	return entry{kind: entryToolCall, depth: depth, tool: presentToolCall(domain.ToolCall{
+		ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"name":"` + name + `","task":"survey"}`),
+	}, workspaceRoot{})}
+}
+
+// A super-group forms at two adjacent same-depth runs of DIFFERENT labels, a lone call counting as a
+// run of 1, and ends at the first thing that is not such a run: a non-tool entry, a sub-agent block,
+// a call standing at another depth, a call the presenter left unfoldable. One run alone is the
+// same-label group that already had a header of its own and is no umbrella
+// (docs/layout/tool-layout.md, "Vocabulary"; design call 1).
+func TestTranscriptSuperGroupFormation(t *testing.T) {
+	t.Parallel()
+
+	note := entry{kind: entryNote, text: "cancelled"}
+	cases := []struct {
+		name    string
+		entries []entry
+		at      int
+		want    superGroup
+		calls   int
+	}{
+		{
+			name: "two runs of different labels fold under one umbrella",
+			entries: []entry{toolCallCard("Read", "a.go", 0), toolCallCard("Read", "b.go", 0),
+				toolCallCard("Terminal", "go build", 0)},
+			at:    0,
+			want:  superGroup{{at: 0, n: 2}, {at: 2, n: 1}},
+			calls: 3,
+		},
+		{
+			name: "a lone call is a run of 1, so read/terminal/read is three rows",
+			entries: []entry{toolCallCard("Read", "a.go", 0), toolCallCard("Terminal", "go build", 0),
+				toolCallCard("Read", "b.go", 0)},
+			at:    0,
+			want:  superGroup{{at: 0, n: 1}, {at: 1, n: 1}, {at: 2, n: 1}},
+			calls: 3,
+		},
+		{
+			name:    "one run alone is the same-label group, not an umbrella",
+			entries: []entry{toolCallCard("Read", "a.go", 0), toolCallCard("Read", "b.go", 0)},
+			at:      0,
+		},
+		{
+			name:    "a single call heads nothing",
+			entries: []entry{toolCallCard("Read", "a.go", 0)},
+			at:      0,
+		},
+		{
+			name:    "a note between two runs breaks the umbrella",
+			entries: []entry{toolCallCard("Read", "a.go", 0), note, toolCallCard("Terminal", "go build", 0)},
+			at:      0,
+		},
+		{
+			name: "the umbrella resumes after the breaker",
+			entries: []entry{toolCallCard("Read", "a.go", 0), toolCallCard("Terminal", "go build", 0), note,
+				toolCallCard("Read", "b.go", 0), toolCallCard("Terminal", "go vet", 0)},
+			at:    3,
+			want:  superGroup{{at: 3, n: 1}, {at: 4, n: 1}},
+			calls: 2,
+		},
+		{
+			name:    "a sub-agent block breaks the umbrella",
+			entries: []entry{toolCallCard("Read", "a.go", 0), subAgentCard("surveyor", 0), toolCallCard("Terminal", "go build", 0)},
+			at:      0,
+		},
+		{
+			name:    "a sub-agent call heads no umbrella of its own",
+			entries: []entry{subAgentCard("surveyor", 0), toolCallCard("Read", "a.go", 0), toolCallCard("Terminal", "go build", 0)},
+			at:      0,
+		},
+		{
+			name:    "a deeper call belongs to another level and does not join",
+			entries: []entry{toolCallCard("Read", "a.go", 0), toolCallCard("Terminal", "go build", 1)},
+			at:      0,
+		},
+		{
+			name:    "a call with no target cannot be a member row",
+			entries: []entry{toolCallCard("Read", "a.go", 0), toolCallCard("HTTP", "", 0), toolCallCard("Terminal", "go build", 0)},
+			at:      0,
+		},
+		{
+			name:    "an index naming no entry heads nothing",
+			entries: []entry{toolCallCard("Read", "a.go", 0), toolCallCard("Terminal", "go build", 0)},
+			at:      7,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := toolSuperGroup(tc.entries, tc.at)
+
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("toolSuperGroup(…, %d) = %v; want %v", tc.at, got, tc.want)
+			}
+			if n := got.calls(); n != tc.calls {
+				t.Errorf("umbrella counts %d calls; want %d — the header states N", n, tc.calls)
+			}
+		})
+	}
+}
+
+// Formation is LIVE (design call 2): the umbrella exists the moment the second different-label run
+// starts — while its last call is still open — and grows as calls append, because membership is
+// derived from the entries every time it is asked rather than recorded when a call lands.
+func TestTranscriptSuperGroupFormsLiveAndGrows(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	call := func(id, tool, args string) {
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: id, Tool: tool, Arguments: []byte(args)}})
+	}
+	call("c1", "read_file", `{"path":"a.go"}`)
+	if got := toolSuperGroup(tr.entries, 0); got != nil {
+		t.Fatalf("one call formed %v; a run of 1 is no umbrella on its own", got)
+	}
+
+	// The second run's first call is still open — no result has folded into it — and the umbrella is
+	// already there, which is what puts the running call on its last row.
+	call("c2", "terminal", `{"command":"go build"}`)
+	want := superGroup{{at: 0, n: 1}, {at: 1, n: 1}}
+	if got := toolSuperGroup(tr.entries, 0); !reflect.DeepEqual(got, want) {
+		t.Fatalf("umbrella at the second run = %v; want %v formed live", got, want)
+	}
+	if tr.entries[1].done {
+		t.Fatal("the fixture's last call is settled; the live-formation case needs it open")
+	}
+
+	call("c3", "terminal", `{"command":"go vet"}`)
+	call("c4", "read_file", `{"path":"b.go"}`)
+	got := toolSuperGroup(tr.entries, 0)
+	if want := (superGroup{{at: 0, n: 1}, {at: 1, n: 2}, {at: 3, n: 1}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("grown umbrella = %v; want %v — a call joins its run, a new label opens one", got, want)
+	}
+	if n := got.calls(); n != 4 {
+		t.Errorf("grown umbrella counts %d calls; want 4", n)
+	}
+}
+
+// The two levels of state are independent and both survive the list growing beneath them: a type row
+// opened inside the umbrella stays open when the next call appends, and opening it never touches the
+// member body state that shares the entry (entry.typeExpanded vs entry.expanded).
+func TestTranscriptSuperGroupStateSurvivesAppends(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{entries: []entry{
+		toolCallCard("Read", "a.go", 0),
+		toolCallCard("Terminal", "go build", 0),
+		toolCallCard("Terminal", "go vet", 0),
+	}}
+	if !tr.setTypeExpanded(1, true) {
+		t.Fatal("setTypeExpanded found no run head at the Terminal run's first call")
+	}
+	if !tr.setExpanded(2, true) {
+		t.Fatal("setExpanded found no block at the run's second member")
+	}
+	if tr.entries[1].expanded {
+		t.Error("opening the type row opened the head member's body too; the levels are independent")
+	}
+	if tr.entries[2].typeExpanded {
+		t.Error("opening a member's body opened a type row; the levels are independent")
+	}
+
+	tr.entries = append(tr.entries, toolCallCard("Read", "b.go", 0))
+
+	want := superGroup{{at: 0, n: 1}, {at: 1, n: 2}, {at: 3, n: 1}}
+	if got := toolSuperGroup(tr.entries, 0); !reflect.DeepEqual(got, want) {
+		t.Fatalf("umbrella after the append = %v; want %v", got, want)
+	}
+	if !tr.entries[1].typeExpanded {
+		t.Error("the open type row closed itself when the umbrella grew")
+	}
+	if !tr.entries[2].expanded {
+		t.Error("the open member closed itself when the umbrella grew")
+	}
+}
+
+// toggleTypeExpanded flips the type row of the one kind that can head a run — a tool call — and
+// nothing else: an index naming another kind, or naming nothing at all, answers false and leaves
+// every entry as it was. It runs on the repaint path, so the out-of-range cases are the point.
+//
+// The gate is deliberately the KIND's and not the live derivation's: whether the entry heads a run
+// today depends on what the model called next (toolSuperGroup), and a click that succeeded or failed
+// by that would lose a reader's open row the moment a call appended behind it.
+func TestTranscriptToggleTypeExpandedTargetsToolCalls(t *testing.T) {
+	t.Parallel()
+
+	fixture := func() *transcript {
+		return &transcript{entries: []entry{
+			toolCallCard("Read", "a.go", 0),
+			{kind: entryNote, text: "cancelled"},
+			{kind: entryUser, text: "read a.go"},
+		}}
+	}
+	cases := []struct {
+		name  string
+		index int
+		want  bool
+	}{
+		{name: "a tool call heads a type row", index: 0, want: true},
+		{name: "a note heads none", index: 1},
+		{name: "a user send heads none", index: 2},
+		{name: "an index past the tail is no entry", index: 3},
+		{name: "a negative index is no entry", index: -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tr := fixture()
+
+			got := tr.toggleTypeExpanded(tc.index)
+
+			if got != tc.want {
+				t.Errorf("toggleTypeExpanded(%d) = %v; want %v", tc.index, got, tc.want)
+			}
+			for i := range tr.entries {
+				if open := tr.entries[i].typeExpanded; open != (tc.want && i == tc.index) {
+					t.Errorf("entries[%d].typeExpanded = %v after toggleTypeExpanded(%d)", i, open, tc.index)
+				}
+				if tr.entries[i].expanded {
+					t.Errorf("entries[%d].expanded = true; the type row must not carry the body's state", i)
+				}
+			}
+		})
+	}
+}
+
 // reset returns the transcript to its empty state — no committed entries, no in-progress buffer —
 // but preserves the debug flag (a hidden view toggle, not conversation). It is the /clear + /new
 // "start a new session" primitive; the caller re-seeds the start-up box afterwards.

@@ -91,7 +91,7 @@ type paintKey struct {
 	span  int    // how many entries the paint covers — a run that grew a member is a different block
 	live  bool   // whether the block still holds an open call (blockState.live), which is what makes the star blink
 	blink bool   // the frame's star phase, folded in ONLY while live — a settled block paints identically at either phase
-	flags string // one byte per covered entry: bit 0 expanded, bit 1 done (spanFlags)
+	flags string // one byte per covered entry: bit 0 expanded, bit 1 done, bit 2 typeExpanded (spanFlags)
 
 	// The head's context reading, which a collapsed sub-agent run states on its summary line
 	// (subAgentFill). It is the one input that moves with NO other movement the key can see: a
@@ -109,10 +109,15 @@ type paintKey struct {
 // The box is one small block at the very top of the scrollback and is not what the cache is for.
 func (k paintKey) cacheable() bool { return k.kind != entryStartup }
 
-// spanFlags packs the per-entry view state the painters read — expanded and done — into one
-// comparable string, one byte per entry. It is a string rather than a bitmask because a folded tool
-// run or a sub-agent span has no fixed length, and a mask that silently stopped covering the 65th
-// entry of a span would be a stale paint rather than a missed optimisation. A one-entry span (the
+// spanFlags packs the per-entry view state the painters read — expanded, done, and the type row's
+// own typeExpanded — into one comparable string, one byte per entry. Every per-entry view FACT
+// belongs here, whether or not a painter reads it yet: a state a key ignores is a stale paint served
+// after a click that changed something, and that is a failure no golden can see, since the paint it
+// asserts is the one the painter would have produced anyway.
+//
+// It is a string rather than a bitmask because a folded tool run or a sub-agent span has no fixed
+// length, and a mask that silently stopped covering the 65th entry of a span would be a stale paint
+// rather than a missed optimisation. A one-entry span (the
 // overwhelmingly common case) converts through the runtime's single-byte string table and so costs
 // no allocation.
 func spanFlags(entries []entry) string {
@@ -124,6 +129,9 @@ func spanFlags(entries []entry) string {
 		}
 		if entries[i].done {
 			f |= 2
+		}
+		if entries[i].typeExpanded {
+			f |= 4
 		}
 		b[i] = f
 	}

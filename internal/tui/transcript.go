@@ -135,6 +135,14 @@ const (
 // and it is deliberately absent from the wire form — the state is the view's alone, so a resumed
 // session paints everything collapsed and /clear forgets it with everything else.
 //
+// typeExpanded is the second, INDEPENDENT view state of the same entry, and it means something only
+// where the entry heads a run inside a super-group (toolSuperGroup): whether that run's TYPE ROW is
+// open, showing its member rows, or closed to the one aggregated row the umbrella lists it as
+// (docs/layout/tool-layout.md, "Grouped tools expanded 1st step"). It is a separate field rather
+// than a re-use of expanded because the two levels nest — a type row is opened to reveal its
+// members, and a member is then opened to reveal its own body — so one flag could not say which of
+// the two steps the reader took. It is view-only and unpersisted for exactly expanded's reasons.
+//
 // ctxUsed / ctxLimit are the CHILD's context fill on the head of a sub-agent run (applyUsage): how
 // much of its window the delegate had filled when it last reported, and the window that reading
 // filled. They are a pair by necessity — a fill says nothing without its limit — so they are
@@ -154,7 +162,9 @@ type entry struct {
 	tool        toolView
 	done        bool
 	expanded    bool // view-only block state: false = collapsed (the default); never persisted
-	ephemeral   bool // display-only: rendered, never persisted (see encodeTranscript)
+	// view-only state of the TYPE ROW this entry heads inside a super-group; never persisted
+	typeExpanded bool
+	ephemeral    bool // display-only: rendered, never persisted (see encodeTranscript)
 	// entryUser / entryInterjected: where the skills this message invoked sit IN text — one span
 	// per occurrence
 	skillSpans []skillSpan
@@ -969,6 +979,137 @@ func (t *transcript) toggleExpanded(index int) bool {
 		return false
 	}
 	return t.setExpanded(index, !t.entries[index].expanded)
+}
+
+// setTypeExpanded opens or closes the TYPE ROW of the run headed by entries[index] — the second,
+// independent level of a super-group's state (entry.typeExpanded) — and reports whether it found a
+// run head to set. Only a tool call can head a run (sameLabelRun), so every other kind answers false
+// and changes nothing, as does an index outside the slice: this sits where setExpanded sits, on the
+// path a click and a repaint share, where a panic is the whole session.
+//
+// It does NOT ask whether the entry heads a run TODAY. Membership is derived from the entries at
+// query time and moves as they append (toolSuperGroup), so a flag written on an entry that later
+// stops heading a run is simply a flag nothing reads — where a gate on the live derivation would
+// make the same click succeed or fail depending on what the model called next. The flag survives
+// either way, which is what lets a reader open a type row and keep it open while the umbrella grows
+// beneath it.
+func (t *transcript) setTypeExpanded(index int, expanded bool) bool {
+	if index < 0 || index >= len(t.entries) || t.entries[index].kind != entryToolCall {
+		return false
+	}
+	t.entries[index].typeExpanded = expanded
+	return true
+}
+
+// toggleTypeExpanded flips one type row between its two states and reports whether it found a run
+// head to flip — the meaning of a click on a type row. The kind and range guards are
+// setTypeExpanded's, so an index that heads nothing answers false from one place; the bound here
+// only makes the READ of the current state safe.
+func (t *transcript) toggleTypeExpanded(index int) bool {
+	if index < 0 || index >= len(t.entries) {
+		return false
+	}
+	return t.setTypeExpanded(index, !t.entries[index].typeExpanded)
+}
+
+// toolRun is one RUN of tool calls: the maximal stretch of adjacent entries carrying the same
+// friendly Label at the same sub-agent depth, every one of them foldable into a member row
+// (groupable). It is the unit both folded shapes are built from — a same-label group IS one run, and
+// a super-group is two or more of them under one umbrella — and a lone call is a run of 1
+// (docs/layout/tool-layout.md, "Vocabulary").
+//
+// It is stated as an index pair rather than as the views it covers because the INDEX is what the
+// levels above it need: the head entry is where the run's type-row state lives (typeExpanded) and
+// what a click on that row resolves to, and each member is one entry, so a member row's own entry is
+// at + n.
+type toolRun struct {
+	at int // index into the entries slice of the run's first call
+	n  int // how many calls the run holds; never 0
+}
+
+// superGroup is the umbrella: the adjacent runs that fold under one "✦ Tools (N calls)" header, in
+// TIME ORDER, which is the order they appear in the transcript. Calls are never reordered to merge
+// same-type calls that were not adjacent (docs/layout/tool-layout.md): `read, terminal, read` is
+// three runs and therefore three rows, not two.
+type superGroup []toolRun
+
+// calls is N — the total number of calls the umbrella holds, which its header states. It is also the
+// number of ENTRIES the umbrella covers, because every member of every run is exactly one entry and
+// the runs are adjacent by construction: a walk over the entries skips the whole umbrella by adding
+// it to the head's index.
+func (g superGroup) calls() int {
+	n := 0
+	for _, r := range g {
+		n += r.n
+	}
+	return n
+}
+
+// sameLabelRun is the length of the run entries[i] opens: the adjacent calls that carry the same
+// friendly Label at the same sub-agent depth and can each be a member row. It answers 0 when
+// entries[i] opens no run at all — anything that is not a tool call, and a call the presenter marked
+// solo or left without a target to lead a row (groupable).
+//
+// Any other entry between two calls ends the run where it stands, since the scan only ever walks
+// forward over ADJACENT entries: narration, a note, an approval, an error. Two different tools
+// sharing a label group all the same — the reader groups by what the row says, not by tool id.
+func sameLabelRun(entries []entry, i int) int {
+	if i < 0 || i >= len(entries) {
+		return 0
+	}
+	head := entries[i]
+	if head.kind != entryToolCall || !groupable(head.tool) {
+		return 0
+	}
+	n := 1
+	for j := i + 1; j < len(entries); j++ {
+		e := entries[j]
+		if e.kind != entryToolCall || e.depth != head.depth || e.tool.Label != head.tool.Label || !groupable(e.tool) {
+			break
+		}
+		n++
+	}
+	return n
+}
+
+// toolSuperGroup is the umbrella entries[i] heads, or nil when it heads none: the adjacent
+// same-depth runs of DIFFERENT labels starting there. Two runs are the floor (design call 1) —
+// one run is the same-label group that already had a header of its own, and a run of 1 is a lone
+// call, so a Read followed by a Terminal is an umbrella of two rows.
+//
+// Adjacent runs differ in label BY CONSTRUCTION rather than by a test here: sameLabelRun is maximal,
+// so a call carrying the previous run's label was already absorbed by it and a call that opens a new
+// run necessarily carries a different one.
+//
+// The breakers are the group's own, one rule stated once: anything that is not a call opening a run
+// at the umbrella's OWN depth ends it where it stands. That covers the non-tool entries a same-label
+// run already broke on — narration, a note, an approval, an error — and, through groupable's solo
+// mark, a sub-agent call, whose block heads a whole run of its own and never joins an umbrella (spec
+// Rules: "a sub-agent block or group breaks the run"); the deeper entries such a run leaves behind
+// break it by depth, as does a nested call at any other level.
+//
+// Membership is DERIVED here and stored nowhere, which is what makes formation live (design call 2):
+// the umbrella exists the moment the second run's first call is placed — the running call being its
+// last row, spinner star and all — and grows as further calls append, with no membership recorded
+// anywhere that could fall out of date behind them.
+func toolSuperGroup(entries []entry, i int) superGroup {
+	n := sameLabelRun(entries, i)
+	if n == 0 {
+		return nil
+	}
+	runs := superGroup{{at: i, n: n}}
+	for at := i + n; at < len(entries) && entries[at].depth == entries[i].depth; {
+		m := sameLabelRun(entries, at)
+		if m == 0 {
+			break
+		}
+		runs = append(runs, toolRun{at: at, n: m})
+		at += m
+	}
+	if len(runs) < 2 {
+		return nil
+	}
+	return runs
 }
 
 // addApproval records an Approval observationally — the decision already came back through

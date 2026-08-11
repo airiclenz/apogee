@@ -1934,24 +1934,20 @@ func renderSubDetails(th theme, details []detailLine, indent, width int) []strin
 }
 
 // toolCallRun returns the consecutive tool-call entries starting at entries[i] that fold into one
-// grouped block, as their presentation views: same sub-agent depth, same friendly Label, every
-// member groupable. Any other entry between two calls — narration, a note, an approval, an error —
-// ends the run, since the scan only ever walks forward over adjacent entries. Two different tools
-// sharing a label (a single and a multi find-and-replace are both "Replace") do group: the reader
-// groups by what the header says, not by tool id. It returns nil when entries[i] is not a groupable
-// tool call, and a one-view run when nothing follows it — the caller renders both as single blocks.
+// grouped block, as their presentation views. WHICH entries those are is [sameLabelRun]'s answer —
+// same sub-agent depth, same friendly Label, every member groupable — asked here for the views the
+// painter needs, so the same-label group and the super-group that lists such runs as its rows
+// (toolSuperGroup) cannot come to disagree about where a run ends. It returns nil when entries[i] is
+// not a groupable tool call, and a one-view run when nothing follows it — the caller renders both as
+// single blocks.
 func toolCallRun(entries []entry, i int) []toolView {
-	head := entries[i]
-	if head.kind != entryToolCall || !groupable(head.tool) {
+	n := sameLabelRun(entries, i)
+	if n == 0 {
 		return nil
 	}
-	views := []toolView{head.tool}
-	for j := i + 1; j < len(entries); j++ {
-		e := entries[j]
-		if e.kind != entryToolCall || e.depth != head.depth || e.tool.Label != head.tool.Label || !groupable(e.tool) {
-			break
-		}
-		views = append(views, e.tool)
+	views := make([]toolView, 0, n)
+	for j := i; j < i+n; j++ {
+		views = append(views, entries[j].tool)
 	}
 	return views
 }
