@@ -48,7 +48,7 @@ const fileHintMarker = "Based on the directory listing, these files are likely m
 // interplay opens and closes a hint opportunity. They compose from the shared spelling families
 // (listSpellings / readSpellings, decompose.go) so a mixed MCP menu still triggers: the list set now
 // carries the full family — the F8 gap fix adds listDir to the list_dir / list_files / listFiles /
-// list_directory it had — and the read set carries apogee's open_file alongside the sim's spellings.
+// list_directory it had — and the read set carries the retired open_file spelling alongside the sim's.
 var (
 	fileHintListTools = toolSet(listSpellings)
 	fileHintReadTools = toolSet(readSpellings)

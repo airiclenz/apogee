@@ -95,10 +95,10 @@ const (
 // cotReadOnlyTools names the tools whose exclusive use marks a read-only turn (apogee-sim
 // readOnlyTools @pin). It composes from the shared read and list spelling families (readSpellings /
 // listSpellings, decompose.go) plus cot's own local search/exec spellings — so it carries apogee's own
-// read/exec extensions (open_file, terminal) and the full list family, which closes the F8 gap that had
-// left list_directory out of the read-only streak. A turn using only these tools is exploration; the
-// first non-read-only tool call ends the read-only streak. (Search/exec spellings stay local — out of
-// the consolidation's read/list scope.)
+// exec extension (terminal), the retired open_file spelling, and the full list family, which closes the
+// F8 gap that had left list_directory out of the read-only streak. A turn using only these tools is
+// exploration; the first non-read-only tool call ends the read-only streak. (Search/exec spellings stay
+// local — out of the consolidation's read/list scope.)
 var cotReadOnlyTools = toolSet(
 	readSpellings,
 	listSpellings,
@@ -110,7 +110,8 @@ var cotReadOnlyTools = toolSet(
 )
 
 // cotReadTools names the file-reading tools countFilesRead and hasFileReadTool count — the read
-// spelling family (readSpellings, decompose.go: apogee-sim toolsets.ReadTools @pin + apogee's open_file).
+// spelling family (readSpellings, decompose.go: apogee-sim toolsets.ReadTools @pin + the retired
+// open_file spelling).
 var cotReadTools = toolSet(readSpellings)
 
 // toolUseDirectiveMechanism nudges a model that answered an action request with prose to actually
@@ -248,7 +249,7 @@ func cotCountReadOnlyTurns(conv domain.ConversationView) int {
 }
 
 // cotCountFilesRead counts the distinct file paths the model has read (apogee-sim countFilesRead
-// @pin, over cotReadTools so apogee's open_file counts).
+// @pin, over cotReadTools so the retired open_file spelling counts too).
 func cotCountFilesRead(conv domain.ConversationView) int {
 	seen := make(map[string]bool)
 	conv.Range(func(_ int, m domain.Message) bool {

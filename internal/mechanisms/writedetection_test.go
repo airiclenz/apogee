@@ -24,8 +24,9 @@ func mutatingCall(id, tool, path string) domain.ToolCall {
 // does not. Only the path is load-bearing for the history family's write-since detection.
 func editCall(id, path string) domain.ToolCall { return mutatingCall(id, "edit_existing_file", path) }
 
-// openCall is an open_file tool call over path — apogee's own read tool, whose result places file
-// content into the conversation exactly like read_file, so the family's read set counts it.
+// openCall is an open_file tool call over path — the retired open_file spelling, a separate read tool
+// until it merged into read_file on 2026-08-11, kept in readSpellings because models may still emit the
+// name, so the family's read set counts it.
 func openCall(id, path string) domain.ToolCall {
 	args, _ := json.Marshal(map[string]string{"path": path})
 	return domain.ToolCall{ID: id, Tool: "open_file", Arguments: args}

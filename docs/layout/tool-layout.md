@@ -246,7 +246,7 @@ expand carries no indicator at all.
 
 | Tool | `<tool-header>` | `<tool-details>` (collapsed) | `<tool-top-level-details>` | `<tool-details-row-*>` (expanded) |
 |---|---|---|---|---|
-| read_file | Read | path (`:12–80` when ranged, `· locate "…"` when set) | `N lines` | the returned content + located line numbers |
+| read_file | Read | path (`:12–80` when ranged, `· locate "…"` when set) | `N lines` | the located lines (`Located "…" on lines: …`) when locate is set, else — |
 | write_file | Write | path | `N lines` | the written content |
 | edit_existing_file | Edit | path | `+A −R` | diff of the change |
 | single_find_and_replace | Replace | path | `+A −R` | diff of the change |

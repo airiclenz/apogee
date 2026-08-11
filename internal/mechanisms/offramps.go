@@ -39,9 +39,10 @@ const (
 
 // readToolNames are the tools whose calls count as a file read when the off-ramps and the history
 // family measure recent progress / recent successful reads. It composes from the read spelling family
-// (readSpellings, decompose.go) — apogee-sim's ReadTools @pin plus apogee's own open_file, whose result
-// places file content into the conversation exactly like read_file — so the cot/filehint/library read
-// sets that share the family stay identical by construction rather than by hand-maintained copies.
+// (readSpellings, decompose.go) — apogee-sim's ReadTools @pin plus the retired open_file spelling, a
+// separate read tool until it merged into read_file on 2026-08-11, kept because models may still emit
+// the name — so the cot/filehint/library read sets that share the family stay identical by construction
+// rather than by hand-maintained copies.
 var readToolNames = toolSet(readSpellings)
 
 // isReadTool reports whether name is one of the file-reading tools progress detection counts.
