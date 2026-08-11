@@ -293,3 +293,108 @@ func TestFoldEventPairsResultWithCallBeforeActivity(t *testing.T) {
 		}
 	})
 }
+
+// ----------------------------------------------------------------------------
+// The main agent's cumulative accounting (foldStats)
+// ----------------------------------------------------------------------------
+
+// mainUsage is one reading the top-level agent reported: the Turn's own fill, and the running
+// totals the agent stamped it with (domain.UsageEvent's Cumulative* fields).
+func mainUsage(prompt, completion, total, cumPrompt, cumCompletion, cumTotal, calls int) domain.UsageEvent {
+	return domain.UsageEvent{
+		PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total,
+		CumulativePromptTokens: cumPrompt, CumulativeCompletionTokens: cumCompletion,
+		CumulativeTotalTokens: cumTotal, CumulativeCalls: calls,
+	}
+}
+
+// TestFoldStatsTracksTheMainAgentsCumulativeTotals pins the totals half of the usage fold: the
+// Model holds the LATEST reading the top-level agent stamped, never a sum of the stream, so a view
+// that joined late reports what one that saw every event reports. A delegate's reading is not the
+// main agent's — it belongs to its own run block — and a reading from an agent that has accounted
+// for nothing leaves the standing totals alone rather than blanking them.
+func TestFoldStatsTracksTheMainAgentsCumulativeTotals(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the newest reading replaces the previous one", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+
+		m = m.foldEvent(mainUsage(1000, 200, 1200, 1000, 200, 1200, 1))
+		m = m.foldEvent(mainUsage(2400, 300, 2700, 3400, 500, 3900, 2))
+
+		want := usageTotals{Calls: 2, PromptTokens: 3400, CompletionTokens: 500, TotalTokens: 3900}
+		if m.usage != want {
+			t.Errorf("totals = %+v, want %+v (the agent's own running sum, not a fold-side sum)", m.usage, want)
+		}
+	})
+
+	t.Run("a delegate's reading is not the main agent's", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+
+		m = m.foldEvent(mainUsage(1000, 200, 1200, 1000, 200, 1200, 1))
+		child := mainUsage(500, 100, 600, 500, 100, 600, 1)
+		child.Depth = 1
+		m = m.foldEvent(child)
+
+		want := usageTotals{Calls: 1, PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}
+		if m.usage != want {
+			t.Errorf("totals = %+v, want %+v — a child counts on its own run head", m.usage, want)
+		}
+	})
+
+	t.Run("a reading stamped by no accounting leaves the totals standing", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+
+		m = m.foldEvent(mainUsage(1000, 200, 1200, 1000, 200, 1200, 1))
+		m = m.foldEvent(domain.UsageEvent{PromptTokens: 900, CompletionTokens: 100, TotalTokens: 1000})
+
+		want := usageTotals{Calls: 1, PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}
+		if m.usage != want {
+			t.Errorf("totals = %+v, want %+v (an uncounted event blanks nothing)", m.usage, want)
+		}
+		if m.ctxUsed != 1000 {
+			t.Errorf("ctxUsed = %d, want 1000 — the fill still follows every reading", m.ctxUsed)
+		}
+	})
+}
+
+// TestFoldStatsSkipsAMaintenanceReadingForTheGaugeAndClock pins where the two readings part
+// company: a maintenance event (the compaction call) is real spend, so the totals take it, but its
+// prompt describes the summarizer's own request — so the gauge must not move to it and the
+// generation clock must survive it, ready to time the Turn that is still streaming.
+func TestFoldStatsSkipsAMaintenanceReadingForTheGaugeAndClock(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+
+	m = m.foldEvent(mainUsage(1000, 200, 1200, 1000, 200, 1200, 1))
+	m = m.foldEvent(domain.TokenEvent{Text: "hi"}) // the next Turn starts streaming
+
+	maintenance := mainUsage(8000, 400, 8400, 9000, 600, 9600, 2)
+	maintenance.Maintenance = true
+	m = m.foldEvent(maintenance)
+
+	want := usageTotals{Calls: 2, PromptTokens: 9000, CompletionTokens: 600, TotalTokens: 9600}
+	if m.usage != want {
+		t.Errorf("totals = %+v, want %+v — a maintenance call's tokens were really spent", m.usage, want)
+	}
+	if m.ctxUsed != 1200 {
+		t.Errorf("ctxUsed = %d, want the last Turn's 1200 — the gauge skips a maintenance reading", m.ctxUsed)
+	}
+	if m.tokPerSec != 0 {
+		t.Errorf("tokPerSec = %v, want 0 — a maintenance reading times nothing", m.tokPerSec)
+	}
+	if m.genStart.IsZero() {
+		t.Error("the generation clock was cleared by a maintenance reading; the Turn is still streaming")
+	}
+
+	m = m.foldEvent(mainUsage(2000, 300, 2300, 11000, 900, 11900, 3))
+	if m.ctxUsed != 2300 {
+		t.Errorf("ctxUsed = %d, want 2300 — the next Turn moves the gauge normally", m.ctxUsed)
+	}
+	if m.tokPerSec <= 0 {
+		t.Errorf("tokPerSec = %v, want > 0 — the surviving clock timed the completion", m.tokPerSec)
+	}
+}

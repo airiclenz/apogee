@@ -174,6 +174,11 @@ type entry struct {
 	// filled, frozen together when the reading folded (applyUsage)
 	ctxUsed  int
 	ctxLimit int
+	// the head of a sub-agent run only: the CHILD's cumulative token accounting for the whole run
+	// (usageTotals, fold.go), folded latest-wins from the same readings — including the maintenance
+	// ones the fill above skips. It is what makes a delegate's spend reportable per agent long after
+	// its run closed, where ctxUsed only ever says how full its window was at the end.
+	usage usageTotals
 }
 
 // skillSpan is one invoked "/token" LOCATED in a sent message's text: the byte range [start,end)
@@ -686,7 +691,8 @@ func (t *transcript) apply(e domain.Event) {
 	}
 }
 
-// applyUsage folds a sub-agent's context reading onto the run it belongs to — the transcript's
+// applyUsage folds a sub-agent's readings onto the run it belongs to — its context FILL and its
+// cumulative TOTALS, which travel on the same Event and land on the same head. It is the transcript's
 // half of the UsageEvent, and the one fold apply cannot perform from the Event alone: a reading
 // is a FILL, and a fill means nothing beside the window it fills, which is a fact about the
 // Model rather than about the Event (foldEvent hands window in). Anything that is not a
@@ -707,6 +713,12 @@ func (t *transcript) apply(e domain.Event) {
 // it filled, so the newest number IS the fill. A total the server omitted falls back to
 // prompt+completion, the preference foldStats already reads usage by; a reading of nothing
 // leaves the previous one standing rather than blanking a run that had reported.
+//
+// The child's cumulative totals are latest-wins for a different reason: the CHILD keeps the running
+// sum (each sub-agent counts its own calls from zero, domain.UsageEvent), so the head holds its
+// newest report rather than adding events up here. They and the fill are folded independently —
+// a maintenance reading advances the totals while leaving the fill standing, and an event stamped
+// by an agent that has counted nothing advances neither.
 func (t *transcript) applyUsage(e domain.Event, window int) {
 	usage, ok := e.(domain.UsageEvent)
 	if !ok || usage.Depth <= 0 {
@@ -716,24 +728,47 @@ func (t *transcript) applyUsage(e domain.Event, window int) {
 	if total == 0 {
 		total = usage.PromptTokens + usage.CompletionTokens
 	}
-	if total <= 0 {
+	// The two readings part company on the Maintenance flag, for the reason foldStats gives on the
+	// gauge: a maintenance call's prompt is the summarizer's own, so it says nothing about how full
+	// the child's window stands — but its tokens were really spent, so the totals take it.
+	fills := total > 0 && !usage.Maintenance
+	totals, counted := usageReading(usage)
+	if !fills && !counted {
 		return
 	}
+	head := t.openSubAgentHead(usage.CallID, usage.Depth)
+	if head == nil {
+		return
+	}
+	if fills {
+		head.ctxUsed, head.ctxLimit = total, window
+	}
+	if counted {
+		head.usage = totals
+	}
+}
+
+// openSubAgentHead picks the still-open run head a delegated reading belongs to: the one its own
+// spawning call opened (callID), or — for a reading carrying no call id, a legacy record or a
+// hand-built stream — the most recent open head standing one level above depth. It returns nil
+// when nothing matches, which is the reading that arrived after its run reported or before its
+// call: it folds nothing at all, exactly as applyUsage describes.
+func (t *transcript) openSubAgentHead(callID string, depth int) *entry {
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		head := &t.entries[i]
 		if head.kind != entryToolCall || head.done || head.tool.name != subAgentToolName {
 			continue
 		}
-		if usage.CallID != "" {
-			if head.callID != usage.CallID {
+		if callID != "" {
+			if head.callID != callID {
 				continue
 			}
-		} else if head.depth != usage.Depth-1 {
+		} else if head.depth != depth-1 {
 			continue
 		}
-		head.ctxUsed, head.ctxLimit = total, window
-		return
+		return head
 	}
+	return nil
 }
 
 // appendToken grows the in-progress assistant buffer with one streamed chunk emitted by run. The

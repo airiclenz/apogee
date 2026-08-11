@@ -91,7 +91,7 @@ next regular Turn's event continues from those totals with `Maintenance: false`.
 
 **Commit:** `feat(engine): count compaction usage via flagged maintenance UsageEvent`
 
-## 3. TUI: fold cumulative usage per agent and persist it
+## 3. TUI: fold cumulative usage per agent and persist it — ✅ DONE (2026-08-11)
 
 Depends on items 1 and 2.
 

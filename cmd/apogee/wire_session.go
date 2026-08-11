@@ -73,7 +73,7 @@ func newSessionHost(store *session.Store, workspace, model string, resumed *sess
 // by a later Save — Rename is the only writer that changes it, so a user rename sticks — while
 // UpdatedAt, the transcript blob, and the browsable counts refresh every Save. Workspace and Model
 // come from the wiring, the facts the renderer cannot know.
-func (h *sessionHost) Save(sess apogee.Session, transcript []byte, title string, userMsgs, ctxUsed int) error {
+func (h *sessionHost) Save(sess apogee.Session, transcript []byte, title string, userMsgs, ctxUsed int, usage session.Usage) error {
 	now := h.now().UTC()
 	h.mu.Lock()
 	if h.active == nil {
@@ -93,6 +93,7 @@ func (h *sessionHost) Save(sess apogee.Session, transcript []byte, title string,
 			Model:     model,
 			UserMsgs:  userMsgs,
 			CtxUsed:   ctxUsed,
+			Usage:     usage,
 		},
 		Transcript: transcript,
 		Session:    sess,
@@ -278,6 +279,7 @@ func resumedSession(rec *session.Record, inExchange bool) *tui.ResumedSession {
 		Transcript: rec.Transcript,
 		Title:      rec.Meta.Title,
 		CtxUsed:    rec.Meta.CtxUsed,
+		Usage:      rec.Meta.Usage,
 		UserMsgs:   rec.Meta.UserMsgs,
 		InExchange: inExchange,
 	}

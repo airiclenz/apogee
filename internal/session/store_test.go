@@ -712,3 +712,78 @@ func TestScheduleIdentityKeepsTheRecordVersion(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 }
+
+// A session's cumulative usage totals survive Save/Load and reach List, so a reopened session
+// reports what it spent from Meta alone — and a session that spent nothing writes no key at all,
+// which is what lets a record predating the accounting read back as the same nothing.
+func TestUsageTotalsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the totals come back off disk", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		st := NewStore(dir)
+
+		want := sampleRecord("20260811T120000Z-aaaa1111", time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC))
+		want.Meta.Usage = Usage{Calls: 4, PromptTokens: 9000, CompletionTokens: 600, TotalTokens: 9600}
+		if err := st.Save(want); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+
+		got, err := st.Load(want.Meta.ID)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got.Meta.Usage != want.Meta.Usage {
+			t.Errorf("loaded usage = %+v, want %+v", got.Meta.Usage, want.Meta.Usage)
+		}
+		metas, err := st.List()
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(metas) != 1 || metas[0].Usage != want.Meta.Usage {
+			t.Errorf("listed usage = %+v, want %+v (the browser reads Meta alone)", metas, want.Meta.Usage)
+		}
+	})
+
+	t.Run("a session that spent nothing writes no usage key", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		st := NewStore(dir)
+
+		rec := sampleRecord("20260811T130000Z-bbbb2222", time.Date(2026, 8, 11, 13, 0, 0, 0, time.UTC))
+		if err := st.Save(rec); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, rec.Meta.ID+".json"))
+		if err != nil {
+			t.Fatalf("read record: %v", err)
+		}
+		if bytes.Contains(data, []byte("usage")) {
+			t.Errorf("an empty accounting reached the record: %s", data)
+		}
+	})
+
+	t.Run("a record written before the accounting loads as zero totals", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		st := NewStore(dir)
+
+		legacy := fmt.Sprintf(
+			`{"recordVersion":%d,"meta":{"id":"20260811T140000Z-cccc3333","title":"greet the world",`+
+				`"createdAt":"2026-08-11T13:00:00Z","updatedAt":"2026-08-11T14:00:00Z","userMsgs":3},`+
+				`"session":{"Version":%d,"State":{"k":"v"}}}`,
+			RecordVersion, domain.SessionVersion)
+		if err := os.WriteFile(filepath.Join(dir, "20260811T140000Z-cccc3333.json"), []byte(legacy), filePerm); err != nil {
+			t.Fatalf("write pre-usage record: %v", err)
+		}
+
+		got, err := st.Load("20260811T140000Z-cccc3333")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if (got.Meta.Usage != Usage{}) {
+			t.Errorf("a record predating the accounting loaded usage %+v, want the zero totals", got.Meta.Usage)
+		}
+	})
+}

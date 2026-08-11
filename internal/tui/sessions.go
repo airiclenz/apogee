@@ -495,7 +495,8 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// (the resolved-live posture: a resumed session speaks from the CURRENT files, not the ones its
 	// snapshot was taken under) — the notice says what it is now carrying.
 	m.noteContextFiles()
-	m.ctxUsed = msg.rec.Meta.CtxUsed // relight the gauge near the resumed session's last fill
+	m.ctxUsed = msg.rec.Meta.CtxUsed          // relight the gauge near the resumed session's last fill
+	m.usage = usageTotals(msg.rec.Meta.Usage) // …and reopen its accounting where the record left it
 	m.tokPerSec = 0
 	m.genStart = time.Time{}
 	m.detached = false // re-arm follow-the-tail: the resumed view opens at its tail like a launch

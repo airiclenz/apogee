@@ -292,7 +292,7 @@ func TestRunRootSwitchServerRepointsTheSession(t *testing.T) {
 	if rec.opts.Sessions == nil {
 		t.Fatal("tui.Options.Sessions is nil; the session host was not wired")
 	}
-	if err := rec.opts.Sessions.Save(apogee.Session{}, nil, "switched", 1, 0); err != nil {
+	if err := rec.opts.Sessions.Save(apogee.Session{}, nil, "switched", 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save after the switch: %v", err)
 	}
 	metas, err := session.NewStore(filepath.Join(configHome, "sessions")).List()

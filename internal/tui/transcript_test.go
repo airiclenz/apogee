@@ -2264,3 +2264,76 @@ func callEntry(tr *transcript, id string) *entry {
 	}
 	return nil
 }
+
+// ----------------------------------------------------------------------------
+// A sub-agent's running totals fold onto its own run (transcript.applyUsage)
+// ----------------------------------------------------------------------------
+
+// childUsage is one reading a delegate reported: the fill its Turn measured, plus the running
+// totals the CHILD stamped it with — its own calls, counted from zero, carried on the event its
+// spawning call (callID) identifies.
+func childUsage(callID string, depth, total int, cum usageTotals) domain.UsageEvent {
+	return domain.UsageEvent{
+		EventBase:                  domain.EventBase{Depth: depth, CallID: callID},
+		TotalTokens:                total,
+		CumulativePromptTokens:     cum.PromptTokens,
+		CumulativeCompletionTokens: cum.CompletionTokens,
+		CumulativeTotalTokens:      cum.TotalTokens,
+		CumulativeCalls:            cum.Calls,
+	}
+}
+
+// TestSubAgentUsageFoldsTheChildsRunningTotals pins the totals half of the delegated fold: a run
+// head keeps the newest totals the child stamped, keyed by the call that spawned it — so two
+// siblings running at once each keep their own — and the two readings on one event fold
+// independently, which is what lets a maintenance call be counted without moving the fill.
+func TestSubAgentUsageFoldsTheChildsRunningTotals(t *testing.T) {
+	const window = 32768
+
+	t.Run("the totals land on the run the reading's own call opened", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentCall(tr, "s2", "survey the docs", 0)
+
+		want := usageTotals{Calls: 2, PromptTokens: 4000, CompletionTokens: 300, TotalTokens: 4300}
+		tr.applyUsage(childUsage("s1", 1, 2200, want), window)
+
+		if got := tr.entries[0].usage; got != want {
+			t.Errorf("first run totals = %+v, want %+v", got, want)
+		}
+		if got := tr.entries[1].usage; got != (usageTotals{}) {
+			t.Errorf("the sibling took totals it never reported: %+v", got)
+		}
+	})
+
+	t.Run("the newest reading replaces the previous one", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+
+		tr.applyUsage(childUsage("s1", 1, 2200, usageTotals{Calls: 1, PromptTokens: 2000, CompletionTokens: 200, TotalTokens: 2200}), window)
+		want := usageTotals{Calls: 2, PromptTokens: 5000, CompletionTokens: 400, TotalTokens: 5400}
+		tr.applyUsage(childUsage("s1", 1, 3200, want), window)
+
+		if got := tr.entries[0].usage; got != want {
+			t.Errorf("run totals = %+v, want %+v (the child's own sum, never one added up here)", got, want)
+		}
+	})
+
+	t.Run("a maintenance reading counts and leaves the fill standing", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		tr.applyUsage(childUsage("s1", 1, 12000, usageTotals{Calls: 1, PromptTokens: 11000, CompletionTokens: 1000, TotalTokens: 12000}), window)
+
+		want := usageTotals{Calls: 2, PromptTokens: 19000, CompletionTokens: 1400, TotalTokens: 20400}
+		maintenance := childUsage("s1", 1, 8400, want)
+		maintenance.Maintenance = true
+		tr.applyUsage(maintenance, window/2)
+
+		if got := tr.entries[0].usage; got != want {
+			t.Errorf("run totals = %+v, want %+v — the compaction's tokens were really spent", got, want)
+		}
+		if used, limit := fillOf(tr, 0); used != 12000 || limit != window {
+			t.Errorf("run fill = %d/%d, want 12000/%d — a maintenance prompt is not the run's fill", used, limit, window)
+		}
+	})
+}

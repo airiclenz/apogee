@@ -75,11 +75,20 @@ type wireEntry struct {
 	// a blob written before they existed decodes to the zero pair, which is the same
 	// nothing-to-say case the summary line already hides (render.go, subAgentFill). Frozen at fold
 	// time, so what a record keeps is the reading as it stood when the run reported.
-	CtxUsed    int             `json:"ctxUsed,omitempty"`
-	CtxLimit   int             `json:"ctxLimit,omitempty"`
-	SkillSpans []wireSkillSpan `json:"skillSpans,omitempty"`
-	Tool       *wireToolView   `json:"tool,omitempty"`
-	Presented  *wirePresented  `json:"presented,omitempty"`
+	CtxUsed  int `json:"ctxUsed,omitempty"`
+	CtxLimit int `json:"ctxLimit,omitempty"`
+	// the cumulative token accounting a sub-agent run's head wears (entry.usage): what the delegate
+	// spent over the whole run, as of its last report. The four members are ADDITIVE within
+	// transcriptVersion on the same wireEntry rule as the pair above — each takes omitempty, so a
+	// run that never reported writes none of them and a blob written before they existed decodes to
+	// zero totals, the same nothing-to-report state a pre-feature session reopens in.
+	UsageCalls            int             `json:"usageCalls,omitempty"`
+	UsagePromptTokens     int             `json:"usagePromptTokens,omitempty"`
+	UsageCompletionTokens int             `json:"usageCompletionTokens,omitempty"`
+	UsageTotalTokens      int             `json:"usageTotalTokens,omitempty"`
+	SkillSpans            []wireSkillSpan `json:"skillSpans,omitempty"`
+	Tool                  *wireToolView   `json:"tool,omitempty"`
+	Presented             *wirePresented  `json:"presented,omitempty"`
 }
 
 // wireSkillSpan is the serialized form of a [skillSpan]: the byte range one invoked "/token"
@@ -288,7 +297,13 @@ func toWireEntry(e *entry, kind string) wireEntry {
 		Done:        e.done,
 		CtxUsed:     e.ctxUsed,
 		CtxLimit:    e.ctxLimit,
-		SkillSpans:  toWireSkillSpans(e.skillSpans),
+
+		UsageCalls:            e.usage.Calls,
+		UsagePromptTokens:     e.usage.PromptTokens,
+		UsageCompletionTokens: e.usage.CompletionTokens,
+		UsageTotalTokens:      e.usage.TotalTokens,
+
+		SkillSpans: toWireSkillSpans(e.skillSpans),
 	}
 	if e.kind == entryToolCall || e.kind == entrySchedule {
 		w.Tool = toWireToolView(e.tool)
@@ -368,6 +383,12 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 		done:        w.Done,
 		ctxUsed:     w.CtxUsed,
 		ctxLimit:    w.CtxLimit,
+		usage: usageTotals{
+			Calls:            w.UsageCalls,
+			PromptTokens:     w.UsagePromptTokens,
+			CompletionTokens: w.UsageCompletionTokens,
+			TotalTokens:      w.UsageTotalTokens,
+		},
 	}
 	// The offsets were measured against the text as SENT, and the text above has just been
 	// re-stripped as untrusted disk input, so a span is kept only while it still locates a run of

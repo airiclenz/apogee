@@ -1380,7 +1380,7 @@ func TestSessionHostRoundTripsThroughResume(t *testing.T) {
 
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	host := newSessionHost(store, t.TempDir(), "fake", nil)
-	if err := host.Save(snap, nil, "hi", 1, 0); err != nil {
+	if err := host.Save(snap, nil, "hi", 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	id := host.ActiveID()
@@ -1447,7 +1447,7 @@ func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
 	if host.ActiveID() != "" {
 		t.Errorf("ActiveID before any Save = %q; want empty", host.ActiveID())
 	}
-	if err := host.Save(apogee.Session{}, nil, "first title", 1, 100); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "first title", 1, 100, session.Usage{}); err != nil {
 		t.Fatalf("Save #1: %v", err)
 	}
 	id := host.ActiveID()
@@ -1455,7 +1455,7 @@ func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
 		t.Fatal("Save minted no id")
 	}
 	// A second Save keeps the same id (update-in-place) and never overwrites the create-time title.
-	if err := host.Save(apogee.Session{}, nil, "SECOND title", 2, 200); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "SECOND title", 2, 200, session.Usage{}); err != nil {
 		t.Fatalf("Save #2: %v", err)
 	}
 	if host.ActiveID() != id {
@@ -1490,11 +1490,11 @@ func TestSessionHostSetModelStampsSaves(t *testing.T) {
 	store := session.NewStore(t.TempDir())
 	host := newSessionHost(store, "/ws", "", nil) // a cold start: nothing bound yet
 
-	if err := host.Save(apogee.Session{}, nil, "cold", 1, 0); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "cold", 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save before the bind: %v", err)
 	}
 	host.SetModel("bound-model")
-	if err := host.Save(apogee.Session{}, nil, "cold", 2, 0); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "cold", 2, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save after the bind: %v", err)
 	}
 
@@ -1519,7 +1519,7 @@ func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 	store := session.NewStore(t.TempDir())
 	host := newSessionHost(store, "/ws", "m", nil)
 
-	if err := host.Save(apogee.Session{}, nil, "A", 1, 0); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "A", 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save A: %v", err)
 	}
 	first := host.ActiveID()
@@ -1528,7 +1528,7 @@ func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 	if host.ActiveID() != "" {
 		t.Errorf("ActiveID after Rotate = %q; want empty", host.ActiveID())
 	}
-	if err := host.Save(apogee.Session{}, nil, "B", 1, 0); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "B", 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save B: %v", err)
 	}
 	second := host.ActiveID()
@@ -1552,7 +1552,7 @@ func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 	if host.ActiveID() != first {
 		t.Errorf("Activate did not make %q current (active %q)", first, host.ActiveID())
 	}
-	if err := host.Save(apogee.Session{}, nil, "ignored", 3, 0); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "ignored", 3, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save after Load: %v", err)
 	}
 	if metas, _ := store.List(); len(metas) != 2 {
@@ -1566,14 +1566,14 @@ func TestSessionHostRenameActiveSticks(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
 	host := newSessionHost(store, "/ws", "m", nil)
-	if err := host.Save(apogee.Session{}, nil, "original", 1, 0); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "original", 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	id := host.ActiveID()
 	if err := host.Rename(id, "renamed"); err != nil {
 		t.Fatalf("Rename: %v", err)
 	}
-	if err := host.Save(apogee.Session{}, nil, "original", 2, 0); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "original", 2, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save after Rename: %v", err)
 	}
 	rec, err := store.Load(id)
@@ -1596,7 +1596,7 @@ func TestSessionHostResumeBeginsActive(t *testing.T) {
 	if host.ActiveID() != seed.Meta.ID {
 		t.Errorf("ActiveID of a resumed host = %q; want the resumed id %q", host.ActiveID(), seed.Meta.ID)
 	}
-	if err := host.Save(apogee.Session{}, nil, "derived", 1, 0); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "derived", 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	rec, err := store.Load(seed.Meta.ID)
@@ -1677,7 +1677,7 @@ func TestResolveResumeByPathRemintsID(t *testing.T) {
 	if host.ActiveID() != rec.Meta.ID {
 		t.Errorf("host active id = %q; want the re-minted %q", host.ActiveID(), rec.Meta.ID)
 	}
-	if err := host.Save(apogee.Session{}, nil, "continued", 1, 0); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "continued", 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save after a path resume: %v", err)
 	}
 	got, err := store.Load(victimID)
@@ -1740,7 +1740,7 @@ func saveAt(t *testing.T, store *session.Store, ws string, when time.Time, title
 	t.Helper()
 	h := newSessionHost(store, ws, "m", nil)
 	h.now = func() time.Time { return when }
-	if err := h.Save(apogee.Session{}, nil, title, 1, 0); err != nil {
+	if err := h.Save(apogee.Session{}, nil, title, 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("saveAt %q: %v", title, err)
 	}
 	return h.ActiveID()

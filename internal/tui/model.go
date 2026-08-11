@@ -239,6 +239,13 @@ type Model struct {
 	genStart  time.Time
 	tokPerSec float64
 
+	// usage is the MAIN agent's cumulative token accounting for the session — the latest reading
+	// its Depth-0 UsageEvents carried (usageTotals, fold.go), including the maintenance events the
+	// gauge above skips. It is persisted with the session record and restored on reopen, so a
+	// resumed session reports what it has already spent. A sub-agent's totals live on its own run
+	// head instead (transcript.applyUsage), which is where the per-agent grouping already is.
+	usage usageTotals
+
 	// transcriptSel is the transcript viewport's screen-space drag-selection (mouse.go), anchored
 	// in content coordinates into m.lines; the zero value is "no selection". A re-render keeps it
 	// exactly while the lines it spans are unchanged (refreshViewport's keep-if-unchanged rule), so
@@ -387,6 +394,10 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	m.autoTitleFired = true
 	m.nameSession(r.Title) // the window opens under the name this record already carries
 	m.ctxUsed = r.CtxUsed  // relight the gauge near the session's last observed fill
+	// …and reopen the accounting where the record left it: the totals are the reading this session
+	// last took, so a resumed session reports its spend instead of starting from nothing. A record
+	// written before the feature carries zeros, which is exactly the nothing-reported state.
+	m.usage = usageTotals(r.Usage)
 	entries, err := decodeTranscript(r.Transcript)
 	if err != nil || len(entries) == 0 {
 		m.transcript.addEphemeralNote("resumed: " + r.Title + " (no scrollback recorded — the model still remembers)")

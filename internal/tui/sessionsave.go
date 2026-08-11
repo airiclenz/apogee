@@ -24,11 +24,12 @@ type savePayload struct {
 	title      string
 	userMsgs   int
 	ctxUsed    int
+	usage      session.Usage // the main agent's cumulative token accounting at snapshot time
 }
 
 // snapshotPayload assembles a savePayload around a captured engine snapshot: it encodes the
 // current transcript (transcriptcodec.go), derives the browsable title from the first user
-// message, counts the user messages, and reads the live context fill. A transcript that fails to
+// message, counts the user messages, and reads the live context fill and usage totals. A transcript that fails to
 // encode yields ok=false so the caller drops the save rather than persisting a half-record.
 func (m Model) snapshotPayload(sess domain.Session) (savePayload, bool) {
 	blob, err := encodeTranscript(&m.transcript)
@@ -41,6 +42,7 @@ func (m Model) snapshotPayload(sess domain.Session) (savePayload, bool) {
 		title:      sessionTitle(m.transcript.firstUserText()),
 		userMsgs:   m.transcript.userMessageCount(),
 		ctxUsed:    m.ctxUsed,
+		usage:      session.Usage(m.usage),
 	}, true
 }
 
@@ -246,7 +248,7 @@ func (m Model) writeCmd(w recordWrite) tea.Cmd {
 	if w.kind == writeSave {
 		p := w.payload
 		return func() tea.Msg {
-			return saveDoneMsg{Err: sessions.Save(p.sess, p.transcript, p.title, p.userMsgs, p.ctxUsed)}
+			return saveDoneMsg{Err: sessions.Save(p.sess, p.transcript, p.title, p.userMsgs, p.ctxUsed, p.usage)}
 		}
 	}
 	return func() tea.Msg {

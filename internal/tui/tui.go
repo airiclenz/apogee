@@ -40,8 +40,9 @@ type SkillCatalog interface {
 type SessionHost interface {
 	// Save persists the active session's current state, minting its ID on the first call and
 	// updating that same file thereafter. transcript is the TUI's opaque scrollback blob
-	// (transcriptcodec.go); title, userMsgs, and ctxUsed populate the browsable metadata.
-	Save(sess domain.Session, transcript []byte, title string, userMsgs, ctxUsed int) error
+	// (transcriptcodec.go); title, userMsgs, ctxUsed and usage — the main agent's cumulative token
+	// accounting as of this save — populate the browsable metadata.
+	Save(sess domain.Session, transcript []byte, title string, userMsgs, ctxUsed int, usage session.Usage) error
 	// Rotate closes the active session so the next Save mints a fresh ID — the /clear|/new and
 	// load-a-different-session boundary. It is idempotent on an already-inactive session.
 	Rotate()
@@ -915,6 +916,10 @@ type ResumedSession struct {
 	Title      string // the session's browsable title, shown in the resume note
 	CtxUsed    int    // the last observed context fill, relighting the gauge on resume
 	UserMsgs   int    // the stored user-message count (metadata parity; the transcript re-derives it)
+	// Usage is the main agent's cumulative token accounting as the record last stored it, so the
+	// reopened session reports its spend rather than nothing. Zero on a record written before the
+	// accounting existed — the same nothing-reported state a fresh session opens in.
+	Usage session.Usage
 	// InExchange marks a session interrupted mid-task — the resumed Agent reports an open Exchange
 	// (the binary reads agent.InExchange() after building it). newModel then appends the interrupted
 	// note so the human knows /continue picks up the unfinished work; false for a cleanly-closed

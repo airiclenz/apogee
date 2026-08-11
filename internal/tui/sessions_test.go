@@ -1955,3 +1955,55 @@ func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionUsageTotalsSurviveTheRecord pins the persistence half of the session's accounting: the
+// main agent's cumulative totals are written with the record and reopened with it, by BOTH resume
+// paths — the startup replay and the in-app browser — so a reopened session reports what it has
+// spent instead of nothing. The save that follows carries the restored totals straight back, which
+// is the round trip through the SessionHost seam.
+func TestSessionUsageTotalsSurviveTheRecord(t *testing.T) {
+	want := session.Usage{Calls: 3, PromptTokens: 21000, CompletionTokens: 1500, TotalTokens: 22500}
+
+	t.Run("a startup resume reopens the stored accounting", func(t *testing.T) {
+		m := newModel(context.Background(), &fakeEngine{}, Options{
+			Resumed: &ResumedSession{Title: "france question", CtxUsed: 4096, Usage: want},
+		}, nil)
+
+		if got := m.usage; got != usageTotals(want) {
+			t.Errorf("totals after a startup resume = %+v, want the stored %+v", got, want)
+		}
+	})
+
+	t.Run("a browser resume reopens it and the next save carries it back", func(t *testing.T) {
+		host := &fakeSessionHost{}
+		host.seed(session.Record{
+			Meta: session.Meta{
+				ID: "sess-1", Title: "france question", Workspace: "/ws/a",
+				UpdatedAt: time.Now(), CtxUsed: 8192, UserMsgs: 1, Usage: want,
+			},
+			Session: domain.Session{Version: domain.SessionVersion, State: []byte(`{"k":1}`)},
+		})
+		m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+		m = openBrowser(t, m)
+
+		m, cmd := stepCmd(t, m, keyEnter())
+		if cmd == nil {
+			t.Fatal("enter dispatched no Load Cmd")
+		}
+		m = foldResume(t, m, cmd)
+
+		if got := m.usage; got != usageTotals(want) {
+			t.Errorf("totals after a browser resume = %+v, want the stored %+v", got, want)
+		}
+
+		m.transcript.addUser("and its population?", nil) // a save is gated on a sent prompt
+		m = driveOneSave(t, m, domain.Session{})
+		calls := host.savedCalls()
+		if len(calls) == 0 {
+			t.Fatal("the resumed session saved nothing")
+		}
+		if got := calls[len(calls)-1].usage; got != want {
+			t.Errorf("saved totals = %+v, want the reopened %+v", got, want)
+		}
+	})
+}

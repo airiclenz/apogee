@@ -335,6 +335,7 @@ type savedCall struct {
 	title      string
 	userMsgs   int
 	ctxUsed    int
+	usage      session.Usage
 }
 
 // fakeSessionHost is a recording SessionHost for the save-pipeline tests: it captures every Save,
@@ -376,14 +377,17 @@ func (h *fakeSessionHost) seed(rec session.Record) {
 // fakeSessionHost satisfies the persistence seam the Model drives.
 var _ SessionHost = (*fakeSessionHost)(nil)
 
-func (h *fakeSessionHost) Save(sess domain.Session, transcript []byte, title string, userMsgs, ctxUsed int) error {
+func (h *fakeSessionHost) Save(sess domain.Session, transcript []byte, title string, userMsgs, ctxUsed int, usage session.Usage) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.activeID == "" {
 		h.minted++
 		h.activeID = fmt.Sprintf("s%d", h.minted)
 	}
-	h.saves = append(h.saves, savedCall{id: h.activeID, sess: sess, transcript: transcript, title: title, userMsgs: userMsgs, ctxUsed: ctxUsed})
+	h.saves = append(h.saves, savedCall{
+		id: h.activeID, sess: sess, transcript: transcript, title: title,
+		userMsgs: userMsgs, ctxUsed: ctxUsed, usage: usage,
+	})
 	return h.saveErr
 }
 

@@ -1008,7 +1008,9 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 		}
 		wantEntry := []string{
 			"Kind", "Text", "Depth", "CallID", "SpawnCallID", "Done",
-			"CtxUsed", "CtxLimit", "SkillSpans", "Tool", "Presented",
+			"CtxUsed", "CtxLimit",
+			"UsageCalls", "UsagePromptTokens", "UsageCompletionTokens", "UsageTotalTokens",
+			"SkillSpans", "Tool", "Presented",
 		}
 		if got := fields(wireEntry{}); !slices.Equal(got, wantEntry) {
 			t.Errorf("wireEntry members = %v, want %v — widening the wire needs its own decision", got, wantEntry)
@@ -1197,4 +1199,79 @@ func TestTranscriptCodecGoldenV1(t *testing.T) {
 	if string(data) != golden {
 		t.Errorf("golden wire shape mismatch:\n got = %s\nwant = %s", data, golden)
 	}
+}
+
+// TestTranscriptCodecRoundTripsASubAgentsTotals proves the cumulative accounting a run head wears
+// survives the record: the four members reach the wire under their own keys and come back on the
+// head that delegated, so a reopened session still reports what each delegate spent — a fact the
+// fill beside them cannot give, since it only ever said how full the child's window stood.
+//
+// The members are ADDITIVE within transcriptVersion on the wireEntry rule: a run that reported no
+// accounting writes none of them, and a blob written before they existed decodes to zero totals —
+// the same nothing-to-report state a pre-feature session reopens in, so there is no migration.
+func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
+	t.Parallel()
+	const window = 32768
+
+	t.Run("a reported run carries its totals through the record", func(t *testing.T) {
+		t.Parallel()
+		totals := usageTotals{Calls: 2, PromptTokens: 11000, CompletionTokens: 1000, TotalTokens: 12000}
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		tr.applyUsage(childUsage("s1", 1, 12000, totals), window)
+		subAgentReport(tr, "s1", "tests read", 0)
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		// The members are part of the record now, so pin their names and their spelling as integers.
+		want := `"usageCalls":2,"usagePromptTokens":11000,"usageCompletionTokens":1000,"usageTotalTokens":12000`
+		if !strings.Contains(string(data), want) {
+			t.Errorf("wire blob does not carry %s:\n%s", want, data)
+		}
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 1 || got[0].kind != entryToolCall {
+			t.Fatalf("decoded %+v; want the one sub-agent run head", got)
+		}
+		if got[0].usage != totals {
+			t.Errorf("replayed totals = %+v, want %+v", got[0].usage, totals)
+		}
+	})
+
+	t.Run("a run that reported no accounting writes no member", func(t *testing.T) {
+		t.Parallel()
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentUsage(tr, 1, 12000, window) // a fill, from a stream that carried no totals
+		subAgentReport(tr, "s1", "tests read", 0)
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		if strings.Contains(string(data), "usage") {
+			t.Errorf("an empty accounting reached the wire: %s", data)
+		}
+	})
+
+	t.Run("a blob written before the members decodes to zero totals", func(t *testing.T) {
+		t.Parallel()
+		legacy := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"s1","done":true,` +
+			`"ctxUsed":12000,"ctxLimit":32768,` +
+			`"tool":{"label":"Sub-Agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
+		got, err := decodeTranscript(legacy)
+		if err != nil {
+			t.Fatalf("decodeTranscript(legacy): %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries; want the one run head", len(got))
+		}
+		if got[0].usage != (usageTotals{}) {
+			t.Errorf("a blob predating the members decoded totals %+v; want zeros", got[0].usage)
+		}
+	})
 }

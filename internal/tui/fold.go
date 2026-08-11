@@ -42,6 +42,37 @@ func (m Model) foldEvent(e domain.Event) Model {
 	return m.foldActivity(e, m.transcript.hasOpenToolCall())
 }
 
+// usageTotals is one agent's cumulative token accounting as the view holds it: the completions
+// accounted for and the tokens they carried. It is read LATEST-WINS off the emitting agent's own
+// running sum (domain.UsageEvent's Cumulative* fields) — the view never adds events up, so a fold
+// that joined the stream late, or dropped an event, still reports the same totals as one that saw
+// every one. The Model keeps the main agent's (foldStats) and each sub-agent run head keeps its
+// own (transcript.applyUsage); plain ints throughout, so it rides safely in the value-copied
+// Model (ADR 0011). Its field set matches session.Usage exactly, which is what lets the
+// save/restore boundary convert between the two instead of mapping them member by member.
+type usageTotals struct {
+	Calls            int
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
+// usageReading projects the cumulative half of a UsageEvent onto the view's own shape, and says
+// whether the event carried one at all: an event stamped by an agent that has accounted for no
+// call — a hand-built stream, or a record from before the engine counted — reports ok=false so
+// its zeros never blank a reading that already stands.
+func usageReading(e domain.UsageEvent) (usageTotals, bool) {
+	if e.CumulativeCalls <= 0 {
+		return usageTotals{}, false
+	}
+	return usageTotals{
+		Calls:            e.CumulativeCalls,
+		PromptTokens:     e.CumulativePromptTokens,
+		CompletionTokens: e.CumulativeCompletionTokens,
+		TotalTokens:      e.CumulativeTotalTokens,
+	}, true
+}
+
 // foldStats updates the live token stats from one engine Event (the eventMsg fold). Only the
 // top-level agent's (Depth 0) accounting drives the status line: a sub-agent's usage nests in
 // the stream, but the gauge tracks the conversation the human is steering — the child's reading
@@ -50,6 +81,12 @@ func (m Model) foldEvent(e domain.Event) Model {
 // completion for a tokens/sec readout, resets that clock when the Turn re-streams, and on usage
 // adopts the new context fill (the gauge's Used) and throughput. It mutates the local copy and
 // returns it, like every Update fold.
+//
+// A usage report moves TWO readings, and they part company on the Maintenance flag: the fill and
+// the throughput describe the conversation as it stands, so a maintenance event — the compaction
+// call, whose prompt is the summarizer's own request — must leave the gauge and the generation
+// clock exactly where the last Turn left them, while the cumulative totals take it like any other
+// call, because those tokens were really spent (domain.UsageEvent).
 func (m Model) foldStats(e domain.Event) Model {
 	switch e := e.(type) {
 	case domain.TokenEvent:
@@ -63,6 +100,12 @@ func (m Model) foldStats(e domain.Event) Model {
 	case domain.UsageEvent:
 		if e.Depth != 0 {
 			break // a delegate's fill, which is its run block's business and not the gauge's
+		}
+		if totals, ok := usageReading(e); ok {
+			m.usage = totals // the main agent's own running sum, latest-wins — maintenance included
+		}
+		if e.Maintenance {
+			break // accounted for above; the gauge and the generation clock skip it
 		}
 		// Prefer the server's total; fall back to prompt+completion when it omits the sum.
 		total := e.TotalTokens
