@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"go/parser"
 	"go/token"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -27,6 +28,14 @@ import (
 // clear "no diagnostics available" result when none is present (§3a — an
 // enhancement, never a hard dependency, never an error).
 //
+// The vet half is wider than the call that asks for it: `go vet` operates on PACKAGES, so
+// a call naming one file reads every .go file in that file's directory. That widening is
+// declared in the tool's own description and restated on every vet result
+// (vettedPackageLine), because a surface that shows one filename while the subprocess reads
+// a directory is telling the operator something other than what runs. The subprocess itself
+// runs with a Go-specific pinned environment (goVetEnv/goVetPins) rather than git's
+// allowlist — vetting untrusted code must not let that code choose a toolchain.
+//
 // The tool is ReadOnly() — it only inspects, never mutates. It is also a
 // SubprocessTool (domain.SubprocessTool) because the go vet / linter half shells
 // out, and THAT marker is what classifies the call: the unfakeable marker outranks
@@ -44,13 +53,13 @@ const vetTimeout = 30 * time.Second
 
 var diagnosticsSpec = toolSpec{
 	name:        "diagnostics",
-	description: "Report syntax and lint-level problems in a source file. Go files are checked in-process (syntax) plus 'go vet' when the toolchain is present; other languages use a detected linter if one is available, and report 'no diagnostics available' (not an error) when none is. Read-only.",
+	description: "Report syntax and lint-level problems in a source file. Go files are checked in-process (syntax) plus 'go vet' when the toolchain is present — vet runs on the file's whole PACKAGE DIRECTORY (every .go file beside it), not on the named file alone. Other languages use a detected linter if one is available, and report 'no diagnostics available' (not an error) when none is. Read-only.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path"],
   "properties": {
-    "path": {"type": "string", "description": "Path to the source file to diagnose (relative to the workspace root or absolute). The language is inferred from the file extension."},
-    "vet": {"type": "boolean", "description": "For Go files, also run 'go vet' on the file's package when the toolchain is available (default: true). Syntax checking via go/parser is always performed and needs no toolchain."}
+    "path": {"type": "string", "description": "Path to the source file to diagnose (relative to the workspace root or absolute). The language is inferred from the file extension. For Go the 'go vet' half reads the file's whole package directory, so naming one file asks for a check of every .go file in that directory."},
+    "vet": {"type": "boolean", "description": "For Go files, also run 'go vet' on the directory the file is in — its package, every .go file included — when the toolchain is available (default: true). Syntax checking via go/parser is always performed, needs no toolchain, and covers only the named file."}
   }
 }`),
 }
@@ -175,10 +184,14 @@ func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, name, abs string, 
 		// error so the loop rolls the Turn back rather than reporting a partial result.
 		return domain.ToolResult{}, err
 	}
+	// Both vet outcomes state the SCOPE vet really ran on (vettedPackageLine): the call
+	// named one file, the subprocess read the package around it, and the result is where
+	// that difference is said out loud. The two branches that skip vet above say nothing
+	// of the kind, because nothing beyond the named file was read.
 	if hadFindings {
-		return errorResult(callID, vet), nil
+		return errorResult(callID, vettedPackageLine(abs, t.root)+"\n\n"+vet), nil
 	}
-	return okResult(callID, cleanGoMessage(abs)), nil
+	return okResult(callID, cleanGoMessage(abs)+"\n\n"+vettedPackageLine(abs, t.root)), nil
 }
 
 // goSyntaxDiagnostics parses src in-process and returns the formatted syntax errors, or ""
@@ -196,23 +209,15 @@ func goSyntaxDiagnostics(abs string, src []byte) string {
 	return strings.TrimSpace(err.Error())
 }
 
-// runGoVet runs `go vet` on the package containing abs, under the vet timeout. It
-// returns the formatted findings, whether vet reported any problem (a non-zero exit
-// with output), and a non-nil error ONLY for ctx cancellation or a
-// confinement-unavailable demotion (so an ordinary vet failure degrades rather than
+// runGoVet runs `go vet` on the package containing abs, under the vet timeout and the
+// pinned toolchain environment (goVetSpec). It returns the formatted findings, whether
+// vet reported any problem (a non-zero exit with output), and a non-nil error ONLY for
+// ctx cancellation or a confinement-unavailable demotion (so an ordinary vet failure —
+// including a dependency the pinned environment cannot resolve — degrades rather than
 // failing the diagnosis). go vet writes findings to stderr and
 // exits non-zero when it finds problems; a clean package exits zero with no output.
 func runGoVet(ctx context.Context, goPath, root, abs string) (findings string, hadFindings bool, err error) {
-	// Vet the package directory (go vet operates on packages, not single files), so
-	// a finding in any file of the package is surfaced; the dir stays inside root.
-	dir := filepath.Dir(abs)
-	spec := subprocessSpec{
-		argv:    []string{goPath, "vet", dir},
-		dir:     root,
-		timeout: vetTimeout,
-		env:     safeGitEnv(root),
-	}
-	res, runErr := runSubprocess(ctx, spec)
+	res, runErr := runSubprocess(ctx, goVetSpec(goPath, root, abs))
 	if runErr != nil {
 		// ctx cancellation, or a confinement-unavailable demotion (diagnostics takes
 		// the subprocess class, so dispatch does confine it — the demote signal must
@@ -229,10 +234,108 @@ func runGoVet(ctx context.Context, goPath, root, abs string) (findings string, h
 	return out, true, nil
 }
 
+// goVetSpec is the exact subprocess one vet invocation runs as: the argv, the working
+// directory, the ceiling, and the pinned toolchain environment (goVetEnv). It is a
+// function of its own — rather than a literal inside runGoVet — so a test can pin what
+// the vet half executes key-by-key without launching a toolchain.
+//
+// The vetted target is the PACKAGE DIRECTORY, because go vet operates on packages rather
+// than single files: a finding in any file of the package is surfaced, and the dir stays
+// inside root (abs was already resolved through the fence). That widening is what
+// vettedPackageLine states on the result, so the sentence the operator approved and the
+// scope the subprocess read are the same sentence.
+func goVetSpec(goPath, root, abs string) subprocessSpec {
+	return subprocessSpec{
+		argv:    []string{goPath, "vet", filepath.Dir(abs)},
+		dir:     root,
+		timeout: vetTimeout,
+		env:     goVetEnv(root),
+	}
+}
+
+// goToolchainEnvKeys is the allowlist of host environment variables the vet subprocess
+// inherits. It is deliberately NOT git's list (safeEnvKeys): that list was written for a
+// program whose behaviour is steered by GIT_* and a pager, and borrowing it for the Go
+// toolchain both dropped the operator's own Go hardening and put nothing back. This list
+// carries only what a build cache needs, and goVetPins below decides everything else.
+var goToolchainEnvKeys = []string{
+	// PATH — the toolchain resolves programs of its own (the compiler, the vet tool);
+	// ScopeEnv strips the entries inside root, so none of them come from the workspace.
+	"PATH",
+	// HOME — GOCACHE and GOMODCACHE default beneath it, and go refuses to build with no
+	// build cache at all.
+	"HOME",
+	// The build's scratch space, and (on Linux) where GOCACHE lands when the user moved
+	// their cache root.
+	"TMPDIR", "TMP", "TEMP", "XDG_CACHE_HOME",
+}
+
+// goVetPins are the toolchain settings the vet subprocess runs with WHATEVER the host
+// environment or the vetted repository says. They are appended after the inherited keys,
+// so a duplicate spelling of any of them loses (os/exec resolves duplicates last-wins).
+//
+// Each one closes a way the Go toolchain can be made to do more than read code:
+//   - GOFLAGS=-mod=readonly — no go.mod/go.sum edit as a side effect of a diagnosis, and
+//     no inherited -toolexec/-exec flag riding in on the operator's own GOFLAGS.
+//   - GOWORK=off — a go.work the ATTACKER authored cannot pull other modules (and other
+//     directories) into the build vet performs.
+//   - GOTOOLCHAIN=local — a `toolchain` line in the repository's go.mod cannot make go
+//     download and execute a different toolchain binary. This is the one pin that stops
+//     an exec rather than bounding one.
+//   - CGO_ENABLED=0 — vet needs no cgo, and this keeps a repository's #cgo directives
+//     away from the host C compiler (which is an exec of an attacker-named line).
+//   - GOENV=off — the `go env -w` file (HOME passes, so it would otherwise still apply)
+//     is a persistent, invisible source of exactly the flags above. Off means the four
+//     pins are the whole story rather than the story until someone runs `go env -w`.
+//
+// The cost of GOENV=off is stated rather than hidden: an operator's persisted GOPROXY,
+// GOPRIVATE or GOMODCACHE are not read either, so on a cold module cache a vet may fail
+// to resolve dependencies. That failure degrades — it is reported as a vet finding, never
+// as a tool error — which is the trade the diagnosis half is allowed to make.
+var goVetPins = []string{
+	"GOFLAGS=-mod=readonly",
+	"GOWORK=off",
+	"GOTOOLCHAIN=local",
+	"CGO_ENABLED=0",
+	"GOENV=off",
+}
+
+// goVetEnv returns the exact environment the vet subprocess runs with: the allowlisted
+// host keys scoped to root (PATH first among them — the toolchain must not resolve its
+// own programs out of the workspace the model writes to), then the pins that decide how
+// the toolchain behaves.
+func goVetEnv(root string) []string {
+	return append(shellHost.ScopeEnv(root, goToolchainEnvKeys, os.LookupEnv), goVetPins...)
+}
+
 // cleanGoMessage is the success text for a Go file with no syntax errors and no
 // vet findings.
 func cleanGoMessage(abs string) string {
 	return "No diagnostics: " + filepath.Base(abs) + " looks clean."
+}
+
+// vettedPackageLine names what the vet half actually read: the package DIRECTORY around
+// the requested file, spelled relative to the workspace root, and said in the same breath
+// as the file the call named. The tool takes one filename and vets its whole package, and
+// until this line existed no surface said so — "I approved foo.go" and "it read every file
+// beside foo.go" were two different sentences.
+//
+// It rides the result string, which is the surface this tool owns: the approval pane paints
+// the model's own arguments plus the engine's resolved-path disclosure, and neither is a
+// place a tool can state a derived scope from.
+func vettedPackageLine(abs, root string) string {
+	return "go vet checked the whole package directory " + packageDirName(filepath.Dir(abs), root) +
+		" — every .go file in it, not only " + filepath.Base(abs) + "."
+}
+
+// packageDirName spells a package directory for a human: relative to the workspace root,
+// with the root itself named rather than left as the bare "." that filepath.Rel returns
+// (a lone dot on a security-facing line reads as a typo, not as "the whole workspace").
+func packageDirName(dir, root string) string {
+	if rel := workspaceRelative(dir, root); rel != "." {
+		return rel
+	}
+	return "the workspace root"
 }
 
 // noDiagnosticsMessage is the graceful-degradation result for a file whose language

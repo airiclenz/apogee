@@ -365,6 +365,44 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`diagnostics` no longer hands the Go toolchain git's environment, and it now says which
+  package it vetted.** The `go vet` half ran with `safeGitEnv` — an allowlist written for a program
+  steered by `GIT_*` and a pager. `GOFLAGS`, `GOWORK`, `GOTOOLCHAIN`, `CGO_ENABLED`, `GOPATH` and
+  `CC` are all absent from it, so an operator's own Go hardening was stripped and **nothing was put
+  back**, while `HOME` passed and the persistent `go env -w` file still applied. Vetting an
+  attacker-authored checkout therefore let that checkout have a say in how the toolchain ran: a
+  `toolchain` line in its `go.mod` could make `go` download and execute a different toolchain, a
+  `go.work` could widen the build, and a `#cgo` directive could reach the host C compiler. The vet
+  subprocess now runs on a Go-specific environment that PINS the hardening instead of removing it —
+  `GOFLAGS=-mod=readonly`, `GOWORK=off`, `GOTOOLCHAIN=local`, `CGO_ENABLED=0` and `GOENV=off`, over
+  an allowlist carrying only what a build cache needs — so the vetted repository no longer chooses
+  anything about the process that reads it. This is scope-and-honesty rather than a demonstrated
+  execution hole: `go vet` never links, and the toolchain download was the one exec in reach.
+  **Deliberate cost:** `GOENV=off` also drops an operator's persisted `GOPROXY`/`GOMODCACHE`, so on
+  a cold module cache a vet may fail to resolve dependencies — which degrades to a reported finding,
+  never a tool error. The second half is what the call CLAIMED: the tool takes one filename but vets
+  the whole package directory around it, which its description never said and its result never
+  mentioned. The description now declares it, and every vet result — clean or findings — names the
+  package directory it read, beside the file the call asked about.
+
+- **Reading the skill library no longer trips the dangerous-action floor.** The `~/.apogee`
+  control-plane rule the hostile-bytes batch added was matched — like every rule — against a
+  call's full text with no regard for what the tool DOES, so the first step of every skill run
+  died on it: `list_dir` of the skill's own directory under `~/.apogee/skills` was refused as a
+  "write or delete", and `copy_file` materializing a resource out of the library would have been
+  refused on its `source` string the same way. The same shape hid in the older path rules —
+  reading `.git/config` to inspect a remote was refused as a write to the git control plane. The
+  four write-shaped rules (`~/.ssh`, credential files, `.git` control plane, `~/.apogee`) now
+  carry a `WritesOnly` class: a tool that declares itself read-only skips them, and a
+  write-capable tool that declares an argument a read-only source (`copy_file`'s `source`, via
+  the new `domain.ReadSourceTool`) has that value judged by the read fence instead of by a rule
+  about writes. Everything else is exactly as strict as before: the command-shaped rules
+  (`rm -rf`, fork bomb, `curl | bash`) ignore the class entirely, a tool that declares nothing —
+  `terminal`, `python_exec`, every MCP tool — is fully inspected, an unknown tool is inspected as
+  write-capable, and the write half of every rule keeps the hard floor: copying INTO
+  `~/.apogee/skills` or MOVING a file out of it (`move_file` deliberately declares no read-only
+  source — its source is deleted) refuses as it did.
+
 - **A command that backgrounds a process no longer leaves it running after the call, and a run
   whose descendants wedged the output pipe no longer reports success.** The process-group teardown
   was wired onto `cmd.Cancel` alone, which fires only when the run's context is cancelled or its

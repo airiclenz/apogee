@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -224,6 +225,11 @@ func TestDiagnostics_CleanGoFileWithVetSkipNote(t *testing.T) {
 	if !strings.Contains(res.Content, "go vet skipped") {
 		t.Errorf("result = %q, want a note that go vet was skipped (toolchain absent)", res.Content)
 	}
+	// The scope sentence belongs to a vet that RAN: nothing beside the named file was read
+	// here, so claiming the package was checked would be the same dishonesty in reverse.
+	if strings.Contains(res.Content, "whole package directory") {
+		t.Errorf("a skipped vet must not claim it checked the package: %q", res.Content)
+	}
 }
 
 func TestDiagnostics_CleanGoFileNoVetRequested(t *testing.T) {
@@ -280,6 +286,128 @@ func TestDiagnostics_CleanGoFilePassesVet(t *testing.T) {
 	}
 	if !strings.Contains(res.Content, "looks clean") {
 		t.Errorf("result = %q, want it to confirm the file looks clean", res.Content)
+	}
+}
+
+// envValues folds an exec environment into effective values the way os/exec does —
+// duplicates resolve last-wins — so a test asserts what the process really sees rather
+// than what the slice happens to contain twice.
+func envValues(env []string) map[string]string {
+	out := make(map[string]string, len(env))
+	for _, entry := range env {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func TestDiagnostics_VetSubprocessEnvironmentIsPinned(t *testing.T) {
+	// Not parallel: t.Setenv. The point of the fixture is that every one of these is a
+	// setting the HOST already had, spelled the way an operator's `go env -w` or an
+	// inherited shell would spell it — the vet subprocess must run on the pins regardless.
+	t.Setenv("GOFLAGS", "-toolexec=/tmp/evil -mod=mod")
+	t.Setenv("GOWORK", "/tmp/attacker.work")
+	t.Setenv("GOTOOLCHAIN", "auto")
+	t.Setenv("CGO_ENABLED", "1")
+	t.Setenv("GOENV", "/tmp/attacker/env")
+	t.Setenv("GOPATH", "/tmp/attacker/gopath")
+	t.Setenv("CC", "/tmp/attacker/cc")
+	t.Setenv("GIT_AUTHOR_NAME", "somebody")
+
+	root := t.TempDir()
+	abs := filepath.Join(root, "pkg", "file.go")
+	spec := goVetSpec("/usr/bin/go", root, abs)
+
+	if got, want := spec.argv, []string{"/usr/bin/go", "vet", filepath.Join(root, "pkg")}; !slices.Equal(got, want) {
+		t.Errorf("vet argv = %q, want %q (the PACKAGE directory, not the file)", got, want)
+	}
+	if spec.dir != root {
+		t.Errorf("vet dir = %q, want the workspace root %q", spec.dir, root)
+	}
+	if spec.timeout != vetTimeout {
+		t.Errorf("vet timeout = %v, want %v", spec.timeout, vetTimeout)
+	}
+
+	env := envValues(spec.env)
+	// The pins: each one is the value the toolchain runs on whatever the host said.
+	for key, want := range map[string]string{
+		"GOFLAGS":     "-mod=readonly",
+		"GOWORK":      "off",
+		"GOTOOLCHAIN": "local",
+		"CGO_ENABLED": "0",
+		"GOENV":       "off",
+	} {
+		if got, ok := env[key]; !ok || got != want {
+			t.Errorf("vet env %s = %q (present=%v), want %q", key, got, ok, want)
+		}
+	}
+	// The allowlist: what a build cache needs, and nothing the host can steer the
+	// toolchain with. GIT_AUTHOR_NAME is the tell that this is no longer git's list.
+	for _, key := range []string{"GOPATH", "GOMODCACHE", "CC", "GIT_AUTHOR_NAME"} {
+		if got, ok := env[key]; ok {
+			t.Errorf("vet env inherited %s = %q, want it dropped", key, got)
+		}
+	}
+	if _, ok := env["PATH"]; !ok {
+		t.Error("vet env has no PATH; the toolchain resolves its own programs with it")
+	}
+	if home, set := os.LookupEnv("HOME"); set {
+		if got, ok := env["HOME"]; !ok || got != home {
+			t.Errorf("vet env HOME = %q (present=%v), want the host's %q (GOCACHE lives under it)", got, ok, home)
+		}
+	}
+}
+
+func TestDiagnostics_VetResultNamesThePackageDirectory(t *testing.T) {
+	realGo(t)
+	// The call names ONE file; the subprocess reads the whole directory. Both vet
+	// outcomes must say which directory that was, or the result describes a narrower
+	// action than the one that ran.
+	cases := []struct {
+		name    string
+		src     string
+		isError bool
+	}{
+		{name: "clean", src: "package pkgdir\n\nfunc Add(a, b int) int { return a + b }\n"},
+		{
+			name:    "findings",
+			src:     "package pkgdir\n\nimport \"fmt\"\n\nfunc Bad() { fmt.Printf(\"%d\\n\", \"not a number\") }\n",
+			isError: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeGoModule(t, root)
+			pkg := filepath.Join(root, "pkgdir")
+			if err := os.Mkdir(pkg, 0o700); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			writeGoFile(t, pkg, "ok.go", tc.src)
+			// A sibling the call does NOT name — the file the operator would not know was
+			// read if the result only echoed the argument.
+			writeGoFile(t, pkg, "sibling.go", "package pkgdir\n\nfunc Sub(a, b int) int { return a - b }\n")
+
+			d := NewDiagnostics(root)
+			res, err := d.Execute(context.Background(), diagnosticsCall("c1", filepath.Join("pkgdir", "ok.go")))
+			if err != nil {
+				t.Fatalf("Execute err = %v, want nil", err)
+			}
+			if res.IsError != tc.isError {
+				t.Fatalf("IsError = %v, want %v: %q", res.IsError, tc.isError, res.Content)
+			}
+			if !strings.Contains(res.Content, "pkgdir") {
+				t.Errorf("result = %q, want it to name the vetted package directory", res.Content)
+			}
+			if !strings.Contains(res.Content, "whole package directory") {
+				t.Errorf("result = %q, want it to say the whole package was checked", res.Content)
+			}
+			if !strings.Contains(res.Content, "ok.go") {
+				t.Errorf("result = %q, want the requested file named beside the package", res.Content)
+			}
+		})
 	}
 }
 
