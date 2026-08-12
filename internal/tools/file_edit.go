@@ -75,11 +75,19 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 
 	// TOCTOU-safe read+write through an os.Root pinned at t.root: an escaping-symlink
 	// component (including one swapped in between the read and the write) is refused
-	// rather than followed (security review H1).
+	// rather than followed (security review H1). An in-root symlink is FOLLOWED by the read
+	// and REFUSED on the write's parent chain (security's symlink policy), so the one path
+	// this edit can still take through a link is a symlinked final NAME — which the read
+	// followed and the write is about to replace.
 	original, err := safeReadFile(args.Path, t.root)
 	if err != nil {
 		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
 	}
+
+	// Which file those bytes actually came from, read BEFORE the write: the write replaces a
+	// symlinked name with a regular file, so afterwards nothing is left to say that "edit
+	// docs/notes.md" read — and disclosed — the contents of somewhere else.
+	resolved := resolvedTargetNote(args.Path, t.root)
 
 	if isPatchContent(args.Content) {
 		hunks := parsePatchHunks(args.Content)
@@ -97,13 +105,13 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 		if len(hunks) > 1 {
 			suffix = "s"
 		}
-		return okResult(call.ID, fmt.Sprintf("applied patch to %s (%d hunk%s)", args.Path, len(hunks), suffix)), nil
+		return okResult(call.ID, fmt.Sprintf("applied patch to %s (%d hunk%s)%s", args.Path, len(hunks), suffix, resolved)), nil
 	}
 
 	if err := safeWriteFile(args.Path, t.root, []byte(args.Content), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
-	return okResult(call.ID, "updated "+args.Path), nil
+	return okResult(call.ID, "updated "+args.Path+resolved), nil
 }
 
 // ----------------------------------------------------------------------------

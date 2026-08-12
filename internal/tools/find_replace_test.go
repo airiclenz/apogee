@@ -65,6 +65,64 @@ func TestSingleFindReplace_Execute(t *testing.T) {
 	}
 }
 
+// Both find-and-replace tools read before they write, and the read follows an in-root symlink, so
+// a patched `docs/notes.md` can be .git/config read out and overwritten under a name that says
+// otherwise. Each tool's success sentence must name the file the bytes came from, and both must
+// carry it — a disclosure only the single form made would be dodged by sending the same edit as a
+// one-element array.
+func TestFindReplace_NameTheFileTheyRead(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	config := symlinkedReadFixture(t, root, "docs", "notes.md")
+	realConfig := realPath(t, config)
+
+	single, err := NewSingleFindReplace(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "docs/notes.md", "oldText": "[core]", "newText": "[clean]"}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if single.IsError {
+		t.Fatalf("unexpected tool error: %q", single.Content)
+	}
+	if want := "replaced text in docs/notes.md → resolves to " + realConfig; single.Content != want {
+		t.Errorf("Content = %q, want %q", single.Content, want)
+	}
+
+	// The write replaced the NAME rather than going through the link, so the redirect target is
+	// still the file it was.
+	if got := string(mustRead(t, config)); got != gitConfigFixture {
+		t.Errorf("redirect target content = %q, want it untouched", got)
+	}
+
+	multiTarget := symlinkedReadFixture(t, root, "notes", "entry.md")
+	multi, err := NewMultiFindReplace(root).Execute(context.Background(),
+		callWith(t, "c2", map[string]any{
+			"path":         "notes/entry.md",
+			"replacements": []map[string]any{{"oldText": "[core]", "newText": "[clean]"}},
+		}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if multi.IsError {
+		t.Fatalf("unexpected tool error: %q", multi.Content)
+	}
+	if want := "applied 1 replacement to notes/entry.md → resolves to " + realPath(t, multiTarget); multi.Content != want {
+		t.Errorf("Content = %q, want %q", multi.Content, want)
+	}
+
+	// An ordinary path reports the sentence it always did.
+	writeTempFile(t, root, "plain.md", "[core]\n")
+	ordinary, err := NewSingleFindReplace(root).Execute(context.Background(),
+		callWith(t, "c3", map[string]any{"path": "plain.md", "oldText": "[core]", "newText": "[clean]"}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if ordinary.Content != "replaced text in plain.md" {
+		t.Errorf("Content = %q, want the bare sentence for a path that resolves to itself", ordinary.Content)
+	}
+}
+
 func TestSingleFindReplace_ToolErrors(t *testing.T) {
 	t.Parallel()
 

@@ -332,6 +332,31 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A directory symlink inside the workspace can no longer redirect a write.** The workspace fence
+  answers one question — does this path leave the root — so a symlink that stays INSIDE it was
+  followed, deliberately: only the final name of a write was protected. A cloned repo shipping
+  `docs → .git` therefore turned an approved `write_file docs/config` into a rewrite of the
+  repository's own config, entirely within the workspace, so `confine-to-workspace` never fired and
+  the approval pane read `docs/config` from beginning to end. A write now refuses a path whose
+  PARENT chain crosses a symlink — before anything is staged, created or `mkdir`'d, so a nested
+  target cannot create directories on the far side of the link on its way to being refused — and
+  the refusal names the component that is a link and where it points, rather than reading as an
+  ordinary I/O failure. The rule is "a write reaches its target through real directories": the
+  final NAME is unchanged, still REPLACED rather than written through when it is a symlink, and a
+  parent pointing outside the workspace still reports the same "outside the workspace" refusal it
+  always did, because that half is the fence's to answer and every caller already matches it.
+
+- **An edit now names the file it actually read.** Reads keep following a symlink that stays inside
+  the workspace — refusing them would break the ordinary linked-file layouts a repo legitimately
+  has — which leaves the sharper half of the same trick: `docs/notes.md` as a link to `.git/config`
+  is READ through, patched, and the result written back to `docs/notes.md`, which discloses the
+  target's contents to the model and destroys the link, reported as "applied patch to
+  docs/notes.md". `edit_existing_file`, `single_find_and_replace` and `multi_find_and_replace` now
+  carry the same `→ resolves to <path>` disclosure `write_file` gained for its write target, naming
+  the file the bytes came from whenever that is not the file the argument named. It is resolved
+  BEFORE the write, because the write leaves a plain file behind whatever the name was — a note
+  taken afterwards would go quiet on exactly the call worth disclosing.
+
 - **Opening the `/` menu no longer stalls the screen while the skill catalog is re-scanned.** The
   merged menu re-scans the skill source dirs whenever the caret enters a `/` token, so a skill
   written since launch both shows in the menu and resolves when invoked. That scan ran on the same

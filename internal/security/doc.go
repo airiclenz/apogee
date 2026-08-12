@@ -17,6 +17,13 @@
 //     A bounded read goes through SafeOpen, which returns the pinned handle itself: the
 //     caller fstats and limit-reads the very descriptor it opened, so the size bound
 //     shares the guarantee (see the SCOPE note in safeio.go).
+//     A symlink that stays INSIDE the root is a separate question, because the fence has
+//     no reason to refuse it and following it still moves the operation off the path the
+//     operator approved: writes REFUSE a parent chain that crosses one (ErrSymlinkedParent
+//     — the write reaches its target through real directories or touches nothing), while
+//     reads FOLLOW it and the reading tool discloses where the name resolved. Neither half
+//     is a boundary: a component swapped after the check can still redirect within the
+//     root, which is the Confiner's business, not this layer's.
 //   - URL-safety (URLGuard): scheme/host allow-deny for the network tools
 //     (web-fetch / http-request, P3.11), deny-first precedence.
 //   - The dangerous-action guard (DangerousActionGuard): the default-on footgun
@@ -66,7 +73,9 @@
 // safeio.go is the USE — SafeReadFile, SafeWriteFile, SafeOpen, SafeCopyFile, SafeCopyFileFrom,
 // SafeRename and SafeRemove, each performed through an os.Root pinned at the root it is fenced
 // by so the validated path IS the path touched (H1), with the same-directory staging file and
-// rename that makes a write atomic at the target name. All but one pin every end at the SAME
+// rename that makes a write atomic at the target name. It also carries the in-root symlink
+// policy the fence does not decide: ErrSymlinkedParent and refuseSymlinkedParents, the
+// write-side refusal of a parent chain that crosses a link, applied by SafeWriteFile. All but one pin every end at the SAME
 // (workspace) root; SafeCopyFileFrom is the exception that pins a root at each end, because a
 // copy's source is a read and may come from a read-only root the destination fence knows nothing
 // about — its write half is bounded by the destination root exactly as the others are.

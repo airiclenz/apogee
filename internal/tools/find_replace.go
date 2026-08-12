@@ -100,6 +100,12 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
 	}
 
+	// Which file those bytes came from, read BEFORE the write replaces a symlinked name with
+	// a regular file: an in-root symlinked final NAME is the one link a read still follows
+	// (a symlinked parent is refused by the write), and echoing the argument alone would let
+	// this call disclose and overwrite somewhere else under the name the operator approved.
+	resolved := resolvedTargetNote(args.Path, t.root)
+
 	count := countOccurrences(string(content), args.OldText)
 	if count == 0 {
 		return errorResult(call.ID, "old text not found in file"), nil
@@ -113,7 +119,7 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 		return errorResult(call.ID, err.Error()), nil
 	}
 
-	return okResult(call.ID, "replaced text in "+args.Path), nil
+	return okResult(call.ID, "replaced text in "+args.Path+resolved), nil
 }
 
 // ----------------------------------------------------------------------------
@@ -216,6 +222,12 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
 	}
 
+	// Read before the write, for the reason single_find_and_replace states above: the
+	// disclosure has to survive the write that destroys the symlink it describes. The sibling
+	// tool carries it, so this one must too — otherwise the same edit dodges the disclosure by
+	// arriving as a one-element array.
+	resolved := resolvedTargetNote(args.Path, t.root)
+
 	content := string(raw)
 	for i, r := range args.Replacements {
 		count := countOccurrences(content, r.OldText)
@@ -242,7 +254,7 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 	if n > 1 {
 		suffix = "s"
 	}
-	return okResult(call.ID, fmt.Sprintf("applied %d replacement%s to %s", n, suffix, args.Path)), nil
+	return okResult(call.ID, fmt.Sprintf("applied %d replacement%s to %s%s", n, suffix, args.Path, resolved)), nil
 }
 
 var (

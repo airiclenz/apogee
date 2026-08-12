@@ -316,6 +316,142 @@ func TestSafeWriteFile_ReplacesInRootSymlinkName(t *testing.T) {
 	assertNoStagingLeftovers(t, root)
 }
 
+// TestSafeWriteFile_RefusesSymlinkedParentDirectory is the write half of the symlink policy: an
+// in-root directory link (`docs → .git`) redirects the write while never leaving the workspace, so
+// the fence has nothing to say about it and the operator approved "docs/config" for a call that
+// would have changed ".git/config". The write must be refused with ErrSymlinkedParent — NOT as an
+// escape, because nothing escaped — and the redirect target must still hold its own bytes.
+func TestSafeWriteFile_RefusesSymlinkedParentDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	gitDir := filepath.Join(root, ".git")
+	if err := os.Mkdir(gitDir, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	config := filepath.Join(gitDir, "config")
+	if err := os.WriteFile(config, []byte("[core]\n"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(".git", filepath.Join(root, "docs")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	err := SafeWriteFile(root, "docs/config", []byte("[core]\n\tfsmonitor = pwned\n"), 0o644)
+	if !errors.Is(err, ErrSymlinkedParent) {
+		t.Fatalf("SafeWriteFile through in-root symlinked parent err = %v, want ErrSymlinkedParent", err)
+	}
+	if errors.Is(err, ErrPathEscape) {
+		t.Errorf("refusal reported as an escape (%v); an in-root link escapes nothing", err)
+	}
+	if !strings.Contains(err.Error(), "docs") {
+		t.Errorf("refusal %q does not name the symlinked component", err)
+	}
+
+	got, readErr := os.ReadFile(config)
+	if readErr != nil {
+		t.Fatalf("read redirect target: %v", readErr)
+	}
+	if string(got) != "[core]\n" {
+		t.Errorf(".git/config content = %q, want it untouched", got)
+	}
+	assertNoStagingLeftovers(t, root)
+}
+
+// TestSafeWriteFile_SymlinkedParentCreatesNothing pins the ORDER of the refusal: it lands before
+// the MkdirAll, so a write to a not-yet-existing path under a symlinked parent does not get to
+// create directories on the far side of the link on its way to being refused.
+func TestSafeWriteFile_SymlinkedParentCreatesNothing(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	gitDir := filepath.Join(root, ".git")
+	if err := os.Mkdir(gitDir, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(".git", filepath.Join(root, "docs")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	if err := SafeWriteFile(root, "docs/hooks/pre-commit", []byte("#!/bin/sh\n"), 0o755); !errors.Is(err, ErrSymlinkedParent) {
+		t.Fatalf("nested write under symlinked parent err = %v, want ErrSymlinkedParent", err)
+	}
+	if _, err := os.Stat(filepath.Join(gitDir, "hooks")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("write created %s through the link before refusing (stat err = %v)",
+			filepath.Join(gitDir, "hooks"), err)
+	}
+	assertNoStagingLeftovers(t, root)
+}
+
+// TestSafeWriteFile_SymlinkedParentOutsideRootStaysAnEscape keeps the two refusals apart: a parent
+// link pointing OUT of the root is the fence's business and must keep the uniform ErrPathEscape
+// wording every caller matches, even though the new policy sees the same symlink first.
+func TestSafeWriteFile_SymlinkedParentOutsideRootStaysAnEscape(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "docs")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	err := SafeWriteFile(root, "docs/config", []byte("pwned"), 0o644)
+	if !errors.Is(err, ErrPathEscape) {
+		t.Fatalf("SafeWriteFile through outside-pointing parent err = %v, want ErrPathEscape", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "config")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("write escaped the fence (stat err = %v)", statErr)
+	}
+}
+
+// TestSafeWriteFile_RealParentsStillWrite is the policy's positive control: ordinary nested
+// directories — created by the call itself, or already there — are untouched by the refusal.
+func TestSafeWriteFile_RealParentsStillWrite(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := SafeWriteFile(root, "docs/deep/notes.md", []byte("hello"), 0o644); err != nil {
+		t.Fatalf("SafeWriteFile through real parents: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "docs", "deep", "notes.md"))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(got) != "hello" {
+		t.Errorf("content = %q, want %q", got, "hello")
+	}
+}
+
+// TestSafeReadFile_FollowsInRootSymlink is the read half of the same policy, and the reason the
+// tools disclose a resolved path: a read through an in-root link is deliberately NOT refused, so
+// the file the caller named and the file it got can be two different paths.
+func TestSafeReadFile_FollowsInRootSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	gitDir := filepath.Join(root, ".git")
+	if err := os.Mkdir(gitDir, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte("[core]\n"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(".git", "config"), filepath.Join(root, "notes.md")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	got, err := SafeReadFile(root, "notes.md")
+	if err != nil {
+		t.Fatalf("SafeReadFile through in-root symlink: %v", err)
+	}
+	if string(got) != "[core]\n" {
+		t.Errorf("content = %q, want the link's target read through (%q)", got, "[core]\n")
+	}
+}
+
 // TestSafeReadFile_ReadsWithinRoot is the read positive control.
 func TestSafeReadFile_ReadsWithinRoot(t *testing.T) {
 	t.Parallel()

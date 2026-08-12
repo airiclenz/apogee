@@ -49,6 +49,29 @@ import (
 // miss under a concurrent swap is now rejected), and they refuse the same traversal /
 // out-of-root absolute paths via the rootRelative containment check below. They never
 // widen the fence.
+//
+// SYMLINK POLICY — what os.Root does NOT decide. os.Root judges one question only: does
+// resolution leave the root. A symlink pointing INSIDE the root is therefore followed, and
+// following it silently moves the operation somewhere the argument never named — an in-root
+// directory link `docs → .git` makes a write to "docs/config" land on ".git/config" without
+// ever leaving the workspace, so the workspace fence has nothing to say about it and the
+// operator approved a path that is not the path touched. The two directions are answered
+// differently, per the hostile-bytes ratified call:
+//
+//   - WRITES REFUSE a parent chain that crosses a symlink (refuseSymlinkedParents, applied
+//     by SafeWriteFile): a write must reach its target through real directories, so the name
+//     on the approval pane is the name that changes. The final component is exempt because
+//     the write REPLACES that name rather than writing through it (see SafeWriteFile).
+//   - READS FOLLOW an in-root symlink, and the tools that read disclose where the name
+//     resolved (internal/tools' `→ resolves to …` note). Refusing reads would break the
+//     ordinary linked-file layouts a repo legitimately has; disclosing is what closes the gap
+//     between what the operator reads and what the model got.
+//
+// The refusal is a POLICY CHECK, not a second fence: it is decided from the chain as it
+// exists at check time, so an in-root component swapped to a symlink after the check can
+// still redirect a write WITHIN the root (never outside it — that half is os.Root's, decided
+// at use time). This layer is a guard, not a boundary (see doc.go); the boundary is the
+// Confiner, which is what bounds who can plant the link in the first place.
 
 // SafeWriteFile writes data to input (relative to root, or absolute-inside-root),
 // creating parent directories as needed, with the workspace fence enforced at WRITE time
@@ -73,6 +96,14 @@ import (
 // itself with a regular file rather than writing through to its target. A name (or
 // component) symlinked OUTSIDE the root is still refused with ErrPathEscape, and nothing —
 // not even a staging file — is created outside the fence.
+//
+// The PARENT CHAIN is the opposite: every directory component leading to the target must be
+// a real directory. A parent that is a symlink — even one pointing inside the root, which the
+// workspace fence has no reason to refuse — returns an error wrapping ErrSymlinkedParent
+// before anything is created, staged or mkdir'd, because following it would land the write
+// somewhere the argument never named (the SYMLINK POLICY note in the package header). So the
+// guarantee is: the write touches EXACTLY the name the caller passed, resolved through real
+// directories, or it touches nothing.
 func SafeWriteFile(root, input string, data []byte, perm os.FileMode) error {
 	rel, err := rootRelative(input, root)
 	if err != nil {
@@ -83,6 +114,12 @@ func SafeWriteFile(root, input string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("%w: %v", ErrPathEscape, err)
 	}
 	defer r.Close()
+
+	// Before ANY mutation: a symlinked parent would redirect the MkdirAll below as readily
+	// as it would redirect the write itself.
+	if err := refuseSymlinkedParents(r, rel); err != nil {
+		return err
+	}
 
 	dir := filepath.Dir(rel)
 	if dir != "." {
@@ -116,6 +153,81 @@ func SafeWriteFile(root, input string, data []byte, perm os.FileMode) error {
 		return mapRootEscape(err)
 	}
 	return nil
+}
+
+// ErrSymlinkedParent is returned when a write's path reaches its target THROUGH a symlinked
+// directory. It is deliberately NOT ErrPathEscape: nothing escaped the workspace — the write
+// was refused because the operator was shown one path and the filesystem would have changed
+// another. Callers that distinguish the two report each in its own words; callers that only
+// print the error say the true thing either way.
+var ErrSymlinkedParent = errors.New("write path crosses a symlinked directory")
+
+// refuseSymlinkedParents refuses a write whose path — rel, relative to the pinned root r — reaches
+// its target through anything other than real directories, returning an error wrapping
+// ErrSymlinkedParent as soon as a parent component is a symlink, and nil when the whole chain is
+// real. The TARGET's own name is not examined — a write replaces that name rather than
+// following it (SafeWriteFile's replace-the-name contract), which is what makes a symlinked
+// final name a disclosure question for the read side rather than a redirect on the write side.
+//
+// The walk is top-down through the pinned root, so the OUTERMOST offending component is the one
+// named: `docs → .git` is reported as "docs", the link the operator can actually look at, not as
+// some deeper component that only exists because of it. A component that does not exist ends the
+// walk successfully — nothing below an absent directory can exist either, and SafeWriteFile's
+// MkdirAll then creates real directories the whole rest of the way.
+func refuseSymlinkedParents(r *os.Root, rel string) error {
+	dir := filepath.Dir(rel)
+	if dir == "." || dir == string(filepath.Separator) {
+		return nil
+	}
+
+	walked := ""
+	for _, part := range strings.Split(dir, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		walked = filepath.Join(walked, part)
+
+		info, err := r.Lstat(walked)
+		switch {
+		case err == nil:
+		case errors.Is(err, os.ErrNotExist):
+			return nil
+		default:
+			return mapRootEscape(err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return symlinkedParentError(r, walked)
+		}
+	}
+	return nil
+}
+
+// symlinkedParentError renders the refusal so an operator can act on it: the component that is a
+// symlink and, when it can be read, where that symlink points — the pair that turns "refused"
+// into "this directory is not the directory you think it is". An unreadable link degrades to the
+// component alone rather than to a bare failure.
+//
+// A link that leaves the ROOT keeps the fence's own uniform escape wording instead: that refusal
+// predates this policy, every caller matches ErrPathEscape for it, and "outside the workspace" is
+// the more urgent half of the truth. Only a link that stays inside — the case the fence has no
+// reason to refuse — is reported as ErrSymlinkedParent.
+func symlinkedParentError(r *os.Root, component string) error {
+	if _, err := r.Stat(component); isRootEscapeError(err) {
+		return mapRootEscape(err)
+	}
+	return inRootSymlinkedParentError(r, component)
+}
+
+// inRootSymlinkedParentError is symlinkedParentError's in-root half, split out so the escape
+// classification above reads as the one decision it makes.
+func inRootSymlinkedParentError(r *os.Root, component string) error {
+	target, err := r.Readlink(component)
+	if err != nil {
+		return fmt.Errorf("%w: %q (a write must reach its target through real directories)",
+			ErrSymlinkedParent, component)
+	}
+	return fmt.Errorf("%w: %q -> %q (a write must reach its target through real directories)",
+		ErrSymlinkedParent, component, target)
 }
 
 // stagingPrefix is the basename prefix of SafeWriteFile's staging file. The leading dot
@@ -203,6 +315,13 @@ func stageAndClose(f *os.File, data []byte, mode os.FileMode, applyMode bool) er
 // pointing outside the root is refused rather than followed. It returns the same
 // (contents, error) contract as os.ReadFile; a path escape returns an error wrapping
 // ErrPathEscape and the read is not performed.
+//
+// A symlink pointing INSIDE the root is FOLLOWED, deliberately: the contents are whatever the
+// name resolves to within the fence, which is what makes ordinary linked-file layouts keep
+// working. That is also why "the file this call read" and "the file the caller named" can be
+// two different paths — a caller that shows the operator (or the model) which file it read must
+// disclose the resolved name rather than echo its argument (the SYMLINK POLICY note in the
+// package header; internal/tools renders it as `→ resolves to …`).
 //
 // It applies no size bound of its own: the contents are whatever the name resolves to inside
 // the root at read time, however large. A caller that needs a bound must use SafeOpen and

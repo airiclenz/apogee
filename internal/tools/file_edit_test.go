@@ -205,6 +205,93 @@ func TestEditExistingFile_PatchFailuresDoNotCorrupt(t *testing.T) {
 	}
 }
 
+// An edit is a READ followed by a write, and the read follows an in-root symlink (the write side
+// refuses a symlinked parent, but a symlinked NAME is read through and then replaced). So
+// "edit docs/notes.md" can disclose .git/config to the model and destroy the link in the same
+// call, reported as an ordinary edit of docs/notes.md. The result sentence must name the file the
+// bytes actually came from — resolved before the write, since the write leaves a plain file behind
+// whatever the name was.
+func TestEditExistingFile_NamesTheFileItRead(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	config := symlinkedReadFixture(t, root, "docs", "notes.md")
+	realConfig := realPath(t, config)
+
+	result, err := NewEditExistingFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "docs/notes.md", "content": "clean\n"}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	if want := "updated docs/notes.md → resolves to " + realConfig; result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+
+	// The write went to the NAME, not through the link: the redirect target keeps its bytes.
+	if got := string(mustRead(t, config)); got != gitConfigFixture {
+		t.Errorf("redirect target content = %q, want it untouched", got)
+	}
+
+	// The patch branch carries the same disclosure.
+	patched := symlinkedReadFixture(t, root, "notes", "entry.md")
+	patch, err := NewEditExistingFile(root).Execute(context.Background(),
+		callWith(t, "c2", map[string]any{
+			"path":    "notes/entry.md",
+			"content": "*** Begin Patch\n@@\n-[core]\n+[clean]\n*** End Patch\n",
+		}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if patch.IsError {
+		t.Fatalf("unexpected tool error: %q", patch.Content)
+	}
+	if want := "applied patch to notes/entry.md (1 hunk) → resolves to " + realPath(t, patched); patch.Content != want {
+		t.Errorf("Content = %q, want %q", patch.Content, want)
+	}
+
+	// An ordinary edit reports the sentence it always did.
+	writeTempFile(t, root, "plain.md", "old\n")
+	ordinary, err := NewEditExistingFile(root).Execute(context.Background(),
+		callWith(t, "c3", map[string]any{"path": "plain.md", "content": "new\n"}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if ordinary.Content != "updated plain.md" {
+		t.Errorf("Content = %q, want the bare sentence for a path that resolves to itself", ordinary.Content)
+	}
+}
+
+// gitConfigFixture is the content symlinkedReadFixture plants at the redirect target — a stand-in
+// for any in-workspace file the operator did not mean to hand over.
+const gitConfigFixture = "[core]\n"
+
+// symlinkedReadFixture builds the read-side redirect the disclosure exists for: a real .git/config
+// holding gitConfigFixture, a real directory dir, and dir/name as an in-root symlink pointing at
+// that config. It returns the redirect target's path. The link is RELATIVE and stays inside the
+// root, so the workspace fence follows it — which is exactly why the tool has to say so.
+func symlinkedReadFixture(t *testing.T, root, dir, name string) string {
+	t.Helper()
+
+	gitDir := filepath.Join(root, ".git")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	config := filepath.Join(gitDir, "config")
+	if err := os.WriteFile(config, []byte(gitConfigFixture), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(filepath.Join("..", ".git", "config"), filepath.Join(root, dir, name)); err != nil {
+		t.Skipf("symlinks unavailable on this host: %v", err)
+	}
+	return config
+}
+
 func TestEditExistingFile_ToolErrors(t *testing.T) {
 	t.Parallel()
 
