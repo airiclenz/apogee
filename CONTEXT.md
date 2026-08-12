@@ -103,10 +103,14 @@ share, not this Driver).
 **Sub-agent**:
 A nested, focused agent loop the top-level agent spawns for one delegated sub-task, with its
 own Session. It is itself an instance of the **Embeddable agent**, spawned in-process; its
-events nest into the parent's event stream at **`Depth = parent+1`**. Its **context window is
-not reduced**: the child inherits the parent's `Config` verbatim (`internal/agent/subagent.go`),
-so it works against a window — and a Budget over it — of the same size the parent has. How
-full that window got is **visible per run**: the TUI paints the run's own reading on its
+events nest into the parent's event stream at **`Depth = parent+1`**. An **unrouted** child's
+**context window is not reduced**: it inherits the parent's `Config` verbatim
+(`internal/agent/subagent.go`), so it works against a window — and a Budget over it — of the same
+size the parent has. A child **routed** to the **Sub-agent server** works against the **Delegation
+target's** window instead (that entry's `context-window:` pin, else the per-slot window the flagged
+server advertises), which is a different model's window and may be smaller or larger than the
+parent's ([ADR 0045](docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md)).
+How full that window got is **visible per run**: the TUI paints the run's own reading on its
 collapsed call block (`N tool calls · 12k/32k · <gist>`) and `apogee headless` prints one
 `sub-agent: <used>/<limit> · <the delegation's name, else the task>` line on stderr per run.
 Each reading belongs to the agent that filled it — it never moves the parent's gauge and never
@@ -158,8 +162,7 @@ the children's **posture** — `bypass:` and `mechanisms:` overrides that apply 
 *routed there* (present key replaces whole, absent key inherits the parent's live value;
 where the *parent* runs is irrelevant). No flag anywhere means today's behavior: children
 share the parent's Upstream. Ratified 2026-08-11
-([ADR 0045](docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md));
-wiring lands via the sub-agent-server plan.
+([ADR 0045](docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md)).
 _Avoid_: "grunt server" (colloquial), "worker server", "delegation server" (the config key
 says `sub-agents:`).
 
@@ -170,8 +173,7 @@ Parallel-agents cap, model profile — kept fresh by a second heartbeat monitor 
 the entry's `model:` / `context-window:` where set. Mutex-read at spawn (never idle-gated:
 beats land mid-Exchange; each spawn snapshots). An **unusable** target (no beat yet, server
 down, no model) is not an error: the spawn **falls back** to the parent's Upstream *and*
-parent posture, with one notice per routing state change. Ratified 2026-08-11 (ADR 0045);
-wiring lands via the sub-agent-server plan.
+parent posture, with one notice per routing state change. Ratified 2026-08-11 (ADR 0045).
 _Avoid_: "child upstream" (the target outlives any one child), "sub-agent endpoint" (it
 carries far more than an address).
 

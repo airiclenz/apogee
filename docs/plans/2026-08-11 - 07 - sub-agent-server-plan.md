@@ -382,7 +382,7 @@ the numbers exactly where they stood.
 
 Commit: `feat(tui): delegation line shows the child model when it differs`
 
-## 9. Docs closer: CONTEXT.md markers resolved, window claim made conditional
+## 9. Docs closer: CONTEXT.md markers resolved, window claim made conditional — ✅ DONE (2026-08-12)
 
 **What:** Depends on items 2-8. In `CONTEXT.md`: (a) remove the two
 "wiring lands via the sub-agent-server plan" markers from the **Sub-agent server** and
