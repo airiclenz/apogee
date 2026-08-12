@@ -38,7 +38,9 @@ type terminalArgs struct {
 // with confine-to-workspace on, and gates it through Approval when fs-confinement is
 // unavailable ("confine if you can, gate if you can't"). It is stateless across Turns
 // (ADR 0008) — a fresh process per call, no persistent shell — and is path-scoped to root
-// for its working directory.
+// for its working directory. The command line runs in the operator's own environment, minus
+// apogee's own credentials (subprocessEnv): a shell line the model chose has no use for the key
+// apogee authenticates to its inference server with.
 type Terminal struct {
 	toolSpec
 	root string
@@ -91,6 +93,9 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		cmdline: cmdline,
 		dir:     dir,
 		timeout: time.Duration(args.TimeoutSeconds) * time.Second,
+		// The command line runs in the operator's own environment — minus apogee's
+		// credentials, which a model-chosen command line has no use for and could exfiltrate.
+		env: subprocessEnv(),
 	}
 	res, err := runSubprocess(ctx, spec)
 	if err != nil {

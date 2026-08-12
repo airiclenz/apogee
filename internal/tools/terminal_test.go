@@ -87,6 +87,38 @@ func TestTerminal_RunsAndCapturesOutput(t *testing.T) {
 	}
 }
 
+// TestTerminal_DropsApogeeCredentialsFromTheChildEnvironment pins the one subtraction the shell
+// tool makes from the operator's environment: apogee's own key, which a model-chosen command
+// line has no use for and could send anywhere. Everything else — PATH, HOME, the operator's own
+// variables — is still inherited, because a stripped environment would break the developer
+// tooling the tool exists to run.
+func TestTerminal_DropsApogeeCredentialsFromTheChildEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell command; covered on unix")
+	}
+	// Not parallel: t.Setenv.
+	t.Setenv("APOGEE_API_KEY", "sk-secret-value")
+	t.Setenv("APOGEE_ENDPOINT", "http://192.0.2.1:1111")
+
+	term := NewTerminal(t.TempDir())
+	res, err := term.Execute(context.Background(), terminalCall("c1", `echo "key=[$APOGEE_API_KEY] endpoint=[$APOGEE_ENDPOINT] path=[${PATH:+set}]"`))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if strings.Contains(res.Content, "sk-secret-value") {
+		t.Errorf("the api key reached the shell: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "key=[]") {
+		t.Errorf("output = %q, want APOGEE_API_KEY empty in the child", res.Content)
+	}
+	if !strings.Contains(res.Content, "endpoint=[http://192.0.2.1:1111]") {
+		t.Errorf("output = %q, want the non-secret variables still inherited", res.Content)
+	}
+	if !strings.Contains(res.Content, "path=[set]") {
+		t.Errorf("output = %q, want PATH still inherited", res.Content)
+	}
+}
+
 func TestTerminal_NonZeroExitIsErrorResult(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell command; covered on unix")

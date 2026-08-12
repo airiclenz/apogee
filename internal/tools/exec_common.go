@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -51,6 +52,56 @@ type subprocessSpec struct {
 	// cmd.exe on Windows sets it, because os/exec's argv joining mangles the quotes the
 	// shell needs (exec_cmdline_other.go).
 	cmdline string
+}
+
+// apogeeSecretEnvVars names the environment variables that carry apogee's OWN credentials. A
+// subprocess launched for the MODEL — a shell command line, a Python snippet — has no business
+// reading the key apogee talks to its inference server with: the model chooses what that
+// subprocess does, and an exfiltration from inside the box is one request away (TODO.md L3
+// accepts that reading is possible; it does not oblige apogee to hand over its own secrets).
+//
+// The name is a literal rather than internal/config's EnvAPIKey because internal/config imports
+// THIS package (its tool-name reconciliation), so the dependency cannot point back. The
+// CONFIGURED server keys need no entry here: they are file-only by design (config.ServerEntry's
+// "APIKey is FILE-ONLY on purpose"), so they never reach an environment to be dropped from.
+var apogeeSecretEnvVars = []string{"APOGEE_API_KEY"}
+
+// subprocessEnv returns the environment an execution tool's subprocess runs with: everything
+// the caller inherited MINUS apogee's own credentials, plus each extra "KEY=value" entry
+// appended — appended, so it wins over an inherited spelling of the same key, which is how
+// every exec implementation resolves a duplicate.
+//
+// It is deliberately NOT git's allowlist (safeEnvKeys): the shell and interpreter tools run
+// what the operator asked for in the developer environment they expect to be in, and an
+// allowlist there would break ordinary tooling. What is removed is only what apogee itself put
+// there.
+func subprocessEnv(extra ...string) []string {
+	inherited := os.Environ()
+	env := make([]string, 0, len(inherited)+len(extra))
+	for _, entry := range inherited {
+		if isApogeeSecretEnv(entry) {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env, extra...)
+}
+
+// isApogeeSecretEnv reports whether a "KEY=value" entry names one of apogee's own credentials.
+// The name comparison is case-insensitive because Windows environment names are: APOGEE_API_KEY
+// and Apogee_Api_Key are one variable there. On POSIX they are two, and dropping both is the
+// safe direction — a lower-cased spelling is one apogee never reads anyway.
+func isApogeeSecretEnv(entry string) bool {
+	key, _, ok := strings.Cut(entry, "=")
+	if !ok {
+		return false
+	}
+	for _, secret := range apogeeSecretEnvVars {
+		if strings.EqualFold(key, secret) {
+			return true
+		}
+	}
+	return false
 }
 
 // subprocessResult is the captured outcome of one subprocess execution.

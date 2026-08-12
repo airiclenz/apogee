@@ -182,6 +182,26 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A `python_exec` snippet imports the standard library, not the repo.** A program fed to CPython
+  on standard input runs with the working directory — for this tool, the workspace root — at the
+  FRONT of `sys.path`, so a repo-root `json.py`, `socket.py` or `subprocess.py` owned the matching
+  `import` in a snippet whose approved `code` showed nothing of the sort, and confinement was no
+  answer (the box leaves read and exec open, so the Auto path ran the repo's `json.py` too). The
+  interpreter now runs with `PYTHONSAFEPATH=1`, which drops that entry. Because the variable landed
+  in 3.11 and every older interpreter ignores it **silently** — `python3` on a stock macOS is
+  frequently 3.9 — the tool measures the interpreter's version first and passes `-I` (isolated
+  mode) instead when it is older, so the fix is not a no-op on the hosts that need it most. Nothing
+  is injected into your code and `PYTHONPATH` is never set. **What changes for you:** a snippet
+  that imports a project module now needs to say so — `import sys; sys.path.append('.')` — which
+  is the point, because that line is then visible in the `code` you approve. The tool description
+  says so, and `sys.path.append` behaves identically under either mechanism.
+
+- **`terminal` and `python_exec` no longer hand your inference-server key to the subprocess.**
+  `APOGEE_API_KEY` is now dropped from the environment those two tools launch with; everything else
+  — `PATH`, `HOME`, your own variables — is inherited exactly as before, because these tools exist
+  to run your ordinary developer tooling. A configured server key was never at risk: keys in
+  `config.yaml` are file-only and never reached an environment in the first place.
+
 - **A program apogee launches may no longer come from a directory the model can write.** Every
   tool that resolves an executable on `PATH` — the five git tools, `python_exec`, `run_tests` and
   `diagnostics`' `go vet` half, plus the autofix Mechanism's formatter probe — now refuses one
