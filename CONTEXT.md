@@ -110,6 +110,9 @@ size the parent has. A child **routed** to the **Sub-agent server** works agains
 target's** window instead (that entry's `context-window:` pin, else the per-slot window the flagged
 server advertises), which is a different model's window and may be smaller or larger than the
 parent's ([ADR 0045](docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md)).
+When that entry names **neither** — no pin, and nothing observed — the routed child keeps the
+**parent's** window rather than running windowless: no window at all would leave its Budget and
+automatic Compaction inactive and its readings unmeasurable.
 How full that window got is **visible per run**: the TUI paints the run's own reading on its
 collapsed call block (`N tool calls · 12k/32k · <gist>`) and `apogee headless` prints one
 `sub-agent: <used>/<limit> · <the delegation's name, else the task>` line on stderr per run.

@@ -147,8 +147,9 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 // The Upstream responder used to be on that inherited list too — this doc said the child gets "the
 // SAME Upstream responder and EventSink" — and ADR 0045 reverses exactly that clause for the
 // Upstream half: when a Delegation target is LATCHED the spawn is ROUTED, and the child dials the
-// Sub-agent server on a provider client of its own, against that server's model, context window and
-// model profile, with the Bypass and Mechanism posture the flagged entry carries. With NO target
+// Sub-agent server on a provider client of its own, against that server's model, context window
+// (the parent's still, when the target names none) and model profile, with the Bypass and Mechanism
+// posture the flagged entry carries. With NO target
 // latched — nothing flagged, the server unreachable, no model bound there — the child takes the
 // parent's Upstream verbatim, which is what every delegation did before routing existed, so the
 // fallback is not a degraded mode but the original one (ADR 0045 §4). Routing never widens
@@ -231,7 +232,20 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 		childCfg.Endpoint = target.Endpoint
 		childCfg.APIKey = target.APIKey
 		childCfg.Model = target.Model
-		childCfg.Context.MaxContextTokens = target.ContextWindow
+		// The window is the one target field that may name NOTHING: a flagged entry with no
+		// `context-window:` pin, on a server whose beat observed no per-slot window either, resolves
+		// to 0 (the host leaves it there rather than inventing a number). Assigning that 0 would
+		// build the child WINDOWLESS — its Budget and automatic Compaction inactive, and its readings
+		// stamped 0, which sends both Drivers to their "the reading names none" fallback and paints a
+		// routed fill against the SESSION's window, the one window that child is not in. So an
+		// unnamed window is not a replacement at all: it leaves the parent's standing, seeded above.
+		// The parent's number is the better wrong answer than none — a routed child is never
+		// constructed windowless — and it is what an UNROUTED child gets anyway. Negative is folded
+		// in with 0 because a target cannot mean it (config refuses a negative pin; a beat cannot
+		// observe one), so both spellings mean the same thing here: the target named no window.
+		if target.ContextWindow > 0 {
+			childCfg.Context.MaxContextTokens = target.ContextWindow
+		}
 		childCfg.Profile = target.Profile
 		if target.Bypass != nil {
 			childCfg.Bypass = *target.Bypass

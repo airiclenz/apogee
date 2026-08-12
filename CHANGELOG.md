@@ -158,6 +158,16 @@ point is a **minor** bump, not a breaking change.
   the limit is frozen when the reading lands and kept in the session record, so a resumed session
   repaints the window the run really filled.
 
+- **A Sub-agent server that never says how big its window is no longer leaves the child without
+  one.** Flag a `servers:` entry for delegations, give it no `context-window:` pin, and point it at
+  a server whose heartbeat reports no per-slot window either, and every routed child used to be
+  built against a window of zero: its Budget and automatic Compaction went inactive, and its
+  readings carried no limit, so both the TUI and `apogee headless` fell back to painting that
+  child's fill against the SESSION's window — the one window it was not working in. A target that
+  names no window now leaves the parent's standing, so the child is never constructed windowless
+  and its readings state the limit it actually filled. A target that does name a window still
+  overrides the parent's, as routing has always done.
+
 - **A stray thinking closer no longer leaks into the reply.** Some chat templates pre-open the
   thinking channel themselves — the server has already consumed the start token by the time the
   model's content arrives — so the reply carries a bare `</mm:think>` (seen live from minimax-m3)

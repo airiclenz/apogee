@@ -45,8 +45,11 @@ type DelegationTarget struct {
 	// delegation that cannot name a model is not a usable target, it is the fallback.
 	Model string
 	// ContextWindow is Model's bound context window in tokens — the entry's `context-window:` pin,
-	// else the observed per-slot window. 0 means unknown, which leaves the routed child's Budget
-	// and automatic Compaction inactive exactly as an undiscovered window does anywhere else.
+	// else the observed per-slot window. 0 means the target names NO window (neither pinned nor
+	// observed), and it is the one field an unusable value does not make the whole target unusable:
+	// the spawn keeps the PARENT's window instead of inheriting the zero, so a routed child is never
+	// built windowless — with a dead Budget, no automatic Compaction and readings stamped 0 — over a
+	// number nobody supplied (subagent.go).
 	ContextWindow int
 	// ParallelAgents is the RECEIVING server's fan-out width — the cap that bounds a routed
 	// depth-0 fan-out and the guided-decomposition batch alike (ADR 0039's one width everywhere,

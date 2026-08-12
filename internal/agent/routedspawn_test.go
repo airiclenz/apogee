@@ -194,6 +194,55 @@ func TestSpawnStampsItsOwnWindowOnItsReadings(t *testing.T) {
 	}
 }
 
+// TestRoutedSpawnWithoutATargetWindowKeepsTheParents covers the one target field that may name
+// NOTHING: a flagged entry with no `context-window:` pin, on a server whose beat observed no
+// per-slot window, hands the engine a target with window 0. Taking that 0 would build the child
+// windowless — Budget and automatic Compaction inactive, readings stamped 0 — so the parent's
+// window stands instead, and the STAMP says so too: a Driver reading it paints the routed fill
+// against a real limit rather than falling back to the session's window for a child in a different
+// one. A target that does name a window still overrides, which is the routed case proper.
+func TestRoutedSpawnWithoutATargetWindowKeepsTheParents(t *testing.T) {
+	t.Parallel()
+
+	const parentWindow = 131072 // routingParent's own, so "kept" and "replaced" are distinguishable
+
+	cases := []struct {
+		name         string
+		targetWindow int
+		want         int
+	}{
+		{name: "no pin and nothing observed keeps the parent's", targetWindow: 0, want: parentWindow},
+		{name: "a negative window is no window either", targetWindow: -1, want: parentWindow},
+		{name: "a named window still overrides", targetWindow: 32768, want: 32768},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			parent := routingParent(t)
+			target := routedTarget()
+			target.ContextWindow = tc.targetWindow
+			parent.SetDelegationTarget(target)
+
+			child := spawn(t, parent)
+
+			if got := child.cfg.Context.MaxContextTokens; got != tc.want {
+				t.Errorf("routed child window = %d, want %d", got, tc.want)
+			}
+			if got := reading(child).ContextWindow; got != tc.want {
+				t.Errorf("routed child reading names window %d, want the effective %d — a 0 stamp sends a Driver to the session's window",
+					got, tc.want)
+			}
+			// The window guard is about the window alone: the rest of the routing still comes from
+			// the target, so a windowless entry is a routed delegation and not a fallback.
+			if child.cfg.Model != target.Model || child.cfg.Endpoint != target.Endpoint {
+				t.Errorf("routed child = %q on %q, want the target's %q on %q",
+					child.cfg.Model, child.cfg.Endpoint, target.Model, target.Endpoint)
+			}
+		})
+	}
+}
+
 // TestRoutedSpawnBypassPosture drives ADR 0045 §2's replace-or-inherit rule on the Bypass half: a
 // present flag replaces the parent's LIVE value in both directions, an absent one inherits it.
 func TestRoutedSpawnBypassPosture(t *testing.T) {
