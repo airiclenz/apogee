@@ -97,7 +97,16 @@ unchanged.
 
 Commit: `fix(processing): strip an orphan thinking closer as an implicit leading span`
 
-## 2. ADR 0044 + CONTEXT.md: the profile is per-model and mostly shipped
+## 2. ADR 0044 + CONTEXT.md: the profile is per-model and mostly shipped — ✅ DONE (2026-08-12)
+
+NOTES (2026-08-12): two departures from the literal text. (a) Beyond the "Model profile" section,
+one clause of CONTEXT.md's neighbouring **Launch profile** entry was edited — it asserted "the
+Model profile is global and stands through it", the exact claim this item retires, and no other
+plan item owns that line; the edit is the minimal reword to "re-resolved for that model when the
+load lands". (b) No CHANGELOG bullet: this item is docs-only (ADR + concept map) with no
+user-visible behaviour change — the standing one-bullet requirement is scoped to user-visible
+items, and the user-visible bullets land with items 4 and 6. The stale `internal/agent` doc
+comments were left to item 5 per the item's own instruction (item 5 has not landed).
 
 **What:** Write `docs/adr/0044-model-profiles-are-per-model-and-mostly-shipped.md`:
 context (the minimax leak; the global block's churn-on-every-switch; rebind.go's

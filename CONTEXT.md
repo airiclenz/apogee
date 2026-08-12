@@ -238,8 +238,19 @@ double-told, or choke on an array it cannot render). A **zero profile is the nat
 no-inline-thinking default** (today's behaviour) — it adds nothing to the request in either
 direction. It is a `domain` type on `Config` (declarative data — [ADR 0010](docs/adr/0010-package-layout-domain-core-and-thin-root-facade.md)),
 translated to the `processing` parsers at the boundary, not the parsers' own config.
+Which profile a model gets is **resolved per model in three layers** — the user's
+`model-profiles:` pattern map ▸ apogee's **shipped shape table** ▸ the zero profile — where the
+nearest layer with a case-insensitive substring match on the model name supplies the WHOLE
+profile (longest pattern wins within a layer; any user entry beats any shipped one). A shipped
+match announces itself with a one-line notice (`model profile: <pattern> (built-in) — thinking:
+<style>`); a user match applies silently. The resolution rides every model switch — the profile is
+one of the per-model bindings Rebind applies at the boundary
+([ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md)) —
+and the retired *global* `model-profile:` block is refused at startup with the map spelling to
+paste. See [ADR 0044](docs/adr/0044-model-profiles-are-per-model-and-mostly-shipped.md).
 _Avoid_: "model config" (overloaded with sampling/endpoint knobs), "adapter", "format" alone
-(there are two axes, not one).
+(there are two axes, not one), "global profile" (the single global block is retired — the profile
+is per-model, and mostly shipped).
 
 **Launch profile**:
 The recipe for *getting a model running* — which model file, which [Upstream](#identity-and-shape)
@@ -259,7 +270,8 @@ used. There is no global launcher key; a `config.yaml` still carrying the retire
 refused at startup with the per-entry line to paste. The deliberate contrast is the [Model profile](#identity-and-shape):
 a Launch profile is **launch-side** (how a model comes to exist at an endpoint), a Model profile is
 **request-side** (how apogee speaks to whatever exists). The two never touch — loading a Launch
-profile changes what runs; the Model profile is global and stands through it. See
+profile changes what runs; the Model profile only says how apogee speaks to whatever now runs, and
+is re-resolved for that model when the load lands. See
 [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md).
 _Avoid_: "profile" unqualified in docs (two profile namespaces exist; inside the launcher's own
 picker the short word is fine — context disambiguates), "launcher profile" (owner-named where the pair is
