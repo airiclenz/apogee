@@ -189,6 +189,7 @@ func (w *rootWiring) options() tui.Options {
 			roots:      w.roots,
 			present:    w.presentation,
 			caps:       w.caps,
+			delegation: w.delegation,
 		}),
 		// The `$EDITOR` round trip for the keys no row can hold (ADR 0037 decision 5): out through a
 		// command line this binary resolves — the file, the key's own line, the editor this environment

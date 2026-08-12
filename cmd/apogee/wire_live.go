@@ -187,9 +187,14 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// It is wired AFTER the bind and reads the engine holder rather than the Agent, for the reason
 	// every seam in this block does: a pre-bound session has no Agent yet, and the flagged server is
 	// observable regardless — routing is a fact about the OTHER server, so nothing here waits for
-	// this session to have picked its own. With no entry flagged this is the zero wiring: no monitor,
-	// no beat, nothing latched, and delegations stay on the session's Upstream (delegation.go).
-	w.delegation, err = newDelegationWiring(w.live.serverList(), w.cfg, w.engine, w.live.modelProfileEntries)
+	// this session to have picked its own. With no entry flagged it holds no server: no monitor, no
+	// beat, nothing latched, and delegations stay on the session's Upstream (delegation.go).
+	//
+	// The notice seam is the Bridge's, like the scheduler's narration below and for its reason: the
+	// routing state changes on the second heartbeat's own goroutine, which needs a send that is safe
+	// before the program exists and safe from anywhere after it does (tui.Bridge.NotifyRouting).
+	w.delegation, err = newDelegationWiring(
+		w.live.serverList(), w.cfg, w.engine, w.live.modelProfileEntries, w.bridge.NotifyRouting)
 	if err != nil {
 		return err
 	}

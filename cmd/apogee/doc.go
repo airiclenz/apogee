@@ -69,8 +69,10 @@
 // session; modelprofile.go its per-model twin — which shape a model speaks the wire in,
 // matched out of the `model-profiles:` map and the shipped table, plus the one-line
 // notice a built-in match announces itself with (ADR 0044); delegation.go the Sub-agent
-// server — the second heartbeat on the `sub-agents:`-flagged entry and the Delegation
-// target each of its beats resolves for the engine to route spawns against (ADR 0045);
+// server — the second heartbeat on the `sub-agents:`-flagged entry, the Delegation
+// target each of its beats resolves for the engine to route spawns against, the one
+// notice each change of routing state is worth, and the re-point a live `servers:` edit
+// drives (ADR 0045);
 // launcher.go the only file
 // importing the llama-launcher facade, kept behind
 // the nil-degrading actuation seams (ADR 0029); schedule.go the scheduler's three

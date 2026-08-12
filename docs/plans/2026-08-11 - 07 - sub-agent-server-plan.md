@@ -302,7 +302,7 @@ than the launch snapshot.
 
 Commit: `feat(apogee): second heartbeat resolves the delegation target from the flagged server`
 
-## 7. Wiring: routing state-change notices and live config lifecycle
+## 7. Wiring: routing state-change notices and live config lifecycle — ✅ DONE (2026-08-12)
 
 **What:** Depends on item 6. Two halves. (a) Notices: track the routing state
 (engaged/lost) beside the second monitor; on each TRANSITION emit one session notice —
@@ -321,6 +321,25 @@ reaches the next resolved spec.
 
 **Acceptance:** `go test ./cmd/apogee/` passes; `make check` passes; CHANGELOG bullet
 added.
+
+**NOTES (2026-08-12):** four deviations from the item's literal text. (a) "the same notice path the
+`context:` notice uses" is `transcript.addEphemeralNote`, which is inside the renderer and has no door
+the composition root can reach — so `internal/tui` gained one: `Bridge.NotifyRouting` → `routingNoticeMsg`
+→ that fold, `Bridge.NotifySchedule`'s twin in every respect, because the routing state resolves on the
+second heartbeat's own goroutine and needs the same late-bound, shutdown-safe send. The note arrives
+already worded (it names a `servers:` entry and the model bound on it — file and wire facts, ADR 0031).
+(b) The state machine says the FIRST resolved state whichever way it goes, not just losses: a flagged
+server that was never reachable would otherwise degrade silently, which is the one thing ADR 0042 §4 asks
+this notice to prevent. (c) `delegationWiring` became a pointer holder with a mutex and a generation
+counter — item 6's "written once at startup" note no longer holds once a reload replaces the entry the
+beat goroutine reads — so `wire.go`, `wire_live.go`, `wire_options.go` and `wire_settings.go` carry the
+pointer and the `servers:` apply (`reloadServers`) drives `relist` before it installs anything. The
+generation guard drops a beat that lands after the edit that superseded it, which is what keeps a stale
+target from being restored for a whole interval. (d) Of the latitude the item grants on posture edits:
+an edit to the SAME flagged entry keeps routing engaged and re-resolves at the next beat with no
+re-notice, while a removed or re-pointed flag pushes nil immediately and forgets the state — what is
+latched then dials a server the file no longer flags. Both doc maps gained their half-line
+(`cmd/apogee/doc.go`, `internal/tui/doc.go`).
 
 Commit: `feat(apogee): routing state-change notices and live config lifecycle for the sub-agent server`
 

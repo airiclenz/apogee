@@ -35,6 +35,7 @@ var (
 	_ tea.Msg = heartbeatTickMsg{}
 	_ tea.Msg = beatMsg{}
 	_ tea.Msg = scheduleEventMsg{}
+	_ tea.Msg = routingNoticeMsg{}
 )
 
 // eventMsg carries one engine Event into the Update loop. The teaSink wraps every Event
@@ -173,6 +174,22 @@ type beatMsg struct {
 // this session's conversation is not its business.
 type scheduleEventMsg struct {
 	Event schedule.Event
+}
+
+// routingNoticeMsg carries one change of the Sub-agent server's routing state into the Update loop:
+// delegations started going to the flagged server, or stopped because it can no longer take them
+// (ADR 0045 §4 — one notice per state CHANGE, never per spawn). Like scheduleEventMsg it rides the
+// late-bound programRef (bridge.go), because the composition root resolves that state on the beat
+// goroutine its second heartbeat runs on.
+//
+// The note arrives already WORDED, which is the one way it differs from the schedule Event beside
+// it: it names a `servers:` entry and the model that entry turned out to be serving, and both are
+// facts of the file and the wire — the two things this package deliberately knows nothing about
+// (ADR 0031). So the root words it and the renderer only places it.
+//
+// It is a REPORT and never a request: the fold appends one ephemeral note and moves nothing else.
+type routingNoticeMsg struct {
+	note string
 }
 
 // saveDoneMsg reports the outcome of one asynchronous SessionHost.Save (the per-Turn snapshot, the

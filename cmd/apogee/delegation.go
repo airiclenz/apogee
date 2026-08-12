@@ -14,10 +14,19 @@ package main
 // without reading a line of config. And it is ADR 0042's degrade: a server that cannot be reached,
 // or that binds no model, resolves to nil — which the engine reads as "not routing", so delegations
 // run on the session's own Upstream exactly as they did before any of this existed.
+//
+// Two things make that degrade VISIBLE and keep it current. The routing STATE — are delegations
+// going to the flagged server or to this session's own — is tracked beside the beat, and each time
+// it changes the transcript says so once (ADR 0045 §4: per state change, never per spawn). And the
+// flagged entry is re-read whenever `servers:` is edited mid-session (ADR 0037/0041), so adding the
+// flag starts observing, removing it stops and unlatches, and re-pointing it moves the whole thing
+// to the other server — none of which waits for a relaunch.
 
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"sync"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -34,43 +43,70 @@ type delegationSetter interface {
 	SetDelegationTarget(*apogee.DelegationTarget)
 }
 
-// delegationWiring is this session's Sub-agent server: the flagged entry, the beat that observes it,
-// and the two values the composition root resolves ONCE because nothing a beat reports can move them
-// — the Mechanism catalogue its delegations run with, and where the model-profile match reads its
-// user tier from.
-//
-// Its ZERO value is the ordinary session: no flag in the `servers:` list means no beat, no second
-// Monitor, and nothing ever latched, which is behaviour identical to before routing existed. That is
-// why it is held by value and why every method below opens by asking whether there is anything to
-// observe — the wiring is always present, the server is not.
-//
-// It needs no lock of its own: every field is written once, at startup, before the renderer starts
-// the cadence that reads them. What IS shared — the latch the resolved target is pushed into — owns
-// its own mutex one layer down (agent.SetDelegationTarget).
-type delegationWiring struct {
-	// entry is the flagged `servers:` entry: the dial facts a target is built from, the pins that
-	// outrank discovery, and the posture keys that ride the flag.
+// subAgentServer is one flagged `servers:` entry as the wiring holds it: the entry itself — the dial
+// facts a target is built from, the pins that outrank discovery, and the posture keys that ride the
+// flag — beside the two things a beat on it needs, both derived from that entry and therefore
+// replaced WITH it whenever the file re-points the flag somewhere else.
+type subAgentServer struct {
 	entry config.ServerEntry
-	// beat observes the Sub-agent server, and is nil when there is none. It is a func rather than the
-	// *heartbeat.Monitor itself for the reason every seam this root hands across is: the resolution
-	// is then exercisable against an observation a test writes down, with no server behind it.
+	// beat observes the Sub-agent server. It is a func rather than the *heartbeat.Monitor itself for
+	// the reason every seam this root hands across is: the resolution is then exercisable against an
+	// observation a test writes down, with no server behind it.
 	beat func(context.Context) heartbeat.Beat
 	// catalogue builds the Mechanism registry ONE routed child runs with, and is nil when the entry
 	// carries no `mechanisms:` map — which is the engine's signal to inherit the parent's catalogue
 	// as it always has (ADR 0045 §2). It is a factory because siblings in a fan-out run at once and
 	// each needs a registry of its own.
 	catalogue func() *apogee.MechanismRegistry
+}
+
+// delegationWiring is this session's Sub-agent server: which entry is flagged right now, the beat
+// that observes it, the routing state the transcript is told about, and the two things the root
+// resolves for every beat — where the model-profile match reads its user tier, and where a resolved
+// target is latched.
+//
+// With NO entry flagged it holds no server: no beat, no second Monitor, nothing ever latched, which
+// is behaviour identical to before routing existed (ADR 0045 §4's floor). The wiring itself is
+// always present even then, because the flag can arrive later: `servers:` is editable mid-session
+// (ADR 0037), so "there is no Sub-agent server" is a state this holder moves out of rather than a
+// reason not to exist.
+//
+// It is a pointer with a mutex for that same reason. The beat goroutine reads the server on every
+// interval while the Update goroutine replaces it from a config reload, so the fields are genuinely
+// shared — the liveSettings posture, one layer up from the latch's own lock inside the engine
+// (agent.SetDelegationTarget).
+type delegationWiring struct {
+	mu sync.Mutex
+	// server is the flagged entry and its beat, or nil when the list flags none.
+	server *subAgentServer
+	// generation counts REPLACEMENTS of the server above. A beat resolves off a snapshot, and an
+	// edit that lands while it is in flight must not be overwritten by what the previous server's
+	// observation resolved to — so a landing whose generation has moved on is dropped.
+	generation int
+	// routed is the routing state the notices are transitions OF: true while delegations go to the
+	// Sub-agent server, false while they fall back to this session's own Upstream.
+	routed bool
+	// stated records that the state above has been reported at least once, which is what makes the
+	// FIRST resolved state news whichever way it goes — a flagged server that was never reachable
+	// degrades as visibly as one that stopped being.
+	stated bool
+	// base is the session's own Config, kept because a re-read `servers:` list has to build the new
+	// entry's Mechanism catalogue out of exactly what startup built the old one from.
+	base apogee.Config
 	// userProfiles reads the `model-profiles:` user tier as it stands NOW, so a profile committed
 	// mid-session reaches the next beat's resolution rather than the next launch.
 	userProfiles func() []profiles.Entry
+	// notify puts one routing notice in front of the human, and is nil for a Driver that shows
+	// nothing (a bench, a headless run) — the degrade every seam this root hands across takes.
+	notify func(string)
 	// engine is where a resolved target is latched.
 	engine delegationSetter
 }
 
 // newDelegationWiring finds the Sub-agent server in entries and builds everything a beat on it will
-// need. With no entry flagged it answers the zero wiring — no monitor is constructed and no target
-// is ever pushed, so a session whose config says nothing about delegation routing behaves exactly as
-// it did before (ADR 0045 §4's floor).
+// need. With no entry flagged it answers a wiring holding no server — no monitor is constructed and
+// no target is ever pushed, so a session whose config says nothing about delegation routing behaves
+// exactly as it did before (ADR 0045 §4's floor) until an edit says otherwise.
 //
 // base is the session's own Config, and it is read for exactly what building the flagged entry's
 // Mechanism catalogue needs: the state roots. The entry's own endpoint and `model:` pin replace the
@@ -86,25 +122,43 @@ func newDelegationWiring(
 	base apogee.Config,
 	engine delegationSetter,
 	userProfiles func() []profiles.Entry,
-) (delegationWiring, error) {
+	notify func(string),
+) (*delegationWiring, error) {
+	wiring := &delegationWiring{
+		base:         base,
+		userProfiles: userProfiles,
+		notify:       notify,
+		engine:       engine,
+	}
 	entry, ok := config.SubAgentServer(entries)
 	if !ok {
-		return delegationWiring{}, nil
+		return wiring, nil
 	}
+	server, err := newSubAgentServer(entry, base)
+	if err != nil {
+		return nil, err
+	}
+	wiring.server = server
+	return wiring, nil
+}
+
+// newSubAgentServer builds the beat and the Mechanism catalogue for one flagged entry. It is the
+// step a startup and a config reload share, so a Sub-agent server that arrives hours into a session
+// is assembled exactly as one named at launch — including the refusal of a defective `mechanisms:`
+// map, which a reload returns to the settings row rather than to the terminal.
+func newSubAgentServer(entry config.ServerEntry, base apogee.Config) (*subAgentServer, error) {
 	catalogue, err := subAgentCatalogue(entry, base)
 	if err != nil {
-		return delegationWiring{}, err
+		return nil, err
 	}
-	return delegationWiring{
+	return &subAgentServer{
 		entry: entry,
 		// The discovery hint is the entry's own `model:` pin, empty when it pins none — the session
 		// Monitor's contract verbatim (heartbeat.NewMonitor): while the server still serves the pinned
 		// id, discovery resolves ITS window rather than the first advertised model's, and once the pin
 		// vanishes the beat reports what is actually loaded.
-		beat:         heartbeat.NewMonitor(entry.Endpoint, entry.Model, entry.APIKey).Beat,
-		catalogue:    catalogue,
-		userProfiles: userProfiles,
-		engine:       engine,
+		beat:      heartbeat.NewMonitor(entry.Endpoint, entry.Model, entry.APIKey).Beat,
+		catalogue: catalogue,
 	}, nil
 }
 
@@ -116,21 +170,146 @@ func newDelegationWiring(
 // rests on a beat staying strictly shorter than the interval. Run side by side they cost the longer
 // of the two, so the second server is observed on the same cadence without slowing the first.
 //
-// The push is unconditional — a resolved target on a usable beat, nil on an unusable one — because
-// "the Sub-agent server is not answering" is exactly as much a fact about routing as "it is". The
-// latch it lands in is anytime-safe (ADR 0045: deliberately never idle-gated), so a beat landing
-// mid-Exchange re-points the delegations SPAWNED after it and leaves every running child alone.
-func (d delegationWiring) observe(ctx context.Context) func() {
-	if d.beat == nil {
+// What it resolves against is a SNAPSHOT taken before the goroutine starts: the entry, its beat and
+// its catalogue travel together, so a `servers:` edit landing mid-beat cannot pair one server's
+// observation with another's posture. The landing checks the generation that snapshot was taken on
+// (see land), which is what keeps the edit's own push the last word.
+func (d *delegationWiring) observe(ctx context.Context) func() {
+	d.mu.Lock()
+	server, generation := d.server, d.generation
+	d.mu.Unlock()
+	if server == nil {
 		return func() {}
 	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		d.engine.SetDelegationTarget(
-			resolveDelegationTarget(d.entry, d.beat(ctx), d.userProfiles(), d.catalogue))
+		d.land(generation, server.entry.Name,
+			resolveDelegationTarget(server.entry, server.beat(ctx), d.userProfiles(), server.catalogue))
 	}()
 	return func() { <-done }
+}
+
+// land installs what one beat resolved and says so when the routing state moved.
+//
+// The push is unconditional — a resolved target on a usable beat, nil on an unusable one — because
+// "the Sub-agent server is not answering" is exactly as much a fact about routing as "it is". The
+// latch it lands in is anytime-safe (ADR 0045: deliberately never idle-gated), so a beat landing
+// mid-Exchange re-points the delegations SPAWNED after it and leaves every running child alone.
+//
+// A landing whose generation has been superseded is DROPPED whole — neither latched nor narrated.
+// It describes a server the file no longer flags, and the edit that replaced it has already pushed
+// what it wanted; letting this land would restore the old server's target for a whole interval,
+// which is the one thing a live edit must never leave behind.
+//
+// The notice goes out AFTER the push and OUTSIDE the lock, and both matter: a notice that preceded
+// the latch would announce routing that is not in force yet, and the notice seam blocks until the
+// renderer's Update loop takes it — so holding the mutex across it would park the beat goroutine on
+// the very loop a config reload calls relist from.
+func (d *delegationWiring) land(generation int, name string, target *apogee.DelegationTarget) {
+	d.mu.Lock()
+	if generation != d.generation {
+		d.mu.Unlock()
+		return
+	}
+	note := d.stateChange(name, target)
+	d.mu.Unlock()
+
+	d.engine.SetDelegationTarget(target)
+	if note != "" && d.notify != nil {
+		d.notify(note)
+	}
+}
+
+// stateChange folds one resolved target into the routing state and answers the notice that change is
+// worth, or "" when nothing changed. Called with the mutex held.
+//
+// The FIRST resolution is always worth one, whichever way it goes: a human who flagged a server
+// wants to know their delegations are going there, and — ADR 0042's visible degrade — wants to know
+// just as much when they are not, which a state machine that only reported LOSSES would say nothing
+// about for a server that was never up.
+//
+// Everything after that is transitions only. The model is deliberately not part of the state: a
+// grunt box reloaded with another model keeps taking the delegations it was taking, and re-stating
+// the routing on every model swap would edge back towards the per-spawn narration ADR 0045 §4 rules
+// out.
+func (d *delegationWiring) stateChange(name string, target *apogee.DelegationTarget) string {
+	routed := target != nil
+	if d.stated && routed == d.routed {
+		return ""
+	}
+	d.routed, d.stated = routed, true
+	if routed {
+		return "sub-agents: routing to " + name + " (" + target.Model + ")"
+	}
+	return "sub-agents: " + name + " unavailable — delegations run on the session server"
+}
+
+// relist re-points the wiring at the `servers:` list as it now stands — the Sub-agent server's half
+// of ADR 0037's live apply, reached from the same reloadServers every other `servers:` re-read goes
+// through (wire_settings.go), whether the edit came from the `/settings` pane or from the watcher
+// noticing the file changed under it (ADR 0041).
+//
+// Four things a list can do to routing, and each is answered where the human would expect:
+//
+//   - ADDS the flag ⇒ the entry is assembled and observed from the next beat on. Nothing is latched
+//     here, because nothing has been observed yet; the first beat says whether it is usable.
+//   - REMOVES it ⇒ the beat stops and the latch is cleared NOW rather than at the next beat. Routing
+//     ends when the file says it ends, and a target left latched for another interval would keep
+//     sending delegations to a server that is no longer the Sub-agent server.
+//   - RE-POINTS it at another entry ⇒ both of the above, in that order, for that same reason.
+//   - EDITS the flagged entry in place ⇒ the new pins and posture are installed and the NEXT beat
+//     resolves against them (never later than that, which is the freshness the plan requires).
+//     Routing is not interrupted and the state is not re-stated: it is the same server, still
+//     taking the same delegations, and nothing about that changed for the human to be told.
+//
+// It is validate-then-commit, like every other live re-read: a flagged entry whose `mechanisms:` map
+// this build refuses returns the error with NOTHING installed, so the session keeps routing exactly
+// as it did while the human fixes the file. A list whose Sub-agent server is untouched — the common
+// case, since most `servers:` edits are about some other entry — is a comparison and no work at all.
+func (d *delegationWiring) relist(entries []config.ServerEntry) error {
+	entry, flagged := config.SubAgentServer(entries)
+
+	d.mu.Lock()
+	current := d.server
+	d.mu.Unlock()
+
+	if !flagged && current == nil {
+		return nil // a list that named no Sub-agent server still names none
+	}
+	if flagged && current != nil && reflect.DeepEqual(current.entry, entry) {
+		return nil // the edit was somewhere else in the list
+	}
+
+	var next *subAgentServer
+	if flagged {
+		built, err := newSubAgentServer(entry, d.base)
+		if err != nil {
+			return err
+		}
+		next = built
+	}
+	// Whether what is LATCHED still describes the flagged server. An entry edited in place still
+	// does — same name, same endpoint, so the delegations in flight are going to the right box and
+	// only the pins and posture the next beat reads have moved.
+	stale := current != nil && (next == nil || next.entry.Name != current.entry.Name ||
+		next.entry.Endpoint != current.entry.Endpoint)
+
+	d.mu.Lock()
+	d.server = next
+	d.generation++
+	if stale {
+		// The state is forgotten rather than reported: a server the file stopped flagging is not a
+		// server that became unavailable, and the human reading the notice is the one who just
+		// edited it. Forgetting is what lets the NEXT server announce itself on its first beat.
+		d.routed, d.stated = false, false
+	}
+	d.mu.Unlock()
+
+	if stale {
+		d.engine.SetDelegationTarget(nil)
+	}
+	return nil
 }
 
 // resolveDelegationTarget turns one observation of the Sub-agent server into the spec a routed spawn

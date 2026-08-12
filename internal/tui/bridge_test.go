@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -149,5 +150,49 @@ func TestSeamConcurrentEmitApproveCancel(t *testing.T) {
 	case exchangeDoneMsg, cancelledMsg, errMsg:
 	default:
 		t.Fatalf("worker returned %T; want a terminal seam Msg", workerMsg)
+	}
+}
+
+// TestBridgeNotifyRoutingLandsAsAnEphemeralNote proves the composition root's OTHER way in (ADR
+// 0045): a routing change sent from the second heartbeat's goroutine reaches the Update loop as a
+// routingNoticeMsg and becomes one transcript note — and, unlike a Firing's narration beside it, is
+// not kept. The routing state is re-derived from live beats every time a session starts or resumes,
+// so a stored line would be a claim about a server nobody has beaten since.
+func TestBridgeNotifyRoutingLandsAsAnEphemeralNote(t *testing.T) {
+	t.Parallel()
+	prog := newStubProgram()
+	b := NewBridge()
+	b.Bind(prog)
+
+	const note = "sub-agents: routing to grunt (cheap-7b)"
+	b.NotifyRouting(note)
+
+	var sent []routingNoticeMsg
+	for _, m := range prog.messages() {
+		if msg, ok := m.(routingNoticeMsg); ok {
+			sent = append(sent, msg)
+		}
+	}
+	if len(sent) != 1 || sent[0].note != note {
+		t.Fatalf("the bound program received %+v; want one routingNoticeMsg carrying %q", sent, note)
+	}
+
+	m := step(t, newTestModel(t), sent[0])
+	if !hasEntry(m, entryNote, note) {
+		t.Errorf("the transcript has no %q note: %+v", note, m.transcript.entries)
+	}
+
+	blob, err := encodeTranscript(&m.transcript)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	entries, err := decodeTranscript(blob)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	for _, e := range entries {
+		if e.kind == entryNote && strings.Contains(e.text, "sub-agents:") {
+			t.Errorf("a routing notice survived the blob: %q", e.text)
+		}
 	}
 }

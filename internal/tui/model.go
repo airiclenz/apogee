@@ -695,6 +695,20 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 
+	case routingNoticeMsg:
+		// The composition root's second heartbeat reporting that delegations changed destination
+		// (ADR 0045 §4). Like the schedule Event above it is a record and not a gate — one note, no
+		// state transition, no engine call — because routing is a fact about the OTHER server and
+		// this session's conversation carries on regardless.
+		//
+		// The note is EPHEMERAL, like the "context: …" line: the routing state is re-derived from
+		// live beats every time a session starts or resumes, so a stored "routing to grunt" is a
+		// claim about a server nobody has beaten since — and five resumes would keep five of them
+		// (addEphemeralNote).
+		m.transcript.addEphemeralNote(msg.note)
+		m.refreshViewport()
+		return m, nil
+
 	case presentedMsg:
 		// The worker's Presenter finished walking the ladder and hands the Update loop rung 0
 		// itself: the transcript entry carrying the document's path (ADR 0019 §2). It asks for

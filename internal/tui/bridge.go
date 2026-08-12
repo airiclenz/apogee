@@ -112,6 +112,18 @@ func (b *Bridge) Bind(p programSender) { b.prog.bind(p) }
 // emits every Event off the goroutine that called Add or Stop.
 func (b *Bridge) NotifySchedule(ev schedule.Event) { b.prog.send(scheduleEventMsg{Event: ev}) }
 
+// NotifyRouting carries one Sub-agent-server routing change into the running program — the seam the
+// composition root's second heartbeat says "delegations are going to the cheap box now" and "they
+// are not any more" through (ADR 0045 §4). It is NotifySchedule's twin in every respect that
+// matters here: the caller is another goroutine of the root's own (the beat the renderer's cadence
+// drives), and it needs exactly what a scheduler goroutine needs — a send that is safe before the
+// program exists and safe from anywhere afterwards.
+//
+// The note is the root's finished sentence rather than a state this package words, because it names
+// a `servers:` entry and the model that server bound; see routingNoticeMsg. It is never called from
+// Update, for the reason every send here carries (programRef.send).
+func (b *Bridge) NotifyRouting(note string) { b.prog.send(routingNoticeMsg{note: note}) }
+
 // programRef is a concurrency-safe, late-bound handle to the running program. send runs on
 // the worker goroutine (via Emit/Approve); bind runs once on the program goroutine inside
 // Run. The atomic pointer makes that hand-off race-free no matter how Bubble Tea schedules

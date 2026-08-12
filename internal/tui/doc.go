@@ -518,7 +518,9 @@
 // seam boundary the binary sees ([Run], [Options], and the [Engine], [SkillCatalog] and
 // [SessionHost] interfaces); bridge.go the late-bound programRef every seam sends the running
 // program through — including [Bridge.NotifySchedule], the composition root's own way in, which is
-// how a Firing narrates from the scheduler's goroutine without the renderer knowing one exists; sink.go the Event→Msg [teaSink]; messages.go the plain values those sends carry
+// how a Firing narrates from the scheduler's goroutine without the renderer knowing one exists, and
+// [Bridge.NotifyRouting] beside it, the same way in for the Sub-agent server's routing state (ADR
+// 0045); sink.go the Event→Msg [teaSink]; messages.go the plain values those sends carry
 // into Update; approver.go and asker.go the two cross-goroutine rendezvous that park a Step on a
 // human ([uiApprover] on an approval decision, [uiAsker] on a typed answer); worker.go the
 // cancellable engine driver; model.go the [Model] itself — the lifecycle state machine, the

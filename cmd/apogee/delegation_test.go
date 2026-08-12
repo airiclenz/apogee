@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -27,6 +28,37 @@ func (s *delegationSpy) SetDelegationTarget(target *apogee.DelegationTarget) {
 // exactly so a resolution can be exercised against one of these rather than against a live server.
 func beatSource(observed heartbeat.Beat) func(context.Context) heartbeat.Beat {
 	return func(context.Context) heartbeat.Beat { return observed }
+}
+
+// noProfiles is a host whose `model-profiles:` map is empty — the tier read every resolution takes,
+// written out once because most of these tests are about something else.
+func noProfiles() []profiles.Entry { return nil }
+
+// noticeSpy records what the human was told, in order. Like delegationSpy it needs no lock: a notice
+// is emitted on the beat's own goroutine, and the join the caller runs is what makes it readable.
+type noticeSpy struct {
+	notes []string
+}
+
+func (s *noticeSpy) add(note string) { s.notes = append(s.notes, note) }
+
+// testDelegationWiring assembles a wiring already holding one Sub-agent server, with the entry's
+// beat written down rather than dialled. notices may be nil — the Driver that shows nothing.
+func testDelegationWiring(
+	entry config.ServerEntry,
+	observed heartbeat.Beat,
+	engine delegationSetter,
+	notices *noticeSpy,
+) *delegationWiring {
+	wiring := &delegationWiring{
+		server:       &subAgentServer{entry: entry, beat: beatSource(observed)},
+		userProfiles: noProfiles,
+		engine:       engine,
+	}
+	if notices != nil {
+		wiring.notify = notices.add
+	}
+	return wiring
 }
 
 // A pin is a statement about the server that discovery may not overrule (ADR 0045 decision 4), and
@@ -193,11 +225,11 @@ func TestNewDelegationWiringWithoutAFlagObservesNothing(t *testing.T) {
 		{Name: "there", Endpoint: "http://127.0.0.1:2222"},
 	}
 	spy := &delegationSpy{}
-	wiring, err := newDelegationWiring(entries, validCfg(t), spy, func() []profiles.Entry { return nil })
+	wiring, err := newDelegationWiring(entries, validCfg(t), spy, noProfiles, nil)
 	if err != nil {
 		t.Fatalf("newDelegationWiring with no flagged entry: %v", err)
 	}
-	if wiring.beat != nil {
+	if wiring.server != nil {
 		t.Error("a monitor was constructed for a list with no Sub-agent server")
 	}
 	wiring.observe(context.Background())()
@@ -214,12 +246,8 @@ func TestDelegationWiringObservePushesWhatTheBeatResolvedTo(t *testing.T) {
 
 	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true, ParallelAgents: 2}
 	spy := &delegationSpy{}
-	wiring := delegationWiring{
-		entry:        entry,
-		beat:         beatSource(heartbeat.Beat{Reachable: true, ActiveModel: "loaded-model", ContextWindow: 8192}),
-		userProfiles: func() []profiles.Entry { return nil },
-		engine:       spy,
-	}
+	wiring := testDelegationWiring(entry,
+		heartbeat.Beat{Reachable: true, ActiveModel: "loaded-model", ContextWindow: 8192}, spy, nil)
 
 	wiring.observe(context.Background())()
 	if len(spy.pushes) != 1 || spy.pushes[0] == nil {
@@ -229,7 +257,7 @@ func TestDelegationWiringObservePushesWhatTheBeatResolvedTo(t *testing.T) {
 		t.Errorf("latched target = %+v; want the beat's model/window and the entry's cap", got)
 	}
 
-	wiring.beat = beatSource(heartbeat.Beat{Failure: "connection refused"})
+	wiring.server.beat = beatSource(heartbeat.Beat{Failure: "connection refused"})
 	wiring.observe(context.Background())()
 	if len(spy.pushes) != 2 || spy.pushes[1] != nil {
 		t.Fatalf("pushes after the server went away = %+v; want a second push clearing the latch", spy.pushes)
@@ -295,7 +323,7 @@ func TestNewDelegationWiringRefusesADefectiveMechanismsMap(t *testing.T) {
 		SubAgents:  true,
 		Mechanisms: map[string]bool{"libary": true},
 	}}
-	_, err := newDelegationWiring(entries, validCfg(t), &delegationSpy{}, func() []profiles.Entry { return nil })
+	_, err := newDelegationWiring(entries, validCfg(t), &delegationSpy{}, noProfiles, nil)
 	if err == nil {
 		t.Fatal("a misspelled mechanism key was accepted; want the run refused")
 	}
@@ -328,5 +356,330 @@ func TestLateEngineRemembersTheDelegationTargetUntilTheBind(t *testing.T) {
 	engine.SetDelegationTarget(nil)
 	if engine.pendingDelegation != nil {
 		t.Errorf("pendingDelegation after a clear = %+v; want nil", engine.pendingDelegation)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The routing notices (ADR 0045 §4)
+// ----------------------------------------------------------------------------
+
+// One notice per routing STATE CHANGE and not one more: a server that keeps answering is not news on
+// every beat, and a server that stays down is not news on every beat either. The states are the two
+// the human cares about — delegations go to the flagged box, or they fall back to this session's own
+// server — so the whole state machine is exercised by driving a server through both twice.
+func TestDelegationNoticesOnlyOnARoutingStateChange(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
+	up := heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}
+	down := heartbeat.Beat{Failure: "connection refused"}
+	notices := &noticeSpy{}
+	wiring := testDelegationWiring(entry, up, &delegationSpy{}, notices)
+
+	beat := func(observed heartbeat.Beat) {
+		t.Helper()
+		wiring.server.beat = beatSource(observed)
+		wiring.observe(context.Background())()
+	}
+	beat(up)   // engaged: said once
+	beat(up)   // still engaged: nothing to say
+	beat(down) // lost: said once
+	beat(down) // still lost: nothing to say
+	beat(up)   // recovered: said again
+
+	want := []string{
+		"sub-agents: routing to grunt (cheap-7b)",
+		"sub-agents: grunt unavailable — delegations run on the session server",
+		"sub-agents: routing to grunt (cheap-7b)",
+	}
+	if len(notices.notes) != len(want) {
+		t.Fatalf("notices = %q; want exactly one per transition: %q", notices.notes, want)
+	}
+	for i, w := range want {
+		if notices.notes[i] != w {
+			t.Errorf("notice %d = %q; want %q", i, notices.notes[i], w)
+		}
+	}
+}
+
+// A flagged server that was never reachable degrades VISIBLY (ADR 0042): the first resolved state is
+// worth a notice whichever way it goes, or a human who configured routing and got none would have
+// nothing at all to read.
+func TestDelegationNoticesTheFirstStateEvenWhenItIsUnusable(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
+	notices := &noticeSpy{}
+	wiring := testDelegationWiring(entry, heartbeat.Beat{Failure: "connection refused"}, &delegationSpy{}, notices)
+
+	wiring.observe(context.Background())()
+	if len(notices.notes) != 1 ||
+		notices.notes[0] != "sub-agents: grunt unavailable — delegations run on the session server" {
+		t.Fatalf("notices = %q; want the unavailable line once", notices.notes)
+	}
+}
+
+// A beat resolved against a server the file has since re-pointed is dropped whole — never latched,
+// never narrated. Without that guard an observation in flight when the edit landed would restore the
+// old server's target and hold it for a whole interval, which is the one thing a live edit must not
+// leave behind.
+func TestDelegationDropsALandingFromASupersededServer(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
+	spy := &delegationSpy{}
+	notices := &noticeSpy{}
+	wiring := testDelegationWiring(entry, heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, notices)
+
+	wiring.land(wiring.generation-1, "grunt", &apogee.DelegationTarget{Model: "cheap-7b"})
+	if len(spy.pushes) != 0 || len(notices.notes) != 0 {
+		t.Errorf("a superseded landing pushed %+v and said %q; want neither", spy.pushes, notices.notes)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The live `servers:` lifecycle (ADR 0037/0041 through ADR 0045)
+// ----------------------------------------------------------------------------
+
+// Flagging a server mid-session starts observing it: nothing is latched by the edit itself — nothing
+// has been observed yet — and the next beat resolves the target and says so.
+func TestDelegationRelistAddsTheFlag(t *testing.T) {
+	t.Parallel()
+
+	spy := &delegationSpy{}
+	notices := &noticeSpy{}
+	wiring, err := newDelegationWiring(
+		[]config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
+		validCfg(t), spy, noProfiles, notices.add)
+	if err != nil {
+		t.Fatalf("newDelegationWiring: %v", err)
+	}
+
+	added := []config.ServerEntry{
+		{Name: "here", Endpoint: "http://127.0.0.1:1111"},
+		{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true},
+	}
+	if err := wiring.relist(added); err != nil {
+		t.Fatalf("relist adding the flag: %v", err)
+	}
+	if wiring.server == nil || wiring.server.entry.Name != "grunt" {
+		t.Fatalf("server after the flag was added = %+v; want the grunt entry observed", wiring.server)
+	}
+	if len(spy.pushes) != 0 || len(notices.notes) != 0 {
+		t.Errorf("the edit itself pushed %+v and said %q; want both to wait for the first beat",
+			spy.pushes, notices.notes)
+	}
+
+	wiring.server.beat = beatSource(heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"})
+	wiring.observe(context.Background())()
+	if len(spy.pushes) != 1 || spy.pushes[0] == nil || spy.pushes[0].Endpoint != "http://127.0.0.1:2222" {
+		t.Fatalf("pushes after the first beat = %+v; want the new server's target", spy.pushes)
+	}
+	if len(notices.notes) != 1 || notices.notes[0] != "sub-agents: routing to grunt (cheap-7b)" {
+		t.Errorf("notices = %q; want the routing line for the newly flagged server", notices.notes)
+	}
+}
+
+// Unflagging it ends routing THERE AND THEN: the beat stops and the latch is cleared by the edit
+// itself, because a target left standing for another interval would keep sending delegations to a
+// server the file no longer names.
+func TestDelegationRelistRemovesTheFlag(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
+	spy := &delegationSpy{}
+	wiring := testDelegationWiring(entry, heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, nil)
+	wiring.observe(context.Background())()
+
+	if err := wiring.relist([]config.ServerEntry{{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}}); err != nil {
+		t.Fatalf("relist removing the flag: %v", err)
+	}
+	if wiring.server != nil {
+		t.Errorf("server after the flag was removed = %+v; want none observed", wiring.server)
+	}
+	if len(spy.pushes) != 2 || spy.pushes[1] != nil {
+		t.Fatalf("pushes = %+v; want the edit to clear the latch", spy.pushes)
+	}
+	// And nothing beats any more: the cadence still calls observe, and it has nothing to observe.
+	wiring.observe(context.Background())()
+	if len(spy.pushes) != 2 {
+		t.Errorf("pushes after a beat with no Sub-agent server = %+v; want none added", spy.pushes)
+	}
+}
+
+// Moving the flag to another entry is both of the above in one edit: what was latched dials a server
+// the file no longer flags, so it is cleared now, and the new server announces itself on its own
+// first beat rather than inheriting the old one's state.
+func TestDelegationRelistRePointsTheFlag(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
+	spy := &delegationSpy{}
+	notices := &noticeSpy{}
+	wiring := testDelegationWiring(entry, heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, notices)
+	wiring.observe(context.Background())()
+
+	moved := []config.ServerEntry{
+		{Name: "grunt", Endpoint: "http://127.0.0.1:2222"},
+		{Name: "cheaper", Endpoint: "http://127.0.0.1:3333", SubAgents: true},
+	}
+	if err := wiring.relist(moved); err != nil {
+		t.Fatalf("relist re-pointing the flag: %v", err)
+	}
+	if wiring.server == nil || wiring.server.entry.Name != "cheaper" {
+		t.Fatalf("server after the re-point = %+v; want the cheaper entry", wiring.server)
+	}
+	if len(spy.pushes) != 2 || spy.pushes[1] != nil {
+		t.Fatalf("pushes = %+v; want the old server's target cleared by the edit", spy.pushes)
+	}
+
+	wiring.server.beat = beatSource(heartbeat.Beat{Reachable: true, ActiveModel: "tiny-3b"})
+	wiring.observe(context.Background())()
+	if len(notices.notes) != 2 || notices.notes[1] != "sub-agents: routing to cheaper (tiny-3b)" {
+		t.Errorf("notices = %q; want the second server to announce itself", notices.notes)
+	}
+}
+
+// An edit to the flagged entry ITSELF — a posture key, a pin — is not a change of server: routing
+// carries on uninterrupted, nothing is said again, and the very next beat resolves against what the
+// file now says. That last part is the freshness rule: no edit may leave a stale posture latched
+// past one beat.
+func TestDelegationRelistEditsTheFlaggedEntryInPlace(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
+	spy := &delegationSpy{}
+	notices := &noticeSpy{}
+	wiring := testDelegationWiring(entry, heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, notices)
+	wiring.observe(context.Background())()
+	if pushed := spy.pushes[0]; pushed.Bypass != nil || pushed.ContextWindow != 0 {
+		t.Fatalf("the first target = %+v; want no posture and no window before the edit", pushed)
+	}
+
+	bypassed := entry
+	on := true
+	bypassed.Bypass, bypassed.ContextWindow = &on, 16384
+	if err := wiring.relist([]config.ServerEntry{bypassed}); err != nil {
+		t.Fatalf("relist editing the entry: %v", err)
+	}
+	if len(spy.pushes) != 1 {
+		t.Fatalf("pushes = %+v; want routing left engaged by an edit to the same server", spy.pushes)
+	}
+
+	wiring.server.beat = beatSource(heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"})
+	wiring.observe(context.Background())()
+	next := spy.pushes[len(spy.pushes)-1]
+	if next == nil || next.Bypass == nil || !*next.Bypass || next.ContextWindow != 16384 {
+		t.Errorf("the next resolved target = %+v; want the edited posture and pin", next)
+	}
+	if len(notices.notes) != 1 {
+		t.Errorf("notices = %q; want the same server not to re-announce itself", notices.notes)
+	}
+}
+
+// A `servers:` edit that leaves the Sub-agent server alone — the common case, since most of that
+// list is about other servers — costs a comparison and nothing else: no new Monitor, no push, and
+// no beat in flight invalidated.
+func TestDelegationRelistIgnoresAnEditElsewhereInTheList(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
+	spy := &delegationSpy{}
+	wiring := testDelegationWiring(entry, heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, nil)
+	wiring.observe(context.Background())()
+	server, generation := wiring.server, wiring.generation
+
+	elsewhere := []config.ServerEntry{
+		{Name: "here", Endpoint: "http://127.0.0.1:1111", ParallelAgents: 4},
+		entry,
+	}
+	if err := wiring.relist(elsewhere); err != nil {
+		t.Fatalf("relist with an untouched Sub-agent server: %v", err)
+	}
+	if wiring.server != server || wiring.generation != generation {
+		t.Error("an edit elsewhere in the list replaced the Sub-agent server")
+	}
+	if len(spy.pushes) != 1 {
+		t.Errorf("pushes = %+v; want the edit to touch nothing", spy.pushes)
+	}
+}
+
+// A live edit is validate-then-commit, exactly as the startup build is loud: a flagged entry whose
+// `mechanisms:` map this build does not know is refused with NOTHING installed, so the session keeps
+// routing where it was routing while the human fixes the file.
+func TestDelegationRelistRefusesADefectiveMechanismsMap(t *testing.T) {
+	t.Parallel()
+
+	base := validCfg(t)
+	base.LibraryDir = t.TempDir()
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
+	spy := &delegationSpy{}
+	wiring := testDelegationWiring(entry, heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, nil)
+	wiring.base = base
+	wiring.observe(context.Background())()
+
+	defective := entry
+	defective.Mechanisms = map[string]bool{"libary": true}
+	err := wiring.relist([]config.ServerEntry{defective})
+	if err == nil {
+		t.Fatal("a misspelled mechanism key was accepted; want the edit refused")
+	}
+	if !strings.Contains(err.Error(), "libary") || !strings.Contains(err.Error(), "grunt") {
+		t.Errorf("error = %q; want it to name both the key and the entry that asked for it", err)
+	}
+	if wiring.server.entry.Mechanisms != nil || len(spy.pushes) != 1 {
+		t.Errorf("server = %+v and pushes = %+v; want the refused edit to have installed nothing",
+			wiring.server.entry, spy.pushes)
+	}
+}
+
+// The flag lives on a `servers:` entry, so the door a live edit reaches routing through is that
+// key's own apply (ADR 0037's dispatcher) — the same one an editor's exit and the watcher's report
+// both end in. This is the wiring of that door: the file names a Sub-agent server, and the session
+// starts observing it without a relaunch.
+func TestApplySettingServersDrivesTheSubAgentServer(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	launchOpts := config.Options{Servers: []config.ServerEntry{{Name: "local", Endpoint: "http://127.0.0.1:1111"}}}
+	live := newLiveSettings(launchOpts, nil)
+	spy := &delegationSpy{}
+	wiring := &delegationWiring{userProfiles: noProfiles, engine: spy}
+	apply := applySettingFor(settingsApplier{live: live, configPath: path, delegation: wiring})
+
+	writeSettingsFixture(t, path, "servers:\n"+
+		"  - name: local\n    endpoint: http://127.0.0.1:1111\n"+
+		"  - name: grunt\n    endpoint: http://127.0.0.1:2222\n    sub-agents: true\n")
+	if _, err := apply("servers", "2 servers"); err != nil {
+		t.Fatalf("apply servers adding the flag: %v", err)
+	}
+	if wiring.server == nil || wiring.server.entry.Name != "grunt" {
+		t.Fatalf("Sub-agent server after the edit = %+v; want the flagged grunt entry", wiring.server)
+	}
+
+	// A flagged entry this build refuses is refused BEFORE anything is installed, so the session
+	// keeps both the list and the routing it was already running.
+	writeSettingsFixture(t, path, "servers:\n"+
+		"  - name: local\n    endpoint: http://127.0.0.1:1111\n"+
+		"  - name: grunt\n    endpoint: http://127.0.0.1:2222\n    sub-agents: true\n"+
+		"    mechanisms:\n      libary: true\n")
+	if _, err := apply("servers", "2 servers"); err == nil {
+		t.Fatal("apply of a defective `mechanisms:` map: want the refusal, got none")
+	}
+	if wiring.server.entry.Mechanisms != nil || len(live.serverList()) != 2 {
+		t.Errorf("refused edit installed %+v and a %d-entry list; want neither touched",
+			wiring.server.entry, len(live.serverList()))
+	}
+
+	writeSettingsFixture(t, path, "servers:\n  - name: local\n    endpoint: http://127.0.0.1:1111\n")
+	if _, err := apply("servers", "1 server"); err != nil {
+		t.Fatalf("apply servers removing the flag: %v", err)
+	}
+	if wiring.server != nil {
+		t.Errorf("Sub-agent server after the flag was removed = %+v; want none", wiring.server)
+	}
+	if len(spy.pushes) != 1 || spy.pushes[0] != nil {
+		t.Errorf("pushes = %+v; want exactly the edit's clearing push", spy.pushes)
 	}
 }

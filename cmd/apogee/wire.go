@@ -139,7 +139,7 @@ type rootWiring struct {
 	holder        *upstreamHolder
 	caps          *parallelAgentsCap
 	hints         hintObserver
-	delegation    delegationWiring
+	delegation    *delegationWiring
 	binder        serverBinder
 	live          *liveSettings
 	externalEdits *externalEdit

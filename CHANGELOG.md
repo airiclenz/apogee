@@ -68,6 +68,19 @@ point is a **minor** bump, not a breaking change.
   the other server back up on the beat after it returns. With no entry flagged nothing changes at all:
   no second monitor is started, and no delegation goes anywhere it did not go yesterday.
 
+- **The session says where its delegations are going, and follows a config edit there.** Routing
+  announces itself once when it starts — `sub-agents: routing to grunt (qwen3-8b)` — and once when it
+  stops: `sub-agents: grunt unavailable — delegations run on the session server`. One line per change
+  of destination, never one per delegation, and the line is said the first time either way, so a
+  flagged server that was never reachable is visible instead of silently unused. Editing `servers:`
+  while apogee runs now moves routing with it, like every other setting since the live-config work:
+  add `sub-agents: true` and the session starts observing that server, remove it and delegations come
+  home immediately rather than at the next beat, move the flag to another entry and the new server is
+  picked up and announced on its own first beat. Editing the flagged entry in place — its `bypass:`,
+  its `mechanisms:`, any of its pins — keeps the delegations flowing and applies at the next beat, and
+  a `mechanisms:` key this build does not know is refused on the spot with the session left running
+  exactly as it was.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's

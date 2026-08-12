@@ -311,6 +311,10 @@ type settingsApplier struct {
 	// that is a value the engine holds. nil ⇒ this Driver composed no cap, so the list still applies
 	// and only the width stands still.
 	caps *parallelAgentsCap
+	// delegation is the Sub-agent server (ADR 0045), reached by that same one key: the flag lives on
+	// a `servers:` entry, so adding, removing or re-pointing it is a `servers:` edit. nil ⇒ this
+	// Driver routes no delegations, and the list applies with routing left where it was.
+	delegation *delegationWiring
 }
 
 // applySettingFor builds the [tui.Options.ApplySetting] dispatcher: the one place a key the pane has
@@ -601,6 +605,15 @@ func (a settingsApplier) reloadServers() error {
 	}
 	if err := config.ValidateServers(l.Servers); err != nil {
 		return err
+	}
+	// The Sub-agent server the list now flags (ADR 0045), re-pointed BEFORE anything is installed:
+	// it is the one part of this apply that can still refuse — a flagged entry whose `mechanisms:`
+	// map this build does not know — and a refusal has to leave the session on the list it was
+	// already running, not half-way onto a new one.
+	if a.delegation != nil {
+		if err := a.delegation.relist(l.Servers); err != nil {
+			return err
+		}
 	}
 	a.live.setServers(l.Servers)
 	// The one thing in that list an engine DOES hold: the fan-out width of the server this session is
