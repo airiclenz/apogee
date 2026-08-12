@@ -66,6 +66,10 @@
 #              still runs, with the context window unknown (the Budget and auto-compaction then
 #              inactive), and apogee says so once in the transcript at startup.
 #              --model / APOGEE_MODEL overrides it for the server this session starts on.
+#              Whichever name a run ends up bound to — set here or discovered from the server — is
+#              also the name the Model profile is matched on: how that model speaks the wire is
+#              resolved per model from model-profiles: at the end of this file over apogee's
+#              built-in shape table, and re-resolved whenever the bound model changes.
 #   llama-launcher
 #              lets apogee start, switch and stop THIS server itself, with llama-launcher — the
 #              tool that owns the model files and the launch profiles on the machine that entry
@@ -536,3 +540,65 @@ system-prompt-text: |
 #   alias:                      # explicit carry-over: runtime model label -> entry key
 #     # gemma-4-e4b-it-qat: gemma-4-e4b-it-qat     # identity = "my model is what it says"
 #     # my-gemma-quant: gemma-4-e4b-it-qat         # transfer to a sibling quant (your call)
+
+# =============================================================================
+# Model profiles: how a model speaks the wire — the shape its tool calls arrive in, and the inline
+# thinking channel apogee strips out of what you are shown. That shape is a chat-template fact of a
+# model family rather than a preference, so it is keyed BY MODEL and re-resolved on every model
+# change: /model, a llama-launcher profile load, a /server move, or the server swapping the loaded
+# model under a running session. Config-file only (no flag or env).
+#
+# Most configurations never spell this key. apogee ships a built-in SHAPE TABLE of known families
+# and applies it by model name, so an out-of-the-box run against one of them already reads correctly
+# with this file untouched. It ships as three verified entries, matched exactly the way your own are:
+#
+#   gemma        delimited <think> … </think> reasoning
+#   gpt-oss      harmony channels
+#   minimax-m3   delimited <mm:think> … </mm:think> reasoning
+#
+# A BUILT-IN match announces itself, at startup and at every switch —
+# `model profile: minimax-m3 (built-in) — thinking: delimited` — because a built-in that matched the
+# WRONG model is otherwise invisible and that line is the first thing to debug from. A model no
+# pattern matches runs the zero profile: native tool calls, nothing stripped, exactly how apogee
+# behaves without a table. Your own entries apply SILENTLY — you wrote them.
+#
+# A key is a PATTERN, not a name: it matches when the model apogee resolved CONTAINS it, ignoring
+# case. That is what survives quants, provider prefixes and :tag suffixes — `minimax-m3` matches
+# `minimax/minimax-m3:exacto` and `minimax-m3-Q4_K_M` alike. Write a family to cover a family, or the
+# full advertised name to pin one build. The LONGEST matching pattern wins within a tier (equal
+# lengths break alphabetically, so the winner never depends on file order), and any entry of yours
+# beats every built-in — which is also how you switch a built-in off when it fires on a model it
+# has no business shaping: name that model here with a thinking style of none.
+#
+# A matching entry replaces the WHOLE profile, both axes: an axis you leave out means native /
+# nothing-stripped, NOT "keep the built-in's". The axes and their values:
+#
+#   tool-call-format   native (the default) — calls arrive structured, out of band
+#                      markdown-fenced      — calls are parsed back out of a fenced block in the reply
+#                      custom-regex         — calls are parsed with tool-call-pattern
+#   tool-call-pattern  the named-group regex custom-regex needs; ignored by the other two formats
+#   thinking:
+#     style            none (the default) — no inline channel; content passes through untouched
+#                      delimited          — a literal token pair: set start: and end: to what the
+#                                           model ACTUALLY emits (the tokens vary per build, not
+#                                           just per family)
+#                      harmony            — gpt-oss channels, which need no tokens
+#
+# `apogee probe model` prints the entry its findings suggest, keyed by the model it probed and ready
+# to paste here (it never edits this file). Editing this block while a session runs swaps the parser
+# on the spot, like every other key in this file.
+#
+# NOTE: the old GLOBAL `model-profile:` block — singular, one profile for every model — is retired. A
+# config that still spells it is refused at startup, with your own block echoed back in the spelling
+# below to paste.
+#
+# model-profiles:
+#   minimax-m3:                     # matches minimax/minimax-m3:exacto, minimax-m3-Q4_K_M, …
+#     thinking:
+#       style: delimited
+#       start: "<mm:think>"
+#       end: "</mm:think>"
+#   my-fenced-model:
+#     tool-call-format: markdown-fenced
+#     thinking:
+#       style: none                 # also how you switch an unwanted built-in match back off

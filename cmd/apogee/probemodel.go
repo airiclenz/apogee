@@ -60,8 +60,9 @@ func probeModelCommand() *cobra.Command {
 		Short: "Run the capability battery and record the model's behavioral fingerprint",
 		Long: "apogee probe model asks the configured model to do three things — emit a native\n" +
 			"tool call, return a JSON object, and carry a tool result into a second call — and\n" +
-			"reports what it observed, an ordinal capability tier, and the model-profile knobs\n" +
-			"the findings suggest (printed for you to paste; config.yaml is never touched).\n\n" +
+			"reports what it observed, an ordinal capability tier, and the `model-profiles:` entry\n" +
+			"the findings suggest, keyed by the model it probed (printed for you to paste;\n" +
+			"config.yaml is never touched).\n\n" +
 			"It costs live model calls. It also WRITES: the behavioral fingerprint it derives is\n" +
 			"recorded under the apogee home at medium confidence, which is what promotes a\n" +
 			"matching Validated set from offered to auto-applied on later runs (ADR 0016 §5).\n" +

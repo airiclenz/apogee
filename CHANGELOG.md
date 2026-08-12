@@ -75,6 +75,17 @@ point is a **minor** bump, not a breaking change.
   the line, echoes your own block back nested under a pattern placeholder, and says what to paste.
   `apogee probe model` suggests its findings in the new spelling too, keyed by the model it probed.
 
+- **The shipped `config.yaml` documents `model-profiles:` now.** The template seeded into `~/.apogee`
+  on first run passed the key over in silence: the built-in shape table means a known family needs no
+  entry, but a reader whose model speaks a dialect apogee does not know — or whose built-in match is
+  the wrong one — had nothing in the file to reach for. It is documented like every other key now: a
+  commented example, the substring-pattern rule and how ties resolve, the three built-in patterns and
+  the notice they print, both axes with the values they take, and the retired global `model-profile:`
+  named as retired rather than left to be discovered at startup. The `servers:` entry's `model` key
+  points at it, since the name a run binds is what the profile is matched on. An existing
+  `~/.apogee/config.yaml` is never rewritten, so this reaches a fresh install. `apogee probe model
+  --help` picks up the same spelling.
+
 ### Removed
 
 - **`open_file` is gone, merged into `read_file`.** It was the read-and-locate twin of a tool that

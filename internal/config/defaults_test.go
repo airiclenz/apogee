@@ -167,6 +167,40 @@ func TestEmbeddedDefaultConfigTeachesTheServersSchema(t *testing.T) {
 	}
 }
 
+// The template documents `model-profiles:` (ADR 0044) and teaches its retired predecessor to
+// nobody. The shipped shape table means a known family needs no entry at all, but the map is the
+// only thing to reach for when a model's dialect is wrong or a built-in matched the wrong model —
+// and a key the seeded file never names is a key its reader never finds. Five facts carry the
+// surface: the map's own spelling, both axes, a shipped pattern (so the built-in table is visible
+// at all), and that the global key it replaced is refused rather than ignored.
+func TestEmbeddedDefaultConfigDocumentsModelProfiles(t *testing.T) {
+	t.Parallel()
+	template := string(defaultConfigYAML)
+	for _, want := range []string{
+		"# model-profiles:",          // the map itself, as a commented example to uncomment
+		"tool-call-format",           // the tool-call axis
+		"style: delimited",           // the thinking axis, with a value it actually takes
+		"minimax-m3",                 // a shipped pattern: the built-in table is documented, not hidden
+		"is retired",                 // and the global key it replaced is named as retired…
+		"refused at startup",         // …loudly, so a stale config's reader knows what happened
+		"replaces the WHOLE profile", // an entry is not merged over a built-in
+	} {
+		if !strings.Contains(template, want) {
+			t.Errorf("embedded template does not mention %q; the model-profiles documentation is missing "+
+				"or reworded", want)
+		}
+	}
+
+	// The retired GLOBAL key is never OFFERED — it may only be named as history. A commented
+	// top-level `# model-profile:` would be an example a reader uncomments into a config that is
+	// then refused at startup, which is the opposite of documenting the retirement.
+	for i, line := range SplitConfigLines(defaultConfigYAML) {
+		if indent, name, ok := commentedKey(line); ok && indent == 0 && name == "model-profile" {
+			t.Errorf("line %d offers the retired global model-profile: key — %q", i+1, line)
+		}
+	}
+}
+
 // SeedDefaultConfig honours an explicit --config home and seeds the embedded template there.
 func TestSeedDefaultConfigHonoursConfigFlag(t *testing.T) {
 	t.Parallel()
