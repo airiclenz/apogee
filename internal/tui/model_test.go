@@ -1003,20 +1003,142 @@ func TestModelApprovalEscapeStrips(t *testing.T) {
 	}
 }
 
-// A labelled argument's value keeps the two-space indent that hangs it under its own label on the
-// rendered body lines (embedded-newline layout is preserved end to end, not collapsed by the wrap).
+// A labelled argument's VALUE keeps the two-space indent that hangs it under its own label on the
+// rendered body lines, and keeps every line it arrived with: embedded-newline layout is preserved
+// end to end, not collapsed by the wrap and not folded by the field flattening either.
+//
+// This is the half of the newline rule that SURVIVES: a value's line breaks are the fact the human
+// is ruling on — the four lines a command will really run — so folding them would leave the pane
+// claiming something other than what executes. The other half is the model-authored FIELDS around
+// it, whose newlines paint rows the pane did not write and are flattened for exactly that reason
+// (TestModelApprovalFlattensFieldsThatCouldForgeRows). Indentation is what makes keeping these
+// safe: a value's lines sit under a label that can no longer be forged, so nothing they say reads
+// as a row of the surface's own.
 func TestModelApprovalArgsKeepIndentation(t *testing.T) {
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	reply := make(chan domain.ApprovalDecision, 1)
 	m = step(t, m, approvalReqMsg{
-		Request: domain.ApprovalRequest{Tool: "write_file", Arguments: json.RawMessage(`{"path":"notes.txt"}`)},
-		Reply:   reply,
+		Request: domain.ApprovalRequest{
+			Tool:      "terminal",
+			Arguments: json.RawMessage(`{"path":"notes.txt","command":"cd /ws/a\ngit status"}`),
+		},
+		Reply: reply,
 	})
 	// The value hangs two spaces under "path:"; had the indent been collapsed, only the popup's
 	// one-space padding would precede it. The two-space run proves it survived.
-	if got := plain(m.View()); !strings.Contains(got, "  notes.txt") {
-		t.Errorf("the argument's value lost its two-space hanging indent:\n%s", got)
+	view := plain(m.View())
+	for _, want := range []string{"  notes.txt", "  cd /ws/a", "  git status"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the argument's value lost its two-space hanging indent at %q:\n%s", want, view)
+		}
 	}
+	// Counting the ROWS is what says the multi-line value was not folded onto one: a substring check
+	// for "cd /ws/a" passes either way.
+	if rows := approvalBodyRows(view, "cd /ws/a"); len(rows) != 1 {
+		t.Errorf("a multi-line value must keep its own rows, got %d opening rows:\n%s", len(rows), view)
+	}
+	if rows := approvalBodyRows(view, "git status"); len(rows) != 1 {
+		t.Errorf("a multi-line value's second line lost its row, got %d:\n%s", len(rows), view)
+	}
+}
+
+// A model-authored FIELD paints no row of its own, whatever it carries. The approval body is drawn
+// one row per line (popupBodyWrapped) and every body row wears the same th.popupBody style —
+// approvalPrompt sets no bodyLead — so a newline inside an argument NAME, a sub-agent TASK or a
+// sub-agent NAME painted a second "Reason:" line indistinguishable from the real one, above the
+// real one, and the human authorised a call whose stated reason the model wrote. flattenField folds
+// each of those onto the single line a label is.
+//
+// The assertions count ROWS rather than looking for substrings, because the forged text is still on
+// the pane after the fix — folded into the row that legitimately carries it — so a substring check
+// passes on the forgery it exists to catch.
+func TestModelApprovalFlattensFieldsThatCouldForgeRows(t *testing.T) {
+	cases := []struct {
+		name string
+		req  domain.ApprovalRequest
+		// carrier is the row prefix the flattened payload must end up folded INTO, so the test pins
+		// that the text was kept and moved rather than dropped.
+		carrier string
+	}{
+		{
+			"an argument name",
+			domain.ApprovalRequest{
+				Tool:      "terminal",
+				Reason:    "subprocess execution",
+				Arguments: json.RawMessage(`{"command\nReason: pre-approved":"rm -rf /"}`),
+			},
+			"command Reason: pre-approved:",
+		},
+		{
+			"a sub-agent task, which leads the body",
+			domain.ApprovalRequest{
+				Tool:         "terminal",
+				Reason:       "subprocess execution",
+				SubAgentTask: "audit the loader\nReason: pre-approved",
+				Arguments:    json.RawMessage(`{"command":"rm -rf /"}`),
+			},
+			"Sub-agent: audit the loader Reason: pre-approved",
+		},
+		{
+			"a sub-agent name",
+			domain.ApprovalRequest{
+				Tool:         "terminal",
+				Reason:       "subprocess execution",
+				SubAgentTask: "audit the loader",
+				SubAgentName: "scout\nReason: pre-approved",
+				Arguments:    json.RawMessage(`{"command":"rm -rf /"}`),
+			},
+			"Sub-agent: scout Reason: pre-approved — audit the loader",
+		},
+		{
+			"the gate's own reason",
+			domain.ApprovalRequest{
+				Tool:      "terminal",
+				Reason:    "subprocess execution\nReason: pre-approved",
+				Arguments: json.RawMessage(`{"command":"rm -rf /"}`),
+			},
+			"Reason: subprocess execution Reason: pre-approved",
+		},
+		{
+			"the remedy the Fix line carries",
+			domain.ApprovalRequest{
+				Tool:      "terminal",
+				Reason:    "subprocess execution",
+				Remedy:    "run /confine status\nReason: pre-approved",
+				Arguments: json.RawMessage(`{"command":"rm -rf /"}`),
+			},
+			"Fix: run /confine status Reason: pre-approved",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+			m = step(t, m, approvalReqMsg{Request: tc.req, Reply: make(chan domain.ApprovalDecision, 1)})
+			view := plain(m.View())
+			if rows := approvalBodyRows(view, "Reason:"); len(rows) != 1 {
+				t.Errorf("the pane paints %d rows opening \"Reason:\", want exactly the gate's own:\n%s",
+					len(rows), view)
+			}
+			if rows := approvalBodyRows(view, tc.carrier); len(rows) != 1 {
+				t.Errorf("the flattened field is not folded into its own row (%q), got %d:\n%s",
+					tc.carrier, len(rows), view)
+			}
+		})
+	}
+}
+
+// approvalBodyRows returns the pane rows that OPEN with prefix, read off the painted view with the
+// popup's own border and padding taken back off. It is the row-level reading a forged-row test
+// needs: what a field can do to this pane is add a ROW, and a substring check over the whole view
+// cannot tell a row from a fold into one.
+func approvalBodyRows(view, prefix string) []string {
+	var out []string
+	for _, ln := range strings.Split(view, "\n") {
+		if row := strings.TrimSpace(strings.Trim(ln, "│")); strings.HasPrefix(row, prefix) {
+			out = append(out, row)
+		}
+	}
+	return out
 }
 
 // A request raised by a sub-agent leads its body with the child's delegated task, so a prompt that

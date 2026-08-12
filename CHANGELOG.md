@@ -315,6 +315,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A tool call can no longer paint rows of its own on the approval prompt.** The prompt draws one
+  row per line of its body and every row is styled alike, so any model-authored string that reached
+  it carrying a newline painted extra rows — and an extra row could be a second `Reason:` line,
+  sitting above the real one and indistinguishable from it. An argument NAME was the shortest route
+  (JSON puts no restriction on what a key may hold), and a `sub_agent` task was the loudest, because
+  that line leads the body. Each of the prompt's label lines — the Sub-agent line, `Reason:` and
+  `Fix:` — is now folded onto the single line a label is, as is every argument name, so a newline
+  inside one shows up as the space it replaced rather than as a row the prompt did not write. **What
+  does not change:** an argument's VALUE keeps every line it arrived with, indented under its own
+  label, because those lines are the fact you are ruling on — a four-line command still reads as the
+  four lines that will run.
+
 - **A routed delegation's context fill is now measured against the window it actually filled.** Send
   the grunt work to a Sub-agent server with an 8k window from a session running a 128k model and the
   child's line read `7k/128k` — a nearly-empty gauge for a child that was in fact nearly full,

@@ -143,6 +143,17 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // for every depth: a child's request is rendered by this same code, told apart by its Sub-agent
 // line rather than by a nested surface of its own.
 //
+// The newline stripEscapes keeps is then taken off the pane's FIELDS, and only its fields
+// (flattenField): the Sub-agent line, the Reason and the Fix each compose a label with a string
+// this pane did not write, and the body is painted one row per line, so a field carrying "\n"
+// paints rows of its own — a second "Reason:" above the real one, in the same th.popupBody style,
+// because this pane sets no bodyLead and has no styling that tells its own rows from a forged one.
+// The same pass takes the newline off each argument's NAME (argumentDetails). What stays multi-line
+// is every argument VALUE: those line breaks are the fact the human is ruling on — the four lines a
+// command will really run — and they sit INDENTED under a label that can no longer be forged, which
+// is what makes keeping them safe. Flatten the values instead and the pane would be lying about
+// what executes; flatten nothing and the pane cannot promise the row it draws is a row it wrote.
+//
 // The guarantee this security surface holds is NOT that the whole reason is always on the screen —
 // no pane can promise that on a terminal with four rows to give. It is that the human is never
 // asked to decide against text the pane hid WITHOUT SAYING SO: the module word-wraps the reason
@@ -171,14 +182,14 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 		parts = append(parts, line)
 	}
 	if req.Reason != "" {
-		parts = append(parts, "Reason: "+stripEscapes(req.Reason))
+		parts = append(parts, "Reason: "+flattenField(stripEscapes(req.Reason)))
 	}
 	// The way out of the condition the Reason just named, on the line under it — a part of its own
 	// rather than a tail on the Reason, so the pane's wrapping, elision and row budgeting treat it
 	// as the prose it is. Most gates carry none (their cause is the mode the user chose), and those
 	// panes draw exactly as before.
 	if req.Remedy != "" {
-		parts = append(parts, "Fix: "+stripEscapes(req.Remedy))
+		parts = append(parts, "Fix: "+flattenField(stripEscapes(req.Remedy)))
 	}
 	if args := approvalArgsBlock(req); args != "" {
 		parts = append(parts, args)
@@ -245,12 +256,18 @@ const approvalTaskClipRunes = detailClipRunes
 // "who is asking" gets before it starts pushing the decision's own facts off the pane, and a name
 // is part of who is asking. So a named line is never longer than an unnamed one, however long a
 // name the model sent.
+//
+// Both halves are FLATTENED before the clip (flattenField), because both are the model's own bytes
+// and this line LEADS the body: a task carrying "\n" painted every line after the first as a row of
+// the pane's, above the Reason the human is deciding on, and the clip did not stop it — a rune
+// budget bounds how much text there is, never how many rows it takes. Flattened first, the clip
+// bounds the one row this line is.
 func subAgentPromptLine(name, task string) string {
 	if task == "" {
 		return ""
 	}
-	who := stripEscapes(task)
-	if clean := stripEscapes(name); clean != "" {
+	who := flattenField(stripEscapes(task))
+	if clean := flattenField(stripEscapes(name)); clean != "" {
 		who = clean + " — " + who
 	}
 	return "Sub-agent: " + clipRunes(who, approvalTaskClipRunes)

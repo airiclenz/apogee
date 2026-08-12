@@ -1472,6 +1472,28 @@ func stripEscapesAll(xs []string) []string {
 	return out
 }
 
+// flattenField folds a FIELD onto one line, each newline becoming the space that stands where the
+// break was. It is [lineEditor.flattenLine]'s rule at a DISPLAY seam rather than an input one, and
+// it exists because stripEscapes deliberately keeps "\n": on a surface that paints one row per line
+// (popupBodyWrapped), a string that keeps its newlines paints as many rows as it likes.
+//
+// That is the right answer for a VALUE and the wrong one for a field. A value's line breaks are the
+// thing the human is reading — a command, a patch, a commit message — and the approval pane hangs
+// them under a label of their own, indented, where they cannot be mistaken for the pane's own
+// structure (argumentValueIndent). A field is a NAME: an argument's key, the task of the sub-agent
+// asking, the reason a gate fired. Nothing in a name is layout, so every line break in one is a row
+// the pane did not author — and on the approval pane a row is where "Reason:" lives, rendered in
+// the same th.popupBody style whatever wrote it. Flattening is the line between the two.
+//
+// One rune for one rune, so what a later clip counts is what the row will hold (clipRunes on the
+// Sub-agent line): a field flattened here is one row wide, and the clip bounds that row.
+func flattenField(s string) string {
+	if !strings.Contains(s, "\n") {
+		return s // the ordinary case, unallocated
+	}
+	return strings.ReplaceAll(s, "\n", " ")
+}
+
 // blankLine reports whether ln carries nothing visible — it is empty or whitespace only. It is
 // the single definition of "blank" the layout's blank-line hygiene rests on: the commit-time
 // trim, the streaming preview's trim, and the markdown collapse all ask this one question.

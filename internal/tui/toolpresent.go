@@ -2202,6 +2202,13 @@ const argumentValueIndent = "  "
 // (presentToolCall's unregistered-tool fallback). One call is spelled one way wherever it appears —
 // the transcript block then collapses to the house budget like any other body (render.go), which is
 // a question about how many of these lines a surface seats, not about what they say.
+//
+// The NAME is flattened (flattenField) and the value is not, which is the same line drawn twice. A
+// name is a label: nothing in it is layout, so a newline in one is not a longer label but a SECOND
+// line, unindented, wearing whatever the model wrote it as — on the approval prompt that is a row
+// beside the pane's own, and JSON puts no restriction on what a key may hold. A value's newlines
+// ARE the fact being read, so they survive, hanging under their label at argumentValueIndent where
+// nothing they say can be mistaken for a label of the surface's own.
 func argumentDetails(raw json.RawMessage) []detailLine {
 	pairs, ok := orderedArgs(raw)
 	if !ok {
@@ -2209,7 +2216,7 @@ func argumentDetails(raw json.RawMessage) []detailLine {
 	}
 	var details []detailLine
 	for _, p := range pairs {
-		details = append(details, detailLine{Text: p.name + ":"})
+		details = append(details, detailLine{Text: flattenField(p.name) + ":"})
 		for _, ln := range argumentValueLines(p.value) {
 			details = append(details, detailLine{Text: argumentValueIndent + ln})
 		}
