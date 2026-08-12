@@ -15,7 +15,7 @@
 //
 // # The files, one line each
 //
-// Nineteen files: the handle and its lifecycle, the loop proper, the tool path, and the
+// Twenty files: the handle and its lifecycle, the loop proper, the tool path, and the
 // mid-session doors a host opens without tearing the session down.
 //
 // The handle. agent.go is the Agent type and the surface a Driver holds — New, Resume, Close,
@@ -55,9 +55,11 @@
 // loaded model changes, and moves the session to another server (ADR 0024). setprofile.go is
 // the separate, explicit door for changing the model PROFILE, which Rebind deliberately leaves
 // alone (ADR 0037). swaptools.go is the single door for handing the engine a freshly built
-// tool registry, so no second registry-mutation path has to exist. contextfiles.go owns the
-// workspace context files' discovery half — the session-scoped cache, its loader, and the
-// construction-time name gate.
+// tool registry, so no second registry-mutation path has to exist. delegationtarget.go is the
+// Delegation-target latch: the never-idle-gated door a host's second heartbeat pushes the
+// Sub-agent server through, held by one handle for a whole agent tree (ADR 0045).
+// contextfiles.go owns the workspace context files' discovery half — the session-scoped cache,
+// its loader, and the construction-time name gate.
 //
 // And doc.go this map.
 package agent

@@ -39,7 +39,7 @@ import (
 // Exchange: that goroutine owns the conversation there, so the boundary itself is the
 // synchronization — no lock, and no other goroutine may make the call (ADR 0025). The
 // anytime-goroutine-safe class — SetMode, SetConfineToWorkspace, SetBypass,
-// SetCompactionEnabled, SetContextFiles and SetParallelAgents — is the exception: each swaps ONE live field
+// SetCompactionEnabled, SetContextFiles, SetParallelAgents and SetDelegationTarget — is the exception: each swaps ONE live field
 // behind its own mutex, so the host (the settings surface, Shift+Tab, /confine) may call it
 // while a Step runs and the change lands at that field's next consumption boundary.
 type Agent struct {
@@ -101,6 +101,15 @@ type Agent struct {
 	// construction seed.
 	parallelAgentsMu sync.RWMutex
 	parallelAgents   int // live depth-0 fan-out width; seeded from cfg.ParallelAgents, swappable via SetParallelAgents
+
+	// delegation is the Delegation-target latch — the Sub-agent server every delegation in this
+	// tree routes to, or nil for today's parent-inheriting spawn (ADR 0045 —
+	// internal/agent/delegationtarget.go). It is a sixth live field of the anytime-safe class, and
+	// the one field held by POINTER rather than by value: newChildAgent hands the child the
+	// PARENT's holder, so one latch serves the whole tree and a host pushing to the top-level
+	// Agent reaches a depth-2 spawn too. It carries its own lock for the same reason the five
+	// above carry theirs, and is never nil on a constructed Agent (newAgent allocates it).
+	delegation *delegationLatch
 
 	// liveMode, when non-nil, is a sub-agent's read-only view of its PARENT's live mode: the
 	// parent's effectiveMode accessor, captured at spawn (ADR 0013). The per-call

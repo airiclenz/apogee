@@ -207,6 +207,13 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// Capturing an accessor (not the raw field/mutex) keeps every read modeMu-guarded at the agent
 	// that owns the field, so the child reads race-free but has no seam to mutate anything.
 	child.liveMode = a.effectiveMode
+	// The Delegation-target latch is shared by HANDLE, not copied (ADR 0045): the child holds the
+	// parent's holder, so a target the host pushes after this spawn is the one the child's OWN
+	// delegations read, and routing reaches every depth from the one place a host pushes to. A
+	// snapshot instead would freeze depth≥1 spawns on whatever was current when their parent was
+	// built — and "identity once there" (a routed child's delegations go to the same server) is
+	// exactly what one shared latch gives for free.
+	child.delegation = a.delegation
 	return child, nil
 }
 

@@ -111,6 +111,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		compaction:         cfg.Context.CompactionEnabled,
 		contextFileNames:   cfg.ContextFiles,
 		parallelAgents:     cfg.ParallelAgents, // and the fan-out width the host resolved per bound server
+		delegation:         &delegationLatch{}, // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045); newChildAgent replaces it with the parent's
 		textParser:         textParser,
 		stripper:           stripper,
 		tracker:            newSelfRegulator(),

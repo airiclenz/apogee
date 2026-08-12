@@ -127,7 +127,7 @@ it would have to describe routing that does not exist until items 6-7.
 
 Commit: `feat(config): sub-agents flag, posture keys, and context-window pin on servers entries`
 
-## 3. Engine: the Delegation-target latch, shared down the agent tree
+## 3. Engine: the Delegation-target latch, shared down the agent tree — ✅ DONE (2026-08-12)
 
 **What:** Depends on item 1. In `internal/agent`, new file `delegationtarget.go`: type
 `DelegationTarget{Endpoint, APIKey, Model string; ContextWindow, ParallelAgents int;
@@ -146,6 +146,15 @@ nil latch snapshot is nil.
 
 **Acceptance:** `go test ./internal/agent/ -race` passes; `make check` passes; the
 setter's doc comment states the never-idle-gated call and cites ADR 0045.
+
+**NOTES (2026-08-12):** three files beyond the item's named ones changed, all of them the
+repo's own conventions for a new exported engine surface. (a) `apogee.go` gained the
+`DelegationTarget = agent.DelegationTarget` alias and `example_test.go` its completeness-guard
+line: `SetDelegationTarget` is exported, so without the alias no external Driver — nor item 6's
+`apogee.DelegationTarget` — could name its argument type. (b) `internal/agent/doc.go`'s file map
+gained the `delegationtarget.go` line (and "Nineteen files" became "Twenty"), which
+`TestDocMapNamesEveryFile` enforces. No CHANGELOG bullet: this item's Acceptance omits one, the
+latch being engine-internal until item 6 wires it.
 
 Commit: `feat(engine): delegation-target latch shared down the agent tree`
 
