@@ -64,7 +64,7 @@ const (
 // there at all, that the block is a click target (layout.md, "Collapsed and expanded blocks"). A
 // block with nothing to reveal wears neither. The shape is the ▶/▼ pair of the owner's sketch
 // (docs/layout/tool-layout.md), full-size rather than the small ▸/▾ these used to be: the indicator
-// is the transcript's one affordance and it reads at a glance. glyphModeAuto's doubled "▸▸" is a
+// is the transcript's one affordance and it reads at a glance. glyphModeAuto's doubled "⏵⏵" is a
 // different element in a different place and the two are deliberately not shared.
 const (
 	glyphCollapsed = "▶" // U+25B6 BLACK RIGHT-POINTING TRIANGLE — this block is collapsed: a click opens it
@@ -86,13 +86,13 @@ const (
 // The autonomy-mode glyphs, one per rung of the ladder (modeSymbol). They lead the footer's mode
 // marker in the mode's OWN colour — the glyph and the word are one styled run, not a coloured
 // badge beside a label — so the rung reads at a glance from the shape before the word is read.
-// Each is one terminal cell wide except ▸▸, which is deliberately two: auto is the one rung that
+// Each is one terminal cell wide except ⏵⏵, which is deliberately two: auto is the one rung that
 // acts without asking, and the doubled chevron is what "running ahead" looks like.
 const (
 	glyphModePlan       = "⊞"  // plan — an outline, nothing filled in yet
 	glyphModeAskBefore  = "◐"  // ask before — the barred circle of a held action
 	glyphModeAllowEdits = "✔"  // allow edits — edits pass
-	glyphModeAuto       = "▸▸" // auto — fast-forward, no gate
+	glyphModeAuto       = "⏵⏵" // auto — fast-forward, no gate
 )
 
 // bodyIndent is the column every transcript block's body text starts in, as a blank prefix: a

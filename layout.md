@@ -1116,7 +1116,7 @@ mode on the right. The host is the bound `servers:` entry's own name — the nam
 that has no name, and any segment nothing has named is dropped with its separator.
 
 **The mode marker's symbol.** The mode is stated as a glyph and its word, one rung per shape:
-`⊞ plan`, `◐ ask before`, `✔ allow edits`, `▸▸ auto`. The glyph is rendered in the SAME styled run
+`⊞ plan`, `◐ ask before`, `✔ allow edits`, `⏵⏵ auto`. The glyph is rendered in the SAME styled run
 as the word, so it carries the mode's own colour by construction rather than by being coloured to
 match — there is no separately toned badge here, and no way for the two halves to drift apart. The
 symbol belongs to the marker alone: everywhere the mode is said in a sentence instead (the
