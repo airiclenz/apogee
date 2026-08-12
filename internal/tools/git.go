@@ -32,6 +32,11 @@ import (
 // process per call), path-scope their inputs to the workspace root, and run with
 // a scrubbed, allowlisted environment so a stray inherited variable cannot change
 // git's behaviour.
+//
+// The environment is only half of that: git also runs programs the REPOSITORY names — hooks,
+// filter and diff drivers — which on an attacker-authored checkout are attacker-authored
+// scripts. gitHardeningOptions, gitHardeningEnv and gitDiffHardeningArgs below refuse those,
+// and runGit applies the first two to every invocation.
 
 // gitTimeout bounds a single git invocation. git operations are local (no network
 // op is exposed by these tools), so a short ceiling is ample and a hung git never
@@ -77,6 +82,44 @@ var safeGitEnv = func(root string) []string {
 	return shellHost.ScopeEnv(root, safeEnvKeys, os.LookupEnv)
 }
 
+// gitHardeningOptions are the global options every git invocation carries, ahead of its
+// subcommand. They close the one seam the allowlisted environment above does not reach: git
+// runs programs the REPOSITORY names, not just the ones apogee names.
+//
+// core.hooksPath= empties the directory git resolves hooks from, so nothing in an
+// attacker-authored .git/hooks/ ever executes. git joins the setting with the hook name, so an
+// empty value resolves every hook to "/<name>" at the filesystem root — a path no in-workspace
+// write can create — and unlike --no-verify it covers EVERY hook, including the post-* ones
+// (post-checkout fires on the branch tools, which have no --no-verify to pass). The delivery
+// this stops is a repository shipped WITH its .git — a tarball, a mirror, an NFS checkout — or
+// a single in-workspace write into an existing .git/hooks/; a plain `git clone` does not carry
+// hooks, so the write is the realistic variant. A hook is a shell script git executes on the
+// operator's behalf with no gate of ours in front of it, which is exactly the unbounded blast
+// radius ADR 0012 requires a gate for.
+var gitHardeningOptions = []string{"-c", "core.hooksPath="}
+
+// gitHardeningEnv is appended to the allowlisted environment of every git subprocess.
+// GIT_CONFIG_NOSYSTEM drops the system config (/etc/gitconfig, and the Git-for-Windows
+// equivalent) from the files git merges, shrinking the set of places a configured hook path,
+// pager, credential helper or diff driver can come from.
+//
+// Two residuals are deliberate, not oversights. HOME stays on safeEnvKeys, so the OPERATOR's
+// own ~/.gitconfig still applies — that config is theirs, and the threat model here trusts the
+// operator and distrusts the bytes in the workspace. And a .gitattributes filter driver
+// (clean/smudge) names a driver whose COMMAND lives in config; git offers no global switch to
+// refuse configured filters, so a repository delivered with its own .git/config keeps that
+// half. gitDiffHardeningArgs closes the read-path drivers, which are the ones a mere inspection
+// would otherwise execute.
+var gitHardeningEnv = []string{"GIT_CONFIG_NOSYSTEM=1"}
+
+// gitDiffHardeningArgs are the diff-level refusals the read paths carry. A textconv driver and
+// an external diff command are both programs the repository selects (in .gitattributes) and
+// configures (in config), and both run on a plain diff or log — so `git_diff_range` and
+// `git_log`, tools whose whole promise is that they only LOOK at the repository, would execute
+// attacker-chosen commands. Passing both refusals makes the promise true: the model sees the
+// stored bytes rather than a driver's rendering of them.
+var gitDiffHardeningArgs = []string{"--no-textconv", "--no-ext-diff"}
+
 // lookGit resolves the system git on PATH (a package var so a test can inject a
 // fake resolver). It returns the absolute path and ok=false when git is absent —
 // the signal a tool degrades to a graceful "git not available" result (§3a).
@@ -104,15 +147,25 @@ func gitProgram(ctx context.Context, root string) (gitPath, refusal string, ok b
 
 // runGit runs git with gitArgs in root under the per-call timeout and the scrubbed
 // environment, honouring the confinement handle the disposition installed (if any).
-// It returns the captured outcome; a missing git is signalled by ok=false on the
-// caller's lookGit, not here. The Go error is non-nil only for ctx cancellation or
-// a confinement-unavailable demotion (the runSubprocess contract).
+// Every invocation goes through here, so this is where gitHardeningOptions and
+// gitHardeningEnv are applied — a caller cannot forget them, and a future git tool inherits
+// them by construction. It returns the captured outcome; a missing git is signalled by
+// ok=false on the caller's lookGit, not here. The Go error is non-nil only for ctx
+// cancellation or a confinement-unavailable demotion (the runSubprocess contract).
 func runGit(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocessResult, error) {
+	argv := make([]string, 0, 1+len(gitHardeningOptions)+len(gitArgs))
+	argv = append(argv, gitPath)
+	argv = append(argv, gitHardeningOptions...)
+	argv = append(argv, gitArgs...)
+
+	env := safeGitEnv(root)
+	env = append(env[:len(env):len(env)], gitHardeningEnv...)
+
 	spec := subprocessSpec{
-		argv:    append([]string{gitPath}, gitArgs...),
+		argv:    argv,
 		dir:     root,
 		timeout: timeout,
-		env:     safeGitEnv(root),
+		env:     env,
 	}
 	return runSubprocess(ctx, spec)
 }
@@ -388,7 +441,11 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		}
 	}
 
-	commitArgs := []string{"commit", "-m", message}
+	// --no-verify refuses the pre-commit and commit-msg hooks explicitly, on top of the
+	// emptied core.hooksPath every invocation already carries (gitHardeningOptions). The
+	// belt-and-braces is deliberate: this is the one path where a hook both runs an
+	// attacker-authored script AND can rewrite or veto the message the operator approved.
+	commitArgs := []string{"commit", "--no-verify", "-m", message}
 	if args.Amend {
 		commitArgs = append(commitArgs, "--amend")
 	}
@@ -516,7 +573,8 @@ func (t *GitDiffRange) Execute(ctx context.Context, call domain.ToolCall) (domai
 		return errorResult(call.ID, "invalid head ref: "+args.Head), nil
 	}
 
-	gitArgs := []string{"diff", args.Base + "..." + args.Head}
+	gitArgs := append([]string{"diff"}, gitDiffHardeningArgs...)
+	gitArgs = append(gitArgs, args.Base+"..."+args.Head)
 	if args.Stat {
 		gitArgs = append(gitArgs, "--stat")
 	}
@@ -876,14 +934,14 @@ func (t *GitLog) Execute(ctx context.Context, call domain.ToolCall) (domain.Tool
 	// tracked path is a PATHSPEC log — it silently answers "which commits touched this file"
 	// with exit 0, so a model's typo'd branch name would return a plausible, wrong history
 	// reported as success. With "--" the same call fails loudly ("fatal: bad revision").
-	gitArgs := []string{
-		"log",
+	gitArgs := append([]string{"log"}, gitDiffHardeningArgs...)
+	gitArgs = append(gitArgs,
 		fmt.Sprintf("--max-count=%d", clampGitLogCount(args.MaxCount)),
-		"--date=" + gitLogDateFormat,
+		"--date="+gitLogDateFormat,
 		"--format=%h %ad %s",
 		ref,
 		"--",
-	}
+	)
 	res, err := runGit(ctx, gitPath, t.root, gitTimeout, gitArgs...)
 	if err != nil {
 		return domain.ToolResult{}, err

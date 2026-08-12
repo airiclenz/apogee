@@ -349,6 +349,30 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The git tools no longer run programs the repository names.** The five tools scrubbed the
+  ENVIRONMENT they handed git — an allowlist, so no inherited variable could redirect config, auth
+  or the pager — and stopped there. But git also runs programs the REPOSITORY names, and on an
+  attacker-authored checkout those are attacker-authored scripts: `git_commit` executed that
+  repo's `.git/hooks/pre-commit`, `git_branch` its `post-checkout`, and the two read-only tools ran
+  whatever textconv or external-diff driver its `.gitattributes` selected and its config defined. A
+  hook is a shell script git runs on the operator's behalf with no gate of ours in front of it, and
+  the read-path drivers are worse than that: they execute during what the operator approved as an
+  inspection, and `git_diff_range` then reports the driver's rendering rather than the stored bytes
+  — a textconv driver that prints a constant made a real change read as `No differences found`.
+  Every invocation now carries `-c core.hooksPath=`, which empties the directory git resolves hooks
+  from and so covers EVERY hook, including the `post-*` ones a `--no-verify` never reaches; the
+  committing path passes `--no-verify` as well, because that is the one hook that can also veto or
+  rewrite the message the operator approved; and the two read paths pass `--no-textconv` and
+  `--no-ext-diff`. `GIT_CONFIG_NOSYSTEM=1` joins the scrubbed environment, dropping the system
+  config from the files git merges. Delivery needs a repository shipped WITH its `.git` — a
+  tarball, a mirror, an NFS checkout — or one in-workspace write into an existing `.git/hooks/`;
+  a plain `git clone` carries no hooks, so the write is the realistic variant, and it is now
+  refused on the dangerous floor as well. Two residuals are deliberate: `HOME` stays on the
+  allowlist, so your own `~/.gitconfig` still applies (the threat model trusts the operator and
+  distrusts the bytes in the workspace), and a `.gitattributes` clean/smudge filter names a driver
+  whose command lives in config, which git offers no global switch to refuse — the read-path
+  drivers, the ones a mere inspection would otherwise execute, are the half that is closed.
+
 - **A directory symlink inside the workspace can no longer redirect a write.** The workspace fence
   answers one question — does this path leave the root — so a symlink that stays INSIDE it was
   followed, deliberately: only the final name of a write was protected. A cloned repo shipping

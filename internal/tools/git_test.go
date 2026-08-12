@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -1049,5 +1050,198 @@ func TestGitLog_EmptyRepo(t *testing.T) {
 	}
 	if strings.TrimSpace(res.Content) == "" {
 		t.Error("git_log on an empty repo must carry git's own message")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Repo-supplied hooks and diff drivers
+// ----------------------------------------------------------------------------
+
+// posixScriptHost skips a test that installs a POSIX shell script (a git hook or a diff
+// driver) on a platform where the fixture's assumptions do not hold. The behaviour being
+// pinned is git's, not the shell's, and it is the same behaviour on every platform.
+func posixScriptHost(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("hook/driver fixtures are POSIX shell scripts; the git flags they pin are platform-independent")
+	}
+}
+
+// writeMarkerScript installs an executable POSIX script at scriptPath whose observable effects
+// are creating markerPath and running tail. It uses shell builtins only, so it does not depend
+// on what survives the git tools' scrubbed, workspace-scoped PATH.
+func writeMarkerScript(t *testing.T, scriptPath, markerPath, tail string) {
+	t.Helper()
+	script := "#!/bin/sh\n: > \"" + markerPath + "\"\n" + tail + "\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write script %s: %v", scriptPath, err)
+	}
+}
+
+// installRepoHook writes a .git/hooks/<name> hook into an existing repository — the shape an
+// attacker-authored checkout arrives in (a tarball or mirror carrying its own .git, or a single
+// in-workspace write). It returns the marker path the hook creates if it ever runs.
+func installRepoHook(t *testing.T, root, name, tail string) (marker string) {
+	t.Helper()
+	marker = filepath.Join(t.TempDir(), name+".ran")
+	hookDir := filepath.Join(root, ".git", "hooks")
+	if err := os.MkdirAll(hookDir, 0o755); err != nil {
+		t.Fatalf("hooks dir: %v", err)
+	}
+	writeMarkerScript(t, filepath.Join(hookDir, name), marker, tail)
+	return marker
+}
+
+// requireNotRan fails when the marker file exists, i.e. the hook or driver executed.
+func requireNotRan(t *testing.T, marker, what string) {
+	t.Helper()
+	if _, err := os.Stat(marker); err == nil {
+		t.Errorf("%s executed; a repo-supplied program must never run for a git tool", what)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat marker: %v", err)
+	}
+}
+
+// runInRepo runs a raw git command in root with the tools' own scrubbed environment plus a
+// deterministic identity, for tests that need to arrange repository state directly.
+func runInRepo(t *testing.T, root string, args ...string) {
+	t.Helper()
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git on PATH; skipping the live git-tool run")
+	}
+	cmd := exec.Command(gitPath, args...)
+	cmd.Dir = root
+	cmd.Env = append(safeGitEnv(""),
+		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// TestGitCommit_DoesNotRunRepoSuppliedHook pins the committing path against an
+// attacker-authored pre-commit hook. The hook exits 1, so a run would be visible twice over:
+// the marker file appears AND the commit is vetoed. Neither may happen.
+func TestGitCommit_DoesNotRunRepoSuppliedHook(t *testing.T) {
+	posixScriptHost(t)
+	root := gitRepo(t)
+	marker := installRepoHook(t, root, "pre-commit", "exit 1")
+
+	if err := writeFileForTest(root, "new.txt", "added\n"); err != nil {
+		t.Fatalf("write new file: %v", err)
+	}
+	res, err := NewGitCommit(root).Execute(context.Background(),
+		commitCall("c1", `{"message":"add new.txt","files":["new.txt"]}`))
+	if err != nil {
+		t.Fatalf("commit err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("commit was vetoed by the repo's hook: %q", res.Content)
+	}
+	requireNotRan(t, marker, "the repository's pre-commit hook")
+}
+
+// TestGitBranch_DoesNotRunRepoSuppliedHook pins the emptied core.hooksPath specifically: a
+// branch switch has no --no-verify to pass, so post-checkout is stopped by that global option
+// alone. It is also the hook class --no-verify would not cover on the commit path either.
+func TestGitBranch_DoesNotRunRepoSuppliedHook(t *testing.T) {
+	posixScriptHost(t)
+	root := gitRepo(t)
+	marker := installRepoHook(t, root, "post-checkout", "exit 0")
+
+	res, err := NewGitBranch(root).Execute(context.Background(),
+		branchCall("c1", `{"action":"create","name":"feature"}`))
+	if err != nil {
+		t.Fatalf("branch err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("branch create errored: %q", res.Content)
+	}
+	requireNotRan(t, marker, "the repository's post-checkout hook")
+}
+
+// TestGitDiffRange_DoesNotRunRepoSuppliedDiffDriver pins the read path against the two driver
+// kinds a repository can select in .gitattributes and configure in its own config: a textconv
+// filter and an external diff command. Both are programs git would run during what the operator
+// approved as an inspection, and both must be refused — while the diff still reports the real
+// stored bytes rather than the driver's rendering.
+func TestGitDiffRange_DoesNotRunRepoSuppliedDiffDriver(t *testing.T) {
+	posixScriptHost(t)
+
+	for _, tc := range []struct {
+		name      string
+		configKey string
+	}{
+		{name: "textconv filter", configKey: "diff.hostile.textconv"},
+		{name: "external diff command", configKey: "diff.hostile.command"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := gitRepo(t)
+			marker := filepath.Join(t.TempDir(), "driver.ran")
+			driver := filepath.Join(t.TempDir(), "driver.sh")
+			writeMarkerScript(t, driver, marker, `echo "rendered by the repository"`)
+
+			if err := writeFileForTest(root, ".gitattributes", "*.data diff=hostile\n"); err != nil {
+				t.Fatalf("write .gitattributes: %v", err)
+			}
+			if err := writeFileForTest(root, "a.data", "before\n"); err != nil {
+				t.Fatalf("write data file: %v", err)
+			}
+			runInRepo(t, root, "config", tc.configKey, driver)
+			runInRepo(t, root, "add", ".gitattributes", "a.data")
+			runInRepo(t, root, "commit", "-m", "seed the driver")
+			runInRepo(t, root, "checkout", "-b", "feature")
+			if err := writeFileForTest(root, "a.data", "after\n"); err != nil {
+				t.Fatalf("rewrite data file: %v", err)
+			}
+			runInRepo(t, root, "add", "a.data")
+			runInRepo(t, root, "commit", "-m", "change the data file")
+
+			res, err := NewGitDiffRange(root).Execute(context.Background(),
+				diffCall("c1", `{"base":"main","head":"feature"}`))
+			if err != nil {
+				t.Fatalf("diff err = %v", err)
+			}
+			if res.IsError {
+				t.Fatalf("diff errored: %q", res.Content)
+			}
+			requireNotRan(t, marker, "the repository's "+tc.name)
+			if !strings.Contains(res.Content, "after") {
+				t.Errorf("diff = %q, want the stored bytes rather than a driver's rendering", res.Content)
+			}
+		})
+	}
+}
+
+// TestRunGit_AppliesHardeningToEveryInvocation pins the two hardening measures runGit applies
+// to ALL git calls, without depending on the host's git: a fake program records the argv it was
+// launched with and whether GIT_CONFIG_NOSYSTEM reached its environment.
+func TestRunGit_AppliesHardeningToEveryInvocation(t *testing.T) {
+	posixScriptHost(t)
+
+	dir := t.TempDir()
+	record := filepath.Join(dir, "record")
+	fakeGit := filepath.Join(dir, "fake-git")
+	script := "#!/bin/sh\n{ echo \"argv: $*\"; echo \"nosystem: ${GIT_CONFIG_NOSYSTEM-unset}\"; } > \"" + record + "\"\n"
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+
+	if _, err := runGit(context.Background(), fakeGit, t.TempDir(), gitTimeout, "status"); err != nil {
+		t.Fatalf("runGit err = %v", err)
+	}
+	out, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("read record: %v", err)
+	}
+	got := string(out)
+	// The global options must precede the subcommand — git only accepts -c there.
+	if !strings.Contains(got, "argv: -c core.hooksPath= status") {
+		t.Errorf("argv = %q, want the hooks-path option ahead of the subcommand", got)
+	}
+	if !strings.Contains(got, "nosystem: 1") {
+		t.Errorf("env = %q, want GIT_CONFIG_NOSYSTEM=1", got)
 	}
 }
