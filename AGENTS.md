@@ -30,6 +30,3 @@
 
 Claude Code auto-loads only `CLAUDE.md`, not this file. Create a local, untracked one-line `CLAUDE.md` containing exactly `@AGENTS.md` (it is gitignored in this repo). Tools that read `AGENTS.md` natively need nothing extra.
 
-## Miscellaneous
-
-Always be extremely concise. Sacrifice grammar for the sake of concision.

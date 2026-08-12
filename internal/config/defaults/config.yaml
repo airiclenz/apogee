@@ -181,6 +181,8 @@ system-prompt-text: |
   summarise what changed. When you need the user's input or a decision,
   call the ask_user tool — never ask in plain chat text.
 
+  Always be extremely concise. Sacrifice grammar for the sake of concision.
+
 # The same prompt, kept in a file instead of inline. Use one or the other: uncommenting this
 # while the text above is still active is the both-set startup error.
 # system-prompt-file: ~/prompts/apogee.md
