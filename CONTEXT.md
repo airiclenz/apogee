@@ -150,6 +150,31 @@ _Avoid_: "slots" (the server's own term for its side of the trade), "concurrency
 (names the bound, not the thing bounded), "fan-out width" (fan-out is the act; this is the
 cap).
 
+**Sub-agent server**:
+The one `servers:` entry flagged `sub-agents: true` — the server **every delegation routes
+to**, so a cheap grunt model does delegated work while a smarter model orchestrates. At most
+one entry may carry the flag (a second is a startup error). The flagged entry may also carry
+the children's **posture** — `bypass:` and `mechanisms:` overrides that apply to every child
+*routed there* (present key replaces whole, absent key inherits the parent's live value;
+where the *parent* runs is irrelevant). No flag anywhere means today's behavior: children
+share the parent's Upstream. Ratified 2026-08-11
+([ADR 0045](docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md));
+wiring lands via the sub-agent-server plan.
+_Avoid_: "grunt server" (colloquial), "worker server", "delegation server" (the config key
+says `sub-agents:`).
+
+**Delegation target**:
+The engine-side latched spec a sub-agent spawn reads to build its own Upstream: the
+Sub-agent server's endpoint and key plus its *observed* facts — model, per-slot window,
+Parallel-agents cap, model profile — kept fresh by a second heartbeat monitor and pinned by
+the entry's `model:` / `context-window:` where set. Mutex-read at spawn (never idle-gated:
+beats land mid-Exchange; each spawn snapshots). An **unusable** target (no beat yet, server
+down, no model) is not an error: the spawn **falls back** to the parent's Upstream *and*
+parent posture, with one notice per routing state change. Ratified 2026-08-11 (ADR 0045);
+wiring lands via the sub-agent-server plan.
+_Avoid_: "child upstream" (the target outlives any one child), "sub-agent endpoint" (it
+carries far more than an address).
+
 **Session** / **Session record**:
 A **Session** is one conversation the engine holds — the versioned `domain.Session` envelope
 `{Version, State}`, opaque to everything outside the engine. A **Session record** is how that
