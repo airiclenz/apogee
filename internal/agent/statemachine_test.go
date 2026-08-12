@@ -13,7 +13,6 @@ import (
 	"context"
 	"encoding/json"
 	"iter"
-	"slices"
 	"strings"
 	"testing"
 
@@ -339,12 +338,16 @@ func TestDispatch_ForcedApprovalNeverCachesAllowForSession(t *testing.T) {
 
 	keys := approver.keysSeen()
 	if len(keys) != 2 {
-		t.Errorf("approver consulted %d times, want 2 (a forced allow-for-session must not pre-allow the next ordinary gate)", len(keys))
+		t.Fatalf("approver consulted %d times, want 2 (a forced allow-for-session must not pre-allow the next ordinary gate)", len(keys))
 	}
 	// The mechanism behind that count: dispatch hands a forced gate an EMPTY CacheKey, the seam's
-	// "this answer can never be remembered" signal, and the ordinary gate its real key.
-	if want := []string{"", "terminal"}; !slices.Equal(keys, want) {
-		t.Errorf("request cache keys = %v, want %v — a forced gate must travel with no key at all", keys, want)
+	// "this answer can never be remembered" signal, and the ordinary gate its real key — the tool
+	// name plus the digest of its arguments (gateCacheKey).
+	if keys[0] != "" {
+		t.Errorf("the forced gate travelled with cache key %q, want no key at all", keys[0])
+	}
+	if !strings.HasPrefix(keys[1], "terminal") {
+		t.Errorf("the ordinary gate's cache key = %q, want a key naming the tool", keys[1])
 	}
 	if ran != 2 {
 		t.Errorf("tool ran %d times, want 2 (both calls were allowed)", ran)

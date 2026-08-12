@@ -3,6 +3,8 @@ package tools
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"sort"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -69,6 +71,118 @@ func decodeArgs(raw json.RawMessage, dst any) error {
 		return json.Unmarshal([]byte("{}"), dst)
 	}
 	return json.Unmarshal(raw, dst)
+}
+
+// CanonicalArgs re-encodes a tool call's raw arguments in the one spelling every reader of
+// those bytes can agree on: object keys sorted, a duplicated key collapsed to the occurrence
+// that WINS (the last — decodeArgs above is stdlib JSON, and so is every guard reading the same
+// call), insignificant whitespace dropped, and empty arguments canonicalised to the empty
+// object exactly as decodeArgs decodes them.
+//
+// It exists so a decision made ABOUT a call — today the allow-for-session key a Gate carries
+// (internal/agent) — can be keyed on what the executor will actually RUN rather than on the byte
+// spelling the model happened to emit: two spellings of one executed call produce identical
+// bytes, and two calls the executor would run differently never do. Scalars keep their wire
+// bytes for the sake of that second half; re-marshalling decoded values instead would round a
+// large integer and replace invalid UTF-8, quietly mapping two different executed calls onto one
+// canonical form.
+//
+// Arguments the executor itself would reject are reported as an error rather than canonicalised,
+// so a caller keying on the result can refuse to remember anything about a call that will not
+// decode.
+func CanonicalArgs(raw json.RawMessage) ([]byte, error) {
+	// Validate through the executor's own decode path, so exactly the blobs a tool would run
+	// are the blobs that get a canonical form.
+	var probe any
+	if err := decodeArgs(raw, &probe); err != nil {
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return []byte("{}"), nil
+	}
+	return canonicalJSON(trimmed)
+}
+
+// canonicalJSON canonicalises one already-validated JSON value: an object is re-emitted with its
+// keys sorted, an array keeps its wire order (order is meaning there), and any scalar is
+// compacted, which loses only insignificant whitespace.
+func canonicalJSON(raw json.RawMessage) ([]byte, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, errors.New("empty JSON value")
+	}
+	switch trimmed[0] {
+	case '{':
+		return canonicalObject(trimmed)
+	case '[':
+		return canonicalArray(trimmed)
+	default:
+		var out bytes.Buffer
+		if err := json.Compact(&out, trimmed); err != nil {
+			return nil, err
+		}
+		return out.Bytes(), nil
+	}
+}
+
+// canonicalObject re-emits a JSON object with its keys sorted. Decoding into a map is what
+// collapses a duplicated key to its LAST occurrence — the same value stdlib JSON hands the
+// executor — so the canonical form describes the call that will actually run.
+func canonicalObject(raw json.RawMessage) ([]byte, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var out bytes.Buffer
+	out.WriteByte('{')
+	for i, key := range keys {
+		if i > 0 {
+			out.WriteByte(',')
+		}
+		encoded, err := json.Marshal(key)
+		if err != nil {
+			return nil, err
+		}
+		out.Write(encoded)
+		out.WriteByte(':')
+		value, err := canonicalJSON(fields[key])
+		if err != nil {
+			return nil, err
+		}
+		out.Write(value)
+	}
+	out.WriteByte('}')
+	return out.Bytes(), nil
+}
+
+// canonicalArray re-emits a JSON array in wire order, canonicalising each element.
+func canonicalArray(raw json.RawMessage) ([]byte, error) {
+	var elements []json.RawMessage
+	if err := json.Unmarshal(raw, &elements); err != nil {
+		return nil, err
+	}
+
+	var out bytes.Buffer
+	out.WriteByte('[')
+	for i, element := range elements {
+		if i > 0 {
+			out.WriteByte(',')
+		}
+		value, err := canonicalJSON(element)
+		if err != nil {
+			return nil, err
+		}
+		out.Write(value)
+	}
+	out.WriteByte(']')
+	return out.Bytes(), nil
 }
 
 // decodeToolArgs decodes call's raw arguments into an A, folding the decode-and-error

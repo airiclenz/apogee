@@ -199,6 +199,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **"Always allow this session" now remembers the call you read, not the tool it used.** The
+  allow-for-session memory was keyed on the tool NAME alone, so one allow on `terminal` pre-cleared
+  every later shell command for the rest of the Session — and since that memory belongs to the whole
+  agent tree, an allow granted inside a sub-agent cleared the prompt for its parent and its siblings
+  too. An approved gate also runs with no confinement box, so the second command was both unread and
+  unfenced. The key now carries a digest of the call's arguments beside the tool name, so the answer
+  authorises the call that was on the screen. The arguments are digested in a canonical spelling —
+  keys sorted, a duplicated key collapsed to the LAST occurrence, which is the value stdlib JSON
+  hands the executor and the value the approval pane shows — so a reordered or duplicated key cannot
+  mint a second identity for one executed call, and each scalar keeps its wire bytes so nothing is
+  rounded or substituted on the way into the key. Arguments that do not decode produce no key at
+  all, which means the call is asked about every time. MCP is deliberately untouched and keeps
+  ADR 0012's server grain: approving one of a server's tools still clears its siblings. The lifetime
+  is untouched too — an allow still survives `/clear` and lasts the Session. The cost is real and
+  you will notice it: allowing `npm test` no longer clears `npm run build`.
+
 - **The dangerous-action floor now covers the two control planes a coding host hands the model.**
   The floor named `~/.ssh`, the AWS credentials, `.netrc` and `.npmrc`, but neither the
   repository's own `.git/` nor apogee's `~/.apogee` — an asymmetry rather than a judgement, and

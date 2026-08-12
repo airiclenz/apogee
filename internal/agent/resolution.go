@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -119,9 +121,12 @@ type resolution struct {
 	// or a runtime-demote fallback). Gate only.
 	force bool
 
-	// cacheKey is the allow-for-session cache key for a Gate: the tool name for most classes,
-	// but the SERVER grain "mcp-server:<alias>" for an MCP tool, so approving one of a server's
-	// tools clears its siblings for the Session (ADR 0012's server-grain promise). Gate only.
+	// cacheKey is the allow-for-session cache key for a Gate: the tool name plus a digest of
+	// the call's arguments for most classes, so one allow authorises the call the human read
+	// and not every later call of that tool; but the SERVER grain "mcp-server:<alias>" for an
+	// MCP tool, so approving one of a server's tools clears its siblings for the Session
+	// (ADR 0012's server-grain promise). Empty when the arguments do not decode — an
+	// unrememberable decision. Gate only.
 	cacheKey string
 
 	// box is the confinement box a Confine subprocess runs inside. Confine only.
@@ -421,7 +426,8 @@ func applyOverlays(in resolutionInput, leaf resolution) resolution {
 // finishGate completes a Gate leaf. A gate with no Approver configured cannot actually
 // consult a human, so it refuses rather than run unapproved (D5) — a Gate always means the
 // Approver is consulted. Otherwise it takes its allow-for-session cache key (gateCacheKey: the
-// tool name, or the MCP server grain) and, unless a forced reason was already set, its
+// tool name plus its argument digest, or the MCP server grain) and, unless a forced reason was
+// already set, its
 // blast-radius class reason and the remedy that goes with it (gateReason yields the pair, so a
 // gate can never end up blaming one condition and prescribing the fix for another).
 func finishGate(in resolutionInput, gate resolution) resolution {
@@ -455,19 +461,61 @@ type serverAliaser interface {
 	ServerAlias() string
 }
 
-// gateCacheKey is the allow-for-session cache key a Gate carries. For an MCP tool it is the
-// SERVER grain "mcp-server:<alias>", so approving one of a server's tools clears its siblings
-// for the Session (ADR 0012); the "mcp-server:" prefix keeps that grain collision-proof against
-// ordinary tool names, and the empty-alias (single unnamed server) case is still one grain.
-// Every other class — and an MCP tool that does not expose its alias — keys on the tool name,
-// today's tighter per-tool grain, so the change never loosens a non-MCP gate.
+// gateArgumentsSeparator sits between a gate cache key's tool name and its argument digest. It
+// is a byte no tool name carries, and the digest that follows it is fixed-length, so two
+// argument-grain keys are equal only when both the tool and the arguments are.
+const gateArgumentsSeparator = "\x00"
+
+// gateCacheKey is the allow-for-session cache key a Gate carries — the identity an "allow for
+// this session" is remembered under, and therefore the blast radius of that one answer.
+//
+// For an MCP tool it is the SERVER grain "mcp-server:<alias>", so approving one of a server's
+// tools clears its siblings for the Session (ADR 0012); the "mcp-server:" prefix keeps that
+// grain collision-proof against ordinary tool names, and the empty-alias (single unnamed server)
+// case is still one grain. An MCP tool that does not expose its alias degrades to the tool name,
+// a tighten-only fallback.
+//
+// Every other class keys on the tool name PLUS a digest of the call's arguments, because the
+// tool name alone made one answer stand for every later call of that tool: an "allow for
+// session" on `terminal` pre-cleared every shell command for the rest of the Session, in this
+// Agent and — the memory being the whole tree's (approvalcache.go) — in its parent and siblings
+// too. With the arguments in the key, the answer authorises the call the human actually read.
+// The deliberate cost is ergonomic: allowing `npm test` no longer clears `npm run build`.
 func gateCacheKey(tool domain.Tool, call domain.ToolCall) string {
 	if classifyTool(tool) == classMCP {
 		if sa, ok := tool.(serverAliaser); ok {
 			return mcpServerCacheKeyPrefix + sa.ServerAlias()
 		}
+		return call.Tool
 	}
-	return call.Tool
+	digest, ok := argumentsDigest(call)
+	if !ok {
+		return ""
+	}
+	return call.Tool + gateArgumentsSeparator + digest
+}
+
+// argumentsDigest hashes what the executor will actually run: the call's arguments in the
+// canonical spelling tools.CanonicalArgs defines (keys sorted, a duplicated key collapsed to the
+// last — the one stdlib JSON hands the executor, and the one the approval pane now shows), bound
+// to the tool name so no two tools can share a digest.
+//
+// It reports ok=false when the arguments do not decode, and the caller then emits the EMPTY key.
+// That is the conservative direction and it needs no further handling: the memory refuses an
+// empty key on both sides (approvalCache.Allowed / .Allow), so a call whose arguments cannot be
+// pinned down is asked about every time rather than remembered under a key that might not
+// describe it.
+func argumentsDigest(call domain.ToolCall) (string, bool) {
+	canonical, err := tools.CanonicalArgs(call.Arguments)
+	if err != nil {
+		return "", false
+	}
+	material := make([]byte, 0, len(call.Tool)+1+len(canonical))
+	material = append(material, call.Tool...)
+	material = append(material, 0)
+	material = append(material, canonical...)
+	sum := sha256.Sum256(material)
+	return hex.EncodeToString(sum[:]), true
 }
 
 // finishConfine completes a Confine leaf: it attaches the prebuilt box and the precomputed

@@ -7,7 +7,11 @@ import (
 )
 
 // approvalCache is the Session's allow-for-session memory: the set of ApprovalRequest.CacheKey
-// identities a human has already cleared for the rest of this Session. There is ONE per agent
+// identities a human has already cleared for the rest of this Session. What ONE cleared identity
+// stands for is the resolver's to decide (gateCacheKey — resolution.go): the tool name plus a
+// digest of the call's arguments for every class but MCP, which keeps ADR 0012's server grain.
+// The memory itself only remembers keys, and remembers them for as long as the Session lasts —
+// including across a /clear (see ClearContext). There is ONE per agent
 // tree — it hangs off the approver seam (queuedApprover), the single object a parent and all its
 // descendants share — so "allow for session" means the whole Session and not merely the Agent that
 // happened to ask. An allow granted inside a sub-agent therefore clears the prompt for its parent

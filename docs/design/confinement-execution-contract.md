@@ -484,12 +484,22 @@ and the no-Approver `Refuse` carries none either, since its text goes to the MOD
 terminal to type `/confine` into. Like `Reason` it is a bare sentence: the `Fix: ` label the TUI
 paints in front of it is that Driver's presentation, not the engine's (ADR 0031, wire-silent).
 `CacheKey` is the
-allow-for-session key — the **tool name** for every class **except mcp**, whose key is the **server
-grain** `mcp-server:<alias>` so approving one of a server's tools clears its siblings for the Session
-(ADR 0012's server-grain promise; the `mcp-server:` prefix keeps the grain collision-proof, and an
-MCP tool that does not expose its alias — or the single unnamed server — degrades to the tool-name /
-`mcp-server:` grain, a tighten-only fallback). A **forced** gate (Tier-2 or a runtime demote) skips
-the cache entirely and is never pre-allowable.
+allow-for-session key, and since it decides what ONE "allow for this session" stands for, it is a
+blast radius like any other: for every class **except mcp** it is the **tool name plus a digest of
+the call's arguments**, so an allow authorises the call the human actually read rather than every
+later call of that tool — one allow on `terminal` no longer pre-clears every shell command for the
+rest of the Session (and, the memory being the whole agent tree's, for its parent and siblings
+too). The arguments are digested in their canonical spelling (`tools.CanonicalArgs`: keys sorted, a
+duplicated key collapsed to the **last** — the value stdlib JSON hands the executor and the
+approval pane shows), so a reordered or duplicated key cannot mint a second identity for one
+executed call; arguments that do not decode yield the **empty** key, which the memory refuses at
+both ends, so such a call re-prompts. The deliberate cost is ergonomic: allowing `npm test` does not
+clear `npm run build`. **mcp** keeps the **server grain** `mcp-server:<alias>` so approving one of a
+server's tools clears its siblings for the Session (ADR 0012's server-grain promise; the
+`mcp-server:` prefix keeps the grain collision-proof, and an MCP tool that does not expose its
+alias — or the single unnamed server — degrades to the tool-name / `mcp-server:` grain, a
+tighten-only fallback). A **forced** gate (Tier-2 or a runtime demote) skips the cache entirely and
+is never pre-allowable.
 
 **A `Confine` carries a bounded runtime `fallback` (D4).** The caps check above is a *construction-time*
 promise; the box can still fail to establish at run time. So the **subproc, caps sufficient → confine**
