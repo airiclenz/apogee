@@ -363,8 +363,8 @@ func TestCopyFile_WriteTargetStaysTheDestinationForAMountedSource(t *testing.T) 
 	if !ok {
 		t.Fatal("workspaceWriteTarget did not classify a call whose source is under an extra root")
 	}
-	if want := realPath(t, filepath.Join(root, "run.sh")); target != want {
-		t.Errorf("write target = %q, want the workspace destination %q", target, want)
+	if want := realPath(t, filepath.Join(root, "run.sh")); target.Real != want {
+		t.Errorf("write target = %q, want the workspace destination %q", target.Real, want)
 	}
 }
 

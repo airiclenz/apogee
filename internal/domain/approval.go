@@ -73,6 +73,24 @@ type ApprovalRequest struct {
 	// that would not be honoured, say — but is free to ignore it, because it is the engine and not
 	// the host that keeps the memory.
 	CacheKey string
+	// ResolvedPath is where this call's path argument REALLY points — the absolute path with
+	// every symlink resolved — and it is populated ONLY when that differs from the path the
+	// argument names. Empty is therefore the ordinary case and means "the argument names its
+	// own target", so a host that renders this unconditionally adds nothing to an ordinary
+	// prompt and names the redirection on the one prompt where the two part company.
+	//
+	// It exists because every other field on this request quotes the model: a `docs/notes.md`
+	// whose `docs` is a symlink out of the workspace reads as an in-workspace write on a pane
+	// built from Arguments alone, right up to the moment it lands elsewhere. The engine
+	// already computes this path — it is what the blast-radius classification judges the call
+	// by — and this field carries that same value, so what the human is shown and what the
+	// gate decided from cannot be two different readings of one call.
+	//
+	// It is a path the MODEL's argument produced, so a Driver treats it as model-authored
+	// text like any other: strip it, flatten it, bound it, exactly as it does Arguments.
+	// Today only a write target populates it; a read that follows a symlink is the same fact
+	// about a different verb and rides this same field.
+	ResolvedPath string
 }
 
 // ApprovalDecision is the Approver's verdict.

@@ -48,7 +48,7 @@ func (t *EditExistingFile) ReadOnly() bool { return false }
 
 // workspaceWriteTarget resolves the absolute path this call would write so dispatch can
 // classify in- vs out-of-workspace before Execute (the workspaceScopedWriter marker).
-func (t *EditExistingFile) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
+func (t *EditExistingFile) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool) {
 	return pathArgWriteTarget(call, t.root)
 }
 

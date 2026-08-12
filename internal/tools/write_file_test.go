@@ -78,6 +78,55 @@ func TestWriteFile_Execute_ReportsBytesWritten(t *testing.T) {
 	}
 }
 
+// The sentence a write reports names where it landed when that is not where the argument said. It
+// is the result-string third of one disclosure — the approval pane and the tool card say the same
+// thing about the same call, off the same resolution — and it matters here because this string is
+// what the MODEL reads back and what an expanded block prints: a `docs/` that is a symlink is
+// otherwise invisible on every one of the three.
+//
+// The redirect is resolved BEFORE the write for a reason the second half pins: afterwards the final
+// name is a plain file whatever it was, so a note read after the fact would go quiet on exactly the
+// call worth disclosing.
+func TestWriteFile_Execute_NamesTheResolvedTarget(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	real := filepath.Join(root, "real")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	// A RELATIVE in-root symlink: the write succeeds (the fence follows a link that stays inside
+	// it), so the SUCCESS sentence is the one that has to carry the disclosure. An absolute link is
+	// refused by the fence whatever it points at, and a refusal is not this test's subject.
+	if err := os.Symlink("real", filepath.Join(root, "docs")); err != nil {
+		t.Skipf("symlinks unavailable on this host: %v", err)
+	}
+
+	result, err := NewWriteFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "docs/notes.md", "content": "hello"}))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+
+	want := "wrote 5 bytes to docs/notes.md → resolves to " + realPath(t, filepath.Join(real, "notes.md"))
+	if result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+
+	// A path that names its own target reports the sentence it always did.
+	plain, err := NewWriteFile(root).Execute(context.Background(),
+		callWith(t, "c2", map[string]any{"path": "notes.md", "content": "hello"}))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if plain.Content != "wrote 5 bytes to notes.md" {
+		t.Errorf("Content = %q, want the bare sentence for a path that resolves to itself", plain.Content)
+	}
+}
+
 func TestWriteFile_Execute_ToolErrors(t *testing.T) {
 	t.Parallel()
 

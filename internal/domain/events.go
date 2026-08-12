@@ -111,6 +111,17 @@ type MessageEvent struct {
 type ToolCallEvent struct {
 	EventBase
 	Call ToolCall
+	// ResolvedPath is where the call's path argument REALLY points, on the same terms as
+	// ApprovalRequest.ResolvedPath: the symlink-resolved absolute path, carried ONLY when it
+	// differs from the path the argument names, and empty in the ordinary case.
+	//
+	// It rides the CALL event and not only the Approval because the surfaces that show a call
+	// are not only the gated ones: in Allow-Edits and Auto an in-workspace write runs with no
+	// prompt at all, and the tool card is then the only place a human ever reads where it
+	// went. Observation only and additive, like every other field here — the engine stays
+	// wire-silent (ADR 0031): nothing is added to a tool's arguments or its result, and a
+	// Driver that ignores this renders exactly what it rendered before.
+	ResolvedPath string
 }
 
 // ToolResultEvent reports a tool's result after execution (and after any

@@ -319,6 +319,20 @@ JSON under its own label, which is the one place a brace still reaches this pane
 display: the arguments the tool receives are the ones the model sent, whatever shape they were read
 in.
 
+**A path that does not point where it reads is named on a line of its own.** When the call's path
+argument resolves somewhere else — a `docs/` that is a symlink, a component pointing out of the
+workspace — the pane keeps the argument exactly as the model wrote it and adds
+`→ resolves to <where it lands>` under the arguments, as the body's last line. The two are separate
+facts and the pane states both: swapping the argument for its resolution would answer a question
+the approver did not ask and hide the one they did. The line is drawn ONLY when the two differ, so
+the overwhelming majority of prompts — every path that names its own target — are unchanged. It is
+the engine that decides there is something to say, because it is the engine that resolved the path
+in the first place: this is the very target the blast-radius classification judged the call by, so
+what you are shown and what the gate decided from cannot be two different readings. The same line,
+in the same words, follows the target on the **tool card** in the transcript, and the write's own
+result sentence names it too — three surfaces, one fact, so a call cannot read one way where you
+approve it and another way where it is recorded.
+
 **When a sub-agent raised the call, the body says so first.** A request from a child leads with
 `Sub-agent: <its delegated task>`, above the reason, because that is the one fact the rest of the
 pane cannot supply: with several children running at once their prompts QUEUE — one on the screen at

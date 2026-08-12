@@ -315,6 +315,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A write whose path does not point where it reads now says so, on every surface that shows the
+  call.** apogee has always resolved a write's true target — it is what the blast-radius ladder
+  classifies the call by — but consumed it as a bool and nothing else, so the approval pane, the
+  tool card and the write's own result sentence all quoted the model's argument: a `docs/notes.md`
+  whose `docs` is a symlink out of the workspace read as an ordinary in-workspace write right up to
+  the moment it landed elsewhere. All three now keep the argument exactly as the model wrote it and
+  add `→ resolves to <where it lands>` beside it. The line is drawn ONLY when the two differ, so
+  every ordinary prompt, card and result is unchanged to the byte. It is the ENGINE that decides
+  there is something to say (`domain.ApprovalRequest.ResolvedPath`,
+  `domain.ToolCallEvent.ResolvedPath` — both populated only on a divergence), and it hands over the
+  very path the gate judged the call by, so what you are shown and what the gate decided from can
+  never be two readings of one call. It rides the call event as well as the approval because the
+  surfaces that show a write are not only the gated ones: in Allow-Edits and Auto an in-workspace
+  write runs with no prompt at all, and the tool card is then the only place the resolution is ever
+  read. Observation only and additive — the engine stays wire-silent, nothing is added to a tool's
+  arguments, and a Driver that ignores the new fields renders what it always did.
+
 - Approval pane and tool cards no longer let a long argument value or a repeated key hide what a
   call will do: each value is capped at eight lines and an elided value (or an elided pane body)
   keeps its LAST line under the `… (+N more lines)` marker as well as its head — the tail is where

@@ -703,7 +703,7 @@ func (t *transcript) apply(e domain.Event) {
 	case domain.ToolCallEvent:
 		run := runOf(e.EventBase)
 		t.finalizeNarration(run)
-		t.addToolCall(e.Call, run)
+		t.addToolCall(e.Call, e.ResolvedPath, run)
 	case domain.ToolResultEvent:
 		t.addToolResult(e.Result, runOf(e.EventBase))
 	case domain.SubAgentPhaseEvent:
@@ -956,13 +956,16 @@ func (t *transcript) closeRun(head entry) {
 // The entry's two ids are different facts and both are kept: callID is the call the block IS —
 // what the paired result folds into, and, for a sub_agent call, what its own children's entries
 // group behind — while spawnCallID is the run this block sits IN (place).
-func (t *transcript) addToolCall(call domain.ToolCall, run runRef) {
+// resolved is the engine's disclosure for this call — where its path argument really points, when
+// that is not where the argument says (domain.ToolCallEvent.ResolvedPath) — and empty on every
+// ordinary call. It reaches the block through the presenter, which spells it beside the target.
+func (t *transcript) addToolCall(call domain.ToolCall, resolved string, run runRef) {
 	t.place(entry{
 		kind:        entryToolCall,
 		depth:       run.depth,
 		callID:      call.ID,
 		spawnCallID: run.spawn,
-		tool:        presentToolCall(call, t.ws),
+		tool:        presentToolCall(call, resolved, t.ws),
 	})
 }
 

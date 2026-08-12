@@ -50,7 +50,7 @@ func (t *WriteFile) ReadOnly() bool { return false }
 // This method being unexported is what makes write_file an Apogee-own writer no
 // third-party tool can fake (contract §3.2) — the method stays per-type even though
 // every writer shares one body (pathArgWriteTarget), because the marker IS the method set.
-func (t *WriteFile) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
+func (t *WriteFile) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool) {
 	return pathArgWriteTarget(call, t.root)
 }
 
@@ -74,6 +74,12 @@ func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, fmt.Sprintf("content too large: %d bytes (max %d)", len(args.Content), maxFileContentBytes)), nil
 	}
 
+	// Where this write REALLY lands, read before the write rather than after it, so the
+	// sentence below says the same thing the approval pane said about the same call — after
+	// the write the final name is a plain file whatever it was, and the two surfaces would
+	// part company on exactly the call worth disclosing (resolvedTargetNote).
+	resolved := resolvedTargetNote(args.Path, t.root)
+
 	// TOCTOU-safe write: the workspace fence is enforced AT WRITE TIME through an
 	// os.Root pinned at t.root, so a path component swapped to an outside-pointing
 	// symlink — including a concurrent swap by a confined subprocess — is refused
@@ -84,7 +90,7 @@ func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	}
 
 	return okSummary(call.ID,
-		fmt.Sprintf("wrote %d bytes to %s", len(args.Content), args.Path),
+		fmt.Sprintf("wrote %d bytes to %s%s", len(args.Content), args.Path, resolved),
 		domain.WroteBytes{Bytes: len(args.Content)}), nil
 }
 

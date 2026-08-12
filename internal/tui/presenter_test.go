@@ -615,7 +615,7 @@ func TestPresentDocumentToolCard(t *testing.T) {
 	tv := presentToolCall(domain.ToolCall{
 		Tool:      "present_document",
 		Arguments: []byte(`{"path":"docs/review.html","title":"Architecture review"}`),
-	}, workspaceRoot{})
+	}, "", workspaceRoot{})
 	if tv.Label != "Present" || tv.Verb != "presenting" || tv.Target != "Architecture review" {
 		t.Errorf("view = %+v; want the Present/presenting/title registry entry", tv)
 	}
@@ -628,7 +628,7 @@ func TestPresentDocumentToolCard(t *testing.T) {
 	untitled := presentToolCall(domain.ToolCall{
 		Tool:      "present_document",
 		Arguments: []byte(`{"path":"docs/review.html"}`),
-	}, workspaceRoot{})
+	}, "", workspaceRoot{})
 	if untitled.Target != "docs/review.html" {
 		t.Errorf("untitled target = %q; want the path fallback", untitled.Target)
 	}

@@ -162,7 +162,9 @@ func formatElapsed(d time.Duration) string {
 // paints this label the moment a call is ANNOUNCED, before any approval gate runs, so it is the
 // earliest point at which a hostile model's argument reaches the screen.
 func toolActivityVerb(call domain.ToolCall, ws workspaceRoot) string {
-	return presentToolCall(call, ws).Verb
+	// No resolved path is handed in, for the same reason the target is absent: this slot says what
+	// is happening, and where a path lands is the block's line to draw (resolvedPathNote).
+	return presentToolCall(call, "", ws).Verb
 }
 
 // setActivity moves the model to a new activity that is not an open tool call, keyed on the phrase

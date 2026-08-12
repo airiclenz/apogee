@@ -712,7 +712,7 @@ func TestToolActivityVerbCarriesNoEscape(t *testing.T) {
 		t.Errorf("stripping ate the benign verb text: %q", verb)
 	}
 
-	tv := presentToolCall(call, workspaceRoot{})
+	tv := presentToolCall(call, "", workspaceRoot{})
 	assertNoESCIn(t, "the presented target", tv.Target)
 	if !strings.Contains(tv.Target, "npm ") {
 		t.Errorf("stripping ate the benign target text: %q", tv.Target)
@@ -2027,7 +2027,7 @@ func toolCallCard(label, target string, depth int) entry {
 func subAgentCard(name string, depth int) entry {
 	return entry{kind: entryToolCall, depth: depth, tool: presentToolCall(domain.ToolCall{
 		ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"name":"` + name + `","task":"survey"}`),
-	}, workspaceRoot{})}
+	}, "", workspaceRoot{})}
 }
 
 // A super-group forms at two adjacent same-depth runs of DIFFERENT labels, a lone call counting as a

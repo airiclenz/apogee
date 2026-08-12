@@ -129,7 +129,7 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 				t.Fatalf("%s attached no summary; the card would degrade to %q", tc.name, firstLine(res.Content))
 			}
 
-			tv := presentToolCall(call, workspaceRoot{})
+			tv := presentToolCall(call, "", workspaceRoot{})
 			tv.enrichWithResult(res, workspaceRoot{})
 			if tv.Summary.Text != tc.want {
 				t.Errorf("card line = %q, want %q (content was %q)", tv.Summary.Text, tc.want, res.Content)

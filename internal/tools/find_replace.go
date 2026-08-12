@@ -66,7 +66,7 @@ func (t *SingleFindReplace) ReadOnly() bool { return false }
 // classify in- vs out-of-workspace before Execute (the workspaceScopedWriter marker,
 // confinement-execution-contract §3). It performs no write — pure path resolution
 // without the containment check. A call with no decodable path yields ok=false.
-func (t *SingleFindReplace) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
+func (t *SingleFindReplace) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool) {
 	return pathArgWriteTarget(call, t.root)
 }
 
@@ -179,7 +179,7 @@ func (t *MultiFindReplace) ReadOnly() bool { return false }
 
 // workspaceWriteTarget resolves the absolute path this call would write so dispatch can
 // classify in- vs out-of-workspace before Execute (the workspaceScopedWriter marker).
-func (t *MultiFindReplace) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
+func (t *MultiFindReplace) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool) {
 	return pathArgWriteTarget(call, t.root)
 }
 

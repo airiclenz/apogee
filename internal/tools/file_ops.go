@@ -110,7 +110,7 @@ func (t *CopyFile) ReadOnly() bool { return false }
 // dispatch can classify in- vs out-of-workspace before Execute (the workspaceScopedWriter
 // marker, confinement-execution-contract §3). It performs no write; see
 // destinationArgWriteTarget for why the source needs no classification of its own.
-func (t *CopyFile) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
+func (t *CopyFile) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool) {
 	return destinationArgWriteTarget(call, t.root)
 }
 
@@ -161,7 +161,7 @@ func (t *MoveFile) ReadOnly() bool { return false }
 // dispatch can classify in- vs out-of-workspace before Execute (the workspaceScopedWriter
 // marker, confinement-execution-contract §3). The removal of the source is part of the same
 // fenced operation, so it needs no classification of its own (destinationArgWriteTarget).
-func (t *MoveFile) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
+func (t *MoveFile) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool) {
 	return destinationArgWriteTarget(call, t.root)
 }
 
@@ -304,7 +304,7 @@ func (t *DeleteFile) ReadOnly() bool { return false }
 // in- vs out-of-workspace before Execute (the workspaceScopedWriter marker,
 // confinement-execution-contract §3). A removal is a write to the directory that held the file, and
 // the file's own path is what states that blast radius. It performs no removal.
-func (t *DeleteFile) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
+func (t *DeleteFile) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool) {
 	return pathArgWriteTarget(call, t.root)
 }
 

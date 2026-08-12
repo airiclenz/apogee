@@ -2588,7 +2588,7 @@ func TestDemotedLineKeepsTheSpellingItWasWrittenWith(t *testing.T) {
 	printed := "/home/me/proj/deep/file.txt"
 
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "terminal",
-		Arguments: []byte(`{"command":"cat /home/me/proj/notes.md"}`)}, ws)
+		Arguments: []byte(`{"command":"cat /home/me/proj/notes.md"}`)}, "", ws)
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: printed + "\n"}, ws)
 
 	th := newTheme(scheme.Default())
@@ -2641,7 +2641,7 @@ func TestGitCommitSlotIsTheShortHashAtEveryWidth(t *testing.T) {
 			t.Parallel()
 
 			tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "git_commit",
-				Arguments: []byte(`{"message":"` + subject + `"}`)}, workspaceRoot{})
+				Arguments: []byte(`{"message":"` + subject + `"}`)}, "", workspaceRoot{})
 			tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: output + "\n"}, workspaceRoot{})
 
 			lines := renderToolBlock(th, []toolView{tv}, tc.width, blockState{expanded: true}).lines

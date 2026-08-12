@@ -160,7 +160,7 @@ for reasons worth stating individually:
 Four fixes in the plan are not among the fourteen. They are recorded here so nobody later reads
 them as scope creep:
 
-- **item 8** — the resolved write/read target is computed (`internal/agent/dispatch.go:717-723`) but
+- **item 8** — the resolved write/read target is computed (`internal/agent/dispatch.go:784-808`) but
   consumed only as a bool for the gate decision; no `internal/tui` surface renders it. It is the
   shared disclosure mechanism items 7 and 13 both depend on.
 - **item 10** — no surface shows whether a loaded skill came from the cloned repo, the user library

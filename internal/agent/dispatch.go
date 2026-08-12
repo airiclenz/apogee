@@ -135,7 +135,7 @@ func (a *Agent) delegationCap() int {
 // cases keep today's behavior exactly.
 func (a *Agent) dispatchSerially(ctx context.Context, turn int, calls []domain.ToolCall) dispatchOutcome {
 	for _, call := range calls {
-		a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call})
+		a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call)})
 
 		if err := a.runPreToolExecHooks(ctx, turn, &call); err != nil {
 			// A pre-tool-exec hook panicked (recovered into an ErrorEvent): skip the call
@@ -648,6 +648,10 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		SubAgentTask: a.task,
 		SubAgentName: a.name,
 		CacheKey:     sessionKey,
+		// Where the write really lands, when that is not where the argument says: the one fact
+		// this request carries that the model did not write, and the reason the pane can no
+		// longer be shown a path the executor will not use (domain.ApprovalRequest.ResolvedPath).
+		ResolvedPath: a.resolvedPath(call),
 	}
 	decision, err := a.cfg.Approver.Approve(ctx, areq)
 	if err != nil {
@@ -788,6 +792,25 @@ func (a *Agent) writeTargetInWorkspace(tool domain.Tool, call domain.ToolCall) b
 		return true // nothing inspectable to classify ⇒ treat as in-bounds (Execute path-bounds it)
 	}
 	return pathWithin(abs, a.cfg.WorkspaceDir)
+}
+
+// resolvedPath is the DISCLOSURE twin of writeTargetInWorkspace: the same resolved target,
+// surfaced as a path instead of consumed as a bool, and only when it differs from the path the
+// model's argument names (tools.ResolvedWriteTarget). It rides the ToolCallEvent and the
+// ApprovalRequest so a Driver can say where a write really goes; it is "" for every ordinary
+// call, which is what keeps an unremarkable prompt unremarkable.
+//
+// It looks the tool up itself because the two seams that need it stand on either side of the
+// registry lookup — the ToolCallEvent is emitted before the call is resolved, the Approval
+// after — and an unknown tool simply discloses nothing, exactly as it classifies as nothing.
+// The resolution is the same disk-touching one dispatch already performs for the ladder, so a
+// gated write costs one more EvalRealPath and a non-writer costs a type assertion.
+func (a *Agent) resolvedPath(call domain.ToolCall) string {
+	tool, ok := a.lookupTool(call.Tool)
+	if !ok {
+		return ""
+	}
+	return tools.ResolvedWriteTarget(tool, call)
 }
 
 // fsConfinementAvailable reports whether the injected Confiner can enforce filesystem

@@ -194,6 +194,15 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	if args := approvalArgsBlock(req); args != "" {
 		parts = append(parts, args)
 	}
+	// Where the call's path really points, when that is not where the argument says
+	// (ApprovalRequest.ResolvedPath). It comes LAST, under the arguments it is about, because it
+	// is a statement about one of them and reads as a footnote to the block rather than as a
+	// fact of its own; and it is a part of its own so the pane's wrapping, elision and row
+	// budgeting treat it as the line it is. An ordinary call sends nothing and this pane is
+	// unchanged to the byte.
+	if note := resolvedPathNote(req.ResolvedPath); note != "" {
+		parts = append(parts, note)
+	}
 
 	rows := make([]popupRow, len(approvalMenu))
 	for i, opt := range approvalMenu {

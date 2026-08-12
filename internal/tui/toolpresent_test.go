@@ -297,7 +297,7 @@ func TestPresentToolCall(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tv := presentToolCall(tc.call, workspaceRoot{})
+			tv := presentToolCall(tc.call, "", workspaceRoot{})
 			if tv.Label != tc.wantLabel {
 				t.Errorf("Label = %q, want %q", tv.Label, tc.wantLabel)
 			}
@@ -381,7 +381,7 @@ func TestPresentSubAgentNameLeadsTheHeader(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tv := presentToolCall(domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(tc.args)}, workspaceRoot{})
+			tv := presentToolCall(domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(tc.args)}, "", workspaceRoot{})
 			if tv.Target != tc.wantTarget {
 				t.Errorf("Target = %q, want %q", tv.Target, tc.wantTarget)
 			}
@@ -401,7 +401,7 @@ func TestPresentSubAgentNameLeadsTheHeader(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshal args: %v", err)
 		}
-		tv := presentToolCall(domain.ToolCall{ID: "s2", Tool: "sub_agent", Arguments: args}, workspaceRoot{})
+		tv := presentToolCall(domain.ToolCall{ID: "s2", Tool: "sub_agent", Arguments: args}, "", workspaceRoot{})
 		if strings.ContainsRune(tv.Target, 0x1b) || strings.ContainsRune(tv.agentName, 0x1b) {
 			t.Errorf("an ESC byte survived into the header: target=%q name=%q", tv.Target, tv.agentName)
 		}
@@ -436,7 +436,7 @@ func TestPresentSubAgentRetainsTheWholeTask(t *testing.T) {
 			t.Fatalf("marshal args: %v", err)
 		}
 
-		tv := presentToolCall(domain.ToolCall{ID: "s1", Tool: subAgentToolName, Arguments: args}, workspaceRoot{})
+		tv := presentToolCall(domain.ToolCall{ID: "s1", Tool: subAgentToolName, Arguments: args}, "", workspaceRoot{})
 
 		if tv.task != task {
 			t.Errorf("retained task = %q, want the argument verbatim %q", tv.task, task)
@@ -453,7 +453,7 @@ func TestPresentSubAgentRetainsTheWholeTask(t *testing.T) {
 			t.Fatalf("marshal args: %v", err)
 		}
 
-		tv := presentToolCall(domain.ToolCall{ID: "s2", Tool: subAgentToolName, Arguments: args}, workspaceRoot{})
+		tv := presentToolCall(domain.ToolCall{ID: "s2", Tool: subAgentToolName, Arguments: args}, "", workspaceRoot{})
 
 		if strings.ContainsRune(tv.task, 0x1b) || strings.ContainsRune(tv.task, 0x07) {
 			t.Errorf("a control byte survived into the retained prompt: %q", tv.task)
@@ -475,7 +475,7 @@ func TestPresentSubAgentRetainsTheWholeTask(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 
-				tv := presentToolCall(tc.call, workspaceRoot{})
+				tv := presentToolCall(tc.call, "", workspaceRoot{})
 
 				if tv.task != "" {
 					t.Errorf("retained task = %q, want nothing", tv.task)
@@ -489,7 +489,7 @@ func TestPresentSubAgentRetainsTheWholeTask(t *testing.T) {
 // summary — a normal in-band outcome the model reacts to. It is the *summary*, not a body
 // line, which is what keeps an errored call grouping with its neighbours.
 func TestPresentToolCallErrorResult(t *testing.T) {
-	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"missing"}`)}, workspaceRoot{})
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"missing"}`)}, "", workspaceRoot{})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "file not found: missing", IsError: true}, workspaceRoot{})
 	if got := tv.Summary.Text; got != "error: file not found: missing" {
 		t.Errorf("error summary = %q; want the error text", got)
@@ -589,7 +589,7 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tv := presentToolCall(tc.call, workspaceRoot{})
+			tv := presentToolCall(tc.call, "", workspaceRoot{})
 			tv.enrichWithResult(tc.result, workspaceRoot{})
 			if tv.Summary.Text != tc.wantSummary {
 				t.Errorf("summary = %q, want %q", tv.Summary.Text, tc.wantSummary)
@@ -623,7 +623,7 @@ func TestPromotionCarriesBothReadingsOfTheOutcome(t *testing.T) {
 
 	present := func(call domain.ToolCall, content string) toolView {
 		t.Helper()
-		tv := presentToolCall(call, workspaceRoot{})
+		tv := presentToolCall(call, "", workspaceRoot{})
 		tv.enrichWithResult(domain.ToolResult{CallID: call.ID, Content: content}, workspaceRoot{})
 		return tv
 	}
@@ -701,7 +701,7 @@ func TestPromotionCarriesBothReadingsOfTheOutcome(t *testing.T) {
 // A call still in flight carries neither half of an outcome, and the zero summary is plain, so
 // it groups with its finished neighbours rather than breaking their block.
 func TestPresentToolCallInFlightHasNoOutcome(t *testing.T) {
-	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}, workspaceRoot{})
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}, "", workspaceRoot{})
 	if tv.Summary.Text != "" || tv.Details.len() != 0 {
 		t.Errorf("in-flight outcome = %+v / %+v; want both halves empty", tv.Summary, tv.Details)
 	}
@@ -792,7 +792,7 @@ func TestAskUserAnswerRecord(t *testing.T) {
 			t.Parallel()
 
 			call := domain.ToolCall{ID: "1", Tool: "ask_user", Arguments: []byte(tc.args)}
-			tv := presentToolCall(call, workspaceRoot{})
+			tv := presentToolCall(call, "", workspaceRoot{})
 			tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: tc.answer}, workspaceRoot{})
 
 			if tv.Summary.Text != tc.wantSummary {
@@ -823,7 +823,7 @@ func TestAskUserPendingCallHasNoRecord(t *testing.T) {
 	t.Parallel()
 
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "ask_user",
-		Arguments: []byte(`{"question":"Which mode?","choices":["Plan","Auto"]}`)}, workspaceRoot{})
+		Arguments: []byte(`{"question":"Which mode?","choices":["Plan","Auto"]}`)}, "", workspaceRoot{})
 
 	if tv.Summary.Text != "" || tv.Details.len() != 0 {
 		t.Errorf("pending question outcome = %+v / %+v; want both halves empty", tv.Summary, tv.Details)
@@ -986,7 +986,7 @@ func TestEditCallsCarryTheirChangedLines(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tv := presentToolCall(tc.call, workspaceRoot{})
+			tv := presentToolCall(tc.call, "", workspaceRoot{})
 			if got := changedBody(t, tv); strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
 				t.Errorf("body = %q, want %q", got, tc.want)
 			}
@@ -1001,7 +1001,7 @@ func TestEditBodyRetainsEveryChangedLine(t *testing.T) {
 	const lines = 40 // far past the collapsed budget, so a build-time cap could not hide in the noise
 	inserted := strings.TrimSuffix(strings.Repeat("added\\n", lines), "\\n")
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "single_find_and_replace",
-		Arguments: []byte(`{"path":"main.go","oldText":"gone","newText":"` + inserted + `"}`)}, workspaceRoot{})
+		Arguments: []byte(`{"path":"main.go","oldText":"gone","newText":"` + inserted + `"}`)}, "", workspaceRoot{})
 
 	if got, want := tv.Details.len(), lines+1; got != want {
 		t.Errorf("body has %d lines, want the removed line plus all %d inserted", got, lines)
@@ -1014,7 +1014,7 @@ func TestEditBodyRetainsEveryChangedLine(t *testing.T) {
 func TestEditBodyClipsALongChangedLine(t *testing.T) {
 	long := strings.Repeat("é", detailClipRunes+50)
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "single_find_and_replace",
-		Arguments: []byte(`{"path":"main.go","oldText":"x","newText":"` + long + `"}`)}, workspaceRoot{})
+		Arguments: []byte(`{"path":"main.go","oldText":"x","newText":"` + long + `"}`)}, "", workspaceRoot{})
 
 	body := tv.Details.all()
 	if len(body) != 2 {
@@ -1078,11 +1078,40 @@ func TestWriteCallCarriesTheWrittenLines(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file", Arguments: []byte(tc.args)}, workspaceRoot{})
+			tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file", Arguments: []byte(tc.args)}, "", workspaceRoot{})
 			if got := changedBody(t, tv); strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
 				t.Errorf("body = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// A call whose path does not point where it reads says so on the branch row, beside the argument
+// rather than instead of it: the model's `path` stays on the screen as written and where the write
+// really lands follows it. The row is where it has to be — a targeted block hides its BODY whole
+// while collapsed, so a disclosure in the body is one a reader would have to open the block to
+// find — and it is spelled workspace-relative like every other path the card names.
+//
+// The engine sends the path only when the two differ (domain.ToolCallEvent.ResolvedPath), so the
+// ordinary call is byte-identical to the card it always drew: same target, nothing appended.
+func TestToolCardNamesTheResolvedPath(t *testing.T) {
+	ws := workspaceRoot{root: "/home/me/proj"}
+	call := domain.ToolCall{ID: "1", Tool: "write_file",
+		Arguments: []byte(`{"path":"docs/notes.md","content":"hi"}`)}
+
+	redirected := presentToolCall(call, "/elsewhere/notes.md", ws)
+	if want := "docs/notes.md → resolves to /elsewhere/notes.md"; redirected.Target != want {
+		t.Errorf("target = %q, want %q", redirected.Target, want)
+	}
+
+	inside := presentToolCall(call, "/home/me/proj/real/notes.md", ws)
+	if want := "docs/notes.md → resolves to real/notes.md"; inside.Target != want {
+		t.Errorf("target = %q, want the resolution spelled workspace-relative: %q", inside.Target, want)
+	}
+
+	plain := presentToolCall(call, "", ws)
+	if plain.Target != "docs/notes.md" {
+		t.Errorf("target = %q, want the argument alone on a call that resolves to itself", plain.Target)
 	}
 }
 
@@ -1092,7 +1121,7 @@ func TestWriteCallCarriesTheWrittenLines(t *testing.T) {
 // there is only one of them. Nothing is promoted into that slot, because it is already taken.
 func TestWriteBodySurvivesItsByteCountSummary(t *testing.T) {
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file",
-		Arguments: []byte(`{"path":"notes.txt","content":"hello"}`)}, workspaceRoot{})
+		Arguments: []byte(`{"path":"notes.txt","content":"hello"}`)}, "", workspaceRoot{})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "wrote 5 bytes to notes.txt",
 		Summary: domain.WroteBytes{Bytes: 5}}, workspaceRoot{})
 
@@ -1112,7 +1141,7 @@ func TestWriteBodySurvivesItsByteCountSummary(t *testing.T) {
 func TestDiffStatSpansTheWholeDiff(t *testing.T) {
 	const longDiff = 25 // well past the collapsed budget, so the stat and the paint cannot agree by luck
 	long := strings.TrimSuffix(strings.Repeat("+ added\n", longDiff), "\n")
-	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, workspaceRoot{})
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, "", workspaceRoot{})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: long, Summary: domain.DiffStat{Added: longDiff}}, workspaceRoot{})
 
 	if want := "+" + strconv.Itoa(longDiff) + " −0"; tv.Summary.Text != want {
@@ -1127,7 +1156,7 @@ func TestDiffStatSpansTheWholeDiff(t *testing.T) {
 // there is no diff to describe — so it falls to the prose floor as one plain summary line
 // with nothing beneath the branch, exactly as it rendered before the view read fields.
 func TestViewDiffNoChangesRendersAsProse(t *testing.T) {
-	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, workspaceRoot{})
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, "", workspaceRoot{})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "No changes detected"}, workspaceRoot{})
 
 	if tv.Summary.Text != "No changes detected" || tv.Summary.Kind != detailPlain {
@@ -1239,7 +1268,7 @@ func TestToolStatDeclinesWithoutATypedSummary(t *testing.T) {
 // nothing to show is that floor end to end: its stat recognises no commit lines, so the extractor's
 // own "(no output)" phrase keeps the slot.
 func TestDecliningStatKeepsTheProseFloor(t *testing.T) {
-	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "git_log", Arguments: []byte(`{"ref":"HEAD"}`)}, workspaceRoot{})
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "git_log", Arguments: []byte(`{"ref":"HEAD"}`)}, "", workspaceRoot{})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "\n"}, workspaceRoot{})
 	if tv.Summary.Text != "(no output)" {
 		t.Errorf("summary = %q, want the extractor's own phrase", tv.Summary.Text)

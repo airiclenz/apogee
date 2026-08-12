@@ -275,8 +275,12 @@ type workspaceScopedWriter interface {
 	// dispatch can classify in- vs out-of-workspace before Execute (§4). ok is false
 	// when the call writes nothing inspectable (then dispatch treats it as in-bounds).
 	// It performs no write — pure path resolution, reusing resolveInRoot's logic
-	// without enforcing containment.
-	workspaceWriteTarget(call domain.ToolCall) (abs string, ok bool)
+	// without enforcing containment. It yields the path in BOTH spellings: the
+	// absolute path the argument NAMES, and that path symlink-resolved. Only the
+	// resolver sees the two, and they differ exactly when the argument travels
+	// through something that is not the directory it appears to be — the fact the
+	// disclosure accessor below hands the surfaces that show the call.
+	workspaceWriteTarget(call domain.ToolCall) (target writeTarget, ok bool)
 }
 
 // IsWorkspaceScopedWriter reports whether t is one of Apogee's own workspace-scoped
@@ -291,11 +295,25 @@ func IsWorkspaceScopedWriter(t domain.Tool) bool {
 // without exporting the marker interface itself. Returns ("", false) for any tool
 // that is not a workspace-scoped writer.
 func WorkspaceWriteTarget(t domain.Tool, call domain.ToolCall) (string, bool) {
-	w, ok := t.(workspaceScopedWriter)
+	target, ok := writeTargetOf(t, call)
 	if !ok {
 		return "", false
 	}
-	return w.workspaceWriteTarget(call)
+	return target.Real, true
+}
+
+// ResolvedWriteTarget is the DISCLOSURE half of the same seam: the path the write
+// really lands on, returned only when it differs from the path the argument names,
+// and "" otherwise. Dispatch puts it on the ToolCallEvent and the ApprovalRequest so
+// the pane, the tool card and the write's own result can name where a call goes —
+// the same resolution the classification above judged it by, so a surface and the
+// gate can never be two readings of one call.
+func ResolvedWriteTarget(t domain.Tool, call domain.ToolCall) string {
+	target, ok := writeTargetOf(t, call)
+	if !ok || target.Real == target.Named {
+		return ""
+	}
+	return target.Real
 }
 ```
 

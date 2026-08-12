@@ -257,6 +257,12 @@ Ratified 2026-08-10. Paths render workspace-relative. `—` = nothing to show
 there: an empty right slot means dots run to the `▶`; a row with nothing to
 expand carries no indicator at all.
 
+A path that resolves somewhere other than where it reads — a symlinked
+component — keeps the argument in its column and gains
+`→ resolves to <where it lands>` after it, the same line the approval pane
+draws. It rides the target rather than the body because a targeted block hides
+its body whole while collapsed, and it appears only when the two differ.
+
 | Tool | `<tool-header>` | `<tool-details>` (collapsed) | `<tool-top-level-details>` | `<tool-details-row-*>` (expanded) |
 |---|---|---|---|---|
 | read_file | Read | path (`:12–80` when ranged, `· locate "…"` when set) | `N lines` | the located lines (`Located "…" on lines: …`) when locate is set, else — |

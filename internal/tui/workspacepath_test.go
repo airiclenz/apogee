@@ -139,7 +139,7 @@ func TestToolCardPaintsWorkspaceRelativePaths(t *testing.T) {
 
 	ws := newWorkspaceRoot("/home/me/proj")
 	call := domain.ToolCall{ID: "1", Tool: "terminal", Arguments: []byte(`{"command":"ls /home/me/proj/docs"}`)}
-	tv := presentToolCall(call, ws)
+	tv := presentToolCall(call, "", ws)
 	if tv.Target != "ls docs" {
 		t.Errorf("target = %q, want %q", tv.Target, "ls docs")
 	}
@@ -148,7 +148,7 @@ func TestToolCardPaintsWorkspaceRelativePaths(t *testing.T) {
 	}
 
 	summarised := presentToolCall(domain.ToolCall{ID: "2", Tool: "single_find_and_replace",
-		Arguments: []byte(`{"path":"/home/me/proj/main.go"}`)}, ws)
+		Arguments: []byte(`{"path":"/home/me/proj/main.go"}`)}, "", ws)
 	summarised.enrichWithResult(domain.ToolResult{CallID: "2", Content: "replaced text in /home/me/proj/main.go"}, ws)
 	if summarised.Target != "main.go" {
 		t.Errorf("target = %q, want %q", summarised.Target, "main.go")
@@ -203,7 +203,7 @@ func TestToolCardBodyKeepsTheSpellingOfWhatItQuotes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			tv := presentToolCall(tc.call, ws)
+			tv := presentToolCall(tc.call, "", ws)
 			tv.enrichWithResult(tc.res, ws)
 
 			body := make([]string, 0, tv.Details.len())
@@ -217,7 +217,7 @@ func TestToolCardBodyKeepsTheSpellingOfWhatItQuotes(t *testing.T) {
 	}
 
 	// The target of the diff above is the one path that block names, and it shortens.
-	diff := presentToolCall(cases[0].call, ws)
+	diff := presentToolCall(cases[0].call, "", ws)
 	if diff.Target != "main.go" {
 		t.Errorf("target = %q, want %q — a named path still shortens beside a verbatim body", diff.Target, "main.go")
 	}
@@ -270,7 +270,7 @@ func TestToolCardSummaryQuotesPromotedOutputOnly(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			tv := presentToolCall(tc.call, ws)
+			tv := presentToolCall(tc.call, "", ws)
 			tv.enrichWithResult(tc.res, ws)
 
 			if tv.Summary.Text != tc.wantSummary {
@@ -322,7 +322,7 @@ func TestAskUserAnswerIsQuotedAndAPathReportStillShortens(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			tv := presentToolCall(tc.call, ws)
+			tv := presentToolCall(tc.call, "", ws)
 			tv.enrichWithResult(tc.res, ws)
 
 			if tv.Summary.Text != tc.wantSummary {
@@ -341,7 +341,7 @@ func TestUnregisteredToolCardQuotesItsArgumentsVerbatim(t *testing.T) {
 
 	ws := newWorkspaceRoot("/home/me/proj")
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "mcp_thing",
-		Arguments: []byte(`{"path":"/home/me/proj/docs/plan.md","other":"/etc/hosts"}`)}, ws)
+		Arguments: []byte(`{"path":"/home/me/proj/docs/plan.md","other":"/etc/hosts"}`)}, "", ws)
 	if tv.Label != "mcp_thing" || tv.Verb != "running mcp_thing" {
 		t.Errorf("view = %+v; want the raw-name fallback", tv)
 	}
@@ -362,14 +362,14 @@ func TestTranscriptShortensPathsAndKeepsItsRootAcrossReset(t *testing.T) {
 	var tr transcript
 	tr.ws = newWorkspaceRoot("/home/me/proj")
 	tr.addToolCall(domain.ToolCall{ID: "1", Tool: "read_file",
-		Arguments: []byte(`{"path":"/home/me/proj/main.go"}`)}, runRef{})
+		Arguments: []byte(`{"path":"/home/me/proj/main.go"}`)}, "", runRef{})
 	if got := tr.entries[0].tool.Target; got != "main.go" {
 		t.Fatalf("target = %q, want %q", got, "main.go")
 	}
 
 	tr.reset()
 	tr.addToolCall(domain.ToolCall{ID: "2", Tool: "read_file",
-		Arguments: []byte(`{"path":"/home/me/proj/docs/plan.md"}`)}, runRef{})
+		Arguments: []byte(`{"path":"/home/me/proj/docs/plan.md"}`)}, "", runRef{})
 	if got := tr.entries[0].tool.Target; got != "docs/plan.md" {
 		t.Errorf("after reset the target = %q, want %q — the root did not survive /clear", got, "docs/plan.md")
 	}

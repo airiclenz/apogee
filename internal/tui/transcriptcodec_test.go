@@ -501,7 +501,7 @@ func TestTranscriptCodecReplaysAPromotedSummaryAsShown(t *testing.T) {
 	t.Parallel()
 	tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
 	tr.addToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
-		Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, runRef{})
+		Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, "", runRef{})
 	tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, runRef{})
 
 	data, err := encodeTranscript(tr)
@@ -543,7 +543,7 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 		// is the shape whose summary is the tool's words and not the block's.
 		tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
 		tr.addToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
-			Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, runRef{})
+			Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, "", runRef{})
 		tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, runRef{})
 		if len(tr.entries) != 1 || !tr.entries[0].tool.Summary.quoted {
 			t.Fatalf("fixture: the promoted output carries no quoted mark to travel (%+v)", tr.entries)
@@ -583,7 +583,7 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 
 		tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
 		tr.addToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
-			Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, runRef{})
+			Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, "", runRef{})
 		tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, runRef{})
 
 		data, err := encodeTranscript(tr)

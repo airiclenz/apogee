@@ -1321,6 +1321,59 @@ func TestModelApprovalDrawsRemedyUnderReason(t *testing.T) {
 	}
 }
 
+// A path argument that does not point where it reads is named on a line of its own, under the
+// arguments it is about: the pane quotes the model's `path` as the model wrote it and says beside
+// it where the write actually lands, because those are two facts and swapping one for the other
+// would answer a question the approver did not ask. The engine sends the path only when the two
+// differ (domain.ApprovalRequest.ResolvedPath), so the ordinary prompt — the overwhelming majority
+// — draws no such line at all.
+//
+// The second half is the hostile-bytes half: the resolution is a path a MODEL-authored argument
+// produced, so it is flattened before it reaches a surface that paints one row per line. Unflattened
+// it would paint rows of its own in the pane's own body style — a second `Reason:` above the real
+// one, which is the forgery this pane's fields are flattened to prevent.
+func TestModelApprovalNamesTheResolvedPath(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	req := domain.ApprovalRequest{
+		Tool:         "write_file",
+		Reason:       "write",
+		Arguments:    json.RawMessage(`{"path":"docs/notes.md","content":"hi"}`),
+		ResolvedPath: "/elsewhere/notes.md",
+	}
+	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
+
+	rows := strings.Split(ansiPattern.ReplaceAllString(m.approvalPrompt(req), ""), "\n")
+	got := strings.Join(rows, "\n")
+	if !strings.Contains(got, "→ resolves to /elsewhere/notes.md") {
+		t.Errorf("the resolved path did not reach the pane:\n%s", got)
+	}
+	if !strings.Contains(got, "docs/notes.md") {
+		t.Errorf("the argument the model wrote left the pane:\n%s", got)
+	}
+	if path, note := paneRowIndex(t, rows, "path:"), paneRowIndex(t, rows, "→ resolves to"); note <= path {
+		t.Errorf("the resolution sits on row %d, above the argument on row %d it is about:\n%s", note, path, got)
+	}
+
+	// A call whose argument names its own target: nothing extra, not a blank line.
+	req.ResolvedPath = ""
+	if bare := ansiPattern.ReplaceAllString(m.approvalPrompt(req), ""); strings.Contains(bare, "resolves to") {
+		t.Errorf("a call whose path resolves to itself drew a resolution line:\n%s", bare)
+	}
+
+	// A resolution carrying a newline is one row, not a forged one.
+	req.ResolvedPath = "/elsewhere/notes.md\nReason: nothing to see here"
+	forged := ansiPattern.ReplaceAllString(m.approvalPrompt(req), "")
+	rowsLed := 0
+	for _, row := range strings.Split(forged, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(strings.ReplaceAll(row, "│", "")), "Reason:") {
+			rowsLed++
+		}
+	}
+	if rowsLed != 1 {
+		t.Errorf("pane opens %d rows with Reason:, want 1 — the resolution painted a row of its own:\n%s", rowsLed, forged)
+	}
+}
+
 // Every argument is a `name:` label with the value's own lines under it — a single-line value, a
 // multi-line one reading as the lines it will actually run rather than as one `\n`-escaped string,
 // and every key of a multi-argument call, in the order the model wrote them. What is NOT on the

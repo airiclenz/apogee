@@ -673,7 +673,14 @@ var toolRegistry = map[string]toolPresenter{
 // registered tool, and the raw name behind an unknown tool's label, verb and labelled body —
 // so both exits leave through finishDisplay, which escape-strips the view and spells the paths it
 // NAMES relative to the workspace root ws names.
-func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
+//
+// resolved is the ONE fact here the model did not write: the path this call's argument really
+// points at, sent by the engine only when it differs from the argument itself
+// (domain.ToolCallEvent.ResolvedPath) and empty on every ordinary call. It joins the target rather
+// than replacing it — the argument stays on the screen as the model wrote it, with where it lands
+// beside it — because a surface that silently swapped one for the other would be answering a
+// question the reader did not ask and hiding the one they did.
+func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) toolView {
 	p, ok := toolRegistry[call.Tool]
 	if !ok {
 		tv := toolView{
@@ -708,6 +715,15 @@ func presentToolCall(call domain.ToolCall, ws workspaceRoot) toolView {
 	}
 	if p.target != nil {
 		tv.Target = p.target(args)
+	}
+	// Where the call's path really points, when that is not where the argument said (resolved,
+	// from the engine). It rides the TARGET rather than the body because a targeted block hides
+	// its body whole while collapsed (collapsedCall) — a disclosure a reader has to open the
+	// block to find is one they will not read — and the branch row is the one row every shape of
+	// this block paints. On a row too narrow for both, the clip ends it in " …" exactly as it
+	// ends an over-long path, which is the same promise the row already makes about its target.
+	if note := resolvedPathNote(resolved); note != "" && tv.Target != "" {
+		tv.Target += " " + note
 	}
 	if p.argBody != nil {
 		tv.Details = newToolBody(p.argBody(args))
@@ -2242,6 +2258,29 @@ func argumentDetails(raw json.RawMessage) []detailLine {
 // rather than the value so the value beneath it is still nothing but the bytes the tool receives.
 func duplicateKeyNote(occurrences int) string {
 	return fmt.Sprintf("  (duplicate key — last of %d wins)", occurrences)
+}
+
+// resolvedPathNote is the ONE wording every decision surface discloses a redirected path with —
+// the approval pane's own line and the tool card's branch row both come here, so the two cannot
+// end up telling the same fact in two dialects. It is empty whenever the engine sent nothing
+// (domain.ApprovalRequest.ResolvedPath / domain.ToolCallEvent.ResolvedPath), which is the ordinary
+// case: the argument names its own target and neither surface grows a line.
+//
+// The engine decides WHETHER there is anything to say — it holds the workspace root and the
+// resolution the gate judged the call by — and this decides how it reads. That split is what keeps
+// the pane from computing a second opinion about a path off arguments it would have to re-resolve
+// on the render goroutine.
+//
+// The path is model-authored like every other field these surfaces paint: it is what the model's
+// own argument resolved to, so it is escape-stripped and FLATTENED here rather than at each call
+// site. Flattening is what makes it safe to hand the approval pane, which paints one row per line
+// and would otherwise let a path carrying "\n" write rows of its own beneath a label it did not
+// author.
+func resolvedPathNote(resolved string) string {
+	if resolved == "" {
+		return ""
+	}
+	return "→ resolves to " + flattenField(stripEscapes(resolved))
 }
 
 // argumentPair is one argument as the model wrote it: its name, and its value still encoded, so the
