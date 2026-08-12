@@ -81,6 +81,16 @@ point is a **minor** bump, not a breaking change.
   a `mechanisms:` key this build does not know is refused on the spot with the session left running
   exactly as it was.
 
+- **A delegation that ran on another model now says which one.** With routing on, a sub-agent's
+  collapsed line closes with the model that actually did the work — `4 tool calls · 12k/32k ·
+  found three gaps · qwen3-4b` — and the headless run's per-delegation line does the same:
+  `sub-agent: 12k/32k · repo-scout · qwen3-4b`. It is the first thing worth knowing when a
+  delegation behaves unlike the session that asked for it. Nothing appears when the child ran on the
+  session's own model, so routing off — or a Sub-agent server bound to the same model — renders
+  exactly the line it always did. The answer is frozen when the reading lands and is kept in the
+  session record, so a resumed session still shows the model the run really used rather than the one
+  it happens to reopen on.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's

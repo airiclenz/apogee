@@ -343,7 +343,7 @@ latched then dials a server the file no longer flags. Both doc maps gained their
 
 Commit: `feat(apogee): routing state-change notices and live config lifecycle for the sub-agent server`
 
-## 8. Surfacing: the delegation line shows the child's model when it differs
+## 8. Surfacing: the delegation line shows the child's model when it differs — ✅ DONE (2026-08-12)
 
 **What:** Depends on item 4. Thread the routed child's bound model into the per-run
 reading surfaces (CONTEXT.md "Sub-agent": the TUI's collapsed call block
@@ -360,6 +360,25 @@ the reading is persisted (match however the existing reading persists).
 
 **Acceptance:** `go test ./internal/tui/ ./cmd/apogee/` passes; `make check` passes;
 CHANGELOG bullet added.
+
+**NOTES (2026-08-12):** four deviations/decisions beyond the item's literal text. (a) The vehicle is
+`domain.UsageEvent`, which gained a `Model` field stamped with the EMITTING agent's bound model
+(`usageTally.record` takes it as an argument) — that event is the one that already carries the per-run
+reading to both surfaces, and a lifecycle event would have made every Driver join two streams. (b) The
+"differs from the parent's" comparison is made against the SESSION's bound model, not the immediate
+parent's, and it is FROZEN at fold time rather than re-made at paint. Frozen because the fill beside it is
+(a finished run's line must not be rewritten by a later `/model` switch or by resuming into a
+differently-bound session), and against the session's because that is the model a Driver actually holds:
+the only visible difference is a routed depth≥2 delegation, whose parent is routed too and which
+therefore names the cell where a strict per-parent rule would stay silent — the more useful reading of
+ADR 0045 §7's "first debugging clue". (c) The two twins spell the model differently on purpose: the TUI
+runs it through `displayModel`, the footer's own strip, so the one model on screen and the other read
+alike; headless prints the id escape-stripped and clipped like every other wire-sourced cell on that
+line, `displayModel` being unexported in `internal/tui` and not worth a package move for one cell.
+(d) `transcriptcodec_test.go`'s wireEntry guard ("widening the wire needs its own decision") was
+widened for `ctxModel` — this item's own persistence requirement is that decision — and `spanFills`
+(the paint-cache key) now covers the model, because a maintenance reading can name it while leaving
+the numbers exactly where they stood.
 
 Commit: `feat(tui): delegation line shows the child model when it differs`
 

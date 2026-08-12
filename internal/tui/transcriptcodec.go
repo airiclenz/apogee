@@ -77,6 +77,14 @@ type wireEntry struct {
 	// time, so what a record keeps is the reading as it stood when the run reported.
 	CtxUsed  int `json:"ctxUsed,omitempty"`
 	CtxLimit int `json:"ctxLimit,omitempty"`
+	// the model a sub-agent run's head wears (entry.ctxModel): the model the delegate ran on when
+	// it was not the session's own — routing to the Sub-agent server (ADR 0045) — and absent when
+	// it was. ADDITIVE within transcriptVersion on the same wireEntry rule: it takes omitempty, so
+	// every unrouted run writes nothing new, and a blob written before it existed decodes to "" —
+	// the run that ran where the session ran, which is what a record from a build without routing
+	// describes. Frozen at fold time like the pair above, so a resumed session repaints the model
+	// the run ACTUALLY used rather than the one it happens to reopen on.
+	CtxModel string `json:"ctxModel,omitempty"`
 	// the cumulative token accounting a sub-agent run's head wears (entry.usage): what the delegate
 	// spent over the whole run, as of its last report. The four members are ADDITIVE within
 	// transcriptVersion on the same wireEntry rule as the pair above — each takes omitempty, so a
@@ -297,6 +305,7 @@ func toWireEntry(e *entry, kind string) wireEntry {
 		Done:        e.done,
 		CtxUsed:     e.ctxUsed,
 		CtxLimit:    e.ctxLimit,
+		CtxModel:    e.ctxModel,
 
 		UsageCalls:            e.usage.Calls,
 		UsagePromptTokens:     e.usage.PromptTokens,
@@ -383,6 +392,7 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 		done:        w.Done,
 		ctxUsed:     w.CtxUsed,
 		ctxLimit:    w.CtxLimit,
+		ctxModel:    w.CtxModel,
 		usage: usageTotals{
 			Calls:            w.UsageCalls,
 			PromptTokens:     w.UsagePromptTokens,

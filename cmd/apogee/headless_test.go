@@ -622,6 +622,38 @@ func TestHeadlessOutputRouting(t *testing.T) {
 		}
 	})
 
+	// Routing a delegation to the Sub-agent server (ADR 0045) is shown on the one line this Driver
+	// gives a run: the model it went to closes that line, and only when it is not the session's own —
+	// which run.SubAgentUsage.Model has already decided, so an unrouted run prints the line headless
+	// runs have always printed. The id is server-reported, so it is escape-stripped and clipped on
+	// the terms every wire-sourced cell beside it gets.
+	t.Run("a routed delegation closes its line with the model it ran on", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 3,
+			SubAgents: []run.SubAgentUsage{
+				{Used: 12000, Limit: 32768, Task: "audit the issues", Model: "qwen3-4b"},
+				{Used: 4000, Limit: 32768, Task: "summarise the findings"},
+				{Used: 4000, Limit: 32768, Name: "scout", Model: "sneaky\x1b[2Kmodel"},
+			},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.ContainsRune(errOut, 0x1b) {
+			t.Errorf("an ESC byte reached stderr from a server-reported model: %q", errOut)
+		}
+		lines := subAgentStderrLines(errOut)
+		want := []string{
+			"sub-agent: 12k/32k · audit the issues · qwen3-4b",
+			"sub-agent: 4k/32k · summarise the findings",
+			"sub-agent: 4k/32k · scout · sneaky[2Kmodel",
+		}
+		if !slices.Equal(lines, want) {
+			t.Errorf("sub-agent lines = %q; want %q", lines, want)
+		}
+	})
+
 	// A name is raw model output on the same terms as the task, and it stands in the same slot: it is
 	// folded to one line, stripped and clipped identically, and a "name" that is nothing but control
 	// characters survives none of that — the task still shows rather than the slot going blank.

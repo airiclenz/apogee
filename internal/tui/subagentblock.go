@@ -472,7 +472,8 @@ func collapsedSubAgentView(head entry, span []entry) toolView {
 //
 // The fill is the exact opposite: it is the head's OWN frozen reading (subAgentFill) and never a
 // nested run's, because each agent fills a window of its own. It sits between the count and the gist
-// so the gist — the one part with no bound on its length — is what a narrow terminal clips.
+// so that the two readings a row always carries hold the left, and the gist — the one part with no
+// bound on its length — takes the clip a narrow terminal makes.
 //
 // A run with nothing to say beyond the count — no reading yet, nothing to add while it works, or a
 // report that carried no line at all — keeps the count alone rather than trailing an empty
@@ -484,6 +485,12 @@ func collapsedSubAgentView(head entry, span []entry) toolView {
 // child's own report. Nothing respells it — this is composed at paint, long after the shortening
 // seam ran on the way in — so the mark is a statement about the text rather than a switch, and it is
 // the one that stays true if a seam ever reads it.
+//
+// A run that went somewhere else CLOSES the line with the model it went to (subAgentModel), which is
+// the whole of what routing to the Sub-agent server shows of itself on a delegation (ADR 0045). It
+// is last, after the gist, because it is the rarest cell on the row: it appears only while routing
+// is on AND the target is bound to another model, so a reader who sees it is reading a line they
+// already know to be unusual — where the count and the fill are on every row and earn the left.
 func subAgentSummary(head entry, span []entry) branchSummary {
 	calls := 0
 	for i := range span {
@@ -498,7 +505,19 @@ func subAgentSummary(head entry, span []entry) branchSummary {
 	if gist := subAgentGist(head, span); gist != "" {
 		text += " · " + gist
 	}
+	if model := subAgentModel(head); model != "" {
+		text += " · " + model
+	}
 	return quotedSummary(detailLine{Text: text})
+}
+
+// subAgentModel spells the run head's model cell, or nothing at all. The entry holds a model only
+// where it DIFFERED from the session's when the reading folded (entry.ctxModel), so the decision is
+// already made by the time anything is painted and this seam only has to spell it — in the footer's
+// own language (displayModel), so the one model on screen and the other are read the same way rather
+// than one showing a bare name and the other a weights path.
+func subAgentModel(head entry) string {
+	return displayModel(head.ctxModel)
 }
 
 // subAgentFill spells the run head's context reading as the gauge spells one — "12k/32k", the same

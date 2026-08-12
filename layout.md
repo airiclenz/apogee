@@ -825,7 +825,14 @@ rather than trailing an empty separator, which is the gauge's own rule about a n
 beside it. It **ticks as each of the child's Turns lands** and **freezes on the final reading**, so
 a finished run goes on saying what it filled however long the scrollback holds it. And unlike the
 count it is **not transitive**: each agent fills a window of its own, so a nested run's reading
-rides that nested block and never accrues to the run above it. A collapsed run is thereby the one
+rides that nested block and never accrues to the run above it. A last cell closes the line where
+the run went **somewhere else**: with delegations routed to the Sub-agent server (ADR 0045), a run
+whose model is not the session's own names that model — `2 tool calls · 12k/32k · Found 4 gaps ·
+qwen3-4b`, spelled the way the footer spells a model. It is the rarest cell on the row, present only
+while routing is on and the target is bound to another model, which is why it takes the end and the
+count and the fill keep the left; a same-model delegation renders exactly the line it always did.
+Like the fill it is **frozen** when the reading lands and kept in the session record, so a resumed
+session shows the model the run really used rather than the one it reopens on. A collapsed run is thereby the one
 block that reads as a single summarised line: its own **report body is elided along with the
 span**, because the summary slot already says that report's first line and no block prints the
 same text twice in two adjacent rows. It counts no `+N more lines` either — the transitive

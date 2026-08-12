@@ -135,6 +135,32 @@ func TestUnroutedSpawnInheritsTheParent(t *testing.T) {
 	}
 }
 
+// TestSpawnStampsItsOwnModelOnItsReadings pins what makes routing VISIBLE to a Driver (ADR 0045 §7):
+// every reading an agent emits names the model that produced it, so a routed child's fill arrives
+// stamped with the grunt model while the session's own arrives stamped with the session's. Without
+// it a surface painting a delegation's fill has no way to say the work happened somewhere else.
+func TestSpawnStampsItsOwnModelOnItsReadings(t *testing.T) {
+	t.Parallel()
+
+	parent := routingParent(t)
+	parent.SetDelegationTarget(routedTarget())
+
+	routed := spawn(t, parent)
+	if got := routed.usage.record(routed.base(1), routed.cfg.Model, 10, 5, 15).Model; got != "cheap-4b" {
+		t.Errorf("routed child reading names %q, want the target's %q", got, "cheap-4b")
+	}
+	if got := parent.usage.record(parent.base(1), parent.cfg.Model, 10, 5, 15).Model; got != "smart-70b" {
+		t.Errorf("session reading names %q, want the session's own %q", got, "smart-70b")
+	}
+
+	parent.SetDelegationTarget(nil)
+	unrouted := spawn(t, parent)
+	if got := unrouted.usage.record(unrouted.base(1), unrouted.cfg.Model, 10, 5, 15).Model; got != "smart-70b" {
+		t.Errorf("unrouted child reading names %q, want the parent's %q — a fallback run is not news",
+			got, "smart-70b")
+	}
+}
+
 // TestRoutedSpawnBypassPosture drives ADR 0045 §2's replace-or-inherit rule on the Bypass half: a
 // present flag replaces the parent's LIVE value in both directions, an absent one inherits it.
 func TestRoutedSpawnBypassPosture(t *testing.T) {

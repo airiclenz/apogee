@@ -162,10 +162,15 @@ func spanFlags(entries []entry) string {
 }
 
 // spanFills packs the context readings of the entries a paint covers into one comparable string:
-// each reading as "<offset>:<used>/<limit>;", and nothing at all for an entry that carries none.
-// It is [spanFlags]' shape for a fact that is a pair of numbers rather than a bit — the same reason
-// that one is a string: a block's span has no fixed length, and a key that stopped covering the
-// members past some bound would be a stale paint rather than a missed optimisation.
+// each reading as "<offset>:<used>/<limit>@<model>;", and nothing at all for an entry that carries
+// none. It is [spanFlags]' shape for a fact that is a group of values rather than a bit — the same
+// reason that one is a string: a block's span has no fixed length, and a key that stopped covering
+// the members past some bound would be a stale paint rather than a missed optimisation.
+//
+// The model belongs in the key because it is a CELL of the same summary line (subAgentSummary) and
+// it does not always move with the numbers: a maintenance reading names the child's model while
+// leaving its fill exactly where it stood, so a key covering only the pair would hold a paint that
+// has lost a cell. It is also why an entry earns a term with the model alone.
 //
 // The overwhelmingly common block carries no reading anywhere (only a delegation's head does), and
 // answers "" without allocating.
@@ -173,7 +178,7 @@ func spanFills(entries []entry) string {
 	var b []byte
 	for i := range entries {
 		e := entries[i]
-		if e.ctxUsed <= 0 && e.ctxLimit <= 0 {
+		if e.ctxUsed <= 0 && e.ctxLimit <= 0 && e.ctxModel == "" {
 			continue
 		}
 		b = strconv.AppendInt(b, int64(i), 10)
@@ -181,6 +186,8 @@ func spanFills(entries []entry) string {
 		b = strconv.AppendInt(b, int64(e.ctxUsed), 10)
 		b = append(b, '/')
 		b = strconv.AppendInt(b, int64(e.ctxLimit), 10)
+		b = append(b, '@')
+		b = append(b, e.ctxModel...)
 		b = append(b, ';')
 	}
 	return string(b)

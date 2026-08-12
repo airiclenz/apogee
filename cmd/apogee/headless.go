@@ -481,6 +481,14 @@ func headlessSummary(res run.Result) string {
 //
 // A run whose reading or whose window is zero is omitted rather than spelled against nothing (the
 // TUI cell's rule, and the gauge's before it): a fill only means something beside its limit.
+//
+// A run that went to a DIFFERENT model than the session's — a delegation routed to the Sub-agent
+// server (ADR 0045) — closes the line with that model. It is the first thing a reader needs when a
+// delegation behaves unlike the session that asked for it, and it is silent otherwise: routing off,
+// or a target bound to the same model, prints exactly the line this Driver always printed. The
+// field is already the answer to "does it differ" (run.SubAgentUsage.Model), so nothing here holds
+// the session's model to compare against; what happens here is the escape strip every wire-sourced
+// cell on this line gets, a server-reported id being no more trusted than a model-written name.
 func headlessSubAgentLines(runs []run.SubAgentUsage) []string {
 	lines := make([]string, 0, len(runs))
 	for _, r := range runs {
@@ -490,6 +498,9 @@ func headlessSubAgentLines(runs []run.SubAgentUsage) []string {
 		line := "sub-agent: " + format.Tokens(r.Used) + "/" + format.Tokens(r.Limit)
 		if who := headlessSubAgentTarget(r); who != "" {
 			line += " · " + who
+		}
+		if model := clipSubAgentTask(stripEscapesToLine(r.Model)); model != "" {
+			line += " · " + model
 		}
 		lines = append(lines, line)
 	}

@@ -71,6 +71,11 @@ func TestStreamEmitsUsageEventFromDelta(t *testing.T) {
 	if ue.Depth != 0 {
 		t.Errorf("UsageEvent Depth = %d, want 0 (top-level agent)", ue.Depth)
 	}
+	// The reading names the model that produced it, which is what lets a Driver say a routed
+	// delegation ran somewhere else (ADR 0045) without tracking a second stream.
+	if ue.Model != "test-model" {
+		t.Errorf("UsageEvent Model = %q, want the emitting agent's bound %q", ue.Model, "test-model")
+	}
 }
 
 // TestStreamEmitsNoUsageEventWhenServerOmitsIt pins the nil-Usage arm: a server that omits

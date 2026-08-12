@@ -190,6 +190,13 @@ type entry struct {
 	// filled, frozen together when the reading folded (applyUsage)
 	ctxUsed  int
 	ctxLimit int
+	// ctxModel is the head of a sub-agent run only, and only where it has something to say: the
+	// model the child ran on WHEN that was not the session's own at the moment the reading folded
+	// — a delegation routed to the Sub-agent server (ADR 0045) — and empty when the two matched.
+	// The comparison is frozen with the fill rather than made at paint for the reason the fill is:
+	// what a run says about itself is what was true while it ran, so a later /model switch, a
+	// rebind, or a resume into a differently-bound session cannot rewrite a finished run's history.
+	ctxModel string
 	// the head of a sub-agent run only: the CHILD's cumulative token accounting for the whole run
 	// (usageTotals, fold.go), folded latest-wins from the same readings — including the maintenance
 	// ones the fill above skips. It is what makes a delegate's spend reportable per agent long after
@@ -739,7 +746,12 @@ func (t *transcript) apply(e domain.Event) {
 // newest report rather than adding events up here. They and the fill are folded independently —
 // a maintenance reading advances the totals while leaving the fill standing, and an event stamped
 // by an agent that has counted nothing advances neither.
-func (t *transcript) applyUsage(e domain.Event, window int) {
+// The child's MODEL folds with the fill and on the fill's terms: it is stamped on the same reading
+// (domain.UsageEvent), and it is kept only when it differs from sessionModel — the model the session
+// itself is bound to — because a delegation that ran where everything else ran is not news. Deciding
+// it here, once, is what lets a finished run keep saying which model filled it after the session has
+// rebound to another (ADR 0045).
+func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string) {
 	usage, ok := e.(domain.UsageEvent)
 	if !ok || usage.Depth <= 0 {
 		return
@@ -765,6 +777,13 @@ func (t *transcript) applyUsage(e domain.Event, window int) {
 	}
 	if counted {
 		head.usage = totals
+	}
+	// Taken from every reading this fold accepts that names a model, whether or not it moved the
+	// fill: a maintenance reading was still produced by the child's own model. An event naming none
+	// — an agent bound before its first heartbeat — leaves whatever was established standing rather
+	// than blanking it.
+	if usage.Model != "" && usage.Model != sessionModel {
+		head.ctxModel = usage.Model
 	}
 }
 

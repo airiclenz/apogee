@@ -1532,7 +1532,151 @@ func TestStreamResetOnlyDiscardsItsOwnDepth(t *testing.T) {
 // it landed — the UsageEvent a child's Turn emits, which reaches the parent's transcript at the
 // child's own nesting level.
 func subAgentUsage(tr *transcript, depth, total, window int) {
-	tr.applyUsage(domain.UsageEvent{EventBase: domain.EventBase{Depth: depth}, TotalTokens: total}, window)
+	tr.applyUsage(domain.UsageEvent{EventBase: domain.EventBase{Depth: depth}, TotalTokens: total}, window, "")
+}
+
+// subAgentUsageOn is subAgentUsage for a routed delegation: the same reading, stamped with the model
+// the CHILD ran on and folded against the model the SESSION is bound to — the two the fold compares
+// to decide whether the run's model is worth saying (ADR 0045).
+func subAgentUsageOn(tr *transcript, depth, total, window int, childModel, sessionModel string) {
+	t := domain.UsageEvent{EventBase: domain.EventBase{Depth: depth}, TotalTokens: total, Model: childModel}
+	tr.applyUsage(t, window, sessionModel)
+}
+
+// TestSubAgentModelFoldsOnlyWhenItDiffers pins what the head keeps of a routed delegation's model:
+// the child's own when the session is bound to another, nothing at all when the two match, and
+// nothing from an agent that names no model. The comparison is made at FOLD time, so what a finished
+// run says about itself survives the session rebinding to the very model the child ran on.
+func TestSubAgentModelFoldsOnlyWhenItDiffers(t *testing.T) {
+	const window = 32768
+
+	t.Run("a routed child keeps the model it ran on", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentUsageOn(tr, 1, 12000, window, "qwen3-4b", "gpt-oss-20b")
+
+		if got := tr.entries[0].ctxModel; got != "qwen3-4b" {
+			t.Errorf("head model = %q, want %q — the delegation ran somewhere else", got, "qwen3-4b")
+		}
+	})
+
+	t.Run("a child on the session's own model keeps nothing", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentUsageOn(tr, 1, 12000, window, "gpt-oss-20b", "gpt-oss-20b")
+
+		if got := tr.entries[0].ctxModel; got != "" {
+			t.Errorf("head model = %q, want none — a run where everything else runs is not news", got)
+		}
+	})
+
+	t.Run("a reading naming no model leaves the answer standing", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentUsageOn(tr, 1, 12000, window, "qwen3-4b", "gpt-oss-20b")
+		subAgentUsageOn(tr, 1, 18000, window, "", "gpt-oss-20b") // an agent bound before its heartbeat
+
+		if got := tr.entries[0].ctxModel; got != "qwen3-4b" {
+			t.Errorf("head model = %q, want it left standing at %q", got, "qwen3-4b")
+		}
+	})
+
+	t.Run("a maintenance reading names the model it left the fill alone for", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		fold := domain.UsageEvent{
+			EventBase:              domain.EventBase{Depth: 1},
+			TotalTokens:            8400,
+			CumulativeCalls:        2,
+			CumulativeTotalTokens:  20400,
+			CumulativePromptTokens: 19000,
+			Model:                  "qwen3-4b",
+			Maintenance:            true,
+		}
+		tr.applyUsage(fold, window, "gpt-oss-20b")
+
+		if used, _ := fillOf(tr, 0); used != 0 {
+			t.Errorf("a maintenance reading moved the fill to %d, want it untouched", used)
+		}
+		if got := tr.entries[0].ctxModel; got != "qwen3-4b" {
+			t.Errorf("head model = %q, want %q — the fold still ran on the child's own model", got, "qwen3-4b")
+		}
+	})
+
+	t.Run("the frozen answer outlives a rebind to the child's model", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentUsageOn(tr, 1, 12000, window, "qwen3-4b", "gpt-oss-20b")
+		subAgentReport(tr, "s1", "tests read", 0)
+		// The session rebinds onto the very model the finished run used; its history does not move.
+		if got := tr.entries[0].ctxModel; got != "qwen3-4b" {
+			t.Errorf("head model = %q, want %q kept as history", got, "qwen3-4b")
+		}
+	})
+}
+
+// TestSubAgentSummaryNamesADifferingModel pins the one thing routing to the Sub-agent server shows
+// of itself on a delegation's collapsed line (ADR 0045): the model the child ran on, closing the
+// line, and only where it is not the session's own. A same-model delegation renders exactly the line
+// this block rendered before routing existed — no cell, no separator.
+func TestSubAgentSummaryNamesADifferingModel(t *testing.T) {
+	const window = 32768
+
+	cases := []struct {
+		name  string
+		build func(tr *transcript)
+		want  string
+	}{
+		{
+			name: "routed: the model closes the line, after the report",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsageOn(tr, 1, 12000, window, "qwen3-4b", "gpt-oss-20b")
+				subAgentReport(tr, "s1", "Found 4 gaps", 0)
+			},
+			want: groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · 12k/32k · Found 4 gaps · qwen3-4b"),
+		},
+		{
+			name: "routed and still working: the model closes the count and the fill",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsageOn(tr, 1, 900, window, "qwen3-4b", "gpt-oss-20b")
+			},
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · 900/32k · qwen3-4b"),
+		},
+		{
+			name: "same model: the line this block always painted",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsageOn(tr, 1, 12000, window, "gpt-oss-20b", "gpt-oss-20b")
+				subAgentReport(tr, "s1", "Found 4 gaps", 0)
+			},
+			want: groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · 12k/32k · Found 4 gaps"),
+		},
+		{
+			name: "a weights path is spelled the way the footer spells one",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsageOn(tr, 1, 900, window, "/models/qwen2.5-coder-7b.gguf", "gpt-oss-20b")
+			},
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · 900/32k · qwen2.5-coder-7b"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(tr)
+
+			branch := strings.Split(renderPlain(tr, 80), "\n")[1]
+			if branch != tc.want {
+				t.Errorf("summary line = %q; want %q", branch, tc.want)
+			}
+		})
+	}
 }
 
 // fillOf reads back the pair frozen on the entry at i: what the child's context held, out of the
@@ -1583,7 +1727,7 @@ func TestSubAgentUsageFillsItsOwnRun(t *testing.T) {
 		tr.applyUsage(domain.UsageEvent{
 			EventBase:    domain.EventBase{Depth: 1},
 			PromptTokens: 900, CompletionTokens: 100,
-		}, window)
+		}, window, "")
 
 		if used, _ := fillOf(tr, 0); used != 1000 {
 			t.Errorf("run fill = %d, want 1000 (the same preference the gauge reads usage by)", used)
@@ -2337,7 +2481,7 @@ func TestSubAgentUsageFoldsTheChildsRunningTotals(t *testing.T) {
 		subAgentCall(tr, "s2", "survey the docs", 0)
 
 		want := usageTotals{Calls: 2, PromptTokens: 4000, CompletionTokens: 300, TotalTokens: 4300}
-		tr.applyUsage(childUsage("s1", 1, 2200, want), window)
+		tr.applyUsage(childUsage("s1", 1, 2200, want), window, "")
 
 		if got := tr.entries[0].usage; got != want {
 			t.Errorf("first run totals = %+v, want %+v", got, want)
@@ -2351,9 +2495,9 @@ func TestSubAgentUsageFoldsTheChildsRunningTotals(t *testing.T) {
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 
-		tr.applyUsage(childUsage("s1", 1, 2200, usageTotals{Calls: 1, PromptTokens: 2000, CompletionTokens: 200, TotalTokens: 2200}), window)
+		tr.applyUsage(childUsage("s1", 1, 2200, usageTotals{Calls: 1, PromptTokens: 2000, CompletionTokens: 200, TotalTokens: 2200}), window, "")
 		want := usageTotals{Calls: 2, PromptTokens: 5000, CompletionTokens: 400, TotalTokens: 5400}
-		tr.applyUsage(childUsage("s1", 1, 3200, want), window)
+		tr.applyUsage(childUsage("s1", 1, 3200, want), window, "")
 
 		if got := tr.entries[0].usage; got != want {
 			t.Errorf("run totals = %+v, want %+v (the child's own sum, never one added up here)", got, want)
@@ -2363,12 +2507,12 @@ func TestSubAgentUsageFoldsTheChildsRunningTotals(t *testing.T) {
 	t.Run("a maintenance reading counts and leaves the fill standing", func(t *testing.T) {
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
-		tr.applyUsage(childUsage("s1", 1, 12000, usageTotals{Calls: 1, PromptTokens: 11000, CompletionTokens: 1000, TotalTokens: 12000}), window)
+		tr.applyUsage(childUsage("s1", 1, 12000, usageTotals{Calls: 1, PromptTokens: 11000, CompletionTokens: 1000, TotalTokens: 12000}), window, "")
 
 		want := usageTotals{Calls: 2, PromptTokens: 19000, CompletionTokens: 1400, TotalTokens: 20400}
 		maintenance := childUsage("s1", 1, 8400, want)
 		maintenance.Maintenance = true
-		tr.applyUsage(maintenance, window/2)
+		tr.applyUsage(maintenance, window/2, "")
 
 		if got := tr.entries[0].usage; got != want {
 			t.Errorf("run totals = %+v, want %+v — the compaction's tokens were really spent", got, want)

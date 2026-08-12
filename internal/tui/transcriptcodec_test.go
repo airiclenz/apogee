@@ -1008,7 +1008,7 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 		}
 		wantEntry := []string{
 			"Kind", "Text", "Depth", "CallID", "SpawnCallID", "Done",
-			"CtxUsed", "CtxLimit",
+			"CtxUsed", "CtxLimit", "CtxModel",
 			"UsageCalls", "UsagePromptTokens", "UsageCompletionTokens", "UsageTotalTokens",
 			"SkillSpans", "Tool", "Presented",
 		}
@@ -1218,7 +1218,7 @@ func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
 		totals := usageTotals{Calls: 2, PromptTokens: 11000, CompletionTokens: 1000, TotalTokens: 12000}
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
-		tr.applyUsage(childUsage("s1", 1, 12000, totals), window)
+		tr.applyUsage(childUsage("s1", 1, 12000, totals), window, "")
 		subAgentReport(tr, "s1", "tests read", 0)
 
 		data, err := encodeTranscript(tr)
@@ -1272,6 +1272,77 @@ func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
 		}
 		if got[0].usage != (usageTotals{}) {
 			t.Errorf("a blob predating the members decoded totals %+v; want zeros", got[0].usage)
+		}
+	})
+}
+
+// TestTranscriptCodecRoundTripsARoutedSubAgentsModel proves the model a routed delegation ran on
+// survives the record and keeps painting after a resume (ADR 0045): it reaches the wire under its
+// own key, comes back on the head that delegated, and is still the last cell of that run's line.
+//
+// It is ADDITIVE within transcriptVersion on the wireEntry rule: an unrouted run — one that ran on
+// the session's own model — writes no member at all, and a blob written before routing existed
+// decodes to no model, which is exactly what such a session was.
+func TestTranscriptCodecRoundTripsARoutedSubAgentsModel(t *testing.T) {
+	t.Parallel()
+	const window = 32768
+
+	t.Run("a routed run carries its model through the record and repaints it", func(t *testing.T) {
+		t.Parallel()
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		readCall(tr, "c1", "a.go", 1, 5, 1)
+		subAgentUsageOn(tr, 1, 12000, window, "qwen3-4b", "gpt-oss-20b")
+		subAgentReport(tr, "s1", "tests read", 0)
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		if want := `"ctxModel":"qwen3-4b"`; !strings.Contains(string(data), want) {
+			t.Errorf("wire blob does not carry %s:\n%s", want, data)
+		}
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		replayed := &transcript{entries: got}
+		want := groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · 12k/32k · tests read · qwen3-4b")
+		if branch := strings.Split(renderPlain(replayed, 80), "\n")[1]; branch != want {
+			t.Errorf("resumed summary line = %q; want %q", branch, want)
+		}
+	})
+
+	t.Run("an unrouted run writes no member", func(t *testing.T) {
+		t.Parallel()
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentUsageOn(tr, 1, 12000, window, "gpt-oss-20b", "gpt-oss-20b")
+		subAgentReport(tr, "s1", "tests read", 0)
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		if strings.Contains(string(data), "ctxModel") {
+			t.Errorf("a same-model run reached the wire with a model: %s", data)
+		}
+	})
+
+	t.Run("a blob written before the member decodes to no model", func(t *testing.T) {
+		t.Parallel()
+		legacy := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"s1","done":true,` +
+			`"ctxUsed":12000,"ctxLimit":32768,` +
+			`"tool":{"label":"Sub-Agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
+		got, err := decodeTranscript(legacy)
+		if err != nil {
+			t.Fatalf("decodeTranscript(legacy): %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries; want the one run head", len(got))
+		}
+		if got[0].ctxModel != "" {
+			t.Errorf("a blob predating the member decoded model %q; want none", got[0].ctxModel)
 		}
 	})
 }

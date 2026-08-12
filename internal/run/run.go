@@ -138,6 +138,16 @@ type SubAgentUsage struct {
 	// existed. RAW model output on the same terms as Task: a surface escape-strips and clips it
 	// at its own render seam.
 	Name string
+	// Model is the model this run went to when that is NOT the model the Firing itself is bound
+	// to — a delegation routed to the Sub-agent server (ADR 0045) — and "" when the two match,
+	// which is every run with routing off and every same-model target. The comparison is made
+	// here rather than at a render seam so the reading carries its own answer to "is this worth
+	// saying": a surface prints the field when it is set and adds no cell when it is not, which
+	// is the self-hiding rule Used/Limit already answer to.
+	//
+	// It is a server-reported id (the heartbeat resolves it), so a surface treats it as wire data
+	// and makes it line-safe at its own render seam exactly as it does Task and Name.
+	Model string
 
 	// The four below are this run's CUMULATIVE accounting, on Usage's terms exactly (its doc
 	// carries the semantics): the child's own totals, latest-wins from its own events, counting
@@ -178,7 +188,11 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	// the EventSink construction requires, the record can relight its context gauge and the
 	// Result can carry the answer.
 	den := &denier{}
-	tap := &eventTap{inner: spec.Config.Events, window: spec.Config.Context.MaxContextTokens}
+	tap := &eventTap{
+		inner:  spec.Config.Events,
+		window: spec.Config.Context.MaxContextTokens,
+		model:  spec.Config.Model,
+	}
 	cfg := spec.Config
 	cfg.Approver = den
 	cfg.Asker = nil
@@ -368,6 +382,10 @@ type eventTap struct {
 	// window is the Firing's context window, stamped onto each finished run's reading: a
 	// sub-agent inherits the parent's Config verbatim, so its limit IS this number.
 	window int
+	// model is the Firing's own bound model — the yardstick a child's model is measured
+	// against, never a value reported on its own. It is what makes SubAgentUsage.Model mean
+	// "different from the session's" rather than "whatever this run used".
+	model string
 
 	mu    sync.Mutex
 	total int
@@ -382,13 +400,18 @@ type eventTap struct {
 }
 
 // openSubAgent is one sub-agent run in flight: the task it was given, the optional name it was
-// given with it, the latest fill its own Turns have reported, and its latest cumulative reading.
-// The delegating call that will close it is the map key it is filed under, not a member — one
-// run, one identity.
+// given with it, the latest fill its own Turns have reported, the model those readings came from,
+// and its latest cumulative reading. The delegating call that will close it is the map key it is
+// filed under, not a member — one run, one identity.
+//
+// model is held RAW and measured against the Firing's only when the run closes: the "is it worth
+// saying" question belongs to the reading that gets filed (SubAgentUsage.Model), not to every
+// event that updates one.
 type openSubAgent struct {
 	task  string
 	name  string
 	used  int
+	model string
 	usage Usage
 }
 
@@ -467,6 +490,13 @@ func (t *eventTap) noteUsage(ev domain.UsageEvent) {
 	if countsFill {
 		run.used = fill
 	}
+	// The model travels with the reading and is taken whenever the event names one, fill or no
+	// fill: a child that only ever reported a maintenance reading still ran on the model it ran
+	// on, and an event from an agent bound before its heartbeat names none and leaves the last
+	// answer standing rather than blanking it.
+	if ev.Model != "" {
+		run.model = ev.Model
+	}
 	if cumulative.Calls > 0 {
 		run.usage = cumulative
 	}
@@ -508,11 +538,23 @@ func (t *eventTap) closeSubAgentRun(callID string) {
 		Limit:            t.window,
 		Task:             run.task,
 		Name:             run.name,
+		Model:            differingModel(run.model, t.model),
 		Calls:            run.usage.Calls,
 		PromptTokens:     run.usage.PromptTokens,
 		CompletionTokens: run.usage.CompletionTokens,
 		TotalTokens:      run.usage.TotalTokens,
 	})
+}
+
+// differingModel answers SubAgentUsage.Model: the child's model when it is not the Firing's, and
+// "" when it is (or when either side is unknown, which is a question no reading can answer). It is
+// the one place the "worth saying" rule lives on this Driver, so a surface never has to hold the
+// session's model to decide whether a child's is news.
+func differingModel(child, firing string) string {
+	if child == "" || child == firing {
+		return ""
+	}
+	return child
 }
 
 // firstTaskLine reads the sub_agent call's task argument and returns its first line, "" when

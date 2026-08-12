@@ -211,11 +211,20 @@ type ErrorEvent struct {
 // summarizer's own request rather than the conversation's current fill. A reader of the
 // live gauge or a tokens/sec clock MUST skip a Maintenance event; a reader of the
 // cumulative totals accepts it, which is what keeps session usage honest across a fold.
+//
+// Model is the model the EMITTING agent is bound to — the id it puts on the wire, not a
+// display spelling — so a reading says which model produced it as well as how big it was. It
+// rides here rather than on a lifecycle event because it is a property OF the reading: a
+// delegation routed to the Sub-agent server (ADR 0045) fills a window on a model of its own,
+// and a Driver that paints the child's fill can name that model beside it without tracking a
+// second stream. An agent bound late (before the first heartbeat) leaves it empty, which is
+// the same absence a Driver already tolerates in its own footer.
 type UsageEvent struct {
 	EventBase
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
+	Model            string
 
 	CumulativePromptTokens     int
 	CumulativeCompletionTokens int

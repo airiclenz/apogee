@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -553,6 +554,43 @@ func TestEventTapKeepsTheFiringsFillFreeOfADelegatedRun(t *testing.T) {
 	}
 	if got := tap.fill(); got != 900 {
 		t.Errorf("fill() = %d after the run closed, want 900", got)
+	}
+}
+
+// TestEventTapReportsAModelOnlyWhenItDiffers pins what SubAgentUsage.Model means: the model a run
+// went to when that is NOT the Firing's own — a delegation routed to the Sub-agent server (ADR
+// 0045) — and nothing when the two match, so a surface prints the cell without holding the session's
+// model to compare against. A stream that names no model at all is every stream a build without
+// routing produced, and it reports none.
+func TestEventTapReportsAModelOnlyWhenItDiffers(t *testing.T) {
+	t.Parallel()
+
+	const window = 32000
+
+	usageOn := func(callID, model string, total int) domain.UsageEvent {
+		ev := usageAt(1, callID, total)
+		ev.Model = model
+		return ev
+	}
+
+	tap := &eventTap{window: window, model: "gpt-oss-20b"}
+	tap.Emit(subAgentCall(0, "call_1", "audit the issues"))
+	tap.Emit(usageOn("call_1", "qwen3-4b", 12000)) // routed: another server, another model
+	tap.Emit(toolResult(0, "call_1"))
+	tap.Emit(subAgentCall(0, "call_2", "summarise the findings"))
+	tap.Emit(usageOn("call_2", "gpt-oss-20b", 4000)) // fell back to the session's own upstream
+	tap.Emit(toolResult(0, "call_2"))
+	tap.Emit(subAgentCall(0, "call_3", "check the docs"))
+	tap.Emit(usageAt(1, "call_3", 2000)) // a stream from before the model was stamped at all
+	tap.Emit(toolResult(0, "call_3"))
+
+	want := []SubAgentUsage{
+		{Used: 12000, Limit: window, Task: "audit the issues", Model: "qwen3-4b"},
+		{Used: 4000, Limit: window, Task: "summarise the findings"},
+		{Used: 2000, Limit: window, Task: "check the docs"},
+	}
+	if runs := tap.subAgentRuns(); !slices.Equal(runs, want) {
+		t.Errorf("subAgentRuns() = %+v, want %+v", runs, want)
 	}
 }
 

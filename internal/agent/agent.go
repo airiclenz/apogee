@@ -206,7 +206,12 @@ type usageTally struct {
 // (a server may count cached or reasoning tokens the split does not show). A caller accounting
 // for something other than a Turn's completion — Compaction — sets Maintenance on the returned
 // event before emitting it.
-func (t *usageTally) record(base domain.EventBase, prompt, completion, total int) domain.UsageEvent {
+//
+// model is the emitting Agent's bound model, stamped on the reading it produced. It is passed in
+// rather than read off a member because the tally holds only its own arithmetic, and it is passed
+// at all because a routed sub-agent runs on a model of its own (ADR 0045): without the stamp a
+// Driver painting the child's fill has no way to say which model filled it.
+func (t *usageTally) record(base domain.EventBase, model string, prompt, completion, total int) domain.UsageEvent {
 	t.prompt += prompt
 	t.completion += completion
 	t.total += total
@@ -216,6 +221,7 @@ func (t *usageTally) record(base domain.EventBase, prompt, completion, total int
 		PromptTokens:               prompt,
 		CompletionTokens:           completion,
 		TotalTokens:                total,
+		Model:                      model,
 		CumulativePromptTokens:     t.prompt,
 		CumulativeCompletionTokens: t.completion,
 		CumulativeTotalTokens:      t.total,

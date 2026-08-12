@@ -116,10 +116,10 @@ func TestEachRunningChildBlockShowsItsOwnLiveTail(t *testing.T) {
 	// A reading from each child, attributed by the spawning call rather than by depth.
 	tr.applyUsage(domain.UsageEvent{
 		EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, TotalTokens: 12000,
-	}, 32000)
+	}, 32000, "")
 	tr.applyUsage(domain.UsageEvent{
 		EventBase: domain.EventBase{Depth: 1, CallID: "s2"}, TotalTokens: 4000,
-	}, 32000)
+	}, 32000, "")
 
 	if got := tr.entries[headIndex(t, tr, "s2")].ctxUsed; got != 4000 {
 		t.Errorf("the second child's block reports a fill of %d, want its own 4000", got)

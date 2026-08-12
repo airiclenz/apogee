@@ -514,7 +514,7 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 				// carries in its cumulative fields: a Driver reads session totals off the latest
 				// event per agent rather than summing the stream, and a sub-agent — a separate
 				// Agent with its own tally — reports child-local totals at its own Depth.
-				a.cfg.Events.Emit(a.usage.record(a.base(turn), u.PromptTokens, u.CompletionTokens, u.TotalTokens))
+				a.cfg.Events.Emit(a.usage.record(a.base(turn), a.cfg.Model, u.PromptTokens, u.CompletionTokens, u.TotalTokens))
 			}
 		case provider.DeltaError, provider.DeltaContextOverflow:
 			// Both are terminal, but only the overflow says something about the request that
