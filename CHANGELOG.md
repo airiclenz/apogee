@@ -315,6 +315,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Approval pane and tool cards no longer let a long argument value or a repeated key hide what a
+  call will do: each value is capped at eight lines and an elided value (or an elided pane body)
+  keeps its LAST line under the `… (+N more lines)` marker as well as its head — the tail is where
+  an appended payload lives — and a key the model wrote twice is shown once, carrying the value the
+  executor actually receives (stdlib JSON is last-wins, as are both guards) and marked
+  `(duplicate key — last of N wins)`.
+
 - **A tool call can no longer paint rows of its own on the approval prompt.** The prompt draws one
   row per line of its body and every row is styled alike, so any model-authored string that reached
   it carrying a newline painted extra rows — and an extra row could be a second `Reason:` line,
@@ -2429,7 +2436,7 @@ point is a **minor** bump, not a breaking change.
   where it was. Specced in `layout.md`.
 
 - **The footer's mode marker leads with a symbol for the rung you are on** — `⊞ plan`,
-  `◐ ask before`, `✔ allow edits`, `▸▸ auto`. Each glyph is drawn in that mode's own colour, as one
+  `◐ ask before`, `✔ allow edits`, `⏵⏵ auto`. Each glyph is drawn in that mode's own colour, as one
   piece with the word rather than as a badge beside it, so the autonomy level reads from the shape
   before the word is read — useful precisely when Shift+Tab has just moved it. The words, the
   colours, and the column the marker ends in are all unchanged, and the mode is still stated in

