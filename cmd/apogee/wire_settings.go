@@ -226,6 +226,16 @@ func (s *liveSettings) setModelProfiles(entries []profiles.Entry) {
 	s.modelProfiles = entries
 }
 
+// modelProfileEntries reports the `model-profiles:` user tier as it stands now. It is the read the
+// Sub-agent server's per-beat resolution matches ITS model against (delegation.go), and it goes
+// through the holder for the reason every live read does: an edit committed mid-session must reach
+// the next resolution rather than the next launch.
+func (s *liveSettings) modelProfileEntries() []profiles.Entry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.modelProfiles
+}
+
 // setValidatedSets installs a re-read `validated-sets:` block — the surface's off-switch and its
 // carry-over map, the two inputs resolveValidatedSet keys a match on, moved together for
 // setMechanisms' reason.

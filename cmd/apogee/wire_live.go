@@ -179,6 +179,21 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// hint); the TUI is handed the display-and-identity projection of the same list, in the same order.
 	w.live = newLiveSettings(w.opts, manualIDs)
 
+	// The Sub-agent server (ADR 0045): the one `servers:` entry flagged `sub-agents: true`, the
+	// second heartbeat that discovers what it is serving, and the Delegation target every beat
+	// resolves for the engine to route spawns against. It is built from the holder's list rather than
+	// from the launch snapshot, like every other read of `servers:` since ADR 0037.
+	//
+	// It is wired AFTER the bind and reads the engine holder rather than the Agent, for the reason
+	// every seam in this block does: a pre-bound session has no Agent yet, and the flagged server is
+	// observable regardless — routing is a fact about the OTHER server, so nothing here waits for
+	// this session to have picked its own. With no entry flagged this is the zero wiring: no monitor,
+	// no beat, nothing latched, and delegations stay on the session's Upstream (delegation.go).
+	w.delegation, err = newDelegationWiring(w.live.serverList(), w.cfg, w.engine, w.live.modelProfileEntries)
+	if err != nil {
+		return err
+	}
+
 	// The `$EDITOR` round trip's own half of the same story (ADR 0037 decision 5): the keys holding a
 	// structure no row can express are edited in the file, and this is what opens it at the right line
 	// and works out what came back different. It is built here rather than at the seam block below

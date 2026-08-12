@@ -280,6 +280,50 @@ func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistr
 	return nil
 }
 
+// BuildMechanisms builds the catalogued Mechanisms named by ids into a registry of their own and
+// runs the three stacking gates over it — the SAME path New walks for Config.EnableMechanisms and
+// Rebind re-walks per model, exposed for a host that needs the REGISTRY rather than an Agent.
+//
+// The Delegation target is why one does (ADR 0045): a routed sub-agent's catalogue is resolved by
+// the host from the Sub-agent server's own `mechanisms:` posture, and Config.Mechanisms takes a
+// BUILT registry rather than an ID list, so the host has to build one. Going through here rather
+// than around it is what keeps ADR 0015 §2's split intact — the engine derives Deps (the Library
+// store and the identity ladder behind it), the catalogue declares which rows need them — and what
+// keeps ADR 0031's benchable-all-the-way-up door open: a bench Driver latching a target of its own
+// can compose the posture without a config file or an Agent in sight.
+//
+// cfg supplies what the build reads and nothing else: LibraryDir and ConfigDir for the store and the
+// probe records behind it, Model and Endpoint for the identity the Library keys observations on — so
+// a caller building the SUB-AGENT server's catalogue passes that server's model and endpoint, not
+// the session's. It is taken by value and its EnableMechanisms is overwritten, so nothing the caller
+// holds is touched.
+//
+// The registry comes back FRESH and owned by the caller. A per-child copy is
+// MechanismRegistry.ForSubAgent, the same live-state isolation an inherited catalogue crosses the
+// delegation boundary through — never the returned registry itself, which siblings would then share.
+//
+// An unknown ID, a Mechanism whose construction fails, and a set tripping the ordering,
+// incompatibility or requirements gates are all errors here: exactly the errors a Config carrying
+// those ids would have failed New with, raised where the host can still name the config that asked
+// for them.
+func BuildMechanisms(cfg domain.Config, ids []domain.MechanismID) (*domain.MechanismRegistry, error) {
+	cfg.EnableMechanisms = ids
+	registry := domain.NewMechanismRegistry()
+	if err := buildEnabledMechanisms(cfg, registry); err != nil {
+		return nil, err
+	}
+	if err := registry.ValidateOrdering(); err != nil {
+		return nil, err
+	}
+	if err := registry.ValidateIncompatibilities(); err != nil {
+		return nil, err
+	}
+	if err := registry.ValidateRequirements(); err != nil {
+		return nil, err
+	}
+	return registry, nil
+}
+
 // deriveDeps turns Config into the collaborators the enabled catalogue rows asked for, deriving each
 // one only when needs says some row actually reads it. This is the ADR 0015 §2 split in code: the
 // ENGINE derives Deps from Config — the store construction, the degrade notice and the identity

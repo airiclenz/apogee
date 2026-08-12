@@ -248,7 +248,7 @@ until item 6 wires a target.
 
 Commit: `feat(engine): routed fan-out width comes from the delegation target's cap`
 
-## 6. Wiring: a second heartbeat resolves the Delegation target from the flagged server
+## 6. Wiring: a second heartbeat resolves the Delegation target from the flagged server — ✅ DONE (2026-08-12)
 
 **What:** Depends on items 2, 4 (and 5 for the cap field being consumed). In
 `cmd/apogee` (beside the session monitor wiring, `wire_server.go:65-91` /
@@ -275,6 +275,30 @@ no-flag config ⇒ no monitor constructed. Live two-server verification is manua
 
 **Acceptance:** `go test ./cmd/apogee/` passes; `make check` passes; CHANGELOG bullet
 added (the feature's user-visible core).
+
+**NOTES (2026-08-12):** five deviations from the item's literal "in `cmd/apogee`" scope. (a) The engine
+gained an exported `BuildMechanisms(cfg, ids)` (`construct.go`, aliased on `apogee.go` with the
+`example_test.go` guard line): the item's "the SAME builder `buildAgent` uses" is
+`buildEnabledMechanisms` + the three stacking gates, and `Config.Mechanisms` takes a BUILT registry —
+which the root cannot assemble without re-deriving the Deps (Library store, identity ladder) that
+ADR 0015 §2 puts in the engine. It also reopens ADR 0031's benchable-all-the-way-up door: without it a
+bench Driver latching its own target could not compose the Mechanisms posture at all. (b)
+`lateEngine.SetDelegationTarget` REMEMBERS the target while unbound (the `pendingBypass` class) rather
+than dropping it like `SetParallelAgents`: the second monitor beats from the moment the renderer
+starts, which on a pre-bound session is before any Agent exists, so dropping it would leave a usable
+Sub-agent server unrouted for up to a whole interval after the human picks their own. (c) The two
+beats run SIDE BY SIDE — `delegationWiring.observe` starts the second one and `rootWiring.beat` joins
+it — rather than in series: two five-second discoveries in series are exactly `heartbeat.Interval`,
+and that package's no-overlap property rests on a beat staying strictly shorter than it. The cadence
+is still the session's, driven by the renderer's one beat Cmd. (d) The `mechanisms:` catalogue is
+built ONCE at startup (a defective map fails the run naming the entry, the posture `mechanismIDs`
+already takes for the session's own block) and only the PROFILE is re-resolved per beat — a registry
+is a per-run instance surface, not a per-model resolution, and a per-beat build error would land
+where nobody can see it. (e) One line beyond this item's files in `CHANGELOG.md`: item 2's bullet
+closed with "This release lands the config surface only — … the routing that consumes them follows",
+which this item falsifies, so that sentence is gone and the new bullet states the routing. Also new:
+`liveSettings.modelProfileEntries`, so the per-beat profile match reads the tier as it stands rather
+than the launch snapshot.
 
 Commit: `feat(apogee): second heartbeat resolves the delegation target from the flagged server`
 

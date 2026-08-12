@@ -74,12 +74,23 @@ func (w *rootWiring) rebind(model string, window int) (tui.RebindResult, error) 
 // and the engine seam behind it is the anytime-safe class (Agent.SetParallelAgents). The Beat is
 // returned untouched — the renderer sees exactly what the server said.
 func (w *rootWiring) beat(ctx context.Context) heartbeat.Beat {
+	// The Sub-agent server's own observation rides the SAME cadence (ADR 0045): one beat every
+	// Interval, on the goroutine the renderer already opened for this one, so routing needs no clock
+	// of its own. It is started before the session's and joined after it — side by side rather than
+	// in series, which is what keeps two five-second discoveries from adding up to the interval
+	// itself (delegation.go). With no Sub-agent server configured the join is a no-op and no second
+	// beat happens at all.
+	joinDelegation := w.delegation.observe(ctx)
 	observed := w.holder.Beat(ctx)
 	w.caps.observe(observed.TotalSlots)
 	// And the same reading catches the other thing only discovery can say: HOW the configured id
 	// resolved against the advertised list, remembered here so the rebind this beat may trigger can
 	// explain an unadvertised model without re-deriving the match.
 	w.hints.observe(observed.ActiveModel, observed.Resolution)
+	// And the second observation is collected before this beat counts as landed: the TUI re-arms the
+	// cadence from a RETURNED beat, so joining here is what keeps the two servers on one clock rather
+	// than letting the delegation beat drift into the next interval.
+	joinDelegation()
 	return observed
 }
 

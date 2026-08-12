@@ -410,6 +410,16 @@ type MechanismRegistry = domain.MechanismRegistry
 // NewMechanismRegistry returns a registry seeded with the built-in catalogue.
 func NewMechanismRegistry() *MechanismRegistry { return domain.NewMechanismRegistry() }
 
+// BuildMechanisms builds the catalogued Mechanisms named by ids into a fresh registry and runs the
+// stacking gates over it — the same build New performs for Config.EnableMechanisms, for a host that
+// needs the registry rather than an Agent. The Delegation target's Mechanisms posture is what needs
+// one (ADR 0045): a routed sub-agent's catalogue is composed by the host, and Config.Mechanisms
+// takes a built registry. cfg supplies the roots and the model identity the build reads; hand each
+// child its own copy with MechanismRegistry.ForSubAgent. See internal/agent for the contract.
+func BuildMechanisms(cfg Config, ids []MechanismID) (*MechanismRegistry, error) {
+	return agent.BuildMechanisms(cfg, ids)
+}
+
 // ----------------------------------------------------------------------------
 // Hook working values (internal/domain)
 // ----------------------------------------------------------------------------

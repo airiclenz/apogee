@@ -52,8 +52,21 @@ point is a **minor** bump, not a breaking change.
   of its own. Three defects are refused at startup, each naming the entry: a SECOND flagged entry
   (delegations route to one server, so the message names both entries to choose between), `bypass:`
   or `mechanisms:` on an entry the flag is absent from (the posture rides the flag), and a negative
-  `context-window:`. This release lands the config surface only — the keys parse and validate, and
-  the routing that consumes them follows.
+  `context-window:`.
+
+- **Delegations now actually run on the flagged server.** Point `sub-agents: true` at a second
+  `servers:` entry and every delegation this session makes runs THERE — a cheap model doing the grunt
+  work while your smart one keeps the conversation — with the session itself staying exactly where it
+  was. A second heartbeat observes that server on the same ten-second cadence as the session's, and
+  what it finds is what the delegations get: the entry's `model:`, `context-window:` and
+  `parallel-agents:` pins wherever you set them, and the server's own bound model, per-slot window and
+  slot count wherever you did not. The model profile is resolved for whichever model that turns out to
+  be, so a grunt model with its own thinking tags is read correctly even when the session's model has
+  none, and the entry's `bypass:`/`mechanisms:` posture is what its delegations run with. Should that
+  server be unreachable — or serving nothing anyone can name — delegations fall back to the session's
+  own server with the session's posture, the behaviour every session had before this existed, and pick
+  the other server back up on the beat after it returns. With no entry flagged nothing changes at all:
+  no second monitor is started, and no delegation goes anywhere it did not go yesterday.
 
 ### Changed
 

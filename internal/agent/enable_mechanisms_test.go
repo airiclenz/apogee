@@ -238,3 +238,52 @@ func TestEnableMechanisms_NonLibraryArmIgnoresLibraryDir(t *testing.T) {
 		t.Errorf("newAgent with a non-library arm: %v, want a clean build (LibraryDir untouched)", err)
 	}
 }
+
+// TestBuildMechanisms_ArmsTheSameSetWithoutAnAgent: the host-facing half of the same build (ADR
+// 0045). A Delegation target's Mechanisms posture is composed by the HOST, which needs the registry
+// rather than an Agent, so BuildMechanisms hands one back off the very path New walks — the Deps
+// derivation included, which is why `library` (the one row wanting collaborators) is what proves it.
+// The registry comes back fresh and unowned; a child takes a copy through ForSubAgent.
+func TestBuildMechanisms_ArmsTheSameSetWithoutAnAgent(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.LibraryDir = t.TempDir()
+
+	registry, err := BuildMechanisms(cfg, []domain.MechanismID{"library"})
+	if err != nil {
+		t.Fatalf("BuildMechanisms with a library arm: %v, want the store derived for it", err)
+	}
+	if got := registry.Ordered(domain.HookPreRequest); len(got) != 1 || got[0].Descriptor.ID != "library" {
+		t.Fatalf("armed pre-request rows = %+v, want the one library Mechanism", got)
+	}
+	if sub := registry.ForSubAgent(); sub == registry {
+		t.Error("ForSubAgent handed back the same container; a child must never share the built one")
+	}
+
+	// Nothing named arms nothing — the empty registry a `mechanisms:` map with every key false
+	// resolves to, which is a catalogue of its own rather than an inheritance.
+	empty, err := BuildMechanisms(cfg, nil)
+	if err != nil {
+		t.Fatalf("BuildMechanisms with no ids: %v, want an empty registry", err)
+	}
+	if got := len(empty.Ordered(domain.HookPreRequest)); got != 0 {
+		t.Errorf("armed rows with no ids = %d, want 0", got)
+	}
+}
+
+// TestBuildMechanisms_RefusesWhatConstructionRefuses: the errors are the construction errors, raised
+// where the host can still name the config that asked for them — an unknown ID wrapping
+// ErrUnknownMechanism, and a half stack the requirements gate refuses (guided_decomposition Requires
+// tool_result_cap), exactly as New refuses the same two lists.
+func TestBuildMechanisms_RefusesWhatConstructionRefuses(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+
+	_, err := BuildMechanisms(cfg, []domain.MechanismID{"no_such_mechanism"})
+	if !errors.Is(err, domain.ErrUnknownMechanism) {
+		t.Errorf("BuildMechanisms with an unknown ID = %v, want ErrUnknownMechanism", err)
+	}
+
+	_, err = BuildMechanisms(cfg, []domain.MechanismID{"guided_decomposition"})
+	if !errors.Is(err, domain.ErrMissingRequirement) {
+		t.Errorf("BuildMechanisms with a half stack = %v, want ErrMissingRequirement", err)
+	}
+}

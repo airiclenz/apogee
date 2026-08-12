@@ -109,6 +109,7 @@ var (
 	_ = apogee.IsReadOnly
 	_ = apogee.NewToolRegistry
 	_ = apogee.NewMechanismRegistry
+	_ = apogee.BuildMechanisms
 	_ = apogee.CataloguedMechanisms
 	_ = apogee.DecodeSession
 )

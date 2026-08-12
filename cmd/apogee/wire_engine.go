@@ -70,6 +70,13 @@ type lateEngine struct {
 	// dialect swap needs an Agent to build its parsers, but a bind with no memory of the edit would
 	// install the profile the process started with (see SetProfile).
 	pendingProfile *apogee.ModelProfile
+	// pendingDelegation is the last Delegation target pushed while there was no Agent to latch it on
+	// (ADR 0045). The second heartbeat beats from the moment the TUI starts, which on a pre-bound
+	// session is before any engine exists, so without this the routing a resolved Sub-agent server
+	// already earned would wait for the beat AFTER the human picked a server. nil means nothing
+	// usable was ever resolved — which is also what a cleared target leaves behind, and both mean the
+	// same thing to a bind: latch nothing, delegations run on the session's own Upstream.
+	pendingDelegation *apogee.DelegationTarget
 }
 
 // contextFileChoice is one remembered SetContextFiles call. The pair travels together because
@@ -130,6 +137,9 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	}
 	if c := e.pendingContextFiles; c != nil {
 		agent.SetContextFiles(c.enable, c.names)
+	}
+	if t := e.pendingDelegation; t != nil {
+		agent.SetDelegationTarget(t)
 	}
 	// The one remembered value that can be REFUSED: a dialect this build cannot parse. The Agent is
 	// released and the bind fails, which is exactly what a config carrying that profile at launch
@@ -310,6 +320,25 @@ func (e *lateEngine) SetContextFiles(enable bool, names []string) {
 func (e *lateEngine) SetParallelAgents(width int) {
 	if agent := e.bound(); agent != nil {
 		agent.SetParallelAgents(width)
+	}
+}
+
+// SetDelegationTarget latches the Sub-agent server delegations route to, or clears it with nil so
+// they fall back to this session's own Upstream (ADR 0045). It is the anytime-safe class the four
+// setters above belong to — the engine seam behind it takes one lock and is deliberately never
+// idle-gated, because a beat lands squarely mid-Exchange for any delegation-heavy Turn.
+//
+// It is REMEMBERED while unbound, unlike SetParallelAgents beside it, and the difference is where
+// the value comes from: a cap is a property of the server the bind itself resolves, while a target
+// is resolved by a monitor that is already beating — so there IS something to remember, and a bind
+// that forgot it would leave a perfectly usable Sub-agent server unrouted until its next beat.
+func (e *lateEngine) SetDelegationTarget(target *apogee.DelegationTarget) {
+	e.mu.Lock()
+	e.pendingDelegation = target
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetDelegationTarget(target)
 	}
 }
 
