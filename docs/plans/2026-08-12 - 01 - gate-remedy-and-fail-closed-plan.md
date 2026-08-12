@@ -109,7 +109,12 @@ Docs owned by this item: the §4 paragraph of
 
 **Commit:** `feat(agent): confinement-unavailable gates carry their /confine remedy`
 
-## 2. A nil-Confiner confinement handle fails closed
+## 2. A nil-Confiner confinement handle fails closed — ✅ DONE (2026-08-12)
+
+NOTES (2026-08-12): the canary test lives in a new `internal/tools/exec_common_test.go` (the file
+under test had none) and skips on Windows, because the canary command is a POSIX shell line — the
+same shape and skip every sibling confinement test in the package uses (`TestTerminal_RunsUnderConfine`).
+The guard it pins is platform-independent.
 
 **What:** `internal/tools/exec_common.go:137` — the guard
 `if conf, ok := domain.ConfinementFromContext(ctx); ok && conf.Confiner != nil` silently runs

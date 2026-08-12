@@ -78,7 +78,8 @@ type subprocessResult struct {
 //     A backend that cannot establish the box returns ErrConfinementUnavailable, which this
 //     function propagates verbatim (wrapped) so dispatch can demote the call to Approval —
 //     the "confine if you can, gate if you can't" runtime net (carried finding #2). The
-//     subprocess is NOT run unconfined when confinement was required and failed.
+//     subprocess is NOT run unconfined when confinement was required and failed — a handle
+//     whose Confiner is nil is that same failure, reported rather than run around.
 //
 // The returned error is non-nil only for ctx cancellation (so the loop rolls the Turn back)
 // or a confinement-unavailable demotion; a clean non-zero process exit is a normal result
@@ -133,8 +134,15 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 	setRawCommandLine(cmd, spec.cmdline)
 
 	// Confine the command if the disposition installed a handle. ErrConfinementUnavailable
-	// is propagated so dispatch demotes to Approval rather than running unconfined.
-	if conf, ok := domain.ConfinementFromContext(ctx); ok && conf.Confiner != nil {
+	// is propagated so dispatch demotes to Approval rather than running unconfined. An
+	// installed handle carrying no Confiner is broken wiring, not permission to run free: it
+	// fails closed the same way, so the escape surfaces as the truthful demote instead of a
+	// silent unconfined run.
+	if conf, ok := domain.ConfinementFromContext(ctx); ok {
+		if conf.Confiner == nil {
+			return subprocessResult{}, fmt.Errorf("confine %s: %w: the installed handle carries no Confiner",
+				spec.argv[0], domain.ErrConfinementUnavailable)
+		}
 		if err := conf.Confiner.Confine(runCtx, conf.Box, cmd); err != nil {
 			return subprocessResult{}, fmt.Errorf("confine %s: %w", spec.argv[0], err)
 		}

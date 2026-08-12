@@ -279,6 +279,16 @@ point is a **minor** bump, not a breaking change.
   Auto with `confine-to-workspace` on and a backend that cannot fence — where it is true, and where
   it is what sends a reader to `/confine`. Which calls gate is unchanged; only what a gate says is.
 
+- **A command asked to run fenced never runs unfenced instead.** If a run arrived carrying the
+  instruction to confine but nothing to confine it with — an empty box handle, the shape a
+  mis-wired embedding or a future backend can hand down — the command used to launch anyway,
+  outside the fence, without a word to anyone. It now stops before launching and reports that
+  confinement is unavailable, which is the same route a backend that tries and fails already
+  takes: you are asked to approve the unconfined run, in the prompt that says why. Runs that were
+  never meant to be fenced — everything you approve, and every call under a rung that gates
+  instead of confining — are untouched and still run exactly as before. Nothing in apogee's own
+  tools could produce the broken shape today; the door is now shut for what can.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added
