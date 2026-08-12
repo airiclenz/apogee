@@ -8,7 +8,7 @@
   skill's folder — the model has neither the address nor the access. Both halves are fixed
   hard-wired in the harness, never via the user-definable system prompt.
 - **Date:** 2026-08-12
-- **Status:** not started
+- **Status:** complete — all five items ✅ done (2026-08-12)
 - **sized for:** ~200k-context host
 - **Authoritative sources:**
   - `internal/tools/path_safety.go` + `internal/security/safeio.go` / `pathsafety.go` —
