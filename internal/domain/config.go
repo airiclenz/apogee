@@ -413,10 +413,16 @@ type SkillResolver interface {
 // ResolvedSkill is one attached skill reduced to the fields the loop injects: the ID and
 // DisplayName label the prepended block, and Body is the skill's instruction text scoped to
 // the turn it was attached to.
+//
+// Dir is the absolute path of the skill's folder, which the loop names in the injected block so
+// the model can read the files bundled beside the skill (refs, prompts, scripts) with the
+// read-only tools. It is empty when the resolver has none, and an empty Dir simply omits that
+// line — the block is then exactly what it was before the field existed.
 type ResolvedSkill struct {
 	ID          string
 	DisplayName string
 	Body        string
+	Dir         string
 }
 
 // StepResult reports the outcome of one Step at the quiescent boundary.

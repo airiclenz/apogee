@@ -68,6 +68,33 @@ func TestCatalogResolveSkillsToDomain(t *testing.T) {
 	}
 }
 
+// The skill's folder must survive the mapping to the loop-facing type: the loop names it in the
+// injected block, and an address that stops at the catalog boundary would be no address at all.
+func TestCatalogResolveSkillsCarriesTheSkillDir(t *testing.T) {
+	dir := filepath.Join("/src", "x")
+	c := build(Skill{ID: "x", DisplayName: "X", Summary: "s", Body: "the body", Dir: dir})
+	got := c.ResolveSkills([]string{"x"})
+	if len(got) != 1 {
+		t.Fatalf("ResolveSkills returned %d, want 1", len(got))
+	}
+	if got[0].Dir != dir {
+		t.Errorf("ResolveSkills dropped the skill folder: Dir = %q, want %q", got[0].Dir, dir)
+	}
+}
+
+// A skill with no folder must map to an empty Dir rather than an invented one — the loop keys the
+// files: line on emptiness, so a placeholder here would promise a directory that does not exist.
+func TestCatalogResolveSkillsWithoutDirLeavesItEmpty(t *testing.T) {
+	c := build(Skill{ID: "x", DisplayName: "X", Summary: "s", Body: "the body"})
+	got := c.ResolveSkills([]string{"x"})
+	if len(got) != 1 {
+		t.Fatalf("ResolveSkills returned %d, want 1", len(got))
+	}
+	if got[0].Dir != "" {
+		t.Errorf("a dirless skill resolved with Dir = %q, want empty", got[0].Dir)
+	}
+}
+
 // A replaced skill is recorded, not forgotten (ADR 0032). set is the single choke point every
 // source dir funnels through, so pinning it here covers the cross-source and same-source cases
 // alike: the loser's own file is named, and the cause carries the winner's path.

@@ -114,13 +114,20 @@ func (c *Catalog) Resolve(ids []string) []Skill {
 }
 
 // ResolveSkills satisfies domain.SkillResolver: it maps attached IDs to the loop-facing
-// domain.ResolvedSkill (ID, DisplayName, Body), in id order, skipping unknowns. The loop
+// domain.ResolvedSkill (ID, DisplayName, Body, Dir), in id order, skipping unknowns. The loop
 // compares the returned set against what it asked for to report any miss (loop.go), keeping
-// the "never silently ignored" property without this package knowing about events.
+// the "never silently ignored" property without this package knowing about events. Dir carries
+// the skill's folder through so the loop can name it in the injected block — the address of the
+// files bundled beside the SKILL.md.
 func (c *Catalog) ResolveSkills(ids []string) []domain.ResolvedSkill {
 	out := make([]domain.ResolvedSkill, 0, len(ids))
 	for _, s := range c.Resolve(ids) {
-		out = append(out, domain.ResolvedSkill{ID: s.ID, DisplayName: s.DisplayName, Body: s.Body})
+		out = append(out, domain.ResolvedSkill{
+			ID:          s.ID,
+			DisplayName: s.DisplayName,
+			Body:        s.Body,
+			Dir:         s.Dir,
+		})
 	}
 	return out
 }

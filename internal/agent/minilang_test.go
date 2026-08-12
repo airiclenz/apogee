@@ -241,6 +241,64 @@ func TestResolveSkillRefsInjectsBodyBeforeText(t *testing.T) {
 	}
 }
 
+// The injected block must hand the model the skill's folder, in the exact wording the harness
+// owns — this line is the only address the model gets for the files bundled beside the SKILL.md,
+// and it is hard-wired here precisely so a user-edited system prompt cannot drop it.
+func TestResolveSkillRefsNamesTheSkillFolder(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
+		"review": {ID: "review", DisplayName: "Code Review", Body: "REVIEW INSTRUCTIONS", Dir: "/home/u/.apogee/skills/review"},
+	}}
+	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if err := a.Submit(domain.UserInput{Text: "please look", SkillIDs: []string{"review"}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	// Directly after the opening tag, before the body: the model reads the address first.
+	want := "<skill: Code Review>\n" +
+		"files: /home/u/.apogee/skills/review — this skill's bundled files; " +
+		"read them with read_file, list_dir, grep or find_files\n" +
+		"REVIEW INSTRUCTIONS\n</skill>"
+	if got := a.conv.At(0).Content; !strings.Contains(got, want) {
+		t.Errorf("skill block did not name the folder verbatim:\ngot:\n%s\nwant to contain:\n%s", got, want)
+	}
+}
+
+// A resolver with no folder to offer must produce the block exactly as it was before the field
+// existed — an empty Dir is silence, never an empty or invented path handed to the model.
+func TestResolveSkillRefsWithoutDirOmitsTheFilesLine(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
+		"review": {ID: "review", DisplayName: "Code Review", Body: "REVIEW INSTRUCTIONS"},
+	}}
+	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if err := a.Submit(domain.UserInput{Text: "please look", SkillIDs: []string{"review"}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	got := a.conv.At(0).Content
+	if strings.Contains(got, "files:") {
+		t.Errorf("a skill with no folder still got a files: line:\n%s", got)
+	}
+	if want := "<skill: Code Review>\nREVIEW INSTRUCTIONS\n</skill>"; !strings.Contains(got, want) {
+		t.Errorf("dirless block changed shape:\ngot:\n%s\nwant to contain:\n%s", got, want)
+	}
+}
+
 func TestResolveSkillRefsUnknownIDNoted(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)

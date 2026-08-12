@@ -10,8 +10,9 @@ import (
 // resolves; DisplayName and Summary drive the merged "/" menu; Body is the instruction text the
 // loop prepends to the turn when the skill is attached.
 //
-// Dir is the absolute path to the skill's folder, carried so a later bundled-resource feature
-// (refs/, scripts) can resolve files relative to the skill without re-walking the source dirs.
+// Dir is the absolute path to the skill's folder. It rides through ResolveSkills into the block
+// the loop injects, which names it so the model can read the resources bundled beside the
+// SKILL.md (refs/, prompts, scripts) without re-walking the source dirs.
 // It plays no part in identity — two skills with the same ID collide regardless of Dir, and
 // the later-loaded source wins (load.go).
 type Skill struct {

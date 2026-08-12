@@ -192,9 +192,15 @@ inheritance claim, cheap to pin).
 
 **Commit:** `feat(engine): skill source dirs wired as live read-only roots for the read tools`
 
-## 5. Attached-skill block names the skill's folder
+## 5. Attached-skill block names the skill's folder — ✅ DONE (2026-08-12)
 
 Depends on item 4 (the line promises readability; item 4 makes the promise true).
+
+NOTES (2026-08-12): two doc comments beyond the item's named files were corrected, because this item
+is the thing they described as future work: `internal/skills/skill.go` (`Skill.Dir` — "carried so a
+LATER bundled-resource feature can resolve files") and `internal/skills/doc.go:7` ("hung off the same
+folder later (the Dir field is the seam)"). Both now state what actually consumes Dir. Comments only,
+no behavior.
 
 **What:**
 - `internal/domain/config.go`: `ResolvedSkill` gains `Dir string` (doc: absolute path of

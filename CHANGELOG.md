@@ -136,6 +136,14 @@ point is a **minor** bump, not a breaking change.
   skills-specific below the composition root: the engine gained a generic `ExtraReadRoots` seam
   (`domain.Config`), and an embedder can mount whatever its own user has opened up.
 
+- **An attached skill now tells the model where its own files live.** Reading the folder was only
+  half the fix — the model still had no address for it. The injected skill block gained one fixed
+  line naming the skill's folder and the tools that can read it, so a skill whose `SKILL.md` points
+  at `references/testing.go.md` can actually be followed there. The line is written by the harness
+  itself, not by the system prompt, so editing the prompt cannot quietly break the promise the
+  read-only mount makes. A skill with no folder behind it is unchanged: no line, and the block is
+  exactly what it always was.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's

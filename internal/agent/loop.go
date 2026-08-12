@@ -844,6 +844,13 @@ func (a *Agent) readFileRef(ref string) (string, error) {
 // no resolver is wired) is surfaced as a loop ErrorEvent and dropped, so an attached skill is
 // never silently ignored — the same "report-and-proceed" contract the @file path keeps. The
 // IDs round-trip through a snapshot on UserInput, so a resumed session re-resolves them.
+//
+// A skill that carries a Dir gets one further fixed line directly after the opening tag, naming
+// the folder and the tools that can read it. It is hard-wired harness text, never the
+// user-definable system prompt: the address is only useful together with the read-only tools'
+// extra-roots mount (tools.HostTools.ExtraReadRoots), which the same harness wires, so the two
+// halves of the promise stay in one place. A resolver with no Dir omits the line entirely and
+// the block is byte-identical to what it was before.
 func (a *Agent) resolveSkillRefs(turn int, ids []string) string {
 	if len(ids) == 0 {
 		return ""
@@ -875,7 +882,12 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string) string {
 			})
 			continue
 		}
-		fmt.Fprintf(&b, "<skill: %s>\n%s\n</skill>\n\n", s.DisplayName, s.Body)
+		fmt.Fprintf(&b, "<skill: %s>\n", s.DisplayName)
+		if s.Dir != "" {
+			fmt.Fprintf(&b, "files: %s — this skill's bundled files; read them with read_file, "+
+				"list_dir, grep or find_files\n", s.Dir)
+		}
+		fmt.Fprintf(&b, "%s\n</skill>\n\n", s.Body)
 	}
 	return b.String()
 }

@@ -3,8 +3,9 @@
 // A skill is a folder containing a SKILL.md file — YAML frontmatter (id/name, displayName,
 // summary/description) plus a Markdown body of instructions. The directory-plus-SKILL.md
 // shape matches the apogee-code oracle and the Anthropic/Claude-Code agent-skills convention,
-// so a skill written for one is interoperable with the others and has room for bundled
-// resources (refs/, scripts) hung off the same folder later (the Dir field is the seam).
+// so a skill written for one is interoperable with the others and carries the bundled
+// resources (refs/, scripts) hung off the same folder: the Dir field is the seam that hands
+// that folder to the loop, which names it in the injected block for the model to read.
 //
 // The package is the discovery half of the post-v1 apogee-code feature-parity skills feature:
 // it loads skills, and a *Catalog resolves attached IDs both for the agent loop (which prepends
