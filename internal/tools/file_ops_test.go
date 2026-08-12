@@ -47,7 +47,7 @@ func TestCopyFile_CopiesContentAndModeCreatingParents(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, filepath.Join(root, "run.sh"), "#!/bin/sh\necho hi\n", 0o755)
 
-	result := runFileOp(t, NewCopyFile(root), map[string]any{
+	result := runFileOp(t, NewCopyFile(root, nil), map[string]any{
 		"source": "run.sh", "destination": "bin/nested/run.sh",
 	})
 	if result.IsError {
@@ -83,7 +83,7 @@ func TestCopyFile_LeavesNoStagingFile(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, filepath.Join(root, "a.txt"), "one", 0o644)
 
-	if result := runFileOp(t, NewCopyFile(root), map[string]any{
+	if result := runFileOp(t, NewCopyFile(root, nil), map[string]any{
 		"source": "a.txt", "destination": "b.txt",
 	}); result.IsError {
 		t.Fatalf("unexpected tool error: %q", result.Content)
@@ -111,7 +111,7 @@ func TestCopyFile_RefusesOccupiedDestinationUnlessOverwrite(t *testing.T) {
 	writeFixture(t, filepath.Join(root, "src.txt"), "fresh", 0o644)
 	writeFixture(t, filepath.Join(root, "dst.txt"), "existing", 0o644)
 
-	result := runFileOp(t, NewCopyFile(root), map[string]any{
+	result := runFileOp(t, NewCopyFile(root, nil), map[string]any{
 		"source": "src.txt", "destination": "dst.txt",
 	})
 	if !result.IsError {
@@ -124,7 +124,7 @@ func TestCopyFile_RefusesOccupiedDestinationUnlessOverwrite(t *testing.T) {
 		t.Errorf("a refused copy must change nothing, destination now = %q", string(got))
 	}
 
-	if result := runFileOp(t, NewCopyFile(root), map[string]any{
+	if result := runFileOp(t, NewCopyFile(root, nil), map[string]any{
 		"source": "src.txt", "destination": "dst.txt", "overwrite": true,
 	}); result.IsError {
 		t.Fatalf("overwrite:true must force the copy: %q", result.Content)
@@ -168,7 +168,7 @@ func TestCopyFile_RefusesDirectories(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := runFileOp(t, NewCopyFile(root), tc.args)
+			result := runFileOp(t, NewCopyFile(root, nil), tc.args)
 			if !result.IsError {
 				t.Fatalf("%s must be refused", tc.name)
 			}
@@ -184,7 +184,7 @@ func TestCopyFile_RefusesDirectories(t *testing.T) {
 func TestCopyFile_MissingSourceIsAnErrorResult(t *testing.T) {
 	t.Parallel()
 
-	result := runFileOp(t, NewCopyFile(t.TempDir()), map[string]any{
+	result := runFileOp(t, NewCopyFile(t.TempDir(), nil), map[string]any{
 		"source": "nope.txt", "destination": "b.txt",
 	})
 	if !result.IsError {
@@ -220,7 +220,7 @@ func TestCopyFile_RefusesEscapes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := runFileOp(t, NewCopyFile(root), tc.args)
+			result := runFileOp(t, NewCopyFile(root, nil), tc.args)
 			if !result.IsError {
 				t.Fatalf("%s must be refused", tc.name)
 			}
@@ -235,6 +235,162 @@ func TestCopyFile_RefusesEscapes(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outside, "leaked.txt")); err == nil {
 		t.Error("a refused copy must not have written anything outside the workspace")
+	}
+}
+
+// extraRootFixture builds the shape every extra-read-root case below shares: a workspace, a
+// configured read-only root holding one 0755 file, and a third directory under no root at all. It
+// returns the three dirs and the absolute path of the file in the read-only root.
+func extraRootFixture(t *testing.T) (root, extra, outside, mounted string) {
+	t.Helper()
+
+	root, extra, outside = t.TempDir(), t.TempDir(), t.TempDir()
+	mounted = filepath.Join(extra, "skill", "run.sh")
+	if err := os.MkdirAll(filepath.Dir(mounted), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	writeFixture(t, mounted, "#!/bin/sh\necho skill\n", 0o755)
+	writeFixture(t, filepath.Join(outside, "id_rsa"), "classified", 0o600)
+	return root, extra, outside, mounted
+}
+
+// TestCopyFile_CopiesFromAnExtraReadRoot is the positive control for the mount half: a skill file
+// living under a configured read-only root copies INTO the workspace by absolute source path,
+// arriving with the source's bytes and the source's mode, and the source itself is untouched —
+// which is the whole point of widening the source and nothing else.
+func TestCopyFile_CopiesFromAnExtraReadRoot(t *testing.T) {
+	t.Parallel()
+
+	root, extra, _, mounted := extraRootFixture(t)
+
+	result := runFileOp(t, NewCopyFile(root, func() []string { return []string{extra} }), map[string]any{
+		"source": mounted, "destination": "docs/run.sh",
+	})
+	if result.IsError {
+		t.Fatalf("copying from the read-only root was refused: %q", result.Content)
+	}
+
+	copied := filepath.Join(root, "docs", "run.sh")
+	got, err := os.ReadFile(copied)
+	if err != nil {
+		t.Fatalf("destination was not created: %v", err)
+	}
+	if string(got) != "#!/bin/sh\necho skill\n" {
+		t.Errorf("destination content = %q, want the mounted source's", string(got))
+	}
+	info, err := os.Stat(copied)
+	if err != nil {
+		t.Fatalf("stat destination: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o755 {
+		t.Errorf("destination mode = %v, want the source's 0755", perm)
+	}
+	if _, err := os.Stat(mounted); err != nil {
+		t.Errorf("the copy must leave the mounted source in place: %v", err)
+	}
+}
+
+// TestCopyFile_ExtraReadRootRefusals pins the three edges the widening must NOT move: a RELATIVE
+// name still resolves against the workspace alone (no one name may mean two files), the read-only
+// root takes no writes as a destination, and a path under no root at all is refused exactly as it
+// was before extra roots existed — with the one uniform escape message.
+func TestCopyFile_ExtraReadRootRefusals(t *testing.T) {
+	t.Parallel()
+
+	root, extra, outside, mounted := extraRootFixture(t)
+	writeFixture(t, filepath.Join(root, "inside.txt"), "ours", 0o644)
+	tool := NewCopyFile(root, func() []string { return []string{extra} })
+
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{
+			name: "relative name of an extra-root file",
+			args: map[string]any{"source": filepath.Join("skill", "run.sh"), "destination": "copied.sh"},
+			want: "file not found",
+		},
+		{
+			name: "destination under the extra root",
+			args: map[string]any{"source": "inside.txt", "destination": filepath.Join(extra, "planted.txt")},
+			want: ErrPathEscape.Error(),
+		},
+		{
+			name: "source under no root",
+			args: map[string]any{"source": filepath.Join(outside, "id_rsa"), "destination": "stolen.txt"},
+			want: ErrPathEscape.Error(),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := runFileOp(t, tool, tc.args)
+			if !result.IsError {
+				t.Fatalf("%s must be refused", tc.name)
+			}
+			if !strings.Contains(result.Content, tc.want) {
+				t.Errorf("refusal = %q, want it to contain %q", result.Content, tc.want)
+			}
+		})
+	}
+
+	if _, err := os.Stat(filepath.Join(extra, "planted.txt")); err == nil {
+		t.Error("the read-only root took a write from copy_file's destination")
+	}
+	if _, err := os.Stat(filepath.Join(root, "stolen.txt")); err == nil {
+		t.Error("a file under no root was copied into the workspace")
+	}
+	if _, err := os.Stat(filepath.Join(root, "copied.sh")); err == nil {
+		t.Error("a relative name resolved against the extra root, which it may never do")
+	}
+	if data, err := os.ReadFile(mounted); err != nil || string(data) != "#!/bin/sh\necho skill\n" {
+		t.Errorf("the mounted file = %q (err %v), want it untouched", data, err)
+	}
+}
+
+// TestCopyFile_WriteTargetStaysTheDestinationForAMountedSource keeps the blast-radius fence honest
+// about the widening: the marker still classifies the DESTINATION, so a call reading from a
+// read-only root is dispatched on the workspace path it writes — not on the root it read.
+func TestCopyFile_WriteTargetStaysTheDestinationForAMountedSource(t *testing.T) {
+	t.Parallel()
+
+	root, extra, _, mounted := extraRootFixture(t)
+
+	target, ok := NewCopyFile(root, func() []string { return []string{extra} }).workspaceWriteTarget(
+		callWith(t, "c1", map[string]any{"source": mounted, "destination": "run.sh"}))
+
+	if !ok {
+		t.Fatal("workspaceWriteTarget did not classify a call whose source is under an extra root")
+	}
+	if want := realPath(t, filepath.Join(root, "run.sh")); target != want {
+		t.Errorf("write target = %q, want the workspace destination %q", target, want)
+	}
+}
+
+// TestMoveFile_RefusesAMountedSource is the read-ONLY half where it is easiest to get wrong: a move
+// REMOVES its source, which is a write, so move_file never receives the extra roots and the very
+// file copy_file may read is refused to it — with the uniform escape message, and still there
+// afterwards.
+func TestMoveFile_RefusesAMountedSource(t *testing.T) {
+	t.Parallel()
+
+	root, _, _, mounted := extraRootFixture(t)
+
+	result := runFileOp(t, NewMoveFile(root), map[string]any{
+		"source": mounted, "destination": "run.sh",
+	})
+	if !result.IsError {
+		t.Fatalf("move_file must refuse a source under a read-only root: %q", result.Content)
+	}
+	if !strings.Contains(result.Content, ErrPathEscape.Error()) {
+		t.Errorf("refusal = %q, want the uniform escape wording", result.Content)
+	}
+	if _, err := os.Stat(mounted); err != nil {
+		t.Errorf("a refused move must leave the mounted source in place: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "run.sh")); err == nil {
+		t.Error("a refused move must not have written the mounted file into the workspace")
 	}
 }
 

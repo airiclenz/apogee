@@ -103,7 +103,9 @@ type Config struct {
 
 	// ExtraReadRoots names directories OUTSIDE WorkspaceDir that the built-in READ-ONLY file
 	// tools (read_file, list_dir, grep, find_files) may reach — read-only mounts beside the
-	// workspace fence. nil ⇒ workspace-only, byte-identical to the fence before this field
+	// workspace fence — plus copy_file's SOURCE, which is itself a read (2026-08-12); that
+	// tool's destination stays workspace-fenced like every other write.
+	// nil ⇒ workspace-only, byte-identical to the fence before this field
 	// existed. It applies to the DEFAULT tool set only, like DisabledTools: an injected
 	// Config.Tools is the host's own assembly and is taken exactly as given.
 	//
@@ -117,9 +119,9 @@ type Config struct {
 	// It is a GENERIC seam and the engine never defaults it: the TUI mounts its skill source
 	// dirs through it, but nothing here knows what a skill is — the engine stays skill-agnostic
 	// and any Driver can mount whatever its user has opened up (ADR 0031). Read-only is
-	// structural, not a promise: no write or execution tool receives it (the
-	// workspaceScopedWriter discipline, ADR 0012 D1), so mounting a directory never makes it
-	// writable.
+	// structural, not a promise: nothing receives it for a WRITE (the workspaceScopedWriter
+	// discipline, ADR 0012 D1), so mounting a directory never makes it writable — copy_file may
+	// READ its source from a mount, and still writes only inside WorkspaceDir.
 	ExtraReadRoots func() []string
 
 	// ExternalEffects is the single injectable boundary for non-forkable effects

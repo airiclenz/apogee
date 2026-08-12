@@ -90,7 +90,17 @@ unmodified.
 
 **Commit:** `feat(security): two-root SafeCopyFileFrom primitive for cross-root copies`
 
-## 2. copy_file resolves its source over the read scope
+## 2. copy_file resolves its source over the read scope — ✅ DONE (2026-08-12)
+
+NOTES (2026-08-12): took the item's "equivalent factoring" latitude for the pre-flight — instead of a
+`checkCopySourcePath(args, scope)`, `checkFileOpsPaths` became a one-line delegation to a new
+`checkFileOpsPathsFrom(args, sourceRoot, destinationRoot)` (the same equal-roots shape
+`SafeCopyFile`/`SafeCopyFileFrom` took in item 1), so move_file's behaviour and every refusal string
+stay shared rather than duplicated; `CopyFile.Execute` picks the matched source root ONCE and pins
+both the stat and the copy to it. Beyond the doc comments the item names, two more it falsifies were
+updated in place: the `HostTools.ExtraReadRoots` field contract (`internal/tools/registry.go`) and
+`domain.Config.ExtraReadRoots` (`internal/domain/config.go`), both of which stated that only read
+tools receive the roots.
 
 Depends on item 1.
 

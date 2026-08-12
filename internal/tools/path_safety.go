@@ -168,8 +168,11 @@ func escapeOrMessage(err error, absent string) string {
 // The roots are read LIVE, once per call, so a mid-session change on the host's side is
 // honoured by the next read with no re-wiring.
 //
-// READ paths only. No write helper takes a readScope and none may: the write tools stay
-// workspace-fenced through the workspaceScopedWriter discipline (ADR 0012 D1).
+// READ paths only, with exactly ONE sanctioned crossing: copy_file resolves its SOURCE through a
+// scope (2026-08-12), because a copy's source is a read — the bytes are read from whichever root
+// accepts the path and written to the workspace root the tool pins itself. No write HALF of any
+// tool takes a readScope and none may: every write stays workspace-fenced through the
+// workspaceScopedWriter discipline (ADR 0012 D1), so a root mounted here never becomes writable.
 type readScope struct {
 	// root is the workspace root — always tried first, and the only root a relative path is
 	// ever resolved against.

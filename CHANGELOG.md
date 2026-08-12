@@ -10,6 +10,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`copy_file` can now copy FROM a read-only root, such as your skills library.** A skill that
+  ships a template or a checklist beside its `SKILL.md` could be READ by the model — `read_file`,
+  `list_dir`, `grep` and `find_files` have reached the configured read-only roots for a while — but
+  copying one into the workspace was refused as a path escape, so the model had to read the file and
+  re-type it into a `write_file`, badly and at the cost of its context. `copy_file`'s SOURCE now
+  resolves over the same roots those four read tools use: an ABSOLUTE path the workspace refuses is
+  tried against each configured root in turn and read through an `os.Root` pinned at the one that
+  accepts it. Nothing about the write moves. The DESTINATION is workspace-fenced exactly as before,
+  a destination naming a read-only root is refused, a RELATIVE source still resolves against the
+  workspace alone (so no one name can mean two files), a source under no root keeps the same
+  uniform refusal, and `move_file` — whose removal of its source IS a write — is unchanged and still
+  refuses a source it does not own. The approval prompt and the blast-radius classification keep
+  reading the destination, which is where the bytes land.
+
 - **The engine now reports each delegation starting and finishing, one child at a time.** A new
   `domain.SubAgentPhaseEvent` brackets every `sub_agent` run with a `started` and a `finished`
   phase, the finished one carrying that child's result. It fills the gap the tool-result stream

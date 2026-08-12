@@ -36,9 +36,10 @@ type HostTools struct {
 	// ExtraReadRoots reports directories the READ-ONLY tools may reach outside the workspace.
 	// The contract, in four clauses:
 	//
-	//   - READ-ONLY: only the read tools take it. Every write and execution tool stays
-	//     workspace-fenced (the workspaceScopedWriter discipline, ADR 0012 D1) — mounting a
-	//     directory here never makes it writable.
+	//   - READ-ONLY: the read tools take it, and copy_file for its SOURCE alone — a copy's source
+	//     is a read (2026-08-12). Every WRITE stays workspace-fenced, copy_file's destination
+	//     included, as does every execution tool (the workspaceScopedWriter discipline, ADR 0012
+	//     D1) — mounting a directory here never makes it writable.
 	//   - ABSOLUTE paths only: a relative argument keeps resolving against the workspace root
 	//     alone, so no one name can mean two files.
 	//   - LIVE: the func is evaluated once per tool call, so a mid-session change on the host's
@@ -125,9 +126,10 @@ func DefaultTools(root string) []domain.Tool {
 // own is not a non-forkable remote effect.
 //
 // host.ExtraReadRoots is threaded into the four read-only file tools (read_file, list_dir, grep,
-// find_files), which resolve an ABSOLUTE path over those roots when the workspace refuses it; a
-// nil func leaves them workspace-only. No write or execution tool receives it — see the field's
-// contract.
+// find_files) and — since 2026-08-12, for its SOURCE alone — into copy_file, each of which resolves
+// an ABSOLUTE path over those roots when the workspace refuses it; a nil func leaves them
+// workspace-only. Nothing else receives it, and no WRITE widens: copy_file's destination, like
+// every other write and execution tool, stays workspace-fenced — see the field's contract.
 //
 // host.Disabled is applied LAST, to the assembled menu: the roster switch subtracts from the set
 // this build offers rather than deciding, per tool, whether to construct it — so a tool's presence
@@ -143,7 +145,7 @@ func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 		NewMultiFindReplace(root),
 		NewEditExistingFile(root),
 		NewViewDiff(root),
-		NewCopyFile(root),
+		NewCopyFile(root, host.ExtraReadRoots),
 		NewMoveFile(root),
 		NewDeleteFile(root),
 		NewTerminal(root),

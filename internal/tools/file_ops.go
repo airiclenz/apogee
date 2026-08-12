@@ -20,9 +20,14 @@ import (
 // (ADR 0012 D1, confinement-execution-contract §3).
 //
 // Their marker resolves the DESTINATION, not the source: that is where the write lands. The
-// source needs no separate classification because it is fenced anyway — a source outside the
-// workspace is refused by the same os.Root the copy reads through, so there is no reachable
-// state in which a call touches a file the destination classification did not account for.
+// source needs no separate classification because it is fenced anyway — by the workspace root for
+// move_file, and for copy_file (2026-08-12) by the READ scope, so an ABSOLUTE source the workspace
+// refuses may still match a configured read-only root (the skills library) and be read through an
+// os.Root pinned at THAT root. A copy's source is a read, which is why it is the one sanctioned use
+// of a readScope on a write tool (path_safety.go). Nothing about the write moves with it: the
+// destination is workspace-fenced at both ends of the call — classification and operation — so
+// there is still no reachable state in which this family WRITES a file the destination
+// classification did not account for.
 //
 // delete_file (2026-08-10) joins them as the family's remove-bytes half. It names ONE file, so its
 // marker resolves `path` like every other single-file writer, and its dangerous-action
@@ -41,7 +46,7 @@ var copyFileSpec = toolSpec{
 	// Both descriptions state the destination is the new file's own PATH, not a directory to
 	// drop the file into: a model carrying `cp foo bar/` habits would otherwise create a file
 	// literally named "bar" and believe it had filled a directory.
-	description: "Copy a file to a new path within the workspace, preserving its permissions. The destination is the full path of the new file, not a directory to copy into. Refuses to replace an existing destination unless overwrite is true.",
+	description: "Copy a file to a new path within the workspace, preserving its permissions. The destination is the full path of the new file, not a directory to copy into. Refuses to replace an existing destination unless overwrite is true. The source may also be an absolute path under a configured read-only root (such as the skills library); the destination must stay within the workspace.",
 	schema:      fileOpsSchema("File path to copy from", "File path to copy to"),
 }
 
@@ -75,15 +80,27 @@ type fileOpsArgs struct {
 	Overwrite   bool   `json:"overwrite"`
 }
 
-// CopyFile copies a workspace file to another workspace path, preserving the source's mode. It
-// is a write tool — the loop routes it through Approval in Ask-Before before Execute is called.
+// CopyFile copies a file onto a workspace path, preserving the source's mode. Its destination is
+// always workspace-fenced; its SOURCE resolves over a readScope, so an ABSOLUTE path under a
+// configured read-only root is a legal source — a copy's source is a read. It is a write tool —
+// the loop routes it through Approval in Ask-Before before Execute is called.
 type CopyFile struct {
 	toolSpec
-	root string
+	root  string
+	scope readScope
 }
 
-// NewCopyFile returns a copy_file tool that resolves paths within root.
-func NewCopyFile(root string) *CopyFile { return &CopyFile{toolSpec: copyFileSpec, root: root} }
+// NewCopyFile returns a copy_file tool that writes within root and resolves its SOURCE within root
+// plus — for ABSOLUTE paths only — any extra read-only root extraReadRoots reports at call time
+// (the same live seam NewReadFile takes). A nil extraReadRoots means workspace-only:
+// byte-identical to the fence before extra roots existed.
+func NewCopyFile(root string, extraReadRoots func() []string) *CopyFile {
+	return &CopyFile{
+		toolSpec: copyFileSpec,
+		root:     root,
+		scope:    readScope{root: root, extra: extraReadRoots},
+	}
+}
 
 // ReadOnly reports that copy_file is write-capable — it returns false, the signal that the loop
 // must gate it through Approval in Ask-Before (domain.ReadOnlyTool).
@@ -99,8 +116,14 @@ func (t *CopyFile) workspaceWriteTarget(call domain.ToolCall) (string, bool) {
 
 // Execute copies the source file onto the destination path, honouring ctx cancellation. Bad
 // arguments, a missing or non-file source, an occupied destination the call did not ask to
-// overwrite, and a path escaping the root are all reported as IsError results. The copy is
+// overwrite, and a path escaping ITS OWN root are all reported as IsError results. The copy is
 // atomic at the destination name: it either fully lands or the destination is untouched.
+//
+// The source's root is chosen ONCE per call — the readScope's workspace-first, absolute-only order
+// — and pins both the pre-flight stat and the copy itself, so the two never disagree about which
+// file is being described. A source under no root at all resolves to the workspace, which then
+// refuses it with the one uniform escape message. The destination is pinned to the workspace root,
+// the only end this call writes.
 func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -110,10 +133,11 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	if !ok {
 		return fail, nil
 	}
-	if refusal := checkFileOpsPaths(args, t.root); refusal != "" {
+	sourceRoot := t.scope.readRoot(args.Source)
+	if refusal := checkFileOpsPathsFrom(args, sourceRoot, t.root); refusal != "" {
 		return errorResult(call.ID, refusal), nil
 	}
-	if err := security.SafeCopyFile(t.root, args.Source, args.Destination); err != nil {
+	if err := security.SafeCopyFileFrom(sourceRoot, args.Source, t.root, args.Destination); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 	return okResult(call.ID, fmt.Sprintf("copied %s to %s", args.Source, args.Destination)), nil
@@ -186,17 +210,30 @@ func (t *MoveFile) move(args fileOpsArgs) string {
 	return ""
 }
 
-// checkFileOpsPaths validates the pair both tools need before either touches the filesystem, and
-// returns the model-facing refusal (empty when the operation may proceed): a source that exists
-// and is a regular FILE, and a destination the operation is allowed to land on — absent, or an
-// existing file the call explicitly asked to overwrite.
+// checkFileOpsPaths is checkFileOpsPathsFrom's EQUAL-ROOTS case: one root fences both ends, which
+// is what move_file needs — its removal of the source is itself a write, so the source may never
+// come from anywhere the destination fence does not already cover.
+func checkFileOpsPaths(args fileOpsArgs, root string) string {
+	return checkFileOpsPathsFrom(args, root, root)
+}
+
+// checkFileOpsPathsFrom validates the pair the file-operation tools need before either touches the
+// filesystem, and returns the model-facing refusal (empty when the operation may proceed): a source
+// under sourceRoot that exists and is a regular FILE, and a destination under destinationRoot the
+// operation is allowed to land on — absent, or an existing file the call explicitly asked to
+// overwrite.
 //
-// Every stat goes through the workspace fence, so a path that escapes is refused here with the
-// uniform escape message rather than being reported as an ordinary absence. These checks are for
-// the MESSAGE, never for the safety: the fenced primitives that follow re-decide containment at
+// The two roots differ for copy_file alone, whose source may have matched a configured read-only
+// root (a copy's source is a read) while its destination stays workspace-fenced; move_file passes
+// the workspace root for both. Everything else is identical for the two tools, refusal wording
+// included, so they can never drift into different answers for the same mistake.
+//
+// Every stat goes through the fence of ITS OWN root, so a path that escapes is refused here with
+// the uniform escape message rather than being reported as an ordinary absence. These checks are
+// for the MESSAGE, never for the safety: the fenced primitives that follow re-decide containment at
 // operation time, so a name swapped after this returns cannot widen anything — it can only turn
 // a friendly refusal into a blunter one.
-func checkFileOpsPaths(args fileOpsArgs, root string) string {
+func checkFileOpsPathsFrom(args fileOpsArgs, sourceRoot, destinationRoot string) string {
 	if args.Source == "" {
 		return "source is required"
 	}
@@ -204,7 +241,7 @@ func checkFileOpsPaths(args fileOpsArgs, root string) string {
 		return "destination is required"
 	}
 
-	source, err := statInRoot(args.Source, root)
+	source, err := statInRoot(args.Source, sourceRoot)
 	if err != nil {
 		return escapeOrMessage(err, "file not found: "+args.Source)
 	}
@@ -212,7 +249,7 @@ func checkFileOpsPaths(args fileOpsArgs, root string) string {
 		return "not a file: " + args.Source + " (directories are not supported)"
 	}
 
-	destination, err := statInRoot(args.Destination, root)
+	destination, err := statInRoot(args.Destination, destinationRoot)
 	switch {
 	case errors.Is(err, ErrPathEscape):
 		return err.Error()
