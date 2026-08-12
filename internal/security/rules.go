@@ -60,6 +60,37 @@ func DefaultDangerousRules() []Rule {
 			Pattern: `(?:~|/home/[^/\s]+|/root|\$home)/` +
 				`(?:\.bashrc|\.bash_profile|\.zshrc|\.profile|\.aws/credentials|\.config/gcloud|\.netrc|\.npmrc)\b`,
 		},
+		// Writes / deletes reaching a repository's git control plane. `.git/hooks` and
+		// `.git/config` are executed by the NEXT ordinary git command the operator runs — a
+		// hook script, or the `core.hooksPath`, filter and textconv drivers a config names —
+		// so a write here is delayed code execution outside any confinement, the same
+		// persistence shape as the shell rc files above. `.git/modules` carries both files
+		// again for every submodule. The boundary is the control plane, not the repository:
+		// the pattern requires `.git/` followed by one of those three names, so the working
+		// tree, `.gitignore`, `.gitattributes`, `.github/` and `.git/info/exclude` never
+		// match, and neither does a `…/repo.git` clone URL. A bare repo's own
+		// `<name>.git/config` does match, which is the same control plane by another path.
+		{
+			ID:      "write-git-control-plane",
+			Tier:    TierHardRefuse,
+			Reason:  "write or delete under a repository's git control plane (.git/hooks, .git/config)",
+			Pattern: `\.git/(?:hooks|config|modules)\b`,
+		},
+		// Writes / deletes reaching apogee's own control plane. `~/.apogee` holds the global
+		// config.yaml — the one source a dangerous-rule REMOVAL is honoured from
+		// (MergeDangerousRules below) — plus the skill library and the session records, so a
+		// write here can dissolve this floor for every later run. The boundary is the HOME
+		// copy: a project's own `<workspace>/.apogee/skills` is workspace territory and never
+		// matches, and a home relocated by `--config` / `APOGEE_CONFIG` is out of a text
+		// pattern's reach (this is a footgun-guard, not a boundary — see doc.go). The anchor
+		// spells the macOS `/Users/<name>` home alongside `/home/<name>` because the desktop
+		// persona is macOS.
+		{
+			ID:      "write-apogee-control-plane",
+			Tier:    TierHardRefuse,
+			Reason:  "write or delete under apogee's own control plane (~/.apogee)",
+			Pattern: `(?:~|/home/[^/\s]+|/users/[^/\s]+|/root|\$home)/\.apogee\b`,
+		},
 		// Piping a remote download straight into a privileged disk-write (dd of=/dev/…)
 		// or overwriting a block device — catastrophic and never a normal coding step.
 		{

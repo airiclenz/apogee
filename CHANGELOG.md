@@ -199,6 +199,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The dangerous-action floor now covers the two control planes a coding host hands the model.**
+  The floor named `~/.ssh`, the AWS credentials, `.netrc` and `.npmrc`, but neither the
+  repository's own `.git/` nor apogee's `~/.apogee` — an asymmetry rather than a judgement, and
+  the more useful pair of the four for anyone whose bytes reach the model. A write to
+  `.git/hooks/pre-commit` or `.git/config` is delayed code execution on the operator's machine:
+  the next ordinary `git` command runs the hook, or the `core.hooksPath`, filter and textconv
+  drivers a config names, outside any confinement box — the same persistence shape as a shell rc
+  file, and reachable inside the workspace fence, where `confine-to-workspace` has nothing to say
+  about it. A write under `~/.apogee` reaches the global `config.yaml`, which is the one source a
+  dangerous-rule REMOVAL is honoured from, so a single write there can dissolve this floor for
+  every later run, plus the skill library and the session records. Both are now tier 1: refused in
+  every mode, with no per-call override. The rules stop at the control plane and nowhere further —
+  `.gitignore`, `.gitattributes`, `.github/`, `.git/info/exclude`, a clone URL ending in `.git`
+  and a project's own `<workspace>/.apogee/skills` are all ordinary work and none of them match.
+  Nothing about the merge semantics moves, so a global config can still remove either rule on a
+  machine where it gets in the way, and a project config still cannot.
+
 - **apogee resolves the OS opener itself now, and refuses one that lives inside your workspace.**
   The presentation ladder's first rung used to hand the bare names `open`, `xdg-open` and `cmd` to
   the exec package, which looked them up against apogee's own `PATH` at the moment of launch — the

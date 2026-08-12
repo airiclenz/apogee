@@ -201,6 +201,85 @@ func TestMergeDangerousRules_ProjectCannotDissolveFloorByID(t *testing.T) {
 	}
 }
 
+func TestDefaultDangerousRules_ControlPlanesAreOnTheFloor(t *testing.T) {
+	t.Parallel()
+	// The two control planes a coding host hands the model by default: the repository's
+	// own `.git/` (whose hooks and config the next git command executes, outside any
+	// confinement) and apogee's `~/.apogee` (whose config.yaml is the one place a floor
+	// rule may be REMOVED). Both are tier 1: no per-call override, in every mode.
+	g := DefaultDangerousActionGuard()
+
+	cases := []struct {
+		name   string
+		call   domain.ToolCall
+		ruleID string
+	}{
+		{"write a pre-commit hook", writeCall(".git/hooks/pre-commit"), "write-git-control-plane"},
+		{"write a hook in a nested repo", writeCall("vendor/dep/.git/hooks/post-checkout"), "write-git-control-plane"},
+		{"rewrite the repo-local git config", writeCall("./.git/config"), "write-git-control-plane"},
+		{"write a submodule's hook", writeCall(".git/modules/sub/hooks/pre-push"), "write-git-control-plane"},
+		{"write a bare repo's config", writeCall("mirror.git/config"), "write-git-control-plane"},
+		{"delete the hooks directory", terminalCall("rm -rf .git/hooks"), "write-git-control-plane"},
+		{"chmod a hook executable", terminalCall("chmod +x .git/hooks/pre-commit"), "write-git-control-plane"},
+		{"write the apogee config", writeCall("~/.apogee/config.yaml"), "write-apogee-control-plane"},
+		{"write the apogee library", writeCall("/home/alice/.apogee/library/probes.yaml"), "write-apogee-control-plane"},
+		{"write the apogee config on macOS", writeCall("/Users/alice/.apogee/config.yaml"), "write-apogee-control-plane"},
+		{"copy over the apogee config", terminalCall("cp evil.yaml $HOME/.apogee/config.yaml"), "write-apogee-control-plane"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(tc.call)
+
+			if d.Tier != TierHardRefuse {
+				t.Fatalf("Inspect(%q) tier = %v, want TierHardRefuse (rule=%q)", tc.name, d.Tier, d.RuleID)
+			}
+			if d.RuleID != tc.ruleID {
+				t.Errorf("Inspect(%q) rule = %q, want %q", tc.name, d.RuleID, tc.ruleID)
+			}
+		})
+	}
+}
+
+func TestDefaultDangerousRules_ControlPlaneNearMissesNotBlocked(t *testing.T) {
+	t.Parallel()
+	// Precision-over-recall (ADR 0012): the two control-plane rules stop at the control
+	// plane. Everything here is a normal coding step — repo metadata that is not the
+	// control plane, a clone URL ending in `.git`, and a project's own `.apogee/skills`,
+	// which is workspace territory rather than the home config.
+	g := DefaultDangerousActionGuard()
+
+	cases := []struct {
+		name string
+		call domain.ToolCall
+	}{
+		{"write .gitignore", writeCall(".gitignore")},
+		{"write .gitattributes", writeCall(".gitattributes")},
+		{"write a GitHub workflow", writeCall(".github/workflows/ci.yml")},
+		{"write .git/info/exclude", writeCall(".git/info/exclude")},
+		{"clone a repo whose URL ends in .git", terminalCall("git clone https://example.com/x/y.git")},
+		{"prune .git from a find", terminalCall("find . -path ./.git -prune -o -name '*.go' -print")},
+		{"read the git log", terminalCall("git log --oneline -5")},
+		{"write a project skill", writeCall(".apogee/skills/review/SKILL.md")},
+		{"write a project skill under the workspace", writeCall("./.apogee/skills/review/SKILL.md")},
+		{"write a doc about the apogee config", writeCall("docs/apogee-config.md")},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(tc.call)
+
+			if d.Triggered() {
+				t.Fatalf("Inspect(%q) wrongly triggered: tier=%v rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
+			}
+		})
+	}
+}
+
 func TestMergeDangerousRules_DefaultRulesetMergesCleanly(t *testing.T) {
 	t.Parallel()
 	// The real default ruleset round-trips through a no-op merge unchanged in count.
