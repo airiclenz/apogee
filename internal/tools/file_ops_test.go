@@ -629,6 +629,7 @@ func TestDeleteFile_DangerousActionClassification(t *testing.T) {
 	t.Parallel()
 
 	guard := security.DefaultDangerousActionGuard()
+	tool := NewDeleteFile(t.TempDir())
 	for _, tc := range []struct {
 		name string
 		path string
@@ -641,12 +642,13 @@ func TestDeleteFile_DangerousActionClassification(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			// The call names itself with the tool's OWN name and its OWN argument key, so the
-			// text the guard inspects is the text a real delete_file call produces.
+			// The call names itself with the tool's OWN name and its OWN argument key, and the
+			// guard sees the REAL tool, so the class it judges is the class dispatch hands it:
+			// delete_file is write-capable, so the write-shaped rules stay in force for it.
 			call := callWith(t, "c1", map[string]any{"path": tc.path})
 			call.Tool = deleteFileSpec.name
 
-			decision := guard.Inspect(call)
+			decision := guard.Inspect(call, tool)
 			if decision.Tier != tc.want {
 				t.Errorf("guard tier for delete_file %q = %v (rule %q), want %v",
 					tc.path, decision.Tier, decision.RuleID, tc.want)
@@ -693,5 +695,54 @@ func TestCopyFileAndMoveFile_AreRegistered(t *testing.T) {
 		if !IsWorkspaceScopedWriter(tool) {
 			t.Errorf("%q must carry the workspaceScopedWriter marker", name)
 		}
+	}
+}
+
+// TestCopyFile_GuardJudgesOnlyTheDestination pins copy_file's ReadSourceTool declaration
+// end-to-end against the shipped floor: the guard judges the write-shaped rules on the
+// DESTINATION alone, because `source` is declared a read-only source path. The first case
+// is the skill-materialization step every skill run performs — copying a resource OUT of
+// the home skill library (an extra read root under ~/.apogee). The other two hold the
+// floor where it belongs: copy_file writing INTO the control plane, and move_file naming
+// the same source — move_file deliberately makes NO ReadSourceTool declaration, because
+// its source is deleted, a write by another name (the var block's missing assertion is
+// that deliberateness; this test is its behavioural pin).
+func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
+	t.Parallel()
+
+	guard := security.DefaultDangerousActionGuard()
+	root := t.TempDir()
+	copier := NewCopyFile(root, nil)
+	mover := NewMoveFile(root)
+
+	if got := domain.ReadSourceArgKeys(mover); got != nil {
+		t.Fatalf("move_file declares read-source keys %v, want none — its source is a delete target", got)
+	}
+
+	materialize := callWith(t, "c1", map[string]any{
+		"source":      "/root/.apogee/skills/security-audit/resources/methodology.md",
+		"destination": "docs/skill-runs/resources/methodology.md",
+	})
+	materialize.Tool = copyFileSpec.name
+	if d := guard.Inspect(materialize, copier); d.Triggered() {
+		t.Errorf("copy FROM the skill library triggered rule %q (tier %v), want no trigger", d.RuleID, d.Tier)
+	}
+
+	poison := callWith(t, "c2", map[string]any{
+		"source":      "docs/x.md",
+		"destination": "/root/.apogee/skills/evil/SKILL.md",
+	})
+	poison.Tool = copyFileSpec.name
+	if d := guard.Inspect(poison, copier); d.Tier != security.TierHardRefuse {
+		t.Errorf("copy INTO the control plane tier = %v, want TierHardRefuse", d.Tier)
+	}
+
+	drain := callWith(t, "c3", map[string]any{
+		"source":      "/root/.apogee/skills/security-audit/SKILL.md",
+		"destination": "docs/x.md",
+	})
+	drain.Tool = moveFileSpec.name
+	if d := guard.Inspect(drain, mover); d.Tier != security.TierHardRefuse {
+		t.Errorf("move OUT of the control plane tier = %v, want TierHardRefuse", d.Tier)
 	}
 }

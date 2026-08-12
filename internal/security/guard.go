@@ -93,9 +93,12 @@ type PreCheck struct {
 // PreExecute runs the always-on pre-execution guardrails for call, in order: the
 // circuit-breaker (a tripped signature short-circuits before anything else, so a runaway
 // loop cannot keep re-triggering the dangerous-action guard), then the dangerous-action
-// guard (tighten-only, before the mode disposition). It does not execute the call and
-// does not consult the Approver — it only reports what the executor must do.
-func (g Guards) PreExecute(call domain.ToolCall) PreCheck {
+// guard (tighten-only, before the mode disposition). tool is the registry's resolution of
+// the call — nil when there is none, which the guard inspects as write-capable, the
+// conservative default; a resolved tool lets the write-shaped rules respect its declared
+// read-only class (see Rule.WritesOnly). It does not execute the call and does not
+// consult the Approver — it only reports what the executor must do.
+func (g Guards) PreExecute(call domain.ToolCall, tool domain.Tool) PreCheck {
 	if g.Breaker != nil && g.Breaker.Tripped(call) {
 		return PreCheck{
 			Outcome: GuardRefuse,
@@ -105,7 +108,7 @@ func (g Guards) PreExecute(call domain.ToolCall) PreCheck {
 	}
 
 	if g.Dangerous != nil {
-		if d := g.Dangerous.Inspect(call); d.Triggered() {
+		if d := g.Dangerous.Inspect(call, tool); d.Triggered() {
 			switch d.Tier {
 			case TierHardRefuse:
 				return PreCheck{Outcome: GuardRefuse, Reason: d.Reason, Audit: AuditDangerousRefused}

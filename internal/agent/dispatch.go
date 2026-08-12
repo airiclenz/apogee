@@ -251,7 +251,7 @@ func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.Too
 		return fanOutSlot{call: call, result: errorToolResult(call.ID, fmt.Sprintf("unknown tool %q", call.Tool))}
 	}
 
-	verdict := resolve(a.resolutionInput(tool, call, a.guards.PreExecute(call)))
+	verdict := resolve(a.resolutionInput(tool, call, a.guards.PreExecute(call, tool)))
 	if verdict.kind != resolveDelegate {
 		// resolve() answers a sub_agent call with Delegate or Refuse and nothing else (its row 2:
 		// a Tier-2 force is deliberately not applied to a delegation, so no Gate or Confine can
@@ -377,7 +377,7 @@ func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.Too
 		return errorToolResult(call.ID, fmt.Sprintf("unknown tool %q", call.Tool)), dispatchDone
 	}
 
-	verdict := resolve(a.resolutionInput(tool, call, a.guards.PreExecute(call)))
+	verdict := resolve(a.resolutionInput(tool, call, a.guards.PreExecute(call, tool)))
 
 	switch verdict.kind {
 	case resolveRefuse:

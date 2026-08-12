@@ -32,7 +32,11 @@
 //     project may only add — MergeDangerousRules). It matches a call's ACTION text —
 //     the tool, its target paths, its command lines and code — and never the payload a
 //     write carries, so a document that merely quotes a guarded path is not an action
-//     (payloadKeys in dangerous.go).
+//     (payloadKeys in dangerous.go). Its write-shaped rules (Rule.WritesOnly) further
+//     respect the tool's own declared class: a read-only tool skips them and a declared
+//     read-source argument (domain.ReadSourceTool — copy_file's source) is out of their
+//     sight, so listing or materializing the home skill library under ~/.apogee is not
+//     judged a "write"; tools that declare nothing stay fully inspected.
 //   - The circuit-breaker (CircuitBreaker): halts a runaway loop of identical failing
 //     calls, surfacing an ErrorEvent rather than spinning.
 //   - The audit record (AuditLog): an append-only call / decision / result trail.
@@ -52,7 +56,8 @@
 // re-derive (ADR 0013).
 //
 // The dangerous-action guard, in two files so the ruleset reads as a list rather than as
-// machinery. dangerous.go is the mechanism: the two Tiers, the Rule and Decision types, Inspect,
+// machinery. dangerous.go is the mechanism: the two Tiers, the Rule and Decision types (including
+// the WritesOnly class that keeps a write-shaped rule off declared reads), Inspect,
 // and the inspectable-text derivation that reads a call's ACTION — tool name, target paths,
 // command lines, code — while skipping the payload keys a write carries, so a document that
 // merely quotes a guarded path is not an action. rules.go is the content: DefaultDangerousRules,

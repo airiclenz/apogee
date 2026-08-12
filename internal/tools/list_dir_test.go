@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // seedTree creates a small directory tree under root for the list_dir and grep tests.
@@ -299,6 +300,44 @@ func TestListDir_Execute_ToolErrors(t *testing.T) {
 			}
 			if !strings.Contains(result.Content, tc.wantContain) {
 				t.Errorf("content %q does not contain %q", result.Content, tc.wantContain)
+			}
+		})
+	}
+}
+
+// TestListDir_DangerousActionClassification mirrors delete_file's classification pin from
+// the read side: list_dir declares itself read-only, so the write-shaped floor (ADR 0012,
+// Rule.WritesOnly) does not fire on a listing that names a guarded WRITE target. The
+// load-bearing row is the home skill library — ~/.apogee/skills is a sanctioned extra
+// read root and every skill run begins by listing its own skill directory, which the
+// ~/.apogee rule hard-refused before the class existed. The command-shaped floor is NOT
+// exempted (TestCommandShapedRulesIgnoreTheToolClass in internal/security), so this pins
+// only the path-shaped half.
+func TestListDir_DangerousActionClassification(t *testing.T) {
+	t.Parallel()
+
+	guard := security.DefaultDangerousActionGuard()
+	tool := NewListDir(t.TempDir(), nil)
+
+	for _, tc := range []struct {
+		name, path string
+	}{
+		{"the home skill library", "/root/.apogee/skills/security-audit"},
+		{"a macOS home skill library", "/Users/alice/.apogee/skills/code-audit"},
+		{"the git control plane, read side", ".git/hooks"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// The call names itself with the tool's OWN name and its OWN argument key, and
+			// the guard sees the REAL tool, so the class it judges is the class dispatch
+			// hands it.
+			call := callWith(t, "c1", map[string]any{"path": tc.path})
+			call.Tool = listDirSpec.name
+
+			if d := guard.Inspect(call, tool); d.Triggered() {
+				t.Errorf("guard triggered rule %q (tier %v) on a read-only listing of %q, want no trigger",
+					d.RuleID, d.Tier, tc.path)
 			}
 		})
 	}

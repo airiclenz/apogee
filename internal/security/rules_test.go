@@ -189,7 +189,7 @@ func TestMergeDangerousRules_ProjectCannotDissolveFloorByID(t *testing.T) {
 			}
 
 			// End-to-end: the guard built from the merged set still catches the call.
-			d := NewDangerousActionGuard(merged).Inspect(tc.probe)
+			d := NewDangerousActionGuard(merged).Inspect(tc.probe, nil)
 			if d.Tier != tc.wantTier {
 				t.Errorf("Inspect(probe) tier = %v, want %v — the project add shrank the shipped rule's coverage",
 					d.Tier, tc.wantTier)
@@ -231,7 +231,7 @@ func TestDefaultDangerousRules_ControlPlanesAreOnTheFloor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(tc.call)
+			d := g.Inspect(tc.call, nil)
 
 			if d.Tier != TierHardRefuse {
 				t.Fatalf("Inspect(%q) tier = %v, want TierHardRefuse (rule=%q)", tc.name, d.Tier, d.RuleID)
@@ -271,7 +271,7 @@ func TestDefaultDangerousRules_ControlPlaneNearMissesNotBlocked(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(tc.call)
+			d := g.Inspect(tc.call, nil)
 
 			if d.Triggered() {
 				t.Fatalf("Inspect(%q) wrongly triggered: tier=%v rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)

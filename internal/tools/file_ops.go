@@ -106,6 +106,13 @@ func NewCopyFile(root string, extraReadRoots func() []string) *CopyFile {
 // must gate it through Approval in Ask-Before (domain.ReadOnlyTool).
 func (t *CopyFile) ReadOnly() bool { return false }
 
+// ReadSourceKeys declares `source` as a read-only source path (domain.ReadSourceTool), so the
+// dangerous-action guard's write-shaped rules judge the DESTINATION alone — copy_file reads its
+// source and writes only its destination, and copying a resource OUT of the home skill library
+// (an extra read root under ~/.apogee) is the ordinary skill-materialization step. MoveFile
+// deliberately makes no such declaration: its source is deleted, a write by another name.
+func (t *CopyFile) ReadSourceKeys() []string { return []string{"source"} }
+
 // workspaceWriteTarget resolves the absolute path this call would write — its DESTINATION — so
 // dispatch can classify in- vs out-of-workspace before Execute (the workspaceScopedWriter
 // marker, confinement-execution-contract §3). It performs no write; see
@@ -359,6 +366,7 @@ func checkDeletePath(path, root string) string {
 var (
 	_ domain.Tool           = (*CopyFile)(nil)
 	_ workspaceScopedWriter = (*CopyFile)(nil)
+	_ domain.ReadSourceTool = (*CopyFile)(nil)
 	_ domain.Tool           = (*MoveFile)(nil)
 	_ workspaceScopedWriter = (*MoveFile)(nil)
 	_ domain.Tool           = (*DeleteFile)(nil)

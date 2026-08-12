@@ -43,12 +43,15 @@ func DefaultDangerousRules() []Rule {
 			Reason:  "fork bomb",
 			Pattern: `:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:`,
 		},
-		// Writes / deletes targeting the SSH key directory.
+		// Writes / deletes targeting the SSH key directory. WritesOnly: the pattern is a
+		// bare path, so without the class the rule also fired on declared reads naming
+		// it — which are the read fence's business, not this rule's.
 		{
-			ID:      "write-ssh-keys",
-			Tier:    TierHardRefuse,
-			Reason:  "write or delete under the SSH key directory (~/.ssh)",
-			Pattern: `(?:~|/home/[^/\s]+|/root|\$home)/\.ssh\b`,
+			ID:         "write-ssh-keys",
+			Tier:       TierHardRefuse,
+			Reason:     "write or delete under the SSH key directory (~/.ssh)",
+			Pattern:    `(?:~|/home/[^/\s]+|/root|\$home)/\.ssh\b`,
+			WritesOnly: true,
 		},
 		// Writes targeting credential / persistence files an autonomous mistake must
 		// never touch: shell rc files, AWS/GCP/cloud creds, the crontab. Narrow to the
@@ -59,6 +62,7 @@ func DefaultDangerousRules() []Rule {
 			Reason: "write to a credential or shell-persistence file",
 			Pattern: `(?:~|/home/[^/\s]+|/root|\$home)/` +
 				`(?:\.bashrc|\.bash_profile|\.zshrc|\.profile|\.aws/credentials|\.config/gcloud|\.netrc|\.npmrc)\b`,
+			WritesOnly: true,
 		},
 		// Writes / deletes reaching a repository's git control plane. `.git/hooks` and
 		// `.git/config` are executed by the NEXT ordinary git command the operator runs — a
@@ -70,11 +74,14 @@ func DefaultDangerousRules() []Rule {
 		// tree, `.gitignore`, `.gitattributes`, `.github/` and `.git/info/exclude` never
 		// match, and neither does a `…/repo.git` clone URL. A bare repo's own
 		// `<name>.git/config` does match, which is the same control plane by another path.
+		// WritesOnly: reading `.git/config` (inspecting remotes) is ordinary in-workspace
+		// work — the rule guards the write that plants delayed execution, not the read.
 		{
-			ID:      "write-git-control-plane",
-			Tier:    TierHardRefuse,
-			Reason:  "write or delete under a repository's git control plane (.git/hooks, .git/config)",
-			Pattern: `\.git/(?:hooks|config|modules)\b`,
+			ID:         "write-git-control-plane",
+			Tier:       TierHardRefuse,
+			Reason:     "write or delete under a repository's git control plane (.git/hooks, .git/config)",
+			Pattern:    `\.git/(?:hooks|config|modules)\b`,
+			WritesOnly: true,
 		},
 		// Writes / deletes reaching apogee's own control plane. `~/.apogee` holds the global
 		// config.yaml — the one source a dangerous-rule REMOVAL is honoured from
@@ -84,12 +91,16 @@ func DefaultDangerousRules() []Rule {
 		// matches, and a home relocated by `--config` / `APOGEE_CONFIG` is out of a text
 		// pattern's reach (this is a footgun-guard, not a boundary — see doc.go). The anchor
 		// spells the macOS `/Users/<name>` home alongside `/home/<name>` because the desktop
-		// persona is macOS.
+		// persona is macOS. WritesOnly is load-bearing here, not hygiene: the home skill
+		// library lives under `~/.apogee/skills` and is a sanctioned extra READ root — every
+		// skill run starts by listing its own skill directory and copy_file-ing resources
+		// out of it, and without the class this rule hard-refused that first step.
 		{
-			ID:      "write-apogee-control-plane",
-			Tier:    TierHardRefuse,
-			Reason:  "write or delete under apogee's own control plane (~/.apogee)",
-			Pattern: `(?:~|/home/[^/\s]+|/users/[^/\s]+|/root|\$home)/\.apogee\b`,
+			ID:         "write-apogee-control-plane",
+			Tier:       TierHardRefuse,
+			Reason:     "write or delete under apogee's own control plane (~/.apogee)",
+			Pattern:    `(?:~|/home/[^/\s]+|/users/[^/\s]+|/root|\$home)/\.apogee\b`,
+			WritesOnly: true,
 		},
 		// Piping a remote download straight into a privileged disk-write (dd of=/dev/…)
 		// or overwriting a block device — catastrophic and never a normal coding step.

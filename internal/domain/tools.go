@@ -56,6 +56,31 @@ func IsReadOnly(t Tool) bool {
 	return ok && ro.ReadOnly()
 }
 
+// ReadSourceTool is an optional interface a write-capable Tool implements to declare
+// which of its argument keys name a path the tool only READS — a copy's source, never
+// its destination. The dangerous-action guard consults it so a rule that names a
+// write/delete target does not fire on a value the tool cannot write through. It
+// declares ARGUMENT ROLES, not read permission: what the tool may actually read is still
+// the read fence's decision (its own path scope and the extra read-only roots). A tool
+// that deletes or moves its source must NOT implement this — that source is a write
+// target by another name. ReadSourceArgKeys is the helper the guard calls rather than
+// the type assertion directly.
+type ReadSourceTool interface {
+	Tool
+	// ReadSourceKeys returns the argument keys whose value names a read-only source path.
+	ReadSourceKeys() []string
+}
+
+// ReadSourceArgKeys returns the argument keys t has declared as read-only source paths
+// via ReadSourceTool. A tool that makes no such declaration — including a nil t — has
+// none, the safe default: every argument is judged as a potential write target.
+func ReadSourceArgKeys(t Tool) []string {
+	if rs, ok := t.(ReadSourceTool); ok {
+		return rs.ReadSourceKeys()
+	}
+	return nil
+}
+
 // SubprocessTool is an optional interface a Tool implements to declare that it launches
 // an OS subprocess (a shell, an interpreter, a child program) whose blast radius is the
 // whole filesystem unless OS-confined — the unbounded surface ADR 0012 fences with the

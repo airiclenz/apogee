@@ -71,6 +71,18 @@ type Rule struct {
 	Tier Tier
 	// Reason is the human-facing explanation surfaced in the error / approval prompt.
 	Reason string
+	// WritesOnly marks a rule whose Pattern names a WRITE or DELETE target (the write-*
+	// rules). Such a rule is skipped for a tool that declares itself read-only
+	// (domain.ReadOnlyTool), and is matched against text that omits any argument value
+	// the tool declares as a read-only source (domain.ReadSourceTool — copy_file's
+	// `source`): a declared read cannot perform the action the rule names, and what a
+	// read may see is the read fence's decision, not this guard's — the home skill
+	// library lives under ~/.apogee and is listed, read and copied FROM as the ordinary
+	// start of every skill run. Tools that declare nothing — terminal, python_exec,
+	// every MCP tool — are always fully inspected, so a third-party tool cannot opt out
+	// of the floor. False (the zero value, and every config-supplied rule) means the
+	// rule is matched against the full text of every call, the pre-field behaviour.
+	WritesOnly bool
 
 	re *regexp.Regexp // compiled lazily by compile()
 }
@@ -111,27 +123,49 @@ func DefaultDangerousActionGuard() *DangerousActionGuard {
 	return NewDangerousActionGuard(DefaultDangerousRules())
 }
 
-// Inspect reports the guard's verdict for call. It extracts the call's inspectable text
-// (the tool name plus every string value in its JSON arguments except the payload-bearing
-// ones — payloadKeys), normalizes it, and returns the strictest matching rule's Decision
-// (TierNone when nothing matches). It never errors and never executes anything — pure
-// inspection.
-func (g *DangerousActionGuard) Inspect(call domain.ToolCall) Decision {
-	text := normalize(inspectableText(call))
+// Inspect reports the guard's verdict for call, resolved by tool — nil when the call
+// names no known tool, which is treated as write-capable and fully inspected, the
+// conservative direction. It extracts the call's inspectable text (the tool name plus
+// every string value in its JSON arguments except the payload-bearing ones —
+// payloadKeys), normalizes it, and returns the strictest matching rule's Decision
+// (TierNone when nothing matches). A WritesOnly rule additionally respects the tool's
+// own declared class: it is skipped when the tool is read-only, and judges a text that
+// omits the tool's declared read-source values (see the Rule field's doc). It never
+// errors and never executes anything — pure inspection.
+func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool) Decision {
+	full := normalize(inspectableText(call, nil))
+	readOnly := domain.IsReadOnly(tool)
+
+	// The write-shaped view of the same call: identical unless the tool declares
+	// read-source keys, in which case those values are out of a write rule's sight.
+	writes := full
+	if keys := domain.ReadSourceArgKeys(tool); len(keys) > 0 {
+		writes = normalize(inspectableText(call, keys))
+	}
+
 	for _, r := range g.rules {
-		if r.re.MatchString(text) {
+		if r.WritesOnly {
+			if readOnly {
+				continue
+			}
+			if r.re.MatchString(writes) {
+				return Decision{Tier: r.Tier, RuleID: r.ID, Reason: r.Reason}
+			}
+			continue
+		}
+		if r.re.MatchString(full) {
 			return Decision{Tier: r.Tier, RuleID: r.ID, Reason: r.Reason}
 		}
 	}
 	return Decision{Tier: TierNone}
 }
 
-// Rules returns a copy of the guard's compiled rules (id/pattern/tier/reason) for
+// Rules returns a copy of the guard's compiled rules (id/pattern/tier/reason/class) for
 // inspection and audit — without exposing the internal slice.
 func (g *DangerousActionGuard) Rules() []Rule {
 	out := make([]Rule, len(g.rules))
 	for i, r := range g.rules {
-		out[i] = Rule{ID: r.ID, Pattern: r.Pattern, Tier: r.Tier, Reason: r.Reason}
+		out[i] = Rule{ID: r.ID, Pattern: r.Pattern, Tier: r.Tier, Reason: r.Reason, WritesOnly: r.WritesOnly}
 	}
 	return out
 }
@@ -170,19 +204,34 @@ var payloadKeys = map[string]bool{
 // keyPunctuation strips the separators that distinguish spellings of one argument name.
 var keyPunctuation = strings.NewReplacer("_", "", "-", "")
 
+// foldKey normalizes an argument key for set membership: lower case, separators removed,
+// so `newContent`, `new_content` and `new-content` all resolve to the same entry.
+func foldKey(key string) string {
+	return keyPunctuation.Replace(strings.ToLower(key))
+}
+
 // isPayloadKey reports whether an argument key carries payload text rather than an action.
-// The key is folded to lower case with separators removed first, so `newContent`,
-// `new_content` and `new-content` all resolve to the same payloadKeys entry.
 func isPayloadKey(key string) bool {
-	return payloadKeys[keyPunctuation.Replace(strings.ToLower(key))]
+	return payloadKeys[foldKey(key)]
 }
 
 // inspectableText pulls the strings the guard matches against out of a tool call: the
 // tool name and every string leaf in the JSON arguments (command lines, paths, scripts)
-// except the payload-bearing ones (isPayloadKey). A non-object / malformed argument
-// payload degrades to the raw argument bytes, so a guard rule still sees the text even
-// when the shape is unexpected.
-func inspectableText(call domain.ToolCall) string {
+// except the payload-bearing ones (isPayloadKey) and — for the write-shaped view a
+// WritesOnly rule matches — the values under dropKeys, the argument keys the tool
+// declared as read-only sources (nil for the full view). A non-object / malformed
+// argument payload degrades to the raw argument bytes, so a guard rule still sees the
+// text even when the shape is unexpected.
+func inspectableText(call domain.ToolCall, dropKeys []string) string {
+	skip := isPayloadKey
+	if len(dropKeys) > 0 {
+		dropped := make(map[string]bool, len(dropKeys))
+		for _, k := range dropKeys {
+			dropped[foldKey(k)] = true
+		}
+		skip = func(key string) bool { return isPayloadKey(key) || dropped[foldKey(key)] }
+	}
+
 	var b strings.Builder
 	b.WriteString(call.Tool)
 	b.WriteByte(' ')
@@ -192,30 +241,30 @@ func inspectableText(call domain.ToolCall) string {
 		b.Write(call.Arguments) // unparseable args: match against the raw bytes
 		return b.String()
 	}
-	collectStrings(decoded, &b)
+	collectStrings(decoded, &b, skip)
 	return b.String()
 }
 
 // collectStrings walks a decoded JSON value appending every string leaf (space-joined) so
 // the guard inspects command lines and paths regardless of which argument key carries them.
-// A payload-bearing key's value is skipped whole, at any depth — that covers a nested
-// payload such as a find_replace `replacements[].newText`, whose enclosing array stays
-// inspected so any future action-bearing sibling key is still seen.
-func collectStrings(v any, b *strings.Builder) {
+// A skipped key's value is dropped whole, at any depth — that covers a nested payload
+// such as a find_replace `replacements[].newText`, whose enclosing array stays inspected
+// so any future action-bearing sibling key is still seen.
+func collectStrings(v any, b *strings.Builder, skip func(string) bool) {
 	switch t := v.(type) {
 	case string:
 		b.WriteString(t)
 		b.WriteByte(' ')
 	case []any:
 		for _, e := range t {
-			collectStrings(e, b)
+			collectStrings(e, b, skip)
 		}
 	case map[string]any:
 		for k, e := range t {
-			if isPayloadKey(k) {
+			if skip(k) {
 				continue
 			}
-			collectStrings(e, b)
+			collectStrings(e, b, skip)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package security
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -53,7 +54,7 @@ func TestDangerousActionGuard_Tier1HardRefuse(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			d := g.Inspect(tc.call)
+			d := g.Inspect(tc.call, nil)
 			if d.Tier != TierHardRefuse {
 				t.Fatalf("Inspect(%q) tier = %v, want TierHardRefuse (reason=%q)", tc.name, d.Tier, d.Reason)
 			}
@@ -81,7 +82,7 @@ func TestDangerousActionGuard_Tier2ForceApproval(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			d := g.Inspect(tc.call)
+			d := g.Inspect(tc.call, nil)
 			if d.Tier != TierForceApproval {
 				t.Fatalf("Inspect(%q) tier = %v, want TierForceApproval (reason=%q)", tc.name, d.Tier, d.Reason)
 			}
@@ -117,7 +118,7 @@ func TestDangerousActionGuard_PrecisionNearMissesNotBlocked(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			d := g.Inspect(tc.call)
+			d := g.Inspect(tc.call, nil)
 			if d.Triggered() {
 				t.Fatalf("Inspect(%q) wrongly triggered: tier=%v rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
 			}
@@ -173,7 +174,7 @@ func TestDangerousActionGuard_PayloadTextNotInspected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(tc.call)
+			d := g.Inspect(tc.call, nil)
 
 			if d.Triggered() {
 				t.Fatalf("Inspect(%q) wrongly triggered on payload text: tier=%v rule=%q reason=%q",
@@ -217,7 +218,7 @@ func TestDangerousActionGuard_ActionKeysStillInspected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(tc.call)
+			d := g.Inspect(tc.call, nil)
 
 			if d.Tier != TierHardRefuse {
 				t.Fatalf("Inspect(%q) tier = %v, want TierHardRefuse (the floor must still fire)", tc.name, d.Tier)
@@ -236,7 +237,7 @@ func TestDangerousActionGuard_PayloadKeySpellingVariants(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(argCall("diff", map[string]any{"path": "docs/x.md", key: "mentions ~/.ssh"}))
+			d := g.Inspect(argCall("diff", map[string]any{"path": "docs/x.md", key: "mentions ~/.ssh"}), nil)
 
 			if d.Triggered() {
 				t.Fatalf("key %q was inspected as an action: tier=%v rule=%q", key, d.Tier, d.RuleID)
@@ -251,7 +252,7 @@ func TestDangerousActionGuard_WhitespaceNormalized(t *testing.T) {
 
 	// Odd-but-not-obfuscated whitespace still matches (whitespace-normalization), but
 	// the guard does NOT chase obfuscation beyond that (ADR 0012).
-	d := g.Inspect(terminalCall("rm    -rf\t/"))
+	d := g.Inspect(terminalCall("rm    -rf\t/"), nil)
 	if d.Tier != TierHardRefuse {
 		t.Fatalf("whitespace-normalized rm -rf / tier = %v, want TierHardRefuse", d.Tier)
 	}
@@ -263,7 +264,7 @@ func TestDangerousActionGuard_HardRefuseBeatsForceApproval(t *testing.T) {
 
 	// A command that matches both a Tier-2 (sudo) and a Tier-1 (rm -rf /) rule must
 	// report the strictest tier.
-	d := g.Inspect(terminalCall("sudo rm -rf /"))
+	d := g.Inspect(terminalCall("sudo rm -rf /"), nil)
 	if d.Tier != TierHardRefuse {
 		t.Fatalf("sudo rm -rf / tier = %v, want TierHardRefuse (strictest wins)", d.Tier)
 	}
@@ -279,7 +280,7 @@ func TestNewDangerousActionGuard_DropsMalformedRule(t *testing.T) {
 	if got := len(g.Rules()); got != 1 {
 		t.Fatalf("compiled rules = %d, want 1 (malformed dropped)", got)
 	}
-	if d := g.Inspect(terminalCall("drop_db now")); d.Tier != TierHardRefuse {
+	if d := g.Inspect(terminalCall("drop_db now"), nil); d.Tier != TierHardRefuse {
 		t.Fatalf("valid rule did not fire after malformed one was dropped: %+v", d)
 	}
 }
@@ -291,7 +292,135 @@ func TestDangerousActionGuard_UnparseableArgsStillInspected(t *testing.T) {
 	// A malformed argument payload degrades to matching the raw bytes — the guard still
 	// sees the dangerous text rather than silently passing it.
 	call := domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: json.RawMessage(`rm -rf / not json`)}
-	if d := g.Inspect(call); d.Tier != TierHardRefuse {
+	if d := g.Inspect(call, nil); d.Tier != TierHardRefuse {
 		t.Fatalf("unparseable args tier = %v, want TierHardRefuse", d.Tier)
+	}
+}
+
+// stubTool is the minimal domain.Tool the class-aware cases need: a name, an inert
+// Execute, and the two optional class declarations under test (domain.ReadOnlyTool via
+// readOnly, domain.ReadSourceTool via sourceKeys — nil means no declaration takes effect,
+// since ReadSourceArgKeys treats an empty answer as "none").
+type stubTool struct {
+	name       string
+	readOnly   bool
+	sourceKeys []string
+}
+
+func (s stubTool) Name() string             { return s.name }
+func (s stubTool) Description() string      { return "" }
+func (s stubTool) Schema() json.RawMessage  { return nil }
+func (s stubTool) ReadOnly() bool           { return s.readOnly }
+func (s stubTool) ReadSourceKeys() []string { return s.sourceKeys }
+func (s stubTool) Execute(context.Context, domain.ToolCall) (domain.ToolResult, error) {
+	return domain.ToolResult{}, nil
+}
+
+// TestWritesOnlyRulesSkipADeclaredReadOnlyTool pins the class half of Rule.WritesOnly: a
+// rule that names a write/delete target does not fire on a tool that declares it performs
+// no writes — what a read may see is the read fence's decision. The load-bearing row is
+// the first one: the home skill library lives under ~/.apogee and every skill run begins
+// by listing its own skill directory, which the ~/.apogee rule hard-refused before the
+// class existed. The same call through a NIL tool (the unknown-tool default) keeps the
+// floor, so the exemption is earned by a declaration, never by absence of one.
+func TestWritesOnlyRulesSkipADeclaredReadOnlyTool(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+	reader := stubTool{name: "list_dir", readOnly: true}
+
+	for _, tc := range []struct {
+		name, path string
+	}{
+		{"the home skill library", "/root/.apogee/skills/security-audit"},
+		{"a macOS home skill library", "/Users/alice/.apogee/skills/code-audit"},
+		{"the git config, in-workspace", ".git/config"},
+		{"the ssh directory", "~/.ssh/config"},
+		{"a credential file", "/home/alice/.aws/credentials"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			call := argCall("list_dir", map[string]any{"path": tc.path})
+
+			if d := g.Inspect(call, reader); d.Triggered() {
+				t.Errorf("read-only tool reading %q triggered rule %q (tier %v), want no trigger",
+					tc.path, d.RuleID, d.Tier)
+			}
+			if d := g.Inspect(call, nil); d.Tier != TierHardRefuse {
+				t.Errorf("nil (unknown) tool naming %q tier = %v, want TierHardRefuse — the exemption must not be the default",
+					tc.path, d.Tier)
+			}
+		})
+	}
+}
+
+// TestCommandShapedRulesIgnoreTheToolClass pins that the class exemption belongs to
+// WritesOnly rules ALONE: a rule describing a command (rm -rf, fork bomb, curl|bash)
+// keeps firing whatever the tool declares about itself, so a mislabeled or hostile
+// tool declaration cannot dodge the command floor.
+func TestCommandShapedRulesIgnoreTheToolClass(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+	reader := stubTool{name: "weird_reader", readOnly: true}
+
+	call := argCall("weird_reader", map[string]any{"path": "x; rm -rf /"})
+	if d := g.Inspect(call, reader); d.Tier != TierHardRefuse {
+		t.Fatalf("command-shaped rule through a read-only tool tier = %v, want TierHardRefuse", d.Tier)
+	}
+}
+
+// TestWritesOnlyRulesJudgeTheWriteTargetNotADeclaredReadSource pins the argument half of
+// Rule.WritesOnly: a write-capable tool that declares an argument key a read-only source
+// (domain.ReadSourceTool) has that VALUE dropped from the write-shaped view — copy_file
+// materializing a skill resource out of ~/.apogee/skills is the sanctioned step this
+// protects. The other two directions hold the floor: the same tool's WRITE half (its
+// destination) still matches, and a tool WITHOUT the declaration (move_file — its source
+// is deleted, a write by another name) is judged on its full text.
+func TestWritesOnlyRulesJudgeTheWriteTargetNotADeclaredReadSource(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+	copier := stubTool{name: "copy_file", sourceKeys: []string{"source"}}
+	mover := stubTool{name: "move_file"}
+
+	materialize := argCall("copy_file", map[string]any{
+		"source":      "/root/.apogee/skills/security-audit/resources/methodology.md",
+		"destination": "docs/skill-runs/security-audit/resources/methodology.md",
+	})
+	if d := g.Inspect(materialize, copier); d.Triggered() {
+		t.Errorf("copy FROM the skill library triggered rule %q (tier %v), want no trigger", d.RuleID, d.Tier)
+	}
+
+	poison := argCall("copy_file", map[string]any{
+		"source":      "docs/x.md",
+		"destination": "/root/.apogee/skills/evil/SKILL.md",
+	})
+	if d := g.Inspect(poison, copier); d.Tier != TierHardRefuse {
+		t.Errorf("copy INTO the control plane tier = %v, want TierHardRefuse — the write half keeps the floor", d.Tier)
+	}
+
+	drain := argCall("move_file", map[string]any{
+		"source":      "/root/.apogee/skills/security-audit/SKILL.md",
+		"destination": "docs/x.md",
+	})
+	if d := g.Inspect(drain, mover); d.Tier != TierHardRefuse {
+		t.Errorf("move OUT of the control plane tier = %v, want TierHardRefuse — an undeclared source is a delete target", d.Tier)
+	}
+}
+
+// TestWriteShapedDefaultRulesCarryWritesOnly pins WHICH shipped rules carry the class
+// exemption: exactly the four whose pattern is a bare write/delete target path. A new
+// path-shaped rule must set the field deliberately; a command-shaped rule must not carry
+// it (TestCommandShapedRulesIgnoreTheToolClass is the behavioural half of that claim).
+func TestWriteShapedDefaultRulesCarryWritesOnly(t *testing.T) {
+	t.Parallel()
+	want := map[string]bool{
+		"write-ssh-keys":               true,
+		"write-credential-persistence": true,
+		"write-git-control-plane":      true,
+		"write-apogee-control-plane":   true,
+	}
+	for _, r := range DefaultDangerousRules() {
+		if r.WritesOnly != want[r.ID] {
+			t.Errorf("rule %q WritesOnly = %v, want %v", r.ID, r.WritesOnly, want[r.ID])
+		}
 	}
 }
