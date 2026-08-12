@@ -336,6 +336,14 @@ func BuildMechanisms(cfg domain.Config, ids []domain.MechanismID) (*domain.Mecha
 // GrammarConstraint inert: neither is derived from Config, so neither has a DepNeeds flag.
 func deriveDeps(cfg domain.Config, needs mechanisms.DepNeeds) mechanisms.Deps {
 	var deps mechanisms.Deps
+	// The exec fence a Mechanism resolving an executable measures against. It is derived for
+	// every run, not behind a needs flag: it costs nothing to carry, and a Mechanism that
+	// spawns must refuse a model-writable program even on a host that can establish no
+	// confinement box at all (internal/security.RefuseExecFromWritablePath).
+	deps.WritableBox = domain.ConfinementBox{
+		WorkspaceRoot: cfg.WorkspaceDir,
+		WritablePaths: cfg.ConfineWritablePaths,
+	}
 	if needs.Library {
 		store := library.NewStore(cfg.LibraryDir)
 		if err := store.Load(); err != nil {

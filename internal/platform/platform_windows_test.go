@@ -186,7 +186,7 @@ func TestWindowsCurrentScopeEnvCarriesTheSystemFloor(t *testing.T) {
 
 	// SystemRoot is the one every Windows process needs and no POSIX-shaped allowlist
 	// names; a git child without it fails inside Winsock, not with "missing variable".
-	env := Current().ScopeEnv([]string{"PATH"}, nil)
+	env := Current().ScopeEnv("", []string{"PATH"}, nil)
 	var sawSystemRoot bool
 	for _, entry := range env {
 		if strings.HasPrefix(strings.ToUpper(entry), "SYSTEMROOT=") {

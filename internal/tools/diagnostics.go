@@ -162,6 +162,12 @@ func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, name, abs string, 
 		// the toolchain is not a hard dependency.
 		return okResult(callID, cleanGoMessage(abs)+"\n\ngo vet skipped: no 'go' toolchain found on PATH."), nil
 	}
+	if err := refuseExecFromWritablePath(goPath, t.root, confinementBox(ctx)); err != nil {
+		// A toolchain the model can write is refused rather than run. vet is the optional
+		// half here, so the syntax verdict still stands and the refusal rides on the note —
+		// which names the resolved path, so the operator can see WHICH go was refused.
+		return okResult(callID, cleanGoMessage(abs)+"\n\ngo vet skipped: "+err.Error()), nil
+	}
 
 	vet, hadFindings, err := runGoVet(ctx, goPath, t.root, abs)
 	if err != nil {
@@ -204,7 +210,7 @@ func runGoVet(ctx context.Context, goPath, root, abs string) (findings string, h
 		argv:    []string{goPath, "vet", dir},
 		dir:     root,
 		timeout: vetTimeout,
-		env:     safeGitEnv(),
+		env:     safeGitEnv(root),
 	}
 	res, runErr := runSubprocess(ctx, spec)
 	if runErr != nil {

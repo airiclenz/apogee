@@ -435,6 +435,24 @@ acceptance or a future-task re-verification, NOT a live hole.
   (mirroring `safeGitEnv`) for a host that wants to run a less-trusted stdio MCP server. Additive,
   post-v1.
 
+- **[L5 accepted cost, 2026-08-12] The exec fence refuses an in-repo virtualenv and
+  `node_modules/.bin`, with no way to switch it off.** Every exec site now refuses an `argv[0]`
+  resolving inside the workspace or a configured writable path
+  (`security.RefuseExecFromWritablePath`, hostile-bytes plan item 2 — it closes the
+  plant-then-exec chain: a confined call writes an executable inside its box, a later unconfined
+  call runs it outside). `lookInterpreter` and `lookTestProgram` resolve against apogee's own
+  inherited `PATH`, so the two most common Python and Node layouts — an activated
+  `<repo>/.venv/bin/python3`, a `node_modules/.bin` entry ahead of the system ones — land inside
+  the root and start refusing. That is the correct security answer and it is also a real
+  regression for real developers. **Accepted as-is** (owner ratification, 2026-08-12): no config
+  opt-in and no allow-list carve-out for the conventional tool directories, because a key here
+  would be a new operator-armed footgun and a carve-out would name exactly the directories an
+  attacker plants in. The refusal is made legible instead — it names the resolved path and the
+  rule, so the venv is visibly the cause. Two alternatives were considered and rejected: keying
+  the refusal on "resolved via `PATH` rather than an absolute config value" (a venv interpreter
+  *is* found via `PATH`) and "was this file written during the session" (stateful and racy). If
+  the cost proves unacceptable in practice, a config key is a small later addition.
+
 (L2 — the dangerous-action guard normalising only whitespace+case, trivially evadable — needs no
 entry: it is ADR-0012 by-design, and `internal/security/doc.go` already states the guard is "NOT
 a security boundary." No doc/UI describes it as one, which is exactly what L2 asks for.)

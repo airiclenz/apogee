@@ -90,6 +90,14 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 		// and not a hard dependency.
 		return errorResult(call.ID, "python not available: no Python interpreter found on PATH (looked for "+strings.Join(pythonCandidates, ", ")+")"), nil
 	}
+	// An interpreter the model can write is not an interpreter: the exec fence refuses it and
+	// says so in its own words, naming the resolved path. This is deliberately NOT the
+	// graceful "python not available" above — that message would send the operator installing
+	// a Python they already have, when the cause is an in-workspace one (typically an
+	// activated .venv) sitting ahead of the system entries on PATH.
+	if err := refuseExecFromWritablePath(interp, t.root, confinementBox(ctx)); err != nil {
+		return errorResult(call.ID, err.Error()), nil
+	}
 
 	dir, err := t.resolveWorkdir(args.Workdir)
 	if err != nil {

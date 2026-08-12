@@ -52,6 +52,16 @@ type Deps struct {
 	// backends"). It is an inert forward seam like Library: a future backend probe populates it,
 	// and grammar's fire path is exercised today only by tests that inject it true.
 	GrammarConstraint bool
+
+	// WritableBox is the fence a Mechanism that resolves an executable refuses to resolve one
+	// INSIDE: the workspace root plus any configured extra writable paths. Autofix's formatter
+	// probe is its only reader today (D3 — resolved once at construction, like the paths it
+	// guards), because bytes a confined call was allowed to write must never become the argv[0]
+	// of a later spawn. deriveDeps (internal/agent/construct.go) populates it from Config
+	// UNCONDITIONALLY rather than behind a DepNeeds flag: the refusal has to hold on a host with
+	// no confinement backend too, so it cannot be derived from a fire-time permit's box, and a
+	// zero value simply names no fence (a Deps built by a test that has no workspace).
+	WritableBox domain.ConfinementBox
 }
 
 // DepNeeds is which construction-injected collaborators a set of enabled rows requires, so the

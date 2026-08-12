@@ -38,7 +38,7 @@ func gitRepo(t *testing.T) string {
 		cmd := exec.Command(gitPath, args...)
 		cmd.Dir = root
 		// A deterministic identity + main branch so the tests do not depend on host config.
-		cmd.Env = append(safeGitEnv(),
+		cmd.Env = append(safeGitEnv(""),
 			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
 			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
 		)
@@ -336,7 +336,7 @@ func TestGitBranch_SwitchToPathShapedNameKeepsEdits(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command(gitPath, args...)
 		cmd.Dir = root
-		cmd.Env = append(safeGitEnv(),
+		cmd.Env = append(safeGitEnv(""),
 			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
 			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
 		)
@@ -508,7 +508,7 @@ func TestGitCommit_PathEscapeRejected(t *testing.T) {
 func TestGitDiffRange_ShowsDiff(t *testing.T) {
 	root := gitRepo(t)
 	gitPath, _ := exec.LookPath("git")
-	env := append(safeGitEnv(),
+	env := append(safeGitEnv(""),
 		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
 	)
@@ -729,7 +729,7 @@ func TestGitStatus_ReportsStagedUnstagedAndUntracked(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command(gitPath, args...)
 		cmd.Dir = root
-		cmd.Env = safeGitEnv()
+		cmd.Env = safeGitEnv("")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -769,7 +769,7 @@ func TestGitStatus_DetachedHead(t *testing.T) {
 	gitPath, _ := exec.LookPath("git")
 	cmd := exec.Command(gitPath, "checkout", "--detach")
 	cmd.Dir = root
-	cmd.Env = safeGitEnv()
+	cmd.Env = safeGitEnv("")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git checkout --detach: %v\n%s", err, out)
 	}
@@ -845,7 +845,7 @@ func commitInRepo(t *testing.T, root, name, subject string) {
 	for _, args := range [][]string{{"add", name}, {"commit", "-m", subject}} {
 		cmd := exec.Command(gitPath, args...)
 		cmd.Dir = root
-		cmd.Env = safeGitEnv()
+		cmd.Env = safeGitEnv("")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -1035,7 +1035,7 @@ func TestGitLog_EmptyRepo(t *testing.T) {
 	root := t.TempDir()
 	cmd := exec.Command(gitPath, "init", "-b", "main")
 	cmd.Dir = root
-	cmd.Env = safeGitEnv()
+	cmd.Env = safeGitEnv("")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}

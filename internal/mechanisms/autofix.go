@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // autofix registers the formatter-repair Mechanism's catalogue row (Phase-4 item 5). Default-off
@@ -90,6 +91,13 @@ type spawnGate struct {
 	timeout     time.Duration
 }
 
+// refuseExecFromWritablePath is this package's name for the shared exec fence
+// (security.RefuseExecFromWritablePath) — the same rule, under the same name, that every tool
+// exec site applies: a program resolving inside a path the model can write is never argv[0].
+func refuseExecFromWritablePath(argv0, root string, box *domain.ConfinementBox) error {
+	return security.RefuseExecFromWritablePath(argv0, root, box)
+}
+
 // newAutofix builds the autofix Mechanism, probing each external formatter's executable exactly
 // once through deps.LookPath (nil ⇒ exec.LookPath) and caching the resolved paths into the
 // per-language repair ladder — the sim's LookPath-cached formatter table, injected at
@@ -107,6 +115,16 @@ func newAutofix(deps Deps) (any, error) {
 		if !done {
 			p, err := look(command)
 			if err != nil {
+				p = ""
+			}
+			// A formatter that resolves inside the writable box is treated exactly as an
+			// absent one — its rung is left out of the ladder. The refusal has to sit HERE,
+			// at the single construction-time resolution, rather than at the spawn: a permit
+			// may authorise an unfenced spawn (nil Confinement on a host with no confinement
+			// backend), which is precisely the run that must not execute bytes the model
+			// wrote. Autofix has no result surface to explain a refusal on, and a skipped
+			// rung is its documented degradation, so the fence is applied silently.
+			if p != "" && refuseExecFromWritablePath(p, deps.WritableBox.WorkspaceRoot, &deps.WritableBox) != nil {
 				p = ""
 			}
 			resolved[command] = p

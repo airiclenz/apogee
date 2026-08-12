@@ -182,6 +182,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A program apogee launches may no longer come from a directory the model can write.** Every
+  tool that resolves an executable on `PATH` — the five git tools, `python_exec`, `run_tests` and
+  `diagnostics`' `go vet` half, plus the autofix Mechanism's formatter probe — now refuses one
+  that resolves inside the workspace or any configured extra writable path. The chain it closes is
+  short: a confined call is *allowed* to write inside its box, so it can plant (or overwrite,
+  keeping the 0755 bit) an executable there, and a later call that resolves its program on `PATH`
+  would run those bytes — possibly unconfined, outside the box the first call was fenced by. The
+  refusal names the **resolved** path and says which fence refused it, rather than reporting the
+  program as missing. **The cost, accepted deliberately:** an activated in-repo virtualenv
+  (`<repo>/.venv/bin/python3`) and a `node_modules/.bin` entry ahead of the system entries on
+  `PATH` are exactly this shape, so `python_exec` and `run_tests` refuse them; point `PATH` at an
+  interpreter or runner outside the workspace, or run it through `terminal`. There is no config
+  key to switch the rule off — one would be a new operator-armed footgun. The git subprocess's
+  scrubbed environment now scopes its `PATH` value the same way: workspace-resident entries (and
+  every relative entry, which names a directory relative to the child's own working directory) are
+  dropped, so the programs *git* resolves — hooks, credential helpers, pagers, diff drivers —
+  cannot come out of the workspace either.
+
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's
   right edge was three spaces wide, which read as a gap rather than as the indicator belonging to the
   row it marks; it is one space everywhere now — `exit 0 · +10 more lines ▶` — for every tool row,

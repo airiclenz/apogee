@@ -106,8 +106,8 @@ func (r hostRules) Quote(arg string) string {
 
 // ScopeEnv returns the scoped environment for a subprocess: every key in keys that is
 // present in the environment, in the order given, followed by this platform's essential
-// variables that keys did not already name.
-func (r hostRules) ScopeEnv(keys []string, lookup func(string) (string, bool)) []string {
+// variables that keys did not already name — with PATH scoped to workspaceRoot.
+func (r hostRules) ScopeEnv(workspaceRoot string, keys []string, lookup func(string) (string, bool)) []string {
 	if lookup == nil {
 		lookup = os.LookupEnv
 	}
@@ -128,6 +128,11 @@ func (r hostRules) ScopeEnv(keys []string, lookup func(string) (string, bool)) [
 		}
 		seen[fold] = struct{}{}
 		if value, ok := lookup(key); ok {
+			// fold is the caller's spelling on POSIX and the upper-cased one on Windows, so
+			// this catches "Path" exactly where the OS would treat it as PATH and nowhere else.
+			if fold == "PATH" {
+				value = r.scopePathValue(value, workspaceRoot)
+			}
 			out = append(out, key+"="+value)
 		}
 	}
@@ -138,6 +143,48 @@ func (r hostRules) ScopeEnv(keys []string, lookup func(string) (string, bool)) [
 		add(key)
 	}
 	return out
+}
+
+// scopePathValue returns a PATH value with every entry that lies inside workspaceRoot removed,
+// plus every entry that is not absolute — an empty entry and a relative one both name a
+// directory relative to the CHILD's working directory, which for every subprocess apogee
+// launches is the workspace itself.
+//
+// The scrub the allowlist performs is about which VARIABLES a subprocess inherits; this is
+// about what one of them points AT. Without it a workspace-resident directory on the operator's
+// PATH — an activated virtualenv, node_modules/.bin — is handed verbatim to a subprocess and
+// to every child it spawns, so bytes the model was allowed to write become the `git`, the
+// `ssh` or the `curl` that a hook, an alias or a helper of that subprocess resolves. That is
+// the same plant-then-exec chain the exec fence refuses at apogee's own resolution sites
+// (internal/security.RefuseExecFromWritablePath); this is the half of it apogee cannot check,
+// because the resolution happens inside somebody else's process.
+//
+// The comparison is Contains's — lexical, resolving no symlinks — so a PATH entry that reaches
+// the workspace THROUGH a symlink outside it survives here. apogee's own exec sites resolve
+// argv[0] through symlinks before applying the fence, so the residual is bounded to programs
+// a subprocess resolves for itself. An empty workspaceRoot scopes nothing.
+func (r hostRules) scopePathValue(value, workspaceRoot string) string {
+	if workspaceRoot == "" || value == "" {
+		return value
+	}
+	sep := ":"
+	if r.windows {
+		sep = ";"
+	}
+	entries := strings.Split(value, sep)
+	kept := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		// split answers "is this a location, and where does it start" under THIS platform's
+		// rules rather than the compiled-in ones, so a Windows PATH is scoped correctly by a
+		// test running on POSIX. An entry it cannot read as a location (empty, a device path,
+		// a drive-relative "C:work") is dropped rather than passed through unjudged.
+		anchor, _, ok := r.split(entry)
+		if !ok || anchor == "" || r.Contains(workspaceRoot, entry) {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	return strings.Join(kept, sep)
 }
 
 // Contains reports whether target is root itself or lies beneath it.

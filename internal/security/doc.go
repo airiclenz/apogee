@@ -70,6 +70,9 @@
 // (workspace) root; SafeCopyFileFrom is the exception that pins a root at each end, because a
 // copy's source is a read and may come from a read-only root the destination fence knows nothing
 // about — its write half is bounded by the destination root exactly as the others are.
+// execsafety.go measures that same boundary in the other direction: RefuseExecFromWritablePath
+// keeps an argv[0] that resolves inside the writable box from ever being executed, so bytes a
+// confined call was allowed to WRITE cannot become the program a later unconfined call RUNS.
 //
 // The network boundary, likewise in two layers. urlsafety.go is URLGuard, judged on the URL as
 // WRITTEN: scheme and host allow-deny with deny-first precedence, plus NormalizeURL and its

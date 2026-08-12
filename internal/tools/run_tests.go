@@ -235,6 +235,13 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		// missing program is a clear, actionable result rather than a crash or a hard dep.
 		return errorResult(call.ID, fmt.Sprintf("%s not available: the project's markers select %s, but no %q executable was found on PATH", runner.name, runner.name, runner.program)), nil
 	}
+	// The runner is on PATH, but a runner the model can write is the plant-then-exec chain
+	// itself — node_modules/.bin ahead of the system entries is the everyday shape of it. The
+	// fence refuses it and names the resolved path, so the cause is legible rather than
+	// arriving as the "not available" message above.
+	if err := refuseExecFromWritablePath(program, t.root, confinementBox(ctx)); err != nil {
+		return errorResult(call.ID, err.Error()), nil
+	}
 
 	runnerArgs := runner.args(subtree, filter)
 	// The environment is INHERITED (spec.env stays nil), as it is for terminal and python_exec:

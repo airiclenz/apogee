@@ -488,3 +488,52 @@ func TestAutofixBoundsTheFormatterKillPath(t *testing.T) {
 		t.Errorf("content = %q, want the original %q when the formatter was killed", got, brokenPy)
 	}
 }
+
+// TestAutofixRefusesAFormatterInsideTheWritableBox pins the exec fence at autofix's single
+// resolution site. A formatter that resolves inside the workspace is treated exactly as an
+// absent one — its rung is left out of the ladder — because bytes the model was allowed to write
+// must never become the program a later spawn runs.
+//
+// The refusal has to sit at CONSTRUCTION rather than at the spawn: a permit may authorise an
+// unfenced spawn (nil Confinement, the shape a host with no confinement backend produces), and
+// that is precisely the run whose argv[0] must not come out of the box. python is the language
+// under test because Go's ladder ends in the in-process gofmt tail, which would mask the
+// difference between a skipped rung and a repaired payload.
+func TestAutofixRefusesAFormatterInsideTheWritableBox(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	inside := filepath.Join(workspace, "node_modules", ".bin", "black")
+	if err := os.MkdirAll(filepath.Dir(inside), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(inside, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write formatter: %v", err)
+	}
+	outside := fakeFormatter(t, fixedPy)
+
+	ladder := func(t *testing.T, path string) []repairer {
+		t.Helper()
+		m, err := Build(autofixID, Deps{
+			LookPath:    resolveOnly("black", path),
+			WritableBox: domain.ConfinementBox{WorkspaceRoot: workspace},
+		})
+		if err != nil {
+			t.Fatalf("Build(%q): %v", autofixID, err)
+		}
+		af, ok := m.Hook.(autofixMechanism)
+		if !ok {
+			t.Fatalf("mechanism %q is not an autofixMechanism (%T)", autofixID, m.Hook)
+		}
+		return af.repairs["python"]
+	}
+
+	if rungs := ladder(t, inside); len(rungs) != 0 {
+		t.Errorf("python ladder = %d rung(s), want 0 — a formatter inside the writable box must be left out", len(rungs))
+	}
+	// The control arm: the same formatter OUTSIDE the box is still laddered, so the test pins
+	// the fence rather than a broken probe.
+	if rungs := ladder(t, outside); len(rungs) != 1 {
+		t.Errorf("python ladder = %d rung(s), want 1 for a formatter outside the box", len(rungs))
+	}
+}

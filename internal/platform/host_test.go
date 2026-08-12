@@ -143,7 +143,7 @@ func TestScopeEnvKeepsTheCallersAllowlistAndAddsThePlatformFloor(t *testing.T) {
 
 	t.Run("posix adds nothing and drops absent keys", func(t *testing.T) {
 		t.Parallel()
-		got := posixRules().ScopeEnv([]string{"PATH", "HOME", "ABSENT"}, lookup)
+		got := posixRules().ScopeEnv("", []string{"PATH", "HOME", "ABSENT"}, lookup)
 		want := []string{"PATH=/bin", "HOME=/home/u"}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("ScopeEnv() = %q, want %q", got, want)
@@ -152,7 +152,7 @@ func TestScopeEnvKeepsTheCallersAllowlistAndAddsThePlatformFloor(t *testing.T) {
 
 	t.Run("windows appends its essentials after the allowlist", func(t *testing.T) {
 		t.Parallel()
-		got := windowsRules().ScopeEnv([]string{"PATH", "HOME"}, lookup)
+		got := windowsRules().ScopeEnv("", []string{"PATH", "HOME"}, lookup)
 		if len(got) < 3 || got[0] != "PATH=/bin" || got[1] != "HOME=/home/u" {
 			t.Fatalf("ScopeEnv() = %q, want the allowlist first, in order", got)
 		}
@@ -167,7 +167,7 @@ func TestScopeEnvKeepsTheCallersAllowlistAndAddsThePlatformFloor(t *testing.T) {
 		t.Parallel()
 		// PATH and Path are one variable on Windows; emitting both would let the second
 		// silently win in the child.
-		got := windowsRules().ScopeEnv([]string{"PATH", "Path"}, lookup)
+		got := windowsRules().ScopeEnv("", []string{"PATH", "Path"}, lookup)
 		if n := countPrefix(got, "PATH="); n != 1 {
 			t.Errorf("ScopeEnv() = %q, want exactly one PATH entry, got %d", got, n)
 		}
@@ -176,11 +176,42 @@ func TestScopeEnvKeepsTheCallersAllowlistAndAddsThePlatformFloor(t *testing.T) {
 		}
 	})
 
+	t.Run("PATH entries inside the workspace are dropped", func(t *testing.T) {
+		t.Parallel()
+		// The allowlist decides which VARIABLES a subprocess inherits; this decides what the
+		// one variable naming where programs come from may point AT. A workspace-resident
+		// entry — an activated virtualenv, node_modules/.bin — would otherwise be handed
+		// verbatim to the subprocess and to every program IT resolves, which is the same
+		// plant-then-exec chain the exec fence refuses at apogee's own resolution sites.
+		scoped := map[string]string{"PATH": "/work/repo/.venv/bin:/usr/bin:/work/repo2/bin:bin::/work/repo"}
+		got := posixRules().ScopeEnv("/work/repo", []string{"PATH"}, func(key string) (string, bool) {
+			value, ok := scoped[key]
+			return value, ok
+		})
+		// /work/repo2/bin survives on the component-wise comparison a plain string prefix
+		// test gets wrong; the relative and empty entries go because both name a directory
+		// relative to the CHILD's working directory, which is the workspace itself.
+		want := []string{"PATH=/usr/bin:/work/repo2/bin"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("ScopeEnv() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("an unscoped call keeps every PATH entry", func(t *testing.T) {
+		t.Parallel()
+		// An empty workspace root names no fence: a caller with no workspace has nothing to
+		// scope against, and dropping entries there would be an invention.
+		got := posixRules().ScopeEnv("", []string{"PATH"}, lookup)
+		if !reflect.DeepEqual(got, []string{"PATH=/bin"}) {
+			t.Errorf("ScopeEnv() = %q, want the PATH value untouched", got)
+		}
+	})
+
 	t.Run("posix keeps distinct names distinct", func(t *testing.T) {
 		t.Parallel()
 		// The same two names are two variables on POSIX — folding them there would be
 		// the bug, not the fix.
-		got := posixRules().ScopeEnv([]string{"PATH", "Path"}, lookup)
+		got := posixRules().ScopeEnv("", []string{"PATH", "Path"}, lookup)
 		want := []string{"PATH=/bin", `Path=C:\Windows`}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("ScopeEnv() = %q, want %q", got, want)
@@ -191,7 +222,7 @@ func TestScopeEnvKeepsTheCallersAllowlistAndAddsThePlatformFloor(t *testing.T) {
 func TestScopeEnvDefaultsToTheProcessEnvironment(t *testing.T) {
 	// No t.Parallel: t.Setenv mutates process state.
 	t.Setenv("APOGEE_SCOPEENV_PROBE", "set")
-	got := posixRules().ScopeEnv([]string{"APOGEE_SCOPEENV_PROBE"}, nil)
+	got := posixRules().ScopeEnv("", []string{"APOGEE_SCOPEENV_PROBE"}, nil)
 	if len(got) != 1 || got[0] != "APOGEE_SCOPEENV_PROBE=set" {
 		t.Errorf("ScopeEnv(nil lookup) = %q, want the process environment to be read", got)
 	}

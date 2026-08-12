@@ -62,13 +62,19 @@ var safeEnvKeys = []string{
 	"CI", "GITHUB_ACTIONS", "GITLAB_CI", "JENKINS_URL",
 }
 
-// safeGitEnv returns the allowlisted environment for a git subprocess: each
+// safeGitEnv returns the allowlisted environment for a git subprocess scoped to root: each
 // safeEnvKeys entry that is present in the host environment, in "KEY=value" form,
 // followed by the platform's own essentials (none on POSIX — the output there is
 // exactly the allowlist, as before). It is a package var so a test can substitute
 // the lookup.
-var safeGitEnv = func() []string {
-	return shellHost.ScopeEnv(safeEnvKeys, os.LookupEnv)
+//
+// root is the workspace the PATH value is scoped to: the allowlist decides which VARIABLES
+// git inherits, and this decides that the one variable saying where programs come from cannot
+// point back inside the box the model writes to. git resolves programs of its own — hooks,
+// credential helpers, pagers, diff drivers — so an unscoped PATH would hand every one of those
+// resolutions to the workspace. An empty root scopes nothing (the shape a test wants).
+var safeGitEnv = func(root string) []string {
+	return shellHost.ScopeEnv(root, safeEnvKeys, os.LookupEnv)
 }
 
 // lookGit resolves the system git on PATH (a package var so a test can inject a
@@ -77,6 +83,23 @@ var safeGitEnv = func() []string {
 var lookGit = func() (string, bool) {
 	path, err := exec.LookPath("git")
 	return path, err == nil
+}
+
+// gitProgram resolves the system git for a call scoped to root and applies the exec fence to
+// what it found. ok=false carries the model-facing message in refusal: the graceful "git not
+// available" when no git is on PATH (§3a), and the fence's own refusal — which NAMES the
+// resolved path — when the git that was found is one the model could have written (a
+// workspace-resident PATH entry). The two are deliberately different sentences: a refusal that
+// read "git not available" would send the operator installing a git they already have.
+func gitProgram(ctx context.Context, root string) (gitPath, refusal string, ok bool) {
+	path, found := lookGit()
+	if !found {
+		return "", gitUnavailableMessage, false
+	}
+	if err := refuseExecFromWritablePath(path, root, confinementBox(ctx)); err != nil {
+		return "", err.Error(), false
+	}
+	return path, "", true
 }
 
 // runGit runs git with gitArgs in root under the per-call timeout and the scrubbed
@@ -89,7 +112,7 @@ func runGit(ctx context.Context, gitPath, root string, timeout time.Duration, gi
 		argv:    append([]string{gitPath}, gitArgs...),
 		dir:     root,
 		timeout: timeout,
-		env:     safeGitEnv(),
+		env:     safeGitEnv(root),
 	}
 	return runSubprocess(ctx, spec)
 }
@@ -173,9 +196,9 @@ func (t *GitBranch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, errMsg), nil
 	}
 
-	gitPath, ok := lookGit()
+	gitPath, refusal, ok := gitProgram(ctx, t.root)
 	if !ok {
-		return errorResult(call.ID, gitUnavailableMessage), nil
+		return errorResult(call.ID, refusal), nil
 	}
 
 	res, err := runGit(ctx, gitPath, t.root, gitTimeout, gitArgs...)
@@ -327,9 +350,9 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, "message is required and must be a non-empty string"), nil
 	}
 
-	gitPath, ok := lookGit()
+	gitPath, refusal, ok := gitProgram(ctx, t.root)
 	if !ok {
-		return errorResult(call.ID, gitUnavailableMessage), nil
+		return errorResult(call.ID, refusal), nil
 	}
 
 	// Amend is refused on a commit already published to a remote (origin/…), so the
@@ -515,9 +538,9 @@ func (t *GitDiffRange) Execute(ctx context.Context, call domain.ToolCall) (domai
 		gitArgs = append(gitArgs, paths...)
 	}
 
-	gitPath, ok := lookGit()
+	gitPath, refusal, ok := gitProgram(ctx, t.root)
 	if !ok {
-		return errorResult(call.ID, gitUnavailableMessage), nil
+		return errorResult(call.ID, refusal), nil
 	}
 
 	res, err := runGit(ctx, gitPath, t.root, gitDiffTimeout, gitArgs...)
@@ -595,9 +618,9 @@ func (t *GitStatus) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return domain.ToolResult{}, err
 	}
 
-	gitPath, ok := lookGit()
+	gitPath, refusal, ok := gitProgram(ctx, t.root)
 	if !ok {
-		return errorResult(call.ID, gitUnavailableMessage), nil
+		return errorResult(call.ID, refusal), nil
 	}
 
 	// Porcelain v2 is the stable machine format (it carries the branch and ahead/behind
@@ -843,9 +866,9 @@ func (t *GitLog) Execute(ctx context.Context, call domain.ToolCall) (domain.Tool
 		return errorResult(call.ID, "invalid ref: "+ref), nil
 	}
 
-	gitPath, ok := lookGit()
+	gitPath, refusal, ok := gitProgram(ctx, t.root)
 	if !ok {
-		return errorResult(call.ID, gitUnavailableMessage), nil
+		return errorResult(call.ID, refusal), nil
 	}
 
 	// The trailing "--" terminates the ref position, closing the same ref-vs-pathspec

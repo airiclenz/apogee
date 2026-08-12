@@ -50,7 +50,13 @@ type Shell interface {
 	// floor rather than every caller re-deriving it. Values are read through lookup
 	// (nil ⇒ os.LookupEnv), an absent key is omitted, and a key named twice is
 	// emitted once (case-insensitively on Windows).
-	ScopeEnv(keys []string, lookup func(string) (string, bool)) []string
+	//
+	// PATH is the one value the scrub INSPECTS rather than copies: entries inside
+	// workspaceRoot (and every entry that is not an absolute location, which names a
+	// directory relative to the child's own cwd) are dropped, so a subprocess and its
+	// children cannot resolve a program out of the box the model can write. An empty
+	// workspaceRoot scopes nothing — a caller with no workspace has no fence to apply.
+	ScopeEnv(workspaceRoot string, keys []string, lookup func(string) (string, bool)) []string
 }
 
 // Path abstracts the one path semantic the standard library's path/filepath does

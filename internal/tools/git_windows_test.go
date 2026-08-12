@@ -15,7 +15,7 @@ import (
 func TestSafeGitEnv_WindowsCarriesTheSystemFloor(t *testing.T) {
 	t.Parallel()
 
-	env := safeGitEnv()
+	env := safeGitEnv("")
 	for _, key := range []string{"SYSTEMROOT=", "COMSPEC=", "PATHEXT="} {
 		var found bool
 		for _, entry := range env {
