@@ -311,6 +311,16 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		cmd.PrintErrln(n)
 	}
 
+	// The skill catalog for this run, held in a variable rather than built inline so the SAME
+	// provider serves both halves of the skills contract: it resolves an attached ID into the
+	// prompt (Config.Skills) AND names the dirs whose files the model may then read
+	// (Config.ExtraReadRoots below).
+	skillProvider := skills.NewProvider(skills.Sources{
+		Home:             roots.config,
+		Workspace:        roots.workspace,
+		UseProjectSkills: opts.UseProjectSkills,
+	})
+
 	cfg := apogee.Config{
 		Endpoint:     opts.Endpoint,
 		Model:        spec.Model,
@@ -337,11 +347,12 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		Profile:      spec.Profile,
 		SystemPrompt: spec.SystemPrompt,
 		ContextFiles: opts.ContextFiles,
-		Skills: skills.NewProvider(skills.Sources{
-			Home:             roots.config,
-			Workspace:        roots.workspace,
-			UseProjectSkills: opts.UseProjectSkills,
-		}),
+		Skills:       skillProvider,
+		// The same read-only mounts a session gets, for the same reason every other file-only key
+		// is honoured here: one configuration, so a headless run's model can read the bundled
+		// files of a skill it was given exactly as an interactive one can. Sub-agents inherit them
+		// through the tool instances a Subset carries, so no per-child wiring exists.
+		ExtraReadRoots:   skillProvider.SourceDirs,
 		EnableMechanisms: spec.EnableMechanisms,
 		Context: apogee.ContextConfig{
 			MaxContextTokens:  spec.MaxContextTokens,

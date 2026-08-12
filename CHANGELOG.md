@@ -124,6 +124,18 @@ point is a **minor** bump, not a breaking change.
   still refused with the same uniform escape message, and with nothing mounted both tools behave
   exactly as before.
 
+- **Your skill folders are now mounted for the model to read.** The dirs skills are discovered in —
+  `~/.apogee/skills`, the project's `.apogee/skills`, and its bare `skills/` when
+  `use-project-skills` is on — are handed to the read tools as read-only roots, so the reference
+  files, prompts and scripts bundled beside a `SKILL.md` can finally be read, listed, grepped and
+  found by name. It follows the setting: flip `use-project-skills` in `/settings` and the project
+  folder is mounted or unmounted for the very next read, with no restart. A headless run mounts the
+  same dirs a session does, and a sub-agent inherits them from its parent without any wiring of its
+  own. The dirs stay unwritable — no write or execution tool can reach them — and each keeps its own
+  fence, so a symlink inside a skill folder that points out of it is refused. Nothing here is
+  skills-specific below the composition root: the engine gained a generic `ExtraReadRoots` seam
+  (`domain.Config`), and an embedder can mount whatever its own user has opened up.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's

@@ -101,6 +101,27 @@ type Config struct {
 	// workspace so a file-edit task never escapes its sandbox (ADR 0001 isolation).
 	WorkspaceDir string
 
+	// ExtraReadRoots names directories OUTSIDE WorkspaceDir that the built-in READ-ONLY file
+	// tools (read_file, list_dir, grep, find_files) may reach — read-only mounts beside the
+	// workspace fence. nil ⇒ workspace-only, byte-identical to the fence before this field
+	// existed. It applies to the DEFAULT tool set only, like DisabledTools: an injected
+	// Config.Tools is the host's own assembly and is taken exactly as given.
+	//
+	// The func is evaluated LIVE — once per tool call — so a host whose set of mounts moves
+	// mid-session (a setting a human can flip) is honoured by the next read with no re-wiring
+	// and no reconstruction. Only ABSOLUTE paths resolve against these roots; a relative
+	// argument keeps resolving against WorkspaceDir alone, so no one name can mean two files.
+	// Each root keeps its own fence, so a symlink inside one that escapes it is still refused,
+	// and a root that does not exist yet is skipped rather than failing the call.
+	//
+	// It is a GENERIC seam and the engine never defaults it: the TUI mounts its skill source
+	// dirs through it, but nothing here knows what a skill is — the engine stays skill-agnostic
+	// and any Driver can mount whatever its user has opened up (ADR 0031). Read-only is
+	// structural, not a promise: no write or execution tool receives it (the
+	// workspaceScopedWriter discipline, ADR 0012 D1), so mounting a directory never makes it
+	// writable.
+	ExtraReadRoots func() []string
+
 	// ExternalEffects is the single injectable boundary for non-forkable effects
 	// (network, MCP). nil ⇒ live. The bench injects a deterministic stub for v1;
 	// record/replay slots in behind the same interface later (ADR 0008).

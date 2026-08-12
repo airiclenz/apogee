@@ -152,9 +152,17 @@ by either walk.
 
 **Commit:** `feat(tools): grep and find_files search under configured read-only roots`
 
-## 4. Engine and composition wiring: skill source dirs become the live read roots
+## 4. Engine and composition wiring: skill source dirs become the live read roots — ✅ DONE (2026-08-12)
 
 Depends on items 2 and 3.
+
+NOTES (2026-08-12): in `headless.go` the `skills.NewProvider(...)` call was hoisted out of the
+`Config` literal into a local `skillProvider` variable — the two fields (`Skills` and
+`ExtraReadRoots`) must be served by the SAME provider, and an inline literal has no name to take a
+method value from. Two tests beyond the item's list guard code this item changed: the composition
+root's hand-assembled `HostTools` (`TestRegistryWithMCPThreadsExtraReadRoots`, the same drift
+`TestRegistryWithMCPThreadsPresenter` already guards) and the engine carrying the FUNC rather than
+its dirs (`TestExtraReadRootsAreLiveThroughTheEngine`).
 
 **What:**
 - `internal/domain/config.go`: `Config` gains `ExtraReadRoots func() []string`, documented

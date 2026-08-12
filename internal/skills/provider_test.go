@@ -2,6 +2,7 @@ package skills
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -127,5 +128,38 @@ func TestProviderSetSourcesLandsOnTheNextReload(t *testing.T) {
 	}
 	if _, ok := p.Get("global"); !ok {
 		t.Error("the library skill went with it; only the workspace's bare skills/ folder is gated")
+	}
+}
+
+// TestProviderSourceDirsFollowSetSources pins the read-root seam's live-ness at its source: the
+// host mounts SourceDirs as the read tools' extra read-only roots (domain.Config.ExtraReadRoots),
+// and a mount frozen at construction would leave the model reading a dir the catalogue no longer
+// scans — or refusing one it does. SourceDirs answers off the CURRENT sources, so a
+// `use-project-skills` flip moves the mount with no Reload and no re-wiring, and it needs no
+// catalogue at all: it reports where skills come from, not which ones loaded.
+func TestProviderSourceDirsFollowSetSources(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	projectDir := filepath.Join(workspace, "skills")
+
+	src := Sources{Home: home, Workspace: workspace, UseProjectSkills: true}
+	p := NewProvider(src)
+
+	if got, want := p.SourceDirs(), sourceDirs(src); !slices.Equal(got, want) {
+		t.Fatalf("SourceDirs() = %v, want the layered scan list %v", got, want)
+	}
+	if !slices.Contains(p.SourceDirs(), projectDir) {
+		t.Fatalf("SourceDirs() = %v, missing the bare project folder the flag admits", p.SourceDirs())
+	}
+
+	src.UseProjectSkills = false
+	p.SetSources(src)
+
+	if slices.Contains(p.SourceDirs(), projectDir) {
+		t.Errorf("SourceDirs() = %v still lists the project folder after the flag went off; the mount is stale",
+			p.SourceDirs())
+	}
+	if !slices.Contains(p.SourceDirs(), filepath.Join(home, "skills")) {
+		t.Errorf("SourceDirs() = %v dropped the global library; only the gated dir moves", p.SourceDirs())
 	}
 }

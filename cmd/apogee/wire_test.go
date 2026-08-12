@@ -856,6 +856,36 @@ func TestRegistryWithMCPThreadsPresenter(t *testing.T) {
 	}
 }
 
+// The read-only mounts reach the assembly the same way the Presenter does, and drift the same way:
+// registryWithMCP builds HostTools by hand, so a mount the engine's own build would have honoured
+// would silently vanish for any session with an MCP server configured — the model could read a
+// skill's bundled files in one session and not in another, for a reason nothing on screen explains.
+func TestRegistryWithMCPThreadsExtraReadRoots(t *testing.T) {
+	t.Parallel()
+	extra := t.TempDir()
+	if err := os.WriteFile(filepath.Join(extra, "SKILL.md"), []byte("bundled bytes"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	cfg := validCfg(t)
+	cfg.ExtraReadRoots = func() []string { return []string{extra} }
+
+	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, nil).Lookup("read_file")
+	if !ok {
+		t.Fatal("read_file is missing from the MCP registry build")
+	}
+	result, err := tool.Execute(context.Background(), apogee.ToolCall{
+		ID:        "c1",
+		Tool:      "read_file",
+		Arguments: []byte(`{"path":` + strconv.Quote(filepath.Join(extra, "SKILL.md")) + `}`),
+	})
+	if err != nil {
+		t.Fatalf("read_file returned a Go error: %v", err)
+	}
+	if result.IsError || !strings.Contains(result.Content, "bundled bytes") {
+		t.Errorf("read under the mounted root failed: %q — the MCP build dropped ExtraReadRoots", result.Content)
+	}
+}
+
 // The roster switch reaches the assembly through the same Config the rest of the host wiring does,
 // and it has to hold in BOTH halves of what a registry is for: the tool list the engine offers is
 // built from All(), and a call is resolved through Lookup — so a disabled tool must be missing from

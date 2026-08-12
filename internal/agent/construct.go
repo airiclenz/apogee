@@ -381,8 +381,9 @@ func resolveTools(cfg domain.Config) *domain.ToolRegistry {
 // applies in ALL modes, an app-level guard independent of OS confinement), the configured
 // web-search endpoint (empty ⇒ web_search's built-in DuckDuckGo default; "off" disables it),
 // the Asker delegate (nil ⇒ ask_user is not registered), the Presenter delegate (nil ⇒
-// present_document is not registered — ADR 0019), and the disabled-tool roster (empty ⇒ the
-// whole built-in set).
+// present_document is not registered — ADR 0019), the disabled-tool roster (empty ⇒ the
+// whole built-in set), and the extra read-only roots the read tools may reach (nil ⇒
+// workspace-only).
 //
 // The url-safety policy is deliberately the default floor, NOT seeded from ConfineNetworkAllow:
 // that field is the OS confinement box's network allow-list (CIDRs the confined SUBPROCESS may
@@ -399,6 +400,10 @@ func hostTools(cfg domain.Config) tools.HostTools {
 		// builds, which is the whole of the key — an Agent cannot offer or dispatch a tool its
 		// registry does not hold.
 		Disabled: cfg.DisabledTools,
+		// The read-only mounts beside the workspace fence, handed through verbatim: the engine
+		// carries the func without evaluating it, so WHICH dirs are mounted stays the host's
+		// question and stays live per call (Config.ExtraReadRoots). nil ⇒ workspace-only.
+		ExtraReadRoots: cfg.ExtraReadRoots,
 	}
 }
 

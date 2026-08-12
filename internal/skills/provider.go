@@ -78,6 +78,18 @@ func (p *Provider) sources() Sources {
 	return p.src
 }
 
+// SourceDirs lists the dirs the NEXT scan would look in — the same layered list Load walks, in
+// the same order (load.go's sourceDirs). It reads the CURRENT sources rather than a set captured
+// at construction, so a SetSources is reflected immediately and a caller holding this method value
+// is holding a live view with no plumbing of its own.
+//
+// It exists for the host that mounts the skill library as a read-only root for the model's read
+// tools (domain.Config.ExtraReadRoots): the bundled files of a skill live beside its SKILL.md, so
+// the dirs discovery scans are exactly the dirs those files are under. A dir that does not exist is
+// still listed — this reports where skills COME FROM, and the mount side skips an unusable root of
+// its own accord, exactly as loadDir skips a missing source dir.
+func (p *Provider) SourceDirs() []string { return sourceDirs(p.sources()) }
+
 // current returns the live catalog snapshot. It is always non-nil: NewProvider stores one and
 // Reload only ever stores the non-nil result of Load.
 func (p *Provider) current() *Catalog { return p.cur.Load() }

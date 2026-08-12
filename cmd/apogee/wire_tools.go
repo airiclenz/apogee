@@ -161,6 +161,11 @@ func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool
 		Asker:             cfg.Asker,
 		Presenter:         cfg.Presenter,
 		Disabled:          cfg.DisabledTools,
+		// The read-only mounts the session opened up (the skill source dirs), off the same Config
+		// the engine would have read them from — this hand-assembly must not be the one place a
+		// read tool loses them, or the model could read a skill's bundled files in a session
+		// without MCP and not in one with it.
+		ExtraReadRoots: cfg.ExtraReadRoots,
 	})
 	for _, t := range mcpTools {
 		if err := registry.Register(t); err != nil {
