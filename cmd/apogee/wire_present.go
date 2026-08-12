@@ -27,7 +27,10 @@ import (
 //   - the Opener (rungs 1 and 3) on a LOCAL session with auto-open on. Remote is excluded here
 //     rather than inside the Opener because an opener fired on a remote box opens into a display
 //     nobody is watching; `auto-open: false` wires none either, which covers the command override
-//     too — the key says whether a document is opened, present.command only says by what.
+//     too — the key says whether a document is opened, present.command only says by what. It is
+//     handed the workspace root for the same reason the doc server below is, one rung down: rung
+//     1 resolves its own program (`open`, `xdg-open`, `cmd`) absolutely and refuses one that
+//     resolves inside that root, since an opener runs with no approval and no confinement box.
 //   - the doc server (rung 2) on a REMOTE session, where the user's browser is on another machine.
 //     It binds nothing until the first served presentation, so wiring it costs one struct. Its
 //     advertised address is resolved HERE, once: AdvertiseHost may probe the routing table, and
@@ -40,7 +43,12 @@ import (
 func presentationRungs(p config.PresentSettings, workspace, goos string, env func(string) string) tui.Presentation {
 	rungs := tui.Presentation{Local: present.Locality(env) == present.Local}
 	if rungs.Local && p.AutoOpen {
-		rungs.Opener = &present.Opener{GOOS: goos, Env: env, CommandOverride: p.Command}
+		rungs.Opener = &present.Opener{
+			GOOS:            goos,
+			Env:             env,
+			CommandOverride: p.Command,
+			WorkspaceRoot:   workspace,
+		}
 	}
 	if !rungs.Local {
 		rungs.Docs = &present.DocServer{

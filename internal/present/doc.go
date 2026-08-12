@@ -10,16 +10,19 @@
 // nothing here renders the transcript: the package answers "what can this machine do, and
 // where would the user reach the file" and performs the mechanism when asked.
 //
-// Everything is an injectable seam — the environment lookup, the GOOS string, the command
-// runner — so the mechanisms are table-testable off the machine the tests run on, which is
-// the only way a ladder whose whole subject is the local platform can be tested at all.
+// Everything is an injectable seam — the environment lookup, the GOOS string, the PATH lookup,
+// the command runner — so the mechanisms are table-testable off the machine the tests run on,
+// which is the only way a ladder whose whole subject is the local platform can be tested at all.
 //
 // The package imports the standard library, plus shlex for splitting the present.command
 // template — the same POSIX command-line splitter the terminal tool already uses, so the one
 // place a user's command line is parsed behaves identically wherever it appears — and
-// internal/security, whose path-safety guard fences every read the doc server does (a served
-// document is re-opened through security.SafeOpen on every request, so a workspace path swapped
-// for an escaping symlink after the grant is refused rather than followed). Under ADR 0010 it may
+// internal/security, for the two fences it owns: the path-safety guard fences every read the doc
+// server does (a served document is re-opened through security.SafeOpen on every request, so a
+// workspace path swapped for an escaping symlink after the grant is refused rather than followed),
+// and the exec fence (security.RefuseExecFromWritablePath) refuses an OS opener whose own program
+// resolves inside the workspace — the same rule every exec site in internal/tools applies, since
+// an opener launched with no approval must not be a program the model could plant. Under ADR 0010 it may
 // depend on internal/domain downward and never on the root facade; today it needs the domain
 // types not at all, because they cross the seam in the caller, not here.
 //
@@ -27,5 +30,7 @@
 // act on the user's own desktop session, the same category as the TUI drawing on the
 // terminal — not a model-chosen subprocess ADR 0012's workspace fence exists to bound. The
 // blast radius is bounded by what may be presented (a path already resolved inside the
-// workspace root and confirmed to be a regular file), not by fencing a browser.
+// workspace root and confirmed to be a regular file) and by which program may be launched (one
+// of three OS opener names, resolved absolutely and refused when it resolves inside the
+// workspace), not by fencing a browser.
 package present

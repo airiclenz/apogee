@@ -786,6 +786,12 @@ func TestPresentationRungs(t *testing.T) {
 			if rungs.Opener != nil && rungs.Opener.CommandOverride != tt.cfg.Command {
 				t.Errorf("Opener.CommandOverride = %q; want the configured %q", rungs.Opener.CommandOverride, tt.cfg.Command)
 			}
+			// Rung 1 resolves its own program (`open`, `xdg-open`, `cmd`) absolutely and refuses one
+			// that resolves inside the workspace, so the rung is only wired with the root to measure
+			// against — an unwired root would leave that fence quietly empty.
+			if rungs.Opener != nil && rungs.Opener.WorkspaceRoot != workspace {
+				t.Errorf("Opener.WorkspaceRoot = %q; want the workspace root %q", rungs.Opener.WorkspaceRoot, workspace)
+			}
 			if rungs.Docs == nil {
 				return
 			}

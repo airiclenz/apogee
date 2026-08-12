@@ -9,11 +9,14 @@ import (
 	"time"
 
 	"github.com/google/shlex"
+
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // ErrNoOpener is the sentinel Open returns when this machine has nothing to hand a document
 // to: an OS with no known opener command, a Linux session with no display server behind it
-// (see HasDesktop), a document whose extension is not one an OS handler should be handed
+// (see HasDesktop), an opener command this machine does not actually have on PATH (see
+// resolveProgram), a document whose extension is not one an OS handler should be handed
 // (see OpenerRenderable), or — on Windows alone — a path whose name cmd.exe would read as its
 // own syntax (see cmdSafe). It is a NORMAL outcome rather than a failure — the caller degrades to
 // the baseline rung, which is the rung that is never wrong, and says so in the transcript
@@ -58,8 +61,13 @@ type Runner func(name string, args ...string) error
 // the null device (see launchDetached), because an opener that printed a warning would scribble
 // straight across the Bubble Tea screen and corrupt the frame.
 //
-// All three inputs are injected. The zero value is safe and opens nothing: an empty GOOS matches
-// no branch, so Open reports ErrNoOpener.
+// Rung 1's own program is resolved absolutely before it is launched and refused when it resolves
+// somewhere the model may write (WorkspaceRoot, security.RefuseExecFromWritablePath): this rung
+// runs with no approval and no confinement box in every mode, so "which bytes are `xdg-open`" must
+// not be a question apogee's inherited PATH answers at launch time.
+//
+// Every input is injected. The zero value is safe and opens nothing: an empty GOOS matches no
+// branch, so Open reports ErrNoOpener.
 type Opener struct {
 	// GOOS is the operating system whose opener command to build — runtime.GOOS in production,
 	// a table row's string in tests.
@@ -73,6 +81,16 @@ type Opener struct {
 	// built-in opener: it is the user's own statement of how a document is shown on their
 	// machine, so it also stands in for the desktop check this type would otherwise make.
 	CommandOverride string
+	// WorkspaceRoot is the workspace the model writes in — the fence rung 1's own program may not
+	// resolve inside (resolveProgram). It is the same root the file tools are scoped to, wired
+	// from the composition root. An empty root fences nothing: a caller that cannot name a
+	// workspace has no policy to apply, and inventing one would refuse every program on the host
+	// (security.RefuseExecFromWritablePath states the same rule).
+	WorkspaceRoot string
+	// LookPath resolves one of rung 1's program names to the absolute path of the file PATH says
+	// it is — exec.LookPath in production, a table's own answer in tests, which is what lets the
+	// resolution be pinned on a machine that has no desktop opener at all. Nil means exec.LookPath.
+	LookPath func(name string) (string, error)
 	// Run launches the command Open built. Nil means launchDetached, the production runner.
 	Run Runner
 }
@@ -132,6 +150,12 @@ func (o Opener) Open(path string) error {
 // reads as syntax (cmdSafe) builds no argv and degrades exactly like a refused extension
 // (ADR 0019, second amendment 2026-07-26). macOS and Linux need no name bound, because `open`
 // and `xdg-open` receive the path as one execve argument with no shell in between.
+//
+// A fourth bound applies to the OS table alone, on the PROGRAM: each of the three names is
+// resolved to an absolute path here and refused when it resolves inside the workspace
+// (resolveProgram). Rung 3 is deliberately outside it — present.command is the user's own
+// configuration, with the same standing as their shell (ADR 0019 §5), and this package does not
+// second-guess a command line its operator wrote.
 func (o Opener) argv(path string) ([]string, error) {
 	if template := strings.TrimSpace(o.CommandOverride); template != "" {
 		return overrideArgv(template, path)
@@ -145,20 +169,86 @@ func (o Opener) argv(path string) ([]string, error) {
 
 	switch o.GOOS {
 	case "darwin":
-		return []string{"open", path}, nil
+		return o.osArgv("open", path)
 	case "windows":
 		if !cmdSafe(path) {
 			return nil, ErrNoOpener
 		}
-		return []string{"cmd", "/c", "start", "", path}, nil
+		return o.osArgv("cmd", "/c", "start", "", path)
 	case "linux":
-		return []string{"xdg-open", path}, nil
+		return o.osArgv("xdg-open", path)
 	default:
 		// Unreachable while HasDesktop and this switch agree on which systems have a desktop;
 		// kept so that teaching HasDesktop a new OS degrades to the baseline rung instead of
 		// running an argv nobody wrote.
 		return nil, ErrNoOpener
 	}
+}
+
+// osArgv builds one of rung 1's platform command lines: the OS opener's program as an absolute
+// path, followed by the arguments that platform's line takes verbatim. The arguments are never
+// resolved or rewritten — only argv[0] is a program.
+func (o Opener) osArgv(program string, args ...string) ([]string, error) {
+	resolved, err := o.resolveProgram(program)
+	if err != nil {
+		return nil, err
+	}
+	return append([]string{resolved}, args...), nil
+}
+
+// resolveProgram answers WHICH FILE one of rung 1's three program names is, before anything is
+// launched, and refuses one the model could have written.
+//
+// Resolving at all is the point. `open`, `xdg-open` and `cmd` were bare names handed to
+// exec.Command, which looks them up against apogee's own inherited PATH at launch — the only
+// bare-name exec left in non-test code. present_document is read-only, so it auto-runs in every
+// mode including Plan, which makes this the one process apogee starts with no approval and no
+// confinement box behind it: a PATH entry the model can write is a program the model chooses.
+// Resolving here also means the argv apogee builds is the argv the OS runs, with no second lookup
+// in between for a PATH change to land in.
+//
+// The two failure directions are deliberately different, because they mean different things:
+//
+//   - NOT FOUND — nothing on PATH, or a name found only through a relative PATH entry
+//     (exec.ErrDot, which carries no absolute path to run) — is ErrNoOpener, the same NORMAL
+//     outcome as a headless session: this machine has no opener, so the ladder degrades to the
+//     baseline transcript rung and the document is still presented (ADR 0019 §4).
+//   - REFUSED — the program resolves inside the workspace — is a real error, surfaced by the
+//     caller rather than swallowed. Degrading silently there would hide the one case worth
+//     saying out loud, and unlike a missing opener it is not a fact about the machine's desktop:
+//     it says the PATH this session inherited points into bytes the model may write. The message
+//     names the resolved path and the fence that refused it (security.ErrExecFromWritablePath),
+//     so the operator can see which PATH entry to fix rather than hunting a missing install.
+//
+// The fence is the workspace root alone, with no confinement box: the opener runs OUTSIDE tool
+// confinement by design (ADR 0019 §5, package doc), so there is no box at this seam — the
+// model-writable set it can name is the root the file tools are scoped to. It is the same rule
+// every exec site in internal/tools applies, measured against the same boundary, so the two
+// cannot drift apart.
+func (o Opener) resolveProgram(program string) (string, error) {
+	look := o.LookPath
+	if look == nil {
+		look = exec.LookPath
+	}
+	resolved, err := look(program)
+	if err != nil || !filepath.IsAbs(resolved) {
+		return "", ErrNoOpener
+	}
+	if err := refuseExecFromWritablePath(resolved, o.WorkspaceRoot); err != nil {
+		return "", fmt.Errorf("present: refusing to launch %s: %w", program, err)
+	}
+	return resolved, nil
+}
+
+// refuseExecFromWritablePath is this package's name for the shared exec fence
+// (security.RefuseExecFromWritablePath) — the same rule, under the same name, that every tool
+// exec site applies: a program resolving inside a path the model can write is never argv[0].
+//
+// It takes no confinement box, unlike the wrappers in internal/tools and internal/mechanisms:
+// the opener runs outside tool confinement by design (ADR 0019 §5), so there is no box to pass
+// and a parameter that could only ever be nil would read as one that is sometimes filled.
+func refuseExecFromWritablePath(argv0, root string) error {
+	return security.RefuseExecFromWritablePath(argv0, root, nil)
 }
 
 // openerRenderableExts is rung 1's allow-list: the extensions whose desktop handler RENDERS the
@@ -344,6 +434,11 @@ func overrideArgv(template, path string) ([]string, error) {
 // command the user configured as a foreground application from holding the presenting Turn open
 // for as long as they keep reading. Either way the child is reaped by the watching goroutine, so
 // nothing is left behind.
+//
+// name is the program to run and never a lookup: on rung 1 it is the absolute path argv already
+// resolved and fenced (resolveProgram), so exec.Command below performs no PATH search of its own.
+// On rung 3 it is the first word of the user's own present.command, resolved the way their shell
+// would resolve it — their configuration, their PATH, stated in argv's doc comment.
 func launchDetached(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 

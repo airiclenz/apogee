@@ -16,13 +16,26 @@ import (
 // Test doubles for the ladder's rungs
 // ----------------------------------------------------------------------------
 
+// testOpenerBin is where these tests' PATH lookup says the OS opener lives: an absolute
+// directory on every OS, outside any workspace, since rung 1 resolves its program absolutely and
+// refuses one that resolves inside the workspace (present.Opener.LookPath, WorkspaceRoot).
+var testOpenerBin = filepath.Join(os.TempDir(), "apogee-ladder-bin")
+
+// lookInTestBin is the PATH lookup the openers below are wired with. It is needed because rung 1
+// resolves its program before launching it, and the machines this suite runs on have no `open`
+// to resolve — a ladder test would otherwise be answering "does this box have a desktop".
+func lookInTestBin(name string) (string, error) {
+	return filepath.Join(testOpenerBin, name), nil
+}
+
 // openerRunning returns an Opener for goos whose launches are captured instead of executed
 // (present.Runner is the seam the package exposes for exactly this), so a ladder test asserts
 // which rung ran without a desktop anywhere near it.
 func openerRunning(goos string, argv *[]string) *present.Opener {
 	return &present.Opener{
-		GOOS: goos,
-		Env:  func(string) string { return "" }, // headless: only darwin/windows/override reach a runner
+		GOOS:     goos,
+		Env:      func(string) string { return "" }, // headless: only darwin/windows/override reach a runner
+		LookPath: lookInTestBin,
 		Run: func(name string, args ...string) error {
 			*argv = append([]string{name}, args...)
 			return nil
@@ -34,9 +47,10 @@ func openerRunning(goos string, argv *[]string) *present.Opener {
 // tried and did not deliver, as opposed to one that was never there (ErrNoOpener).
 func failingOpener() *present.Opener {
 	return &present.Opener{
-		GOOS: "darwin",
-		Env:  func(string) string { return "" },
-		Run:  func(string, ...string) error { return errors.New("boom") },
+		GOOS:     "darwin",
+		Env:      func(string) string { return "" },
+		LookPath: lookInTestBin,
+		Run:      func(string, ...string) error { return errors.New("boom") },
 	}
 }
 
@@ -300,7 +314,9 @@ func TestPresenterOpensTheResolvedPath(t *testing.T) {
 		Title:       "Architecture review",
 	})
 
-	if want := []string{"open", "/workspace/docs/review.md"}; strings.Join(argv, " ") != strings.Join(want, " ") {
+	// argv[0] is the resolved program, not the bare name: rung 1 looks its opener up before it
+	// launches anything (present.Opener.LookPath).
+	if want := []string{filepath.Join(testOpenerBin, "open"), "/workspace/docs/review.md"}; strings.Join(argv, " ") != strings.Join(want, " ") {
 		t.Errorf("argv = %v; want %v", argv, want)
 	}
 	if msg.Path != "docs/review.md" || msg.Title != "Architecture review" {

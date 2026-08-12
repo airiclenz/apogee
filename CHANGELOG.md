@@ -182,6 +182,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **apogee resolves the OS opener itself now, and refuses one that lives inside your workspace.**
+  The presentation ladder's first rung used to hand the bare names `open`, `xdg-open` and `cmd` to
+  the exec package, which looked them up against apogee's own `PATH` at the moment of launch — the
+  last bare-name launch anywhere in the code. `present_document` is read-only, so it auto-runs in
+  every mode including Plan, with no approval and no confinement box behind it: a `PATH` entry
+  inside the workspace was therefore a program the model could choose by writing a file. Each of
+  the three names is now resolved to an absolute path *before* anything starts, and one that
+  resolves inside the workspace root is refused with a message naming the resolved file and the
+  fence that refused it — the same rule the git tools, `python_exec`, `run_tests` and `go vet`
+  already apply to their own programs. A machine that simply has no opener on `PATH` is unchanged:
+  that is still a normal outcome, and the document is presented on the transcript rung as before.
+  A `present.command` you configured yourself is untouched — it names one application, and it is
+  your own configuration, with the same standing as your shell.
+
 - **An HTML page or an SVG is no longer handed to your browser by the OS opener.**
   `present_document` is read-only, so it runs in every mode including Plan, and `present.auto-open`
   is on by default — which meant a `.html` file that need only have ARRIVED in a cloned repo could

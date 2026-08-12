@@ -3,8 +3,12 @@ package present
 import (
 	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // recordingRunner is the fake behind Opener.Run: it captures the argv it was handed instead of
@@ -45,6 +49,30 @@ func docNamed(name string) string {
 	return "/workspace/my reports/" + name
 }
 
+// openerBinDir is the directory the tests' PATH lookup answers with: an absolute one on every OS
+// (os.TempDir is, where a literal "/usr/bin" would not be on Windows), and outside any workspace
+// root a test builds, so the rows below exercise resolution with nothing for the fence to refuse.
+var openerBinDir = filepath.Join(os.TempDir(), "apogee-opener-bin")
+
+// lookInBin is the fake behind Opener.LookPath: PATH says every program lives in openerBinDir.
+// It is the seam that makes rung 1's resolution testable at all — the suite runs on machines
+// with no `open`, no `xdg-open` and no `cmd`, and a test that only passed where the real program
+// exists would be testing the machine rather than the opener.
+func lookInBin(name string) (string, error) {
+	return filepath.Join(openerBinDir, name), nil
+}
+
+// resolvedArgv is a wanted command line with its program NAME rewritten to the absolute path
+// lookInBin resolves it to. The tables keep naming the program — that name is the contract with
+// three operating systems — while the assertion pins what the opener now hands its runner: an
+// absolute argv[0], because a bare name would be resolved again, by apogee's inherited PATH, at
+// the moment of launch.
+func resolvedArgv(argv []string) []string {
+	resolved := append([]string(nil), argv...)
+	resolved[0] = filepath.Join(openerBinDir, resolved[0])
+	return resolved
+}
+
 // Each desktop OS has exactly one opener command line, and the argv is asserted literally —
 // these strings are the contract with three operating systems, not an implementation detail.
 //
@@ -53,6 +81,10 @@ func docNamed(name string) string {
 // name picks the program unless the launch is bounded — a refused extension must therefore
 // produce no argv at all (ErrNoOpener, degrade to the baseline rung), not a command that merely
 // goes unrun.
+//
+// The rows name the program; the assertion expects the ABSOLUTE path PATH resolves it to
+// (resolvedArgv), which is what the opener builds since 2026-08-12 — a bare name in argv[0] is a
+// second lookup, performed by the exec package against apogee's inherited PATH at launch.
 func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 	t.Parallel()
 
@@ -264,7 +296,7 @@ func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 				path = testDocPath
 			}
 			runner := &recordingRunner{}
-			opener := Opener{GOOS: tt.goos, Env: envFrom(tt.vars), Run: runner.run}
+			opener := Opener{GOOS: tt.goos, Env: envFrom(tt.vars), LookPath: lookInBin, Run: runner.run}
 
 			err := opener.Open(path)
 			if tt.want == nil {
@@ -279,8 +311,8 @@ func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Open(%q) = %v, want no error", path, err)
 			}
-			if got := runner.only(t); !equalArgv(got, tt.want) {
-				t.Errorf("Open(%q) ran %q, want %q", path, got, tt.want)
+			if want, got := resolvedArgv(tt.want), runner.only(t); !equalArgv(got, want) {
+				t.Errorf("Open(%q) ran %q, want %q", path, got, want)
 			}
 		})
 	}
@@ -564,9 +596,10 @@ func TestOpenerSurfacesARunnerFailure(t *testing.T) {
 	launchFailed := errors.New("exec: \"xdg-open\": executable file not found in $PATH")
 	runner := &recordingRunner{err: launchFailed}
 	opener := Opener{
-		GOOS: "linux",
-		Env:  envFrom(map[string]string{"DISPLAY": ":0"}),
-		Run:  runner.run,
+		GOOS:     "linux",
+		Env:      envFrom(map[string]string{"DISPLAY": ":0"}),
+		LookPath: lookInBin,
+		Run:      runner.run,
 	}
 
 	err := opener.Open(testDocPath)
@@ -576,8 +609,102 @@ func TestOpenerSurfacesARunnerFailure(t *testing.T) {
 	if errors.Is(err, ErrNoOpener) {
 		t.Error("Open() reported ErrNoOpener for an opener that ran and failed")
 	}
-	if got := runner.only(t); !equalArgv(got, []string{"xdg-open", testDocPath}) {
+	if got := runner.only(t); !equalArgv(got, resolvedArgv([]string{"xdg-open", testDocPath})) {
 		t.Errorf("Open() ran %q, want the platform opener", got)
+	}
+}
+
+// Rung 1's own program is the one thing about a presentation the model never chose — until a
+// PATH entry inside the workspace makes it one. `.venv/bin` on PATH is the everyday shape of
+// that (an activated virtualenv, or node_modules/.bin), and a confined call is ALLOWED to write
+// there, so a planted `xdg-open` would be launched by a read-only tool that auto-runs in every
+// mode, with no approval and no confinement box. The refusal must therefore be LOUD — a real
+// error naming the resolved file, not the ErrNoOpener a headless machine reports — because
+// unlike a missing opener it says something is wrong with this session, not with this desktop.
+func TestOpenerRefusesAProgramInsideTheWorkspace(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	bin := filepath.Join(root, ".venv", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", bin, err)
+	}
+	planted := filepath.Join(bin, "xdg-open")
+	if err := os.WriteFile(planted, []byte("#!/bin/sh\nexec /bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write %s: %v", planted, err)
+	}
+
+	runner := &recordingRunner{}
+	opener := Opener{
+		GOOS:          "linux",
+		Env:           envFrom(map[string]string{"DISPLAY": ":0"}),
+		WorkspaceRoot: root,
+		LookPath:      func(name string) (string, error) { return filepath.Join(bin, name), nil },
+		Run:           runner.run,
+	}
+
+	err := opener.Open(testDocPath)
+	if !errors.Is(err, security.ErrExecFromWritablePath) {
+		t.Fatalf("Open() = %v, want the exec fence's refusal", err)
+	}
+	if errors.Is(err, ErrNoOpener) {
+		t.Error("Open() reported ErrNoOpener for a refused program, degrading silently past the one case worth saying")
+	}
+	// The operator has to be able to see WHICH file was refused: "not available" would send them
+	// after a missing install instead of after their own PATH.
+	if resolved := security.EvalRealPath(planted); !strings.Contains(err.Error(), resolved) {
+		t.Errorf("Open() = %v, want the message to name the resolved program %q", err, resolved)
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("Open() launched %v, want nothing run", runner.calls)
+	}
+}
+
+// A program that cannot be resolved to an absolute path is a fact about the MACHINE, so it takes
+// the machine's answer: ErrNoOpener, and the ladder degrades to the baseline transcript rung with
+// the document still presented. The relative rows are exec.LookPath's own ErrDot shape — a name
+// found only through a relative PATH entry, which the child would re-resolve against its working
+// directory (the workspace) — and are refused for the same reason the absolute check exists.
+func TestOpenerDegradesWhenTheProgramDoesNotResolve(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		look func(string) (string, error)
+	}{
+		{
+			name: "nothing on PATH",
+			look: func(string) (string, error) { return "", exec.ErrNotFound },
+		},
+		{
+			name: "found only through a relative PATH entry (ErrDot)",
+			look: func(name string) (string, error) { return filepath.Join("bin", name), exec.ErrDot },
+		},
+		{
+			name: "a relative answer with no error at all",
+			look: func(name string) (string, error) { return filepath.Join("bin", name), nil },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			runner := &recordingRunner{}
+			opener := Opener{
+				GOOS:     "linux",
+				Env:      envFrom(map[string]string{"DISPLAY": ":0"}),
+				LookPath: tt.look,
+				Run:      runner.run,
+			}
+
+			if err := opener.Open(testDocPath); !errors.Is(err, ErrNoOpener) {
+				t.Fatalf("Open() = %v, want ErrNoOpener", err)
+			}
+			if len(runner.calls) != 0 {
+				t.Errorf("Open() ran %v, want nothing run", runner.calls)
+			}
+		})
 	}
 }
 
@@ -603,10 +730,10 @@ func TestOpenerToleratesANilEnv(t *testing.T) {
 	t.Parallel()
 
 	runner := &recordingRunner{}
-	if err := (Opener{GOOS: "linux", Run: runner.run}).Open(testDocPath); !errors.Is(err, ErrNoOpener) {
+	if err := (Opener{GOOS: "linux", LookPath: lookInBin, Run: runner.run}).Open(testDocPath); !errors.Is(err, ErrNoOpener) {
 		t.Errorf("Open() on linux with a nil env = %v, want ErrNoOpener", err)
 	}
-	if err := (Opener{GOOS: "darwin", Run: runner.run}).Open(testDocPath); err != nil {
+	if err := (Opener{GOOS: "darwin", LookPath: lookInBin, Run: runner.run}).Open(testDocPath); err != nil {
 		t.Errorf("Open() on darwin with a nil env = %v, want no error", err)
 	}
 }
