@@ -441,7 +441,7 @@ the native tool is the *safer* path) while a network tool that does **not** rout
 **asks** (its URLs are unfiltered — the network analogue of the 3p-write row); **MCP asks**
 (unfenceable server — the per-tool teeth, intact).
 
-**A `Gate` carries `Reason` + `CacheKey`.** `Reason` is the human-facing why, mapped from the tool's
+**A `Gate` carries `Reason` + `CacheKey`, and on two cells only a `Remedy`.** `Reason` is the human-facing why, mapped from the tool's
 class — `network reach` (net), `unfiltered network reach` (3p-net), `unconfinable MCP tool` (mcp),
 `subprocess execution` (subproc), `out-of-workspace write` (WS-write), `write` (3p-write); a
 Tier-2-forced gate overrides it with `dangerous-action guard forced approval`. Subproc is the one
@@ -452,7 +452,20 @@ only the **Auto + `confine=true` + caps-insufficient** cell reads
 `subprocess execution (confinement unavailable on this host)`, where the backend genuinely could not
 give the fence ("gate if you can't") and naming it is what points the user at `/confine` — the same
 wording the runtime-demote fallback below carries, deliberately telling that story in the same
-words. `CacheKey` is the
+words. **`Remedy`** (optional; added 2026-08-12) is the one-line route OUT of the condition the
+`Reason` names, carried beside it to the Approval prompt. It is set on exactly the two gates whose
+cause the user can lift — the **Auto + `confine=true` + caps-insufficient** cell above, and the
+runtime-demote fallback below — and both read
+`/confine off runs commands unconfined this session (disposable machines only)` — the escape
+`/confine status` already offers, condensed to the one line an Approval prompt has room for.
+For that cell the reason and the remedy leave the resolver
+TOGETHER, out of ONE cell predicate written once, so a prompt can never name one cause and
+prescribe another's fix. Every other gate carries none: a gate the autonomy rung itself asked for
+has no condition to lift, only a mode to be in, so most prompts read exactly as they always have —
+and the no-Approver `Refuse` carries none either, since its text goes to the MODEL, which has no
+terminal to type `/confine` into. Like `Reason` it is a bare sentence: the `Fix: ` label the TUI
+paints in front of it is that Driver's presentation, not the engine's (ADR 0031, wire-silent).
+`CacheKey` is the
 allow-for-session key — the **tool name** for every class **except mcp**, whose key is the **server
 grain** `mcp-server:<alias>` so approving one of a server's tools clears its siblings for the Session
 (ADR 0012's server-grain promise; the `mcp-server:` prefix keeps the grain collision-proof, and an

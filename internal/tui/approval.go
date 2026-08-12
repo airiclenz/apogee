@@ -104,8 +104,9 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // above the input box (the shared popup module; D7/D8): the title carries the RAW tool name
 // verbatim (not the friendly transcript label — the approval flow is a security surface, so the
 // human sees exactly the tool that will run), the body carries the asking sub-agent's task when a
-// child raised the call, then a non-empty Reason, then the arguments (approvalArgsBlock), and the
-// decisions themselves are the pane's ROWS.
+// child raised the call, then a non-empty Reason, then the Fix: line for the few gates whose cause
+// the user can lift (ApprovalRequest.Remedy — the confinement-unavailable pair), then the arguments
+// (approvalArgsBlock), and the decisions themselves are the pane's ROWS.
 //
 // The Sub-agent line leads the body because it answers a question the rest of the pane cannot: with
 // several children running at once their prompts QUEUE, one at a time, in an order nothing on the
@@ -171,6 +172,13 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	}
 	if req.Reason != "" {
 		parts = append(parts, "Reason: "+stripEscapes(req.Reason))
+	}
+	// The way out of the condition the Reason just named, on the line under it — a part of its own
+	// rather than a tail on the Reason, so the pane's wrapping, elision and row budgeting treat it
+	// as the prose it is. Most gates carry none (their cause is the mode the user chose), and those
+	// panes draw exactly as before.
+	if req.Remedy != "" {
+		parts = append(parts, "Fix: "+stripEscapes(req.Remedy))
 	}
 	if args := approvalArgsBlock(req); args != "" {
 		parts = append(parts, args)

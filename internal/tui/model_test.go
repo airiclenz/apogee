@@ -1166,6 +1166,39 @@ func TestModelApprovalTerminalShowsCommandBlock(t *testing.T) {
 	}
 }
 
+// A gate whose cause the user can lift carries a Remedy, and the pane draws it as its own `Fix:`
+// line on the row directly under the Reason it answers: the diagnosis and the way out are two
+// facts, and a human who has just read that this host cannot confine wants the next line to say
+// what to do about it. The label is the TUI's — the engine ships the bare sentence — so this is the
+// Driver's assertion to make. Panes for the gates the autonomy rung itself asked for carry no
+// Remedy and draw no Fix line at all, which is most of them.
+func TestModelApprovalDrawsRemedyUnderReason(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	req := domain.ApprovalRequest{
+		Tool:      "terminal",
+		Reason:    "subprocess execution (confinement unavailable on this host)",
+		Remedy:    "/confine off runs commands unconfined this session (disposable machines only)",
+		Arguments: json.RawMessage(`{"command":"cd /ws/a && git status"}`),
+	}
+	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
+
+	rows := strings.Split(ansiPattern.ReplaceAllString(m.approvalPrompt(req), ""), "\n")
+	got := strings.Join(rows, "\n")
+	if !strings.Contains(got, "Fix: /confine off") {
+		t.Errorf("the remedy did not reach the pane:\n%s", got)
+	}
+	if reason, fix := paneRowIndex(t, rows, "Reason:"), paneRowIndex(t, rows, "Fix:"); fix != reason+1 {
+		t.Errorf("Fix: sits %d lines under Reason:, want it on the very next row:\n%s", fix-reason, got)
+	}
+
+	// The same call with nothing to fix: the line is absent, not blank.
+	req.Remedy = ""
+	bare := ansiPattern.ReplaceAllString(m.approvalPrompt(req), "")
+	if strings.Contains(bare, "Fix:") {
+		t.Errorf("a gate with no remedy drew a Fix line:\n%s", bare)
+	}
+}
+
 // Every argument is a `name:` label with the value's own lines under it — a single-line value, a
 // multi-line one reading as the lines it will actually run rather than as one `\n`-escaped string,
 // and every key of a multi-argument call, in the order the model wrote them. What is NOT on the

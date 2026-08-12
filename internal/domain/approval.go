@@ -34,6 +34,16 @@ type ApprovalRequest struct {
 	Tool      string
 	Arguments json.RawMessage
 	Reason    string // why approval is required (e.g. "write", "unconfinable MCP tool")
+	// Remedy is the OPTIONAL one-line route out of the condition that forced this approval — the
+	// answer to "and what do I do about it", for the gates whose cause is something the user can
+	// actually change. Today that is the confinement-unavailable pair: the Auto ladder cell where
+	// the host cannot fence a subprocess, and the runtime demote where the box failed to establish.
+	//
+	// It is EMPTY on every gate whose cause is the autonomy rung itself — an ask-before write has
+	// nothing to fix, only a mode to be in — so most prompts read exactly as they always have. Like
+	// Reason it is a bare sentence: any label a Driver paints in front of it is that Driver's
+	// presentation choice, not the engine's (ADR 0031, wire-silent).
+	Remedy string
 	// SubAgentTask is the delegated task of the SUB-AGENT whose call this is — the answer to
 	// "which agent is asking", which stops being obvious the moment several children run at
 	// once and their prompts queue one behind another (ADR 0039). It is the task text from the

@@ -231,6 +231,108 @@ func assertConfineFallback(t *testing.T, got resolution, approverPresent bool) {
 }
 
 // ----------------------------------------------------------------------------
+// The Gate remedy — only the two confinement-unavailable gates carry one
+// ----------------------------------------------------------------------------
+
+// TestResolve_GateRemedy pins which gates name a way out. A remedy answers "and what do I do
+// about it", so it belongs only where the condition is one the user can actually lift: the
+// Auto + confine=true + caps-insufficient ladder cell, and the runtime demote whose box failed
+// to establish. Every gate the autonomy rung itself asked for carries none — there is nothing
+// to fix, only a mode to be in — which is why this is a focused test rather than a column on
+// the ladder table: three non-empty cells out of ~40 rows.
+func TestResolve_GateRemedy(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+
+	sub := &subprocTool{name: "terminal"}
+	roSub := &subprocTool{name: "git_diff_range", readOnly: true}
+	tpn := externalTool{name: "3p-net", kind: domain.EffectNetwork}
+
+	cases := []struct {
+		name       string
+		tool       domain.Tool
+		mode       domain.Mode
+		confine    bool
+		fsConfine  bool
+		wantRemedy string
+	}{
+		// The host genuinely could not give the fence: /confine off is the way out.
+		{"subproc auto caps-insufficient", sub, domain.ModeAuto, true, false, confineUnavailableRemedy},
+		{"RO+subproc auto caps-insufficient", roSub, domain.ModeAuto, true, false, confineUnavailableRemedy},
+		// Mode-driven gates: the rung asked for the approval, so there is no condition to lift.
+		{"subproc ask-before", sub, domain.ModeAskBefore, true, false, ""},
+		{"3p-net auto-confine", tpn, domain.ModeAuto, true, true, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := resolve(resolutionInput{
+				mode:                   tc.mode,
+				call:                   domain.ToolCall{ID: "c1", Tool: tc.tool.Name()},
+				tool:                   tc.tool,
+				guard:                  proceed,
+				confineToWorkspace:     tc.confine,
+				fsConfineAvailable:     tc.fsConfine,
+				writeTargetInWorkspace: true,
+				approverPresent:        true,
+				box:                    domain.ConfinementBox{WorkspaceRoot: ws},
+			})
+			if got.kind != resolveGate {
+				t.Fatalf("kind = %s, want gate", got.kind)
+			}
+			if got.remedy != tc.wantRemedy {
+				t.Errorf("remedy = %q, want %q", got.remedy, tc.wantRemedy)
+			}
+		})
+	}
+}
+
+// TestResolve_ConfineFallbackRemedy pins the runtime-demote half of the pair: the demote gate
+// tells the same story as the caps-insufficient cell, in the same words, because the cause is
+// the same and only the moment of discovery differs. The no-Approver Refuse carries none — its
+// text goes to the MODEL, which has no terminal to type /confine into.
+func TestResolve_ConfineFallbackRemedy(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+
+	base := func(approverPresent bool) resolutionInput {
+		return resolutionInput{
+			mode:               domain.ModeAuto,
+			call:               domain.ToolCall{ID: "c1", Tool: "terminal"},
+			tool:               &subprocTool{name: "terminal"},
+			guard:              proceed,
+			confineToWorkspace: true,
+			fsConfineAvailable: true,
+			approverPresent:    approverPresent,
+			box:                domain.ConfinementBox{WorkspaceRoot: ws},
+		}
+	}
+
+	t.Run("demote gate carries the remedy", func(t *testing.T) {
+		t.Parallel()
+		got := resolve(base(true))
+		if got.fallback == nil || got.fallback.kind != resolveGate {
+			t.Fatalf("want a gate fallback, got %+v", got.fallback)
+		}
+		if got.fallback.remedy != confineUnavailableRemedy {
+			t.Errorf("fallback remedy = %q, want %q", got.fallback.remedy, confineUnavailableRemedy)
+		}
+	})
+
+	t.Run("no-Approver refuse carries none", func(t *testing.T) {
+		t.Parallel()
+		got := resolve(base(false))
+		if got.fallback == nil || got.fallback.kind != resolveRefuse {
+			t.Fatalf("want a refuse fallback, got %+v", got.fallback)
+		}
+		if got.fallback.remedy != "" {
+			t.Errorf("refuse fallback remedy = %q, want empty (a Refuse speaks to the model)", got.fallback.remedy)
+		}
+	})
+}
+
+// ----------------------------------------------------------------------------
 // Overlay: the tighten-only guardrail floor (Tier-1 refuse, Tier-2 force)
 // ----------------------------------------------------------------------------
 

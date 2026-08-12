@@ -54,6 +54,13 @@ const (
 	// confineDemoteRefuseReason is the runtime-demote fallback when no Approver is configured:
 	// the subprocess could not be confined and no human could authorise the unconfined run.
 	confineDemoteRefuseReason = "subprocess could not be confined and approval was not granted"
+	// confineUnavailableRemedy is the Approval remedy the two confinement-unavailable gates carry
+	// — the ladder cell that could not fence the subprocess and the runtime demote whose box
+	// failed to establish. Same cause, same way out, so both name it in the same words — mirroring
+	// the escape `/confine status` already offers (internal/tui/confine.go), condensed to one line
+	// because an Approval prompt has room for a sentence, not a paragraph. It is a bare sentence: the
+	// "Fix: " label a Driver paints in front of it is presentation, not engine (ADR 0031).
+	confineUnavailableRemedy = "/confine off runs commands unconfined this session (disposable machines only)"
 )
 
 // resolutionKind is the class of verdict resolve() computes for one tool call. It is the
@@ -102,6 +109,11 @@ type resolution struct {
 	// reason is the model-facing refusal text (Refuse) or the human-facing Approval prompt
 	// reason (Gate). Empty for Run / Confine / Delegate.
 	reason string
+
+	// remedy is the optional one-line route out of the condition that forced a Gate, carried to
+	// the Approval prompt beside the reason. Only the two confinement-unavailable gates set it —
+	// a gate the autonomy rung itself asked for has nothing to fix. Gate only.
+	remedy string
 
 	// force marks a Gate that must SKIP the allow-for-session cache (a Tier-2 force-approval
 	// or a runtime-demote fallback). Gate only.
@@ -410,7 +422,8 @@ func applyOverlays(in resolutionInput, leaf resolution) resolution {
 // consult a human, so it refuses rather than run unapproved (D5) — a Gate always means the
 // Approver is consulted. Otherwise it takes its allow-for-session cache key (gateCacheKey: the
 // tool name, or the MCP server grain) and, unless a forced reason was already set, its
-// blast-radius class reason.
+// blast-radius class reason and the remedy that goes with it (gateReason yields the pair, so a
+// gate can never end up blaming one condition and prescribing the fix for another).
 func finishGate(in resolutionInput, gate resolution) resolution {
 	if !in.approverPresent {
 		return resolution{
@@ -422,7 +435,7 @@ func finishGate(in resolutionInput, gate resolution) resolution {
 	}
 	gate.cacheKey = gateCacheKey(in.tool, in.call)
 	if gate.reason == "" {
-		gate.reason = gateReason(in)
+		gate.reason, gate.remedy = gateReason(in)
 	}
 	gate.auditDecision = in.guard.Audit
 	gate.auditReason = in.guard.Reason
@@ -470,7 +483,9 @@ func finishConfine(in resolutionInput, confine resolution) resolution {
 // confineFallback builds the one bounded runtime-demote contingency every Confine carries
 // (D4): if the box cannot be established at run time, the call demotes to a FORCED gate whose
 // allow-continuation is a re-run UNCONFINED; with no Approver it refuses instead. The
-// fallback never carries its own fallback — the demote is a single, bounded step.
+// fallback never carries its own fallback — the demote is a single, bounded step. The gate
+// carries the same remedy as the caps-insufficient ladder cell: the two prompts differ only in
+// WHEN the host's incapacity was discovered, and the way out of both is the same one command.
 func confineFallback(in resolutionInput) *resolution {
 	if !in.approverPresent {
 		return &resolution{
@@ -484,36 +499,44 @@ func confineFallback(in resolutionInput) *resolution {
 		kind:          resolveGate,
 		force:         true,
 		reason:        confineDemoteGateReason,
+		remedy:        confineUnavailableRemedy,
 		cacheKey:      in.call.Tool,
 		auditDecision: in.guard.Audit,
 		auditReason:   in.guard.Reason,
 	}
 }
 
-// gateReason maps a gated tool onto the human-facing why for the Approval prompt. It
-// reproduces the P3 approvalReason() mapping, plus the third-party-network reason the
-// vouched-for/unvouched network split added (ADR 0012 Amendment 2026-07-25). Six of the seven
-// classes are a bare statement of the reach being authorised, so the class alone decides them;
-// the subprocess class also reads the ladder CELL, because only one of its cells is a
-// confinement failure (see subprocessGateReason).
-func gateReason(in resolutionInput) string {
+// gateReason maps a gated tool onto the human-facing why for the Approval prompt, and the
+// optional remedy that goes with it. It reproduces the P3 approvalReason() mapping, plus the
+// third-party-network reason the vouched-for/unvouched network split added (ADR 0012 Amendment
+// 2026-07-25). Six of the seven classes are a bare statement of the reach being authorised, so
+// the class alone decides them; the subprocess class also reads the ladder CELL, because only
+// one of its cells is a confinement failure (see subprocessGateReason).
+//
+// The remedy is empty for every class but that one cell: a gate the autonomy rung itself asked
+// for has no condition to lift, and offering a fix for it would be an invitation to widen the
+// blast radius the user chose. Reason and remedy leave together so a prompt cannot name one
+// cause and prescribe another's fix.
+func gateReason(in resolutionInput) (reason, remedy string) {
 	switch classifyTool(in.tool) {
 	case classNetwork:
-		return "network reach"
+		return "network reach", ""
 	case classThirdPartyNetwork:
-		return "unfiltered network reach"
+		return "unfiltered network reach", ""
 	case classMCP:
-		return "unconfinable MCP tool"
+		return "unconfinable MCP tool", ""
 	case classSubprocess:
 		return subprocessGateReason(in)
 	case classWorkspaceWrite:
-		return "out-of-workspace write"
+		return "out-of-workspace write", ""
 	default:
-		return "write"
+		return "write", ""
 	}
 }
 
-// subprocessGateReason words a gated subprocess call by the ladder cell it was gated in. In
+// subprocessGateReason words a gated subprocess call by the ladder cell it was gated in, and
+// hands back the remedy for that cell in the same breath — ONE cell predicate, written once,
+// yielding both, so the diagnosis and the fix can never drift apart. In
 // Auto with confinement asked for, a gate means the backend could not give the fence ("confine
 // if you can, gate if you can't"), so the host's incapacity IS the reason and naming it is what
 // points the user at /confine. Every other rung gates the subprocess surface as a MODE
@@ -522,9 +545,9 @@ func gateReason(in resolutionInput) string {
 // opposite (dated 2026-08-11). The three-term test spells the cell out: confineToWorkspace ==
 // false in Auto cannot reach a subprocess gate today (resolveLadderAuto auto-runs it), so that
 // term documents the cell rather than carrying live logic.
-func subprocessGateReason(in resolutionInput) string {
+func subprocessGateReason(in resolutionInput) (reason, remedy string) {
 	if in.mode == domain.ModeAuto && in.confineToWorkspace && !in.fsConfineAvailable {
-		return "subprocess execution (confinement unavailable on this host)"
+		return "subprocess execution (confinement unavailable on this host)", confineUnavailableRemedy
 	}
-	return "subprocess execution"
+	return "subprocess execution", ""
 }

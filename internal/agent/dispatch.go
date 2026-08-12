@@ -478,7 +478,7 @@ func (a *Agent) executeRun(ctx context.Context, turn int, tool domain.Tool, call
 // Refuse — Resolution D5), so nothing runs unapproved here. A forced gate skips the
 // allow-for-session cache; a deny (or a nil Approver defensively) refuses the call.
 func (a *Agent) executeGate(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
-	allowed, outcome := a.approve(ctx, turn, call, verdict.force, verdict.cacheKey, verdict.reason)
+	allowed, outcome := a.approve(ctx, turn, call, verdict.force, verdict.cacheKey, verdict.reason, verdict.remedy)
 	if outcome == dispatchCancelled {
 		return domain.ToolResult{}, dispatchCancelled
 	}
@@ -527,7 +527,7 @@ func (a *Agent) executeConfineFallback(ctx context.Context, turn int, tool domai
 		return result, dispatchDone
 	}
 
-	allowed, outcome := a.approve(ctx, turn, call, fb.force, fb.cacheKey, fb.reason)
+	allowed, outcome := a.approve(ctx, turn, call, fb.force, fb.cacheKey, fb.reason, fb.remedy)
 	if outcome == dispatchCancelled {
 		return domain.ToolResult{}, dispatchCancelled
 	}
@@ -595,8 +595,10 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 // approve consults the Approver for a Gate verdict, returning whether the call may run. It
 // honours allow-for-session — remembered for the rest of the Session under the verdict's
 // cacheKey — unless force is set: a forced gate (a Tier-2 speed-bump or a runtime demote) is a
-// per-call event, not a pre-allowable convenience. reason feeds the Approval prompt. It reports
-// dispatchCancelled if ctx is cancelled while the human deliberates.
+// per-call event, not a pre-allowable convenience. reason and remedy feed the Approval prompt —
+// the why, and (only where the condition is one the user can lift) the way out; both come off
+// the verdict, so dispatch invents neither. It reports dispatchCancelled if ctx is cancelled
+// while the human deliberates.
 //
 // The memory those allows land in is the SESSION's, not this Agent's: it lives on the Approver
 // seam every agent in the tree shares (sessionAllows — internal/agent/approvalcache.go), so a
@@ -616,7 +618,7 @@ func (a *Agent) lookupTool(name string) (domain.Tool, bool) {
 // The resolver only produces a Gate when an Approver is configured (a gate with none is a
 // Refuse — Resolution D5), so the nil-Approver guard below is defensive: it refuses rather than
 // dereferencing a nil Approver, never running unapproved.
-func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, force bool, cacheKey, reason string) (bool, dispatchOutcome) {
+func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, force bool, cacheKey, reason, remedy string) (bool, dispatchOutcome) {
 	if !force && sessionAllows(a.cfg.Approver).Allowed(cacheKey) {
 		return true, dispatchDone
 	}
@@ -642,6 +644,7 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		Tool:         call.Tool,
 		Arguments:    call.Arguments,
 		Reason:       reason,
+		Remedy:       remedy,
 		SubAgentTask: a.task,
 		SubAgentName: a.name,
 		CacheKey:     sessionKey,

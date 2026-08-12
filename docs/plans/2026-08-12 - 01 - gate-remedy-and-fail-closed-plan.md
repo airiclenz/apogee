@@ -55,7 +55,14 @@
   - `resolutionInput.mode` being `effectiveMode()` for sub-agents — truthful since the wording
     fix; nothing to do.
 
-## 1. Remedy field: the confinement-unavailable gates name their fix
+## 1. Remedy field: the confinement-unavailable gates name their fix — ✅ DONE (2026-08-12)
+
+NOTES (2026-08-12): the TUI half landed as a NEW test (`TestModelApprovalDrawsRemedyUnderReason`)
+carrying both halves — Fix-under-Reason with a remedy, no Fix line without — rather than by editing
+an existing fixture in place: the nearest fixture belongs to
+`TestModelApprovalTerminalShowsCommandBlock`, which is about argument rendering, and mutating it
+would have changed what that test is about. Existing remedy-less fixtures still pin the absence
+implicitly; the new test pins it explicitly.
 
 **What:** plumb one optional remedy sentence from the resolver to the approval prompt.
 

@@ -144,6 +144,16 @@ point is a **minor** bump, not a breaking change.
   read-only mount makes. A skill with no folder behind it is unchanged: no line, and the block is
   exactly what it always was.
 
+- **The prompt that says confinement is unavailable now also says what to do about it.** When Auto
+  wants to fence a command and the host cannot, the approval pane has been truthfully blaming the
+  host — and leaving you to work out the way forward from a prompt that offers only allow or deny.
+  It now carries a second line under the reason, `Fix: /confine off runs commands unconfined this
+  session (disposable machines only)` — the same escape `/confine status` describes. Both prompts with
+  that cause carry it — the one raised up front, and the one raised when a box that looked
+  establishable failed at run time — because the fix is the same either way. Every other approval
+  is untouched: a prompt you got because of the mode you chose has nothing to fix, only a mode to
+  be in, so it reads exactly as it always has.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's
