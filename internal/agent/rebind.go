@@ -48,10 +48,15 @@ var (
 // questions resolved in cmd/apogee, so the engine neither reads config.yaml nor re-derives an
 // identity — it applies what it is handed, atomically.
 //
-// It is deliberately NOT the whole Config: mode, approvals, confinement, tools, the model
-// profile (`model-profile` is global, not per-model — see Config.Profile; SetProfile is its
-// separate, explicit door) and the conversation are session state that a model switch has no
-// business resetting.
+// It is deliberately NOT the whole Config: mode, approvals, confinement, tools and the
+// conversation are session state that a model switch has no business resetting.
+//
+// The model profile used to be on that list. This doc said "`model-profile` is global, not
+// per-model — see Config.Profile; SetProfile is its separate, explicit door", and ADR 0044
+// reverses exactly that clause: a tool-call format and a thinking-tag shape are facts OF the model
+// (its chat template), not a dialect the human chose, so the profile joins the per-model bindings
+// and a switch applies it atomically with them. SetProfile stays as the same-model door a config
+// edit takes; both run the one applyProfile.
 type RebindSpec struct {
 	// Model is the model id to send on the wire. Required — an empty spec is refused.
 	Model string
@@ -64,6 +69,13 @@ type RebindSpec struct {
 	// EnableMechanisms is the catalogued Mechanism set re-resolved for the new model. It replaces
 	// the current set outright; empty arms nothing (the default-off posture).
 	EnableMechanisms []domain.MechanismID
+	// Profile is the model profile re-resolved for the new model (ADR 0044): how it speaks the
+	// wire, on the two axes of tool-call format and inline thinking channel. It replaces the
+	// current profile outright, and the ZERO value is meaningful — native tool calls, no inline
+	// thinking — so a model that matches no user entry and no shipped shape parses exactly as an
+	// unprofiled session does. A profile the processing seam cannot translate fails the whole
+	// spec, leaving every binding standing.
+	Profile domain.ModelProfile
 }
 
 // Rebind swaps the Agent's per-model bindings at a quiescent boundary — the wire model, the
@@ -83,8 +95,11 @@ type RebindSpec struct {
 // cannot satisfy leaves every existing binding, and the whole conversation, exactly as it was.
 //
 // What stands: the conversation and Turn counters, the autonomy mode, session approvals, the
-// confinement flag, the resolved tools, and the model profile with its parse-seam collaborators —
-// the profile is global rather than per-model, so it moves only through SetProfile, never here.
+// confinement flag, and the resolved tools.
+// What MOVES with the model, since ADR 0044: the profile and its parse-seam collaborators. The
+// caller resolves it for the new model and hands it in on the spec; the same unexported
+// applyProfile SetProfile uses installs it, so the next response is read in the new model's
+// dialect rather than the departed model's.
 // What resets: the token estimator (its chars→token calibration described the OLD model) and the
 // compaction saturation latch (it was judged against the old window).
 func (a *Agent) Rebind(spec RebindSpec) error {
@@ -109,6 +124,9 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	next.SystemPrompt = spec.SystemPrompt
 	next.Context.MaxContextTokens = spec.MaxContextTokens
 	next.EnableMechanisms = spec.EnableMechanisms
+	// applyProfile below writes the live a.cfg.Profile; carrying the profile on the copy too is
+	// what keeps `a.cfg = next` from putting the departed model's profile straight back.
+	next.Profile = spec.Profile
 
 	registry := domain.NewMechanismRegistry()
 	if err := buildEnabledMechanisms(next, registry); err != nil {
@@ -121,6 +139,12 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 		return err
 	}
 	if err := registry.ValidateRequirements(); err != nil {
+		return err
+	}
+	// The last step that can fail: translating the new model's profile into its parse-seam
+	// collaborators. applyProfile is itself validate-then-commit, so an untranslatable profile
+	// leaves the parsers, cfg.Profile and every binding above exactly as they were.
+	if err := a.applyProfile(spec.Profile); err != nil {
 		return err
 	}
 
@@ -171,10 +195,10 @@ type UpstreamSpec struct {
 // this IS the synchronization for the loop's un-mutexed cfg reads.
 //
 // What stands: the conversation and Turn counters, the autonomy mode, session approvals, the
-// confinement flag, the resolved tools, and the model profile with its parse-seam collaborators —
-// none of them describe a server. The catalogued Mechanism registry also stands, still armed for
-// the model that just went away, until the follow-up Rebind rebuilds it for the new one; it is
-// unreachable meanwhile, since no request can open while nothing is bound.
+// confinement flag, and the resolved tools — none of them describe a server. The catalogued
+// Mechanism registry and the model profile also stand, both still describing the model that just
+// went away, until the follow-up Rebind re-resolves them for the new one; they are unreachable
+// meanwhile, since no request can open while nothing is bound.
 // What resets, with Rebind's own rationale: the token estimator (its chars→token calibration
 // described a model this session no longer speaks to) and the compaction saturation latch (it was
 // judged against a window that is no longer bound).

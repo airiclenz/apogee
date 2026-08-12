@@ -199,7 +199,23 @@ containing the old key fails startup with the migration message.
 
 Commit: `feat(config): model-profiles pattern map replaces the global model-profile block`
 
-## 5. Engine: RebindSpec carries the profile; one internal swap
+## 5. Engine: RebindSpec carries the profile; one internal swap — ✅ DONE (2026-08-12)
+
+NOTES (2026-08-12): four recorded calls. (a) Two doc comments beyond the two the item names were
+rewritten, both to satisfy the acceptance line "no remaining comment in internal/agent claims the
+profile is global": `agent.go`'s textParser/stripper field comment said SetProfile is "the one door
+for that, since Rebind deliberately leaves the profile alone", and `SwitchUpstream`'s "what stands"
+list kept the profile among the things that "describe no server" — the profile now stands there for
+the Mechanism registry's reason instead (stale for the departed model, unreachable, re-resolved by
+the follow-up Rebind), so it moved into that sentence. Item 4's NOTES explicitly left the
+`internal/agent` comments to this item. (b) `compact.go:15`'s "a model-profile knob" was left alone —
+it is a concept adjective, not the config key. (c) No CHANGELOG bullet: the swap is engine-internal
+and unreachable until item 6 fills `RebindSpec.Profile` at the composition root, so nothing is
+user-visible yet (the reading items 2 and 3 took; item 6's acceptance carries the bullet). (d) In
+`Rebind`, `applyProfile` is called just BEFORE the "Commit" line rather than inside it: it is the
+last step that can fail and is itself validate-then-commit, so the all-or-nothing property stands,
+and `next.Profile = spec.Profile` is what stops `a.cfg = next` putting the departed model's profile
+straight back.
 
 **What:** In `internal/agent`: add `Profile domain.ModelProfile` to `RebindSpec`
 (`rebind.go:55-67`) and apply it in Rebind through the SAME internal swap SetProfile

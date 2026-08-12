@@ -1,14 +1,16 @@
 package agent
 
 // Coverage for the full engine rebind (ADR 0024) and the deferred model binding it enables:
-// Agent.Rebind swaps the wire model, the system-prompt template, the context window and the
-// catalogued Mechanism set together at a quiescent boundary, refuses mid-Exchange, and leaves
-// every binding intact when the new set fails a gate. The white-box package placement is what
-// lets these inject a fake Responder through newAgent and read the resulting Budget directly.
+// Agent.Rebind swaps the wire model, the system-prompt template, the context window, the
+// catalogued Mechanism set and the model profile (ADR 0044) together at a quiescent boundary,
+// refuses mid-Exchange, and leaves every binding intact when the new spec fails a gate. The
+// white-box package placement is what lets these inject a fake Responder through newAgent and
+// read the resulting Budget and parse-seam collaborators directly.
 
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -313,4 +315,106 @@ func TestRebindRefusesUnbuildableSpecs(t *testing.T) {
 			t.Errorf("model = %q after the refusal, want it unchanged", a.cfg.Model)
 		}
 	})
+
+	// The profile is the LAST thing a spec can fail on, so it is the case that proves the new
+	// binding did not sneak a half-commit in behind the gates that passed.
+	t.Run("untranslatable profile", func(t *testing.T) {
+		live := domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
+		cfg := baseConfig(&recordingSink{})
+		cfg.Profile = live
+
+		a, err := newAgent(cfg, echoResponder{reply: "unreached"})
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		spec := RebindSpec{
+			Model:   "new-model",
+			Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingStyle("telepathy")}},
+		}
+
+		if err := a.Rebind(spec); err == nil {
+			t.Fatal("Rebind accepted a profile processing.ParserFor refuses")
+		}
+		if a.cfg.Model != "test-model" {
+			t.Errorf("model = %q after the refusal, want it unchanged", a.cfg.Model)
+		}
+		if a.cfg.Profile != live {
+			t.Errorf("cfg.Profile = %+v after the refusal, want the live one %+v", a.cfg.Profile, live)
+		}
+		if _, found := a.textParser.ParseToolCall(fencedReadFileCall); !found {
+			t.Error("the live parser stopped recovering fenced calls after a refused rebind")
+		}
+	})
+}
+
+// TestRebindSwapsTheModelProfile: a model switch carries the new model's dialect with it now
+// (ADR 0044, reversing RebindSpec's old exclusion) — the inline thinking channel the departed
+// model never spoke is lifted out of the NEXT response's visible content, and cfg.Profile moves
+// with the collaborators so the emit half follows.
+func TestRebindSwapsTheModelProfile(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	a := newProfileAgent(t, cfg, echoResponder{reply: "<mm:think>weighing it up</mm:think>The answer is 42."})
+
+	before := answerOnce(t, a, "think about it")
+	if !strings.Contains(before.Content, "weighing it up") {
+		t.Fatalf("the zero profile stripped an inline channel it does not know: %q", before.Content)
+	}
+
+	profile := domain.ModelProfile{Thinking: domain.ThinkingProfile{
+		Style: domain.ThinkingDelimited,
+		Start: "<mm:think>",
+		End:   "</mm:think>",
+	}}
+	if err := a.Rebind(RebindSpec{Model: "minimax-m3", Profile: profile}); err != nil {
+		t.Fatalf("Rebind: %v", err)
+	}
+
+	after := answerOnce(t, a, "think about it again")
+	if strings.Contains(after.Content, "weighing it up") {
+		t.Errorf("the rebound model's thinking channel survived in visible content: %q", after.Content)
+	}
+	if !strings.Contains(after.Content, "The answer is 42.") {
+		t.Errorf("the rebound stripper ate the visible answer: %q", after.Content)
+	}
+	assertReasoning(t, after, "weighing it up")
+	if a.cfg.Profile != profile {
+		t.Errorf("cfg.Profile = %+v after the rebind, want the spec's %+v", a.cfg.Profile, profile)
+	}
+}
+
+// TestRebindToZeroProfileResetsTheParsers: the zero Profile is a meaningful value — the native,
+// no-inline-thinking default a model that matches no entry gets — so rebinding to it must UNDO the
+// departed model's dialect rather than leave its stripper installed against a model that does not
+// speak it.
+func TestRebindToZeroProfileResetsTheParsers(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Profile = domain.ModelProfile{
+		ToolCallFormat: domain.FormatMarkdownFenced,
+		Thinking: domain.ThinkingProfile{
+			Style: domain.ThinkingDelimited,
+			Start: "<think>",
+			End:   "</think>",
+		},
+	}
+	a := newProfileAgent(t, cfg, echoResponder{reply: "<think>weighing it up</think>The answer is 42."})
+
+	before := answerOnce(t, a, "think about it")
+	if strings.Contains(before.Content, "weighing it up") {
+		t.Fatalf("the delimited profile did not strip its own channel: %q", before.Content)
+	}
+
+	if err := a.Rebind(RebindSpec{Model: "native-model"}); err != nil {
+		t.Fatalf("Rebind: %v", err)
+	}
+
+	after := answerOnce(t, a, "think about it again")
+	if !strings.Contains(after.Content, "<think>weighing it up</think>") {
+		t.Errorf("the departed model's stripper is still installed: %q", after.Content)
+	}
+	if _, found := a.textParser.ParseToolCall(fencedReadFileCall); found {
+		t.Error("the departed model's text-format tool-call parser is still installed")
+	}
+	if a.cfg.Profile != (domain.ModelProfile{}) {
+		t.Errorf("cfg.Profile = %+v after a zero-profile rebind, want the zero profile", a.cfg.Profile)
+	}
 }

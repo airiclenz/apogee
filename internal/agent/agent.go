@@ -53,10 +53,11 @@ type Agent struct {
 	// construction (processing.ParserFor): the text-format tool-call parser recovers a call from
 	// the visible content of a non-native model, and stripper lifts the inline thinking/harmony
 	// channel out of that content. A native, no-inline-thinking profile (the zero value) yields
-	// no-op parsers, so the content path is byte-identical to the pre-profile loop. SetProfile
-	// re-selects both from a new profile at an idle boundary (the settings surface's
-	// `model-profile` edit) — the one door for that, since Rebind deliberately leaves the profile
-	// alone; cfg.Profile moves with them, so the emit half (toolInstructions) follows.
+	// no-op parsers, so the content path is byte-identical to the pre-profile loop. applyProfile
+	// re-selects both from a new profile at an idle boundary, through either door onto it: a
+	// `model-profiles:` edit under a stable model (SetProfile) or an observed model change
+	// (Rebind, ADR 0044). cfg.Profile moves with them, so the emit half (toolInstructions)
+	// follows.
 	textParser processing.ToolCallParser
 	stripper   processing.ContentStripper
 
