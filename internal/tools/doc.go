@@ -98,8 +98,14 @@
 // an occupied destination unless the call passes overwrite (a silent clobber is the one mistake a
 // model cannot undo), both refuse a directory at either end (a recursive copy is a different tool
 // with a different blast radius), and both go through internal/security's os.Root-pinned
-// primitives — SafeCopyFile, SafeRename, SafeRemove — so the fence is decided at OPERATION time
-// at BOTH ends, never on a re-walked path string. A copy lands with the source's mode (a 0755
+// primitives — SafeCopyFileFrom for the copy, SafeRename plus SafeCopyFile and SafeRemove for the
+// move — so the fence is decided at OPERATION time at BOTH ends, never on a re-walked path string.
+// The two ends need not share a root: copy_file (2026-08-12) resolves its SOURCE over the READ
+// scope, so an ABSOLUTE path the workspace refuses may still match a configured read-only root (the
+// skills library) and be read through an os.Root pinned at THAT root, while its DESTINATION stays
+// pinned to the workspace — the only end either tool writes. move_file keeps BOTH ends
+// workspace-fenced: a move removes its source, which is a write, and extra roots are read-only.
+// A copy lands with the source's mode (a 0755
 // script copied 0644 is a broken copy) and is atomic at the destination name, like every other
 // write here; a move renames, falling back to copy-then-remove for a filesystem that cannot
 // rename across the two paths. They carry the workspaceScopedWriter marker, and it resolves their
