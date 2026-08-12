@@ -896,7 +896,8 @@ confinement (ADR 0012)
 rather than something the bare noun triggers, because it costs live model calls *and*
 writes. It runs a three-part capability battery — a native tool call, JSON/structured
 output, and a multi-step tool chain — then prints what it observed, an ordinal
-capability tier, and the model-profile knobs the findings suggest as paste-ready YAML
+capability tier, and the `model-profiles:` entry the findings suggest — keyed by the
+model it probed, and paste-ready as YAML
 (your `config.yaml` is never edited). It also records a **behavioral fingerprint**: the
 model keeps its advertised name — probing never renames it, so Validated-set entries,
 aliases and Library observations keyed on that name keep matching — but its identity

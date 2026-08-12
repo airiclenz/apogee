@@ -101,9 +101,13 @@ documents concurrent use), and `sessionHost.SetModel` uses the `mu` its `Save` a
 incompatibility and requirement gates *before* mutating anything, so a spec the new model cannot
 satisfy leaves every binding — and the whole conversation — exactly as it was. What stands across
 a rebind: the conversation and Turn counters, the autonomy mode, session approvals, the
-confinement flag, the resolved tools, and the **model profile** (`model-profile` is global, not
-per-model). What resets: the token estimator (its chars→token calibration described the old model)
+confinement flag, the resolved tools, and ~~the **model profile** (`model-profile` is global, not
+per-model)~~. What resets: the token estimator (its chars→token calibration described the old model)
 and the compaction saturation latch (it was judged against the old window).
+*(The struck clause is **superseded 2026-08-11 by
+[ADR 0044](0044-model-profiles-are-per-model-and-mostly-shipped.md)**: the profile is resolved per
+model, so it no longer stands across a rebind — it rides one, as `RebindSpec.Profile`, applied
+atomically with the other per-model bindings. Everything else this paragraph lists is unchanged.)*
 
 **5. Two seams, split by job: the heartbeat OBSERVES, the rebind APPLIES, and the binary owns
 everything in between.** `tui.Options` gains `Heartbeat func(context.Context) heartbeat.Beat` and

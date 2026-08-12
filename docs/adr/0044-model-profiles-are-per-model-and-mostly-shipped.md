@@ -127,6 +127,13 @@ so a bench Driver drives the same doors directly.
   separate, explicit door)" no longer describes the system: the profile joins Model,
   SystemPrompt, MaxContextTokens and EnableMechanisms as a per-model binding. `SetProfile`'s
   "leaves it alone when the Upstream's loaded model changes" goes with it.
+- **Two clauses of older records are superseded — clauses, not whole ADRs.**
+  [ADR 0024](0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md) §4's
+  "what stands across a rebind" list, where the model profile stands with "`model-profile` is
+  global, not per-model", and
+  [ADR 0028](0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)'s
+  Consequences note that the switchable profile abstraction "stays deliberately global". Both are
+  struck in place and point here; everything else in those two records stands.
 - **`SetProfile` narrows to one job:** applying a profile to the CURRENT model when the config
   changed under a stable model. It keeps its mid-Exchange refusal; Rebind stays atomic and
   idle-only.

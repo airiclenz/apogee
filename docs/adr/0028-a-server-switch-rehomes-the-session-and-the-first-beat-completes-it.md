@@ -224,8 +224,10 @@ where `rebindNote`'s silent-when-nothing-moved contract is about the observation
 - **`TODO.md`'s "[P1] Server / model switching" loses two of its three halves.** The picker UI and
   the endpoint switch close here; what remains of the entry is **local llama.cpp start/stop** (to be
   rebuilt over `heartbeat.Beat`, as ADR 0024 already recorded) and the switchable **model-profile**
-  abstraction, which stays deliberately global — `model-profile` is not per-model, and neither a
-  rebind nor a switch touches it.
+  abstraction, ~~which stays deliberately global — `model-profile` is not per-model, and neither a
+  rebind nor a switch touches it~~ *(superseded 2026-08-11 by
+  [ADR 0044](0044-model-profiles-are-per-model-and-mostly-shipped.md): the profile is resolved per
+  model from the `model-profiles:` pattern map and rides every rebind)*.
 - **A switch costs one Interval of "connecting…" at worst and usually none** — the fold returns the
   first beat as a command rather than waiting for the next tick. Against a dead new server the same
   fold means offline is reported immediately, which is the cold-start rule doing its job.

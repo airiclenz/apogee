@@ -23,26 +23,24 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
 **Remaining:**
 
 - **[P1] Server / model switching** — **every switch SHIPPED (2026-07-28 the two user-facing ones,
-  2026-07-29 the local-server half); the profile half is all that remains.** The shipped bodies have
+  2026-07-29 the local-server half, 2026-08-12 the profile half); only two request-side knobs
+  remain.** The shipped bodies have
   left this file for their authoritative records — see the ledger at the end of this entry
   ([ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)
   for `/model` + `/server`,
   [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md)
-  for the launcher). **Remaining:**
-  - The switchable **model-profile** abstraction (sampling params, context-budget %,
-    thinking/tool-call format — reuse `internal/processing`), still unstarted and still
-    deliberately **global**: `model-profile` is not per-model, and neither a rebind nor a server
-    switch touches it. Distinct from the launcher's **Launch profiles**, which are **launch-side**
-    (model file, server flags); `model-profile` is **request-side** — the grill it needs must
-    keep the two "profile" namespaces from colliding in the UX. Note the producer already exists
-    with no switchable consumer: `apogee probe model` prints a suggested `model-profile:` block as
-    paste-ready YAML ([ADR 0021](docs/adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md)),
-    and `modelProfileConfig` (`internal/config/config.go`) reads one static block today — `tool-call-format`,
-    `tool-call-pattern`, `thinking`, and nothing else. Two ADRs already lean on the layer this item
-    would build: [ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md)
-    pins "global, not per-model" into the rebind contract, and
-    [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md) §6 defers the
-    user-after-tool wire risk to it by name.
+  for the launcher,
+  [ADR 0044](docs/adr/0044-model-profiles-are-per-model-and-mostly-shipped.md) for the profile).
+  **Remaining:**
+  - The **request-side knobs the Model profile still does not carry** — sampling params and the
+    context-budget %. The profile itself is per-model and switchable now (a `model-profiles:`
+    pattern map resolved user-entry ▸ shipped table ▸ zero, riding every rebind — ADR 0044), but
+    its two axes are wire dialect only: tool-call format and thinking channel. Distinct from the
+    launcher's **Launch profiles**, which are **launch-side** (model file, server flags); these
+    knobs are **request-side** — the grill they need must keep the two "profile" namespaces from
+    colliding in the UX.
+    [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md) §6 still
+    defers the user-after-tool wire risk to this layer by name.
 
 - **[P2] Inspector / raw-protocol view** — apogee-code's "Show Code"/Inspector (advanced mode)
   shows wire-level request/response JSON. apogee has only a hidden, non-toggleable debug field in
@@ -127,6 +125,14 @@ disposition table but no user-facing override. See *Configurable tool × mode se
   2026-08-05,
   [ADR 0036](docs/adr/0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-the-startup-choice.md) +
   `docs/plans/archived/2026-08-05 - 05 - servers-single-definition-plan.md`.
+- **Per-model Model profiles — the profile half** of the *Server / model switching* item above: the
+  global `model-profile:` block retired (a config still spelling it is refused at startup) for a
+  file-only `model-profiles:` pattern map, a shipped shape table that auto-applies by model name
+  and announces itself, resolution layered user-entry ▸ shipped ▸ zero in the composition root, and
+  the resolved profile carried on `RebindSpec` so a model switch swaps the parser atomically with
+  the other per-model bindings — 2026-08-12,
+  [ADR 0044](docs/adr/0044-model-profiles-are-per-model-and-mostly-shipped.md). **Standing:** the
+  table grows one entry per *sighting*, never per guess.
 
 ---
 
