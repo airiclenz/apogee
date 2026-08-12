@@ -91,6 +91,16 @@ point is a **minor** bump, not a breaking change.
   session record, so a resumed session still shows the model the run really used rather than the one
   it happens to reopen on.
 
+- **The read-only tools gained a seam for extra read-only roots.** A path a read tool is handed is
+  now resolvable against the workspace root *plus* any additional read-only roots the host mounts —
+  the groundwork for letting a model read the bundled files of a skill it has attached. Roots are
+  tried workspace-first, each accepted path is pinned to the root that accepted it, and every root
+  keeps its own fence: a symlink inside an extra root that points out of it is refused exactly as one
+  inside the workspace is. Extra roots answer to absolute paths only, so no relative name can mean two
+  files, and they are read live, so a change on the host's side is honoured by the next read. Nothing
+  is mounted yet — with no extra root configured the tools resolve, refuse and word their refusals
+  exactly as before — and the seam is read-only by construction: no write tool can take it.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's

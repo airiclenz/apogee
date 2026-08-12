@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/airiclenz/apogee/internal/security"
 )
@@ -148,4 +149,134 @@ func escapeOrMessage(err error, absent string) string {
 		return err.Error()
 	}
 	return absent
+}
+
+// readScope resolves the path argument of a READ-ONLY tool over the workspace root plus any
+// extra read-only roots the host configured. It is a generic seam: a skills library is the
+// first thing mounted through it, but nothing here knows that (ADR 0031 — engine seams stay
+// driver-agnostic). Roots are tried in order, workspace first, and every method returns the
+// MATCHED root beside its result so the caller pins each later fenced operation to the root
+// the path was accepted under — a listing walk that began in an extra root must not measure
+// its children against the workspace.
+//
+// Two properties are deliberate. Extra roots are reachable by ABSOLUTE path only: a relative
+// argument keeps resolving against the workspace root alone, so no one name can mean two
+// files. And the zero value — extra nil, or a func returning nothing — behaves exactly as the
+// single-root helpers it wraps: the fallback never runs, and a refusal carries the workspace's
+// own unchanged message.
+//
+// The roots are read LIVE, once per call, so a mid-session change on the host's side is
+// honoured by the next read with no re-wiring.
+//
+// READ paths only. No write helper takes a readScope and none may: the write tools stay
+// workspace-fenced through the workspaceScopedWriter discipline (ADR 0012 D1).
+type readScope struct {
+	// root is the workspace root — always tried first, and the only root a relative path is
+	// ever resolved against.
+	root string
+	// extra reports the extra read-only roots, evaluated once per call. nil means
+	// workspace-only.
+	extra func() []string
+}
+
+// extraRoots evaluates the live extra-root func for ONE call, answering nil when there is
+// nothing to fall back on: no func, or a relative input, which extra roots never serve.
+func (s readScope) extraRoots(input string) []string {
+	if s.extra == nil || !filepath.IsAbs(input) {
+		return nil
+	}
+	return s.extra()
+}
+
+// resolve resolves input to a real path within the first root that contains it and returns
+// that root beside the resolved path. When no root accepts it, the error is the WORKSPACE's
+// ErrPathEscape, so the model reads the one uniform "outside the workspace" refusal whatever
+// the extra roots happen to be.
+func (s readScope) resolve(input string) (root, resolved string, err error) {
+	resolved, err = resolveInRoot(input, s.root)
+	if err == nil {
+		return s.root, resolved, nil
+	}
+	if extraRoot, extraResolved, ok := matchRoot(input, s.extraRoots(input)); ok {
+		return extraRoot, extraResolved, nil
+	}
+	return "", "", err
+}
+
+// open opens input for reading through the fence of the first root that contains it and
+// returns that root beside the handle. A containment refusal falls through to the next root;
+// a genuine I/O failure under a root that DOES contain the path is returned as it is, so a
+// missing file is never disguised as an escape (nor an escape as a missing file).
+func (s readScope) open(input string) (*os.File, string, error) {
+	f, err := safeOpen(input, s.root)
+	if err == nil {
+		return f, s.root, nil
+	}
+	if !errors.Is(err, ErrPathEscape) {
+		return nil, "", err
+	}
+	extraRoot, _, ok := matchRoot(input, s.extraRoots(input))
+	if !ok {
+		return nil, "", err
+	}
+	f, extraErr := safeOpen(input, extraRoot)
+	if extraErr != nil {
+		return nil, "", extraErr
+	}
+	return f, extraRoot, nil
+}
+
+// readBounded reads input through the one-handle bounded read, pinned to the root that
+// contains it. It is readWorkspaceFileBounded's contract verbatim — the same cap, the same
+// growth backstop, the same model-facing failure message — with the root chosen rather than
+// assumed.
+func (s readScope) readBounded(input string) ([]byte, string) {
+	return readWorkspaceFileBounded(input, s.readRoot(input))
+}
+
+// readRoot answers the root a fenced read of input must be pinned to: the workspace when it
+// contains input (always, for a relative path), else the first extra root that does. When NO
+// root accepts it the answer is still the workspace root — the read then fails THERE, so the
+// refusal the caller renders is the workspace's own, exactly as it is without extra roots.
+func (s readScope) readRoot(input string) string {
+	roots := s.extraRoots(input)
+	if len(roots) == 0 {
+		return s.root
+	}
+	if _, err := resolveInRoot(input, s.root); err == nil {
+		return s.root
+	}
+	if extraRoot, _, ok := matchRoot(input, roots); ok {
+		return extraRoot
+	}
+	return s.root
+}
+
+// matchRoot reports the first root in roots that is usable AND contains input, with the path
+// input resolves to there. A root that is absent or is not a directory — the skills library on
+// a box where nothing has created it yet, the creation-deferred convention — is skipped: a
+// per-root refusal, never an error of its own.
+func matchRoot(input string, roots []string) (root, resolved string, ok bool) {
+	for _, candidate := range roots {
+		if candidate == "" || !rootUsable(candidate) {
+			continue
+		}
+		candidateResolved, err := resolveInRoot(input, candidate)
+		if err != nil {
+			continue
+		}
+		return candidate, candidateResolved, true
+	}
+	return "", "", false
+}
+
+// rootUsable reports whether root can anchor a fenced read: it exists and opens as a
+// directory — the very os.Root the read that follows is pinned to.
+func rootUsable(root string) bool {
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return false
+	}
+	_ = r.Close()
+	return true
 }

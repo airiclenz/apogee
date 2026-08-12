@@ -46,7 +46,12 @@ Every item: add a line under `[Unreleased]` in `CHANGELOG.md` describing the cha
 run the build sanity check before reporting. Any authorized deviation from item text must
 land as a dated NOTES line under the item.
 
-## 1. Multi-root read resolution helper in internal/tools
+## 1. Multi-root read resolution helper in internal/tools — ✅ DONE (2026-08-12)
+
+NOTES (2026-08-12): the "a relative path never resolves against an extra root" test asserts
+the workspace OUTCOME rather than an error — path-safety resolves a relative path against the
+workspace root whether or not the workspace holds that name, so the extra root's file of the
+same name is proven unreachable by the read reporting `file not found` instead of serving it.
 
 **What:** In `internal/tools/path_safety.go`, add an unexported helper type (suggested
 name `readScope`) holding the workspace root and `extra func() []string` (nil ⇒

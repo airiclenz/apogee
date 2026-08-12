@@ -200,7 +200,10 @@
 // two assemblers, NewDefaultRegistry and NewDefaultRegistryWithHost, that turn the built-ins
 // into a domain.ToolRegistry. path_safety.go is the thin alias layer onto internal/security's
 // one symlink-aware boundary (ResolveInRoot, ErrPathEscape), so every tool and test here keeps
-// calling the same names while the rule lives in one place. workspace_scoped.go is the
+// calling the same names while the rule lives in one place — plus readScope, the READ-only
+// multi-root resolver that tries the workspace first and then any extra read-only roots the
+// host mounts, returning the matched root so a caller pins every later fenced operation to it.
+// workspace_scoped.go is the
 // unexported workspaceScopedWriter marker and the write-target resolvers that say WHICH
 // argument a given writer lands on.
 //
