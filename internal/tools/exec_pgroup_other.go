@@ -26,6 +26,8 @@ import (
 //   - cmd.Cancel terminates the JOB — not the leader — when the run's context is cancelled or
 //     times out, which is the negative-PID kill's counterpart. If the job never took the
 //     process it falls back to killing the leader alone (planTreeKill's degraded rung).
+//   - runWithTeardown reaps the job the same way once a run that was NOT cancelled has been
+//     waited on, so a one-shot call leaves no descendants on any exit path (processTeardown.reap).
 //   - cmd.WaitDelay bounds how long Wait blocks draining I/O after the kill, so a descendant
 //     holding a pipe open cannot wedge the tool forever — identical to POSIX.
 //
@@ -54,8 +56,10 @@ func setProcessGroupTeardown(cmd *exec.Cmd) processTeardown {
 }
 
 // processWaitDelay bounds the post-exit drain so a child holding a pipe open cannot wedge
-// Wait indefinitely after the process has been signalled.
-const processWaitDelay = 5 * time.Second
+// Wait indefinitely after the process has been signalled. It is a var rather than a const so a
+// test can shrink it and exercise the drain-wedged path in milliseconds; production never
+// reassigns it.
+var processWaitDelay = 5 * time.Second
 
 // jobTeardown is the Windows processTeardown: the Job Object holding one run's process tree.
 // cmd.Cancel runs on os/exec's watchdog goroutine while contain/release run on the goroutine
@@ -148,14 +152,22 @@ func (t *jobTeardown) cancel(cmd *exec.Cmd) error {
 	return nil
 }
 
-// release drops the job handle when the run is over — after Wait on the normal path, and also
-// on the confine-refusal and Start-failure paths, which never reach Wait but own the handle
-// from the moment setProcessGroupTeardown created it. The KILL_ON_JOB_CLOSE limit is cleared
-// first: on a clean completion a process the command deliberately left running must outlive
-// the call, exactly as a backgrounded process outlives its POSIX process-group leader. The
-// limit exists for the crash path, and the cancel path has already terminated the job
-// explicitly, so clearing it here costs nothing and keeps the two backends' observable
-// behaviour the same.
+// reap terminates the job once a run that was never cancelled has been waited on, so a process
+// the command detached — which the job holds anyway, breakaway being denied — does not outlive
+// the one-shot call (processTeardown.reap). It is cancel's clean-exit twin and goes through the
+// same plan: the leader is already gone by now, so the degraded rung's Kill is a no-op and only
+// the job termination can still reach anything.
+func (t *jobTeardown) reap(cmd *exec.Cmd) {
+	_ = t.cancel(cmd)
+}
+
+// release drops the job handle when the run is over — after Wait and the reap on the normal
+// path, and also on the confine-refusal and Start-failure paths, which never reach Wait but own
+// the handle from the moment setProcessGroupTeardown created it. The KILL_ON_JOB_CLOSE limit is
+// cleared first so that closing the handle is never itself a teardown: every path that started
+// a process has already terminated the job explicitly (cancel, or reap on a clean exit), and the
+// paths that started none hold an empty job. The limit exists for the crash path — apogee dying
+// mid-run with nobody left to make either call.
 func (t *jobTeardown) release() {
 	t.mu.Lock()
 	defer t.mu.Unlock()

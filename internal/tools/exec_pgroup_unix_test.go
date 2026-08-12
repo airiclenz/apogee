@@ -9,3 +9,10 @@ import "syscall"
 func syscallKill0(pid int) error {
 	return syscall.Kill(pid, 0)
 }
+
+// killPID terminates pid, best-effort — the POSIX counterpart of the Windows helper of the same
+// name. It exists so a test that might leave a backgrounded process behind cannot leak it into
+// the machine, whichever way its assertion goes.
+func killPID(pid int) {
+	_ = syscall.Kill(pid, syscall.SIGKILL)
+}

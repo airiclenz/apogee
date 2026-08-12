@@ -365,6 +365,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A command that backgrounds a process no longer leaves it running after the call, and a run
+  whose descendants wedged the output pipe no longer reports success.** The process-group teardown
+  was wired onto `cmd.Cancel` alone, which fires only when the run's context is cancelled or its
+  timeout expires — so a command that exited cleanly after backgrounding something left that
+  descendant alive, and the tool rendered the call as a green tick. That is a persistence primitive
+  handed to whoever authored the bytes the model is acting on, and it contradicted the execution
+  tools' own documented contract: one-shot, a fresh process per call, no persistent shell
+  (ADR 0008). The teardown now also runs after a normal `Wait`, on POSIX as a negative-PID kill of
+  the process group and on Windows as a termination of the Job Object that already held the tree,
+  so every exit path leaves no descendants rather than only the cancelled one. The second half is
+  what the call reported while this was open: when something still holds the output pipe after the
+  process exits, `Wait` is cut off at the five-second drain limit and returns `exec.ErrWaitDelay`,
+  which is not an exit error — so the exit code fell through to the leader's own status, 0, and the
+  truncated output read as a clean success. A wedged drain is now surfaced on the result, the exit
+  code is no longer flattened to 0, and the tool result says in words that something the command
+  left running still held the pipe and was killed. **Deliberate cost:** a `terminal` call that
+  intentionally backgrounds a long-running server now has it reaped when the call returns. That was
+  already the documented contract, but it is behaviour someone may be relying on by accident.
+
 - **A bidi override in a tool argument can no longer reorder the approval pane.** A right-to-left
   override reverses the glyphs of the row it sits in without changing a byte the executor reads, so
   the pane could show one command while the tool ran another — the same "read one thing, run

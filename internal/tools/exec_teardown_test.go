@@ -55,24 +55,27 @@ func TestPlanTreeKill(t *testing.T) {
 	}
 }
 
-// TestNoTeardownIsInert pins the POSIX implementation: the process group needs no post-start
-// step and owns no handle, so both hooks must be safe to call — including with a cmd that
-// never started.
+// TestNoTeardownIsInert pins the inert base POSIX embeds: the process group needs no post-start
+// step and owns no handle, so every hook it keeps must be safe to call — including with a cmd
+// that never started.
 func TestNoTeardownIsInert(t *testing.T) {
 	t.Parallel()
 
 	var td processTeardown = noTeardown{}
 	td.contain(nil)
+	td.reap(nil)
 	td.release()
 	td.release()
 }
 
 // fakeTeardown is a processTeardown that records its own lifecycle and nothing else, so the
 // ownership rule — runSubprocess releases the teardown on EVERY exit path, including the two
-// that never reach Wait — is provable on every OS instead of only where a Job Object exists.
+// that never reach Wait, and reaps the tree on the one that completes — is provable on every OS
+// instead of only where a Job Object exists.
 type fakeTeardown struct {
 	mu        sync.Mutex
 	contained int
+	reaped    int
 	released  int
 }
 
@@ -82,16 +85,22 @@ func (t *fakeTeardown) contain(*exec.Cmd) {
 	t.contained++
 }
 
+func (t *fakeTeardown) reap(*exec.Cmd) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.reaped++
+}
+
 func (t *fakeTeardown) release() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.released++
 }
 
-func (t *fakeTeardown) counts() (contained, released int) {
+func (t *fakeTeardown) counts() (contained, reaped, released int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.contained, t.released
+	return t.contained, t.reaped, t.released
 }
 
 // installFakeTeardown substitutes the platform teardown constructor with one handing out td
@@ -109,7 +118,8 @@ func installFakeTeardown(t *testing.T) *fakeTeardown {
 // TestRunSubprocessReleasesTheTeardownOnEveryExitPath pins the handle-ownership rule: the
 // teardown is built before the command is confined and before it is started, so the two routine
 // early exits — a Confine refusal and a Start failure — must release it just as the normal path
-// does. Exactly once each: the count also proves the release is in one place, not two.
+// does. Exactly once each: the count also proves the release is in one place, not two. The reap
+// counts ride along, pinning the other half — a tree is reaped only where one can exist.
 func TestRunSubprocessReleasesTheTeardownOnEveryExitPath(t *testing.T) {
 	t.Run("a confine refusal releases the handle it never used", func(t *testing.T) {
 		td := installFakeTeardown(t)
@@ -122,9 +132,9 @@ func TestRunSubprocessReleasesTheTeardownOnEveryExitPath(t *testing.T) {
 		if !errors.Is(err, domain.ErrConfinementUnavailable) {
 			t.Fatalf("runSubprocess err = %v, want ErrConfinementUnavailable", err)
 		}
-		contained, released := td.counts()
-		if contained != 0 {
-			t.Errorf("contain called %d times, want 0 — the process never started", contained)
+		contained, reaped, released := td.counts()
+		if contained != 0 || reaped != 0 {
+			t.Errorf("contain called %d times and reap %d, want 0 and 0 — the process never started", contained, reaped)
 		}
 		if released != 1 {
 			t.Errorf("release called %d times, want 1 — the confine-failure path must not leak the handle", released)
@@ -142,9 +152,9 @@ func TestRunSubprocessReleasesTheTeardownOnEveryExitPath(t *testing.T) {
 		if res.exitCode != -1 {
 			t.Errorf("exitCode = %d, want -1 for a process that never started", res.exitCode)
 		}
-		contained, released := td.counts()
-		if contained != 0 {
-			t.Errorf("contain called %d times, want 0 — the process never started", contained)
+		contained, reaped, released := td.counts()
+		if contained != 0 || reaped != 0 {
+			t.Errorf("contain called %d times and reap %d, want 0 and 0 — the process never started", contained, reaped)
 		}
 		if released != 1 {
 			t.Errorf("release called %d times, want 1 — the start-failure path must not leak the handle", released)
@@ -163,9 +173,12 @@ func TestRunSubprocessReleasesTheTeardownOnEveryExitPath(t *testing.T) {
 		if res.exitCode != 0 {
 			t.Fatalf("exitCode = %d, want 0 (output %q)", res.exitCode, res.combinedOutput)
 		}
-		contained, released := td.counts()
+		contained, reaped, released := td.counts()
 		if contained != 1 {
 			t.Errorf("contain called %d times, want 1", contained)
+		}
+		if reaped != 1 {
+			t.Errorf("reap called %d times, want 1 — a completed run must reap its tree, not only a cancelled one", reaped)
 		}
 		if released != 1 {
 			t.Errorf("release called %d times, want 1 — two releases would mean two owners", released)

@@ -142,6 +142,12 @@ func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult
 	if res.timedOut {
 		b.WriteString("command timed out\n")
 	}
+	if res.drainWedged {
+		// The exit code alone cannot say this: the leader may have exited 0 and left the
+		// pipe held by something else, which runSubprocess reports as -1 rather than as a
+		// success. Name the reason so the reader is not left guessing at the code.
+		b.WriteString("output was cut short: something the command left running still held the pipe and was killed\n")
+	}
 	b.WriteString(res.combinedOutput)
 	if res.exitCode != 0 {
 		fmt.Fprintf(&b, "\n[exit code %d]", res.exitCode)

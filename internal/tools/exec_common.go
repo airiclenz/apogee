@@ -113,6 +113,11 @@ type subprocessResult struct {
 	exitCode int
 	// timedOut reports that the run was cut short by its own timeout (vs the model's ctx).
 	timedOut bool
+	// drainWedged reports that the process had exited but something it left running was still
+	// holding the output pipe when processWaitDelay expired, so exec cut the drain short and
+	// killed what was left. The captured output may be missing its tail, and the run is not a
+	// success however cleanly the leader itself exited.
+	drainWedged bool
 }
 
 // runSubprocess runs spec as a one-shot subprocess (ADR 0008 — fresh process per call, no
@@ -209,12 +214,22 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 	res := subprocessResult{combinedOutput: out.String()}
 	res.timedOut = runCtx.Err() == context.DeadlineExceeded
 	res.exitCode = exitCodeOf(cmd, runErr)
+	// exec.ErrWaitDelay is not an *exec.ExitError, so exitCodeOf falls through to the leader's
+	// own status — 0 whenever the leader exited cleanly and only its descendants wedged the
+	// drain. Reporting that as a success hides exactly the case the operator needs to see:
+	// something was still holding the pipe and had to be killed.
+	res.drainWedged = errors.Is(runErr, exec.ErrWaitDelay)
+	if res.drainWedged && res.exitCode == 0 {
+		res.exitCode = -1
+	}
 	return res, nil
 }
 
 // exitCodeOf extracts the process exit code from a finished cmd: the child's code on a clean
 // exit (zero or non-zero), and -1 when the process was killed by a signal (a timeout or the
-// teardown kill), which exec reports without an ExitCode.
+// teardown kill), which exec reports without an ExitCode. A wedged drain (exec.ErrWaitDelay) is
+// deliberately NOT decided here — it is not a process status at all, so runSubprocess reads it
+// off the run error itself.
 func exitCodeOf(cmd *exec.Cmd, runErr error) int {
 	if runErr == nil {
 		return 0

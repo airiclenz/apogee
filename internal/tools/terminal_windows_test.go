@@ -158,12 +158,13 @@ func TestTerminal_WindowsCancelKillsTheProcessTree(t *testing.T) {
 	}
 }
 
-// TestTerminal_WindowsCleanRunLeavesADetachedProcessAlive pins the other half of the job
-// object's contract: the teardown fires on CANCELLATION, not on completion. A command that
-// deliberately leaves a process running behind it must keep it, exactly as a backgrounded
-// process outlives its POSIX process-group leader — which is why release() clears
-// KILL_ON_JOB_CLOSE before closing the handle instead of letting the kernel reap the job.
-func TestTerminal_WindowsCleanRunLeavesADetachedProcessAlive(t *testing.T) {
+// TestTerminal_WindowsCleanRunReapsADetachedProcess pins the other half of the job object's
+// contract: the teardown fires on COMPLETION as well as on cancellation. A command that detaches
+// a process and exits cleanly must not leave it running past the call — the tool is one-shot
+// (ADR 0008), and a survivor is a persistence primitive reported as a success. The job holds a
+// detached child anyway (breakaway is denied), so the post-Wait reap terminates it, and this is
+// the Windows twin of TestRunSubprocessReapsTheProcessGroupOnACleanExit.
+func TestTerminal_WindowsCleanRunReapsADetachedProcess(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -173,11 +174,12 @@ func TestTerminal_WindowsCleanRunLeavesADetachedProcessAlive(t *testing.T) {
 	// The script starts a detached process and then EXITS — the whole command completes
 	// cleanly in well under a second, so nothing cancels the run.
 	//
-	// Two details keep the surviving process from wrecking t.TempDir's RemoveAll, which runs
-	// while it is still alive. It is a single ping.exe rather than a cmd.exe wrapping one, so
-	// the recorded PID *is* the whole detached tree and the cleanup below reaps all of it; and
-	// it is started with its working directory outside the temp dir, because a process's cwd
-	// is an open directory handle and Windows refuses to delete a directory anyone holds.
+	// Two details keep a process that outlives the call (the failure this test reports) from
+	// wrecking t.TempDir's RemoveAll. It is a single ping.exe rather than a cmd.exe wrapping
+	// one, so the recorded PID *is* the whole detached tree and the cleanup below reaps all of
+	// it; and it is started with its working directory outside the temp dir, because a
+	// process's cwd is an open directory handle and Windows refuses to delete a directory
+	// anyone holds.
 	script := "$p = Start-Process -FilePath ping.exe -ArgumentList '-n','60','127.0.0.1'" +
 		" -WorkingDirectory $env:SystemRoot -PassThru -WindowStyle Hidden\r\n" +
 		"Set-Content -LiteralPath '" + pidFile + "' -Value $p.Id\r\n"
@@ -199,8 +201,8 @@ func TestTerminal_WindowsCleanRunLeavesADetachedProcessAlive(t *testing.T) {
 	// Whatever the assertion says, this test must not leak a process into the machine.
 	t.Cleanup(func() { killPID(detachedPID) })
 
-	if syscallKill0(detachedPID) != nil {
-		t.Errorf("detached PID %d died with the completed command; the job object reaped a process the command meant to leave running", detachedPID)
+	if pidAlive(detachedPID, 3*time.Second) {
+		t.Errorf("detached PID %d survived the completed command; the job was reaped only on cancellation", detachedPID)
 	}
 }
 
