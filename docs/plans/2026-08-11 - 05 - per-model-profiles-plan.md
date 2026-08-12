@@ -65,7 +65,19 @@
     new resolution — the mechanism itself is untouched.
   - Per-axis merge semantics; a future 'inherit' spelling if ever wanted.
 
-## 1. Commit the orphan-closer stripper fix (already in the working tree)
+## 1. Commit the orphan-closer stripper fix (already in the working tree) — ✅ DONE (2026-08-12)
+
+NOTES (2026-08-12): the code+tests were already committed before this run as `92b0e52`
+(subject `feat(tests): add tests for orphan closer handling in StripThinking function`,
+only `internal/processing/thinking.go` + `thinking_test.go`), so no new code commit was
+made and the planned commit subject was not used. Verified: `92b0e52` is an ancestor of
+HEAD, both files are unchanged since it, `TestStripThinking_OrphanCloser_ImplicitLeadingSpan`
+carries all 5 cases, `go test ./internal/processing/` and `make check` pass. The acceptance
+line `git show --stat HEAD` no longer applies (HEAD has moved on); it was checked against
+`git show --stat 92b0e52` instead. That commit carried no CHANGELOG bullet, so this run adds
+one under `[Unreleased] → Fixed` per the plan's standing requirement — the item's "exactly
+this pair of files" wording guarded against the unrelated `compact.go` change, which is not
+in the tree.
 
 **What:** The fix and its tests are already implemented (session 2026-08-11):
 `internal/processing/thinking.go` — StripThinking treats an EndToken that appears

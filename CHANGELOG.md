@@ -65,6 +65,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A stray thinking closer no longer leaks into the reply.** Some chat templates pre-open the
+  thinking channel themselves — the server has already consumed the start token by the time the
+  model's content arrives — so the reply carries a bare `</mm:think>` (seen live from minimax-m3)
+  with nothing that looks like a span to strip. The stripper now reads an end token that appears
+  before any start token as closing an implicit span opened at position 0: everything ahead of it
+  is reasoning, never visible content, and a normal span later in the same message still strips as
+  it always did. A closer that follows its own opener is untouched.
+
 - **A delegation in a fan-out is marked done the moment IT finishes, not when the whole group
   joins.** The transcript now follows each `sub_agent` block's own lifecycle phase, so the member
   that reported first wears its ✓ and says `done` while its siblings are still working — and its
