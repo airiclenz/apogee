@@ -93,7 +93,7 @@ present; the one-swap `applyProfile` seam items 4/5 consume exists at
 to commit": the ✅ marker above is itself committed, so the plan file keeps working as the
 resume state. No code changed.
 
-## 2. Config: `sub-agents:` flag, posture keys, `context-window:` pin on servers entries
+## 2. Config: `sub-agents:` flag, posture keys, `context-window:` pin on servers entries — ✅ DONE (2026-08-12)
 
 **What:** In `internal/config` (`config.go:1027` `ServerEntry`): add
 `SubAgents bool yaml:"sub-agents,omitempty"`,
@@ -115,6 +115,15 @@ posture on unflagged; negative window); `SubAgentServer` found/absent; existing
 
 **Acceptance:** `go test ./internal/config/` passes; `make check` passes; CHANGELOG
 bullet added (user-visible config surface).
+
+**NOTES (2026-08-12):** two deviations from the item's literal text. (a) `registry.go` was NOT
+touched: the `servers:` row's Desc ("name, endpoint, and what each one needs") does not enumerate
+the entry keys today, so the item's "if it enumerates them" condition did not fire. (b)
+`configmigrate.go`'s `serversAppended` had to change: `Mechanisms map[string]bool` makes
+`ServerEntry` non-comparable, so its `==`/`slices.Equal` comparison no longer compiled and now goes
+through `reflect.DeepEqual` (via `slices.EqualFunc`, which keeps nil and empty `before` reading
+alike). The seeded template (`internal/config/defaults/config.yaml`) was deliberately left alone —
+it would have to describe routing that does not exist until items 6-7.
 
 Commit: `feat(config): sub-agents flag, posture keys, and context-window pin on servers entries`
 

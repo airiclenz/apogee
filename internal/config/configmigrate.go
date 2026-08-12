@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -218,10 +219,16 @@ func verifyFold(data, updated []byte, entry ServerEntry) error {
 
 // serversAppended reports whether after is exactly before plus entry, appended last — the only
 // shape the fold may produce (hostsAppended's rule, one list over).
+//
+// The comparison goes through reflect.DeepEqual because ServerEntry stopped being comparable when it
+// grew the sub-agent posture's `mechanisms:` map (ADR 0045): a struct holding a map cannot be `==`d.
+// slices.EqualFunc still carries the head comparison so that a nil `before` and an empty one keep
+// reading the same, which a bare DeepEqual over the two slices would not.
 func serversAppended(before, after []ServerEntry, entry ServerEntry) bool {
+	sameEntry := func(a, b ServerEntry) bool { return reflect.DeepEqual(a, b) }
 	return len(after) == len(before)+1 &&
-		slices.Equal(before, after[:len(before)]) &&
-		after[len(after)-1] == entry
+		slices.EqualFunc(before, after[:len(before)], sameEntry) &&
+		sameEntry(after[len(after)-1], entry)
 }
 
 // legacyKeyLines is the 1-based line of each retired key the file actually sets — the lines the

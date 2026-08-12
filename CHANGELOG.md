@@ -43,6 +43,18 @@ point is a **minor** bump, not a breaking change.
   reads the new model's dialect instead of the departed one's. Editing `model-profiles:` in
   `/settings` still applies to the running session, re-resolved for the model you are on.
 
+- **A `servers:` entry can now be flagged as the one that takes delegations: `sub-agents: true`.** The
+  flagged entry is the **Sub-agent server** (ADR 0045) — the cheap box a smart session hands its grunt
+  work to — and it may carry its own `bypass:` and `mechanisms:`, saying what delegations to that
+  server run as rather than what the session runs as: a present key replaces the value a child would
+  have inherited whole, an absent one still inherits the parent's live posture. Every entry may also
+  pin `context-window:` now, the top-level key per server, for an endpoint that advertises no window
+  of its own. Three defects are refused at startup, each naming the entry: a SECOND flagged entry
+  (delegations route to one server, so the message names both entries to choose between), `bypass:`
+  or `mechanisms:` on an entry the flag is absent from (the posture rides the flag), and a negative
+  `context-window:`. This release lands the config surface only — the keys parse and validate, and
+  the routing that consumes them follows.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's

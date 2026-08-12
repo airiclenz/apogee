@@ -1033,13 +1033,42 @@ type UnconfinedHost struct {
 // The trade the number buys is the server operator's and worth saying out loud: more parallel
 // agents means a smaller context window each, since `--parallel N` splits one window into N slots
 // (ADR 0024 — Apogee's numbers are per-slot-honest either way).
+//
+// SubAgents is ADR 0045 decision 1's routing flag: the ONE entry spelling `sub-agents: true` is the
+// Sub-agent server, and every delegation at every depth runs against it rather than against the
+// parent's upstream. Absent is today's behaviour — a child shares the parent's server — and two
+// flagged entries are refused by ValidateServers on the duplicate-name reasoning: a delegation
+// routes to ONE server, so a second flag is a defect in the file rather than a preference between
+// two entries.
+//
+// Bypass and Mechanisms are that entry's POSTURE (ADR 0045 decision 2), in the top-level keys'
+// shapes verbatim: "delegations to this server run with this". A present key replaces the value the
+// child would otherwise have inherited WHOLE — a present `mechanisms:` map is the child's entire
+// catalogue, with no per-ID merge, which would need an `inherit` spelling to be readable — and an
+// absent one inherits the parent's LIVE value at spawn, exactly today's rule. Bypass is a pointer
+// for the reason the top-level key is one: an explicit `bypass: false` is a posture, not an absent
+// key. Both are refused on an UNflagged entry, where they would describe delegations that never
+// arrive; posture rides the ROUTING, so where the parent itself happens to be running is irrelevant
+// to what its children run as.
+//
+// ContextWindow PINS this server's per-slot context window in tokens — the top-level
+// `context-window:` key, per entry, and the same three states `parallel-agents` has: absent (or 0,
+// which yaml cannot tell from absent) ⇒ whatever the heartbeat observes stands, N ≥ 1 ⇒ that number
+// whatever the server advertises, negative ⇒ refused by ValidateServers. It is legal on ANY entry
+// because it describes the server, the way `model:` does; only the Delegation target reads it today
+// (ADR 0045 decision 3), where it earns its keep: a cloud endpoint advertises no window at all, so
+// the pin is how such a server is usable as a Sub-agent server in the first place.
 type ServerEntry struct {
-	Name           string `yaml:"name"`
-	Endpoint       string `yaml:"endpoint"`
-	APIKey         string `yaml:"api-key,omitempty"`
-	Model          string `yaml:"model,omitempty"`
-	LlamaLauncher  string `yaml:"llama-launcher,omitempty"`
-	ParallelAgents int    `yaml:"parallel-agents,omitempty"`
+	Name           string          `yaml:"name"`
+	Endpoint       string          `yaml:"endpoint"`
+	APIKey         string          `yaml:"api-key,omitempty"`
+	Model          string          `yaml:"model,omitempty"`
+	LlamaLauncher  string          `yaml:"llama-launcher,omitempty"`
+	ParallelAgents int             `yaml:"parallel-agents,omitempty"`
+	SubAgents      bool            `yaml:"sub-agents,omitempty"`
+	Bypass         *bool           `yaml:"bypass,omitempty"`
+	Mechanisms     map[string]bool `yaml:"mechanisms,omitempty"`
+	ContextWindow  int             `yaml:"context-window,omitempty"`
 }
 
 // ValidateServers rejects an entry that could never be switched to, at the startup boundary where
@@ -1066,9 +1095,19 @@ type ServerEntry struct {
 // The entry's optional `parallel-agents:` value is checked for the one defect it can carry: a
 // negative cap. Absent and 0 are the same state (discover — yaml cannot distinguish them) and any
 // N ≥ 1 is a pin, so a negative number is the only value with nothing to mean, and saying so here
-// beats resolving it to a silent 1 months later.
+// beats resolving it to a silent 1 months later. The entry's optional `context-window:` pin is
+// checked for that same one defect, on that same reasoning.
+//
+// The entry's optional `sub-agents:` flag and the posture keys that ride it carry two defects
+// between them (ADR 0045 decisions 1 and 2). A SECOND flagged entry is refused with BOTH entries
+// named, because the fix is a choice between two entries the file already spells: delegations route
+// to one server, so a second flag is the duplicate-name defect wearing another key. And
+// `bypass:`/`mechanisms:` on an entry the flag is absent from is refused because they would describe
+// delegations that never route there — the posture rides the flag, and a key with nothing to govern
+// reads as configured while doing nothing.
 func ValidateServers(servers []ServerEntry) error {
 	seen := make(map[string]struct{}, len(servers))
+	flagged := -1
 	for i, s := range servers {
 		if strings.TrimSpace(s.Name) == "" {
 			return fmt.Errorf("apogee: servers: entry %d (%q): has no name — the name is what selects "+
@@ -1106,8 +1145,55 @@ func ValidateServers(servers []ServerEntry) error {
 				"number of sub-agents this server may run at once (1 or more), or remove the key to take "+
 				"the server's own slot count", i+1, s.Name, s.ParallelAgents)
 		}
+		if s.ContextWindow < 0 {
+			return fmt.Errorf("apogee: servers: entry %d (%q): context-window: %d is negative — give the "+
+				"context window this server serves, in tokens (1 or more), or remove the key to take the "+
+				"window the server advertises", i+1, s.Name, s.ContextWindow)
+		}
+		if s.SubAgents {
+			if flagged >= 0 {
+				return fmt.Errorf("apogee: servers: entry %d (%q): sub-agents: true, but entry %d (%q) is "+
+					"already flagged — delegations route to ONE server, so flag the entry that should take "+
+					"them and remove the flag from the other", i+1, s.Name, flagged+1, servers[flagged].Name)
+			}
+			flagged = i
+		} else if keys := posturedKeys(s); keys != "" {
+			return fmt.Errorf("apogee: servers: entry %d (%q): %s without sub-agents: true — those keys say "+
+				"what DELEGATIONS to this server run as, so they ride the sub-agents: flag; add "+
+				"sub-agents: true to route delegations here, or remove the keys", i+1, s.Name, keys)
+		}
 	}
 	return nil
+}
+
+// posturedKeys names the sub-agent posture keys this entry carries, in file order, for the refusal
+// that reports them — and is empty when it carries neither, which is what makes it the condition of
+// that refusal too. A present-but-empty `mechanisms: {}` counts as written: an empty catalogue is a
+// posture (run the child with no Mechanisms at all), and only an absent key inherits.
+func posturedKeys(s ServerEntry) string {
+	switch {
+	case s.Bypass != nil && s.Mechanisms != nil:
+		return "bypass: and mechanisms:"
+	case s.Bypass != nil:
+		return "bypass:"
+	case s.Mechanisms != nil:
+		return "mechanisms:"
+	}
+	return ""
+}
+
+// SubAgentServer answers the one question ADR 0045 decision 1 asks of a resolved `servers:` list:
+// which entry, if any, takes the delegations. ValidateServers has already refused a second flagged
+// entry by the time anything calls this, so the first match is THE match — and false means the
+// flag is absent from the whole list, which is not a defect but today's behaviour: children share
+// the parent's upstream, no second monitor runs, and nothing latches.
+func SubAgentServer(entries []ServerEntry) (ServerEntry, bool) {
+	for _, e := range entries {
+		if e.SubAgents {
+			return e, true
+		}
+	}
+	return ServerEntry{}, false
 }
 
 // ResolveParallelAgents answers the one question ADR 0039 decision 2 asks about a bound server: how

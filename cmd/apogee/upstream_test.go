@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -164,7 +165,9 @@ func TestUpstreamChoicesAssembly(t *testing.T) {
 				t.Fatalf("assembled %d choices (%+v); want %d", len(got), got, len(tt.want))
 			}
 			for i := range tt.want {
-				if got[i] != tt.want[i] {
+				// DeepEqual rather than ==: ServerEntry carries a map since it gained the
+				// sub-agent posture keys, so it is no longer a comparable struct.
+				if !reflect.DeepEqual(got[i], tt.want[i]) {
 					t.Errorf("choice %d = %+v; want %+v", i, got[i], tt.want[i])
 				}
 			}

@@ -1478,6 +1478,36 @@ server: workstation
 				{Name: "openrouter", Endpoint: "https://openrouter.ai/api/v1"},
 			},
 		},
+		{
+			// The Sub-agent server's four keys (ADR 0045): the routing flag, the posture that rides
+			// it — an explicit `bypass: false` surviving as a value, not as an absent key — and the
+			// window pin, which is legal on any entry because it describes the server.
+			name: "the sub-agents flag, its posture keys, and the context-window pin travel per entry",
+			configYAML: `servers:
+  - name: workstation
+    endpoint: http://192.168.64.1:1111
+    context-window: 65536
+  - name: grunt-box
+    endpoint: http://192.168.64.1:2222
+    model: qwen3-4b
+    sub-agents: true
+    bypass: false
+    mechanisms:
+      validate: true
+      syntax: false
+    context-window: 32768
+server: workstation
+`,
+			want: []ServerEntry{
+				{Name: "workstation", Endpoint: "http://192.168.64.1:1111", ContextWindow: 65536},
+				{
+					Name: "grunt-box", Endpoint: "http://192.168.64.1:2222", Model: "qwen3-4b",
+					SubAgents: true, Bypass: boolptr(false),
+					Mechanisms:    map[string]bool{"validate": true, "syntax": false},
+					ContextWindow: 32768,
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1581,6 +1611,39 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 				"  - name: other\n    endpoint: http://two:1111\n    parallel-agents: -4\n",
 			wantErr: []string{"servers: entry 2", "other", "parallel-agents: -4 is negative"},
 		},
+		{
+			// The window pin is refused on the parallel-agents reasoning: absent and 0 already mean
+			// observe, every N ≥ 1 is a pin, so a negative number has nothing left to mean.
+			name: "an entry whose context-window pin is negative",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    context-window: -8192\n",
+			wantErr: []string{"servers: entry 1", "box", "context-window: -8192 is negative", "1 or more"},
+		},
+		{
+			// Delegations route to ONE server (ADR 0045 decision 1), so the second flag is the
+			// duplicate-name defect in another key — and the refusal names BOTH entries, because
+			// choosing between them is the fix.
+			name: "two entries flagged sub-agents",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n    sub-agents: true\n" +
+				"  - name: other\n    endpoint: http://two:1111\n    sub-agents: true\n",
+			wantErr: []string{"servers: entry 2", "other", "sub-agents: true", "entry 1", "box", "ONE server"},
+		},
+		{
+			name: "posture keys on an entry the sub-agents flag is absent from",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    bypass: true\n    mechanisms:\n      validate: true\n",
+			wantErr: []string{
+				"servers: entry 1", "box", "bypass: and mechanisms: without sub-agents: true",
+				"ride the sub-agents: flag",
+			},
+		},
+		{
+			// Either key alone is refused, and the message names only the one that is there.
+			name: "a lone mechanisms map on an unflagged entry",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n    sub-agents: true\n" +
+				"  - name: other\n    endpoint: http://two:1111\n    mechanisms:\n      syntax: true\n",
+			wantErr: []string{"servers: entry 2", "other", "mechanisms: without sub-agents: true"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1596,6 +1659,48 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error = %q; want it to contain %q", err, want)
 				}
+			}
+		})
+	}
+}
+
+// SubAgentServer is the lookup the composition root runs once it has a validated list: the flagged
+// entry, or nothing. Nothing is not a defect — it is today's behaviour, no routing at all — which is
+// why the second return value says "found" rather than the error a missing entry would deserve.
+func TestSubAgentServer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		entries []ServerEntry
+		want    string
+	}{
+		{
+			name: "the flagged entry is returned whole, wherever it sits in the list",
+			entries: []ServerEntry{
+				{Name: "workstation", Endpoint: "http://one:1111"},
+				{Name: "grunt-box", Endpoint: "http://two:1111", SubAgents: true},
+				{Name: "rented-box", Endpoint: "https://three:1111"},
+			},
+			want: "grunt-box",
+		},
+		{
+			name: "no flag anywhere is not found — delegations stay on the parent's server",
+			entries: []ServerEntry{
+				{Name: "workstation", Endpoint: "http://one:1111"},
+				{Name: "rented-box", Endpoint: "https://three:1111"},
+			},
+		},
+		{name: "an empty list is not found"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, found := SubAgentServer(tt.entries)
+			if found != (tt.want != "") {
+				t.Fatalf("SubAgentServer found = %v, want %v (entry %q)", found, tt.want != "", tt.want)
+			}
+			if got.Name != tt.want {
+				t.Errorf("SubAgentServer = %q, want %q", got.Name, tt.want)
 			}
 		})
 	}
