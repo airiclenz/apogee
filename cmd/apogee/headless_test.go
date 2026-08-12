@@ -654,6 +654,32 @@ func TestHeadlessOutputRouting(t *testing.T) {
 		}
 	})
 
+	// The fill on that line is measured against the window the CHILD filled, which for a routed
+	// delegation is the Sub-agent server's and not the session's (ADR 0045): run.SubAgentUsage.Limit
+	// has already resolved which, so a small window shows as a small window instead of a routed run
+	// reading as almost-empty against a session window it never had.
+	t.Run("a routed delegation's fill reads against the window it filled", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 3,
+			SubAgents: []run.SubAgentUsage{
+				{Used: 7000, Limit: 8192, Task: "audit the issues", Model: "qwen3-4b"},
+				{Used: 7000, Limit: 131072, Task: "summarise the findings"},
+			},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		lines := subAgentStderrLines(errOut)
+		want := []string{
+			"sub-agent: 7k/8k · audit the issues · qwen3-4b",
+			"sub-agent: 7k/128k · summarise the findings",
+		}
+		if !slices.Equal(lines, want) {
+			t.Errorf("sub-agent lines = %q; want %q", lines, want)
+		}
+	})
+
 	// A name is raw model output on the same terms as the task, and it stands in the same slot: it is
 	// folded to one line, stripped and clipped identically, and a "name" that is nothing but control
 	// characters survives none of that — the task still shows rather than the slot going blank.

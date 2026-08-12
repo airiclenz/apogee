@@ -158,9 +158,10 @@ const (
 //
 // ctxUsed / ctxLimit are the CHILD's context fill on the head of a sub-agent run (applyUsage): how
 // much of its window the delegate had filled when it last reported, and the window that reading
-// filled. They are a pair by necessity — a fill says nothing without its limit — so they are
-// captured together at fold time and frozen there, which is what keeps a finished run's history
-// out of reach of a later window rebind.
+// filled — the CHILD's own, which for a run routed to the Sub-agent server is the Delegation
+// target's and not the session's (ADR 0045). They are a pair by necessity — a fill says nothing
+// without its limit — so they are captured together at fold time and frozen there, which is what
+// keeps a finished run's history out of reach of a later window rebind.
 type entry struct {
 	kind   entryKind
 	text   string
@@ -186,8 +187,9 @@ type entry struct {
 	skillSpans []skillSpan
 	presented  presentedView
 	startup    startupView // entryStartup only: the one-time start-up box's logo + session facts
-	// the head of a sub-agent run only: the child's latest context reading and the window it
-	// filled, frozen together when the reading folded (applyUsage)
+	// the head of a sub-agent run only: the child's latest context reading and the CHILD's own
+	// window it filled (the Delegation target's where the run was routed), frozen together when
+	// the reading folded (applyUsage)
 	ctxUsed  int
 	ctxLimit int
 	// ctxModel is the head of a sub-agent run only, and only where it has something to say: the
@@ -751,6 +753,10 @@ func (t *transcript) apply(e domain.Event) {
 // itself is bound to — because a delegation that ran where everything else ran is not news. Deciding
 // it here, once, is what lets a finished run keep saying which model filled it after the session has
 // rebound to another (ADR 0045).
+//
+// window is the SESSION's window and only the fallback: the reading names the window it actually
+// filled (childWindow), because a routed delegation fills the Delegation target's window rather
+// than the session's and a fill measured against the wrong limit is a wrong number on screen.
 func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string) {
 	usage, ok := e.(domain.UsageEvent)
 	if !ok || usage.Depth <= 0 {
@@ -773,7 +779,7 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 		return
 	}
 	if fills {
-		head.ctxUsed, head.ctxLimit = total, window
+		head.ctxUsed, head.ctxLimit = total, childWindow(usage, window)
 	}
 	if counted {
 		head.usage = totals
@@ -785,6 +791,20 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 	if usage.Model != "" && usage.Model != sessionModel {
 		head.ctxModel = usage.Model
 	}
+}
+
+// childWindow answers which limit a delegated fill is measured against: the one the reading itself
+// carries — the emitting agent's own bound window, which for a routed child is the Delegation
+// target's and not the session's (ADR 0045) — falling back to sessionWindow when the reading names
+// none. A reading names none in exactly the cases where the session's window IS the child's answer:
+// a child that inherited the parent's Config verbatim on a build before the stamp existed, and a
+// record decoded from such a session. So the fallback is the old behaviour preserved where it was
+// right, not a guess where it is wrong.
+func childWindow(usage domain.UsageEvent, sessionWindow int) int {
+	if usage.ContextWindow > 0 {
+		return usage.ContextWindow
+	}
+	return sessionWindow
 }
 
 // openSubAgentHead picks the still-open run head a delegated reading belongs to: the one its own

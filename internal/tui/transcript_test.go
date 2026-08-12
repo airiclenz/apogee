@@ -1543,6 +1543,97 @@ func subAgentUsageOn(tr *transcript, depth, total, window int, childModel, sessi
 	tr.applyUsage(t, window, sessionModel)
 }
 
+// subAgentUsageIn is subAgentUsage for a routed delegation's FILL: the same reading, stamped with
+// the window the CHILD actually worked against (the Delegation target's) and folded while the
+// session's own is another number entirely.
+func subAgentUsageIn(tr *transcript, depth, total, sessionWindow, childWindow int) {
+	reading := domain.UsageEvent{
+		EventBase:     domain.EventBase{Depth: depth},
+		TotalTokens:   total,
+		ContextWindow: childWindow,
+	}
+	tr.applyUsage(reading, sessionWindow, "")
+}
+
+// TestSubAgentFillFoldsTheChildsOwnWindow pins the limit half of a delegation's reading: a routed
+// child works against the Delegation target's window (ADR 0045), so its fill is frozen against THAT
+// number and painted against it — 7k on an 8k grunt server is `7k/8k`, never `7k/128k` against the
+// session's window, which would be a wrong number on screen rather than a missing one. A reading
+// naming no window (an unrouted child, a record from before the stamp existed) keeps the session's.
+func TestSubAgentFillFoldsTheChildsOwnWindow(t *testing.T) {
+	const sessionWindow = 131072
+
+	t.Run("a routed child freezes the target's window", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentUsageIn(tr, 1, 7000, sessionWindow, 8192)
+
+		used, limit := fillOf(tr, 0)
+		if used != 7000 || limit != 8192 {
+			t.Errorf("head fill = %d/%d, want 7000/8192 — the window the child actually filled", used, limit)
+		}
+	})
+
+	t.Run("a reading naming no window falls back to the session's", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentUsageIn(tr, 1, 7000, sessionWindow, 0)
+
+		if _, limit := fillOf(tr, 0); limit != sessionWindow {
+			t.Errorf("head limit = %d, want the session's %d — an unrouted child inherits it verbatim",
+				limit, sessionWindow)
+		}
+	})
+
+	t.Run("a later reading moves the limit with the fill", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentUsageIn(tr, 1, 7000, sessionWindow, 8192)
+		subAgentUsageIn(tr, 1, 9000, sessionWindow, 16384) // the target rebound mid-run
+
+		used, limit := fillOf(tr, 0)
+		if used != 9000 || limit != 16384 {
+			t.Errorf("head fill = %d/%d, want 9000/16384 — the pair is frozen together", used, limit)
+		}
+	})
+
+	cases := []struct {
+		name  string
+		build func(tr *transcript)
+		want  string
+	}{
+		{
+			name: "routed: the fill reads against the grunt server's window",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsageIn(tr, 1, 7000, sessionWindow, 8192)
+			},
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · 7k/8k"),
+		},
+		{
+			name: "unrouted: the fill reads against the session's window",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsageIn(tr, 1, 7000, sessionWindow, 0)
+			},
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · 7k/128k"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(tr)
+
+			branch := strings.Split(renderPlain(tr, 80), "\n")[1]
+			if branch != tc.want {
+				t.Errorf("summary line = %q; want %q", branch, tc.want)
+			}
+		})
+	}
+}
+
 // TestSubAgentModelFoldsOnlyWhenItDiffers pins what the head keeps of a routed delegation's model:
 // the child's own when the session is bound to another, nothing at all when the two match, and
 // nothing from an agent that names no model. The comparison is made at FOLD time, so what a finished

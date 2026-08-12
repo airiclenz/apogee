@@ -219,12 +219,21 @@ type ErrorEvent struct {
 // and a Driver that paints the child's fill can name that model beside it without tracking a
 // second stream. An agent bound late (before the first heartbeat) leaves it empty, which is
 // the same absence a Driver already tolerates in its own footer.
+//
+// ContextWindow is the window that fill sits in — the EMITTING agent's own bound window, on
+// Model's terms exactly and for the same reason: a routed sub-agent works against the Delegation
+// target's window (ADR 0045), which may be a fraction of the session's, so a fill painted against
+// the session's limit would be a wrong number rather than a missing one. 0 means the emitting
+// agent knows no window (none discovered, none pinned), and a Driver falls back to its own —
+// which is what every unrouted reading amounts to, the child inheriting the parent's window
+// verbatim.
 type UsageEvent struct {
 	EventBase
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
 	Model            string
+	ContextWindow    int
 
 	CumulativePromptTokens     int
 	CumulativeCompletionTokens int

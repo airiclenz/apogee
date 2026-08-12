@@ -125,8 +125,12 @@ type SubAgentUsage struct {
 	// Used is the run's final fill: the token total of the LAST usage its Turns reported,
 	// never a sum across them — each Turn restates the whole fill, it does not add to it.
 	Used int
-	// Limit is the window that fill sits in: the Firing's own Context.MaxContextTokens,
-	// which a sub-agent inherits verbatim. 0 means the Config named no window; a fill only
+	// Limit is the window that fill sits in: the CHILD's own, as its readings reported it —
+	// which for a delegation routed to the Sub-agent server (ADR 0045) is the Delegation
+	// target's window and NOT the Firing's, a routed child working against a window of its
+	// own. A run whose readings named no window falls back to the Firing's
+	// Context.MaxContextTokens, which is the right answer for every unrouted child (it
+	// inherits the parent's Config verbatim). 0 means neither named one; a fill only
 	// means something beside its limit, so a surface omits the reading rather than
 	// spelling it against nothing.
 	Limit int
@@ -379,8 +383,9 @@ func (d *denier) count() int {
 // and a reading with no matching bracket is dropped.
 type eventTap struct {
 	inner domain.EventSink
-	// window is the Firing's context window, stamped onto each finished run's reading: a
-	// sub-agent inherits the parent's Config verbatim, so its limit IS this number.
+	// window is the Firing's context window, the FALLBACK stamped onto a finished run's reading
+	// when the run's own readings named none: an unrouted sub-agent inherits the parent's Config
+	// verbatim, so its limit IS this number, while a routed one (ADR 0045) reports its own.
 	window int
 	// model is the Firing's own bound model — the yardstick a child's model is measured
 	// against, never a value reported on its own. It is what makes SubAgentUsage.Model mean
@@ -400,19 +405,21 @@ type eventTap struct {
 }
 
 // openSubAgent is one sub-agent run in flight: the task it was given, the optional name it was
-// given with it, the latest fill its own Turns have reported, the model those readings came from,
-// and its latest cumulative reading. The delegating call that will close it is the map key it is
-// filed under, not a member — one run, one identity.
+// given with it, the latest fill its own Turns have reported, the model and window those readings
+// came from, and its latest cumulative reading. The delegating call that will close it is the map
+// key it is filed under, not a member — one run, one identity.
 //
 // model is held RAW and measured against the Firing's only when the run closes: the "is it worth
 // saying" question belongs to the reading that gets filed (SubAgentUsage.Model), not to every
-// event that updates one.
+// event that updates one. window is held on the same terms and resolved against the Firing's at
+// the same moment, though as a fallback rather than a yardstick (SubAgentUsage.Limit).
 type openSubAgent struct {
-	task  string
-	name  string
-	used  int
-	model string
-	usage Usage
+	task   string
+	name   string
+	used   int
+	model  string
+	window int
+	usage  Usage
 }
 
 // Emit records a top-level usage total and answer, tracks the sub-agent runs that pass
@@ -497,6 +504,12 @@ func (t *eventTap) noteUsage(ev domain.UsageEvent) {
 	if ev.Model != "" {
 		run.model = ev.Model
 	}
+	// The window rides the reading for the same reason and is taken on the same terms: a routed
+	// child fills the Delegation target's window (ADR 0045), and a reading that names none leaves
+	// the last answer standing rather than dropping the run back onto the Firing's.
+	if ev.ContextWindow > 0 {
+		run.window = ev.ContextWindow
+	}
 	if cumulative.Calls > 0 {
 		run.usage = cumulative
 	}
@@ -535,7 +548,7 @@ func (t *eventTap) closeSubAgentRun(callID string) {
 	}
 	t.runs = append(t.runs, SubAgentUsage{
 		Used:             run.used,
-		Limit:            t.window,
+		Limit:            runWindow(run.window, t.window),
 		Task:             run.task,
 		Name:             run.name,
 		Model:            differingModel(run.model, t.model),
@@ -555,6 +568,18 @@ func differingModel(child, firing string) string {
 		return ""
 	}
 	return child
+}
+
+// runWindow answers SubAgentUsage.Limit: the window the child's own readings named — the Delegation
+// target's for a routed run (ADR 0045) — and the Firing's where they named none. It is the fill's
+// counterpart to differingModel above and inverts its rule on purpose: a model the reading does not
+// name is nothing to say, while a window it does not name is the Firing's own, an unrouted child
+// inheriting the parent's Config verbatim.
+func runWindow(child, firing int) int {
+	if child > 0 {
+		return child
+	}
+	return firing
 }
 
 // firstTaskLine reads the sub_agent call's task argument and returns its first line, "" when

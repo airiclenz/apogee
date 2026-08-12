@@ -147,6 +147,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A routed delegation's context fill is now measured against the window it actually filled.** Send
+  the grunt work to a Sub-agent server with an 8k window from a session running a 128k model and the
+  child's line read `7k/128k` — a nearly-empty gauge for a child that was in fact nearly full,
+  because both the TUI and `apogee headless` painted every delegation's fill against the SESSION's
+  window. Each reading now carries the window of the agent that produced it, so the same run reads
+  `7k/8k` and the number means what it says. Delegations that ran on the session's own upstream are
+  unchanged — an unrouted child inherits the parent's window verbatim, and a reading that names no
+  window (a session recorded before this) still falls back to the session's. Like the fill itself
+  the limit is frozen when the reading lands and kept in the session record, so a resumed session
+  repaints the window the run really filled.
+
 - **A stray thinking closer no longer leaks into the reply.** Some chat templates pre-open the
   thinking channel themselves — the server has already consumed the start token by the time the
   model's content arrives — so the reply carries a bare `</mm:think>` (seen live from minimax-m3)

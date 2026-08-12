@@ -32,11 +32,13 @@ func (m Model) foldEvent(e domain.Event) Model {
 	m = m.foldStats(e)
 	m.transcript.apply(e)
 	// The transcript fold's second half, and separate for one reason: a sub-agent's usage reading
-	// is a FILL, so it needs the window it fills — a Model fact no Event carries. It is HANDED in,
-	// by the same rule foldActivity is handed its answer below, rather than reached for sideways
-	// from inside the transcript. The session's own bound model rides in beside it on the same
-	// terms: the reading names the model that produced it, and only the Model knows what that is
-	// DIFFERENT from (ADR 0045).
+	// is a FILL, so it needs the window it fills — and where the reading names none, that window is
+	// a Model fact. It is HANDED in, by the same rule foldActivity is handed its answer below,
+	// rather than reached for sideways from inside the transcript. The session's own bound model
+	// rides in beside it on the same terms: the reading names the model that produced it, and only
+	// the Model knows what that is DIFFERENT from (ADR 0045). The two travel together and are used
+	// oppositely — the window is the FALLBACK behind the reading's own (a routed child fills the
+	// Delegation target's window), the model the YARDSTICK the reading's own is measured against.
 	m.transcript.applyUsage(e, m.opts.ContextWindow, m.opts.Model)
 	// foldActivity runs after apply and is HANDED what apply established: its ToolResultEvent
 	// rule asks whether a call is still open (a parallel batch holds the tool phrase), and only

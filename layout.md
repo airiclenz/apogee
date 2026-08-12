@@ -825,7 +825,12 @@ rather than trailing an empty separator, which is the gauge's own rule about a n
 beside it. It **ticks as each of the child's Turns lands** and **freezes on the final reading**, so
 a finished run goes on saying what it filled however long the scrollback holds it. And unlike the
 count it is **not transitive**: each agent fills a window of its own, so a nested run's reading
-rides that nested block and never accrues to the run above it. A last cell closes the line where
+rides that nested block and never accrues to the run above it. Its **limit half is the child's own
+window** for the same reason: a run routed to the Sub-agent server (ADR 0045) is measured against
+**that** server's window, so a 7k fill on an 8k grunt box reads `7k/8k` and not `7k/128k` against a
+session window the child never had. A run that reports no window of its own is spelled against the
+session's — which is every unrouted delegation, the child inheriting the parent's window verbatim,
+and every reading recorded before the child's own travelled with it. A last cell closes the line where
 the run went **somewhere else**: with delegations routed to the Sub-agent server (ADR 0045), a run
 whose model is not the session's own names that model — `2 tool calls · 12k/32k · Found 4 gaps ·
 qwen3-4b`, spelled the way the footer spells a model. It is the rarest cell on the row, present only

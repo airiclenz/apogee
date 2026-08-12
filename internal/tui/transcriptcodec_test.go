@@ -912,6 +912,30 @@ func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
 		}
 	})
 
+	t.Run("a routed run keeps the window it actually filled", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		// The child ran on the Sub-agent server (ADR 0045): a small window inside a big session.
+		subAgentUsageIn(tr, 1, 7000, 131072, 8192)
+		subAgentReport(tr, "s1", "tests read", 0)
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries; want the one run head", len(got))
+		}
+		if got[0].ctxUsed != 7000 || got[0].ctxLimit != 8192 {
+			t.Errorf("replayed fill = %d/%d, want 7000/8192 — a resume repaints the target's window,"+
+				" not the session's", got[0].ctxUsed, got[0].ctxLimit)
+		}
+	})
+
 	t.Run("a run that never reported writes neither member", func(t *testing.T) {
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)

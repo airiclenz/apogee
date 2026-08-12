@@ -146,18 +146,51 @@ func TestSpawnStampsItsOwnModelOnItsReadings(t *testing.T) {
 	parent.SetDelegationTarget(routedTarget())
 
 	routed := spawn(t, parent)
-	if got := routed.usage.record(routed.base(1), routed.cfg.Model, 10, 5, 15).Model; got != "cheap-4b" {
+	if got := reading(routed).Model; got != "cheap-4b" {
 		t.Errorf("routed child reading names %q, want the target's %q", got, "cheap-4b")
 	}
-	if got := parent.usage.record(parent.base(1), parent.cfg.Model, 10, 5, 15).Model; got != "smart-70b" {
+	if got := reading(parent).Model; got != "smart-70b" {
 		t.Errorf("session reading names %q, want the session's own %q", got, "smart-70b")
 	}
 
 	parent.SetDelegationTarget(nil)
 	unrouted := spawn(t, parent)
-	if got := unrouted.usage.record(unrouted.base(1), unrouted.cfg.Model, 10, 5, 15).Model; got != "smart-70b" {
+	if got := reading(unrouted).Model; got != "smart-70b" {
 		t.Errorf("unrouted child reading names %q, want the parent's %q — a fallback run is not news",
 			got, "smart-70b")
+	}
+}
+
+// reading is one usage event as the agent under test would emit it — the same two bindings the loop
+// stamps (agent.go), so a test asks what a Driver would receive rather than what a call site typed.
+func reading(a *Agent) domain.UsageEvent {
+	return a.usage.record(a.base(1), a.cfg.Model, a.cfg.Context.MaxContextTokens, 10, 5, 15)
+}
+
+// TestSpawnStampsItsOwnWindowOnItsReadings is the model stamp's twin, and the reason a Driver can
+// paint a routed fill honestly: a routed child works against the Delegation target's window
+// (ADR 0045), so its readings must carry THAT number — a 7k fill on an 8k grunt server is `7k/8k`,
+// not `7k/128k` against the session's. An unrouted child names the parent's window, which is the
+// one it actually inherited.
+func TestSpawnStampsItsOwnWindowOnItsReadings(t *testing.T) {
+	t.Parallel()
+
+	parent := routingParent(t)
+	parent.SetDelegationTarget(routedTarget())
+
+	routed := spawn(t, parent)
+	if got := reading(routed).ContextWindow; got != 32768 {
+		t.Errorf("routed child reading names window %d, want the target's %d", got, 32768)
+	}
+	if got := reading(parent).ContextWindow; got != 131072 {
+		t.Errorf("session reading names window %d, want the session's own %d", got, 131072)
+	}
+
+	parent.SetDelegationTarget(nil)
+	unrouted := spawn(t, parent)
+	if got := reading(unrouted).ContextWindow; got != 131072 {
+		t.Errorf("unrouted child reading names window %d, want the parent's %d — inherited verbatim",
+			got, 131072)
 	}
 }
 

@@ -594,6 +594,44 @@ func TestEventTapReportsAModelOnlyWhenItDiffers(t *testing.T) {
 	}
 }
 
+// TestEventTapReportsTheChildsOwnWindow pins SubAgentUsage.Limit's other half, and it inverts the
+// model rule above on purpose: a routed child works against the Delegation target's window (ADR
+// 0045), so its fill must be reported against THAT number — a 7k fill on an 8k grunt server is
+// `7k/8k`, not `7k/128k` against the Firing's window — while a reading that names no window falls
+// back to the Firing's, which is exactly the window an unrouted child inherited.
+func TestEventTapReportsTheChildsOwnWindow(t *testing.T) {
+	t.Parallel()
+
+	const firingWindow = 131072
+
+	usageIn := func(callID string, total, window int) domain.UsageEvent {
+		ev := usageAt(1, callID, total)
+		ev.ContextWindow = window
+		return ev
+	}
+
+	tap := &eventTap{window: firingWindow}
+	tap.Emit(subAgentCall(0, "call_1", "audit the issues"))
+	tap.Emit(usageIn("call_1", 7000, 8192)) // routed: a small window on the grunt server
+	tap.Emit(toolResult(0, "call_1"))
+	tap.Emit(subAgentCall(0, "call_2", "summarise the findings"))
+	tap.Emit(usageAt(1, "call_2", 4000)) // unrouted, or a stream from before the stamp existed
+	tap.Emit(toolResult(0, "call_2"))
+	tap.Emit(subAgentCall(0, "call_3", "check the docs"))
+	tap.Emit(usageIn("call_3", 2000, 8192))
+	tap.Emit(usageAt(1, "call_3", 3000)) // names none: the established window stands, not the Firing's
+	tap.Emit(toolResult(0, "call_3"))
+
+	want := []SubAgentUsage{
+		{Used: 7000, Limit: 8192, Task: "audit the issues"},
+		{Used: 4000, Limit: firingWindow, Task: "summarise the findings"},
+		{Used: 3000, Limit: 8192, Task: "check the docs"},
+	}
+	if runs := tap.subAgentRuns(); !slices.Equal(runs, want) {
+		t.Errorf("subAgentRuns() = %+v, want %+v", runs, want)
+	}
+}
+
 // TestEventTapAttributesANestedRunToItsOwnDepth pins the non-transitivity: each agent fills
 // its own window, so a grandchild's reading belongs to the grandchild's entry alone and
 // nothing rolls up into the run that spawned it. The nested run also finishes FIRST, which is
