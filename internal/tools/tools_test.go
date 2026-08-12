@@ -25,7 +25,7 @@ func TestToolSpecEmbedding(t *testing.T) {
 		t.Errorf("Schema() = %s, want %s", probe.Schema(), schema)
 	}
 
-	rf := NewReadFile(t.TempDir())
+	rf := NewReadFile(t.TempDir(), nil)
 	if got := rf.Name(); got != readFileSpec.name {
 		t.Errorf("ReadFile.Name() = %q, want the spec's %q", got, readFileSpec.name)
 	}

@@ -12,7 +12,7 @@ import (
 
 var readFileSpec = toolSpec{
 	name:        "read_file",
-	description: "Read the contents of a file by path, optionally restricted to a line range, and optionally locating the line numbers where a substring occurs.",
+	description: "Read the contents of a file by path, optionally restricted to a line range, and optionally locating the line numbers where a substring occurs; absolute paths under a configured read-only root (such as the skills library) are also readable.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path"],
@@ -35,14 +35,19 @@ type readFileArgs struct {
 }
 
 // ReadFile reads a file's contents, optionally restricted to a line range and optionally
-// reporting where a substring occurs. It is a read-only tool scoped to a sandbox root.
+// reporting where a substring occurs. It is a read-only tool scoped to a sandbox root plus
+// any extra read-only roots the host mounted (readScope).
 type ReadFile struct {
 	toolSpec
-	root string
+	scope readScope
 }
 
-// NewReadFile returns a read_file tool that resolves paths within root.
-func NewReadFile(root string) *ReadFile { return &ReadFile{toolSpec: readFileSpec, root: root} }
+// NewReadFile returns a read_file tool that resolves paths within root, and — for ABSOLUTE
+// paths only — within any extra read-only root extraReadRoots reports at call time. A nil
+// extraReadRoots means workspace-only: byte-identical to the fence before extra roots existed.
+func NewReadFile(root string, extraReadRoots func() []string) *ReadFile {
+	return &ReadFile{toolSpec: readFileSpec, scope: readScope{root: root, extra: extraReadRoots}}
+}
 
 // ReadOnly reports that read_file performs no writes (domain.ReadOnlyTool).
 func (t *ReadFile) ReadOnly() bool { return true }
@@ -51,9 +56,12 @@ func (t *ReadFile) ReadOnly() bool { return true }
 // ctx cancellation. Bad arguments, a missing file, an oversized file, or a path that
 // escapes the root are reported as IsError results, not Go errors.
 //
-// The workspace fence is enforced at OPEN time through an os.Root pinned at t.root, so a
-// path component swapped to point outside the root — including a concurrent swap by a
-// confined subprocess mid-call — is refused rather than followed (security review H1).
+// The fence is enforced at OPEN time through an os.Root pinned at the root the path was
+// accepted under — the workspace, or, for an absolute path the workspace refuses, the first
+// configured extra read-only root that contains it — so a path component swapped to point
+// outside that root, including a concurrent swap by a confined subprocess mid-call, is
+// refused rather than followed (security review H1). A path under no root is refused with
+// the workspace's own uniform escape message, whatever the extra roots happen to be.
 // The open, the size check and the read share ONE descriptor (readWorkspaceFileBounded),
 // so there is no check/use gap between them: a rename mid-call changes nothing the call
 // sees, and a file grown past the cap mid-read is refused (see the SCOPE note in
@@ -77,7 +85,7 @@ func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, "path is required"), nil
 	}
 
-	content, failMessage := readWorkspaceFileBounded(args.Path, t.root)
+	content, failMessage := t.scope.readBounded(args.Path)
 	if failMessage != "" {
 		return errorResult(call.ID, failMessage), nil
 	}

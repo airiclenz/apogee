@@ -88,9 +88,17 @@ silently.
 
 **Commit:** `feat(tools): multi-root read resolution seam for the read-only tools`
 
-## 2. read_file and list_dir honor extra read-only roots
+## 2. read_file and list_dir honor extra read-only roots — ✅ DONE (2026-08-12)
 
 Depends on item 1.
+
+NOTES (2026-08-12): in `list_dir` only the FIRST call (`:67`) goes through the item-1 helper
+(`scope.resolve`); the two walk-time `safeOpen` calls (`:75`, `:158`) are pinned to the root that
+call returned instead of being re-routed through the helper. They open a ROOT-RELATIVE name, and
+the helper resolves a relative path against the workspace alone by design — routing them through it
+would refuse every subdirectory of an extra root. Pinning them to the matched root is what the item
+asks for in substance ("pinning the whole listing walk to the matched root"), so `collectEntries`
+and `collectSubdir` gained a `root` parameter.
 
 **What:**
 - `internal/tools/registry.go`: `HostTools` gains `ExtraReadRoots func() []string` with a

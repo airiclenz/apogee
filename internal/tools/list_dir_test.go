@@ -40,7 +40,7 @@ func TestListDir_Execute_ListsTopLevel(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewListDir(root).Execute(context.Background(),
+	result, err := NewListDir(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "."}))
 
 	if err != nil {
@@ -63,7 +63,7 @@ func TestListDir_Execute_RecursesWhenAsked(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewListDir(root).Execute(context.Background(),
+	result, err := NewListDir(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "src", "recursive": true}))
 
 	if err != nil {
@@ -80,7 +80,7 @@ func TestListDir_Execute_NonRecursiveStopsAtTop(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewListDir(root).Execute(context.Background(),
+	result, err := NewListDir(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "src"}))
 
 	if err != nil {
@@ -96,7 +96,7 @@ func TestListDir_Execute_ReportsEntryCounts(t *testing.T) {
 
 	root := t.TempDir()
 	seedTree(t, root)
-	tool := NewListDir(root)
+	tool := NewListDir(root, nil)
 
 	cases := []struct {
 		name        string
@@ -171,7 +171,7 @@ func TestListDir_RefusesEscapingSymlink(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "ssh"), filepath.Join(root, "escape")); err != nil {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
-	tool := NewListDir(root)
+	tool := NewListDir(root, nil)
 
 	t.Run("named directly", func(t *testing.T) {
 		t.Parallel()
@@ -217,6 +217,55 @@ func TestListDir_RefusesEscapingSymlink(t *testing.T) {
 	})
 }
 
+// TestListDir_Execute_ListsUnderAnExtraReadRoot pins that a listing may START in a configured
+// read-only root and recurse inside it: the whole walk is pinned to the root the path was
+// accepted under, so a subdirectory of an extra root lists exactly as a workspace one does.
+// Workspace-relative listings are unchanged, and a directory under no root is still refused
+// with the uniform escape message.
+func TestListDir_Execute_ListsUnderAnExtraReadRoot(t *testing.T) {
+	t.Parallel()
+
+	root, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	seedTree(t, root)
+	seedTree(t, extra)
+
+	tool := NewListDir(root, func() []string { return []string{extra} })
+
+	cases := []struct {
+		name      string
+		path      string
+		recursive bool
+		want      []string // substrings the listing must carry
+		wantErr   bool
+	}{
+		{"extra root itself", extra, false, []string{"top.txt", "src/"}, false},
+		{"subdir of the extra root", filepath.Join(extra, "src"), true, []string{"a.go", "b.go"}, false},
+		{"workspace relative unchanged", "src", true, []string{"a.go", "b.go"}, false},
+		{"under no root", outside, false, []string{"outside the workspace"}, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(),
+				callWith(t, "c1", map[string]any{"path": tc.path, "recursive": tc.recursive}))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError != tc.wantErr {
+				t.Fatalf("IsError = %v, want %v (content: %q)", result.IsError, tc.wantErr, result.Content)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(result.Content, want) {
+					t.Errorf("content %q does not contain %q", result.Content, want)
+				}
+			}
+		})
+	}
+}
+
 func TestListDir_Execute_ToolErrors(t *testing.T) {
 	t.Parallel()
 
@@ -224,7 +273,7 @@ func TestListDir_Execute_ToolErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	tool := NewListDir(root)
+	tool := NewListDir(root, nil)
 
 	cases := []struct {
 		name        string

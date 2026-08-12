@@ -32,6 +32,24 @@ type HostTools struct {
 	// (KnownToolNames is what it checks against): a registry assembly has nowhere to put a
 	// warning, and a roster the user is pruning must not be able to stop a session from starting.
 	Disabled []string
+
+	// ExtraReadRoots reports directories the READ-ONLY tools may reach outside the workspace.
+	// The contract, in four clauses:
+	//
+	//   - READ-ONLY: only the read tools take it. Every write and execution tool stays
+	//     workspace-fenced (the workspaceScopedWriter discipline, ADR 0012 D1) — mounting a
+	//     directory here never makes it writable.
+	//   - ABSOLUTE paths only: a relative argument keeps resolving against the workspace root
+	//     alone, so no one name can mean two files.
+	//   - LIVE: the func is evaluated once per tool call, so a mid-session change on the host's
+	//     side is honoured by the next read with no re-wiring.
+	//   - nil ⇒ workspace-only, byte-identical to the fence before this field existed.
+	//
+	// It is a generic seam: a skills library is the first thing mounted through it, but nothing
+	// in this package knows that (ADR 0031 — engine seams stay driver-agnostic). Each root keeps
+	// its own os.Root fence, so a symlink inside one that escapes it is still refused, and a root
+	// that does not exist yet is skipped rather than failing the call.
+	ExtraReadRoots func() []string
 }
 
 // NewDefaultRegistry assembles the built-in tool set — the read/write/list/grep base
@@ -106,14 +124,18 @@ func DefaultTools(root string) []domain.Tool {
 // no more an ExternalEffectTool than ask_user is — showing the user a document they already
 // own is not a non-forkable remote effect.
 //
+// host.ExtraReadRoots is threaded into the read-only file tools (read_file, list_dir), which
+// resolve an ABSOLUTE path over those roots when the workspace refuses it; a nil func leaves
+// them workspace-only. No write or execution tool receives it — see the field's contract.
+//
 // host.Disabled is applied LAST, to the assembled menu: the roster switch subtracts from the set
 // this build offers rather than deciding, per tool, whether to construct it — so a tool's presence
 // stays one line above and its availability one list in the user's config.
 func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 	all := []domain.Tool{
-		NewReadFile(root),
+		NewReadFile(root, host.ExtraReadRoots),
 		NewWriteFile(root),
-		NewListDir(root),
+		NewListDir(root, host.ExtraReadRoots),
 		NewGrep(root),
 		NewFindFiles(root),
 		NewSingleFindReplace(root),

@@ -21,7 +21,7 @@ func TestMarkerAccessors_NonMarkerTool(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	ro := NewReadFile(root) // read-only; carries no marker
+	ro := NewReadFile(root, nil) // read-only; carries no marker
 
 	if IsWorkspaceScopedWriter(ro) {
 		t.Error("IsWorkspaceScopedWriter(read_file) = true, want false (read-only tool is not a workspace-scoped writer)")

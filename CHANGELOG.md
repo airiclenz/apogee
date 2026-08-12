@@ -101,6 +101,18 @@ point is a **minor** bump, not a breaking change.
   is mounted yet — with no extra root configured the tools resolve, refuse and word their refusals
   exactly as before — and the seam is read-only by construction: no write tool can take it.
 
+- **`read_file` and `list_dir` now read under the host's configured read-only roots.** The two tools
+  take the seam above: an absolute path the workspace refuses is resolved against each mounted
+  read-only root in turn, so a file outside the workspace the host has deliberately opened up — a
+  skills library, once it is wired — reads and lists like any other. A listing that starts in such a
+  root walks entirely inside it, subdirectory by subdirectory, measured against that root rather than
+  the workspace. Both tools say so in their description, so the model knows the address is worth
+  trying. Everything else holds: relative paths still resolve against the workspace alone, a path
+  under no root is refused with the same uniform escape message it always was, and with nothing
+  mounted the two tools behave exactly as before. Mounting a directory for reading does not make it
+  writable — `write_file`, `edit_existing_file` and the rest of the write family never see the roots
+  and refuse the very paths `read_file` can read.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's

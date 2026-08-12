@@ -253,7 +253,7 @@ func armProbe(t *testing.T) (*apogee.MechanismRegistry, *fivePointProbe) {
 func paddedRegistry(t *testing.T, workspace string) *apogee.ToolRegistry {
 	t.Helper()
 	reg := apogee.NewToolRegistry()
-	if err := reg.Register(tools.NewListDir(workspace)); err != nil {
+	if err := reg.Register(tools.NewListDir(workspace, nil)); err != nil {
 		t.Fatalf("register list_dir: %v", err)
 	}
 	for i := 0; i < 30; i++ {

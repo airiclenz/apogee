@@ -98,7 +98,7 @@ func TestReadFile_Execute(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	tool := NewReadFile(root)
+	tool := NewReadFile(root, nil)
 
 	cases := []struct {
 		name        string
@@ -168,7 +168,7 @@ func TestReadFile_Execute_ReportsTheSpanItRendered(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	tool := NewReadFile(root)
+	tool := NewReadFile(root, nil)
 
 	cases := []struct {
 		name        string
@@ -236,7 +236,7 @@ func TestReadFile_Execute_LocatesASubstring(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	tool := NewReadFile(root)
+	tool := NewReadFile(root, nil)
 
 	cases := []struct {
 		name        string
@@ -298,7 +298,7 @@ func TestReadFile_Execute_LocatesASubstring(t *testing.T) {
 func TestReadFile_Execute_ErrorCarriesNoSummary(t *testing.T) {
 	t.Parallel()
 
-	result, err := NewReadFile(t.TempDir()).Execute(context.Background(),
+	result, err := NewReadFile(t.TempDir(), nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "absent.txt"}))
 
 	if err != nil {
@@ -335,7 +335,7 @@ func TestReadFile_Execute_RefusesEscapingSymlink(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	result, err := NewReadFile(root).Execute(context.Background(),
+	result, err := NewReadFile(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "ssh/id_rsa"}))
 
 	if err != nil {
@@ -362,7 +362,7 @@ func TestReadFile_Execute_RefusesComponentSwappedMidRead(t *testing.T) {
 
 	root := t.TempDir()
 
-	escapes := escapesUnderComponentSwap(t, NewReadFile(root), root, 2000)
+	escapes := escapesUnderComponentSwap(t, NewReadFile(root, nil), root, 2000)
 
 	if escapes != 0 {
 		t.Errorf("%d of 2000 reads returned the file outside the workspace, want 0", escapes)
@@ -387,7 +387,7 @@ func TestReadFile_Execute_RefusesAbsoluteInRootSymlink(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	result, err := NewReadFile(root).Execute(context.Background(),
+	result, err := NewReadFile(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "link.txt"}))
 
 	if err != nil {
@@ -424,7 +424,7 @@ func TestReadFile_Execute_ReadsRelativeInRootSymlink(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			t.Parallel()
 
-			result, err := NewReadFile(root).Execute(context.Background(),
+			result, err := NewReadFile(root, nil).Execute(context.Background(),
 				callWith(t, "c1", map[string]any{"path": path}))
 
 			if err != nil {
@@ -448,7 +448,7 @@ func TestReadFile_Execute_RejectsRangeOnLineTwo(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	result, err := NewReadFile(root).Execute(context.Background(),
+	result, err := NewReadFile(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "f.txt", "start_line": 2, "end_line": 3}))
 
 	if err != nil {
@@ -462,13 +462,108 @@ func TestReadFile_Execute_RejectsRangeOnLineTwo(t *testing.T) {
 	}
 }
 
+// TestReadFile_Execute_ReadsUnderAnExtraReadRoot pins the mount half of the read-only roots
+// seam: an ABSOLUTE path under a configured extra root reads, a workspace-relative path is
+// untouched by the mount, and a path under no root at all is still refused with the one
+// uniform escape message — the extra roots widen what can be read, never what a refusal says.
+func TestReadFile_Execute_ReadsUnderAnExtraReadRoot(t *testing.T) {
+	t.Parallel()
+
+	root, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, "in-workspace.txt"), "workspace bytes")
+	writeFixtureFile(t, filepath.Join(extra, "skill", "SKILL.md"), "skill bytes")
+	writeFixtureFile(t, filepath.Join(outside, "id_rsa"), outsideMarker)
+
+	tool := NewReadFile(root, func() []string { return []string{extra} })
+
+	cases := []struct {
+		name    string
+		path    string
+		want    string // substring the result content must carry
+		wantErr bool
+	}{
+		{"absolute under the extra root", filepath.Join(extra, "skill", "SKILL.md"), "skill bytes", false},
+		{"workspace relative unchanged", "in-workspace.txt", "workspace bytes", false},
+		{"under no root", filepath.Join(outside, "id_rsa"), ErrPathEscape.Error(), true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(), callWith(t, "c1", map[string]any{"path": tc.path}))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError != tc.wantErr {
+				t.Fatalf("IsError = %v, want %v (content: %q)", result.IsError, tc.wantErr, result.Content)
+			}
+			if !strings.Contains(result.Content, tc.want) {
+				t.Errorf("content %q does not contain %q", result.Content, tc.want)
+			}
+			if tc.wantErr && strings.Contains(result.Content, outsideMarker) {
+				t.Errorf("content leaked the file under no root: %q", result.Content)
+			}
+		})
+	}
+}
+
+// TestReadFile_Execute_ExtraRootIsReadableNotWritable pins the read-ONLY half of the seam,
+// where it is easiest to get wrong: the very directory read_file now reads from is refused by
+// the write tools, which never receive the extra-roots func and stay workspace-fenced through
+// the workspaceScopedWriter discipline (ADR 0012 D1). Mounting a directory for reading must
+// not make one byte of it writable.
+func TestReadFile_Execute_ExtraRootIsReadableNotWritable(t *testing.T) {
+	t.Parallel()
+
+	root, extra := t.TempDir(), t.TempDir()
+	target := filepath.Join(extra, "SKILL.md")
+	writeFixtureFile(t, target, "skill bytes")
+
+	read, err := NewReadFile(root, func() []string { return []string{extra} }).Execute(
+		context.Background(), callWith(t, "c1", map[string]any{"path": target}))
+	if err != nil {
+		t.Fatalf("read of the extra root returned a Go error: %v", err)
+	}
+	if read.IsError {
+		t.Fatalf("read of the extra root failed: %q", read.Content)
+	}
+
+	writers := map[string]domain.Tool{
+		"write_file":         NewWriteFile(root),
+		"edit_existing_file": NewEditExistingFile(root),
+	}
+	for name, tool := range writers {
+		t.Run(name, func(t *testing.T) {
+			result, err := tool.Execute(context.Background(),
+				callWith(t, "c2", map[string]any{"path": target, "content": "overwritten"}))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatalf("%s wrote into the read-only root (content: %q)", name, result.Content)
+			}
+			if !strings.Contains(result.Content, ErrPathEscape.Error()) {
+				t.Errorf("content %q does not carry the ErrPathEscape message %q", result.Content, ErrPathEscape.Error())
+			}
+		})
+	}
+
+	data, err := os.ReadFile(target)
+	if err != nil || string(data) != "skill bytes" {
+		t.Errorf("file under the read-only root = %q (err %v), want it untouched", data, err)
+	}
+}
+
 func TestReadFile_Execute_HonoursCancelledContext(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := NewReadFile(t.TempDir()).Execute(ctx, callWith(t, "c1", map[string]any{"path": "x"}))
+	_, err := NewReadFile(t.TempDir(), nil).Execute(ctx, callWith(t, "c1", map[string]any{"path": "x"}))
 
 	if err == nil {
 		t.Fatalf("Execute on a cancelled ctx returned nil error, want ctx error")
