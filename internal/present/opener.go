@@ -42,9 +42,11 @@ const launchGrace = 2 * time.Second
 type Runner func(name string, args ...string) error
 
 // Opener is the presentation ladder's rung 1 and rung 3 (ADR 0019): the host's act of handing a
-// finished document to the desktop application that knows how to show it — the default browser
-// for HTML, the OS-associated app for every other extension rung 1 will hand over
-// (OpenerRenderable), or the one application the user named in present.command.
+// finished document to the desktop application that knows how to show it — the OS-associated app
+// for every extension rung 1 will hand over (OpenerRenderable), or the one application the user
+// named in present.command. The default browser is deliberately not among the applications rung 1
+// reaches any more: a browser does not display a page so much as run it, and a file:// launch can
+// carry no policy to bound that (openerRenderableExts, ADR 0019 fourth amendment).
 //
 // It decides only WHAT to run; whether an opener should run at all is the ladder's call, because
 // that answer needs the locality fact this type deliberately does not consult (rung 1 is right
@@ -186,10 +188,22 @@ func (o Opener) argv(path string) ([]string, error) {
 // that application's own security prompts; meanwhile .csv is a format a coding agent's
 // deliverables genuinely arrive in, which .doc and .ppt are not.
 //
-// It is deliberately WIDER than rung 2's browser set (browserRenderableExts, internal/tui) —
-// an OS handler shows the .docx, .png and .md a browser would download or render as source, and
-// opening a deliverable in the application that knows it is rung 1's whole value. Rung 2's four
-// extensions are a subset of this set, pinned by a test in internal/tui.
+// The same line puts the ACTIVE-CONTENT containers OUT — .html, .htm, .xhtml and .svg (ADR 0019,
+// fourth amendment 2026-08-12). Their default handler is a browser, and a browser runs a page as
+// much as it shows one: script in a document that need only have ARRIVED in the clone reaches
+// loopback, RFC1918 and 169.254.169.254 from the browser's own network position, with none of the
+// URLGuard filtering that is the stated justification for a network tool auto-running at all. They
+// sit on the .docm side of the line by the same rule, and further along it: a macro needs one
+// Enable Content click, a <script> needs none.
+//
+// It is therefore no longer a SUPERSET of rung 2's browser set (browserRenderableExts,
+// internal/tui). That inversion is a decision rather than drift: the two rungs bound active
+// content by different means, so the sets now CROSS instead of nesting. Rung 1 stays the wider
+// set for everything inert — an OS handler shows the .docx, .png and .md a browser would download
+// or render as source, which is rung 1's whole value — while the three active formats are rung 2's
+// alone, because only a served document can carry the Content-Security-Policy that bounds it
+// (internal/present/server.go) and a file:// launch cannot. The single extension both rungs hold
+// is .pdf. A test in internal/tui pins the crossing.
 var openerRenderableExts = map[string]bool{
 	// Text and markup: the shapes a Skill's own deliverables come in.
 	".txt":      true,
@@ -206,10 +220,8 @@ var openerRenderableExts = map[string]bool{
 	".yaml":     true,
 	".yml":      true,
 	".toml":     true,
-	".html":     true,
-	".htm":      true,
-	".xhtml":    true,
-	".svg":      true,
+
+	// .html, .htm, .xhtml and .svg are deliberately absent — see the active-content rule above.
 
 	// Documents: the formats an office or reader application owns. The pre-2007 binary
 	// formats (.doc/.xls/.ppt) are deliberately absent — see the macro rule above.
@@ -243,8 +255,9 @@ var openerRenderableExts = map[string]bool{
 // program the model named by choosing a file name.
 //
 // It is exported so the bound is a stated, testable part of this package's contract rather than
-// a hidden filter: a host wiring its own presentation ladder asks the same question, and rung
-// 2's narrower browser set is a subset of the answer.
+// a hidden filter: a host wiring its own presentation ladder asks the same question. Rung 2's
+// browser set is no longer a subset of the answer — .html, .htm and .svg are served but never
+// launched (see openerRenderableExts), so .pdf is all the two sets share.
 //
 // The extension is lowercased first, so a Windows-authored REPORT.HTML is the same document as
 // report.html — and REPORT.BAT is refused exactly like report.bat.

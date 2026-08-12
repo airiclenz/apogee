@@ -182,6 +182,33 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **An HTML page or an SVG is no longer handed to your browser by the OS opener.**
+  `present_document` is read-only, so it runs in every mode including Plan, and `present.auto-open`
+  is on by default — which meant a `.html` file that need only have ARRIVED in a cloned repo could
+  be handed to your default browser with no approval anywhere. A browser is a runtime rather than a
+  viewer: script in that page reaches loopback, your RFC1918 network and `169.254.169.254` from the
+  browser's own network position, past none of the URL filtering apogee's own network tools go
+  through. `.html`, `.htm`, `.xhtml` and `.svg` therefore leave the opener's extension allow-list,
+  by the same rule that already excluded the macro-bearing office formats — and further along it,
+  since a macro needs one *Enable Content* click and a `<script>` needs none. **What changes for
+  you:** on a local session, `present_document report.html` degrades to the transcript rung — the
+  path is still presented, and you open it yourself if that is what you meant — instead of
+  launching a browser. Everything else in the set is untouched: markdown, text, data files,
+  documents, images and PDFs still open in the application that knows them, and a `present.command`
+  you configured yourself is unbounded as before, because it names one application and the
+  extension selects nothing.
+
+- **A document served to your browser now carries a restrictive Content-Security-Policy.** On a
+  remote session the ladder's second rung serves the document over loopback-or-LAN HTTP instead of
+  opening it, and that rung keeps the active formats above — because a served response can carry a
+  policy and a `file://` launch cannot. Every served document now answers with
+  `default-src 'none'`, which refuses script, `fetch`, XHR and every subresource load, plus a bare
+  `sandbox` (CSP has no directive for `<meta http-equiv="refresh">`, and the bare form withholds
+  the top-level navigation that would answer it), `form-action`/`base-uri`/`frame-ancestors` set to
+  `'none'`, and `X-Content-Type-Options: nosniff` so the extension keeps deciding what a document
+  is. `img-src` and `style-src` stay open enough that a self-contained report still renders with its
+  own images and its own inline stylesheet.
+
 - **A `python_exec` snippet imports the standard library, not the repo.** A program fed to CPython
   on standard input runs with the working directory — for this tool, the workspace root — at the
   FRONT of `sys.path`, so a repo-root `json.py`, `socket.py` or `subprocess.py` owned the matching

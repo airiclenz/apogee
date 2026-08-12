@@ -156,6 +156,110 @@ func TestDocServerServesAGrantedDocument(t *testing.T) {
 	}
 }
 
+// cspDirectives splits a Content-Security-Policy header into directive name → source list, so a
+// test can assert what a directive SAYS rather than that the header exists. Directive names are
+// case-insensitive per the CSP grammar; source expressions are not, so only the name is folded.
+func cspDirectives(t *testing.T, header string) map[string][]string {
+	t.Helper()
+
+	directives := make(map[string][]string)
+	for _, raw := range strings.Split(header, ";") {
+		fields := strings.Fields(raw)
+		if len(fields) == 0 {
+			continue
+		}
+		name := strings.ToLower(fields[0])
+		if _, dup := directives[name]; dup {
+			t.Errorf("policy states %q twice; browsers honour the first and the second reads as intent that is not applied", name)
+		}
+		directives[name] = fields[1:]
+	}
+	return directives
+}
+
+// Rung 2 is the only rung that still shows active content — .html, .htm, .xhtml and .svg left the
+// OS opener's allow-list on 2026-08-12 (ADR 0019, fourth amendment) because a file:// launch can
+// carry no policy — so the served document's POLICY is what bounds it, and this test asserts the
+// directives rather than the header's presence. That distinction is the whole point: a page served
+// under `default-src 'self'` would satisfy a presence assertion while still letting script fetch
+// loopback, RFC1918 and 169.254.169.254 from the browser's network position, which is the attack.
+// Weakening `default-src 'none'` must fail here.
+func TestDocServerServesEveryDocumentUnderARestrictivePolicy(t *testing.T) {
+	t.Parallel()
+
+	// Every document gets the same headers, active or not: the policy is a property of the server
+	// rather than of the extension, so a format that becomes active later is already covered.
+	files := map[string]string{
+		"report.html": "<html><body>the review</body></html>",
+		"graph.svg":   `<svg xmlns="http://www.w3.org/2000/svg"></svg>`,
+		"report.pdf":  "%PDF-1.7\n",
+	}
+
+	for file, content := range files {
+		t.Run(file, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			server := newTestServer(t, root)
+			served, err := server.Serve(writeDoc(t, root, file, content))
+			if err != nil {
+				t.Fatalf("Serve() = %v, want no error", err)
+			}
+
+			client := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Get(served)
+			if err != nil {
+				t.Fatalf("GET %s: %v", served, err)
+			}
+			defer resp.Body.Close()
+			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+				t.Fatalf("reading the response body: %v", err)
+			}
+
+			if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Errorf("X-Content-Type-Options = %q, want %q — the extension must keep deciding what is active", got, "nosniff")
+			}
+
+			policy := resp.Header.Get("Content-Security-Policy")
+			if policy == "" {
+				t.Fatal("no Content-Security-Policy: rung 2 is the rung that shows active content, so the policy is the bound")
+			}
+			directives := cspDirectives(t, policy)
+
+			// The load-bearing directive, asserted as an exact source list. 'self' would still
+			// permit script from the served origin, and the origin is a token away.
+			if got := directives["default-src"]; len(got) != 1 || got[0] != "'none'" {
+				t.Errorf("default-src = %q, want exactly [\"'none'\"] — anything else leaves script, fetch and XHR open", got)
+			}
+			// These do not fall back to default-src, so each must say 'none' in its own right.
+			for _, name := range []string{"form-action", "base-uri", "frame-ancestors"} {
+				if got := directives[name]; len(got) != 1 || got[0] != "'none'" {
+					t.Errorf("%s = %q, want exactly [\"'none'\"] — this directive has no default-src fallback", name, got)
+				}
+			}
+			// A BARE sandbox is what withholds allow-top-navigation, which is the only answer to
+			// <meta http-equiv="refresh"> — CSP has no directive for it. Any allow-* token here
+			// hands part of that back.
+			tokens, ok := directives["sandbox"]
+			if !ok {
+				t.Error("no sandbox directive: nothing then stops a meta refresh navigating the browser somewhere the policy never sees")
+			}
+			if len(tokens) != 0 {
+				t.Errorf("sandbox = %q, want it bare — each allow-* token returns a capability the bare form withholds", tokens)
+			}
+			// The two narrow re-openings that keep a self-contained report readable. They are
+			// asserted so that tightening them is a deliberate change with a failing test, not a
+			// silent regression in what rung 2 can still show.
+			if got := directives["img-src"]; len(got) == 0 {
+				t.Error("no img-src: a report with its own images would render blank, which makes the rung useless")
+			}
+			if got := directives["style-src"]; len(got) == 0 {
+				t.Error("no style-src: a report with an inline stylesheet would render unstyled")
+			}
+		})
+	}
+}
+
 // The grant is to the PATH, not to a snapshot: a document rewritten after it was presented serves
 // its new content, which is what makes re-presenting an edited deliverable work at all.
 func TestDocServerRereadsTheDocumentPerRequest(t *testing.T) {

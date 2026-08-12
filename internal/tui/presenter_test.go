@@ -122,7 +122,10 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 	html := writeDoc(t, root, "review.html")
 	markdown := writeDoc(t, root, "review.md")
 	script := writeDoc(t, root, "review.bat")
-	injected := writeDoc(t, root, "report&calc&.html")
+	// Markdown, not HTML: since 2026-08-12 rung 1 refuses .html on its extension alone, so an
+	// .html fixture here would be refused before cmdSafe saw the name and the row would prove
+	// nothing about the NAME bound it exists to pin.
+	injected := writeDoc(t, root, "report&calc&.md")
 
 	tests := []struct {
 		name       string
@@ -137,8 +140,24 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 			rungs: func(*testing.T) Presentation {
 				return Presentation{Local: true, Opener: openerRunning("darwin", new([]string))}
 			},
-			path:       html,
+			path:       markdown,
 			wantMethod: domain.PresentOpened,
+		},
+		{
+			// The user-visible half of ADR 0019's fourth amendment: an HTML report on a LOCAL
+			// session no longer launches a browser at all. climb's two branches are exclusive, so
+			// rung 1's refusal degrades to the baseline rather than falling through to rung 2 —
+			// the URL rung is for a machine that is not this one, and the policy that bounds an
+			// active page can only ride a served response.
+			name: "a local desktop refuses an active-content page and degrades to the baseline",
+			rungs: func(t *testing.T) Presentation {
+				o := headlessOpener(t)
+				o.GOOS = "darwin" // a real desktop: only the extension keeps this from launching
+				return Presentation{Local: true, Opener: o}
+			},
+			path:       html,
+			wantMethod: domain.PresentShown,
+			wantReason: "no opener on this machine",
 		},
 		{
 			name: "local with a present.command opens on a machine with no desktop",
@@ -188,7 +207,7 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 		{
 			name:       "an opener that fails is visible",
 			rungs:      func(*testing.T) Presentation { return Presentation{Local: true, Opener: failingOpener()} },
-			path:       html,
+			path:       markdown, // reaches the runner: an .html would be refused before it launched
 			wantMethod: domain.PresentShown,
 			wantReason: "could not open: ",
 		},
@@ -276,15 +295,15 @@ func TestPresenterOpensTheResolvedPath(t *testing.T) {
 	rungs := Presentation{Local: true, Opener: openerRunning("darwin", &argv)}
 
 	_, msg := presentOnce(t, rungs, domain.PresentRequest{
-		Path:        "/workspace/docs/review.html",
-		DisplayPath: "docs/review.html",
+		Path:        "/workspace/docs/review.md",
+		DisplayPath: "docs/review.md",
 		Title:       "Architecture review",
 	})
 
-	if want := []string{"open", "/workspace/docs/review.html"}; strings.Join(argv, " ") != strings.Join(want, " ") {
+	if want := []string{"open", "/workspace/docs/review.md"}; strings.Join(argv, " ") != strings.Join(want, " ") {
 		t.Errorf("argv = %v; want %v", argv, want)
 	}
-	if msg.Path != "docs/review.html" || msg.Title != "Architecture review" {
+	if msg.Path != "docs/review.md" || msg.Title != "Architecture review" {
 		t.Errorf("entry = %+v; want the display path and the title", msg)
 	}
 }
@@ -393,18 +412,40 @@ func TestBridgeSetPresentationSwapsTheLadderInPlace(t *testing.T) {
 	}
 }
 
-// TestBrowserRenderableIsASubsetOfTheOpenerSet pins the relationship between the ladder's two
-// extension sets: rung 2 serves what a browser renders itself, rung 1 hands the OS handler the
-// wider set of what a desktop application renders (present.OpenerRenderable, the bound added
-// 2026-07-26). Rung 1 is the wider one BY CONSTRUCTION, so anything worth a URL on a remote
-// session must also be worth opening on a local one — a future rung-2 addition (markdown, say)
-// that rung 1 would refuse is a ladder that answers differently depending on where it runs.
-func TestBrowserRenderableIsASubsetOfTheOpenerSet(t *testing.T) {
+// TestTheTwoExtensionSetsCrossOnlyOnActiveContent pins the relationship between the ladder's two
+// extension sets. It used to be a SUBSET relation — rung 2 served what a browser renders, rung 1
+// handed the OS handler a strictly wider set — and this test used to assert exactly that.
+//
+// The relation is now a CROSSING, and that is a decision rather than a broken invariant (ADR 0019,
+// fourth amendment 2026-08-12). The three active formats left rung 1 because the rung that shows
+// active content must be the rung that can BOUND it: a served response carries a
+// Content-Security-Policy, a file:// launch carries nothing. So the subset direction is inverted
+// on exactly one axis and holds everywhere else, which is what this test states — asserting the
+// inversion in both directions, so a later "repair" that quietly restores .html to the opener set
+// fails here rather than passing.
+func TestTheTwoExtensionSetsCrossOnlyOnActiveContent(t *testing.T) {
 	t.Parallel()
 
+	// The axis of the inversion: rung 2 serves these, rung 1 must refuse them. A regression here
+	// is a local session launching a browser on a page it cannot police.
+	for _, ext := range []string{".html", ".htm", ".svg"} {
+		if !browserRenderableExts[ext] {
+			t.Errorf("rung 2 no longer serves %q — it is then shown on no rung at all", ext)
+		}
+		if present.OpenerRenderable("report" + ext) {
+			t.Errorf("rung 1 opens %q again — active content must stay on the rung that carries a policy", ext)
+		}
+	}
+
+	// Everywhere else the old relation stands: what rung 2 serves, rung 1 still opens. Only .pdf
+	// is left in that intersection today, and it is the inert one.
 	for ext := range browserRenderableExts {
+		switch ext {
+		case ".html", ".htm", ".svg":
+			continue
+		}
 		if !present.OpenerRenderable("report" + ext) {
-			t.Errorf("rung 2 serves %q but rung 1 refuses it — the browser set must stay a subset", ext)
+			t.Errorf("rung 2 serves %q but rung 1 refuses it — an inert format must be openable on both rungs", ext)
 		}
 	}
 }

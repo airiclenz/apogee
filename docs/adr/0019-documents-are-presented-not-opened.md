@@ -280,3 +280,51 @@ format a coding agent's deliverables genuinely arrive in, which `.doc` and `.ppt
 **(c) Nothing else moves.** Rung 2's four browser extensions were never in the removed trio, so the
 subset invariant holds unchanged; rung 3 stays unbounded (the first amendment's (c)); the Windows
 name bound (the second amendment) is untouched.
+
+## Amendment (2026-08-12) — the allow-list refuses active content, and rung 2 carries a policy
+
+**Why now.** Raised by the external security audit of 2026-08-11 and ratified by the owner
+(hostile-bytes hardening plan, design call 3). The first amendment's rule is "the formats whose
+default handler **displays** the file rather than executing it", and the shipped set admitted
+`.html`, `.htm`, `.xhtml` and `.svg` — whose default handler is a browser, which does not so much
+display a page as **run** it. The preconditions are all stock: `present_document` is `ReadOnly`, so
+it auto-runs in **every** mode including Plan; `present.auto-open` defaults true; and the document
+need not have been written by the model, since one that arrived in the clone is enough. Script in
+that page then reaches loopback, RFC1918 and `169.254.169.254` from the **browser's** network
+position, with none of the `URLGuard` filtering that is the stated justification for a network tool
+auto-running at all. This is the same move as the third amendment and further along the same line:
+a macro needs one *Enable Content* click, a `<script>` needs none.
+
+The bound is real but not unlimited, and the triage records the limit rather than overstating the
+finding: `presentationRungs` wires the opener only on a **Local** session with `auto-open` set, and
+`Opener.argv` additionally requires `HasDesktop`, so any `SSH_*` variable in the environment or a
+headless container means no opener was ever built. The persona this defends is the local desktop
+one, which is apogee's primary persona.
+
+**(a) The four active-content extensions are out of rung 1.** They degrade exactly as any refused
+extension does (the first amendment's (a)): no argv at all, `ErrNoOpener`, rung 0 — the path still
+presented, the tool result still `shown`, never an error. Because `climb`'s two branches are
+exclusive (a Local session degrades to the baseline rather than falling through to rung 2), the
+user-visible consequence is that a **local** `present_document report.html` launches no browser.
+
+**(b) Rung 2 keeps them, and gains the policy that bounds them.** The rung that shows active
+content must be the rung that can police it, and only a served response can carry a header: every
+document the doc server answers now carries `Content-Security-Policy: default-src 'none'; img-src
+'self' data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors
+'none'; sandbox`, plus `X-Content-Type-Options: nosniff`. `default-src 'none'` is the load-bearing
+directive — it refuses script, `fetch`, XHR and every subresource load, which is the mechanism the
+audit named. The bare `sandbox` is not redundant beside it: CSP has no directive for `<meta
+http-equiv="refresh">`, and withholding `allow-top-navigation` is what closes that half. `img-src`
+and `style-src` are the narrow re-openings that keep a self-contained report readable. The policy's
+**directives** are what a test asserts, not the header's presence — a permissive policy would
+satisfy a presence check while closing nothing.
+
+**(c) The subset invariant is deliberately INVERTED on this axis.** The first amendment's (b) and
+the third's (c) both state that rung 2's set is a subset of rung 1's, pinned by a test. Three of
+rung 2's four extensions have now left rung 1, so the two sets **cross** on `.pdf` rather than
+nest, and the test states the crossing in both directions instead. The original reasoning — a
+ladder that answers differently depending on where it runs is suspect — is answered rather than
+abandoned: the two rungs differ here **because** their ability to bound the document differs, which
+is the ladder working as designed and not drift. Rung 1 stays the wider set for every inert format;
+rung 3 stays unbounded (the first amendment's (c)); the Windows name bound (the second amendment)
+is untouched.

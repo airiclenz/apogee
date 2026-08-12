@@ -57,6 +57,30 @@ const idleTimeout = 60 * time.Second
 // and far below any descriptor budget.
 const maxConnections = 32
 
+// documentCSP is the Content-Security-Policy every served document carries. Rung 2 is the ONLY
+// rung that still shows active content: .html, .htm, .xhtml and .svg left rung 1's allow-list
+// precisely because a file:// launch can carry no policy at all (ADR 0019, fourth amendment
+// 2026-08-12), so this header is the whole of the bound here — and the DIRECTIVES are the fix, not
+// the header's presence. A permissive policy would satisfy an assertion that a policy exists while
+// closing nothing.
+//
+// `default-src 'none'` is the load-bearing directive. It refuses script, fetch, XHR, WebSocket and
+// every subresource load, which is what stops a page that need only have ARRIVED in the clone from
+// reaching loopback, RFC1918 and 169.254.169.254 from the browser's network position — reach the
+// agent's own network tool does not have, because URLGuard filters exactly those destinations.
+// `img-src 'self' data:` and `style-src 'unsafe-inline'` are the narrow re-openings that let a
+// self-contained report still render: its own images and its own inline stylesheet, neither of
+// which can originate a request to another host.
+//
+// `sandbox` is not redundant beside them. CSP has no directive for `<meta http-equiv="refresh">`,
+// so everything above leaves the NAVIGATION half of the attack open; a BARE sandbox grants no
+// allow-* token, which withholds allow-top-navigation and closes it (and withholds allow-scripts
+// and allow-forms as a second statement of the directives above). `form-action`, `base-uri` and
+// `frame-ancestors` are named explicitly because they do not fall back to `default-src` — leaving
+// them off would leave three holes in a policy that reads as closed.
+const documentCSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; " +
+	"form-action 'none'; base-uri 'none'; frame-ancestors 'none'; sandbox"
+
 // errClosed is returned by Serve after Close: the doc server's lifetime is the app's (ADR 0019 §1
 // — nothing live crosses the quiescent boundary), so a presentation arriving during or after
 // shutdown must fail rather than resurrect a listener that outlives the process's own teardown.
@@ -340,6 +364,12 @@ func (s *DocServer) handle(w http.ResponseWriter, r *http.Request) {
 	// is a function of the extension alone. ServeContent then only adds what it is good at: range
 	// requests (a PDF viewer fetches a document in pieces) and conditional GETs.
 	w.Header().Set("Content-Type", contentType(granted.name))
+	// And nosniff makes that decision binding on the browser too: a document whose extension says
+	// text/plain cannot be re-read as markup by content sniffing, so the extension keeps deciding
+	// which documents are active at all. The policy below is what bounds the ones that say markup
+	// honestly.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", documentCSP)
 	http.ServeContent(w, r, "", info.ModTime(), doc)
 }
 

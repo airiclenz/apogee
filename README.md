@@ -783,14 +783,19 @@ When the model finishes a deliverable — a report, a review, an HTML summary �
 it; the model never reasons about your platform.** Whatever it decides, the document's
 workspace-relative path is always printed in the transcript, which most terminals (Zed,
 VS Code, iTerm2, WezTerm, kitty) make cmd/ctrl+clickable. Above that baseline: on your
-own desktop the file is opened in its associated application (HTML in your default
-browser) — documents, images and text only, because anything the OS would *run* rather
-than show (a `.bat`, a `.command`, a `.desktop`) is left as a path for you to open
-deliberately; over SSH — a devbox, a VM, a container — browser-renderable documents
-(`.html`, `.htm`, `.svg`, `.pdf`) are served from a small built-in server and the URL is
-printed beside the path, so one cmd+click opens the document in the browser on *your*
-machine. Apogee never auto-opens on the remote box: there is no display there to open
-into. If a rung fails, the transcript says so and falls back to the path.
+own desktop the file is opened in its associated application — documents, images and
+text only, because anything the OS would *run* rather than show (a `.bat`, a `.command`,
+a `.desktop`) is left as a path for you to open deliberately. A **web page counts as
+something it would run**: `.html`, `.htm`, `.xhtml` and `.svg` are left as a path too,
+because a browser executes what a page carries — including a page that merely arrived in
+a repo you cloned — and a `file://` launch can carry no policy to stop it. Over SSH — a
+devbox, a VM, a container — browser-renderable documents (`.html`, `.htm`, `.svg`,
+`.pdf`) are served from a small built-in server and the URL is printed beside the path,
+so one cmd+click opens the document in the browser on *your* machine; that rung keeps the
+web formats precisely because a served response *can* carry a policy, and every document
+it serves is answered under `default-src 'none'` with `nosniff`. Apogee never auto-opens
+on the remote box: there is no display there to open into. If a rung fails, the
+transcript says so and falls back to the path.
 
 The built-in server hands out one random-token URL per presented document — no directory
 listing, no other file reachable — re-reads the file per request, starts only when a

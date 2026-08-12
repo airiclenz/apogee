@@ -33,8 +33,11 @@ func (r *recordingRunner) only(t *testing.T) []string {
 }
 
 // The document path used throughout: absolute (as the tool resolves it) and containing a space,
-// because argument boundaries are the one thing an opener can silently get wrong.
-const testDocPath = "/workspace/my reports/review.html"
+// because argument boundaries are the one thing an opener can silently get wrong. Its extension is
+// markdown rather than HTML so that the rows below keep testing what they SAY they test — since
+// 2026-08-12 an .html path is refused by the extension bound before any of the platform or name
+// logic runs, so a table built on one would pass while exercising nothing.
+const testDocPath = "/workspace/my reports/review.md"
 
 // docNamed returns testDocPath's directory with a different file name, so a table row can vary
 // the extension — the thing rung 1 now judges — without varying anything else.
@@ -106,8 +109,38 @@ func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 		{
 			name: "a Windows-authored upper-case name is the same document",
 			goos: "darwin",
-			path: docNamed("REVIEW.HTML"),
-			want: []string{"open", docNamed("REVIEW.HTML")},
+			path: docNamed("REVIEW.MD"),
+			want: []string{"open", docNamed("REVIEW.MD")},
+		},
+		{
+			// The active-content half of the bound (ADR 0019, fourth amendment): the handler for
+			// these is a browser, which runs the page rather than merely showing it, and a
+			// file:// launch can carry no Content-Security-Policy to bound that. Rung 2 keeps
+			// them; rung 1 refuses them exactly as it refuses a .bat.
+			name: "darwin refuses an HTML page, whose handler runs what the page carries",
+			goos: "darwin",
+			path: docNamed("report.html"),
+		},
+		{
+			name: "linux refuses an SVG, which is a script container with a picture in it",
+			goos: "linux",
+			vars: map[string]string{"DISPLAY": ":0"},
+			path: docNamed("diagram.svg"),
+		},
+		{
+			name: "the refusal is by extension, so an upper-case page is refused too",
+			goos: "darwin",
+			path: docNamed("REPORT.HTML"),
+		},
+		{
+			name: "windows refuses the other two active markup extensions",
+			goos: "windows",
+			path: docNamed("report.xhtml"),
+		},
+		{
+			name: "windows refuses the short HTML extension as well",
+			goos: "windows",
+			path: docNamed("report.htm"),
 		},
 		{
 			name: "darwin refuses the double-clickable shell script",
@@ -153,69 +186,72 @@ func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 			// joined line, EscapeArg quotes an argument only when it holds a space or a quote,
 			// and `&` splits commands — so this space-free path reads back as three commands and
 			// the middle one runs. The NAME is therefore bounded on Windows: no argv at all.
+			// Every row below carries a markdown extension for the same reason testDocPath does:
+			// the extension bound runs first, so an .html name would be refused before cmdSafe
+			// was ever consulted and the row would prove nothing about the NAME.
 			name: "windows refuses a name cmd would split into a second command",
 			goos: "windows",
-			path: "/ws/report&calc&.html",
+			path: "/ws/report&calc&.md",
 		},
 		{
 			name: "windows refuses a pipe in a name",
 			goos: "windows",
-			path: docNamed("a|b.html"),
+			path: docNamed("a|b.md"),
 		},
 		{
 			name: "windows refuses cmd's own escape character",
 			goos: "windows",
-			path: docNamed("x^y.html"),
+			path: docNamed("x^y.md"),
 		},
 		{
 			// %TEMP% expands even inside the double quotes EscapeArg adds around a space-carrying
 			// path, so quoting is no defence against it.
 			name: "windows refuses a name that expands an environment variable",
 			goos: "windows",
-			path: docNamed("%TEMP%.html"),
+			path: docNamed("%TEMP%.md"),
 		},
 		{
 			// Go escapes an embedded quote as `\"`, which cmd's parser does not honour: the two
 			// disagree about where the quoted region ends, and everything after that is live.
 			name: "windows refuses a quote in a name",
 			goos: "windows",
-			path: docNamed(`re"port.html`),
+			path: docNamed(`re"port.md`),
 		},
 		{
 			// `;` is a cmd token delimiter: in an unquoted path it splits the line into TWO
 			// start arguments, and start resolves its first argument like a command name.
 			name: "windows refuses a cmd token delimiter in a name",
 			goos: "windows",
-			path: "/ws/a;b.html",
+			path: "/ws/a;b.md",
 		},
 		{
 			// `!` fires when delayed expansion is switched on machine-wide (a registry key, not
 			// a choice this process makes), so it is refused rather than depended on.
 			name: "windows refuses a delayed-expansion trigger in a name",
 			goos: "windows",
-			path: docNamed("hello!.html"),
+			path: docNamed("hello!.md"),
 		},
 		{
 			// The bound refuses cmd's grammar, not every unusual character: a space is quoted by
 			// EscapeArg and inert inside the quotes, so the common case keeps opening.
 			name: "windows still opens a name with a space",
 			goos: "windows",
-			path: docNamed("annual report.html"),
-			want: []string{"cmd", "/c", "start", "", docNamed("annual report.html")},
+			path: docNamed("annual report.md"),
+			want: []string{"cmd", "/c", "start", "", docNamed("annual report.md")},
 		},
 		{
 			name: "windows still opens parentheses, which are literal mid-argument",
 			goos: "windows",
-			path: docNamed("report(1).html"),
-			want: []string{"cmd", "/c", "start", "", docNamed("report(1).html")},
+			path: docNamed("report(1).md"),
+			want: []string{"cmd", "/c", "start", "", docNamed("report(1).md")},
 		},
 		{
 			// The name bound is Windows' alone: `open` receives the path as one execve argument
 			// with no shell in between, so the same name is just a file name on macOS.
 			name: "darwin opens the name windows refuses, because no shell re-parses it",
 			goos: "darwin",
-			path: docNamed("report&calc&.html"),
-			want: []string{"open", docNamed("report&calc&.html")},
+			path: docNamed("report&calc&.md"),
+			want: []string{"open", docNamed("report&calc&.md")},
 		},
 	}
 
@@ -256,11 +292,20 @@ func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 // image and text formats a deliverable actually arrives in are in. The office rows pin the line
 // the rule draws — .docx vs .docm — with the pre-2007 binary formats, which have no macro-free
 // variant, on the .docm side of it (ADR 0019, third amendment 2026-07-26).
+//
+// The four active-content extensions moved from the first list to the second on 2026-08-12 (ADR
+// 0019, fourth amendment). That is the rule being APPLIED, not relaxed or repaired: a browser is
+// the default handler for .html/.htm/.xhtml/.svg and a browser RUNS a page, so script in a
+// document that need only have arrived in the clone reaches loopback, RFC1918 and the cloud
+// metadata address from the browser's network position. They sit further along the same line as
+// .docm — a macro needs one Enable Content click, a <script> needs none — and they keep rung 2,
+// where a Content-Security-Policy can bound them and a file:// launch cannot. Restoring any of
+// them to the allow-list must fail here.
 func TestOpenerRenderableAllowsDocumentsAndRefusesPrograms(t *testing.T) {
 	t.Parallel()
 
 	renderable := []string{
-		"report.html", "report.htm", "report.xhtml", "diagram.svg", "report.pdf",
+		"report.pdf",
 		"report.md", "notes.txt", "data.json", "config.yaml", "notes.log",
 		"report.docx", "report.odt", "sheet.xlsx", "deck.pptx", "book.epub",
 		"data.csv", // ruled IN (ADR 0019, third amendment): plain text, no container for a macro
@@ -279,6 +324,8 @@ func TestOpenerRenderableAllowsDocumentsAndRefusesPrograms(t *testing.T) {
 		"report.desktop", "report.sh", "report.py", // Linux and friends
 		"report.docm", "sheet.xlsm", "deck.pptm", // macro-enabled office documents
 		"report.doc", "sheet.xls", "deck.ppt", // pre-2007 office: the one binary container carries macros too
+		"report.html", "report.htm", "report.xhtml", "diagram.svg", // active content: the handler is a runtime
+		"REPORT.HTML", "DIAGRAM.SVG", // and the case fold applies to the refusal too
 		"report", "report.", ".bashrc", // no usable extension at all
 	}
 	for _, name := range programs {

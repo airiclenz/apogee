@@ -167,9 +167,17 @@ func (p *uiPresenter) climb(ctx context.Context, req domain.PresentRequest) (dom
 // anything it is handed — so the judgement of what is worth a URL lives here, with the ladder, and
 // a later markdown→HTML rung is a change to this set rather than to the server.
 //
-// It is the narrow half of a pair: rung 1's own set (present.OpenerRenderable, the launch bound
-// added 2026-07-26) is wider, because an OS handler shows the .docx and .png a browser would only
-// download. This set must stay a SUBSET of that one, which a test in this package pins.
+// It is no longer the narrow half of a nested pair. Rung 1's own set (present.OpenerRenderable) is
+// still wider for everything INERT — an OS handler shows the .docx and .png a browser would only
+// download — but the three active formats here (.html, .htm, .svg) were removed from it on
+// 2026-08-12 (ADR 0019, fourth amendment), so the two sets now CROSS on .pdf rather than nest.
+//
+// The crossing is what the ladder is for rather than a hole in it: a served document carries a
+// restrictive Content-Security-Policy (internal/present, documentCSP), and a file:// launch carries
+// none, so the rung that can bound active content is the rung that shows it. The consequence is
+// visible to the user — a LOCAL `present_document report.html` degrades to the baseline transcript
+// rung and launches no browser, because climb's two branches are exclusive. A test in this package
+// pins the crossing, in both directions.
 var browserRenderableExts = map[string]bool{
 	".html": true,
 	".htm":  true,
