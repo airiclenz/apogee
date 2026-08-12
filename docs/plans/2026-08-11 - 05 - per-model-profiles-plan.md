@@ -127,7 +127,15 @@ three-layer precedence in one sentence; `make check` passes.
 
 Commit: `docs(adr): ADR 0044 — per-model profiles with a shipped shape table`
 
-## 3. `internal/profiles`: entries, pattern match, shipped trio
+## 3. `internal/profiles`: entries, pattern match, shipped trio — ✅ DONE (2026-08-12)
+
+NOTES (2026-08-12): three recorded calls. (a) No CHANGELOG bullet — the package is internal and
+wires to nothing yet, so nothing is user-visible until items 4/6 (same reading of the standing
+requirement item 2 took). (b) The shipped table is reached through `Shipped() []Entry`, which
+returns a COPY, rather than an exported slice var — an exported mutable table is editable by any
+caller; item 6's snippet `profiles.Shipped` therefore needs parens. (c) Two details the item text
+left open: an EMPTY pattern never matches (it is a substring of every name and would profile every
+model), and an equal-length tie gives the lexicographically SMALLER pattern.
 
 **What:** New package `internal/profiles` (shape mirrors `internal/validated`):
 `Entry{Pattern string; Profile domain.ModelProfile; Note string}`;
