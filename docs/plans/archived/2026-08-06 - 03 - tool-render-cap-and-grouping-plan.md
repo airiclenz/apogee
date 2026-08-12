@@ -385,10 +385,10 @@ SGR collapsed vs expanded; diff lines carry identical SGR in both states.
 
 ## 8. Rewrite the layout prose to the shipped rules — ✅ DONE (2026-08-07)
 
-NOTES (2026-08-07): four deviations. (a) `! grep -q "▸" layout.md` cannot pass: `▸▸` is the AUTO
+NOTES (2026-08-07): four deviations. (a) `! grep -q "▸" layout.md` cannot pass: `⏵⏵` is the AUTO
 mode glyph (`glyphModeAuto`, theme.go), a different UI element the footer paragraph documents, and
 changing it would make the doc contradict the code. Every collapse indicator is gone; the one
-remaining hit is `▸▸ auto` at layout.md:1001. (b) The sketch at the TOP of layout.md is edited too,
+remaining hit is `⏵⏵ auto` at layout.md:1001. (b) The sketch at the TOP of layout.md is edited too,
 outside the two named sections: the acceptance criterion forces the glyph swap there, and the two
 sections quote that sketch by row, so it also gains `Read File (3)` and loses the collapsed Run's
 body-preview line — a sketch still showing the retired shape would contradict the prose that names
@@ -400,10 +400,10 @@ pointer naming the two rewritten sections was added under the existing grouping 
 the type-to-filter entry already set; no release heading or version field was touched.
 
 NOTES (2026-08-07): owner-ratified narrowing of this item's second acceptance command. `! grep -q
-"▸" layout.md` cannot pass as written — `▸▸` is the unrelated auto-mode glyph (`glyphModeAuto`,
+"▸" layout.md` cannot pass as written — `⏵⏵` is the unrelated auto-mode glyph (`glyphModeAuto`,
 theme.go) documented in the footer paragraph at layout.md:1001, and the owner decided that glyph
 STAYS unchanged. The check is narrowed to its real intent: **no collapse indicator `▸` remains in
-the tool-block prose**, verified as `grep -n "▸" layout.md | grep -v "▸▸"` returning nothing. The
+the tool-block prose**, verified as `grep -n "▸" layout.md | grep -v "⏵⏵"` returning nothing. The
 literal command's failure is expected, not a FAIL.
 
 NOTES (2026-08-07): retry fix, owner-ratified. The rewritten "The label." paragraph still carried the
