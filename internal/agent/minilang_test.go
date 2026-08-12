@@ -264,7 +264,7 @@ func TestResolveSkillRefsNamesTheSkillFolder(t *testing.T) {
 	// Directly after the opening tag, before the body: the model reads the address first.
 	want := "<skill: Code Review>\n" +
 		"files: /home/u/.apogee/skills/review — this skill's bundled files; " +
-		"read them with read_file, list_dir, grep or find_files\n" +
+		"read one (read_file, list_dir, grep or find_files) only when these instructions call for it\n" +
 		"REVIEW INSTRUCTIONS\n</skill>"
 	if got := a.conv.At(0).Content; !strings.Contains(got, want) {
 		t.Errorf("skill block did not name the folder verbatim:\ngot:\n%s\nwant to contain:\n%s", got, want)

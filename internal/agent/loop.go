@@ -884,8 +884,8 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string) string {
 		}
 		fmt.Fprintf(&b, "<skill: %s>\n", s.DisplayName)
 		if s.Dir != "" {
-			fmt.Fprintf(&b, "files: %s — this skill's bundled files; read them with read_file, "+
-				"list_dir, grep or find_files\n", s.Dir)
+			fmt.Fprintf(&b, "files: %s — this skill's bundled files; read one (read_file, "+
+				"list_dir, grep or find_files) only when these instructions call for it\n", s.Dir)
 		}
 		fmt.Fprintf(&b, "%s\n</skill>\n\n", s.Body)
 	}
