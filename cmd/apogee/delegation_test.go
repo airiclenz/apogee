@@ -4,7 +4,9 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -434,6 +436,86 @@ func TestDelegationDropsALandingFromASupersededServer(t *testing.T) {
 	wiring.land(wiring.generation-1, "grunt", &apogee.DelegationTarget{Model: "cheap-7b"})
 	if len(spy.pushes) != 0 || len(notices.notes) != 0 {
 		t.Errorf("a superseded landing pushed %+v and said %q; want neither", spy.pushes, notices.notes)
+	}
+}
+
+// gatedDelegationSpy is a delegationSpy that can be stopped INSIDE a push, which is the only way a
+// test can stand in the window an ordering is decided in: the FIRST push announces that it arrived
+// and then waits to be released, so the test can run a config edit while a beat's landing is half
+// done. Every later push — the edit's own — passes straight through, or the edit could never overtake
+// the landing this is built to let it overtake.
+type gatedDelegationSpy struct {
+	mu      sync.Mutex
+	pushes  []*apogee.DelegationTarget
+	gated   bool
+	arrived chan struct{} // closed by the first push, once it is in
+	release chan struct{} // closed by the test, to let that push finish
+}
+
+func (s *gatedDelegationSpy) SetDelegationTarget(target *apogee.DelegationTarget) {
+	s.mu.Lock()
+	first := !s.gated
+	s.gated = true
+	s.mu.Unlock()
+	if first {
+		close(s.arrived)
+		<-s.release
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pushes = append(s.pushes, target)
+}
+
+func (s *gatedDelegationSpy) snapshot() []*apogee.DelegationTarget {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*apogee.DelegationTarget(nil), s.pushes...)
+}
+
+// A beat that resolved a usable target and an edit that unflags the server can be in flight at the
+// same instant, and only one order of the two is survivable. The edit must have the LAST word: let the
+// superseded landing push after it and routing stays engaged against a server the file no longer
+// flags — and with the flag gone there is no further beat to correct it, which is what makes this
+// interleaving worse than the one the generation guard already drops.
+//
+// So the landing is held inside its own push and the edit is given that whole window to run in. It
+// gets there only if the push happens outside the wiring's lock; under the lock it waits, lands after,
+// and its nil is the last word either way.
+func TestDelegationLandLosesToAnEditThatUnflagsTheServer(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
+	gate := &gatedDelegationSpy{arrived: make(chan struct{}), release: make(chan struct{})}
+	wiring := testDelegationWiring(entry, heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, gate, nil)
+	generation := wiring.generation
+
+	landed := make(chan struct{})
+	go func() {
+		defer close(landed)
+		wiring.land(generation, entry.Name, &apogee.DelegationTarget{Model: "cheap-7b"})
+	}()
+	<-gate.arrived // the beat is mid-push, which is the only place the edit can overtake it
+
+	relisted := make(chan struct{})
+	go func() {
+		defer close(relisted)
+		if err := wiring.relist([]config.ServerEntry{{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}}); err != nil {
+			t.Errorf("relist removing the flag: %v", err)
+		}
+	}()
+	// The edit either finishes inside the window — the ordering under test — or is still held out of it
+	// when the wait expires, and the assertion is the same for both: what the engine is left holding.
+	select {
+	case <-relisted:
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(gate.release)
+	<-landed
+	<-relisted
+
+	pushes := gate.snapshot()
+	if len(pushes) != 2 || pushes[len(pushes)-1] != nil {
+		t.Fatalf("pushes = %+v; want the edit's nil to be the last word, so nothing stays routed", pushes)
 	}
 }
 

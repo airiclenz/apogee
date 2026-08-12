@@ -202,10 +202,17 @@ func (d *delegationWiring) observe(ctx context.Context) func() {
 // what it wanted; letting this land would restore the old server's target for a whole interval,
 // which is the one thing a live edit must never leave behind.
 //
-// The notice goes out AFTER the push and OUTSIDE the lock, and both matter: a notice that preceded
-// the latch would announce routing that is not in force yet, and the notice seam blocks until the
-// renderer's Update loop takes it — so holding the mutex across it would park the beat goroutine on
-// the very loop a config reload calls relist from.
+// The push happens UNDER the lock, which is what ties it to the generation it was just admitted on. A
+// landing that released the lock first could be overtaken in that window by a relist that unflags the
+// server: the edit pushes its nil, this superseded target lands after it and wins, and — the flag
+// being gone — no further beat ever comes to correct it, so routing would stay engaged against a
+// server the file no longer flags. Holding the mutex across the push costs nothing, because the seam
+// behind it takes one short lock of its own and calls nothing back into this holder.
+//
+// The notice, by contrast, goes out AFTER the push and OUTSIDE the lock, and both matter: a notice
+// that preceded the latch would announce routing that is not in force yet, and the notice seam blocks
+// until the renderer's Update loop takes it — so holding the mutex across it would park the beat
+// goroutine on the very loop a config reload calls relist from.
 func (d *delegationWiring) land(generation int, name string, target *apogee.DelegationTarget) {
 	d.mu.Lock()
 	if generation != d.generation {
@@ -213,9 +220,9 @@ func (d *delegationWiring) land(generation int, name string, target *apogee.Dele
 		return
 	}
 	note := d.stateChange(name, target)
+	d.engine.SetDelegationTarget(target)
 	d.mu.Unlock()
 
-	d.engine.SetDelegationTarget(target)
 	if note != "" && d.notify != nil {
 		d.notify(note)
 	}
