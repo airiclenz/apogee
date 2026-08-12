@@ -439,6 +439,40 @@ acceptance or a future-task re-verification, NOT a live hole.
 entry: it is ADR-0012 by-design, and `internal/security/doc.go` already states the guard is "NOT
 a security boundary." No doc/UI describes it as one, which is exactly what L2 asks for.)
 
+**Triage note, 2026-08-11 — the external security audit was checked against L2/L3/L4 before any
+finding was accepted.** The audit's own strongest observation is that a deferred acceptance here is
+the single biggest predictor of a finding being answered "intended", so every one of its 14 ranked
+positions was tested against these three first. **None of the fourteen dies on them**, and the
+reasons are worth recording so the acceptances are not re-argued at the next audit
+(`docs/reviews/2026-08-11 - 01 - external-audit-triage.md`; fixes in
+`docs/plans/private/2026-08-11 - 06 - hostile-bytes-hardening-plan.md`):
+
+- **L2 does not dismiss the approval-pane findings** (newline-forged rows, head-only truncation and
+  wire-order duplicate keys, the unshown resolved path, surviving bidi overrides — plan items 6, 7,
+  8, 17). L2 is about the *guard* being evadable; these are about the *disclosure* surface — what
+  the human is shown before they authorise — on which L2 says nothing. The one floor change in the
+  batch (item 14, adding `.git/` and `~/.apogee`) tightens `DefaultDangerousRules` only and leaves
+  `MergeDangerousRules` semantics alone, so L1 and L2 stand exactly as written.
+- **L3 does not dismiss the unbounded-execution findings** (plan items 2, 3, 5, 18). L3 accepts
+  read-and-exfiltrate *from inside the box*; these are code running **outside** it (an `argv[0]` the
+  model planted inside the writable box, executed later unconfined), code the operator never saw
+  running inside it (the workspace shadowing the Python stdlib), a process spawned with no approval
+  and a nil box (the bare-name opener exec), and a process outliving the call that spawned it. What
+  they violate is ADR 0012's invariant — a call runs ungated only if its blast radius is bounded —
+  which L3 does not weaken.
+- **L4 does not dismiss either environment finding.** L4 is specifically about a *configured stdio
+  MCP server* inheriting the full environment, a trusted host-configured launch. It does not cover
+  plan item 3's much narrower change (dropping apogee's **own** credentials — `APOGEE_API_KEY` and
+  any configured server key — from what `python_exec` and `terminal` inherit), which is not the
+  blanket allowlist L4 deferred; nor plan item 19, where the defect is that the Go toolchain was
+  handed *git's* allowlist (`safeGitEnv`), stripping the operator's own Go hardening and putting
+  nothing back.
+
+The audit findings these acceptances **did** dismiss are recorded in the triage's exclusion buckets
+rather than here, together with the operator-armed footguns, the attacks on apogee's own build and
+release, and the hostile-inference-endpoint set — all different threat models from the hostile-bytes
+one the batch answers.
+
 ---
 
 ## Mid-Exchange auto-compaction (fire at Turn boundaries under budget pressure)
