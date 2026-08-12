@@ -372,18 +372,6 @@ func TestLoadAnchorSymlinkRefused(t *testing.T) {
 				return Sources{Workspace: ws, UseProjectSkills: true}
 			},
 		},
-		{
-			// The library gets the same fence: its base is the apogee home, so a home whose skills/
-			// is linked at a folder elsewhere no longer loads. That is the cost of one uniform rule
-			// — and it is a legible cost, because the skip names the dir and why it was passed over.
-			name: "home library skills/ is the symlink",
-			setup: func(t *testing.T) Sources {
-				home, outside := t.TempDir(), t.TempDir()
-				writeSkill(t, outside, "escapee", escapee)
-				mustSymlink(t, outside, filepath.Join(home, "skills"))
-				return Sources{Home: home}
-			},
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cat, err := Load(tc.setup(t))
@@ -421,6 +409,53 @@ func TestLoadAnchorSymlinkInsideBaseFollowed(t *testing.T) {
 	}
 	if _, ok := cat.Get("kept"); !ok {
 		t.Error("a source dir symlinked WITHIN the workspace was refused; the fence is containment, not a symlink ban")
+	}
+}
+
+// The containment above is for repo-authored anchors. The apogee home is the operator's own control
+// plane, so a `skills` symlink there was placed by the human — the dotfiles-managed library — and
+// discovery follows it wherever it points. Without this the loader would take the global library
+// away from the operator in order to defend against the operator.
+func TestLoadHomeLibraryAnchorSymlinkFollowed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	home, library := t.TempDir(), t.TempDir()
+	writeSkill(t, library, "linked", "---\nid: linked\nsummary: s\n---\nb")
+	mustSymlink(t, library, filepath.Join(home, "skills"))
+
+	cat, err := Load(Sources{Home: home})
+	if err != nil {
+		t.Fatalf("Load soft error on the operator's symlinked home library: %v", err)
+	}
+	if _, ok := cat.Get("linked"); !ok {
+		t.Error("the home library reached through the operator's symlink was not loaded")
+	}
+	if got := cat.Skipped(); len(got) != 0 {
+		t.Errorf("Skipped() = %+v, want none — the library was scanned", got)
+	}
+}
+
+// Following the operator's symlink RE-PINS the fence at the library it resolves to; it does not
+// give the fence up. A symlink inside that library pointing anywhere else is refused exactly as
+// TestLoadSymlinkEscapeRefused pins for an unlinked one — otherwise the next reader would relax
+// the trusted anchor into "no fence at all".
+func TestLoadHomeLibraryEscapeBelowResolvedTargetRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	home, library, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	writeSkill(t, library, "kept", "---\nid: kept\nsummary: s\n---\nb")
+	writeSkill(t, outside, "escapee", "---\nid: escapee\nsummary: should not load\n---\nLEAKED")
+	mustSymlink(t, library, filepath.Join(home, "skills"))
+	mustSymlink(t, filepath.Join(outside, "escapee"), filepath.Join(library, "escapee"))
+
+	cat, _ := Load(Sources{Home: home})
+	if _, ok := cat.Get("escapee"); ok {
+		t.Error("a skill reached through a symlink out of the RESOLVED home library was loaded; the fence must pin at the target")
+	}
+	if _, ok := cat.Get("kept"); !ok {
+		t.Error("the library's own skill was dropped; only the escaping symlink must be refused")
 	}
 }
 

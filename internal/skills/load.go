@@ -69,14 +69,17 @@ func Load(src Sources) (*Catalog, error) {
 	return cat, cat.skipError()
 }
 
-// skillAnchor is one source dir kept in two halves: the trusted BASE it belongs to (the workspace
-// root, or the apogee home — both operator-chosen) and the path of the source dir below it. The
-// split is what lets loadDir pin its fence at the base and reach the source dir THROUGH it, so
-// every component below the base — `.apogee`, `skills` — is resolved inside that fence and an
-// untrusted repo cannot relocate the walk by shipping any of them as a symlink.
+// skillAnchor is one source dir kept in two halves: the BASE it belongs to (the workspace root, or
+// the apogee home — both operator-chosen) and the path of the source dir below it. The split is
+// what lets loadDir pin its fence at the base and reach the source dir THROUGH it, so every
+// component below the base — `.apogee`, `skills` — is resolved inside that fence and an untrusted
+// repo cannot relocate the walk by shipping any of them as a symlink. trusted marks the one anchor
+// exempt from that containment because the path naming it is operator-authored rather than
+// repo-authored — the global library under the apogee home; openAnchor carries the rationale.
 type skillAnchor struct {
-	base string // the operator-chosen root the walk may not leave
-	rel  string // slash-separated path of the source dir below base
+	base    string // the operator-chosen root the walk may not leave
+	rel     string // slash-separated path of the source dir below base
+	trusted bool   // the anchor's own path is the operator's: follow it, fence at what it resolves to
 }
 
 // dir renders the anchor as the single host path a human sees — what skip records name, what
@@ -89,7 +92,9 @@ func (a skillAnchor) dir() string { return filepath.Join(a.base, filepath.FromSl
 // the user's own library wins any cross-source id collision, so a cloned repo can contribute a
 // NEW skill id but can never silently replace a skill the user invokes by muscle memory. The
 // workspace dirs keep their relative order among themselves. An empty Home/Workspace drops its
-// dirs rather than producing a bogus relative path.
+// dirs rather than producing a bogus relative path. The home anchor is the trusted one: the apogee
+// home is the operator's control plane, so the path naming the library may be a symlink the
+// operator placed and discovery follows it (openAnchor).
 //
 // This is a deliberate, documented deviation from the apogee-code oracle's order, which this
 // function used to mirror: a SKILL.md written for either tool still loads in both — only
@@ -104,7 +109,7 @@ func sourceAnchors(src Sources) []skillAnchor {
 		}
 	}
 	if src.Home != "" {
-		anchors = append(anchors, skillAnchor{base: src.Home, rel: "skills"})
+		anchors = append(anchors, skillAnchor{base: src.Home, rel: "skills", trusted: true})
 	}
 	return anchors
 }
@@ -123,9 +128,11 @@ func sourceDirs(src Sources) []string {
 
 // loadDir walks one source dir through os.Root and loads every SKILL.md it finds, recording a
 // SkipError on the catalog per unreadable/malformed skill (a missing source dir records none — it
-// is simply skipped). The fence is pinned by openAnchor, so it covers the ANCHOR as well as the
-// walk below it: neither a symlinked `.apogee`, `.apogee/skills` or `skills` nor a symlink deeper
-// in the tree can move the walk out of the workspace root or the apogee home. Dotted subdirs are
+// is simply skipped). The fence is pinned by openAnchor. For a workspace source dir it covers the
+// ANCHOR as well as the walk below it: neither a symlinked `.apogee`, `.apogee/skills` or `skills`
+// nor a symlink deeper in the tree can move the walk out of the workspace root. For the operator's
+// global library it is pinned at the dir the home's `skills` RESOLVES to, so the walk below it is
+// contained against that target and a symlink leaving it is still refused. Dotted subdirs are
 // skipped (no .git, no hidden folders), and the walk is bounded by maxSkillDirs and
 // maxSkillDirDepth so an unloadably deep or wide tree terminates instead of touring the disk.
 func loadDir(cat *Catalog, a skillAnchor) {
@@ -197,17 +204,29 @@ func loadDir(cat *Catalog, a skillAnchor) {
 	})
 }
 
-// openAnchor pins the walk's os.Root at the source dir WITHOUT trusting the path that names it.
-// os.OpenRoot resolves its own argument like any other open — it follows symlinks in every
-// component of the anchor, including the last — so opening `<workspace>/.apogee/skills` directly
-// hands the fence to whoever authored the workspace: a repo that ships `.apogee`, `.apogee/skills`
-// or `skills` as a symlink relocates the root and the walk below it reads a tree apogee never
-// meant to scan. Anchoring at the base and reaching the source dir through Root.OpenRoot resolves
-// every component INSIDE the fence instead, which refuses exactly that relocation while still
-// following a symlink whose target stays within the base.
+// openAnchor pins the walk's os.Root at the source dir, and how much it trusts the path naming
+// that dir turns on WHO wrote it. os.OpenRoot resolves its own argument like any other open — it
+// follows symlinks in every component of the anchor, including the last — so opening
+// `<workspace>/.apogee/skills` directly hands the fence to whoever authored the workspace: a repo
+// that ships `.apogee`, `.apogee/skills` or `skills` as a symlink relocates the root and the walk
+// below it reads a tree apogee never meant to scan. Those anchors are repo-authored bytes, so they
+// are anchored at the base and reached through Root.OpenRoot, which resolves every component
+// INSIDE the fence instead and refuses exactly that relocation, while still following a symlink
+// whose target stays within the base. The derived Root owns its own descriptor, so the base handle
+// is released immediately.
 //
-// The derived Root owns its own descriptor, so the base handle is released immediately.
+// A trusted anchor — only the global library below the apogee home — is opened directly. The
+// apogee home is not a repo's territory but the operator's control plane, and the dangerous-action
+// floor gates model writes to it, so a symlink found there was placed by the human: naming the
+// library that way is exactly how a dotfiles-managed library is wired, and refusing it would take
+// the library away from the operator to defend against the operator. The fence is not given up,
+// only re-pinned — os.OpenRoot fixes the root at what the symlink RESOLVES to, so the walk stays
+// contained against the real library, a symlink below it that leaves is refused like any other
+// escape, and both walk caps apply unchanged.
 func openAnchor(a skillAnchor) (*os.Root, error) {
+	if a.trusted {
+		return os.OpenRoot(a.dir())
+	}
 	base, err := os.OpenRoot(a.base)
 	if err != nil {
 		return nil, err

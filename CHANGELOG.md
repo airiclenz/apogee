@@ -475,12 +475,15 @@ point is a **minor** bump, not a breaking change.
   moved the fence itself: the walk meant to be confined to a folder in the workspace read a tree
   anywhere on the disk, and every `SKILL.md` it found there loaded as instructions the model can be
   handed. (A symlink BELOW a source dir was already refused; the anchor naming that dir was the
-  gap.) The loader now pins its root at the workspace — or at the apogee home for the global
-  library — and reaches the source dir THROUGH that fence, so every component of the anchor is
-  resolved inside the base it belongs to. The rule is containment, not a symlink ban: a source dir
-  symlinked to another folder within the same base still loads, while one pointing outside is
-  passed over and RECORDED, so `/skills` names the dir and why it was not scanned instead of
-  leaving a vanished library indistinguishable from an absent one. The walk is bounded to match:
+  gap.) The loader now pins its root at the workspace and reaches the source dir THROUGH that
+  fence, so every component of a workspace anchor is resolved inside the workspace root. The rule is
+  containment, not a symlink ban: a source dir symlinked to another folder within the same base
+  still loads, while one pointing outside is passed over and RECORDED, so `/skills` names the dir
+  and why it was not scanned instead of leaving a vanished library indistinguishable from an absent
+  one. The global library below the apogee home is the operator's own territory rather than a
+  repo's, so its anchor keeps following the symlink that names it — a dotfiles-managed library still
+  loads — and the fence pins at the library that symlink RESOLVES to, so a symlink below it that
+  leaves is refused all the same. The walk is bounded to match:
   the existing cap stopped the CATALOG at 1024 skills but never stopped the walk, so a tree that
   loads no skills at all — a million empty folders, or one folder nested a million deep — was still
   toured in full, on every mid-session reload. Discovery now descends at most 4096 directories and
