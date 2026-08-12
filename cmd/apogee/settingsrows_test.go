@@ -46,7 +46,6 @@ func fabricatedSettings() config.Options {
 		Mechanisms:          map[string]bool{"validate": true, "syntax": true, "autofix": false},
 		ValidatedSetsEnable: true,
 		ValidatedSetsAlias:  map[string]string{"gpt-oss-20b": "gpt-oss"},
-		Profile:             apogee.ModelProfile{},
 		ModelProfiles: []profiles.Entry{
 			{Pattern: "minimax-m3", Profile: apogee.ModelProfile{
 				Thinking: apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<mm:think>", End: "</mm:think>"},

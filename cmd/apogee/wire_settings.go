@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mechanisms"
+	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -81,6 +82,13 @@ type liveSettings struct {
 	// they stand rather than the ones this run launched with.
 	contextFilesEnable bool
 	contextFileNames   []string
+
+	// modelProfiles is the `model-profiles:` map (ADR 0044): the user tier the next per-model
+	// resolution matches a model name against. It is held for the `mechanisms:` reason — an edit is
+	// an INPUT to a resolution rather than a value the engine keeps — even though its own key also
+	// pushes the resolved profile at SetProfile straight away: without it a switch made after the
+	// edit would re-resolve against the map this process launched with.
+	modelProfiles []profiles.Entry
 }
 
 // newLiveSettings seeds the holder with what THIS run resolved. manualIDs is passed in rather than
@@ -101,6 +109,7 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		systemPrompt:       opts.SystemPrompt,
 		contextFilesEnable: len(opts.ContextFiles) > 0,
 		contextFileNames:   opts.ContextFiles,
+		modelProfiles:      opts.ModelProfiles,
 	}
 }
 
@@ -206,6 +215,17 @@ func (s *liveSettings) setMechanisms(ids []apogee.MechanismID, block map[string]
 	s.manualIDs, s.mechanisms = ids, block
 }
 
+// setModelProfiles installs a re-read `model-profiles:` map — the USER tier of the per-model
+// resolution (ADR 0044), which every later rebind and every scheduled Firing matches against. The
+// map alone is not a state the engine can be put into, so the key's apply pushes the resolved
+// profile through SetProfile as well; this store is what keeps the two from drifting apart the
+// moment the session changes model.
+func (s *liveSettings) setModelProfiles(entries []profiles.Entry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.modelProfiles = entries
+}
+
 // setValidatedSets installs a re-read `validated-sets:` block — the surface's off-switch and its
 // carry-over map, the two inputs resolveValidatedSet keys a match on, moved together for
 // setMechanisms' reason.
@@ -238,6 +258,7 @@ func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) 
 	base.ValidatedSetsEnable = s.validatedEnable
 	base.ValidatedSetsAlias = s.validatedAlias
 	base.SystemPrompt = s.systemPrompt
+	base.ModelProfiles = s.modelProfiles
 	return base, s.manualIDs, s.pinnedWindow
 }
 
@@ -440,11 +461,14 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			// that answered (ADR 0037 decision 6). The value the pane persisted is not read, for the
 			// `servers:` reason — a list of blocks is a shape no single string spells.
 			return "", a.reconnectMCP()
-		case "model-profile":
-			// The dialect the model speaks (CONTEXT: Model profile) is a GLOBAL setting with its own
-			// engine door, deliberately not the per-model rebind: a model change is not a dialect
-			// change, so Rebind leaves the profile alone and SetProfile is where it moves.
-			return "", a.reloadProfile()
+		case "model-profiles":
+			// The map is an INPUT to the per-model resolution, like `mechanisms:` above — but the
+			// model has NOT changed, and re-driving a whole rebind to move one field would refuse the
+			// edit whenever an Exchange is open. So it takes the profile's own engine door instead
+			// (ADR 0044 ratified call 6: Rebind is the model-switch door, SetProfile the same-model
+			// config-edit one). The value the pane persisted is not read — a map of blocks is a shape
+			// no single string spells.
+			return "", a.reloadModelProfiles()
 		default:
 			return "", cannotApply(key)
 		}
@@ -476,8 +500,13 @@ func (a settingsApplier) unreachable(key string) error {
 	rides := a.live != nil && a.binding != nil && a.rebind != nil
 	reaches := true
 	switch key {
-	case "mode", "bypass", "auto-compact", "model-profile":
+	case "mode", "bypass", "auto-compact":
 		reaches = a.engine != nil
+	case "model-profiles":
+		// The engine for the swap and the binding for the model to resolve the map AGAINST — the one
+		// key that both pushes and re-resolves, so it needs a member from each class. The holder is
+		// in the list because the map it stores is what the NEXT rebind reads.
+		reaches = a.engine != nil && a.binding != nil && a.live != nil
 	case "context-files.enable", "context-files.names":
 		reaches = a.engine != nil && a.live != nil
 	case "use-project-skills":
@@ -624,24 +653,34 @@ func (a settingsApplier) reconnectMCP() error {
 	return a.mcp.reconnect(l.MCPServers, a.tools, a.engine)
 }
 
-// reloadProfile re-reads the `model-profile:` block and swaps it into the running engine. The
-// resolution is the composition root's (the on-disk schema projected through toModelProfile, exactly
-// as startup projects it) and the VALIDATION is the engine's: SetProfile builds the profile's two
-// collaborators before it commits, so a tool-call format this build cannot parse leaves the session
-// reading responses exactly as it did — and says so on the row.
+// reloadModelProfiles re-reads the `model-profiles:` map, installs it on the holder, and swaps the
+// profile it resolves for the model the session is bound to RIGHT NOW into the running engine
+// (ADR 0044). The resolution is the composition root's — profiles.Resolve over the user map and this
+// build's shipped table, exactly as startup and every rebind resolve it — and the VALIDATION is the
+// engine's: SetProfile builds the profile's two collaborators before it commits, so a tool-call
+// format this build cannot parse leaves the session reading responses exactly as it did, and says so
+// on the row.
 //
-// An absent block resolves to the zero profile, which is what startup would have resolved it to: a
-// human who deleted the block asked for native tool calls and no inline thinking channel, not for
-// whatever the process happened to launch with.
-func (a settingsApplier) reloadProfile() error {
+// A map the human emptied resolves to whatever the shipped table says for this model, and to the zero
+// profile when it says nothing — which is what startup would have resolved it to. Deleting an entry
+// asks for apogee's own answer back, not for whatever the process happened to launch with.
+//
+// With no model bound — a cold start before the first beat, or the gap a `/server` switch opens —
+// there is nothing to resolve against and the holder carries the change alone, rideTheRebind's own
+// posture: the first beat that binds a model resolves it in.
+func (a settingsApplier) reloadModelProfiles() error {
 	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
-	var profile apogee.ModelProfile
-	if l.Profile != nil {
-		profile = *l.Profile
+	a.live.setModelProfiles(l.ModelProfiles)
+	model := a.binding().Model
+	if model == "" {
+		return nil
 	}
+	// The notice is dropped rather than returned: it is a resolution's narration for a model change
+	// nobody made, and the row the pane is about to paint already says the edit applied.
+	profile, _ := resolveModelProfile(model, l.ModelProfiles)
 	return a.engine.SetProfile(profile)
 }
 
@@ -686,11 +725,13 @@ func settingBool(key, value string) (bool, error) {
 //     is manual control and suppresses any matched set (whole-set-or-nothing, never a merge), which
 //     is why manualIDs is passed in rather than re-derived from the map here;
 //   - the context window, applying the pin: pinnedWindow > 0 is the user's `context-window:` key and
-//     outranks whatever the server reports (decision 9), else the observed window is bound as-is.
+//     outranks whatever the server reports (decision 9), else the observed window is bound as-is;
+//   - the Model profile, because `model-profiles:` keys on the model name and the shipped shape
+//     table matches on it too (ADR 0044) — the shape a model speaks the wire in travels with the
+//     model, so it rides the same atomic Rebind as the prompt and the Mechanisms.
 //
-// What it deliberately does NOT touch: `model-profile:`, which is a GLOBAL key (one profile per
-// installation, not per model) and therefore not a per-model binding at all; the endpoint, the mode,
-// the tools, and the conversation, none of which a model change has any claim on.
+// What it deliberately does NOT touch: the endpoint, the mode, the tools, and the conversation, none
+// of which a model change has any claim on.
 //
 // A resolution failure is returned rather than swallowed — an unreadable per-model prompt file or a
 // dangling validated-sets alias is the user's own config being wrong about the new model — and the
@@ -724,10 +765,19 @@ func rebindSpecFor(
 		bound = pinnedWindow
 	}
 
+	// The shape the NEW model speaks the wire in (ADR 0044). A built-in match announces itself on the
+	// same channel the validated-set lines travel, because to the human they are one kind of fact:
+	// something apogee decided about this model that nobody typed.
+	profile, notice := resolveModelProfile(model, next.ModelProfiles)
+	if notice != "" {
+		notices = append(notices, notice)
+	}
+
 	return apogee.RebindSpec{
 		Model:            model,
 		SystemPrompt:     sysPrompt,
 		MaxContextTokens: bound,
 		EnableMechanisms: enable,
+		Profile:          profile,
 	}, notices, nil
 }

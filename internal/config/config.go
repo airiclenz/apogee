@@ -124,12 +124,6 @@ type Settings struct {
 	// one. It is deliberately GLOBAL: a per-profile roster is a later key that builds on it.
 	ToolsDisabled []string
 
-	// profile is the model profile (CONTEXT: Model profile) — the model's tool-call format and
-	// inline thinking-channel style — file-only (a per-model concern, like mcpServers, with no
-	// flag/env). A zero ModelProfile is native tool calls with no inline thinking (today's
-	// behaviour), so an absent profile block leaves it unchanged.
-	Profile domain.ModelProfile
-
 	// modelProfiles is the resolved `model-profiles:` map (ADR 0044): the user's pattern-keyed
 	// Model profiles, ordered by pattern so the same file always resolves to the same slice.
 	// File-only (a per-model concern, like mcpServers, with no flag/env) and default-empty ⇒ the
@@ -511,11 +505,6 @@ type Layer struct {
 	// resolution leaves the whole built-in roster standing.
 	ToolsDisabled []string
 
-	// profile is set only by the FILE layer (the model profile is config'd, default-zero, with no
-	// flag/env). A nil pointer means the source does not configure a profile, so resolution falls
-	// through to the zero/native default.
-	Profile *domain.ModelProfile
-
 	// modelProfiles is set only by the FILE layer (the map is config'd, default-empty, with no
 	// flag/env — like mechanisms). A nil slice means the source configures no profile at all, so
 	// a nearer layer that does carries the whole map: the block is replaced entry-and-all, never
@@ -706,9 +695,6 @@ func ResolveSettings(file, env, flag Layer, hostID string) (Settings, []string) 
 		s.ValidatedSetsEnable = *file.ValidatedSetsEnable
 	}
 	s.ValidatedSetsAlias = file.ValidatedSetsAlias
-	if file.Profile != nil { // file-only; env/flag never carry a model profile
-		s.Profile = *file.Profile
-	}
 	// file-only (ADR 0044), like mechanisms above: env/flag never carry a model profile, and a
 	// layer that sets the key replaces the map whole rather than merging patterns into it.
 	s.ModelProfiles = file.ModelProfiles
@@ -1797,7 +1783,6 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	if n := unknownToolNotice(s.ToolsDisabled); n != "" {
 		notify(n)
 	}
-	opts.Profile = s.Profile
 	opts.ModelProfiles = s.ModelProfiles
 	opts.Mechanisms = s.Mechanisms
 	opts.ValidatedSetsEnable = s.ValidatedSetsEnable

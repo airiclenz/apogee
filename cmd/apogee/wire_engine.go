@@ -326,8 +326,8 @@ func (e *lateEngine) SwapTools(registry *apogee.ToolRegistry) error {
 	return agent.SwapTools(registry)
 }
 
-// SetProfile swaps the dialect the session reads responses in (`model-profile`, ADR 0037's other
-// idle-only door). Unbound it is REMEMBERED and installed at the bind, like the anytime-safe setters
+// SetProfile swaps the dialect the session reads responses in (`model-profiles`, ADR 0037's other
+// idle-only door — the SAME-model half of ADR 0044's two doors, a model change taking Rebind). Unbound it is REMEMBERED and installed at the bind, like the anytime-safe setters
 // above and unlike SwapTools: a tool registry has a carrier across the bind already — Config.Tools,
 // which the composition root holds and hands over — while the profile a bind would otherwise install
 // is the one the process STARTED with, so a pre-bound edit that was only remembered nowhere would be

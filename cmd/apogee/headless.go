@@ -331,9 +331,12 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		// key is: it is one configuration, and a headless run of it must offer the model the same
 		// tools an interactive session would.
 		DisabledTools: opts.ToolsDisabled,
-		Profile:       opts.Profile,
-		SystemPrompt:  spec.SystemPrompt,
-		ContextFiles:  opts.ContextFiles,
+		// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
+		// rather than off opts, so a headless run reads responses in the same shape a session on the
+		// same model would, and a built-in match has already narrated itself through the notices.
+		Profile:      spec.Profile,
+		SystemPrompt: spec.SystemPrompt,
+		ContextFiles: opts.ContextFiles,
 		Skills: skills.NewProvider(skills.Sources{
 			Home:             roots.config,
 			Workspace:        roots.workspace,

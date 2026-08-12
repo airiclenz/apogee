@@ -31,6 +31,18 @@ point is a **minor** bump, not a breaking change.
   to open and clicking it did nothing anyway. The row becomes an ordinary live delegation the instant
   its child starts. A lone delegation starts immediately and never shows the state.
 
+- **apogee knows a few model shapes out of the box, and the profile now follows a model switch.**
+  Run minimax-m3 with no configuration at all and its `</mm:think>` no longer leaks into the reply:
+  a small built-in table matches the model name and applies the shape — gemma's `<think>`, gpt-oss's
+  harmony channels, minimax-m3's `<mm:think>` — announcing itself once, as
+  `model profile: minimax-m3 (built-in) — thinking: delimited`, so a wrong match has a first clue.
+  Your own `model-profiles:` entry always wins over a built-in one and applies silently; an entry
+  with `thinking: {style: none}` turns a wrong built-in match back off. The resolution now runs
+  wherever the bound model is decided — at startup, on the mid-session switch the heartbeat
+  observes, for a scheduled Firing, and for `apogee headless` — so a session that changes models
+  reads the new model's dialect instead of the departed one's. Editing `model-profiles:` in
+  `/settings` still applies to the running session, re-resolved for the model you are on.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's

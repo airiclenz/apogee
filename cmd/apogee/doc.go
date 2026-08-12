@@ -66,7 +66,10 @@
 // behind the "model not advertised" notice; title.go the out-of-band
 // session-naming completion behind [tui.Options.GenerateTitle]; validatedsets.go the
 // startup ladder that decides what the Validated-set surface applies and says this
-// session; launcher.go the only file importing the llama-launcher facade, kept behind
+// session; modelprofile.go its per-model twin — which shape a model speaks the wire in,
+// matched out of the `model-profiles:` map and the shipped table, plus the one-line
+// notice a built-in match announces itself with (ADR 0044); launcher.go the only file
+// importing the llama-launcher facade, kept behind
 // the nil-degrading actuation seams (ADR 0029); schedule.go the scheduler's three
 // composition seams — what a Firing runs against, when it may start, where it narrates
 // (ADR 0033).

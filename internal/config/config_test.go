@@ -187,23 +187,6 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
-			name: "model profile is file-only (default zero)",
-			file: Layer{Profile: &domain.ModelProfile{
-				ToolCallFormat: domain.FormatMarkdownFenced,
-				Thinking:       domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
-			}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, Profile: domain.ModelProfile{
-				ToolCallFormat: domain.FormatMarkdownFenced,
-				Thinking:       domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
-			}},
-		},
-		{
-			name: "model profile is NOT settable by env or flag (file-only)",
-			env:  Layer{Profile: &domain.ModelProfile{ToolCallFormat: domain.FormatCustomRegex}},
-			flag: Layer{Profile: &domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
-		},
-		{
 			name: "the model-profiles map is file-only, and a nearer layer replaces it whole",
 			file: Layer{ModelProfiles: []profiles.Entry{
 				{Pattern: "gemma", Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"}}},

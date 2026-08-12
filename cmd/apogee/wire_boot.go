@@ -115,6 +115,15 @@ func (w *rootWiring) resolveConfig() error {
 		return err
 	}
 
+	// The shape this session STARTS reading responses in (ADR 0044), matched on the model as
+	// configured — the system prompt's own story: a cold start names no model, nothing matches, and
+	// the first beat's rebind re-runs exactly this resolution against the model the server reports.
+	// A built-in match says so on stderr, pre-alt-screen like every other launch notice.
+	profile, notice := resolveModelProfile(w.opts.Model, w.opts.ModelProfiles)
+	if notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
+	}
+
 	w.cfg = apogee.Config{
 		Endpoint: w.opts.Endpoint,
 		Model:    w.opts.Model,
@@ -144,10 +153,11 @@ func (w *rootWiring) resolveConfig() error {
 		// Config rather than passed to the assembly alone so every Driver — this session, a headless
 		// run, an embedder — prunes the same roster from the same value.
 		DisabledTools: w.opts.ToolsDisabled,
-		// The model profile (CONTEXT: Model profile) — tool-call format + thinking channel —
-		// resolved from config.yaml (file-only). A zero profile is native tool calls with no
-		// inline thinking, so an unconfigured model behaves exactly as today.
-		Profile: w.opts.Profile,
+		// The Model profile (CONTEXT: Model profile) — tool-call format + thinking channel —
+		// resolved above for THIS model out of the `model-profiles:` map and the shipped shape
+		// table. A model neither tier knows gets the zero profile: native tool calls with no inline
+		// thinking, exactly as an unprofiled model has always behaved.
+		Profile: profile,
 		// The configured system-prompt TEMPLATE (ADR 0023), which the loop renders fresh per
 		// request and seeds as the first system message. Empty ⇒ no prompt: the request opens with
 		// the user's own message, exactly as it did before this key existed.

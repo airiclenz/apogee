@@ -100,6 +100,11 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	cfg.Model, cfg.SystemPrompt = spec.Model, spec.SystemPrompt
 	cfg.EnableMechanisms = spec.EnableMechanisms
 	cfg.Context.MaxContextTokens = spec.MaxContextTokens
+	// The Model profile the same resolution matched (ADR 0044). Taken off the spec rather than left
+	// on the base Config for the reason every other field here is: the base carries what the SESSION
+	// launched with, and a Firing that runs on another model must read responses in that model's
+	// shape, not in the departed one's.
+	cfg.Profile = spec.Profile
 	// The mode is the Schedule's, chosen explicitly at creation and never inherited from the
 	// session's own (ADR 0033, decision 3). Auto's eligibility was ruled on there, at the surface
 	// that offered it — scheduleAutoBlocked below — exactly as agent.New trusts a Config that says

@@ -3695,8 +3695,8 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	if _, err := rec.opts.ApplySetting("mcp-servers", "none"); err != nil {
 		t.Errorf("ApplySetting(mcp-servers): %v", err)
 	}
-	if _, err := rec.opts.ApplySetting("model-profile", "native"); err != nil {
-		t.Errorf("ApplySetting(model-profile): %v", err)
+	if _, err := rec.opts.ApplySetting("model-profiles", "1 model profile"); err != nil {
+		t.Errorf("ApplySetting(model-profiles): %v", err)
 	}
 	// `server` is the key with no dispatcher home BY DESIGN and permanently: its live apply is the
 	// picker's own switch (ADR 0037 decision 4), so a value arriving here is a value nothing can do

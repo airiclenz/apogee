@@ -234,7 +234,21 @@ comment in internal/agent claims the profile is global.
 
 Commit: `feat(engine): RebindSpec carries the model profile through one internal swap`
 
-## 6. Root wiring: resolve at startup, switch, and config edit — with the notice
+## 6. Root wiring: resolve at startup, switch, and config edit — with the notice — ✅ DONE (2026-08-12)
+
+NOTES (2026-08-12): five recorded calls beyond the item's literal three resolution points. (a) Filling
+`RebindSpec.Profile` in `rebindSpecFor` makes every consumer of that spec a resolution point, so
+`cmd/apogee/headless.go` and the scheduled Firing (`schedule.go`) now take `spec.Profile` too — both
+already copy the spec's other per-model fields, and leaving them on the launch value would have a
+Firing on another model read the departed model's dialect. (b) `liveSettings` gained a `modelProfiles`
+field (seeded from opts, overlaid in `rebindInputs`) beside the `mechanisms:` one: without it a model
+switch made AFTER a `model-profiles:` edit would re-resolve against the map this process launched
+with. (c) The startup notice goes to stderr pre-alt-screen, the channel the validated-set notices
+already use; the switch notice rides `rebindSpecFor`'s notices slice. (d) Deleting `Layer.Profile`
+took its two now-unrepresentable layering cases in `internal/config/config_test.go` with it (the
+`model-profiles:` map's own case covers the file-only/nearer-layer rule). (e) `wire_engine.go`'s
+`SetProfile` doc comment was respelled from the retired key to `model-profiles` and to ADR 0044's
+two-door split — it names the key it is the door for.
 
 **What:** In cmd/apogee (composition root — the engine never reads config, per
 RebindSpec's contract): resolve `profiles.Resolve(model, userEntries, profiles.Shipped)`

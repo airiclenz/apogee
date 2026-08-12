@@ -6,7 +6,6 @@ package config
 // cobra command that binds a handful of its fields (ADR 0043).
 
 import (
-	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -155,12 +154,6 @@ type Options struct {
 	// matches no tool; runRoot folds it into apogee.Config.DisabledTools, which the registry
 	// assembly subtracts, so a disabled tool is neither offered to the model nor dispatchable.
 	ToolsDisabled []string
-
-	// profile is the model profile (CONTEXT: Model profile) — the model's tool-call format and
-	// inline thinking-channel style — loaded from the config file only (a per-model concern, no
-	// flag/env). ApplyConfig sets it from settings; a zero profile is native tool calls with no
-	// inline thinking (today's behaviour). runRoot folds it into apogee.Config.Profile.
-	Profile domain.ModelProfile
 
 	// modelProfiles is the user's `model-profiles:` map (ADR 0044) — the Model profiles they keyed
 	// by a pattern the model name contains — ordered by pattern, loaded from the config file only
