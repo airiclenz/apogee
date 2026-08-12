@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -133,7 +134,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 // reaches the still-running child at ANY depth, a Guards bundle that isolates live state but shares the dangerous
 // floor read-only (Guards.ForSubAgent), a tool set that is a SUBSET of this Agent's tools
 // (defaultSubAgentTools — never an expansion, and withholding sub_agent at the depth bound),
-// the SAME Upstream responder and EventSink, the parent session's context-file content
+// the SAME EventSink, the parent session's context-file content
 // verbatim (copied, never re-read — a sub-agent is not a session boundary), and Depth =
 // parent+1 so its events nest. The
 // nested Agent is NOT given the parent's pending input or conversation — it starts fresh with only
@@ -142,6 +143,19 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 // it reaches the child through the very Approver threaded above — the shared queueing seam holds it
 // (approvalCache in approvalcache.go), so a gate the human already cleared anywhere in the tree does
 // not ask the child again, and an allow the child earns outlives it for the parent and its siblings.
+//
+// The Upstream responder used to be on that inherited list too — this doc said the child gets "the
+// SAME Upstream responder and EventSink" — and ADR 0045 reverses exactly that clause for the
+// Upstream half: when a Delegation target is LATCHED the spawn is ROUTED, and the child dials the
+// Sub-agent server on a provider client of its own, against that server's model, context window and
+// model profile, with the Bypass and Mechanism posture the flagged entry carries. With NO target
+// latched — nothing flagged, the server unreachable, no model bound there — the child takes the
+// parent's Upstream verbatim, which is what every delegation did before routing existed, so the
+// fallback is not a degraded mode but the original one (ADR 0045 §4). Routing never widens
+// privilege: the Mode, Approver, Confiner, blast radius and tool bounds above are the parent's
+// whichever server answers, and only the two POSTURE keys ADR 0045 §2 puts on the flagged entry —
+// Bypass and the Mechanism catalogue, neither of which gates a tool — may differ, and only because
+// the host was configured to say so.
 //
 // spawnCallID is the id of the sub_agent tool call being served — the child's RUN IDENTITY,
 // stamped on every Event it emits (domain.EventBase.CallID). It is what tells one delegated
@@ -185,10 +199,58 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	childCfg.Mechanisms = a.registry.ForSubAgent()
 	childCfg.EnableMechanisms = nil
 
-	child, err := newAgent(childCfg, a.upstream)
+	// ROUTING (ADR 0045). The latch is snapshotted ONCE, here, and everything below reads that one
+	// value: a beat landing mid-spawn must never build half a child from each target. A nil
+	// snapshot is the FALLBACK and takes the path above verbatim — the parent's Upstream, the
+	// parent's model, window and profile, the parent's live Bypass and its inherited catalogue — so
+	// a session with nothing flagged, or a Sub-agent server that is down, delegates exactly as it
+	// did before this existed.
+	//
+	// A non-nil snapshot makes this delegation ROUTED. The target is the resolved Sub-agent server,
+	// computed whole by the host from the flagged entry's pins and its own heartbeat's observations
+	// (ADR 0045 §3), so the engine applies what it is handed and reads no config of its own
+	// (ADR 0031): the dial facts and the window land on the child's Config, the profile with them
+	// because a tool-call format and a thinking-tag shape are facts OF the model the child is about
+	// to speak to (ADR 0044) — construction translates it into the child's parse seam through the
+	// same processing.ParserFor the one-swap applyProfile runs, so a routed child reads the grunt
+	// model's dialect rather than the orchestrator's.
+	//
+	// The two POSTURE keys follow ADR 0045 §2's replace-or-inherit rule, and both are already
+	// seeded with the inherited value above: a PRESENT key replaces it WHOLE (no per-ID merge, no
+	// OR-ing of flags), an ABSENT one leaves the parent's live value standing. Mechanisms arrives as
+	// a FACTORY rather than a registry for the reason ForSubAgent exists one line up: siblings in a
+	// depth-0 fan-out run at once (ADR 0039), so each child needs a registry of its own and the
+	// factory is called once per child.
+	//
+	// The client is built rather than mutated — provider.Client.SetModel rebinds the model and
+	// deliberately never the endpoint — so the child's wire target moves atomically with its key,
+	// the same idiom SwitchUpstream takes for the session (rebind.go). The parent's own responder is
+	// untouched: routing changes what a SPAWN builds, never what the session speaks to.
+	upstream := a.upstream
+	if target := a.delegationTarget(); target != nil {
+		childCfg.Endpoint = target.Endpoint
+		childCfg.APIKey = target.APIKey
+		childCfg.Model = target.Model
+		childCfg.Context.MaxContextTokens = target.ContextWindow
+		childCfg.Profile = target.Profile
+		if target.Bypass != nil {
+			childCfg.Bypass = *target.Bypass
+		}
+		if target.Mechanisms != nil {
+			childCfg.Mechanisms = target.Mechanisms()
+		}
+		upstream = provider.NewClient(target.Endpoint, target.Model, provider.WithAPIKey(target.APIKey))
+	}
+
+	child, err := newAgent(childCfg, upstream)
 	if err != nil {
 		return nil, err
 	}
+	// The child's token estimator needs no reset for a routed spawn — the reason SwitchUpstream and
+	// Rebind reset theirs (a chars→token calibration that described the departed model) cannot
+	// arise here: newAgent seeds every child with a fresh apogeectx.NewTokenEstimator, and
+	// newChildAgent never copies the parent's, so a routed child starts uncalibrated by
+	// construction.
 	child.depth = a.depth + 1
 	child.callID = spawnCallID
 	child.task = task

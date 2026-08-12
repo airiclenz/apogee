@@ -16,7 +16,8 @@ import (
 // ----------------------------------------------------------------------------
 //
 // These tests drive a nested Agent hermetically: the parent and the sub-agent share one
-// scriptedResponder (the sub-agent reuses the parent's Upstream), so scripts[N] is consumed
+// scriptedResponder (no Delegation target is latched, so the sub-agent reuses the parent's
+// Upstream — the routed spawn has its own tests in routedspawn_test.go), so scripts[N] is consumed
 // in run order across BOTH loops. A typical script is: [0] parent emits a sub_agent call →
 // [1..k] the child's Turns → [k+1] the parent's final message. No real LLM, no real exec.
 

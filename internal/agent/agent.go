@@ -30,8 +30,12 @@ import (
 // parent's loop still runs on one goroutine, and the pool it opens mid-dispatch (ADR 0039)
 // is internal to that one dispatch — each worker drives a SEPARATE nested Agent, and every
 // touch of the parent's own state happens on the dispatching goroutine before the pool opens
-// or after it joins. The children share only the Upstream and the EventSink, both of which
-// tolerate it (the sink through the engine's serializing seam).
+// or after it joins. What the children share of the parent is the EventSink always and the
+// Upstream conditionally: this said "the Upstream and the EventSink" flatly until ADR 0045 made a
+// spawn with a Delegation target latched ROUTED, dialing a provider client of its own
+// (newChildAgent), so the Upstream is shared only while nothing is latched. Both tolerate the
+// sharing (the sink through the engine's serializing seam), and a routed child's own client is
+// reached by nobody else — routing only narrows what concurrent siblings touch.
 // The methods touching loop state fall into three call classes. Idle-only calls (Submit,
 // ClearContext, RestoreSession, Compact, Rebind, SwapTools, SetProfile, AbortExchange) need a
 // quiescent boundary with no Exchange mid-flight. Between-Steps calls by the goroutine DRIVING the loop

@@ -158,7 +158,7 @@ latch being engine-internal until item 6 wires it.
 
 Commit: `feat(engine): delegation-target latch shared down the agent tree`
 
-## 4. Engine: a routed spawn builds upstream, window, profile, and posture from the target
+## 4. Engine: a routed spawn builds upstream, window, profile, and posture from the target — ✅ DONE (2026-08-12)
 
 **What:** Depends on item 3. In `newChildAgent` (`subagent.go:163-211`): snapshot the
 latch; when non-nil, the child is ROUTED — `childCfg.Endpoint/Model/APIKey/ContextWindow`
@@ -185,6 +185,32 @@ inheritance tests still green; a mid-Exchange latch swap affects only spawns AFT
 
 **Acceptance:** `go test ./internal/agent/ -race` passes; `make check` passes; no
 comment in `internal/agent` still claims the child always shares the parent's upstream.
+
+**NOTES (2026-08-12):** three deviations from the item's literal text, all of them the item's intent
+met by construction rather than by a call. (a) The profile lands as `childCfg.Profile =
+target.Profile` BEFORE `newAgent` instead of a post-construction `child.applyProfile(...)`:
+construction runs the identical `processing.ParserFor` translation applyProfile runs (setprofile.go
+calls it "exactly the construction path"), so routing through the swap door would translate twice
+and leave the child holding the PARENT's parsers in between; setting it on the config keeps
+`cfg.Profile` and the parse seam coherent from the child's first instant, and a bad profile still
+fails loudly as "could not construct sub-agent". (b) No token-estimator reset was added: `newAgent`
+already seeds every child with a fresh `apogeectx.NewTokenEstimator` and `newChildAgent` never
+copies the parent's, so the stale-calibration hazard SwitchUpstream resets for cannot arise —
+recorded as a comment at the construction site instead. (c) One line beyond the item's named file:
+`subagent_test.go`'s header comment said the sub-agent "reuses the parent's Upstream" unconditionally,
+which the Acceptance's "no comment still claims..." sweep catches, so it now names the unrouted
+condition. No CHANGELOG bullet — this item's Acceptance omits one, routing being unreachable until
+the item-6 wiring pushes a target.
+
+**NOTES (2026-08-12):** retry — the Acceptance sweep ("no comment in `internal/agent` still claims the
+child always shares the parent's upstream") had missed `agent.go:33`, whose concurrency paragraph still
+read "The children share only the Upstream and the EventSink"; it is now conditional in the same
+quote-reverse voice `subagent.go:147` uses (EventSink always, Upstream only while nothing is latched,
+a routed child dialing its own client per ADR 0045). Sweep re-run over ALL of `internal/agent`
+(comments matching upstream/responder/model/context-window/share claims about a child, test files
+included): no other unconditional claim remains — `subagent.go:19` and `doc.go:48` speak of
+PRIVILEGES (mode/approver/confiner/tools), which routing never widens, and
+`routedspawn_test.go`/`subagent_test.go` already name the routed and unrouted conditions.
 
 Commit: `feat(engine): routed sub-agents build upstream, window, profile, and posture from the delegation target`
 
