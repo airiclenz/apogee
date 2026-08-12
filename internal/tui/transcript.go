@@ -1446,6 +1446,12 @@ func (t *transcript) addError(source, msg string, run runRef) {
 // Dropping or folding them there would run paragraphs together and flatten a command's output into
 // one line. The one-line cells that also strip — a popup row, a settings value — legitimately carry
 // neither, and the character that actually rewinds a line beside them, CR, goes either way.
+//
+// The bidi formatting characters go too (bidiControl), for the same reason CR does: this is the
+// DECISION surface. A right-to-left override inside a tool argument reorders the glyphs of the
+// approval row without touching a byte the executor sees, so the operator reads one command and
+// approves another — the same "read one thing, run another" family as the field flattening beside
+// it, and invisible to it, because folding "\n" does nothing to U+202E.
 func stripEscapes(s string) string {
 	// strings.Map returns s itself, unallocated, when it rewrites nothing: the overwhelmingly common
 	// case of text carrying no control character at all. An invalid UTF-8 byte is the one thing it
@@ -1455,11 +1461,29 @@ func stripEscapes(s string) string {
 		if r == '\n' || r == '\t' {
 			return r
 		}
-		if r < 0x20 || r == 0x7f {
+		if r < 0x20 || r == 0x7f || bidiControl(r) {
 			return -1 // strings.Map's "drop this rune"
 		}
 		return r
 	}, s)
+}
+
+// bidiControl reports whether r is one of the Unicode bidirectional formatting characters — the
+// embeddings and overrides U+202A–U+202E, the isolates U+2066–U+2069, and the two marks U+200E and
+// U+200F. Every one of them reorders the glyphs around it while leaving the underlying bytes alone,
+// which at a display seam means the row can say something other than what it holds.
+//
+// Deliberately the bidi set and NOT the whole of unicode.Cf, which the INGESTION and STORAGE seams
+// drop wholesale (neuterInert in internal/tools, sanitize in internal/library). The asymmetry is
+// intended, not an inconsistency to repair later: Cf also holds U+200D ZWJ, which is load-bearing
+// inside an emoji sequence, and U+00AD soft hyphen — dropping those where untrusted bytes ARRIVE
+// costs nothing, but dropping them here would mangle the user's own prose on its way to the screen.
+// The same set is stripped at the two other seams that kept it, internal/title.strippableControl and
+// internal/session's id validator; a fourth copy anywhere means one of them has drifted.
+func bidiControl(r rune) bool {
+	return r == '\u200e' || r == '\u200f' || // LRM, RLM
+		(r >= '\u202a' && r <= '\u202e') || // LRE, RLE, PDF, LRO, RLO
+		(r >= '\u2066' && r <= '\u2069') // LRI, RLI, FSI, PDI
 }
 
 // stripEscapesAll escape-strips every string in xs, returning a new slice (nil for nil), so a

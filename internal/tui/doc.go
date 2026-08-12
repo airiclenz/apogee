@@ -657,8 +657,8 @@
 // tool card and everything derived from it (toolActivityVerb, the gist), and each popupRow
 // builder for the overlays, since the popup module strips
 // nothing and truncates ANSI-preservingly. stripEscapes is idempotent and allocation-free on text
-// with nothing to rewrite — no control character, no DEL, no invalid UTF-8 byte — so a producer
-// that also strips costs nothing. TestTranscriptStripsTerminalEscapes and its siblings pin every
+// with nothing to rewrite — no control character, no DEL, no bidi formatting character, no invalid
+// UTF-8 byte — so a producer that also strips costs nothing. TestTranscriptStripsTerminalEscapes and its siblings pin every
 // one of those paths.
 //
 // The COMPOSER is that invariant's second door, and the "@" dropdown is what walks through it: an

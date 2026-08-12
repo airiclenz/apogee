@@ -133,10 +133,11 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // gives way before an option does on a window too short for both.
 //
 // Every model-authored string (tool name, reason, args) is escape-stripped at this call site;
-// stripEscapes drops the C0 control characters and DEL (keeping \n and \t) and passes every
-// printable rune through, so the tool name the human is deciding about arrives with its printable
-// text intact and loses only what the terminal would have OBEYED rather than shown — the ESC that
-// opens a sequence, the CR that could rewind the name's own row. That is a claim about the
+// stripEscapes drops the C0 control characters and DEL (keeping \n and \t), drops the bidi
+// formatting characters with them, and passes every printable rune through, so the tool name the
+// human is deciding about arrives with its printable text intact and loses only what the terminal
+// would have OBEYED rather than shown — the ESC that opens a sequence, the CR that could rewind the
+// name's own row, the U+202E that would draw this row's glyphs in an order the executor never sees. That is a claim about the
 // TERMINAL, not about the name: a name written entirely in printable characters, lookalikes and
 // all, reaches this pane exactly as the model wrote it. The menu's own rows are ours, not the
 // model's, so nothing there needs stripping. Empty/null arguments add no body. There is ONE pane

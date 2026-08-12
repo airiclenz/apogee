@@ -365,6 +365,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A bidi override in a tool argument can no longer reorder the approval pane.** A right-to-left
+  override reverses the glyphs of the row it sits in without changing a byte the executor reads, so
+  the pane could show one command while the tool ran another — the same "read one thing, run
+  another" family as the forged rows and duplicate keys fixed beside it, and invisible to both,
+  because flattening a newline does nothing to U+202E. Three seams kept these: the transcript's
+  escape strip, which is the decision surface, tested C0 and DEL only; the title strip tested
+  `unicode.IsControl`, which is Cc; and the session-id validator used the same C0 test — the last
+  two being how a forged title rides into a saved session and back out onto the history browser.
+  All three now handle the bidi set — the embeddings and overrides U+202A–U+202E, the isolates
+  U+2066–U+2069, and the marks U+200E and U+200F — the two display seams by dropping it, the id
+  validator by refusing the id outright, because an id is an identity rather than prose. The set is
+  deliberately the bidi controls and NOT all of `unicode.Cf`: Cf also holds U+200D ZWJ, which is
+  load-bearing inside an emoji sequence, and U+00AD soft hyphen, and dropping those where text is
+  DISPLAYED would mangle prose a person legitimately wrote. The seams where untrusted bytes arrive
+  or are stored — the fetched-header and URL neutering, the library store's note sanitizer — go on
+  dropping all of Cf; that asymmetry is intended, and a test now pins the narrow set as narrow so a
+  later "consistency" change breaks a test rather than someone's emoji.
+
 - **The git tools no longer run programs the repository names.** The five tools scrubbed the
   ENVIRONMENT they handed git — an allowlist, so no inherited variable could redirect config, auth
   or the pager — and stopped there. But git also runs programs the REPOSITORY names, and on an

@@ -407,8 +407,30 @@ func StripEscapes(s string) string {
 // strippableControl reports whether r is a control character that must not survive into a title.
 // Whitespace controls (a tab, most obviously) are exempt: they carry no escape and collapse into
 // a single space one step later, so dropping them here would weld two words together.
+//
+// The bidi formatting characters count as strippable too (bidiControl). unicode.IsControl is Cc
+// only, so without them a reply could name the session with a right-to-left override and have the
+// history browser render a row in an order the stored title does not have — the title is the one
+// piece of model-authored text that survives into a saved session and comes back out onto a
+// browsable list, which is the whole reason this strip is the strong one.
 func strippableControl(r rune) bool {
-	return unicode.IsControl(r) && !unicode.IsSpace(r)
+	return (unicode.IsControl(r) && !unicode.IsSpace(r)) || bidiControl(r)
+}
+
+// bidiControl reports whether r is one of the Unicode bidirectional formatting characters — the
+// embeddings and overrides U+202A–U+202E, the isolates U+2066–U+2069, and the two marks U+200E and
+// U+200F — every one of which reorders the glyphs around it while leaving the bytes alone.
+//
+// Deliberately the bidi set and NOT the whole of unicode.Cf, which the seams where untrusted bytes
+// ARRIVE or are STORED drop wholesale (internal/tools' neuterInert, internal/library's sanitize).
+// That asymmetry is intended rather than an inconsistency to repair: Cf also holds U+200D ZWJ,
+// load-bearing inside an emoji sequence, and U+00AD soft hyphen, and a title is prose a person may
+// legitimately have written. The same set is stripped at the two other seams that kept it,
+// internal/tui.stripEscapes and internal/session's id validator.
+func bidiControl(r rune) bool {
+	return r == '\u200e' || r == '\u200f' || // LRM, RLM
+		(r >= '\u202a' && r <= '\u202e') || // LRE, RLE, PDF, LRO, RLO
+		(r >= '\u2066' && r <= '\u2069') // LRI, RLI, FSI, PDI
 }
 
 // escapeRunes reports how many runes the escape sequence beginning at runes[0] (an ESC) spans:

@@ -420,6 +420,12 @@ var unsafeIDs = []struct {
 	{"dot prefixed", ".hidden"},
 	{"newline", "two\nlines"},
 	{"nul byte", "nul\x00byte"},
+	// A bidi override reorders the glyphs of the stem without changing a byte of the path, so the
+	// browser row, the delete confirmation and the resumed file would read in an order the record
+	// does not have. Refused rather than stripped: an id is an identity, not prose.
+	{"bidi override", "session\u202egpj.exe"},
+	{"bidi isolate", "session\u2066inner\u2069"},
+	{"bidi mark", "session\u200fname"},
 	{"over length", strings.Repeat("x", maxIDLen+1)},
 }
 

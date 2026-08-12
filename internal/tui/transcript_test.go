@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -693,6 +694,68 @@ func TestStripEscapesDropsControlCharacters(t *testing.T) {
 				t.Errorf("stripEscapes is not idempotent: %q became %q", got, again) // every seam may strip twice
 			}
 		})
+	}
+}
+
+// The bidi half of the same sanitizer, pinned rune by rune. A bidirectional formatting character
+// reorders the glyphs around it without touching a byte the executor reads, so on the DECISION
+// surface it is the same hazard as the CR above: the row says one thing and the tool runs another,
+// and flattening a field does nothing to it. The set is deliberately narrow — the bidi controls, not
+// all of unicode.Cf — so the two survivors below are the point of the test as much as the casualties
+// are: U+200D ZWJ holds an emoji sequence together and U+00AD is a soft hyphen, and a later
+// "consistency" change to blanket-drop Cf must break a test rather than a person's prose.
+func TestStripEscapesDropsBidiControls(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"RLO reorders the row it sits in", "run \u202esafe.sh", "run safe.sh"},
+		{"LRO goes with it", "run \u202dsafe.sh", "run safe.sh"},
+		{"the embeddings and their pop go too", "a\u202ab\u202bc\u202cd", "abcd"},
+		{"the isolates go", "a\u2066b\u2067c\u2068d\u2069e", "abcde"},
+		{"the marks go", "a\u200eb\u200fc", "abc"},
+		{"a whole reversed tail is dropped, not reordered", "echo hello\u202edlrow", "echo hellodlrow"},
+		{"ZWJ survives: it holds an emoji sequence together", "\U0001f469\u200d\U0001f4bb ok", "\U0001f469\u200d\U0001f4bb ok"},
+		{"a soft hyphen survives: it is the user's own prose", "in\u00adcremental", "in\u00adcremental"},
+		{"a zero-width space survives", "a\u200bb", "a\u200bb"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripEscapes(tc.in)
+			if got != tc.want {
+				t.Errorf("stripEscapes(%q) = %q; want %q", tc.in, got, tc.want)
+			}
+			if strings.ContainsFunc(got, bidiControl) {
+				t.Errorf("stripEscapes(%q) left a bidi control behind: %q", tc.in, got)
+			}
+			if again := stripEscapes(got); again != got {
+				t.Errorf("stripEscapes is not idempotent: %q became %q", got, again)
+			}
+		})
+	}
+}
+
+// The seam in the surface it exists for: an approval pane whose tool ARGUMENT carries a
+// right-to-left override. The bytes the executor will run are unchanged by it, so an unstripped
+// pane would draw the command in an order the shell never sees and the human would approve a line
+// that does not exist. The pane draws the argument's own order or the argument does not reach it.
+func TestModelApprovalStripsBidiOverrideFromArguments(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	// The override arrives the way a model really writes one: a \u escape in the call's JSON, decoded
+	// into the rune before any TUI code sees it.
+	req := domain.ApprovalRequest{
+		Tool:      "terminal",
+		Reason:    "run a command",
+		Arguments: json.RawMessage(`{"command":"echo hello\u202edlrow"}`),
+	}
+	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
+
+	got := ansiPattern.ReplaceAllString(m.approvalPrompt(req), "")
+	if strings.ContainsFunc(got, bidiControl) {
+		t.Errorf("a bidi control reached the approval pane:\n%q", got)
+	}
+	if !strings.Contains(got, "echo hellodlrow") {
+		t.Errorf("the argument did not reach the pane in its own order:\n%s", got)
 	}
 }
 

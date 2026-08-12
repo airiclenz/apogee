@@ -639,6 +639,46 @@ func TestSanitize(t *testing.T) {
 	}
 }
 
+// A title is the one piece of model-authored text that is SAVED and comes back out onto a browsable
+// list, so a bidirectional formatting character in the reply would reorder a session-browser row —
+// and the stored title, read later by something else, would not say what the row said. IsControl is
+// Cc only, so these survived the strip until this seam named them. The set stays narrow on purpose:
+// the ZWJ and soft-hyphen cases below are what a blanket unicode.Cf drop would break, and a title is
+// prose a person may legitimately have written.
+func TestStripEscapesDropsBidiControls(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"RLO", "Add\u202e retry to the uploader", "Add retry to the uploader"},
+		{"LRO", "Add\u202d retry to the uploader", "Add retry to the uploader"},
+		{"embeddings and their pop", "Add\u202a\u202b\u202c retry", "Add retry"},
+		{"isolates", "Add\u2066\u2067\u2068\u2069 retry", "Add retry"},
+		{"the marks", "Add\u200e\u200f retry", "Add retry"},
+		{"ZWJ survives", "Ship \U0001f469\u200d\U0001f4bb", "Ship \U0001f469\u200d\U0001f4bb"},
+		{"soft hyphen survives", "In\u00adcremental parse", "In\u00adcremental parse"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := StripEscapes(tc.raw); got != tc.want {
+				t.Errorf("StripEscapes(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+			// Through the whole cleanup too, since that is how a reply really reaches a saved record.
+			got, ok := Sanitize(tc.raw)
+			if !ok {
+				t.Fatalf("Sanitize(%q) reported failure", tc.raw)
+			}
+			if strings.ContainsFunc(got, bidiControl) {
+				t.Errorf("Sanitize(%q) = %q, which still carries a bidi control", tc.raw, got)
+			}
+		})
+	}
+}
+
 func TestSanitizeTruncatesOnAWordBoundary(t *testing.T) {
 	t.Parallel()
 
