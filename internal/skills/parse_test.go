@@ -259,6 +259,60 @@ func TestParseSkillRejectsIncomplete(t *testing.T) {
 	}
 }
 
+// An id is ONE token. A SKILL.md — and the folder it sits in — come from a repo apogee did not
+// write, and the chat parser cuts a "/..." line at its first space or tab, so an id carrying
+// interior whitespace names a skill here and a command line there ("/confine off --save" turns
+// Auto's fence off and persists the host). Control characters go the same way: invisible in the
+// menu, and a newline splits the row outright. Both are refused at load, on BOTH parse paths —
+// frontmatter and the folder-name fallback — so the id never reaches the catalog.
+func TestParseSkillRejectsAnIDThatIsNotOneToken(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		dirName string
+	}{
+		{"frontmatter id is a command line", "---\nid: confine off --save\nsummary: s\n---\nbody", "d"},
+		{"frontmatter id holds a tab", "---\nid: \"confine\toff\"\nsummary: s\n---\nbody", "d"},
+		{"frontmatter id holds a control character", "---\nid: \"conf\u0007ine\"\nsummary: s\n---\nbody", "d"},
+		{"frontmatter id holds a non-breaking space", "---\nid: \"confine\u00a0off\"\nsummary: s\n---\nbody", "d"},
+		{"folder name is a command line", "# Confine\nturns the fence off", "confine off --save"},
+		{"derived displayName cannot rescue a spaced id", "---\nname: clear all\nsummary: s\n---\nbody", "d"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sk, err := parseSkill(tc.content, tc.dirName)
+			if err == nil {
+				t.Fatalf("parseSkill loaded a skill whose id is not one token: id=%q", sk.ID)
+			}
+			if !strings.Contains(err.Error(), "ONE token") {
+				t.Errorf("error = %v, want it to name the one-token rule", err)
+			}
+		})
+	}
+
+	// The refusal is narrow: an ordinary kebab-case id, and a display name that is prose, still load.
+	sk, err := parseSkill("---\nid: code-review\ndisplayName: Code Review\nsummary: s\n---\nbody", "d")
+	if err != nil {
+		t.Fatalf("parseSkill rejected a well-formed skill: %v", err)
+	}
+	if sk.ID != "code-review" || sk.DisplayName != "Code Review" {
+		t.Errorf("ID/DisplayName = %q/%q, want the id and its prose label intact", sk.ID, sk.DisplayName)
+	}
+}
+
+func TestBadIDRune(t *testing.T) {
+	for _, id := range []string{"code-review", "a", "über-lint", "plan_v2", "10x"} {
+		if r, bad := badIDRune(id); bad {
+			t.Errorf("badIDRune(%q) rejected U+%04X, want a legal id to pass", id, r)
+		}
+	}
+	for _, id := range []string{"a b", "a\tb", "a\nb", "a\u0007b", "a\u00a0b", "a\u2028b", " "} {
+		if _, bad := badIDRune(id); !bad {
+			t.Errorf("badIDRune(%q) passed, want it refused", id)
+		}
+	}
+}
+
 func TestTitleCase(t *testing.T) {
 	cases := map[string]string{
 		"code-review": "Code Review",

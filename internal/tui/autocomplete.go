@@ -220,8 +220,13 @@ func caretToken(value string, caret int) (start, end int) {
 // the menu opens on the "/word" being edited anywhere in a draft that already holds text, instead of
 // only on an otherwise-empty box. A caret on whitespace has no token (the word is finished).
 //
-// There is no quoted shape to read: command verbs and skill ids are whitespace-free by construction
-// (skill ids are directory names — extractSkillRefs), so the bare word is the whole grammar.
+// There is no quoted shape to read, because the token is a NAME: command verbs are whitespace-free
+// by their registry, and a skill id is whitespace-free because the loader refuses one that is not
+// (skills.validate — an id is one token, no whitespace and no control characters). That is an
+// enforced rule, not the property of directory names it was once mistaken for: a repo names its own
+// skill folders, so "by construction" was never true here, and an id like "confine off --save" read
+// as one bare word right up to the moment the parser cut it into a verb and arguments. The bare
+// word is the whole grammar because nothing may enter the catalog that would need more of one.
 func caretSlashToken(value string, caret int) (start, end int, partial string, ok bool) {
 	start, end = caretToken(value, caret)
 	if start == end || value[start] != '/' {
@@ -338,11 +343,14 @@ func commandSuggestions(partial string, busy bool) []acItem {
 // in the MIDDLE of its name no longer outranks one the partial actually starts — typing "imple"
 // now offers /implement-plan above /feature-implementation, which is what ⏎ and tab accept.
 //
-// Commands SHADOW skills: a skill whose id equals any verb in commandSpecs is dropped from the
-// merged rows, because the whole-input parse would read "/id" as that command anyway. The collision
-// is settled here, menu-side, so the parse layer never has to know skills exist — and the shadowed
-// skill stays invocable by typing its "/id" token anywhere but at the head of the line, where no
-// command rule claims it.
+// Commands SHADOW skills: a skill whose id's FIRST TOKEN is a verb of commandSpecs is dropped from
+// the merged rows, because the whole-input parse would read "/id" as that command anyway. The
+// first-token rule is the parser's own (firstCommandToken, command.go) and is read from there
+// rather than restated: a guard that tested the whole id would leave exactly the ids that carry
+// arguments — "/confine off --save" — showing as innocent skill rows. The collision is settled
+// here, menu-side, so the parse layer never has to know skills exist — and the shadowed skill stays
+// invocable by typing its "/id" token anywhere but at the head of the line, where no command rule
+// claims it.
 //
 // outside is the draft text OUTSIDE the region being completed, so the half-typed token can never
 // suppress its own row while the already-invoked ones stay out (skillSuggestions).
@@ -357,7 +365,10 @@ func commandSuggestions(partial string, busy bool) []acItem {
 func (m Model) slashSuggestions(partial, outside string) []acItem {
 	items := commandSuggestions(partial, m.busy())
 	for _, sk := range m.skillSuggestions(partial, outside) {
-		if _, shadowed := commandByName(sk.value); shadowed {
+		// Keyed on the id's FIRST TOKEN, the same cut matchCommand makes (firstCommandToken,
+		// command.go) — never on the whole id, or the guard and the parser read different things
+		// and a skill named "confine off --save" is offered as a skill row and run as a command.
+		if _, shadowed := commandByName(firstCommandToken(sk.value)); shadowed {
 			continue
 		}
 		items = append(items, acItem{

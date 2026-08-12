@@ -305,15 +305,33 @@ func matchCommand(trimmed string) (string, string, bool) {
 	if !strings.HasPrefix(trimmed, "/") {
 		return "", "", false
 	}
-	first, rest := trimmed, ""
-	if i := strings.IndexAny(trimmed, " \t"); i >= 0 {
-		first, rest = trimmed[:i], trimmed[i+1:]
+	first := firstCommandToken(trimmed)
+	rest := ""
+	if len(first) < len(trimmed) {
+		rest = trimmed[len(first)+1:]
 	}
 	c, ok := commandByName(strings.TrimPrefix(first, "/"))
 	if !ok {
 		return "", "", false
 	}
 	return c.name, rest, true
+}
+
+// firstCommandToken returns everything before s's first space or tab — the piece matchCommand
+// looks up in commandSpecs, and the whole of what "the verb" means to the parser.
+//
+// It is exported to the package rather than inlined because the parser is not its only reader: the
+// merged "/" menu's shadow guard (slashSuggestions, autocomplete.go) must drop exactly the skills
+// this cut would hand to a command, and the two layers reading the SAME rule is what stops them
+// disagreeing. They did disagree: the guard once compared a WHOLE skill id against the registry, so
+// a repo-supplied id of "confine off --save" was offered as an ordinary skill row and then parsed
+// as /confine with arguments. Newlines are deliberately not cut on, because matchCommand does not
+// cut on them either — a multi-line message whose first line is "/clear" stays a message.
+func firstCommandToken(s string) string {
+	if i := strings.IndexAny(s, " \t"); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // ----------------------------------------------------------------------------

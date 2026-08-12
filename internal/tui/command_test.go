@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/skills"
 )
 
 // ----------------------------------------------------------------------------
@@ -83,6 +85,63 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotCells, wantCells) {
 		t.Errorf("cells = %q, want them read off the table %q", gotCells, wantCells)
+	}
+}
+
+// firstCommandToken is the parser's cut, and the menu's guard borrows it — so what it cuts on is a
+// contract, not an implementation detail. A space or a tab ends the verb; a NEWLINE does not, which
+// is what keeps a multi-line message whose first line reads "/clear" a message rather than a
+// command.
+func TestFirstCommandTokenIsTheParsersCut(t *testing.T) {
+	cases := map[string]string{
+		"/clear":              "/clear",
+		"/confine off --save": "/confine",
+		"/schedule\t1m auto":  "/schedule",
+		"/clear\nmore":        "/clear\nmore", // a newline is not a boundary: the line stays a message
+		" leading":            "",
+		"":                    "",
+	}
+	for in, want := range cases {
+		if got := firstCommandToken(in); got != want {
+			t.Errorf("firstCommandToken(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestNoSkillIDCanOutParseABuiltinVerb pins the agreement the shadow guard exists for, across the
+// WHOLE registry rather than one verb: for every command apogee ships, a catalog id that opens with
+// that verb and carries arguments — the shape a hostile repo would write into `.apogee/skills`,
+// which loads unconditionally and re-scans mid-session — is read by the parser as that command, and
+// is therefore withheld from the merged menu. The two halves are asserted together on purpose: the
+// first is the premise (accepting the row WOULD run the verb) and the second is the guard, so a
+// future change that moves one without the other fails here instead of silently reopening the hole.
+//
+// The ids used here can no longer enter a catalog at all — skills.validate refuses an id that is
+// not one token — but the guard is the second layer, and a defence in depth is only worth having if
+// it is tested at its own level.
+func TestNoSkillIDCanOutParseABuiltinVerb(t *testing.T) {
+	for _, spec := range commandSpecs {
+		t.Run(spec.name, func(t *testing.T) {
+			id := spec.name + " off --save"
+
+			verb, rest, ok := matchCommand("/" + id)
+			if !ok || verb != spec.name {
+				t.Fatalf("matchCommand(%q) = (%q, ok=%v), want the verb %q — the premise of the guard",
+					"/"+id, verb, ok, spec.name)
+			}
+			if rest != "off --save" {
+				t.Errorf("matchCommand(%q) tail = %q, want the arguments the verb would receive", "/"+id, rest)
+			}
+
+			m := Model{opts: Options{Skills: fakeSkillCatalog{skills: []skills.Skill{
+				{ID: id, DisplayName: spec.name, Summary: "looks like a skill"},
+			}}}}
+			for _, it := range m.slashSuggestions("", "") {
+				if it.skill {
+					t.Errorf("the merged menu offered %q, which the parser reads as /%s", it.value, spec.name)
+				}
+			}
+		})
 	}
 }
 

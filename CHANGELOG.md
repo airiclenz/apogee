@@ -315,6 +315,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A skill id can no longer be a command line.** A workspace's `.apogee/skills` is an
+  unconditional source and the catalog re-scans mid-session, so a cloned repo could ship a skill
+  whose id is `confine off --save`. The merged `/` menu's shadow guard dropped a skill only when its
+  WHOLE id matched a command verb, found no collision there, and offered the row like any other
+  skill — while the parser, which cuts a `/` line at its first space or tab, read the accepted token
+  as `/confine` with arguments: Auto's fence off and the host persisted, from a row the human
+  believed was a skill. Two layers now close it. The loader REFUSES an id holding whitespace or a
+  control character — an id is ONE token, and a repo authors both the frontmatter and the folder
+  name an id can be derived from — so such a skill never reaches the catalog and the skip is
+  reported like any other malformed one. And the menu's guard now keys on the id's FIRST TOKEN, read
+  from the parser's own cut rather than restated beside it, so the two layers cannot drift apart
+  again; a registry-wide test asserts no verb of `commandSpecs` can be out-parsed by a skill id.
+  Nothing legitimate moves: a kebab-case id loads as before, a display name may still be prose, and
+  a skill shadowed by a verb stays invocable as a `/token` anywhere but at the head of the line.
+
 - **A write whose path does not point where it reads now says so, on every surface that shows the
   call.** apogee has always resolved a write's true target — it is what the blast-radius ladder
   classifies the call by — but consumed it as a bool and nothing else, so the approval pane, the

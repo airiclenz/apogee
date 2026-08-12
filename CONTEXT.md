@@ -860,7 +860,11 @@ its id as a **`/token`** in the message
 text — `/code-audit please check the parser` — at a word boundary and whitespace-delimited,
 exactly parallel to an `@path`. The token **stays in the text** the model reads, and only a token
 the catalog confirms is a reference: any other `/word` inside a message is prose (a path survives
-untouched), and a **command verb shadows** a skill of the same id. Like an `@file`, a skill is
+untouched), and a **command verb shadows** a skill whose id OPENS with that verb — the cut the
+command parser makes, not whole-id equality, so an id carrying arguments cannot slip past the
+shadow and be parsed as the command it names. An id is **one token**: the loader refuses one
+holding whitespace or a control character, because a repo writes both the frontmatter and the
+folder name an id can come from. Like an `@file`, a skill is
 **turn-local**: the loop resolves the extracted IDs (`UserInput.SkillIDs`) through `Config.Skills`
 and prepends each body to *that one* user message, so a skill never persists as a system-prompt
 edit. The TUI parses and offers (one merged `/` menu, and `/skills` to browse the catalog); the

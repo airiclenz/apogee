@@ -244,12 +244,40 @@ func parseFallback(content, dirName string) (Skill, error) {
 // to inject — so the loader skips it rather than surfacing a half-blank, contentless entry in
 // the menu. The body check is what turns an empty/whitespace SKILL.md into a skip: the
 // fallback would otherwise name it after its folder and load a skill with nothing to say.
+//
+// It then rejects an id that is not a single token (badIDRune), which is a REFUSAL rather than a
+// completeness check: both fields a skill is named by come from an untrusted SKILL.md — or from a
+// directory name in an untrusted repo — and an id carrying interior whitespace is a command line,
+// not a name.
 func validate(s Skill) (Skill, error) {
 	if s.ID == "" || s.DisplayName == "" || s.Summary == "" || s.Body == "" {
 		return Skill{}, fmt.Errorf("skill is missing a required field (id=%q displayName=%q summary=%q body-empty=%v)",
 			s.ID, s.DisplayName, s.Summary, s.Body == "")
 	}
+	if r, bad := badIDRune(s.ID); bad {
+		return Skill{}, fmt.Errorf("skill id %q contains U+%04X: an id is ONE token — no whitespace, no control characters", s.ID, r)
+	}
 	return s, nil
+}
+
+// badIDRune reports the first rune of an id that may not be in one, and whether there was such a
+// rune. A skill id is invoked as a "/id" token in the chat line, and the command parser cuts that
+// line at its first space or tab and looks only the leading piece up in its verb registry — so an
+// id like "confine off --save" is a NAME to this package and a COMMAND LINE to the parser. That
+// mismatch is the whole reason for the check: a repo-supplied SKILL.md must not be able to write a
+// command into the human's composer under the guise of naming itself.
+//
+// Control characters are refused for the neighbouring reason: they take no display cell, so an id
+// carrying one shows in the menu as something shorter than what it is, and a newline splits a
+// rendered row outright. Both classes are refused at the earliest place they can be — the loader
+// skips the skill and records the refusal, so the id never enters the catalog at all.
+func badIDRune(id string) (rune, bool) {
+	for _, r := range id {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return r, true
+		}
+	}
+	return 0, false
 }
 
 // firstNonEmpty returns the first argument that is non-empty after trimming, or "".

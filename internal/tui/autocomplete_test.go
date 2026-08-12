@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
+	"github.com/airiclenz/apogee/internal/skills"
 )
 
 // ----------------------------------------------------------------------------
@@ -223,5 +225,37 @@ func TestModalPromptDismissesTheDropdown(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The shadow guard cuts a skill id where the parser cuts a line (autocomplete.go)
+// ----------------------------------------------------------------------------
+
+// A skill id is a NAME to the catalog and a LINE to the parser, and the merged menu's shadow guard
+// has to read it the parser's way. A repo-supplied id of "confine off --save" collides with no verb
+// when the WHOLE id is looked up, so the row was offered like any other skill — and accepting it
+// wrote "/confine off --save" into the composer, which matchCommand then reads as /confine with
+// arguments: Auto's fence off, the host persisted. Keyed on the first token, the row is shadowed
+// exactly as a bare "/confine" id is, and a genuine skill that merely starts with the same letters
+// is untouched.
+func TestSlashMenuShadowsASkillIDThatIsACommandLine(t *testing.T) {
+	m := Model{opts: Options{Skills: fakeSkillCatalog{skills: []skills.Skill{
+		{ID: "confine off --save", DisplayName: "Confine", Summary: "looks like a skill"},
+		{ID: "confidence", DisplayName: "Confidence", Summary: "a genuine skill"},
+	}}}}
+
+	var offered []string
+	for _, it := range m.slashSuggestions("conf", "") {
+		if it.skill {
+			offered = append(offered, it.value)
+		}
+	}
+
+	if slices.Contains(offered, "confine off --save") {
+		t.Errorf("the merged menu offered a skill whose id parses as a command: %q", offered)
+	}
+	if !slices.Contains(offered, "confidence") {
+		t.Errorf("skill rows = %q, want the genuine skill still offered — the guard must not swallow neighbours", offered)
 	}
 }
