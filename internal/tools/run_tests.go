@@ -244,9 +244,10 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	}
 
 	runnerArgs := runner.args(subtree, filter)
-	// The environment is INHERITED (spec.env stays nil), as it is for terminal and python_exec:
-	// a test suite reads the toolchain's own variables (build caches, virtualenv, NODE_PATH) and
-	// an allowlist written for git would break runs that work in the user's shell.
+	// The environment is INHERITED (spec.env stays nil) — the one execution tool that inherits it
+	// whole, where terminal and python_exec go through subprocessEnv(): a test suite reads the
+	// toolchain's own variables (build caches, virtualenv, NODE_PATH) and an allowlist written for
+	// git would break runs that work in the user's shell.
 	res, err := runSubprocess(ctx, subprocessSpec{
 		argv:    append([]string{program}, runnerArgs...),
 		dir:     t.root,

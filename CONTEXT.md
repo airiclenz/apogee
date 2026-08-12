@@ -985,9 +985,9 @@ transcript entry carrying the workspace-relative path as **plain text on its own
 that is never wrong. **Rung 1 (local desktop)** — the OS opener auto-opens the file when the
 session is local (no `SSH_CONNECTION`/`SSH_TTY`/`SSH_CLIENT`), a desktop is detected, *and* the
 extension is one an OS handler **renders rather than runs** (documents, images, text — its own
-allow-list, which **crosses** rung 2's rather than containing it, since `.html`/`.htm`/`.xhtml`/
-`.svg` are rung 2's alone: a browser runs a page as much as it shows one, and only a served
-response can carry a policy that bounds it; a `report.bat` degrades to rung 0 instead of
+allow-list, which **crosses** rung 2's rather than containing it, since `.html`/`.htm`/`.svg` are
+rung 2's alone and `.xhtml` is on neither: a browser runs a page as much as it shows one, and only
+a served response can carry a policy that bounds it; a `report.bat` degrades to rung 0 instead of
 executing). **Rung 2 (remote + browser-renderable)** — the
 [doc server](#deliverables-and-presentation) serves the file and the URL joins the entry, also as
 plain text; every served document is answered under a restrictive `Content-Security-Policy`

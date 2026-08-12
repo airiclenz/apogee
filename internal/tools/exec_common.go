@@ -42,9 +42,11 @@ type subprocessSpec struct {
 	// stdin, when non-empty, is fed to the process on its standard input.
 	stdin string
 	// env, when non-nil, is the exact environment the process runs with (each entry
-	// "KEY=value"); nil means it inherits the caller's environment. A tool that wants a
-	// scrubbed, allowlisted environment (e.g. git) sets it; the shell/interpreter tools
-	// leave it nil to inherit.
+	// "KEY=value"); nil means it inherits the caller's environment. Every tool that runs
+	// something for the MODEL sets it: git and the Go toolchain to an allowlist scoped by
+	// platform.Host.ScopeEnv, the shell and interpreter tools to subprocessEnv() — the
+	// caller's environment minus apogee's own credentials. Only run_tests leaves it nil,
+	// because a test suite needs the toolchain variables its user's shell has.
 	env []string
 	// cmdline, when non-empty, is the verbatim process command line to launch argv with
 	// instead of letting os/exec join it (platform.Shell.CommandLine). It is empty on

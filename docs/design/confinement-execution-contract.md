@@ -190,6 +190,12 @@ kills the container.** What the container *is* is the only per-OS part.
 - **Tool obligation (P3.8) — POSIX:** the execution tools set `cmd.Cancel` to signal the **negative PID**
   (`syscall.Kill(-cmd.Process.Pid, SIGKILL)`) and set a short `cmd.WaitDelay`, so a ctx cancel / timeout
   reaps the whole group — no orphaned `sandbox-exec`, no orphaned child.
+  **Amended 2026-08-12 (hostile-bytes hardening, item 18): teardown runs on EVERY exit, not only on
+  cancellation.** The same group kill also runs after a normal `Wait` (`processTeardown.reap`,
+  `internal/tools/exec_teardown.go`), so a descendant the command backgrounded does not outlive a
+  clean exit either — the one-shot contract holds on all three paths, not two. A `cmd.WaitDelay`
+  that expires is now reported (`exec.ErrWaitDelay`) instead of falling through to the leader's own
+  exit code, which rendered a wedged drain as a success.
 - **Tool obligation — Windows (Phase 5):** Windows has no process groups, so the container is a **Job
   Object** created before `Start` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, which the started process is
   assigned to and which `cmd.Cancel` **terminates** (`TerminateJobObject`) instead of killing the leader;
@@ -200,9 +206,12 @@ kills the container.** What the container *is* is the only per-OS part.
     into a job needs `PROC_THREAD_ATTRIBUTE_JOB_LIST` on a `STARTUPINFOEX`, which `syscall.SysProcAttr`
     cannot express and a suspended start cannot substitute for (`os/exec` closes the initial thread
     handle). The residual window closes before a shell has parsed its command line.
-  - **The `KILL_ON_JOB_CLOSE` limit is cleared before the handle is closed** on a completed run, so a
-    process the command deliberately left running outlives the call exactly as it does on POSIX. The
-    limit's job is the crash path; the cancel path terminates explicitly.
+  - **The `KILL_ON_JOB_CLOSE` limit is cleared before the handle is closed** on a completed run, so
+    closing the handle is never itself a teardown. The limit's job is the crash path — apogee dying
+    mid-run with nobody left to make the call; every path that started a process terminates the job
+    explicitly first, `cmd.Cancel` on the cancelled one and `reap` on the clean one (amended
+    2026-08-12, item 18: a process the command deliberately left running does **not** outlive the
+    call, on either OS).
 
 The tool never needs to know *how* the command was wrapped, and the two backends' observable behaviour
 is the same: the container contract abstracts both. The run is governed by the **cmd's own context**
@@ -396,6 +405,24 @@ one level down (D2), for free, with no threading.
 > recursion point stays (it is `Delegate`d before the ladder, never a leaf). `ReadOnly()` keeps its
 > remaining jobs: it is the terminal-floor input to `classifyTool` and what self-regulation's
 > read/write tally reads. Menu-only change; no ladder cell moves, and no verdict changes.
+
+> **Amended 2026-08-12 (the writable box fences `argv[0]` too; hostile-bytes hardening, items 2 and
+> 5).** `box.WritablePaths` was read only by the OS backends that build the *write* fence, so
+> nothing stopped a confined Auto call planting an executable inside its box and a later
+> **unconfined** call running it from outside — the box bounded the write and then vouched for the
+> bytes. Every site that resolves a program now refuses an `argv[0]` landing inside the workspace
+> root or any `box.WritablePaths` entry, before anything starts
+> (`security.RefuseExecFromWritablePath`, wrapped package-locally in `internal/tools`,
+> `internal/mechanisms` and `internal/present`). It is a **tool-side fence, not a ladder cell**: no
+> cell moves and no verdict changes, it applies on the `Run` path exactly as on `Confine` (an
+> unconfined site passes a nil box, leaving the workspace root as the whole fence), and it reaches
+> the one exec that never gets a Resolution at all — rung 1's OS opener, which `present_document`
+> fires read-only in every mode (ADR 0019), and which also stopped resolving its program by bare
+> name against apogee's inherited `PATH`. The scoped environments close the same door from the
+> child's side: `platform.Host.ScopeEnv` now takes the workspace root and drops workspace-resident
+> `PATH` entries, so git and the Go toolchain cannot redo the lookup the fence just refused. The
+> ergonomics cost — an activated `<repo>/.venv/bin/python3` or `node_modules/.bin` is refused, with
+> no switch — is accepted and recorded in `TODO.md` L5.
 
 A Resolution is one of five **kinds** — `Run` · `Confine` · `Gate` · `Refuse` · `Delegate` —
 computed in a fixed, load-bearing order:

@@ -307,7 +307,10 @@ presented, the tool result still `shown`, never an error. Because `climb`'s two 
 exclusive (a Local session degrades to the baseline rather than falling through to rung 2), the
 user-visible consequence is that a **local** `present_document report.html` launches no browser.
 
-**(b) Rung 2 keeps them, and gains the policy that bounds them.** The rung that shows active
+**(b) Rung 2 keeps three of them, and gains the policy that bounds them.** `.html`, `.htm` and
+`.svg` were already in `browserRenderableExts` and stay there; `.xhtml` was never in it, so it is
+now on no rung above the baseline transcript entry — presented as a path, shown by neither the OS
+opener nor the doc server. The rung that shows active
 content must be the rung that can police it, and only a served response can carry a header: every
 document the doc server answers now carries `Content-Security-Policy: default-src 'none'; img-src
 'self' data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors

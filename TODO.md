@@ -453,6 +453,18 @@ acceptance or a future-task re-verification, NOT a live hole.
   *is* found via `PATH`) and "was this file written during the session" (stateful and racy). If
   the cost proves unacceptable in practice, a config key is a small later addition.
 
+- **[L6 accepted cost, 2026-08-12] A process a `terminal` call deliberately backgrounded is reaped
+  when the call returns.** Process-group teardown used to run on cancellation only — `cmd.Cancel`
+  was the single group kill — so a command that backgrounded a server left it running after a clean
+  exit, and because `exec.ErrWaitDelay` is not an `*exec.ExitError` a wedged post-exit drain was
+  reported as exit code 0. The teardown now also runs after a normal `Wait`, and an expired
+  `WaitDelay` is surfaced on the result (hostile-bytes plan item 18). **Accepted as-is:** this is
+  what the tool's own contract already promised — "one-shot, a fresh process per call, no persistent
+  shell" (ADR 0008) — so it closes a gap between contract and code rather than choosing a new
+  policy, and a descendant outliving its call is exactly the persistence primitive the audit named.
+  The cost is that anyone who was relying on `terminal` to leave a dev server up now finds it gone,
+  with no opt-out: a long-running process belongs outside the one-shot tool.
+
 (L2 — the dangerous-action guard normalising only whitespace+case, trivially evadable — needs no
 entry: it is ADR-0012 by-design, and `internal/security/doc.go` already states the guard is "NOT
 a security boundary." No doc/UI describes it as one, which is exactly what L2 asks for.)
@@ -490,6 +502,27 @@ The audit findings these acceptances **did** dismiss are recorded in the triage'
 rather than here, together with the operator-armed footguns, the attacks on apogee's own build and
 release, and the hostile-inference-endpoint set — all different threat models from the hostile-bytes
 one the batch answers.
+
+**Closeout, 2026-08-12 — what the batch closed and what it deliberately left.** All fourteen ranked
+positions are now answered in code (plan items 2–19): the writable-box exec fence and the absolutely
+resolved opener, `python_exec`'s load path, the active-content formats out of rung 1 and a policy on
+rung 2, the approval pane's forged rows / head-only truncation / duplicate keys / undisclosed
+resolved path, skill ids that were command lines and skill sources that were unnamed, the skill
+loader's anchor containment, symlink-crossing write parents, `.git/` and `~/.apogee` on the
+dangerous floor, repo-supplied git hooks and textconv/ext-diff drivers, a session grant that keyed
+on the bare tool name, bidi controls at three TUI seams, teardown on every exit path, and the Go
+toolchain's own environment. **Left, deliberately:** everything in the plan's **Out of scope**
+section — operator-armed footguns (`present.command`, `--workspace /`, `APOGEE_MODE=auto`, the
+stdio MCP command surface), attacks presupposing the audited workspace *is* the apogee repo, the
+hostile-inference-endpoint set, the gate-reason wording (owned by
+`docs/plans/2026-08-11 - 03 - subprocess-gate-reason-plan.md`), and the human-timing attacks on the
+gate. **Two residuals sit inside items that did land**, documented at the code rather than fixed: a
+`.gitattributes` clean/smudge **filter** driver takes its command from the repository's own
+`.git/config` and git offers no switch that refuses configured filters, so only the read-path
+textconv/ext-diff half is closed (`gitHardeningEnv`'s doc comment); and `GOENV=off` means the
+operator's persisted `GOPROXY`/`GOPRIVATE`/`GOMODCACHE` are unread, so a cold-cache `go vet` can
+fail to resolve dependencies — which degrades to a reported finding, not a tool error (`goVetEnv`'s
+doc comment). L1–L4 above are untouched by the batch; L5 and L6 are its two new accepted costs.
 
 ---
 
