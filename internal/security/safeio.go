@@ -253,11 +253,20 @@ func SafeOpen(root, input string) (*os.File, error) {
 	return f, nil
 }
 
-// SafeCopyFile copies the regular file at srcInput to dstInput — both relative to root, or
-// absolute-inside-root — with the workspace fence enforced at COPY time through a single
-// os.Root pinned at root. Either path escaping the root (by traversal, by an absolute target
-// outside it, or by a symlinked component pointing outside, including one swapped in
-// concurrently) returns an error wrapping ErrPathEscape, and nothing is written.
+// SafeCopyFileFrom copies the regular file at srcInput — relative to srcRoot, or
+// absolute-inside-srcRoot — to dstInput under dstRoot, with EACH END fenced at COPY time by its
+// OWN os.Root: the source is read through a root pinned at srcRoot, the destination written
+// through a root pinned at dstRoot. A path that escapes ITS OWN root (by traversal, by an
+// absolute target outside it, or by a symlinked component pointing outside, including one
+// swapped in concurrently) returns an error wrapping ErrPathEscape, and nothing is written. The
+// two fences are independent: a source escaping srcRoot is refused even when it happens to lie
+// inside dstRoot, and vice versa.
+//
+// Two roots exist for the one case where a read boundary and a write boundary legitimately
+// differ — a copy's source is a READ, so it may come from a configured read-only root (the
+// skills library) while the destination stays workspace-fenced. The write half is not widened
+// by any of this: dstRoot bounds the only thing this call creates, exactly as the one-root form
+// does.
 //
 // The destination is written with SafeWriteFile's guarantees: parent directories are created
 // inside the fence, the bytes are staged in the destination's own parent and renamed over it,
@@ -272,56 +281,91 @@ func SafeOpen(root, input string) (*os.File, error) {
 //
 // The content is streamed, so a copy costs no more memory than its buffer however large the
 // file is; there is no fsync, for the same reason SafeWriteFile has none.
-func SafeCopyFile(root, srcInput, dstInput string) error {
-	srcRel, err := rootRelative(srcInput, root)
+func SafeCopyFileFrom(srcRoot, srcInput, dstRoot, dstInput string) error {
+	srcRel, err := rootRelative(srcInput, srcRoot)
 	if err != nil {
 		return err
 	}
-	dstRel, err := rootRelative(dstInput, root)
+	dstRel, err := rootRelative(dstInput, dstRoot)
 	if err != nil {
 		return err
 	}
-	r, err := os.OpenRoot(root)
+	sr, err := os.OpenRoot(srcRoot)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrPathEscape, err)
 	}
-	defer r.Close()
-
-	src, err := r.Open(srcRel)
+	defer sr.Close()
+	dr, err := os.OpenRoot(dstRoot)
 	if err != nil {
-		return mapRootEscape(err)
+		return fmt.Errorf("%w: %v", ErrPathEscape, err)
 	}
-	defer src.Close()
+	defer dr.Close()
 
-	// The mode comes from the very descriptor the bytes are read through, so the copy cannot
-	// take its permissions from one file and its content from another.
-	info, err := src.Stat()
+	src, mode, err := openCopySource(sr, srcRel, srcInput)
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("not a regular file: %s", srcInput)
-	}
+	defer src.Close()
 
+	return stageCopy(dr, dstRel, src, mode)
+}
+
+// SafeCopyFile copies the regular file at srcInput to dstInput — both relative to root, or
+// absolute-inside-root — with the workspace fence enforced at COPY time. It is
+// SafeCopyFileFrom's EQUAL-ROOTS special case: the one root pins both ends, which is what every
+// caller whose source and destination are both workspace paths wants. Every guarantee documented
+// on SafeCopyFileFrom — staged-and-renamed destination, the source's mode, a non-regular source
+// refused, ErrPathEscape at either end with nothing written — holds here unchanged.
+func SafeCopyFile(root, srcInput, dstInput string) error {
+	return SafeCopyFileFrom(root, srcInput, root, dstInput)
+}
+
+// openCopySource opens the copy's source through the root pinned at the SOURCE's end and reports
+// the mode the destination must land with. The mode comes from the very descriptor the bytes are
+// read through, so the copy cannot take its permissions from one file and its content from
+// another. A non-regular source is refused here, before anything is staged at the destination;
+// input is the source as the caller wrote it, for that refusal's message.
+func openCopySource(sr *os.Root, rel, input string) (*os.File, os.FileMode, error) {
+	f, err := sr.Open(rel)
+	if err != nil {
+		return nil, 0, mapRootEscape(err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, 0, err
+	}
+	if !info.Mode().IsRegular() {
+		f.Close()
+		return nil, 0, fmt.Errorf("not a regular file: %s", input)
+	}
+	return f, info.Mode().Perm(), nil
+}
+
+// stageCopy lands src's bytes at dstRel through the root pinned at the DESTINATION's end, with
+// SafeWriteFile's staging discipline: parents created inside the fence, the bytes staged in the
+// destination's own parent, the rename last, and the staging file removed on any failure after
+// it is created.
+func stageCopy(dr *os.Root, dstRel string, src io.Reader, mode os.FileMode) error {
 	dir := filepath.Dir(dstRel)
 	if dir != "." {
 		// Same reasoning as SafeWriteFile's parent creation: an ESCAPE here is fatal, any other
 		// error defers to the staging open, which os.Root refuses if resolution would leave the
 		// root.
-		if err := r.MkdirAll(dir, 0o755); err != nil && isRootEscapeError(err) {
+		if err := dr.MkdirAll(dir, 0o755); err != nil && isRootEscapeError(err) {
 			return mapRootEscape(err)
 		}
 	}
-	staged, dst, err := createStagingFile(r, dir, info.Mode().Perm())
+	staged, dst, err := createStagingFile(dr, dir, mode)
 	if err != nil {
 		return mapRootEscape(err)
 	}
-	if err := copyAndClose(dst, src, info.Mode().Perm()); err != nil {
-		_ = r.Remove(staged)
+	if err := copyAndClose(dst, src, mode); err != nil {
+		_ = dr.Remove(staged)
 		return err
 	}
-	if err := r.Rename(staged, dstRel); err != nil {
-		_ = r.Remove(staged)
+	if err := dr.Rename(staged, dstRel); err != nil {
+		_ = dr.Remove(staged)
 		return mapRootEscape(err)
 	}
 	return nil

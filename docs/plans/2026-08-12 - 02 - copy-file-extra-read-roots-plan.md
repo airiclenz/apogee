@@ -60,7 +60,11 @@ Every item: add a line under `[Unreleased]` in `CHANGELOG.md` describing the cha
 run the build sanity check before reporting. Any authorized deviation from item text must
 land as a dated NOTES line under the item.
 
-## 1. Two-root copy primitive in internal/security
+## 1. Two-root copy primitive in internal/security — ✅ DONE (2026-08-12)
+
+NOTES (2026-08-12): beyond the item's named doc comment, the `internal/security/doc.go` package
+map was updated too — its safeio.go line listed the primitives and claimed each pins "the
+workspace root", which the two-root form falsifies.
 
 **What:** In `internal/security/safeio.go`, add `SafeCopyFileFrom(srcRoot, srcInput,
 dstRoot, dstInput string) error`: the source is resolved (`rootRelative`), opened and

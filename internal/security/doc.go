@@ -63,10 +63,13 @@
 // pathsafety.go is the CHECK — ResolveInRoot (symlink-aware, traversal-rejecting, validating a
 // not-yet-existing write target against its nearest existing ancestor), ErrPathEscape, and the
 // EvalRealPath / WorkspaceRelative helpers every surface that prints a path goes through.
-// safeio.go is the USE — SafeReadFile, SafeWriteFile, SafeOpen, SafeCopyFile, SafeRename and
-// SafeRemove, each performed through an os.Root pinned at the workspace root so the validated
-// path IS the path touched (H1), with the same-directory staging file and rename that makes a
-// write atomic at the target name.
+// safeio.go is the USE — SafeReadFile, SafeWriteFile, SafeOpen, SafeCopyFile, SafeCopyFileFrom,
+// SafeRename and SafeRemove, each performed through an os.Root pinned at the root it is fenced
+// by so the validated path IS the path touched (H1), with the same-directory staging file and
+// rename that makes a write atomic at the target name. All but one pin every end at the SAME
+// (workspace) root; SafeCopyFileFrom is the exception that pins a root at each end, because a
+// copy's source is a read and may come from a read-only root the destination fence knows nothing
+// about — its write half is bounded by the destination root exactly as the others are.
 //
 // The network boundary, likewise in two layers. urlsafety.go is URLGuard, judged on the URL as
 // WRITTEN: scheme and host allow-deny with deny-first precedence, plus NormalizeURL and its

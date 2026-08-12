@@ -154,6 +154,18 @@ point is a **minor** bump, not a breaking change.
   is untouched: a prompt you got because of the mode you chose has nothing to fix, only a mode to
   be in, so it reads exactly as it always has.
 
+- **The copy primitive can now fence its two ends at two different roots.** `security.SafeCopyFileFrom`
+  reads its source through an `os.Root` pinned at the SOURCE's root and writes its destination through
+  an `os.Root` pinned at the DESTINATION's root, so a copy whose source is a read from somewhere the
+  destination fence knows nothing about — a configured read-only root, such as the skills library — is
+  expressible without loosening the write end: the destination root bounds the only thing the call
+  creates, and a path escaping its OWN root is refused with nothing written, however it happens to lie
+  relative to the other one. Every guarantee the one-root copy already made is kept — parents created
+  inside the fence, bytes staged in the destination's own parent and renamed over it, the destination
+  landing with the SOURCE's mode, a non-regular source refused. `SafeCopyFile` is now that function's
+  equal-roots case and behaves exactly as before, so no tool's fence moves with this entry:
+  `copy_file` still fences both of its ends at the workspace.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's

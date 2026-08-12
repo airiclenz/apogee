@@ -528,6 +528,207 @@ func TestSafeCopyFile_RefusesNonRegularSource(t *testing.T) {
 	assertNoStagingLeftovers(t, root)
 }
 
+// TestSafeCopyFileFrom_CopiesAcrossRootsWithSourceMode is the two-root positive control: a source
+// read through a root pinned at ITS OWN end — a directory the destination fence knows nothing
+// about, which is the read-only library case this form exists for — lands inside the destination
+// root by absolute source path, with the source's content and mode and its parents created on the
+// way.
+func TestSafeCopyFileFrom_CopiesAcrossRootsWithSourceMode(t *testing.T) {
+	t.Parallel()
+
+	srcRoot := t.TempDir()
+	dstRoot := t.TempDir()
+	src := filepath.Join(srcRoot, "methodology.md")
+	if err := os.WriteFile(src, []byte("# method\n"), 0o640); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Chmod(src, 0o640); err != nil {
+		t.Fatalf("setup chmod: %v", err)
+	}
+
+	if err := SafeCopyFileFrom(srcRoot, src, dstRoot, "docs/methodology.md"); err != nil {
+		t.Fatalf("SafeCopyFileFrom: %v", err)
+	}
+
+	dst := filepath.Join(dstRoot, "docs", "methodology.md")
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("destination missing: %v", err)
+	}
+	if string(got) != "# method\n" {
+		t.Errorf("destination content = %q, want the source's", got)
+	}
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("stat destination: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o640 {
+		t.Errorf("destination mode = %v, want the source's 0640", perm)
+	}
+	assertNoStagingLeftovers(t, dstRoot)
+}
+
+// TestSafeCopyFileFrom_RefusesSourceEscapingItsOwnRoot: widening the SOURCE to a second root
+// widens it to THAT root and no further. A traversal out of srcRoot and a component of srcRoot
+// symlinked outside it are both refused, and the refusal is total — the outside file does not
+// land in the destination root, not even as a staging file.
+func TestSafeCopyFileFrom_RefusesSourceEscapingItsOwnRoot(t *testing.T) {
+	t.Parallel()
+
+	outside := t.TempDir()
+	dstRoot := t.TempDir()
+	srcRoot := filepath.Join(outside, "library")
+	if err := os.Mkdir(srcRoot, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("classified"), 0o600); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	private := filepath.Join(outside, "private")
+	if err := os.Mkdir(private, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(private, "secret.txt"), []byte("classified"), 0o600); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(private, filepath.Join(srcRoot, "hop")); err != nil {
+		t.Fatalf("setup symlink: %v", err)
+	}
+
+	t.Run("traversal", func(t *testing.T) {
+		if err := SafeCopyFileFrom(srcRoot, "../secret.txt", dstRoot, "stolen.txt"); !errors.Is(err, ErrPathEscape) {
+			t.Errorf("escaping source error = %v, want ErrPathEscape", err)
+		}
+	})
+	t.Run("symlinked component", func(t *testing.T) {
+		if err := SafeCopyFileFrom(srcRoot, "hop/secret.txt", dstRoot, "stolen.txt"); !errors.Is(err, ErrPathEscape) {
+			t.Errorf("symlinked-component source error = %v, want ErrPathEscape", err)
+		}
+	})
+
+	if _, err := os.Stat(filepath.Join(dstRoot, "stolen.txt")); err == nil {
+		t.Error("a refused copy wrote a file from outside the source root into the destination")
+	}
+	assertNoStagingLeftovers(t, dstRoot)
+}
+
+// TestSafeCopyFileFrom_RefusesDestinationEscapingItsOwnRoot is the other end of the same proof:
+// the destination fence is unaffected by where the source came from. A traversal out of dstRoot
+// and a component of dstRoot symlinked outside it are both refused, with nothing written beyond
+// the destination root.
+func TestSafeCopyFileFrom_RefusesDestinationEscapingItsOwnRoot(t *testing.T) {
+	t.Parallel()
+
+	srcRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcRoot, "payload.txt"), []byte("payload"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	outside := t.TempDir()
+	dstRoot := filepath.Join(outside, "workspace")
+	if err := os.Mkdir(dstRoot, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	drop := filepath.Join(outside, "drop")
+	if err := os.Mkdir(drop, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(drop, filepath.Join(dstRoot, "out")); err != nil {
+		t.Fatalf("setup symlink: %v", err)
+	}
+
+	t.Run("traversal", func(t *testing.T) {
+		if err := SafeCopyFileFrom(srcRoot, "payload.txt", dstRoot, "../leaked.txt"); !errors.Is(err, ErrPathEscape) {
+			t.Errorf("escaping destination error = %v, want ErrPathEscape", err)
+		}
+	})
+	t.Run("symlinked component", func(t *testing.T) {
+		if err := SafeCopyFileFrom(srcRoot, "payload.txt", dstRoot, "out/leaked.txt"); !errors.Is(err, ErrPathEscape) {
+			t.Errorf("symlinked-component destination error = %v, want ErrPathEscape", err)
+		}
+	})
+
+	if _, err := os.Stat(filepath.Join(outside, "leaked.txt")); err == nil {
+		t.Error("a refused copy wrote outside the destination root")
+	}
+	if _, err := os.Stat(filepath.Join(drop, "leaked.txt")); err == nil {
+		t.Error("a refused copy wrote through a symlinked component out of the destination root")
+	}
+	assertNoStagingLeftovers(t, outside)
+}
+
+// TestSafeCopyFileFrom_RefusesNonRegularSource: the two-root form copies FILES too — a directory
+// under the source root is refused before anything is staged under the destination root.
+func TestSafeCopyFileFrom_RefusesNonRegularSource(t *testing.T) {
+	t.Parallel()
+
+	srcRoot := t.TempDir()
+	dstRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(srcRoot, "bundle"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	err := SafeCopyFileFrom(srcRoot, "bundle", dstRoot, "copy")
+	if err == nil {
+		t.Fatal("copying a directory must fail")
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Errorf("error = %v, want it to name the non-regular source", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dstRoot, "copy")); statErr == nil {
+		t.Error("a refused copy created the destination anyway")
+	}
+	assertNoStagingLeftovers(t, dstRoot)
+}
+
+// TestSafeCopyFile_DelegatesWithEqualRoots pins the delegation: the one-root call is the two-root
+// call with both ends at the same root, so the same copy expressed either way produces the same
+// content and the same mode, and an escape is refused identically by both spellings.
+func TestSafeCopyFile_DelegatesWithEqualRoots(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	src := filepath.Join(root, "a.txt")
+	if err := os.WriteFile(src, []byte("payload"), 0o600); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Chmod(src, 0o600); err != nil {
+		t.Fatalf("setup chmod: %v", err)
+	}
+
+	if err := SafeCopyFile(root, "a.txt", "one/b.txt"); err != nil {
+		t.Fatalf("SafeCopyFile: %v", err)
+	}
+	if err := SafeCopyFileFrom(root, "a.txt", root, "two/b.txt"); err != nil {
+		t.Fatalf("SafeCopyFileFrom: %v", err)
+	}
+
+	viaOneRoot, err := os.Stat(filepath.Join(root, "one", "b.txt"))
+	if err != nil {
+		t.Fatalf("one-root destination missing: %v", err)
+	}
+	viaTwoRoots, err := os.Stat(filepath.Join(root, "two", "b.txt"))
+	if err != nil {
+		t.Fatalf("two-root destination missing: %v", err)
+	}
+	if viaOneRoot.Mode().Perm() != viaTwoRoots.Mode().Perm() {
+		t.Errorf("modes differ: one-root %v, two-root %v", viaOneRoot.Mode().Perm(), viaTwoRoots.Mode().Perm())
+	}
+	if viaOneRoot.Mode().Perm() != 0o600 {
+		t.Errorf("destination mode = %v, want the source's 0600", viaOneRoot.Mode().Perm())
+	}
+	got, err := os.ReadFile(filepath.Join(root, "two", "b.txt"))
+	if err != nil || string(got) != "payload" {
+		t.Fatalf("two-root destination = (%q, %v), want the source's payload", got, err)
+	}
+
+	oneRootErr := SafeCopyFile(root, "../nothing.txt", "pulled.txt")
+	twoRootErr := SafeCopyFileFrom(root, "../nothing.txt", root, "pulled.txt")
+	if !errors.Is(oneRootErr, ErrPathEscape) || !errors.Is(twoRootErr, ErrPathEscape) {
+		t.Errorf("escape errors = (%v, %v), want both ErrPathEscape", oneRootErr, twoRootErr)
+	}
+	assertNoStagingLeftovers(t, root)
+}
+
 // TestSafeRename_MovesWithinRootAndRefusesEscapes: the rename primitive fences BOTH names — the
 // half a one-path fence would miss is renaming an in-workspace file out of the workspace — and
 // creates the destination's parents the way SafeWriteFile creates its target's.
