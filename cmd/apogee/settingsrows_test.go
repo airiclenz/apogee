@@ -8,6 +8,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -46,7 +47,12 @@ func fabricatedSettings() config.Options {
 		ValidatedSetsEnable: true,
 		ValidatedSetsAlias:  map[string]string{"gpt-oss-20b": "gpt-oss"},
 		Profile:             apogee.ModelProfile{},
-		Overrides:           map[string]config.Source{"mode": config.SourceFlag, "server": config.SourceEnv},
+		ModelProfiles: []profiles.Entry{
+			{Pattern: "minimax-m3", Profile: apogee.ModelProfile{
+				Thinking: apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<mm:think>", End: "</mm:think>"},
+			}},
+		},
+		Overrides: map[string]config.Source{"mode": config.SourceFlag, "server": config.SourceEnv},
 	}
 }
 
@@ -209,7 +215,7 @@ func TestSettingsRowsCarryTheirSection(t *testing.T) {
 		"cursor-shape":        "Interface",
 		"editor":              "Interface",
 		"validated-sets":      "Mechanisms",
-		"model-profile":       "Model profile",
+		"model-profiles":      "Model profiles",
 	} {
 		if got := byPath[path].Section; got != want {
 			t.Errorf("row %q is in section %q; want %q", path, got, want)
@@ -255,7 +261,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"bypass":               "true",
 		"mechanisms":           "2 mechanisms", // the explicit `false` entry is not an enabled one
 		"validated-sets":       "on, 1 alias",
-		"model-profile":        "native",
+		"model-profiles":       "1 model profile",
 	}
 	for path, wantValue := range want {
 		if got := byPath[path].Value; got != wantValue {
@@ -342,7 +348,7 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 	}
 	// system-prompt-text is NOT among them since it became editable in its own multi-line field: the
 	// prose the file carries as a block is written in the pane now (tui.SettingText).
-	for _, path := range []string{"servers", "mcp-servers", "mechanisms", "system-prompt-models", "model-profile"} {
+	for _, path := range []string{"servers", "mcp-servers", "mechanisms", "system-prompt-models", "model-profiles"} {
 		if got := byPath[path].EditPointer; got != pointerExternalEdit {
 			t.Errorf("row %q pointer = %q; want %q", path, got, pointerExternalEdit)
 		}
@@ -427,15 +433,17 @@ func TestSettingsRowsSummarizeStructuredBlocks(t *testing.T) {
 			want: "off",
 		},
 		{
-			name: "a configured profile names its format and thinking style",
+			// The count and nothing else: which pattern applies depends on the model that is bound
+			// (ADR 0044), which no row of a config surface knows.
+			name: "the profile map is counted, whatever shape its entries give a model",
 			mut: func(o *config.Options) {
-				o.Profile = apogee.ModelProfile{
-					ToolCallFormat: apogee.FormatMarkdownFenced,
-					Thinking:       apogee.ThinkingProfile{Style: apogee.ThinkingHarmony},
-				}
+				o.ModelProfiles = append(o.ModelProfiles, profiles.Entry{
+					Pattern: "gemma",
+					Profile: apogee.ModelProfile{ToolCallFormat: apogee.FormatMarkdownFenced},
+				})
 			},
-			path: "model-profile",
-			want: string(apogee.FormatMarkdownFenced) + ", thinking " + string(apogee.ThinkingHarmony),
+			path: "model-profiles",
+			want: "2 model profiles",
 		},
 		{
 			name: "context files off resolves to an empty list, not to none",

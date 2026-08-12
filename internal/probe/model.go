@@ -159,7 +159,7 @@ func (m Model) Report() string {
 	lines = append(lines,
 		"",
 		"suggested model profile — paste into ~/.apogee/config.yaml (nothing is written for you):",
-		ProfileYAML(m.Profile))
+		ProfileYAML(m.Model, m.Profile))
 
 	report := strings.Join(lines, "\n")
 	if record := m.recordSection(); record != "" {

@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -77,7 +76,7 @@ var settingSections = []settingSection{
 	{Name: "Presentation", Opens: "present.auto-open"},
 	{Name: "Interface", Opens: "ui.spinner"},
 	{Name: "Mechanisms", Opens: "bypass"},
-	{Name: "Model profile", Opens: "model-profile"},
+	{Name: "Model profiles", Opens: "model-profiles"},
 }
 
 // settingValues formats each key's EFFECTIVE value — what this run actually resolved, spelled the
@@ -137,7 +136,7 @@ var settingValues = map[string]func(config.Options) string{
 	"bypass":         func(o config.Options) string { return boolValue(o.Bypass) },
 	"mechanisms":     func(o config.Options) string { return countSummary(enabledCount(o.Mechanisms), "mechanism") },
 	"validated-sets": func(o config.Options) string { return validatedSetsSummary(o) },
-	"model-profile":  func(o config.Options) string { return profileSummary(o.Profile) },
+	"model-profiles": func(o config.Options) string { return countSummary(len(o.ModelProfiles), "model profile") },
 }
 
 // settingTexts is the RAW value of the keys whose displayed value is only a summary of it — the
@@ -340,17 +339,8 @@ func validatedSetsSummary(o config.Options) string {
 	return "on"
 }
 
-// profileSummary summarizes the `model-profile:` block by the two facts it configures: how the
-// model emits tool calls, and whether it has an inline thinking channel to strip. An unset format
-// is native tool calls (the domain treats "" that way), so the row names native rather than
-// leaving the more interesting half of the block looking unconfigured.
-func profileSummary(profile apogee.ModelProfile) string {
-	format := string(profile.ToolCallFormat)
-	if format == "" {
-		format = string(apogee.FormatNative)
-	}
-	if style := string(profile.Thinking.Style); style != "" {
-		return format + ", thinking " + style
-	}
-	return format
-}
+// The `model-profiles:` map is summarized by its COUNT (countSummary above), like every other block
+// of entries the pane cannot hold on a row. What it does not say — which model each pattern matches,
+// and what shape it gives it — is deliberate: a profile is per-model now (ADR 0044), so no single
+// line can name the one in force without knowing which model is bound, and the row's job is to say
+// how many the file carries and open the file on that key.

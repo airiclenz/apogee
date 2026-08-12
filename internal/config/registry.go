@@ -136,7 +136,7 @@ var (
 // KeyRegistry is the table: one row per leaf key of fileConfig, plus one row per structured
 // block, in the order the seeded template (internal/config/defaults/config.yaml) presents them —
 // so a surface that renders the registry top to bottom reads like the file the user edits.
-// model-profile is the one key the template does not document, so it sits last.
+// model-profiles is the one key the template does not document, so it sits last.
 var KeyRegistry = []Key{
 	{
 		Path: "servers", Kind: KindStructured,
@@ -329,8 +329,8 @@ var KeyRegistry = []Key{
 		Desc: "The per-model Validated-set surface: its off-switch and explicit model aliases.",
 	},
 	{
-		Path: "model-profile", Kind: KindStructured,
-		Desc: "How the configured model speaks the wire: tool-call format and thinking-channel style.",
+		Path: "model-profiles", Kind: KindStructured,
+		Desc: "How a model speaks the wire — tool-call format and thinking style — per name pattern.",
 	},
 }
 

@@ -342,7 +342,7 @@ edit lands the same way, because what applies it is the file being **saved**, no
 exiting. Every key that changed is applied the way an in-pane edit is — a changed `mcp-servers:`
 **reconnects**, connecting the new set first and swapping the tools over only once it is up, so a
 server that will not come back leaves the old connections serving and the reason on the row; a
-changed `model-profile:` swaps the parser. The jump is offered between runs only — mid-run the
+changed `model-profiles:` swaps the parser. The jump is offered between runs only — mid-run the
 row asks you to wait, while in-pane edits stay open. The confinement keys are the one pair that
 goes nowhere near it: they carry `· use /confine`, because switching Auto's fence off asks for an
 acknowledgement that belongs with [that verb](#auto-modes-blast-radius). And the `server:` row

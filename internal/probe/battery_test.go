@@ -274,7 +274,13 @@ func TestBatteryObservesInlineThinking(t *testing.T) {
 	if profile.Thinking.Start != "<think>" || profile.Thinking.End != "</think>" {
 		t.Errorf("thinking delimiters = %q/%q; want the tokens actually seen", profile.Thinking.Start, profile.Thinking.End)
 	}
-	if yaml := ProfileYAML(profile); !strings.Contains(yaml, `start: "<think>"`) {
+	yaml := ProfileYAML("gemma-4-e4b-it", profile)
+	if !strings.Contains(yaml, `start: "<think>"`) {
 		t.Errorf("paste-ready YAML must quote the delimiter so YAML cannot re-read it:\n%s", yaml)
+	}
+	// The block is an ENTRY of the per-model map (ADR 0044), keyed by the model that was probed:
+	// pasting the retired global block would fail the next launch outright.
+	if !strings.Contains(yaml, "model-profiles:") || !strings.Contains(yaml, `"gemma-4-e4b-it":`) {
+		t.Errorf("the suggestion must paste as a model-profiles: entry keyed by the probed model:\n%s", yaml)
 	}
 }

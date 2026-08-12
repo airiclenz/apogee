@@ -3483,69 +3483,6 @@ func TestApplySettingMCPReconnectKeepsEverythingWhenTheEngineIsBusy(t *testing.T
 	}
 }
 
-// `model-profile` is the dialect the session reads replies in, and it has its own engine door: the
-// block is re-read and RESOLVED here — the on-disk schema is the composition root's business (ADR
-// 0031: the engine is handed values, never config text) — and handed over as a value.
-func TestApplySettingModelProfileSwapsTheDialect(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	writeSettingsFixture(t, path, "model-profile:\n"+
-		"  tool-call-format: markdown-fenced\n"+
-		"  thinking:\n"+
-		"    style: delimited\n"+
-		"    start: \"<think>\"\n"+
-		"    end: \"</think>\"\n")
-	spy := &applySettingSpy{}
-	apply := applySettingFor(settingsApplier{engine: spy, configPath: path})
-
-	if _, err := apply("model-profile", "markdown-fenced"); err != nil {
-		t.Fatalf("apply model-profile: %v", err)
-	}
-	want := apogee.ModelProfile{
-		ToolCallFormat: apogee.FormatMarkdownFenced,
-		Thinking: apogee.ThinkingProfile{
-			Style: apogee.ThinkingDelimited, Start: "<think>", End: "</think>",
-		},
-	}
-	if len(spy.profiles) != 1 || spy.profiles[0] != want {
-		t.Fatalf("SetProfile = %+v, want one call with %+v", spy.profiles, want)
-	}
-
-	// A block the human DELETED resolves to the zero profile — native tool calls, no inline thinking
-	// channel — which is what a launch from that same file would have resolved, not whatever dialect
-	// the process happens to be running.
-	writeSettingsFixture(t, path, "auto-title: true\n")
-	if _, err := apply("model-profile", "native"); err != nil {
-		t.Fatalf("apply model-profile with the block gone: %v", err)
-	}
-	if len(spy.profiles) != 2 || spy.profiles[1] != (apogee.ModelProfile{}) {
-		t.Errorf("SetProfile = %+v, want the second call to carry the zero profile", spy.profiles)
-	}
-}
-
-// A profile the engine will not take — a run in flight, or a dialect this build cannot parse — is
-// REPORTED over a value the file already carries (binding A). The session keeps reading replies the
-// way it was, which is the engine's own validate-then-commit; here the assertion is that the refusal
-// reaches the row rather than being swallowed by a dispatcher that already wrote the file.
-func TestApplySettingModelProfileRefusalIsReported(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	writeSettingsFixture(t, path, "model-profile:\n  tool-call-format: nonsense\n")
-	spy := &applySettingSpy{profileErr: errors.New("unknown tool-call format \"nonsense\"")}
-	apply := applySettingFor(settingsApplier{engine: spy, configPath: path})
-
-	_, err := apply("model-profile", "nonsense")
-	if err == nil {
-		t.Fatal("apply model-profile: want the engine's refusal, got none")
-	}
-	if !strings.Contains(err.Error(), "nonsense") {
-		t.Errorf("error = %q, want it to name what the engine refused", err)
-	}
-	if len(spy.profiles) != 0 {
-		t.Errorf("a refused profile was recorded as applied: %+v", spy.profiles)
-	}
-}
-
 // `use-project-skills` moves WHICH dirs are skill sources, so the apply re-points the shared Provider
 // and re-scans: the flag is not something a catalogue already loaded can answer. One Provider feeds
 // the loop and the "/" menu (ADR 0032), so both see the same set the moment the edit lands.

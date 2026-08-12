@@ -159,7 +159,26 @@ a doc.go stating the match rule and the no-confidence-gate call (ADR 0044).
 
 Commit: `feat(profiles): pattern-matched model-profile resolution with a shipped shape table`
 
-## 4. Config: `model-profiles:` pattern map; retire `model-profile:`
+## 4. Config: `model-profiles:` pattern map; retire `model-profile:` — ✅ DONE (2026-08-12)
+
+NOTES (2026-08-12): the item is scoped "In `internal/config`", but the registry-row rename forces
+edits outside it; five calls recorded. (a) cmd/apogee's three registry-PINNED tables follow the
+rename mechanically (`settingSections`, `settingValues`, `settingStructures`) — their coverage tests
+fail otherwise and `make check` cannot pass. The row now shows the entry COUNT ("2 model profiles")
+like every other block of entries, since no single line can name the profile in force without
+knowing which model is bound; `profileSummary` went with its only call site. (b) The dead
+global-profile plumbing is LEFT standing for item 6, which owns deleting it: `Layer.Profile`,
+`Settings.Profile`, `Options.Profile`, the applier's `case "model-profile"` and `reloadProfile` all
+survive, now fed by nothing. Consequence until item 6 lands: a pane edit of `model-profiles:` reports
+cannot-apply (pinned by `TestApplySettingRefusesEveryKeyItCannotReach`), and the two wire_test.go
+tests of the old door (`TestApplySettingModelProfileSwapsTheDialect`,
+`…RefusalIsReported`) were DELETED — their fixtures spell the retired key, which now hard-errors at
+load, and the door they cover is item 6's to re-home. (c) `internal/probe.ProfileYAML` gained the
+probed model name and emits a `model-profiles:` entry keyed by it: no item owns the probe, but
+leaving it would have `apogee probe model` printing a paste-ready block that hard-errors at the next
+launch. (d) One README line and one `internal/tui` doc comment were respelled to the new key (the
+`internal/agent` comments stay with item 5). (e) The retired-key refusal lives in configmigrate.go
+beside the `llama-launcher:` one — same posture, same refuse-before-any-write ordering.
 
 **What:** In `internal/config`: add `ModelProfiles map[string]modelProfileConfig
 `yaml:"model-profiles"`` (key = pattern; reuse the existing block schema at

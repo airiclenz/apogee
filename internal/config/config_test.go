@@ -12,6 +12,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -201,6 +202,17 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			env:  Layer{Profile: &domain.ModelProfile{ToolCallFormat: domain.FormatCustomRegex}},
 			flag: Layer{Profile: &domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}},
 			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+		},
+		{
+			name: "the model-profiles map is file-only, and a nearer layer replaces it whole",
+			file: Layer{ModelProfiles: []profiles.Entry{
+				{Pattern: "gemma", Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"}}},
+			}},
+			env:  Layer{ModelProfiles: []profiles.Entry{{Pattern: "fromenv"}}},
+			flag: Layer{ModelProfiles: []profiles.Entry{{Pattern: "fromflag"}}},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, ModelProfiles: []profiles.Entry{
+				{Pattern: "gemma", Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"}}},
+			}},
 		},
 		{
 			name: "mechanisms are file-only (default empty)",
@@ -2395,19 +2407,24 @@ func TestApplyConfigNoValidatedSetsDefaultsOn(t *testing.T) {
 	}
 }
 
-// The model-profile config block reaches opts.profile — which runRoot folds directly into
-// domain.Config.Profile: a markdown-fenced tool-call format plus a <think> thinking block map
-// across to the domain ModelProfile the loop translates to its parsers at the seam (item 1 has
-// no loop consumer yet; this proves the config surface lands end-to-end).
-func TestApplyConfigModelProfile(t *testing.T) {
+// The `model-profiles:` map reaches opts.modelProfiles as entries the composition root matches a
+// model name against (ADR 0044): each pattern keeps the whole block it was given — both axes — and
+// the entries come back ordered by pattern, whatever order the map decoded in.
+func TestApplyConfigModelProfiles(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
-	const configYAML = `model-profile:
-  tool-call-format: markdown-fenced
-  thinking:
-    style: delimited
-    start: "<think>"
-    end: "</think>"
+	const configYAML = `model-profiles:
+  minimax-m3:
+    thinking:
+      style: delimited
+      start: "<mm:think>"
+      end: "</mm:think>"
+  gemma:
+    tool-call-format: markdown-fenced
+    thinking:
+      style: delimited
+      start: "<think>"
+      end: "</think>"
 `
 	writeConfigHome(t, home, configYAML)
 	opts := Options{ConfigDir: home}
@@ -2415,25 +2432,36 @@ func TestApplyConfigModelProfile(t *testing.T) {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
 
-	want := domain.ModelProfile{
-		ToolCallFormat: domain.FormatMarkdownFenced,
-		Thinking:       domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
+	want := []profiles.Entry{
+		{
+			Pattern: "gemma",
+			Profile: domain.ModelProfile{
+				ToolCallFormat: domain.FormatMarkdownFenced,
+				Thinking:       domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
+			},
+		},
+		{
+			Pattern: "minimax-m3",
+			Profile: domain.ModelProfile{
+				Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<mm:think>", End: "</mm:think>"},
+			},
+		},
 	}
-	if !reflect.DeepEqual(opts.Profile, want) {
-		t.Errorf("opts.profile = %+v; want %+v", opts.Profile, want)
+	if !reflect.DeepEqual(opts.ModelProfiles, want) {
+		t.Errorf("opts.modelProfiles = %+v; want %+v", opts.ModelProfiles, want)
 	}
 }
 
-// With no model-profile block, opts.profile is the zero ModelProfile — native tool calls with no
-// inline thinking (today's behaviour), the byte-identical anchor this item must preserve.
-func TestApplyConfigNoProfileIsZero(t *testing.T) {
+// With no `model-profiles:` map, opts.modelProfiles is empty — the user configures no shape, so the
+// composition root resolves against the shipped table alone and, failing that, the zero profile.
+func TestApplyConfigNoProfilesIsEmpty(t *testing.T) {
 	t.Parallel()
 	opts := Options{ConfigDir: testConfigHome(t, "")} // nothing but a startup server
 	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
-	if (opts.Profile != domain.ModelProfile{}) {
-		t.Errorf("opts.profile = %+v; want the zero ModelProfile", opts.Profile)
+	if len(opts.ModelProfiles) != 0 {
+		t.Errorf("opts.modelProfiles = %+v; want no entries", opts.ModelProfiles)
 	}
 }
 

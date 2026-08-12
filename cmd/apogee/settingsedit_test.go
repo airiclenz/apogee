@@ -248,16 +248,16 @@ func TestExternalEditReloadReportsAnMCPServerRepointedUnderTheSameSummary(t *tes
 	}
 }
 
-// The same blind spot on the other proved key: a model profile keeps its format and its thinking
-// STYLE — so its row keeps reading "markdown-fenced, thinking delimited" — while the delimiters the
-// stripper actually matches on are replaced. Nothing about the summary can say so.
+// The same blind spot on the other proved key: the one entry of a `model-profiles:` map keeps its
+// pattern — so its row keeps reading "1 model profile" — while the delimiters the stripper actually
+// matches on are replaced. Nothing about the summary can say so.
 func TestExternalEditReloadReportsThinkingDelimitersUnderTheSameSummary(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
 	profile := func(start, end string) string {
-		return "model-profile:\n  tool-call-format: markdown-fenced\n  thinking:\n    style: delimited\n" +
-			"    start: \"" + start + "\"\n    end: \"" + end + "\"\n"
+		return "model-profiles:\n  minimax-m3:\n    tool-call-format: markdown-fenced\n    thinking:\n" +
+			"      style: delimited\n      start: \"" + start + "\"\n      end: \"" + end + "\"\n"
 	}
 	writeSettingsFixture(t, path, profile("<think>", "</think>"))
 	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
@@ -267,10 +267,10 @@ func TestExternalEditReloadReportsThinkingDelimitersUnderTheSameSummary(t *testi
 	if err != nil {
 		t.Fatalf("changed: %v", err)
 	}
-	if len(applied) != 1 || applied[0].Path != "model-profile" {
-		t.Fatalf("reload = %+v, want the re-delimited model-profile block", applied)
+	if len(applied) != 1 || applied[0].Path != "model-profiles" {
+		t.Fatalf("reload = %+v, want the re-delimited model-profiles entry", applied)
 	}
-	if want := "markdown-fenced, thinking delimited"; applied[0].Value != want {
+	if want := "1 model profile"; applied[0].Value != want {
 		t.Errorf("value = %q, want the row's own summary %q", applied[0].Value, want)
 	}
 }

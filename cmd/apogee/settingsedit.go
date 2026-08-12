@@ -3,7 +3,7 @@ package main
 // The `$EDITOR` round trip: the composition root's half of ADR 0037 decision 5.
 //
 // Six keys of the schema hold a structure no row can express — `servers:`, `system-prompt-models:`,
-// `mcp-servers:`, `mechanisms:`, `validated-sets:` and `model-profile:`. The settings pane edits them
+// `mcp-servers:`, `mechanisms:`, `validated-sets:` and `model-profiles:`. The settings pane edits them
 // by handing the human the file itself, opened in their own editor on that key's line, and re-reading
 // it when they come back. Both halves are the binary's, for the reason every other settings seam is
 // (ADR 0011's thin renderer): where the config lives, which line a key sits on, which editor this
@@ -251,9 +251,9 @@ func (e *externalEdit) refresh() {
 // settingStructures is the LOSSLESS projection of the keys whose row shows only a SUMMARY of what
 // they hold. It is what the reload diff compares them by, because two different structures summarize
 // alike: repoint the one `mcp-servers:` entry at another machine and the row still reads "1 server";
-// change a model profile's thinking delimiters and it still reads "harmony, thinking delimited". A
-// diff over summaries reports neither, so neither applies, and the edit sits in the file waiting for
-// a relaunch — the deferral ADR 0037 exists to abolish.
+// change a model profile's thinking delimiters and it still reads "1 model profile". A diff over
+// summaries reports neither, so neither applies, and the edit sits in the file waiting for a
+// relaunch — the deferral ADR 0037 exists to abolish.
 //
 // It is keyed by registry path and covers every structured key, `unconfined-hosts` included even
 // though the diff never reaches it (binding G skips the confinement pair before comparing): the table
@@ -272,7 +272,7 @@ var settingStructures = map[string]func(config.Options) any{
 	// The block's two resolved facts together: the off-switch decides whether the aliases do
 	// anything, and it is the pair that `validated-sets` applies.
 	"validated-sets": func(o config.Options) any { return []any{o.ValidatedSetsEnable, o.ValidatedSetsAlias} },
-	"model-profile":  func(o config.Options) any { return o.Profile },
+	"model-profiles": func(o config.Options) any { return o.ModelProfiles },
 }
 
 // settingChanged reports whether the key at registry index i came back holding something else.

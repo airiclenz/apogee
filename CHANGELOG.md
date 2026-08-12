@@ -52,6 +52,17 @@ point is a **minor** bump, not a breaking change.
   shows (`path:12–80 · locate "…"`) — and the located lines ride the tool summary as data rather than
   as a sentence a host has to parse back out.
 
+- **The model profile is configured per model now: `model-profiles:` replaces `model-profile:`.** The
+  block that said how a model speaks the wire — its tool-call format and its inline thinking channel —
+  was one GLOBAL setting, so a machine that runs several models had to be re-edited on every switch. It
+  is a map now, keyed by a **pattern the model name contains** (a case-insensitive substring), and the
+  block under each key is exactly what the old one was: `model-profiles: {"minimax-m3": {thinking:
+  {style: delimited, start: "<mm:think>", end: "</mm:think>"}}}`. A matching entry supplies the WHOLE
+  profile, both axes, and the longest matching pattern wins. The retired global key is a **loud startup
+  error** rather than a silently unread one (no back-compat layer, pre-production): the message names
+  the line, echoes your own block back nested under a pattern placeholder, and says what to paste.
+  `apogee probe model` suggests its findings in the new spelling too, keyed by the model it probed.
+
 ### Removed
 
 - **`open_file` is gone, merged into `read_file`.** It was the read-and-locate twin of a tool that

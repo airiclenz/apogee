@@ -509,3 +509,114 @@ func TestApplyConfigMigratesTheRetiredKeys(t *testing.T) {
 			second.Endpoint, second.StartupServer, opts.Endpoint, opts.StartupServer)
 	}
 }
+
+// The other retirement that is a refusal rather than a fold: the global `model-profile:` block of
+// ADR 0044. The user's own block comes back nested under a pattern placeholder, so the fix is a
+// paste plus the one thing only they know — which models it was written for — and a bare key, which
+// configured nothing, is told to delete and nothing more.
+func TestMigrateLegacyConfigRefusesTheRetiredProfileKey(t *testing.T) {
+	t.Parallel()
+	// Five lines of new-schema config, so the retired key always lands on line 6.
+	const entries = "servers:\n  - name: box\n    endpoint: http://box:1111\n\nserver: box\n"
+	const block = "model-profile:\n  tool-call-format: markdown-fenced\n  thinking:\n    style: delimited\n" +
+		"    start: \"<mm:think>\"\n    end: \"</mm:think>\"\n"
+	tests := []struct {
+		name     string
+		given    string
+		want     []string
+		unwanted []string
+	}{
+		{
+			name:  "the user's own block comes back under a pattern",
+			given: entries + block,
+			want: []string{"line 6", "model-profiles:", "\"<pattern>\":", "tool-call-format: markdown-fenced",
+				"start: \"<mm:think>\""},
+		},
+		{
+			name:     "a bare key configured nothing, so the fix is the deletion alone",
+			given:    entries + "model-profile:\n",
+			want:     []string{"line 6", "model-profiles:", "Delete that line"},
+			unwanted: []string{"Delete that block"},
+		},
+		{
+			name:     "the refusal beats the quadruple fold",
+			given:    "endpoint: http://box:1111\n" + block,
+			want:     []string{"line 2", "model-profiles:"},
+			unwanted: []string{"host-alias:"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeMigrationConfig(t, tt.given)
+			updated, note, err := migrateLegacyConfig(path, []byte(tt.given), migrationClock)
+			if err == nil {
+				t.Fatalf("a config still setting the retired profile key was migrated to:\n%s", updated)
+			}
+			if note != "" {
+				t.Errorf("a refused config announced itself: %s", note)
+			}
+			for _, want := range append([]string{path, "retired global model-profile:"}, tt.want...) {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal does not carry %q: %v", want, err)
+				}
+			}
+			for _, unwanted := range tt.unwanted {
+				if strings.Contains(err.Error(), unwanted) {
+					t.Errorf("the refusal carries %q, which it must not: %v", unwanted, err)
+				}
+			}
+			onDisk, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read the config: %v", err)
+			}
+			if string(onDisk) != tt.given {
+				t.Errorf("a refused config was rewritten:\n%s", onDisk)
+			}
+		})
+	}
+}
+
+// The profile refusal must not depend on the shape of the rest of the file either: a config the node
+// tree cannot be read from is read by the struct instead, which still tells a set key from an absent
+// one. Only the line number is lost, so the refusal names no line and still says what to paste.
+func TestMigrateLegacyConfigRefusesTheProfileKeyWithoutTheNodeTree(t *testing.T) {
+	t.Parallel()
+	given := "{model-profile: {tool-call-format: markdown-fenced}}\n"
+	path := writeMigrationConfig(t, given)
+	_, _, err := migrateLegacyConfig(path, []byte(given), migrationClock)
+	if err == nil {
+		t.Fatal("a flow-style config still setting the retired profile key was not refused")
+	}
+	for _, want := range []string{"retired global model-profile:", "model-profiles:", "tool-call-format: markdown-fenced"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not carry %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "line ") {
+		t.Errorf("the refusal names a line the struct fallback cannot know: %v", err)
+	}
+}
+
+// End to end: the retired global block stops STARTUP, with the map spelling in the message — the
+// loud error ADR 0044 chose over a back-compat layer.
+func TestApplyConfigRefusesTheRetiredProfileKey(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	given := "servers:\n  - name: box\n    endpoint: http://box:1111\n\nserver: box\n" +
+		"model-profile:\n  thinking:\n    style: harmony\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(given), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	opts := Options{ConfigDir: home}
+	err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, func(msg string) { t.Errorf("a refused config announced %q", msg) })
+	if err == nil {
+		t.Fatal("a config still setting the retired global model-profile: key started a session")
+	}
+	for _, want := range []string{"retired global model-profile:", "line 6", "model-profiles:", "style: harmony"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not carry %q: %v", want, err)
+		}
+	}
+}

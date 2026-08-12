@@ -32,11 +32,12 @@ import (
 // A file already in the new schema never reaches any of it. The sniff is the only trigger, so a
 // config apogee can read is one this file does not open.
 //
-// A second retired key rides along at the bottom of this file: the top-level `llama-launcher:` of
-// ADR 0029 decision 4, which moved onto the `servers:` entries. That one is REFUSED rather than
-// folded — nobody but the user knows which entry the launcher belonged to — and it is refused
-// FIRST, so a file carrying both retirements is never rewritten for one and then stopped for the
-// other.
+// Two more retired keys ride along at the bottom of this file: the top-level `llama-launcher:` of
+// ADR 0029 decision 4, which moved onto the `servers:` entries, and the global `model-profile:` of
+// ADR 0044, which became the per-model `model-profiles:` map. Both are REFUSED rather than folded —
+// nobody but the user knows which entry the launcher belonged to, or which models the profile was
+// written for — and both are refused FIRST, so a file carrying several retirements is never
+// rewritten for one and then stopped for another.
 
 // legacyKeys are the four retired top-level keys, each with the field of the sniff struct it is
 // parsed into. The fold needs BOTH halves — the key NAME to find the line to delete, the VALUE to
@@ -73,13 +74,16 @@ const backupStampLayout = "20060102-150405"
 // cannot be made safely, so NOTHING is written and the error carries the ready-to-paste replacement
 // (legacyRefusal) — the same answer this refused with before the rewrite existed.
 //
-// Ahead of all three sits the one retirement that is not a migration at all: the top-level
-// `llama-launcher:` key, refused before a single byte is read for the fold, so a config that
-// carries both retired shapes is stopped rather than half-rewritten.
+// Ahead of all three sit the retirements that are not migrations at all: the top-level
+// `llama-launcher:` and `model-profile:` keys, refused before a single byte is read for the fold,
+// so a config that carries more than one retired shape is stopped rather than half-rewritten.
 //
 // now dates the backup and is injected so a test can name the file it expects.
 func migrateLegacyConfig(path string, data []byte, now time.Time) ([]byte, string, error) {
 	if err := refuseRetiredLauncherKey(path, data); err != nil {
+		return nil, "", err
+	}
+	if err := refuseRetiredProfileKey(path, data); err != nil {
 		return nil, "", err
 	}
 	var lc legacyFileConfig
@@ -505,4 +509,125 @@ func launcherEntryBlock(value string) string {
 		return serversKey + ":\n" + strings.Repeat(" ", listIndent) + "- " + retiredLauncherKey + ": " + value + "\n"
 	}
 	return serversKey + ":\n" + strings.Join(item, "\n") + "\n"
+}
+
+// ----------------------------------------------------------------------------
+// The retired global `model-profile:` key
+// ----------------------------------------------------------------------------
+//
+// The Model profile used to be one global block: a top-level `model-profile:` key that fixed the
+// dialect for the whole session, whatever model was loaded. It is per-MODEL now (ADR 0044) —
+// `model-profiles:` maps a pattern the model name contains to the profile it applies — and apogee
+// ships the known shapes built in, so most configs need no entry at all.
+//
+// Like the launcher key one section up it is REFUSED rather than folded: only the user knows which
+// models their block was written for, and a fold would have to invent that pattern. Silence is the
+// one answer it must not get — fileConfig no longer has the field, so an unrefused key would simply
+// stop being read and the session would go back to leaking thinking tags with nothing pointing at
+// the block that was meant to strip them.
+
+// retiredProfileKey is that key, spelled as the retired schema spelled it — and as the map's
+// entries are spelled one level down, which is the whole of what changed.
+const retiredProfileKey = "model-profile"
+
+// profilesKey is the key that replaces it, spelled as fileConfig tags it.
+const profilesKey = "model-profiles"
+
+// legacyProfileConfig reads the retired key off a file that still sets it, for legacyLauncherConfig's
+// reason one section up: fileConfig no longer has the field, so a plain unmarshal cannot tell a
+// config that sets it from one that never did. The node keeps the block itself, which the refusal
+// echoes back as the entry to paste.
+type legacyProfileConfig struct {
+	ModelProfile yaml.Node `yaml:"model-profile"`
+}
+
+// refuseRetiredProfileKey stops a config that still carries the retired global key, with the line to
+// delete and the map spelling to paste in its place. A file that does not set it returns nil.
+//
+// It runs beside the launcher refusal, before the quadruple fold reads anything, so a file carrying
+// more than one retirement is refused with nothing written.
+func refuseRetiredProfileKey(path string, data []byte) error {
+	block, line, set := retiredProfileSetting(data)
+	if !set {
+		return nil
+	}
+	where := ""
+	if line > 0 {
+		where = fmt.Sprintf(" on line %d", line)
+	}
+	// A bare `model-profile:` configured nothing in the first place — there is no block to move, so
+	// pasting one back would hand the user a shape they never wrote.
+	if block == "" {
+		return fmt.Errorf("apogee: %s still sets the retired global %s: key%s — a profile belongs to a "+
+			"MODEL now, so it is keyed by a pattern the model name contains: %s: {\"<pattern>\": {...}}.\n\n"+
+			"Delete that line. With no block under it, it configured nothing.", path, retiredProfileKey, where,
+			profilesKey)
+	}
+	return fmt.Errorf("apogee: %s still sets the retired global %s: key%s — a profile belongs to a MODEL "+
+		"now, so it is keyed by a pattern the model name contains (a case-insensitive substring), and apogee "+
+		"ships the shapes it knows built in.\n\n"+
+		"Delete that block and put it back under a pattern that matches the model it was written for — or "+
+		"delete it outright, if the built-in table already covers that model:\n\n%s",
+		path, retiredProfileKey, where, profilesBlock(block))
+}
+
+// retiredProfileSetting reports whether the file sets the retired key, the block it gives it, and the
+// 1-based line the key sits on — retiredLauncherSetting's three answers, read the same two ways and
+// for the same reason: a key with no value at all is still set, and only the LINE is lost to the
+// struct fallback.
+func retiredProfileSetting(data []byte) (block string, line int, set bool) {
+	if doc, err := Document(data); err == nil {
+		if root, err := rootMapping(doc); err == nil && root != nil {
+			keyNode, valueNode := mappingEntry(root, retiredProfileKey)
+			if keyNode == nil {
+				return "", 0, false
+			}
+			return renderNode(valueNode), keyNode.Line, true
+		}
+	}
+	var lpc legacyProfileConfig
+	if err := yaml.Unmarshal(data, &lpc); err != nil {
+		return "", 0, false
+	}
+	if lpc.ModelProfile.IsZero() { // the zero node is the key the file never had
+		return "", 0, false
+	}
+	return renderNode(&lpc.ModelProfile), 0, true
+}
+
+// renderNode marshals one value node back to YAML, so the refusal can echo the user's OWN block
+// rather than a schema example they then have to translate. A node that will not marshal, and the
+// empty value of a bare key, both come back empty — the shape whose fix is the deletion alone.
+//
+// The indent is the file's own (listIndent) rather than the marshaller's default four, because this
+// text is written to be pasted back into a config the user hand-edits.
+func renderNode(n *yaml.Node) string {
+	if n == nil || isNullNode(n) {
+		return ""
+	}
+	var out strings.Builder
+	encoder := yaml.NewEncoder(&out)
+	encoder.SetIndent(listIndent)
+	if err := encoder.Encode(n); err != nil {
+		return ""
+	}
+	if err := encoder.Close(); err != nil {
+		return ""
+	}
+	return strings.TrimRight(out.String(), "\n")
+}
+
+// profilesBlock renders the fix as a whole `model-profiles:` entry carrying the block the retired key
+// had — a paste rather than a schema lookup. The pattern is a placeholder, because it is the one
+// thing in the entry that is not already in the file: only the user knows which models the block was
+// written for.
+func profilesBlock(block string) string {
+	indent := strings.Repeat(" ", listIndent)
+	lines := strings.Split(block, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = indent + indent + line
+		}
+	}
+	return profilesKey + ":\n" + indent + "\"<pattern>\":\n" + strings.Join(lines, "\n") + "\n"
 }

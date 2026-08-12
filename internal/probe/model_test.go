@@ -44,8 +44,9 @@ func TestModelReportStatesTheFindings(t *testing.T) {
 		"probe:1:tools+json+chain:lp-",
 		"medium — a dated behavioral claim",
 		"suggested model profile",
-		"  model-profile:",
-		"    tool-call-format: native",
+		"  model-profiles:",
+		"    \"fake-model\":",
+		"      tool-call-format: native",
 		// The dated claim, in the spelling the reader gets — see
 		// TestModelReportSpellsTheProbedAtTimeLocally for the zone itself.
 		m.ProbedAt.Local().Format(time.RFC3339),

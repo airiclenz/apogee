@@ -150,21 +150,32 @@ func SuggestProfile(b Battery) domain.ModelProfile {
 	return p
 }
 
-// ProfileYAML renders a suggested profile as the paste-ready `model-profile:` block, indented
-// to sit under the top level of ~/.apogee/config.yaml. The keys are the on-disk schema's
-// (cmd/apogee's modelProfileConfig), not the Go field names, because the whole value of this
-// output is that it can be pasted without translation.
-func ProfileYAML(p domain.ModelProfile) string {
+// ProfileYAML renders a suggested profile as the paste-ready `model-profiles:` entry, indented to
+// sit under the top level of ~/.apogee/config.yaml. The keys are the on-disk schema's (internal
+// config's modelProfileConfig), not the Go field names, because the whole value of this output is
+// that it can be pasted without translation.
+//
+// The entry is keyed by the model that was PROBED, since a profile is per-model (ADR 0044) and the
+// key is matched as a case-insensitive substring of the model name — so the advertised name is the
+// narrowest pattern that certainly matches, and widening it to a family is the user's edit to make.
+// A probe with no model name falls back to a placeholder: the block is still worth pasting, and the
+// one thing it cannot supply is the name nothing told it.
+func ProfileYAML(model string, p domain.ModelProfile) string {
+	pattern := model
+	if pattern == "" {
+		pattern = "<pattern>"
+	}
 	lines := []string{
-		"  model-profile:",
-		"    tool-call-format: " + string(p.ToolCallFormat),
-		"    thinking:",
-		"      style: " + string(p.Thinking.Style),
+		"  model-profiles:",
+		"    " + quoteYAML(pattern) + ":",
+		"      tool-call-format: " + string(p.ToolCallFormat),
+		"      thinking:",
+		"        style: " + string(p.Thinking.Style),
 	}
 	if p.Thinking.Start != "" || p.Thinking.End != "" {
 		lines = append(lines,
-			"      start: "+quoteYAML(p.Thinking.Start),
-			"      end: "+quoteYAML(p.Thinking.End))
+			"        start: "+quoteYAML(p.Thinking.Start),
+			"        end: "+quoteYAML(p.Thinking.End))
 	}
 	return strings.Join(lines, "\n")
 }

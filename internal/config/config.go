@@ -16,6 +16,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -128,6 +129,14 @@ type Settings struct {
 	// flag/env). A zero ModelProfile is native tool calls with no inline thinking (today's
 	// behaviour), so an absent profile block leaves it unchanged.
 	Profile domain.ModelProfile
+
+	// modelProfiles is the resolved `model-profiles:` map (ADR 0044): the user's pattern-keyed
+	// Model profiles, ordered by pattern so the same file always resolves to the same slice.
+	// File-only (a per-model concern, like mcpServers, with no flag/env) and default-empty ⇒ the
+	// user configures no shape and the composition root resolves against the shipped table alone.
+	// The composition root — never this package — matches a model name against them
+	// (profiles.Resolve): which model is bound is not a fact the config file holds.
+	ModelProfiles []profiles.Entry
 
 	// mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4), file-only
 	// (a per-model tuning concern, like mcpServers, with no flag/env) and default-empty. All
@@ -507,6 +516,12 @@ type Layer struct {
 	// through to the zero/native default.
 	Profile *domain.ModelProfile
 
+	// modelProfiles is set only by the FILE layer (the map is config'd, default-empty, with no
+	// flag/env — like mechanisms). A nil slice means the source configures no profile at all, so
+	// a nearer layer that does carries the whole map: the block is replaced entry-and-all, never
+	// merged key by key.
+	ModelProfiles []profiles.Entry
+
 	// mechanisms is set only by the FILE layer (Mechanisms are config'd, default-empty, with no
 	// flag/env — like mcpServers). A nil map means the source does not enable any Mechanism (fall
 	// through to the empty default).
@@ -694,6 +709,9 @@ func ResolveSettings(file, env, flag Layer, hostID string) (Settings, []string) 
 	if file.Profile != nil { // file-only; env/flag never carry a model profile
 		s.Profile = *file.Profile
 	}
+	// file-only (ADR 0044), like mechanisms above: env/flag never carry a model profile, and a
+	// layer that sets the key replaces the map whole rather than merging patterns into it.
+	s.ModelProfiles = file.ModelProfiles
 	if file.Present != nil { // file-only (ADR 0019); env/flag never carry the presentation block
 		s.Present = *file.Present
 	}
@@ -901,12 +919,17 @@ type fileConfig struct {
 	// takes off the menu. A pointer so an absent block falls through to the default (every tool)
 	// rather than reading as an explicit empty one.
 	Tools *toolsConfig `yaml:"tools"`
-	// ModelProfile describes how the configured model speaks the wire (CONTEXT: Model profile) —
-	// its tool-call format and inline thinking-channel style. A per-model concern (like
-	// mcp-servers): file-only, no flag/env. Absent ⇒ the zero profile (native tool calls, no
-	// inline thinking — today's behaviour). A pointer so an absent block falls through to that
-	// default rather than being an explicit zero setting.
-	ModelProfile *modelProfileConfig `yaml:"model-profile"`
+	// ModelProfiles describes how a model speaks the wire (CONTEXT: Model profile) — its tool-call
+	// format and inline thinking-channel style — keyed by a PATTERN the model name contains
+	// (ADR 0044). File-only, no flag/env, like mcp-servers. Absent/empty ⇒ nothing the user
+	// configured matches any model, so resolution falls back to apogee's shipped shape table and,
+	// failing that, to the zero profile (native tool calls, no inline thinking). A matching entry
+	// replaces the WHOLE profile, both axes, and outranks every shipped entry.
+	//
+	// The retired GLOBAL `model-profile:` block this replaces is refused at startup with the map
+	// spelling to paste (configmigrate.go): a profile is per-model now, so a config that still
+	// spells it must be told rather than silently unread.
+	ModelProfiles map[string]modelProfileConfig `yaml:"model-profiles"`
 	// Mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4): a map of
 	// canonical mechanism ID → enabled. File-only (no flag/env), like mcp-servers. Absent/empty ⇒
 	// no Mechanism is enabled — ALL default OFF (D1, default-off until bench-proven), so an entry
@@ -1330,6 +1353,24 @@ func (p modelProfileConfig) toModelProfile() domain.ModelProfile {
 	}
 }
 
+// toProfileEntries projects the on-disk `model-profiles:` map onto the ordered entry list the
+// composition root matches a model name against (ADR 0044). The map is sorted BY PATTERN because a
+// Go map has no order and three surfaces read this slice — the /settings row's diff, the resolution
+// itself, and any test pinning it — so an unordered projection would report a change the user did
+// not make and pick a different winner between two runs of the same file.
+//
+// Order is a determinism property only: profiles.Resolve ranks by pattern length and breaks ties
+// lexicographically, so the winner is the same whatever order the entries arrive in.
+func toProfileEntries(m map[string]modelProfileConfig) []profiles.Entry {
+	patterns := slices.Sorted(maps.Keys(m))
+
+	entries := make([]profiles.Entry, 0, len(patterns))
+	for _, pattern := range patterns {
+		entries = append(entries, profiles.Entry{Pattern: pattern, Profile: m[pattern].toModelProfile()})
+	}
+	return entries
+}
+
 // layer projects a parsed file config onto a precedence layer: a present (non-empty)
 // field becomes an explicit setting, an absent one stays nil to fall through.
 func (fc fileConfig) layer() Layer {
@@ -1380,9 +1421,8 @@ func (fc fileConfig) layer() Layer {
 	if fc.Tools != nil && len(fc.Tools.Disabled) > 0 {
 		l.ToolsDisabled = fc.Tools.Disabled
 	}
-	if fc.ModelProfile != nil {
-		p := fc.ModelProfile.toModelProfile()
-		l.Profile = &p
+	if len(fc.ModelProfiles) > 0 {
+		l.ModelProfiles = toProfileEntries(fc.ModelProfiles)
 	}
 	if len(fc.Mechanisms) > 0 {
 		l.Mechanisms = fc.Mechanisms
@@ -1758,6 +1798,7 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 		notify(n)
 	}
 	opts.Profile = s.Profile
+	opts.ModelProfiles = s.ModelProfiles
 	opts.Mechanisms = s.Mechanisms
 	opts.ValidatedSetsEnable = s.ValidatedSetsEnable
 	opts.ValidatedSetsAlias = s.ValidatedSetsAlias

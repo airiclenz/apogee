@@ -415,7 +415,7 @@ type Options struct {
 
 	// ExternalEditSpec is the command line that opens the config file at path's own line — the
 	// nested structures' whole edit idiom (ADR 0037 decision 5): a `servers:` list or a
-	// `model-profile:` block is a shape no row can hold, so ⏎ on such a row hands the human the file
+	// `model-profiles:` map is a shape no row can hold, so ⏎ on such a row hands the human the file
 	// itself in their own editor rather than growing a form for each of them.
 	//
 	// The binary resolves all four parts because it owns all four: the config file's location, the

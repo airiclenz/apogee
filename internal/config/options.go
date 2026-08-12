@@ -8,6 +8,7 @@ package config
 import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -160,6 +161,13 @@ type Options struct {
 	// flag/env). ApplyConfig sets it from settings; a zero profile is native tool calls with no
 	// inline thinking (today's behaviour). runRoot folds it into apogee.Config.Profile.
 	Profile domain.ModelProfile
+
+	// modelProfiles is the user's `model-profiles:` map (ADR 0044) — the Model profiles they keyed
+	// by a pattern the model name contains — ordered by pattern, loaded from the config file only
+	// (default-empty). ApplyConfig sets it from settings; the composition root matches the BOUND
+	// model against it (profiles.Resolve, user entries first, then apogee's shipped shape table),
+	// because which model is bound is not a fact this file holds.
+	ModelProfiles []profiles.Entry
 
 	// mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4), loaded from
 	// the config file only (default-empty ⇒ no Mechanism enabled; all default OFF, D1). ApplyConfig
