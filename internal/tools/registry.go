@@ -124,9 +124,10 @@ func DefaultTools(root string) []domain.Tool {
 // no more an ExternalEffectTool than ask_user is — showing the user a document they already
 // own is not a non-forkable remote effect.
 //
-// host.ExtraReadRoots is threaded into the read-only file tools (read_file, list_dir), which
-// resolve an ABSOLUTE path over those roots when the workspace refuses it; a nil func leaves
-// them workspace-only. No write or execution tool receives it — see the field's contract.
+// host.ExtraReadRoots is threaded into the four read-only file tools (read_file, list_dir, grep,
+// find_files), which resolve an ABSOLUTE path over those roots when the workspace refuses it; a
+// nil func leaves them workspace-only. No write or execution tool receives it — see the field's
+// contract.
 //
 // host.Disabled is applied LAST, to the assembled menu: the roster switch subtracts from the set
 // this build offers rather than deciding, per tool, whether to construct it — so a tool's presence
@@ -136,8 +137,8 @@ func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 		NewReadFile(root, host.ExtraReadRoots),
 		NewWriteFile(root),
 		NewListDir(root, host.ExtraReadRoots),
-		NewGrep(root),
-		NewFindFiles(root),
+		NewGrep(root, host.ExtraReadRoots),
+		NewFindFiles(root, host.ExtraReadRoots),
 		NewSingleFindReplace(root),
 		NewMultiFindReplace(root),
 		NewEditExistingFile(root),

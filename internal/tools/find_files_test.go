@@ -40,7 +40,7 @@ func seedFindTree(t *testing.T, root string) {
 // error or an unexpected tool error.
 func findFiles(t *testing.T, root string, args map[string]any) string {
 	t.Helper()
-	result, err := NewFindFiles(root).Execute(context.Background(), callWith(t, "c1", args))
+	result, err := NewFindFiles(root, nil).Execute(context.Background(), callWith(t, "c1", args))
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestFindFiles_Execute_MalformedGlobMatchesNothingLikeGrep(t *testing.T) {
 		t.Errorf("a malformed glob must match nothing: %q", content)
 	}
 
-	grepped, err := NewGrep(root).Execute(context.Background(),
+	grepped, err := NewGrep(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "x", "include": "["}))
 	if err != nil {
 		t.Fatalf("grep Execute returned error: %v", err)
@@ -218,7 +218,7 @@ func TestFindFiles_Execute_MalformedGlobMatchesNothingLikeGrep(t *testing.T) {
 func TestFindFiles_Execute_RequiresPattern(t *testing.T) {
 	t.Parallel()
 
-	result, err := NewFindFiles(t.TempDir()).Execute(context.Background(),
+	result, err := NewFindFiles(t.TempDir(), nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "   "}))
 
 	if err != nil {
@@ -235,7 +235,7 @@ func TestFindFiles_Execute_RefusesPathEscape(t *testing.T) {
 	root := t.TempDir()
 	seedFindTree(t, root)
 
-	result, err := NewFindFiles(root).Execute(context.Background(),
+	result, err := NewFindFiles(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "*.go", "path": "../"}))
 
 	if err != nil {
@@ -274,6 +274,88 @@ func TestFindFiles_Execute_SkipsSymlinkOutOfWorkspace(t *testing.T) {
 	}
 	if !strings.Contains(content, "kept.txt") {
 		t.Errorf("the ordinary file next to it went missing: %q", content)
+	}
+}
+
+// TestFindFiles_Execute_FindsUnderAnExtraReadRoot pins the mount half of the read-only roots
+// seam for find_files: an ABSOLUTE search path under a configured extra root is walked — the
+// names reported relative to that root, subdirectories included — while a workspace-relative
+// search is untouched by the mount and a path under no root is still refused with the one
+// uniform escape message.
+func TestFindFiles_Execute_FindsUnderAnExtraReadRoot(t *testing.T) {
+	t.Parallel()
+
+	root, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	seedFindTree(t, root)
+	seedFindTree(t, extra)
+
+	tool := NewFindFiles(root, func() []string { return []string{extra} })
+
+	cases := []struct {
+		name    string
+		path    string
+		want    []string // substrings the result content must carry
+		wantErr bool
+	}{
+		{"extra root itself", extra, []string{"top.go", "src/main.go", "a/b/c/d/deep.go"}, false},
+		{"subdir of the extra root", filepath.Join(extra, "src"), []string{"main.go"}, false},
+		{"workspace relative unchanged", "src", []string{"main.go"}, false},
+		{"under no root", outside, []string{"outside the workspace"}, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(),
+				callWith(t, "c1", map[string]any{"pattern": "*.go", "path": tc.path}))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError != tc.wantErr {
+				t.Fatalf("IsError = %v, want %v (content: %q)", result.IsError, tc.wantErr, result.Content)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(result.Content, want) {
+					t.Errorf("content %q does not contain %q", result.Content, want)
+				}
+			}
+		})
+	}
+}
+
+// TestFindFiles_Execute_SkipsSymlinkOutOfAnExtraReadRoot pins that a mounted read-only root is
+// a root, not a doorway: a link inside it aimed outside it is refused by that root's own fence
+// and therefore never named, exactly as a link out of the workspace is.
+func TestFindFiles_Execute_SkipsSymlinkOutOfAnExtraReadRoot(t *testing.T) {
+	t.Parallel()
+
+	root, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "id_rsa"), []byte(outsideMarker), 0o600); err != nil {
+		t.Fatalf("setup write: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "id_rsa"), filepath.Join(extra, "leak.txt")); err != nil {
+		t.Skipf("symlinks unavailable on this platform: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(extra, "kept.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("setup write: %v", err)
+	}
+
+	result, err := NewFindFiles(root, func() []string { return []string{extra} }).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"pattern": "*.txt", "path": extra}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	if strings.Contains(result.Content, "leak.txt") {
+		t.Errorf("a symlink out of the extra root was named: %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "kept.txt") {
+		t.Errorf("the ordinary file next to it went missing: %q", result.Content)
 	}
 }
 

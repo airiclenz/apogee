@@ -113,6 +113,17 @@ point is a **minor** bump, not a breaking change.
   writable — `write_file`, `edit_existing_file` and the rest of the write family never see the roots
   and refuse the very paths `read_file` can read.
 
+- **`grep` and `find_files` now search under the host's configured read-only roots.** The two
+  discovery tools complete the read-only set: an absolute `path` the workspace refuses is resolved
+  against each mounted read-only root in turn, and the whole walk is then pinned to the root that
+  accepted it — matches and file names come back measured from that root, and every file the walk
+  opens goes through that root's fence rather than the workspace's. So a skills library, once it is
+  wired, can be searched by content and by file name, not just read a file at a time. Both tools say
+  so in their description. A symlink inside such a root that points out of it is skipped exactly as
+  one inside the workspace is, workspace-relative searches are unchanged, a path under no root is
+  still refused with the same uniform escape message, and with nothing mounted both tools behave
+  exactly as before.
+
 ### Changed
 
 - **One space now separates a tool row from its ▶/▼ fold indicator.** The field reserved at a row's

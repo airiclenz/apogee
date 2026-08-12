@@ -21,13 +21,13 @@ var findFilesSpec = toolSpec{
 	// able to tell this tool from grep without trying one. So it says what is matched (the NAME,
 	// never the path), what is not (a path pattern like "src/**/*.go"), and where content search
 	// lives instead.
-	description: "Find files by NAME. Returns workspace-relative paths whose file name matches a comma-separated list of globs, searching subdirectories recursively. Basename globs only — a path pattern such as \"src/**/*.go\" never matches; narrow the subtree with the path parameter instead. Use grep to search file CONTENT.",
+	description: "Find files by NAME. Returns workspace-relative paths whose file name matches a comma-separated list of globs, searching subdirectories recursively. Basename globs only — a path pattern such as \"src/**/*.go\" never matches; narrow the subtree with the path parameter instead. An absolute path under a configured read-only root (such as the skills library) can be searched too. Use grep to search file CONTENT.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["pattern"],
   "properties": {
     "pattern": {"type": "string", "description": "Comma-separated file-name globs, e.g. \"*.go,Makefile\". Matched against each file's base NAME only, never against its directory path"},
-    "path": {"type": "string", "description": "Directory to search within, relative to the workspace root (default: the whole workspace). The search always recurses into subdirectories"},
+    "path": {"type": "string", "description": "Directory to search within, relative to the workspace root or absolute (default: the whole workspace). The search always recurses into subdirectories"},
     "max_results": {"type": "integer", "description": "Maximum paths to return (default 50)"},
     "offset": {"type": "integer", "description": "Number of paths to skip for pagination (default 0)"}
   }
@@ -52,32 +52,35 @@ const defaultFindFilesResults = 50
 // errFindFilesStop unwinds the WalkDir once the path cap is reached.
 var errFindFilesStop = errors.New("find_files: path cap reached")
 
-// FindFiles finds workspace files by NAME — the discovery half of the pair whose other half
-// is grep (content). It is a read-only tool scoped to a sandbox root: the walk enumerates
-// names only, it never descends through a symlink (fs.WalkDir over os.DirFS recurses into
-// real directories alone), and an entry that is not a regular file is only reported when it
-// still resolves to one THROUGH the workspace fence — so no name it reports lies outside the
-// workspace.
+// FindFiles finds files by NAME — the discovery half of the pair whose other half is grep
+// (content). It is a read-only tool scoped to a sandbox root plus any extra read-only roots
+// the host mounted (readScope): the walk enumerates names only, it never descends through a
+// symlink (fs.WalkDir over os.DirFS recurses into real directories alone), and an entry that
+// is not a regular file is only reported when it still resolves to one THROUGH the fence of
+// the root the search path was accepted under — so no name it reports lies outside that root.
 type FindFiles struct {
 	toolSpec
-	root string
-	// realRoot is root resolved through symlinks, for the same reason grep keeps one: the
-	// walk's absolute paths come back symlink-resolved, so the workspace-relative name is only
-	// measurable from the real root on a host whose workspace is reached through a link.
-	realRoot string
+	scope readScope
 }
 
-// NewFindFiles returns a find_files tool that resolves paths within root.
-func NewFindFiles(root string) *FindFiles {
-	return &FindFiles{toolSpec: findFilesSpec, root: root, realRoot: security.EvalRealPath(root)}
+// NewFindFiles returns a find_files tool that resolves paths within root, and — for ABSOLUTE
+// paths only — within any extra read-only root extraReadRoots reports at call time. A nil
+// extraReadRoots means workspace-only: byte-identical to the fence before extra roots existed.
+func NewFindFiles(root string, extraReadRoots func() []string) *FindFiles {
+	return &FindFiles{toolSpec: findFilesSpec, scope: readScope{root: root, extra: extraReadRoots}}
 }
 
 // ReadOnly reports that find_files performs no writes (domain.ReadOnlyTool).
 func (t *FindFiles) ReadOnly() bool { return true }
 
-// Execute walks the workspace (or the subtree named by path) and returns the
-// workspace-relative paths whose base name matches pattern, honouring ctx cancellation. A
-// missing pattern, a missing path, or a path escaping the root is an IsError result.
+// Execute walks the workspace (or the subtree named by path) and returns the root-relative
+// paths whose base name matches pattern, honouring ctx cancellation. A missing pattern, a
+// missing path, or a path escaping every root is an IsError result.
+//
+// The search path is resolved over the workspace root first, then — for an ABSOLUTE path only —
+// over the configured extra read-only roots, and the WHOLE walk is pinned to the root that
+// accepted it: names are measured from that root and the reportability check opens through its
+// fence, never the workspace's.
 func (t *FindFiles) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -95,7 +98,7 @@ func (t *FindFiles) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if searchPath == "" {
 		searchPath = "."
 	}
-	resolved, err := resolveInRoot(searchPath, t.root)
+	root, resolved, err := t.scope.resolve(searchPath)
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
@@ -109,7 +112,7 @@ func (t *FindFiles) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	// syntax — comma-separated basename globs — and on a malformed glob, which filepath.Match
 	// reports as "no match" rather than an error the model has to decode.
 	globs := parseIncludeGlobs(args.Pattern)
-	found, err := t.walk(ctx, resolved, info, globs)
+	found, err := t.walk(ctx, root, resolved, info, globs)
 	if err != nil {
 		return domain.ToolResult{}, err // only ctx cancellation propagates as a Go error
 	}
@@ -117,16 +120,21 @@ func (t *FindFiles) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 }
 
 // walk collects the matching paths under target — the resolved absolute path of the search
-// root — as workspace-relative names. target is used to ENUMERATE names only; nothing is
-// opened by an absolute path the walk handed out. A target that is a file is matched by its
-// own base name, so naming one file is a legal (if pointless) query rather than an error.
+// path — as names relative to root, the root that path was accepted under. target is used to
+// ENUMERATE names only; nothing is opened by an absolute path the walk handed out. A target
+// that is a file is matched by its own base name, so naming one file is a legal (if pointless)
+// query rather than an error.
 //
 // The walk skips the same noise directories grep skips (grepExcludeDirs) and is always
 // recursive: name discovery is this tool's whole point, so there is no depth or recursion
 // parameter to get wrong.
-func (t *FindFiles) walk(ctx context.Context, target string, info os.FileInfo, globs []string) ([]string, error) {
+func (t *FindFiles) walk(ctx context.Context, root, target string, info os.FileInfo, globs []string) ([]string, error) {
 	found := make([]string, 0, defaultFindFilesResults)
-	targetRel := filepath.ToSlash(t.relative(target))
+	// The name is measured from the MATCHED root, symlink-resolved by the shared guard, for the
+	// reason grep measures its own that way: the walk's absolute paths come back
+	// symlink-resolved, so on a host whose root is reached through a link the raw root is a
+	// prefix of nothing.
+	targetRel := filepath.ToSlash(workspaceRelative(target, root))
 
 	if !info.IsDir() {
 		if err := ctx.Err(); err != nil {
@@ -138,8 +146,8 @@ func (t *FindFiles) walk(ctx context.Context, target string, info os.FileInfo, g
 		return found, nil
 	}
 
-	// prefix lifts a walk-relative name to a workspace-relative one ("" when the search root IS
-	// the workspace root). fs.WalkDir yields slash-separated names, so the join is path.Join.
+	// prefix lifts a walk-relative name to a root-relative one ("" when the search root IS
+	// the matched root). fs.WalkDir yields slash-separated names, so the join is path.Join.
 	prefix := targetRel
 	if prefix == "." {
 		prefix = ""
@@ -162,7 +170,7 @@ func (t *FindFiles) walk(ctx context.Context, target string, info os.FileInfo, g
 			return nil
 		}
 		name := path.Join(prefix, rel)
-		if !t.reportable(entry, name) {
+		if !t.reportable(root, entry, name) {
 			return nil
 		}
 		found = append(found, name)
@@ -179,28 +187,19 @@ func (t *FindFiles) walk(ctx context.Context, target string, info os.FileInfo, g
 	return found, nil
 }
 
-// relative renders p relative to the sandbox root — the workspace-relative name a match is
-// reported under — falling back to the absolute path if it cannot be made relative (which the
-// fenced check then refuses, the safe direction).
-func (t *FindFiles) relative(p string) string {
-	if rel, err := filepath.Rel(t.realRoot, p); err == nil {
-		return rel
-	}
-	return p
-}
-
-// reportable reports whether an entry the walk NAMED may be reported under rel, its
-// workspace-relative name. A regular file always may: the walk never descends through a
-// symlink, so every component above it is a real directory inside the searched subtree.
-// Anything else — a symlink, a device, a socket — is only reported when it still opens to a
-// regular file THROUGH the workspace fence (security.SafeOpen), so a planted `notes.txt ->
-// ~/.ssh/id_rsa` is refused rather than named. A refused entry is silently absent, the same
-// contract grep gives an unreadable file.
-func (t *FindFiles) reportable(entry fs.DirEntry, rel string) bool {
+// reportable reports whether an entry the walk NAMED may be reported under rel, its name
+// relative to root. A regular file always may: the walk never descends through a symlink, so
+// every component above it is a real directory inside the searched subtree. Anything else — a
+// symlink, a device, a socket — is only reported when it still opens to a regular file THROUGH
+// root's fence (security.SafeOpen), so a planted `notes.txt -> ~/.ssh/id_rsa` is refused rather
+// than named — and a walk that began under an extra read-only root is checked against THAT
+// root, so a link escaping it is refused just as one escaping the workspace is. A refused entry
+// is silently absent, the same contract grep gives an unreadable file.
+func (t *FindFiles) reportable(root string, entry fs.DirEntry, rel string) bool {
 	if entry.Type().IsRegular() {
 		return true
 	}
-	file, err := security.SafeOpen(t.root, rel)
+	file, err := security.SafeOpen(root, rel)
 	if err != nil {
 		return false
 	}

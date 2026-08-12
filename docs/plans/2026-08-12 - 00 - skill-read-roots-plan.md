@@ -125,9 +125,17 @@ error.
 
 **Commit:** `feat(tools): read_file and list_dir read under configured read-only roots`
 
-## 3. grep and find_files honor extra read-only roots
+## 3. grep and find_files honor extra read-only roots — ✅ DONE (2026-08-12)
 
 Depends on item 2 (uses the `HostTools.ExtraReadRoots` field it adds).
+
+NOTES (2026-08-12): both tools cached `realRoot` (the workspace resolved through symlinks) in a
+struct field, which cannot survive a per-call matched root. Each tool's private `relative` method
+and that field are therefore gone, replaced by the existing shared `workspaceRelative(path, root)`
+helper called with the MATCHED root — the same helper (and the same pinning) item 2 gave `list_dir`.
+The matched root is threaded through the walk and, in grep, through the context-render chain
+(`search`, `searchFile`, `renderMatches`, `renderContextMatches`, `renderFileGroup`,
+`readContextLines`) so every fenced open uses the root the search path was accepted under.
 
 **What:** same treatment for the two discovery tools: `DefaultToolsWithHost` threads the
 func into `NewGrep`/`NewFindFiles`; the path resolution (`grep.go:131`,

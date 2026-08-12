@@ -17,7 +17,7 @@ func TestGrep_Execute_FindsMatchesWithLocation(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewGrep(root).Execute(context.Background(),
+	result, err := NewGrep(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "^package "}))
 
 	if err != nil {
@@ -40,7 +40,7 @@ func TestGrep_Execute_ExcludesNoiseDirs(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewGrep(root).Execute(context.Background(),
+	result, err := NewGrep(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "noise"}))
 
 	if err != nil {
@@ -57,7 +57,7 @@ func TestGrep_Execute_IncludeGlobNarrows(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewGrep(root).Execute(context.Background(),
+	result, err := NewGrep(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "func", "include": "*.go"}))
 
 	if err != nil {
@@ -76,7 +76,7 @@ func TestGrep_Execute_InvalidRegexFallsBackToLiteral(t *testing.T) {
 
 	// "Alpha(" is not a valid regex (unclosed group); it must be matched literally
 	// against "func Alpha() {}".
-	result, err := NewGrep(root).Execute(context.Background(),
+	result, err := NewGrep(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "Alpha("}))
 
 	if err != nil {
@@ -93,7 +93,7 @@ func TestGrep_Execute_SearchesSingleFile(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewGrep(root).Execute(context.Background(),
+	result, err := NewGrep(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "Beta", "path": "src/inner/b.go"}))
 
 	if err != nil {
@@ -109,7 +109,7 @@ func TestGrep_Execute_ReportsMatchCount(t *testing.T) {
 
 	root := t.TempDir()
 	seedTree(t, root)
-	tool := NewGrep(root)
+	tool := NewGrep(root, nil)
 
 	cases := []struct {
 		name        string
@@ -178,7 +178,7 @@ func TestGrep_Execute_SearchesSubdirectory(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	result, err := NewGrep(root).Execute(context.Background(),
+	result, err := NewGrep(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "a|TOKEN", "path": "src"}))
 
 	if err != nil {
@@ -235,7 +235,7 @@ func TestGrep_RefusesEscapingSymlink(t *testing.T) {
 	if err := os.Symlink("inside.txt", filepath.Join(root, "link.txt")); err != nil {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
-	tool := NewGrep(root)
+	tool := NewGrep(root, nil)
 
 	t.Run("directory walk", func(t *testing.T) {
 		t.Parallel()
@@ -285,6 +285,93 @@ func TestGrep_RefusesEscapingSymlink(t *testing.T) {
 			t.Errorf("content leaked the file outside the workspace: %q", result.Content)
 		}
 	})
+}
+
+// TestGrep_Execute_SearchesUnderAnExtraReadRoot pins the mount half of the read-only roots
+// seam for grep: an ABSOLUTE search path under a configured extra root is searched — the whole
+// walk pinned to that root, so its subdirectories are reached and its matches are reported by
+// names measured from it — while a workspace-relative search is untouched by the mount and a
+// path under no root is still refused with the one uniform escape message.
+func TestGrep_Execute_SearchesUnderAnExtraReadRoot(t *testing.T) {
+	t.Parallel()
+
+	root, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	seedTree(t, root)
+	seedTree(t, extra)
+	if err := os.WriteFile(filepath.Join(outside, "id_rsa"), []byte(grepOutsideMarker), 0o600); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	tool := NewGrep(root, func() []string { return []string{extra} })
+
+	cases := []struct {
+		name    string
+		path    string
+		want    []string // substrings the result content must carry
+		wantErr bool
+	}{
+		{"extra root itself", extra, []string{"src/a.go:1:package a", "src/inner/b.go:1:package b"}, false},
+		{"subdir of the extra root", filepath.Join(extra, "src"), []string{"a.go:1:package a"}, false},
+		{"one file under the extra root", filepath.Join(extra, "src", "a.go"), []string{":1:package a"}, false},
+		{"workspace relative unchanged", "src", []string{"a.go:1:package a"}, false},
+		{"under no root", outside, []string{"outside the workspace"}, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(),
+				callWith(t, "c1", map[string]any{"pattern": "^package ", "path": tc.path}))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError != tc.wantErr {
+				t.Fatalf("IsError = %v, want %v (content: %q)", result.IsError, tc.wantErr, result.Content)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(result.Content, want) {
+					t.Errorf("content %q does not contain %q", result.Content, want)
+				}
+			}
+		})
+	}
+}
+
+// TestGrep_Execute_RefusesSymlinkEscapingAnExtraReadRoot pins that mounting a directory for
+// reading mounts THAT directory and nothing it points at: a link inside the extra root aimed
+// outside it is refused by the extra root's own fence, exactly as a link out of the workspace
+// is refused by the workspace's. A read-only root is a root, not a doorway.
+func TestGrep_Execute_RefusesSymlinkEscapingAnExtraReadRoot(t *testing.T) {
+	t.Parallel()
+
+	root, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "id_rsa"), []byte(grepOutsideMarker), 0o600); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(extra, "inside.txt"), []byte("SKILL_TOKEN=ok"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "id_rsa"), filepath.Join(extra, "notes.txt")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	result, err := NewGrep(root, func() []string { return []string{extra} }).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"pattern": "TOKEN=", "path": extra}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	if strings.Contains(result.Content, grepOutsideMarker) {
+		t.Errorf("the walk read a file outside the extra root: %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "inside.txt:1:SKILL_TOKEN=ok") {
+		t.Errorf("the ordinary file inside the extra root stopped matching: %q", result.Content)
+	}
 }
 
 // writeGrepLines writes name under root with one newline-terminated line per element.
@@ -370,7 +457,7 @@ func TestGrep_Execute_ContextLines(t *testing.T) {
 			root := t.TempDir()
 			writeGrepLines(t, root, "f.txt", tc.lines...)
 
-			result, err := NewGrep(root).Execute(context.Background(), callWith(t, "c1", tc.args))
+			result, err := NewGrep(root, nil).Execute(context.Background(), callWith(t, "c1", tc.args))
 
 			if err != nil {
 				t.Fatalf("Execute returned a Go error: %v", err)
@@ -395,7 +482,7 @@ func TestGrep_Execute_ContextLinesPaginateByMatches(t *testing.T) {
 	writeGrepLines(t, root, "f.txt",
 		"L1", "NEEDLE a", "L3", "L4", "NEEDLE b", "L6", "L7", "NEEDLE c", "L9")
 
-	result, err := NewGrep(root).Execute(context.Background(), callWith(t, "c1", map[string]any{
+	result, err := NewGrep(root, nil).Execute(context.Background(), callWith(t, "c1", map[string]any{
 		"pattern": "NEEDLE", "context_lines": 1, "max_results": 1, "offset": 1,
 	}))
 
@@ -427,7 +514,7 @@ func TestGrep_Execute_ContextLinesClampedToMaximum(t *testing.T) {
 	root := t.TempDir()
 	writeGrepLines(t, root, "f.txt", lines...)
 
-	result, err := NewGrep(root).Execute(context.Background(),
+	result, err := NewGrep(root, nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "NEEDLE", "context_lines": 99}))
 
 	if err != nil {
@@ -454,7 +541,7 @@ func TestGrep_Execute_ContextLinesGroupPerFile(t *testing.T) {
 	writeGrepLines(t, root, "src/a.txt", "a1", "NEEDLE a", "a3")
 	writeGrepLines(t, root, "src/b.txt", "b1", "NEEDLE b", "b3")
 
-	result, err := NewGrep(root).Execute(context.Background(), callWith(t, "c1", map[string]any{
+	result, err := NewGrep(root, nil).Execute(context.Background(), callWith(t, "c1", map[string]any{
 		"pattern": "NEEDLE", "path": "src", "context_lines": 1,
 	}))
 
@@ -476,7 +563,7 @@ func TestGrep_Execute_ContextLinesAbsentMatchesDefault(t *testing.T) {
 
 	root := t.TempDir()
 	seedTree(t, root)
-	tool := NewGrep(root)
+	tool := NewGrep(root, nil)
 
 	baseline, err := tool.Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "^package "}))
@@ -504,7 +591,7 @@ func TestGrep_Execute_ToolErrors(t *testing.T) {
 
 	root := t.TempDir()
 	seedTree(t, root)
-	tool := NewGrep(root)
+	tool := NewGrep(root, nil)
 
 	cases := []struct {
 		name        string

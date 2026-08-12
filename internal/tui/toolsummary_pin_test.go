@@ -93,7 +93,7 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 		},
 		{
 			name: "grep",
-			tool: tools.NewGrep(root),
+			tool: tools.NewGrep(root, nil),
 			args: `{"pattern":"func main","path":"main.go"}`,
 			want: "1 hit",
 		},
