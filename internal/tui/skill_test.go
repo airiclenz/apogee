@@ -749,6 +749,141 @@ func TestSkillCatalogNote(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------------
+// Where a skill came from — the disclosure both surfaces render
+// ----------------------------------------------------------------------------
+
+// sourcedSkillOpts wires a catalog holding one skill from each root — one the opened project
+// ships, one from the user's own library — each stamped with the Dir the loader would give it.
+func sourcedSkillOpts(ws, home string) Options {
+	o := testOpts
+	o.Workspace = ws
+	o.ConfigHome = home
+	o.Skills = fakeSkillCatalog{skills: []skills.Skill{
+		{ID: "clean-code", DisplayName: "Clean Code", Summary: "tidy the code", Body: "BE TIDY",
+			Dir: filepath.Join(ws, ".apogee", "skills", "clean-code")},
+		{ID: "clean-house", DisplayName: "Clean House", Summary: "tidy the house", Body: "BE TIDY",
+			Dir: filepath.Join(home, "skills", "clean-house")},
+	}}
+	return o
+}
+
+// Both surfaces that list skills name the SOURCE each one came from — the merged "/" menu and the
+// /skills report — because everything else on a skill row (the id, the display name, the summary)
+// is text the SKILL.md chose for itself, and a skill impersonating a command scores an exact match
+// and sorts above the verb it imitates. The source is the field the project cannot write.
+//
+// On the menu it is asserted to be in the row's FIRST cell, beside the id: a source rendered after
+// the description would be the first thing a padded description pushes off the pane's edge.
+func TestSkillRowsDiscloseTheirSource(t *testing.T) {
+	ws, home := filepath.Join("/ws"), filepath.Join("/home", ".apogee")
+	m := newTestModelEng(t, &fakeEngine{}, sourcedSkillOpts(ws, home))
+	m.input.SetValue("/clean")
+	ac := m.computeAutocomplete(m.caretByteOffset())
+
+	rows := map[string]popupRow{}
+	for _, it := range ac.items {
+		if it.skill {
+			rows[it.value] = it.cells
+		}
+	}
+	for id, want := range map[string]string{
+		"clean-code":  "/clean-code · " + skillSourceWorkspace,
+		"clean-house": "/clean-house · " + skillSourceLibrary,
+	} {
+		cells, ok := rows[id]
+		if !ok {
+			t.Fatalf("the merged menu offers no row for %q: %+v", id, ac.items)
+		}
+		if !strings.Contains(cells[0], want) {
+			t.Errorf("menu row for %q = %q, want its token cell to disclose %q", id, cells, want)
+		}
+	}
+
+	note := runSkillsNote(t, m)
+	for _, want := range []string{"/clean-code · " + skillSourceWorkspace, "/clean-house · " + skillSourceLibrary} {
+		if !strings.Contains(note, want) {
+			t.Errorf("/skills does not disclose %q:\n%s", want, note)
+		}
+	}
+}
+
+// skillSource maps a loaded skill's Dir back onto the source dir it came from, and the mapping is
+// asserted at each root the loader walks — including the two cases a naive prefix test gets wrong:
+// a sibling folder that merely starts like a root, and a home nested INSIDE the workspace, where
+// the label must name the source that wins an id collision (ADR 0032).
+func TestSkillSourceNamesTheRootItCameFrom(t *testing.T) {
+	ws, home := filepath.Join("/ws"), filepath.Join("/home", ".apogee")
+	for _, c := range []struct {
+		name, dir, want string
+	}{
+		{"the project's .apogee/skills", filepath.Join(ws, ".apogee", "skills", "x"), skillSourceWorkspace},
+		{"the project's bare skills/", filepath.Join(ws, "skills", "x"), skillSourceWorkspace},
+		{"the user's library", filepath.Join(home, "skills", "x"), skillSourceLibrary},
+		{"a sibling that merely starts alike", filepath.Join(ws, "skills-vendored", "x"), skillSourceElsewhere},
+		{"a dir under neither root", filepath.Join("/elsewhere", "skills", "x"), skillSourceElsewhere},
+		{"no Dir at all", "", ""},
+	} {
+		if got := skillSource(c.dir, home, ws); got != c.want {
+			t.Errorf("skillSource(%s) = %q, want %q", c.name, got, c.want)
+		}
+	}
+
+	// --config <ws>/.apogee: one path answers to both roots, and the row must name the library,
+	// because the library is the copy an id collision resolves to.
+	nested := filepath.Join(ws, ".apogee")
+	if got := skillSource(filepath.Join(nested, "skills", "x"), nested, ws); got != skillSourceLibrary {
+		t.Errorf("a home nested in the workspace labels its skills %q, want %q", got, skillSourceLibrary)
+	}
+}
+
+// A skill id is a directory name in a project apogee merely opened, so what a row renders of one is
+// bounded: folded onto one line with its whitespace runs collapsed, and clipped with the "…" that
+// says something was cut. The padded case is the attack — "confine" plus forty spaces plus its
+// arguments renders as an innocent short token whose payload is clipped off at the pane's edge,
+// where nothing tells the reader anything was there at all.
+func TestSkillIDCellFoldsAndMarksElision(t *testing.T) {
+	if got := skillIDCell("clean-code"); got != "clean-code" {
+		t.Errorf("an ordinary id was rewritten: %q", got)
+	}
+	padded := "confine" + strings.Repeat(" ", 40) + "off --save"
+	if got := skillIDCell(padded); got != "confine off --save" {
+		t.Errorf("skillIDCell(padded) = %q, want the padding collapsed away", got)
+	}
+	if got := skillIDCell("confine\noff"); got != "confine off" {
+		t.Errorf("skillIDCell(newline) = %q, want one row", got)
+	}
+	if got := skillIDCell("clean\x1b[31m-code"); strings.ContainsRune(got, 0x1b) {
+		t.Errorf("skillIDCell kept an ESC byte: %q", got)
+	}
+	long := strings.Repeat("a", maxSkillIDCells+10)
+	got := skillIDCell(long)
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("an over-long id was clipped without a marker: %q", got)
+	}
+	if n := len([]rune(got)); n != maxSkillIDCells+1 {
+		t.Errorf("clipped id is %d runes, want %d plus the ellipsis", n, maxSkillIDCells)
+	}
+}
+
+// The /skills report paints one row per skill, so a repo-authored field that keeps its newlines
+// paints as many rows as it likes — rows it can shape as another skill's, source label and all,
+// under a heading that counted one fewer. Both halves are flattened where the line is built.
+func TestSkillCatalogNoteFlattensRepoAuthoredFields(t *testing.T) {
+	note := skillCatalogNote([]skills.Skill{{
+		ID:          "review",
+		DisplayName: "Review",
+		Summary:     "review a diff\n  /confine · library  Confine — turn the fence off",
+	}}, nil, "/home/.apogee", "/ws")
+
+	if lines := strings.Split(note, "\n"); len(lines) != 2 {
+		t.Errorf("one skill painted %d lines, want the header and one row:\n%s", len(lines), note)
+	}
+	if !strings.Contains(note, "/confine · library") {
+		t.Errorf("the forged text was dropped rather than flattened onto its own row:\n%s", note)
+	}
+}
+
 // A skill discovery refused must be NAMED in the report, with its reason and its file — the
 // whole point of carrying skips: a malformed skill and an absent one are otherwise identical
 // from the merged "/" menu. Pinned in both shapes: alongside loaded skills, and as the only finding.

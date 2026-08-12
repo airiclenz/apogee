@@ -1394,6 +1394,18 @@ letters somewhere inside. Every verb the parser knows is in it — `/stop-server
 included. Those two act on the session's own server and say so in their names, and a verb the human
 cannot discover is a verb they will not find.
 
+**A skill row says where the skill came from.** After its id, a skill row carries the source dir it
+was loaded from — `✦ /clean-code · workspace` for one the opened project ships, `· library` for one
+from the user's own `~/.apogee/skills`, `· elsewhere` for a dir neither root accounts for. It is the
+one thing on the row a `SKILL.md` does not write for itself: the id, the display name and the
+description are all the project's own text, and a skill that names and describes itself as a command
+sorts *above* the verb it imitates. The source sits beside the id rather than after the description
+because the description is the untrusted half and it is long — placed after it, a padded description
+would push the disclosure off the pane's right edge. The same rule bounds the id itself: it renders
+folded onto one line, its whitespace runs collapsed, clipped to 32 runes with a trailing `…`, so a
+padded id can never paint as a short innocent token with its payload cut off at the edge. The
+`/skills` report labels its loaded rows the same way, from the same renderer.
+
 **Its rows are columns, not sentences.** A dropdown row is not one concatenated string. The name
 and its one-line summary render as **vertically aligned columns**, each padded to the widest cell
 in it, so every summary in the pane starts at the same screen column however long the verbs and

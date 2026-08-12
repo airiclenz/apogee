@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -63,6 +64,10 @@ func (m Model) runSkills() (tea.Model, tea.Cmd) {
 // found a skill and refused it, and the case where the library's only skill is the broken one is
 // exactly when the human most needs the reason. Only a genuinely empty scan — nothing loaded,
 // nothing refused — gets the where-we-looked note.
+//
+// The two roots are what the report answers "where from?" with, in both directions: an empty scan
+// names the dirs discovery LOOKED in, and a loaded skill is labelled with the one it CAME from
+// (skillSource).
 func skillCatalogNote(list []skills.Skill, skipped []skills.SkipError, home, workspace string) string {
 	if len(list) == 0 && len(skipped) == 0 {
 		return strings.Join(emptyCatalogLines(home, workspace), "\n")
@@ -70,7 +75,7 @@ func skillCatalogNote(list []skills.Skill, skipped []skills.SkipError, home, wor
 	failed, shadowed := partitionSkips(skipped)
 	var lines []string
 	for _, section := range [][]string{
-		loadedSkillLines(list),
+		loadedSkillLines(list, home, workspace),
 		failedSkillLines(failed),
 		shadowedSkillLines(shadowed),
 	} {
@@ -112,10 +117,128 @@ func emptyCatalogLines(home, workspace string) []string {
 	}
 }
 
-// loadedSkillLines renders the working half: one line per skill — the /id that names it, its
-// display name, and its summary. Nothing loaded renders nothing, so the caller's section joiner
-// never emits a "0 skills available:" header over an empty list.
-func loadedSkillLines(list []skills.Skill) []string {
+// ----------------------------------------------------------------------------
+// Where a skill came from — the disclosure both surfaces render
+// ----------------------------------------------------------------------------
+//
+// A loaded skill is bytes from one of three folders, and which one is the whole difference between
+// an extension the human installed and one a cloned repo shipped itself. Until this, no surface
+// said: the "/" menu and /skills both showed an id and a description, and a repo-supplied
+// SKILL.md chooses BOTH of those — it may name itself "Confine" and describe itself as the verb it
+// is impersonating, and (matching exactly) it sorts above the row it imitates (slashMatchRank).
+// Nothing about the row disagreed with it. The source is the one field on a skill row the repo
+// does NOT author, so it is the field that answers the deception.
+//
+// It is rendered LEFT of the description on purpose. The description is the untrusted half and it
+// is long: put the source after it and a padded summary pushes the disclosure past the pane's
+// right edge, where the truncation eats it — the mitigation would then be present exactly when it
+// was not needed. Beside the id it is bounded by the id's own clip (skillIDCell) and cannot be
+// moved by anything a SKILL.md says.
+
+// The three source labels a skill row may carry. They name the SOURCE DIR the skill was loaded
+// from (sourceDirs, internal/skills/load.go), not a trust level: trust is the human's call, and
+// the label's job is to hand them the fact they need to make it.
+const (
+	skillSourceWorkspace = "workspace" // <ws>/.apogee/skills or <ws>/skills — the project's own
+	skillSourceLibrary   = "library"   // <home>/skills — the user's global library (ADR 0032)
+	skillSourceElsewhere = "elsewhere" // under neither root: a relocated or unwired source dir
+)
+
+// skillSourceSep joins a rendered id to its source label. It is the separator the dropdown's own
+// hint line already uses (autocompleteHint), so a row's metadata reads as metadata rather than as
+// more of the token — which "/clean-code workspace" would.
+const skillSourceSep = " · "
+
+// skillSource names which source dir a loaded skill came from, given the two roots this run
+// resolved: home is [Options.ConfigHome] and workspace is [Options.Workspace] — the same pair the
+// composition root builds skills.Sources from, so the answer is derived from the loader's own
+// layering rather than guessed at.
+//
+// An empty Dir discloses NOTHING (the empty string) rather than guessing: a catalog assembled
+// without one — a fake in a test, a future in-memory source — has no source to name, and inventing
+// "elsewhere" for it would put a word on the row that says less than silence. A Dir that answers to
+// neither root is the case that DOES earn "elsewhere": something loaded it, and the human should
+// see that this run cannot account for where.
+func skillSource(dir, home, workspace string) string {
+	if dir == "" {
+		return ""
+	}
+	// The library is asked FIRST because it is the source that WINS an id collision (ADR 0032), and
+	// because a home may legitimately sit inside the workspace (--config <ws>/.apogee): when one
+	// path answers to both roots, the label must name the source the catalog resolved the id
+	// through, not the outer folder that happens to contain it.
+	if home != "" && underSkillRoot(dir, filepath.Join(home, "skills")) {
+		return skillSourceLibrary
+	}
+	if workspace != "" &&
+		(underSkillRoot(dir, filepath.Join(workspace, ".apogee", "skills")) ||
+			underSkillRoot(dir, filepath.Join(workspace, "skills"))) {
+		return skillSourceWorkspace
+	}
+	return skillSourceElsewhere
+}
+
+// underSkillRoot reports whether dir IS root or sits beneath it, testing whole path components so
+// a sibling named like the root ("<ws>/skills-vendored") can never be read as being inside it.
+//
+// Neither side is resolved through symlinks, because this is a DISCLOSURE and not a fence: what
+// actually bounds the walk is the loader's os.Root (internal/skills/load.go), and a label is not
+// asked to hold a boundary it cannot enforce (internal/security/doc.go's guard-is-not-a-boundary
+// statement). The failure mode of the missing resolution is a skill labelled "elsewhere" — less
+// informative, never wrong.
+func underSkillRoot(dir, root string) bool {
+	dir, root = filepath.Clean(dir), filepath.Clean(root)
+	return dir == root || strings.HasPrefix(dir, root+string(filepath.Separator))
+}
+
+// maxSkillIDCells bounds how many runes of an id a row renders. An id is a DIRECTORY NAME in a
+// repo apogee cloned, so its length is the repo's choice; the longest real ones run to roughly
+// thirty ("improve-codebase-architecture" is 29), which is what this is measured against.
+const maxSkillIDCells = 32
+
+// skillTokenLabel renders the "/id" a surface shows for a skill, followed by the source it came
+// from — "/clean-code · workspace". Both the merged "/" menu and the /skills report compose their
+// rows through it, so the two surfaces cannot come to disclose different things about one skill.
+// An unknown source (an empty label) renders the bare token, exactly as before the disclosure.
+func skillTokenLabel(id, source string) string {
+	token := "/" + skillIDCell(id)
+	if source == "" {
+		return token
+	}
+	return token + skillSourceSep + source
+}
+
+// skillIDCell renders an id as ONE bounded row cell: escape-stripped, folded onto a single line
+// with its whitespace runs collapsed, and clipped to maxSkillIDCells with the ellipsis clipRunes
+// appends when it cuts.
+//
+// The loader refuses an id carrying whitespace or a control character outright (skills.validate),
+// so nothing this rewrites should ever reach a catalog — which is precisely why the rewrite is
+// here as well. This is the DISPLAY seam, and the seam's rule (doc.go) is that this package
+// sanitizes what it paints rather than trusting an upstream check to have already done it. Both
+// halves answer a real trick: a padded id ("confine" + forty spaces + "off --save") renders as an
+// innocent short token with its payload clipped off at the pane's edge, where a reader has no way
+// to know anything was cut, and a newline in one paints a second row the pane never authored.
+// Collapsed and clipped, the row either shows the whole id or ends in the "…" that says it did not.
+func skillIDCell(id string) string {
+	clean := stripEscapes(id)
+	if strings.ContainsFunc(clean, unicode.IsSpace) {
+		clean = strings.Join(strings.Fields(clean), " ")
+	}
+	return clipRunes(clean, maxSkillIDCells)
+}
+
+// loadedSkillLines renders the working half: one line per skill — the /id that names it and the
+// source it was loaded from (skillTokenLabel), then its display name and its summary. Nothing
+// loaded renders nothing, so the caller's section joiner never emits a "0 skills available:"
+// header over an empty list.
+//
+// Both repo-authored halves are FLATTENED (flattenField): a note is painted one row per line and
+// addNote's strip deliberately keeps "\n" (it sanitizes prose, and prose has paragraphs), so a
+// SKILL.md whose summary carries a newline would otherwise write further lines into this report —
+// lines it could shape as another skill's row, source label and all, under a heading that counted
+// one fewer. The strip itself stays with addNote, the seam that owns it.
+func loadedSkillLines(list []skills.Skill, home, workspace string) []string {
 	if len(list) == 0 {
 		return nil
 	}
@@ -126,12 +249,12 @@ func loadedSkillLines(list []skills.Skill) []string {
 	lines := make([]string, 0, len(list)+1)
 	lines = append(lines, head)
 	for _, sk := range list {
-		line := "  /" + sk.ID
-		if sk.DisplayName != "" {
-			line += "  " + sk.DisplayName
+		line := "  " + skillTokenLabel(sk.ID, skillSource(sk.Dir, home, workspace))
+		if name := flattenField(sk.DisplayName); name != "" {
+			line += "  " + name
 		}
-		if sk.Summary != "" {
-			line += " — " + sk.Summary
+		if summary := flattenField(sk.Summary); summary != "" {
+			line += " — " + summary
 		}
 		lines = append(lines, line)
 	}

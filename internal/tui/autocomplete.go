@@ -61,11 +61,17 @@ const (
 // sorts by it, so a row the partial prefixes outranks one it merely appears inside. It is a
 // property of the pair (partial, row), not of the row alone, which is why it is computed where the
 // row is built and not stored on the skill or the commandSpec behind it.
+//
+// source is the skill half's other row fact: WHICH source dir the skill was loaded from
+// (skillSource — "workspace", "library"), empty on every command and file row. It rides here rather
+// than being re-derived at render time because the skill it describes is in hand where the row is
+// built (skillSuggestions) and gone by the time the row is composed (slashSuggestions).
 type acItem struct {
-	value string
-	cells popupRow
-	skill bool
-	rank  int
+	value  string
+	cells  popupRow
+	skill  bool
+	rank   int
+	source string
 }
 
 // slashMatchRank scores how well name answers partial, lowest-is-best: 0 exact, 1 prefix,
@@ -359,9 +365,15 @@ func commandSuggestions(partial string, busy bool) []acItem {
 // that rides an interjection to the running Exchange, so it is as invocable mid-run as at idle. Only
 // the command half answers to the while-running policy (commandSuggestions takes m.busy()).
 //
-// A skill row follows the merged menu's schema: ["✦ /id", what the skill is]. The
+// A skill row follows the merged menu's schema: ["✦ /id · source", what the skill is]. The
 // two kinds of row therefore share one second column, so a skill's description starts exactly where
 // the command summaries above it do rather than wherever its own token happened to end.
+//
+// The source rides in the FIRST cell, beside the id, rather than in a column of its own after the
+// description (skills.go says why: the description is the repo's own text and is long, so a source
+// placed after it is the first thing a padded summary pushes off the pane). The id it sits beside
+// is bounded and folded by skillTokenLabel, so nothing a SKILL.md chooses can move it, hide it, or
+// paint a second row beneath it.
 func (m Model) slashSuggestions(partial, outside string) []acItem {
 	items := commandSuggestions(partial, m.busy())
 	for _, sk := range m.skillSuggestions(partial, outside) {
@@ -374,9 +386,11 @@ func (m Model) slashSuggestions(partial, outside string) []acItem {
 		items = append(items, acItem{
 			value: sk.value,
 			// The token cell is escape-stripped like every other cell this module builds
-			// (sessionRowCells, launchProfileRows): a skill id is a directory name a repo chose.
-			// The description cell arrives already stripped from skillSuggestions.
-			cells: popupRow{glyphSkill + " /" + stripEscapes(sk.value), skillMenuCell(sk.cells)},
+			// (sessionRowCells, launchProfileRows) — a skill id is a directory name a repo chose —
+			// and is folded and clipped besides (skillTokenLabel → skillIDCell), so the row shows
+			// the whole id or says it did not. The description cell arrives already stripped and
+			// flattened from skillSuggestions.
+			cells: popupRow{glyphSkill + " " + skillTokenLabel(sk.value, sk.source), skillMenuCell(sk.cells)},
 			skill: true,
 			rank:  sk.rank,
 		})
@@ -405,8 +419,9 @@ func skillMenuCell(cells popupRow) string {
 // displayName), excluding those the message already invokes, as two cells —
 // ["DisplayName", "Summary"] — which the merged "/" menu flattens into the single description cell
 // a skill row gets (skillMenuCell), so what each skill DOES aligns against the command summaries
-// above it. The value is the skill ID (what the accepted row splices in as a "/id" token). A nil
-// catalog yields nothing (the menu shows no skill rows).
+// above it. The value is the skill ID (what the accepted row splices in as a "/id" token), and the
+// source is which dir the skill was loaded from, for the merged menu to render beside that id. A
+// nil catalog yields nothing (the menu shows no skill rows).
 //
 // The list is ranked by match quality (slashMatchRank) and only THEN cut to maxAutocompleteItems,
 // which is the whole reason the cap moved out of the scan loop. Capping first meant the cut was
@@ -443,14 +458,23 @@ func (m Model) skillSuggestions(partial, outside string) []acItem {
 		// Both cells come from a repo-supplied SKILL.md front matter, so they are escape-stripped
 		// where the row is built — the popup module strips nothing and truncates
 		// ANSI-preservingly, and an ESC byte takes string length but no display cell, so an
-		// unstripped cell would both reach the terminal live and lie to the column math.
+		// unstripped cell would both reach the terminal live and lie to the column math. They are
+		// FLATTENED for the neighbouring reason (flattenField): stripEscapes keeps "\n" because its
+		// biggest callers are wrapped prose bodies, while a menu cell is one row — a kept newline
+		// there is a row the pane did not author, in a pane whose rows are chosen with ⏎.
 		items = append(items, acItem{
 			value: sk.ID,
-			cells: popupRow{stripEscapes(sk.DisplayName), stripEscapes(sk.Summary)},
+			cells: popupRow{
+				flattenField(stripEscapes(sk.DisplayName)),
+				flattenField(stripEscapes(sk.Summary)),
+			},
 			// The better of the two names the filter above accepted the skill on: matching an id
 			// by prefix is worth as much as matching a display name by one, and a skill must not
 			// be ranked down for the name it did NOT match through.
 			rank: min(slashMatchRank(partial, sk.ID), slashMatchRank(partial, sk.DisplayName)),
+			// The one row fact the SKILL.md does not author, carried from the only place that holds
+			// the Dir it is read off (Options.ConfigHome/Workspace are the loader's own roots).
+			source: skillSource(sk.Dir, m.opts.ConfigHome, m.opts.Workspace),
 		})
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].rank < items[j].rank })

@@ -10,6 +10,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The `/` menu and `/skills` now say where each skill came from.** A loaded skill's row carried
+  only fields the `SKILL.md` writes for itself — the id, the display name, the summary — so a skill
+  a cloned repo shipped and one from your own library read exactly alike. That is the residual the
+  id refusal leaves behind: a repo-supplied skill may still call itself `Confine`, describe itself
+  as the verb it imitates, and — matching a typed partial exactly — sort ABOVE the genuine row, so a
+  habituated `/conf`, tab, enter takes the repo's. Every row now names its source beside the id
+  (`✦ /clean-code · workspace`, `· library` for the global library, `· elsewhere` for a dir neither
+  root accounts for), and the `/skills` report labels its rows from the same renderer. The label
+  sits BEFORE the description on purpose: the description is the untrusted half and it is long, so a
+  source rendered after it would be the first thing a padded summary pushed off the pane's edge.
+  What a row renders of an id is bounded to match — folded onto one line, its whitespace runs
+  collapsed, and clipped at 32 runes with a trailing `…` — so a padded id can no longer paint as a
+  short innocent token whose payload is clipped away at the pane edge, where nothing tells the
+  reader anything was cut. The skill's display name and summary are flattened at both surfaces for
+  the same reason: a newline kept in either used to paint further rows the pane never authored,
+  which is how a forged row would have carried a false source label of its own.
+
 - **`copy_file` can now copy FROM a read-only root, such as your skills library.** A skill that
   ships a template or a checklist beside its `SKILL.md` could be READ by the model — `read_file`,
   `list_dir`, `grep` and `find_files` have reached the configured read-only roots for a while — but
