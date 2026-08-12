@@ -18,7 +18,7 @@
 
 - **Pre-production policy (current phase):** commit directly to `main` — no feature branches or PRs. Commit and push only when the owner asks.
 - **No AI attribution trailers** in commit messages (no Co-Authored-By / "generated with" lines); a local commit-msg hook strips them as a backstop.
-- Run `make check` before committing.
+- Run `make check` before committing; a multi-item skill run satisfies this once, at its closeout — per-item commits run the item's targeted acceptance instead.
 - Distribution: a Homebrew tap (`airiclenz/tap`, binary formula) plus six prebuilt archives per release (`make dist`); building from source stays fully supported. Never `go install …@latest` — proxy.golang.org still serves the deleted v1.x tags from its immutable cache, so `@latest` resolves to stale `v1.7.0`; known, not a bug (`@main` and `@<sha>` are fine).
 - Config home is a single `~/.apogee` dotdir on every OS (like `~/.aws`). Settled decision — do not propose XDG / os.UserConfigDir`.
 - The Bubble Tea `Model` is copied by value on every `Update`: never let a `strings.Builder` (or any no-copy type) be held by value anywhere it reaches. Rule and guard test are in `internal/tui/` (see `doc.go`, ADR 0011).
