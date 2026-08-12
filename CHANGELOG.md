@@ -332,6 +332,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A cloned repo can no longer relocate the skill loader's fence by symlinking a source dir.**
+  Discovery pinned its `os.Root` by opening `<workspace>/.apogee/skills` directly, and an open
+  follows symlinks in EVERY component of the path it is handed, the last one included. So a repo
+  that shipped `.apogee`, `.apogee/skills` — or `skills`, with project skills on — as a symlink
+  moved the fence itself: the walk meant to be confined to a folder in the workspace read a tree
+  anywhere on the disk, and every `SKILL.md` it found there loaded as instructions the model can be
+  handed. (A symlink BELOW a source dir was already refused; the anchor naming that dir was the
+  gap.) The loader now pins its root at the workspace — or at the apogee home for the global
+  library — and reaches the source dir THROUGH that fence, so every component of the anchor is
+  resolved inside the base it belongs to. The rule is containment, not a symlink ban: a source dir
+  symlinked to another folder within the same base still loads, while one pointing outside is
+  passed over and RECORDED, so `/skills` names the dir and why it was not scanned instead of
+  leaving a vanished library indistinguishable from an absent one. The walk is bounded to match:
+  the existing cap stopped the CATALOG at 1024 skills but never stopped the walk, so a tree that
+  loads no skills at all — a million empty folders, or one folder nested a million deep — was still
+  toured in full, on every mid-session reload. Discovery now descends at most 4096 directories and
+  8 levels below each source dir, noting where it stopped the same way.
+
 - **A skill id can no longer be a command line.** A workspace's `.apogee/skills` is an
   unconditional source and the catalog re-scans mid-session, so a cloned repo could ship a skill
   whose id is `confine off --save`. The merged `/` menu's shadow guard dropped a skill only when its

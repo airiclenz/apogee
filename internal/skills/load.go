@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -26,6 +27,19 @@ const maxSkillFileBytes = 1 << 20 // 1 MiB
 // library; the merged "/" menu only ever surfaces a handful at once.
 const maxSkills = 1024
 
+// maxSkillDirs caps how many directories ONE source dir's walk descends into. maxSkills bounds the
+// catalog, not the walk: a tree of a million skill-less folders loads zero skills and still costs a
+// million readdirs, so a hostile repo could stall discovery — which runs on every catalog reload —
+// without ever growing the catalog. A real library is a flat list of skill folders with the odd
+// bundled resource tree, so this is orders of magnitude past any honest layout.
+const maxSkillDirs = 4096
+
+// maxSkillDirDepth caps how deep below a source dir the walk descends, the other half of the same
+// bound: a single chain of nested folders is narrow enough to slip under maxSkillDirs but can still
+// be arbitrarily long. A skill folder sits ONE level down and its bundled files a level or two
+// below that (references/, scripts/), so eight levels is far past any real skill.
+const maxSkillDirDepth = 8
+
 // Sources are the injected roots Load discovers skills under (ADR 0001 — no implicit ~/.apogee).
 // Home is the apogee home (its skills/ subdir is the global library); Workspace is the project
 // root (its .apogee/skills and, when UseProjectSkills, its skills/ folder). An empty Home or
@@ -49,13 +63,27 @@ type Sources struct {
 // did not load and why.
 func Load(src Sources) (*Catalog, error) {
 	cat := newCatalog()
-	for _, dir := range sourceDirs(src) {
-		loadDir(cat, dir)
+	for _, a := range sourceAnchors(src) {
+		loadDir(cat, a)
 	}
 	return cat, cat.skipError()
 }
 
-// sourceDirs lists the skill dirs in increasing priority (later overrides earlier on an id
+// skillAnchor is one source dir kept in two halves: the trusted BASE it belongs to (the workspace
+// root, or the apogee home — both operator-chosen) and the path of the source dir below it. The
+// split is what lets loadDir pin its fence at the base and reach the source dir THROUGH it, so
+// every component below the base — `.apogee`, `skills` — is resolved inside that fence and an
+// untrusted repo cannot relocate the walk by shipping any of them as a symlink.
+type skillAnchor struct {
+	base string // the operator-chosen root the walk may not leave
+	rel  string // slash-separated path of the source dir below base
+}
+
+// dir renders the anchor as the single host path a human sees — what skip records name, what
+// Skill.Dir is stamped from, and what the /skills report lists as a source.
+func (a skillAnchor) dir() string { return filepath.Join(a.base, filepath.FromSlash(a.rel)) }
+
+// sourceAnchors lists the skill dirs in increasing priority (later overrides earlier on an id
 // collision): the project's .apogee/skills, then the project's bare skills/ (gated by
 // UseProjectSkills), and the user's global library LAST. Home going last is the ADR 0032 rule —
 // the user's own library wins any cross-source id collision, so a cloned repo can contribute a
@@ -67,33 +95,58 @@ func Load(src Sources) (*Catalog, error) {
 // function used to mirror: a SKILL.md written for either tool still loads in both — only
 // collision RESOLUTION differs (ADR 0032). Every displaced skill is recorded rather than dropped
 // (Catalog.set), so the trade is visible in the /skills report instead of silent.
-func sourceDirs(src Sources) []string {
-	var dirs []string
+func sourceAnchors(src Sources) []skillAnchor {
+	var anchors []skillAnchor
 	if src.Workspace != "" {
-		dirs = append(dirs, filepath.Join(src.Workspace, ".apogee", "skills"))
+		anchors = append(anchors, skillAnchor{base: src.Workspace, rel: ".apogee/skills"})
 		if src.UseProjectSkills {
-			dirs = append(dirs, filepath.Join(src.Workspace, "skills"))
+			anchors = append(anchors, skillAnchor{base: src.Workspace, rel: "skills"})
 		}
 	}
 	if src.Home != "" {
-		dirs = append(dirs, filepath.Join(src.Home, "skills"))
+		anchors = append(anchors, skillAnchor{base: src.Home, rel: "skills"})
+	}
+	return anchors
+}
+
+// sourceDirs renders the same list as plain host paths, for the callers that only DISPLAY the
+// sources (Provider.SourceDirs, the /skills report). Discovery itself walks the anchors, which
+// carry the base each dir must stay inside.
+func sourceDirs(src Sources) []string {
+	anchors := sourceAnchors(src)
+	dirs := make([]string, 0, len(anchors))
+	for _, a := range anchors {
+		dirs = append(dirs, a.dir())
 	}
 	return dirs
 }
 
 // loadDir walks one source dir through os.Root and loads every SKILL.md it finds, recording a
-// SkipError on the catalog per unreadable/malformed skill (a missing or unopenable dir records
-// none — it is simply skipped). The os.Root fence is the same idiom as the TUI's workspace file
-// walk: a symlink that escapes the dir cannot be followed, so a workspace skills/ symlinked at
-// host files reads nothing out of bounds. Dotted subdirs are skipped (no .git, no hidden folders).
-func loadDir(cat *Catalog, dir string) {
-	root, err := os.OpenRoot(dir)
+// SkipError on the catalog per unreadable/malformed skill (a missing source dir records none — it
+// is simply skipped). The fence is pinned by openAnchor, so it covers the ANCHOR as well as the
+// walk below it: neither a symlinked `.apogee`, `.apogee/skills` or `skills` nor a symlink deeper
+// in the tree can move the walk out of the workspace root or the apogee home. Dotted subdirs are
+// skipped (no .git, no hidden folders), and the walk is bounded by maxSkillDirs and
+// maxSkillDirDepth so an unloadably deep or wide tree terminates instead of touring the disk.
+func loadDir(cat *Catalog, a skillAnchor) {
+	dir := a.dir()
+	root, err := openAnchor(a)
 	if err != nil {
-		return // a missing/unreadable source dir is fine — there just are no skills here
+		if !errors.Is(err, fs.ErrNotExist) {
+			// An absent source dir is the normal case and stays silent; anything else — an anchor
+			// that resolves outside its base, an unreadable one — is a source the human expected
+			// to be scanned and was not, and this package does not let soft mean silent (doc.go).
+			cat.addSkip(SkipError{
+				Path: dir,
+				Err:  fmt.Errorf("skill source dir %s was not scanned: %w", dir, err),
+			})
+		}
+		return
 	}
 	defer root.Close()
 	fsys := root.FS()
 
+	dirsSeen, deepBranchNoted := 0, false
 	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil || p == "." {
 			return nil // skip an unreadable entry (incl. an escaping symlink) / the root itself
@@ -101,6 +154,28 @@ func loadDir(cat *Catalog, dir string) {
 		if d.IsDir() {
 			if strings.HasPrefix(d.Name(), ".") {
 				return fs.SkipDir // never descend into .git or other dotted dirs
+			}
+			dirsSeen++
+			if dirsSeen > maxSkillDirs {
+				// Cap reached: stop this dir's walk rather than let a planted tree own discovery's
+				// running time. Noted once, like the skill cap below.
+				cat.addSkip(SkipError{
+					Path: absSkillPath(dir, p),
+					Err: fmt.Errorf("directory cap (%d) reached; this and any later directories under %s were not scanned",
+						maxSkillDirs, dir),
+				})
+				return fs.SkipAll
+			}
+			if walkDepth(p) >= maxSkillDirDepth {
+				if !deepBranchNoted {
+					deepBranchNoted = true
+					cat.addSkip(SkipError{
+						Path: absSkillPath(dir, p),
+						Err: fmt.Errorf("depth cap (%d) reached; nothing below this directory under %s was scanned",
+							maxSkillDirDepth, dir),
+					})
+				}
+				return fs.SkipDir
 			}
 			return nil
 		}
@@ -121,6 +196,30 @@ func loadDir(cat *Catalog, dir string) {
 		return nil
 	})
 }
+
+// openAnchor pins the walk's os.Root at the source dir WITHOUT trusting the path that names it.
+// os.OpenRoot resolves its own argument like any other open — it follows symlinks in every
+// component of the anchor, including the last — so opening `<workspace>/.apogee/skills` directly
+// hands the fence to whoever authored the workspace: a repo that ships `.apogee`, `.apogee/skills`
+// or `skills` as a symlink relocates the root and the walk below it reads a tree apogee never
+// meant to scan. Anchoring at the base and reaching the source dir through Root.OpenRoot resolves
+// every component INSIDE the fence instead, which refuses exactly that relocation while still
+// following a symlink whose target stays within the base.
+//
+// The derived Root owns its own descriptor, so the base handle is released immediately.
+func openAnchor(a skillAnchor) (*os.Root, error) {
+	base, err := os.OpenRoot(a.base)
+	if err != nil {
+		return nil, err
+	}
+	defer base.Close()
+	return base.OpenRoot(a.rel)
+}
+
+// walkDepth counts how many path elements below the source dir a walk entry sits at: a skill
+// folder in the root of a source dir is 1, its references/ subfolder 2. The path is the
+// slash-separated fs.FS form the walk yields, never a host path.
+func walkDepth(p string) int { return strings.Count(p, "/") + 1 }
 
 // loadSkillFile reads and parses one SKILL.md at the dir-relative path p (read through the
 // os.Root FS, so the fence still holds) and inserts the parsed Skill, stamping its absolute Dir.

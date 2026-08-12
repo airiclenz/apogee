@@ -2,6 +2,7 @@ package skills
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -287,6 +288,22 @@ func TestLoadDottedDirsSkipped(t *testing.T) {
 	}
 }
 
+// mustMkdirAll and mustSymlink build the anchor fixtures below: a source dir whose own path
+// components are symlinks, which writeSkill cannot express.
+func mustMkdirAll(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustSymlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLoadSymlinkEscapeRefused(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on Windows")
@@ -309,5 +326,150 @@ func TestLoadSymlinkEscapeRefused(t *testing.T) {
 	cat, _ := Load(Sources{Home: home})
 	if _, ok := cat.Get("escapee"); ok {
 		t.Error("a skill reached through an escaping symlink was loaded; the os.Root fence failed")
+	}
+}
+
+// TestLoadAnchorSymlinkRefused pins the ANCHOR, which the test above does not: it covers a symlink
+// BELOW the source dir, while os.OpenRoot follows symlinks in every component OF the path naming
+// that dir. So a repo shipping `.apogee`, `.apogee/skills` or `skills` as a symlink used to move
+// the fence itself and have the walk read a tree apogee never meant to scan — and the refusal must
+// be recorded, not silent, or a source that vanishes is indistinguishable from an absent one.
+func TestLoadAnchorSymlinkRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	const escapee = "---\nid: escapee\nsummary: should not load\n---\nLEAKED"
+
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T) Sources
+	}{
+		{
+			name: "workspace .apogee/skills is the symlink",
+			setup: func(t *testing.T) Sources {
+				ws, outside := t.TempDir(), t.TempDir()
+				writeSkill(t, outside, "escapee", escapee)
+				mustMkdirAll(t, filepath.Join(ws, ".apogee"))
+				mustSymlink(t, outside, filepath.Join(ws, ".apogee", "skills"))
+				return Sources{Workspace: ws}
+			},
+		},
+		{
+			name: "workspace .apogee is the symlink",
+			setup: func(t *testing.T) Sources {
+				ws, outside := t.TempDir(), t.TempDir()
+				writeSkill(t, filepath.Join(outside, "skills"), "escapee", escapee)
+				mustSymlink(t, outside, filepath.Join(ws, ".apogee"))
+				return Sources{Workspace: ws}
+			},
+		},
+		{
+			name: "workspace skills/ is the symlink",
+			setup: func(t *testing.T) Sources {
+				ws, outside := t.TempDir(), t.TempDir()
+				writeSkill(t, outside, "escapee", escapee)
+				mustSymlink(t, outside, filepath.Join(ws, "skills"))
+				return Sources{Workspace: ws, UseProjectSkills: true}
+			},
+		},
+		{
+			// The library gets the same fence: its base is the apogee home, so a home whose skills/
+			// is linked at a folder elsewhere no longer loads. That is the cost of one uniform rule
+			// — and it is a legible cost, because the skip names the dir and why it was passed over.
+			name: "home library skills/ is the symlink",
+			setup: func(t *testing.T) Sources {
+				home, outside := t.TempDir(), t.TempDir()
+				writeSkill(t, outside, "escapee", escapee)
+				mustSymlink(t, outside, filepath.Join(home, "skills"))
+				return Sources{Home: home}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cat, err := Load(tc.setup(t))
+			if err == nil {
+				t.Error("an uncontained source dir was passed over silently; expected a soft error")
+			}
+			if _, ok := cat.Get("escapee"); ok {
+				t.Error("a skill reached through a symlinked anchor component was loaded")
+			}
+			if got := cat.Len(); got != 0 {
+				t.Errorf("catalog holds %d skills, want 0: %+v", got, cat.List())
+			}
+			if got := cat.Skipped(); len(got) != 1 || !strings.Contains(got[0].Reason(), "not scanned") {
+				t.Errorf("Skipped() = %+v, want one entry naming the source dir that was not scanned", got)
+			}
+		})
+	}
+}
+
+// The rule is CONTAINMENT, not "no symlinks": a workspace that keeps its skills in a folder of its
+// own and links .apogee/skills at it never leaves the base, so it still loads. Without this the
+// fix would read as a ban on symlinked sources, and the next reader would relax the wrong half.
+func TestLoadAnchorSymlinkInsideBaseFollowed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	ws := t.TempDir()
+	writeSkill(t, filepath.Join(ws, "vendored"), "kept", "---\nid: kept\nsummary: s\n---\nb")
+	mustMkdirAll(t, filepath.Join(ws, ".apogee"))
+	mustSymlink(t, filepath.Join("..", "vendored"), filepath.Join(ws, ".apogee", "skills"))
+
+	cat, err := Load(Sources{Workspace: ws})
+	if err != nil {
+		t.Fatalf("Load soft error on an in-base symlinked source dir: %v", err)
+	}
+	if _, ok := cat.Get("kept"); !ok {
+		t.Error("a source dir symlinked WITHIN the workspace was refused; the fence is containment, not a symlink ban")
+	}
+}
+
+// TestLoadWalkDepthBounded and its width sibling pin the other half of item 11: maxSkills caps the
+// CATALOG, so a tree that loads nothing at all — deep or wide — used to be walked in full. Both
+// caps must stop the walk while leaving the skills the walk already reached in place.
+func TestLoadWalkDepthBounded(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, "skills")
+	writeSkill(t, root, "shallow", "---\nid: shallow\nsummary: s\n---\nb")
+
+	deep := root
+	for range maxSkillDirDepth {
+		deep = filepath.Join(deep, "n")
+	}
+	writeSkill(t, deep, "buried", "---\nid: buried\nsummary: s\n---\nb")
+
+	cat, _ := Load(Sources{Home: home})
+	if _, ok := cat.Get("buried"); ok {
+		t.Errorf("a skill %d levels down was loaded; the walk must stop at %d", maxSkillDirDepth+1, maxSkillDirDepth)
+	}
+	if _, ok := cat.Get("shallow"); !ok {
+		t.Error("the shallow skill was dropped; the depth cap must not stop the whole walk")
+	}
+	if got := cat.Skipped(); len(got) != 1 || !strings.Contains(got[0].Reason(), "depth cap") {
+		t.Errorf("Skipped() = %+v, want one entry naming the depth cap", got)
+	}
+}
+
+func TestLoadWalkWidthBounded(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, "skills")
+	// Folder names sort lexically in numeric order, which is the order WalkDir visits them: the
+	// first holds a skill the walk reaches, the last one past the cap holds a skill it must not.
+	first, last := "d0000", fmt.Sprintf("d%04d", maxSkillDirs+1)
+	writeSkill(t, root, first, "---\nid: "+first+"\nsummary: s\n---\nb")
+	for i := 1; i <= maxSkillDirs; i++ {
+		mustMkdirAll(t, filepath.Join(root, fmt.Sprintf("d%04d", i)))
+	}
+	writeSkill(t, root, last, "---\nid: "+last+"\nsummary: s\n---\nb")
+
+	cat, _ := Load(Sources{Home: home})
+	if _, ok := cat.Get(last); ok {
+		t.Errorf("a skill past the %d-directory cap was loaded; the walk must stop", maxSkillDirs)
+	}
+	if _, ok := cat.Get(first); !ok {
+		t.Error("the skill the walk reached before the cap was dropped")
+	}
+	if got := cat.Skipped(); len(got) != 1 || !strings.Contains(got[0].Reason(), "directory cap") {
+		t.Errorf("Skipped() = %+v, want one entry naming the directory cap", got)
 	}
 }
