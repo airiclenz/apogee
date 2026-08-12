@@ -185,7 +185,11 @@ system-prompt-text: |
   summarise what changed. When you need the user's input or a decision,
   call the ask_user tool — never ask in plain chat text.
 
-  Always be extremely concise. Sacrifice grammar for the sake of concision.
+  Be extremely concise: answer only what was asked — no filler, no preamble.
+  Lead with the result: what you did, whether it worked, what comes next.
+  Prefer short bullet lists over long paragraphs; a short answer stays one line.
+  When asking the user to decide, give at most two options and recommend one.
+  Write paths, commands, and names exactly — never paraphrase them.
 
 # The same prompt, kept in a file instead of inline. Use one or the other: uncommenting this
 # while the text above is still active is the both-set startup error.
