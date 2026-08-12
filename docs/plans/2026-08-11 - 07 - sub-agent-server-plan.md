@@ -71,7 +71,7 @@
   - Any change to the profile machinery beyond CONSUMING `profiles.Resolve` (ADR 0044).
   - Bench runs — no default moves, no gate owed (ADR 0045 §6).
 
-## 1. Gate: the per-model-profiles plan is archived
+## 1. Gate: the per-model-profiles plan is archived — ✅ DONE (2026-08-12)
 
 **What:** Verify plan `2026-08-11 - 05` has been executed and archived:
 `docs/plans/archived/2026-08-11 - 05 - per-model-profiles-plan.md` exists, ADR 0044
@@ -85,6 +85,13 @@ consumes `profiles.Resolve` and the profile-through-one-swap machinery that plan
 docs/adr/0044-*.md internal/profiles/` all succeed.
 
 Commit: none — verification-only item; nothing to commit.
+
+**NOTES (2026-08-12):** the gate passed — archived plan `2026-08-11 - 05` (all 6 items
+✅ DONE), ADR 0044 (`accepted`), and `internal/profiles` with `Resolve` (`match.go:53`) all
+present; the one-swap `applyProfile` seam items 4/5 consume exists at
+`internal/agent/setprofile.go:78` and is used by `rebind.go:147`. Deviation from "nothing
+to commit": the ✅ marker above is itself committed, so the plan file keeps working as the
+resume state. No code changed.
 
 ## 2. Config: `sub-agents:` flag, posture keys, `context-window:` pin on servers entries
 
