@@ -99,7 +99,9 @@ func TestStripThinking_PortedOracleVectors_MatchTypeScript(t *testing.T) {
 // TestStripThinking_OrphanCloser_ImplicitLeadingSpan covers the pre-opened-template case
 // the oracle never saw: the server consumes the StartToken (or splits reasoning into
 // reasoning_content), so content carries an EndToken with no opener — live shape from
-// minimax-m3 emitting a bare "</mm:think>".
+// minimax-m3 emitting a bare "</mm:think>". The table also pins that EVERY such closer is
+// absorbed, not just the first: a model that re-opens the channel implicitly emits the shape
+// again, and a closer surviving into Visible is the leak this case exists to prevent.
 func TestStripThinking_OrphanCloser_ImplicitLeadingSpan(t *testing.T) {
 	t.Parallel()
 
@@ -151,6 +153,30 @@ func TestStripThinking_OrphanCloser_ImplicitLeadingSpan(t *testing.T) {
 			raw:          "<think>First</think>Answer",
 			wantVisible:  "Answer",
 			wantReason:   "First",
+			wantReasoned: true,
+		},
+		{
+			name:         "every orphan closer is absorbed, not just the first",
+			cfg:          mmConfig,
+			raw:          "a</mm:think>b</mm:think>c",
+			wantVisible:  "c",
+			wantReason:   "a\n\nb",
+			wantReasoned: true,
+		},
+		{
+			name:         "an orphan closer after a normal span is absorbed too",
+			cfg:          gemmaConfig,
+			raw:          "<think>First</think>second thought</think>Answer.",
+			wantVisible:  "Answer.",
+			wantReason:   "First\n\nsecond thought",
+			wantReasoned: true,
+		},
+		{
+			name:         "a span still streaming after an orphan closer stays in-flight reasoning",
+			cfg:          gemmaConfig,
+			raw:          "lead-in</think>Part 1 <think>still thinking",
+			wantVisible:  "Part 1",
+			wantReason:   "lead-in\n\nstill thinking",
 			wantReasoned: true,
 		},
 	}

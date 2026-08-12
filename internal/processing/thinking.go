@@ -37,12 +37,15 @@ type Stripped struct {
 // reasoning with an empty visible tail, and visible content is trimmed. A nil cfg — or
 // one with an empty token — returns the whole message as visible with no reasoning.
 //
-// One case goes beyond the oracle: an EndToken that appears before any StartToken closes
-// an implicit span opened at position 0. Chat templates that pre-open the thinking channel
-// (and servers that split reasoning into reasoning_content) consume the opener, so the
-// model's content starts mid-think and carries only the orphan closer — seen live as a
-// bare "</mm:think>" leaking from minimax-m3. The text before that closer is reasoning,
-// never visible content.
+// One case goes beyond the oracle: an EndToken reached with no opener of its own closes an
+// implicit span opened where the walk currently stands — position 0 for the first such closer.
+// Chat templates that pre-open the thinking channel (and servers that split reasoning into
+// reasoning_content) consume the opener, so the model's content starts mid-think and carries
+// only the orphan closer — seen live as a bare "</mm:think>" leaking from minimax-m3. The text
+// before that closer is reasoning, never visible content. A model that re-opens the channel the
+// same implicit way emits the shape again, so every orphan closer is absorbed, not just the
+// first — no stray closer survives into Visible. A closer that follows its own opener, and an
+// unclosed span still being streamed, are both untouched.
 func StripThinking(raw string, cfg *ThinkingConfig) Stripped {
 	if cfg == nil || cfg.StartToken == "" || cfg.EndToken == "" {
 		return Stripped{Visible: raw}
@@ -50,14 +53,14 @@ func StripThinking(raw string, cfg *ThinkingConfig) Stripped {
 
 	var visible, reasoning []string
 	pos := 0
-	if end := strings.Index(raw, cfg.EndToken); end != -1 {
-		if start := strings.Index(raw, cfg.StartToken); start == -1 || end < start {
-			reasoning = append(reasoning, raw[:end])
-			pos = end + len(cfg.EndToken)
-		}
-	}
 	for pos < len(raw) {
 		start := indexFrom(raw, cfg.StartToken, pos)
+		if end := indexFrom(raw, cfg.EndToken, pos); end != -1 && (start == -1 || end < start) {
+			// Orphan closer: the span it closes was opened implicitly at pos.
+			reasoning = append(reasoning, raw[pos:end])
+			pos = end + len(cfg.EndToken)
+			continue
+		}
 		if start == -1 {
 			visible = append(visible, raw[pos:])
 			break
