@@ -2,7 +2,11 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"iter"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -484,11 +488,216 @@ func TestFanOutWidth_BoundsTheGroup(t *testing.T) {
 		{"depth 2 is serial whatever the cap", 2, 4, 4, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := &Agent{depth: tc.depth, parallelAgents: tc.cap}
+			// The latch is part of an Agent's construction (construct.go), so a hand-built one
+			// gets an empty holder: nothing routed, the session cap above governs.
+			a := &Agent{depth: tc.depth, parallelAgents: tc.cap, delegation: &delegationLatch{}}
 			if got := a.fanOutWidth(tc.delegations); got != tc.want {
 				t.Errorf("fanOutWidth(%d) at depth %d cap %d = %d, want %d",
 					tc.delegations, tc.depth, tc.cap, got, tc.want)
 			}
 		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Routed fan-out width (ADR 0045 §5 — the receiving server's cap)
+// ----------------------------------------------------------------------------
+//
+// A routed delegation spends the SUB-AGENT server's slots, so that server's cap is the one that
+// bounds the group. These tests pin the choice (which cap governs), the behaviour it buys (a
+// session server pinned to serial still fans out three-wide onto a three-slot grunt box), the
+// second reader that follows for free (the hook view guided decomposition batches by), and the
+// once-per-reply snapshot that keeps a group at one width while the target moves under it.
+
+// TestDelegationCapPicksTheGoverningServer is the resolution rule alone: routed ⇒ the target's
+// cap, unrouted ⇒ the session server's live cap, and the depth-0 eligibility rule ahead of both.
+func TestDelegationCapPicksTheGoverningServer(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		depth      int
+		sessionCap int
+		target     *DelegationTarget
+		want       int
+	}{
+		{"nothing latched: the session server's cap governs", 0, 3, nil, 3},
+		{"routed: the target's cap governs", 0, 1, &DelegationTarget{ParallelAgents: 3}, 3},
+		{"routed narrow: the target REPLACES a wider session cap", 0, 4, &DelegationTarget{ParallelAgents: 1}, 1},
+		{"routed with nothing resolved: the serial floor, not the session's 4", 0, 4, &DelegationTarget{}, 1},
+		{"depth 1 is serial whatever is latched", 1, 4, &DelegationTarget{ParallelAgents: 3}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Agent{depth: tc.depth, parallelAgents: tc.sessionCap, delegation: &delegationLatch{}}
+			a.SetDelegationTarget(tc.target)
+			if got := a.delegationWidth(); got != tc.want {
+				t.Errorf("delegationWidth() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// gruntUpstream is the Sub-agent server these tests route to: an OpenAI-compatible httptest
+// endpoint answering every child with one canned reply. It is a real HTTP server because a routed
+// child dials a provider client of its own (ADR 0045, subagent.go) rather than borrowing the
+// parent's responder — so the only place to observe routed children at once is the wire.
+//
+// gate runs on net/http's goroutine before the reply streams, which is where these tests measure
+// concurrency, exactly as routedResponder's gate does for an unrouted child.
+func gruntUpstream(t *testing.T, gate func(context.Context), reply string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if gate != nil {
+			gate(r.Context())
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q},\"finish_reason\":null}]}\n\n", reply)
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// gruntTarget is a usable Delegation target pointing at endpoint with the given fan-out width.
+func gruntTarget(endpoint string, parallelAgents int) *DelegationTarget {
+	return &DelegationTarget{
+		Endpoint:       endpoint,
+		Model:          "cheap-4b",
+		ContextWindow:  32768,
+		ParallelAgents: parallelAgents,
+	}
+}
+
+// threeWayFanOutParent builds a parent whose reply delegates three tasks, at the given SESSION
+// cap, and gates each unrouted child on gate. It returns the agent, submitted and ready to Run.
+func threeWayFanOutParent(t *testing.T, sink domain.EventSink, sessionCap int, gate func(context.Context)) *Agent {
+	t.Helper()
+	up := newRoutedResponder().
+		route("delegate three things", nil, fanOutScript(
+			[2]string{"c1", "task one"}, [2]string{"c2", "task two"}, [2]string{"c3", "task three"})).
+		route("task one", gate, contentScript("child one done")).
+		route("task two", gate, contentScript("child two done")).
+		route("task three", gate, contentScript("child three done")).
+		route("delegate three things", nil, contentScript("parent done"))
+
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.ParallelAgents = sessionCap
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate three things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	return a
+}
+
+// TestFanOut_RoutedWidthComesFromTheTargetCap is the item's core acceptance, and the contrast is
+// the whole point: the SESSION server is pinned to 1, which TestFanOut_CapOneKeepsTheGroupSerial
+// proves is serial with nothing latched — yet a three-slot Sub-agent server runs all three
+// children at once, because the slots being spent are its own (ADR 0045 §5).
+func TestFanOut_RoutedWidthComesFromTheTargetCap(t *testing.T) {
+	sink := &recordingSink{}
+	probe := newConcurrencyProbe(3, 3*time.Second)
+	srv := gruntUpstream(t, probe.enter, "grunt child done")
+
+	a := threeWayFanOutParent(t, sink, 1 /* the session server is serial */, nil)
+	a.SetDelegationTarget(gruntTarget(srv.URL, 3))
+
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("parent status = %q, want the Exchange to complete", res.Status)
+	}
+
+	if peak := probe.peakInFlight(); peak != 3 {
+		t.Errorf("peak children in flight = %d, want 3 (the session server's cap of 1 governed a routed group)", peak)
+	}
+	results := subAgentResults(sink.events)
+	if len(results) != 3 {
+		t.Fatalf("depth-0 tool results = %d, want 3", len(results))
+	}
+	if results[0].CallID != "c1" || results[1].CallID != "c2" || results[2].CallID != "c3" {
+		t.Errorf("results committed as %q,%q,%q; want the emitted call order c1,c2,c3",
+			results[0].CallID, results[1].CallID, results[2].CallID)
+	}
+	for i, r := range results {
+		if !strings.Contains(r.Content, "grunt child done") {
+			t.Errorf("result %d = %q, want the Sub-agent server's reply (the child ran on the parent's Upstream)", i, r.Content)
+		}
+	}
+}
+
+// TestFanOut_LatchClearedMidGroupKeepsTheGroupWidth pins the once-per-reply snapshot: the width is
+// resolved before the first child spawns and travels as an argument, so a target cleared while the
+// group is in flight cannot narrow the running pool. The children AFTER the clear spawn unrouted
+// and answer on the parent's own Upstream — which is exactly why the probe is shared by both
+// servers: where each child lands is a race, that all three ran AT ONCE is not.
+func TestFanOut_LatchClearedMidGroupKeepsTheGroupWidth(t *testing.T) {
+	sink := &recordingSink{}
+	probe := newConcurrencyProbe(3, 3*time.Second)
+
+	var parent atomic.Pointer[Agent]
+	var once sync.Once
+	// The first routed child to reach the Sub-agent server drops the target — a beat observing the
+	// grunt box gone, landing squarely mid-group — and only then joins the rendezvous.
+	srv := gruntUpstream(t, func(ctx context.Context) {
+		once.Do(func() {
+			if p := parent.Load(); p != nil {
+				p.SetDelegationTarget(nil)
+			}
+		})
+		probe.enter(ctx)
+	}, "grunt child done")
+
+	a := threeWayFanOutParent(t, sink, 1 /* falling back to this would be serial */, probe.enter)
+	parent.Store(a)
+	a.SetDelegationTarget(gruntTarget(srv.URL, 3))
+
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if peak := probe.peakInFlight(); peak != 3 {
+		t.Errorf("peak children in flight = %d, want 3 (the group re-read the latch and narrowed mid-flight)", peak)
+	}
+	if results := subAgentResults(sink.events); len(results) != 3 {
+		t.Errorf("depth-0 tool results = %d, want 3", len(results))
+	}
+	if a.delegationTarget() != nil {
+		t.Error("target still latched after the mid-group clear")
+	}
+}
+
+// TestRoutedWidthReachesTheHookView pins the second reader (ADR 0039's one width everywhere): the
+// width stamped onto the hook-facing view is the ROUTED one, so guided decomposition's
+// min(cap, remaining) batch follows the Sub-agent server's cap with no rule of its own — and falls
+// back to the session server's the moment the target is gone.
+func TestRoutedWidthReachesTheHookView(t *testing.T) {
+	t.Parallel()
+
+	cfg := subAgentConfig(&recordingSink{}, domain.ModeAskBefore)
+	cfg.ParallelAgents = 1
+	a, err := newAgent(cfg, &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	a.SetDelegationTarget(gruntTarget("http://grunt.local:1111", 3))
+	req, _ := a.buildRequest(0)
+	if got := req.View().ParallelAgents(); got != 3 {
+		t.Errorf("routed request view width = %d, want the target's 3", got)
+	}
+	if got := a.loopView(0).ParallelAgents(); got != 3 {
+		t.Errorf("routed tool-stage view width = %d, want the target's 3", got)
+	}
+
+	a.SetDelegationTarget(nil)
+	req, _ = a.buildRequest(0)
+	if got := req.View().ParallelAgents(); got != 1 {
+		t.Errorf("unrouted request view width = %d, want the session server's 1", got)
 	}
 }

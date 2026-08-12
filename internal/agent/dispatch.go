@@ -76,6 +76,12 @@ func partitionDispatch(calls []domain.ToolCall) (leaves, delegations []domain.To
 // at depth 0 when the Parallel agents cap (ADR 0039 decision 2) allows more than one, and 1 —
 // meaning "run the group serially, exactly as this loop always has" — otherwise. A group of
 // one is never worth a pool; everything else is delegationWidth's rule.
+//
+// dispatchTools calls it ONCE per reply and hands the number DOWN as an argument, which is what
+// makes a group's width immutable for the life of that group: the Delegation target it may have
+// been resolved from is re-stated on every heartbeat of the Sub-agent server (ADR 0045), so a
+// beat landing between the first child and the last must not be able to re-size a pool that is
+// already running. One reply, one width, however many beats cross it.
 func (a *Agent) fanOutWidth(delegations int) int {
 	if delegations < 2 {
 		return 1
@@ -91,15 +97,35 @@ func (a *Agent) fanOutWidth(delegations int) int {
 // inline, so there is no slot accounting across levels and no way for a nested fan-out to hold
 // slots its own children need. It is one rule with two readers — the pool below sizes itself by
 // it, and buildRequest stamps it onto the hook-facing view (LoopView.ParallelAgents) so a
-// Mechanism synthesizing delegations batches by the same width the engine will honour.
+// Mechanism synthesizing delegations batches by the same width the engine will honour. That
+// second reader is why guided decomposition's batch needs nothing of its own to follow a routed
+// cap (ADR 0045 §5): its min(cap, remaining) reads the view, the view carries this number, and
+// this number already knows which server the children will run on.
 func (a *Agent) delegationWidth() int {
 	if a.depth != 0 {
 		return 1
 	}
-	if width := a.parallelAgentsCap(); width > 1 {
+	if width := a.delegationCap(); width > 1 {
 		return width
 	}
 	return 1
+}
+
+// delegationCap reports WHOSE Parallel agents cap governs this agent's delegations. The slots a
+// fan-out spends belong to the server the children actually run on, so a latched Delegation
+// target answers with ITS cap — the Sub-agent server's pin, else the slot count its own heartbeat
+// observed (ADR 0045 §5) — and the bound session server's live cap answers otherwise. The
+// otherwise is also the fallback: a target that goes unusable puts the children back on this
+// session's Upstream, and the width follows them home on the next dispatch.
+//
+// A routed cap REPLACES rather than bounds: a grunt box with more slots widens the fan-out past
+// the orchestrator's, and a single-slot one narrows it to serial however many the session server
+// advertises. Both directions are the same rule — the width follows the work, not the asker.
+func (a *Agent) delegationCap() int {
+	if target := a.delegationTarget(); target != nil {
+		return target.ParallelAgents
+	}
+	return a.parallelAgentsCap()
 }
 
 // dispatchSerially is the loop this dispatch has always been: one call at a time, each carried

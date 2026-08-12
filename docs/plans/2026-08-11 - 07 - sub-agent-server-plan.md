@@ -214,7 +214,7 @@ PRIVILEGES (mode/approver/confiner/tools), which routing never widens, and
 
 Commit: `feat(engine): routed sub-agents build upstream, window, profile, and posture from the delegation target`
 
-## 5. Engine: routed fan-out width comes from the target's cap
+## 5. Engine: routed fan-out width comes from the target's cap — ✅ DONE (2026-08-12)
 
 **What:** Depends on item 4. In `internal/agent/dispatch.go` (width resolution around
 lines 76-108) and the guided-decomposition batch sizing: when the latch snapshot at
@@ -228,6 +228,23 @@ so one fan-out group never mixes widths mid-group.
 latch cleared mid-group does not change that group's width.
 
 **Acceptance:** `go test ./internal/agent/ -race` passes; `make check` passes.
+
+**NOTES (2026-08-12):** four deviations from the item's literal text. (a) The guided-decomposition batch
+sizing was NOT touched: GD's `min(cap, remaining)` reads `LoopView.ParallelAgents()`, which
+`buildRequest`/`loopView` stamp from `delegationWidth()` — so routing the cap through that one function
+delivers the same resolved number to the GD batch by construction, and a second rule in
+`guideddecomposition.go` would be exactly the duplication ADR 0039's one-width-everywhere forbids. Pinned
+at the stamping seam instead (`TestRoutedWidthReachesTheHookView`). (b) "Snapshot ONCE per reply dispatch"
+likewise needed no code change: `dispatchTools` already resolved the width once and handed it DOWN as an
+argument, so the property was structural — it is now documented on `fanOutWidth` and pinned by
+`TestFanOut_LatchClearedMidGroupKeepsTheGroupWidth`. (c) Two doc comments in `agent.go` beyond the item's
+named file: `SetParallelAgents` and `parallelAgentsCap` both claimed the session server's cap simply WAS
+the depth-0 fan-out width, which this item falsifies; amended in the quote-reverse voice, pointing at
+`delegationCap` as the choice. (d) `fanout_test.go`'s existing hand-built `&Agent{depth:…, parallelAgents:…}`
+gained `delegation: &delegationLatch{}` — the new latch read nil-panics on a partially constructed Agent,
+and `construct.go` is the only production constructor, so the test was corrected rather than the type made
+nil-receiver-tolerant. No CHANGELOG bullet: this item's Acceptance omits one, routing staying unreachable
+until item 6 wires a target.
 
 Commit: `feat(engine): routed fan-out width comes from the delegation target's cap`
 

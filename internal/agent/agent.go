@@ -469,6 +469,11 @@ func (a *Agent) SetContextFiles(enable bool, names []string) {
 // means serial, which is the floor this loop has always run at, so a host that resolves nothing
 // leaves the engine exactly where it was.
 //
+// It is the cap the SESSION server advertises, which is the width of every fan-out that actually
+// runs there: while a Delegation target is latched the children run somewhere else and the width
+// comes from that server instead (ADR 0045 §5, delegationCap). Hosts push both regardless — the
+// two monitors observe two servers — and the one that governs is decided per dispatch.
+//
 // It is the SERVER's number rather than the session's: the host resolves it from the bound entry's
 // `parallel-agents:` pin, else that server's advertised slot count, and re-states it whenever the
 // session moves or a heartbeat observes a different one. That is why it belongs to the anytime-safe
@@ -482,8 +487,9 @@ func (a *Agent) SetParallelAgents(width int) {
 }
 
 // parallelAgentsCap reports the live fan-out width under the lock, so the dispatch read is race-free
-// against a concurrent SetParallelAgents. It is the ONE read seam for the cap: cfg.ParallelAgents is
-// only the construction seed.
+// against a concurrent SetParallelAgents. It is the ONE read seam for the SESSION server's cap:
+// cfg.ParallelAgents is only the construction seed. Which cap a dispatch then GOVERNS by — this one
+// or a latched Delegation target's — is delegationCap's single choice (dispatch.go, ADR 0045 §5).
 func (a *Agent) parallelAgentsCap() int {
 	a.parallelAgentsMu.RLock()
 	defer a.parallelAgentsMu.RUnlock()
