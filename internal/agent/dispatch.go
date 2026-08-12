@@ -680,6 +680,10 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 // (confinement-execution-contract §2.2). A subprocess tool that cannot establish the box at run
 // time returns ErrConfinementUnavailable rather than running unconfined; executeTool surfaces
 // that as dispatchConfinementUnavailable so the caller follows the verdict's demote fallback.
+// That translation happens ONLY when box is non-nil: with no box no confinement was asked for,
+// no caller has a demote to follow, and a tool claiming otherwise (a third-party or
+// host-registered one) is treated as any other erroring tool — an ErrorEvent and an error
+// result — so the claim is never swallowed into an empty result.
 // An ExternalEffectTool routes through the injected ExternalEffects boundary (ADR 0008) when
 // the host supplied one; else it runs live.
 func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, box *domain.ConfinementBox) (result domain.ToolResult, outcome dispatchOutcome) {
@@ -729,9 +733,12 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		// A subprocess tool that could not confine its command (the backend returned
 		// ErrConfinementUnavailable when asked to wrap the cmd) reports it as a Go error rather
 		// than running unconfined. Surface it as the demote signal so the caller follows the
-		// verdict's fallback (Resolution D4). This only arises on a Confine call (the only path
-		// that installs a Confinement handle).
-		if errors.Is(err, domain.ErrConfinementUnavailable) {
+		// verdict's fallback (Resolution D4). The box test is what MAKES that true rather than
+		// assuming it: only a Confine call installs a handle, so only a Confine call can have a
+		// demote to fall back to. Outside one, no caller reads the outcome, so translating there
+		// would swallow the claim into an empty result — the sentinel takes the ordinary
+		// tool-error branch below instead, reaching the human and the model.
+		if box != nil && errors.Is(err, domain.ErrConfinementUnavailable) {
 			return domain.ToolResult{}, dispatchConfinementUnavailable
 		}
 		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: call.Tool, Err: err.Error()})

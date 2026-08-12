@@ -139,7 +139,7 @@ existing exec test harness in the package.
 
 **Commit:** `fix(tools): a nil-Confiner confinement handle fails closed instead of running unconfined`
 
-## 3. An unconfined run never swallows a confinement-unavailable claim
+## 3. An unconfined run never swallows a confinement-unavailable claim — ✅ DONE (2026-08-12)
 
 **What:** `internal/agent/dispatch.go:731` — `executeTool` translates a tool's
 `ErrConfinementUnavailable` into `dispatchConfinementUnavailable` regardless of whether a box

@@ -564,6 +564,70 @@ func TestDisposition_RuntimeConfineUnavailable_DemotesToApproval(t *testing.T) {
 	})
 }
 
+// unconfinableClaimTool returns ErrConfinementUnavailable from Execute although nothing asked
+// it to confine anything — the third-party or host-registered tool that reports the sentinel
+// outside a Confine verdict. It is read-only, so the disposition resolves it to a plain Run and
+// no Confinement handle is ever installed for it.
+type unconfinableClaimTool struct {
+	name string
+	ran  *int
+}
+
+func (t unconfinableClaimTool) Name() string            { return t.name }
+func (t unconfinableClaimTool) Description() string     { return t.name + " (read-only)" }
+func (t unconfinableClaimTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (t unconfinableClaimTool) ReadOnly() bool          { return true }
+
+func (t unconfinableClaimTool) Execute(_ context.Context, _ domain.ToolCall) (domain.ToolResult, error) {
+	if t.ran != nil {
+		*t.ran++
+	}
+	return domain.ToolResult{}, fmt.Errorf("confine %s: %w", t.name, domain.ErrConfinementUnavailable)
+}
+
+// TestDispatch_RunVerdictSurfacesConfinementUnavailableAsError is the counterpart of the demote
+// test above: the SAME sentinel arriving on a call that was never confined must not be read as a
+// demote signal. Only a Confine verdict installs a box and only its caller follows a fallback,
+// so translating the sentinel on a Run verdict would hand executeRun an outcome it ignores — the
+// call recorded EXECUTED with an empty result, no event, and the tool's "could not confine"
+// claim gone from both the transcript and the human's view. It must take the ordinary tool-error
+// branch instead: an ErrorEvent for the human, an error result for the model, no demote.
+func TestDispatch_RunVerdictSurfacesConfinementUnavailableAsError(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	ran := 0
+	claimer := unconfinableClaimTool{name: "probe", ran: &ran}
+	conf := &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}}
+	cfg := autoConfig(sink, conf, true, claimer)
+	approver := &fakeApprover{decision: domain.ApprovalAllow}
+	cfg.Approver = approver
+
+	driveToolCall(t, cfg, sink, "c1", "probe", `{}`)
+
+	if ran != 1 {
+		t.Fatalf("tool ran %d times; a read-only tool resolves to Run and executes once", ran)
+	}
+	res, ok := lastToolResult(sink.events)
+	if !ok {
+		t.Fatal("no ToolResultEvent; the model must receive the tool's failure, not silence")
+	}
+	if !res.IsError || !strings.Contains(res.Content, "confinement unavailable") {
+		t.Errorf("tool result = %+v; want an error result carrying the tool's confinement claim", res)
+	}
+	if !hasEvent[domain.ErrorEvent](sink.events) {
+		t.Error("no ErrorEvent; an unconfined call's confinement claim must reach the human")
+	}
+	for _, e := range sink.events {
+		if ee, isErr := e.(domain.ErrorEvent); isErr && strings.Contains(ee.Err, "demoting") {
+			t.Errorf("demote event %q fired; nothing was confined, so there is no box to demote from", ee.Err)
+		}
+	}
+	if approver.calls != 0 {
+		t.Errorf("Approver consulted %d times; a Run verdict's tool error must not open an approval", approver.calls)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // The Approver seam — a Gate is fail-closed on every way it can fail
 // ----------------------------------------------------------------------------

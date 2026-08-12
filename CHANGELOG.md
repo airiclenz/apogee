@@ -289,6 +289,15 @@ point is a **minor** bump, not a breaking change.
   instead of confining — are untouched and still run exactly as before. Nothing in apogee's own
   tools could produce the broken shape today; the door is now shut for what can.
 
+- **A tool reporting that it could not confine something is never answered with silence.** apogee
+  read that report as its signal to demote a fenced run to an approval — but on a call nothing had
+  been asked to fence, no demote was waiting for it: the call was recorded as executed, no error
+  reached you, and the model was handed an empty result for a tool that had in fact refused to run.
+  Any tool you or an extension registers could land there. Such a report now behaves like any other
+  tool failure on an unfenced call — the error is shown and the model is told the call failed —
+  while a genuinely fenced run that cannot establish its fence still demotes to the approval prompt
+  exactly as before.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added
