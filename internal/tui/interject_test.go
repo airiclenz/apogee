@@ -975,7 +975,7 @@ func TestAcceptIdleOnlyCommandWhileRunningNotesAndKeepsTheDraft(t *testing.T) {
 
 	m.input.SetValue("fix the parser /clear")
 	m.input.MoveToEnd()
-	m = m.recomputeAutocomplete()
+	m, _ = m.recomputeAutocomplete()
 	if !m.autocomplete.active {
 		t.Fatalf("precondition: the menu did not open on the trailing token")
 	}
@@ -1011,7 +1011,7 @@ func TestAcceptSkillWhileRunningStagesTheID(t *testing.T) {
 
 	m.input.SetValue("also /revi")
 	m.input.MoveToEnd()
-	m = m.recomputeAutocomplete()
+	m, _ = m.recomputeAutocomplete()
 	if !m.autocomplete.active || m.autocomplete.kind != acCommand {
 		t.Fatalf("autocomplete = %+v; want the merged menu open on the skill token", m.autocomplete)
 	}

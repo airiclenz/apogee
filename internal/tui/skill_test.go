@@ -141,7 +141,7 @@ func TestAcceptSkillRowSeatsTheCaretOnAWrappedDraft(t *testing.T) {
 			}
 			m.input.SetValue(tc.first + "\nplease /rev")
 			m.input.MoveToEnd()
-			m = m.recomputeAutocomplete()
+			m, _ = m.recomputeAutocomplete()
 			if len(m.autocomplete.items) == 0 {
 				t.Fatalf("no completion offered for the /rev token: %+v", m.autocomplete)
 			}
@@ -590,19 +590,44 @@ func reloadOpts() (Options, *int) {
 	return o, &reloads
 }
 
-// Opening the merged "/" menu re-scans the catalog exactly once, and the menu then lists the skill
-// the reload discovered — the live refresh a skill added since launch depends on. It is
-// edge-triggered on the REGION, so typing on inside the open menu must not walk the disk again.
+// runCmd runs a Cmd off the Update loop as the runtime would and feeds the message it produced back
+// into the model, returning what that fold left. A nil Cmd or a Cmd that reports nothing changes
+// nothing, which is exactly the runtime's behaviour.
+func runCmd(t *testing.T, m Model, cmd tea.Cmd) Model {
+	t.Helper()
+	if cmd == nil {
+		return m
+	}
+	msg := cmd()
+	if msg == nil {
+		return m
+	}
+	return step(t, m, msg)
+}
+
+// Opening the merged "/" menu re-scans the catalog exactly once, OFF the Update goroutine: the
+// keypress dispatches the walk as a Cmd rather than running it inline, and the menu lists the skill
+// that walk discovered once its message lands — the live refresh a skill added since launch depends
+// on, now costing the render loop nothing. It is edge-triggered on the REGION, so typing on inside
+// the open menu must not walk the disk again.
 func TestSlashMenuReloadsTheCatalogOnOpen(t *testing.T) {
 	o, reloads := reloadOpts()
 	m := newTestModelEng(t, &fakeEngine{}, o)
 
-	m = step(t, m, keyRune('/')) // the "/" opens the merged menu → one reload
-	if *reloads != 1 {
-		t.Fatalf("opening the merged menu triggered %d reloads, want exactly 1", *reloads)
+	m, cmd := stepCmd(t, m, keyRune('/')) // the "/" opens the merged menu → one reload, dispatched
+	if cmd == nil {
+		t.Fatal("opening the merged menu returned no Cmd; the re-scan must not run on the Update loop")
+	}
+	if *reloads != 0 {
+		t.Fatalf("the re-scan ran inline during Update (%d reloads); it belongs on the Cmd goroutine", *reloads)
 	}
 	if !m.autocomplete.active || m.autocomplete.kind != acCommand {
 		t.Fatalf("merged menu not open after '/': %+v", m.autocomplete)
+	}
+
+	m = runCmd(t, m, cmd) // the walk runs off the loop and reports back
+	if *reloads != 1 {
+		t.Fatalf("opening the merged menu triggered %d reloads, want exactly 1", *reloads)
 	}
 	var got []string
 	for _, it := range m.autocomplete.items {
@@ -613,16 +638,62 @@ func TestSlashMenuReloadsTheCatalogOnOpen(t *testing.T) {
 	}
 
 	// Typing further inside the already-open region must NOT re-scan disk (edge-triggered on open).
-	m = step(t, m, keyRune('f'))
+	m, cmd = stepCmd(t, m, keyRune('f'))
+	m = runCmd(t, m, cmd)
 	if *reloads != 1 {
 		t.Errorf("typing inside the open menu re-scanned: %d reloads, want it to stay 1", *reloads)
 	}
 }
 
-// A nil ReloadSkills is simply a no-op (no panic) — the existing catalog stays as loaded.
+// The reload's message repaints the menu the human left open — and leaves their highlighted row
+// where it was. The walk now finishes after the keystroke, so a re-derivation that reset the
+// selection would move the highlight out from under someone already arrowing down the list.
+func TestSkillsReloadedKeepsTheHighlightedRow(t *testing.T) {
+	o, _ := reloadOpts()
+	m := newTestModelEng(t, &fakeEngine{}, o)
+
+	m, cmd := stepCmd(t, m, keyRune('/'))
+	m = step(t, m, keyDown()) // the human moves off the first row while the walk is still running
+	want := m.autocomplete.items[m.autocomplete.selected].value
+	if m.autocomplete.selected == 0 {
+		t.Fatalf("precondition: the highlight did not move off row 0: %+v", m.autocomplete)
+	}
+
+	m = runCmd(t, m, cmd)
+	if got := m.autocomplete.items[m.autocomplete.selected].value; got != want {
+		t.Errorf("the reload moved the highlight to %q, want it left on %q", got, want)
+	}
+}
+
+// A reload landing after the menu was dismissed repaints nothing. The walk outlives the keystroke
+// that asked for it now, so esc has to hold against a result arriving afterwards — a dropdown that
+// painted itself back a moment after being dismissed is the one outcome esc exists to prevent.
+func TestSkillsReloadedAfterEscRepaintsNothing(t *testing.T) {
+	o, reloads := reloadOpts()
+	m := newTestModelEng(t, &fakeEngine{}, o)
+
+	m, cmd := stepCmd(t, m, keyRune('/'))
+	m = step(t, m, keyEsc()) // dismissed while the walk is still running
+	if m.autocomplete.active {
+		t.Fatalf("precondition: esc did not dismiss the menu: %+v", m.autocomplete)
+	}
+
+	m = runCmd(t, m, cmd) // the walk lands on a menu that is no longer there
+	if *reloads != 1 {
+		t.Fatalf("the dispatched walk did not run: %d reloads, want 1", *reloads)
+	}
+	if m.autocomplete.active {
+		t.Errorf("a reload landing after esc re-opened the menu: %+v", m.autocomplete)
+	}
+}
+
+// A nil ReloadSkills is simply a no-op (no panic, no Cmd) — the existing catalog stays as loaded.
 func TestSlashMenuReloadNilSafe(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts()) // a catalog, but no ReloadSkills
-	m = step(t, m, keyRune('/'))                        // must not panic with a nil ReloadSkills
+	m, cmd := stepCmd(t, m, keyRune('/'))               // must not panic with a nil ReloadSkills
+	if cmd != nil {
+		t.Error("an unwired ReloadSkills scheduled a Cmd; there is nothing for it to run")
+	}
 	if !m.autocomplete.active || m.autocomplete.kind != acCommand {
 		t.Fatalf("the menu did not open with a nil ReloadSkills: %+v", m.autocomplete)
 	}

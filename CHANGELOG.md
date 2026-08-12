@@ -332,6 +332,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Opening the `/` menu no longer stalls the screen while the skill catalog is re-scanned.** The
+  merged menu re-scans the skill source dirs whenever the caret enters a `/` token, so a skill
+  written since launch both shows in the menu and resolves when invoked. That scan ran on the same
+  goroutine that draws the screen: the keystroke which opened the menu waited on a full walk of
+  every source dir before the frame it was typed into could be painted, and every other message the
+  loop had to handle — streamed reply tokens included — waited behind it. On a large library, a
+  network-mounted home, or a workspace tree a cloned repo made big on purpose, that is long enough
+  to read as a hang. The walk now runs off the loop as a command and reports back when it finishes
+  (ADR 0011's division: disk work on a worker, its result as a message). The menu opens immediately
+  over the catalog as it stood and repaints over the fresh one the moment the scan lands. Two
+  things follow from the scan outliving the keystroke, and both are held: the highlighted row
+  survives the repaint — matched by name, not by index — so a scan finishing while you are arrowing
+  down the list cannot move the selection out from under you, and a menu you dismissed with esc
+  stays dismissed instead of being painted back by a result arriving after it. The `/skills` report
+  still scans inline, where the walk IS the answer you asked for rather than a side effect of a
+  keystroke.
+
 - **A cloned repo can no longer relocate the skill loader's fence by symlinking a source dir.**
   Discovery pinned its `os.Root` by opening `<workspace>/.apogee/skills` directly, and an open
   follows symlinks in EVERY component of the path it is handed, the last one included. So a repo

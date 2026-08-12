@@ -54,6 +54,10 @@ type promptEditor struct {
 	// false→true transition) rather than on every keystroke inside it. It follows the region
 	// itself, not autocomplete.active, so a region that momentarily shows no matches still
 	// counts as open and does not re-reload on the next matching keystroke.
+	//
+	// It is also what says whether a finished re-scan is owed a repaint (foldSkillsReloaded), which
+	// is why dismissAutocomplete clears it: a menu esc dismissed, or one a modal took the frame from,
+	// is not a region a walk landing afterwards may paint back.
 	skillRegion bool
 
 	// files memoises the workspace listing behind the "@" autocomplete so a typing burst reuses

@@ -201,7 +201,7 @@ func TestModalPromptDismissesTheDropdown(t *testing.T) {
 				m := modelWithOverlayRoomAt(t, 80, 30, Options{Workspace: "."})
 				m.state = stateRunning
 				m.input.SetValue(d.value)
-				m = m.recomputeAutocomplete()
+				m, _ = m.recomputeAutocomplete()
 				m.layout()
 				if !m.autocomplete.active {
 					t.Fatalf("the %q menu did not open — test premise broken", d.value)

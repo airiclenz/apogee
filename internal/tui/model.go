@@ -632,7 +632,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		if m.state == stateIdle || m.state == stateRunning {
-			m = m.recomputeAutocomplete() // re-derive the overlay from the pasted-into input (reloads on "/" menu open)
+			var reload tea.Cmd
+			m, reload = m.recomputeAutocomplete() // re-derive the overlay from the pasted-into input
+			cmd = tea.Batch(cmd, reload)          // a "/" menu the paste opened owes a catalog re-scan, off the loop
 		}
 		m.layout() // re-flow: the box auto-grows as the pasted text wraps to more rows
 		return m, cmd
@@ -863,6 +865,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// Sessions.Load(id) returned: restore the record into the live engine and repaint its
 		// scrollback, or note the failure with the view left untouched (sessions.go).
 		return m, m.resumeLoaded(msg)
+
+	case skillsReloadedMsg:
+		// The catalog re-scan the merged "/" menu dispatched when it opened has finished and swapped
+		// in a fresh snapshot on the shared provider: repaint the dropdown over it, so a skill
+		// written since launch shows in the menu that asked for the walk (autocomplete.go). The walk
+		// itself ran on the Cmd goroutine, which is the point — a keystroke no longer waits on it.
+		m.foldSkillsReloaded()
+		return m, nil
 
 	case recallLoadedMsg:
 		// Recall.LoadPrompts() returned (Init's start-up read): install what this workspace has
@@ -1216,19 +1226,20 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "backspace", "delete":
 				m.deleteSelection(sel)
+				var reload tea.Cmd
 				if m.state == stateIdle || m.state == stateRunning {
-					m = m.recomputeAutocomplete() // the value changed: re-derive the overlay, as a typed edit does
+					m, reload = m.recomputeAutocomplete() // the value changed: re-derive the overlay, as a typed edit does
 				}
 				m.layout() // re-flow: the box shrinks as the cut unwraps rows
-				return m, nil
+				return m, reload
 			}
 		}
 		if m.input.Value() == "" && msg.String() == "backspace" {
 			// Backspace on an empty input un-does the last thing staged: it lifts the newest queued
 			// interjection back into the box. Nothing else is staged beside the text any more — a
 			// skill is a /token IN it, deleted like any other word.
-			if popped, ok := m.popInterjection(); ok {
-				return popped, nil
+			if popped, reload, ok := m.popInterjection(); ok {
+				return popped, reload
 			}
 		}
 		// ↑/↓ walk this workspace's recorded prompts while the box is empty or holds an untouched
@@ -1242,7 +1253,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		if m.state == stateIdle || m.state == stateRunning {
-			m = m.recomputeAutocomplete() // re-derive the overlay from the edited input (reloads on "/" menu open)
+			var reload tea.Cmd
+			m, reload = m.recomputeAutocomplete() // re-derive the overlay from the edited input
+			cmd = tea.Batch(cmd, reload)          // a "/" menu this keystroke opened owes a catalog re-scan, off the loop
 		}
 		m.layout() // re-flow: the input box auto-grows as the message wraps to more rows
 		return m, cmd

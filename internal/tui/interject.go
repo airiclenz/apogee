@@ -204,7 +204,9 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 	return m, record
 }
 
-// popInterjection lifts the NEWEST staged row back into the editor, reporting whether it did. It
+// popInterjection lifts the NEWEST staged row back into the editor, reporting whether it did — and
+// carrying out the Cmd the restored draft owes, which is a skill-catalog re-scan when the text it put
+// back leaves the caret in a "/" menu region (recomputeAutocomplete). It
 // is Backspace's meaning on an empty box: the same key that deletes the last character deletes the
 // last thing queued, and hands it back editable rather than merely discarding it (latest-wins, the
 // mirror of the oldest-first delivery order).
@@ -217,24 +219,25 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 // It is deliberately confined to the states where the queue is the human's to edit — idle (a held
 // queue) and running (a live one). At an approval or an ask the box belongs to the decision in
 // front of it, and popping a queued message into the answer field would answer the wrong question.
-func (m Model) popInterjection() (Model, bool) {
+func (m Model) popInterjection() (Model, tea.Cmd, bool) {
 	if m.state != stateIdle && m.state != stateRunning {
-		return m, false
+		return m, nil, false
 	}
 	n := len(m.pendingInterjections)
 	if n == 0 {
-		return m, false
+		return m, nil, false
 	}
 	row := m.pendingInterjections[n-1]
 	if !m.box.withdraw(row.id) {
-		return m, false
+		return m, nil, false
 	}
 	m.pendingInterjections = m.pendingInterjections[:n-1]
 	m.input.SetValue(row.raw)
 	m.input.MoveToEnd()
-	m = m.recomputeAutocomplete() // the restored text may re-open the "@file" overlay it was typed with
-	m.layout()                    // the box regrows around the restored text; the strip loses a row
-	return m, true
+	var reload tea.Cmd
+	m, reload = m.recomputeAutocomplete() // the restored text may re-open the overlay it was typed with
+	m.layout()                            // the box regrows around the restored text; the strip loses a row
+	return m, reload, true
 }
 
 // foldInterjected records the rows the worker COMMITTED (interjectedMsg) and takes them off the

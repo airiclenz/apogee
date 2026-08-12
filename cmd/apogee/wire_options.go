@@ -208,6 +208,11 @@ func (w *rootWiring) options() tui.Options {
 		// on the shared Provider — the same one Config.Skills resolves against — so a skill added
 		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals
 		// unusable), so it is dropped.
+		//
+		// The renderer calls this from a Cmd goroutine, off its Update loop, so it runs concurrently
+		// with the loop resolving skills against the same Provider. That is what Provider is for: it
+		// swaps a whole immutable catalog under an atomic pointer, so a reader sees one snapshot or
+		// the other and never a torn one (internal/skills/provider.go).
 		ReloadSkills: func() { _ = w.skillProvider.Reload() },
 		// The store-backed session host drives all persistence (per-Turn saves, /sessions, quit
 		// flush); the renderer sees only the SessionHost seam. Resumed carries the startup-replay

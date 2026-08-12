@@ -971,11 +971,14 @@ func TestAutocompleteQuotedFileEnterExactSubmits(t *testing.T) {
 
 // caretAt puts the prompt caret at a byte offset into the current value and re-derives the overlay
 // from there — exactly what the Update loop does after every edit (recomputeAutocomplete), so a
-// test can reach a mid-buffer caret without spelling out the arrow keys that walked it there.
+// test can reach a mid-buffer caret without spelling out the arrow keys that walked it there. The
+// catalog-reload Cmd a "/" region opening owes is dropped: these tests assert on the overlay, and
+// the reload has its own coverage (skill_test.go).
 func caretAt(t *testing.T, m Model, off int) Model {
 	t.Helper()
 	m.caretToOffset(off)
-	return m.recomputeAutocomplete()
+	m, _ = m.recomputeAutocomplete()
+	return m
 }
 
 // caretToken is the whole caret-awareness rule: the word the caret stands in or immediately after,

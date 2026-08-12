@@ -169,9 +169,9 @@ func outsideRegion(value string, start, end int) string {
 	return value[:start] + value[end:]
 }
 
-// recomputeAutocomplete re-derives the overlay from the current input and stores it, reloading
-// the skill catalog the moment the catalog-listing region OPENS — the input entering the merged
-// "/" menu that it was not in before. The reload swaps the shared
+// recomputeAutocomplete re-derives the overlay from the current input and stores it, and hands back
+// the skill-catalog reload the moment the catalog-listing region OPENS — the input entering the
+// merged "/" menu that it was not in before. The reload swaps the shared
 // skills.Provider that both those rows and the agent loop read, so a skill added since launch — or
 // since the menu last closed — both shows in the dropdown and resolves when invoked. It is
 // edge-triggered on skillRegion so a burst of keystrokes inside one open region re-scans disk once,
@@ -180,19 +180,102 @@ func outsideRegion(value string, start, end int) string {
 // asked where its cursor is: callers use it instead of assigning m.computeAutocomplete(…) directly,
 // and computeAutocomplete stays a pure function of the (value, caret) pair a test can construct.
 //
+// The reload comes back as a Cmd rather than being CALLED here, which is the whole of this
+// function's second return value. A re-scan is a full walk of the skill source dirs, and running it
+// on this goroutine blocked the render loop for the length of that walk — on the keystroke that
+// opened the menu, which is the one moment the human is watching the box. ADR 0011's division puts
+// work that touches the disk on a worker and lands its result as a message, exactly as the recall
+// read and the session list already do (loadRecallCmd). The menu therefore opens over the catalog as
+// it stood, and skillsReloadedMsg repaints it over the fresh one a moment later
+// (foldSkillsReloaded). Callers must return the Cmd to the Update loop — the signature is what makes
+// the compiler ask them to, rather than a reload silently going nowhere.
+//
 // The reload is state-blind, because the region is: a skill invoked from an interjection is
 // resolved by the same shared provider a submitted one is, so a "/" token typed while the model
 // works must see the catalog as it stands now, exactly as one typed at idle does.
-func (m Model) recomputeAutocomplete() Model {
+func (m Model) recomputeAutocomplete() (Model, tea.Cmd) {
 	value := m.input.Value()
 	caret := m.caretByteOffset() // the one place the widget is asked where its cursor is
 	_, _, _, inMenu := caretSlashToken(value, caret)
-	if inMenu && !m.skillRegion && m.opts.ReloadSkills != nil {
-		m.opts.ReloadSkills() // region opening: re-scan before computeAutocomplete lists suggestions
+	var reload tea.Cmd
+	if inMenu && !m.skillRegion {
+		reload = m.reloadSkillsCmd() // region opening: re-scan off the loop, repaint when it lands
 	}
 	m.skillRegion = inMenu
 	m.autocomplete = m.computeAutocomplete(caret)
-	return m
+	return m, reload
+}
+
+// skillsReloadedMsg reports that the catalog re-scan reloadSkillsCmd dispatched has finished and the
+// shared skills.Provider now holds the fresh snapshot. It carries no payload: the catalog is read
+// through [Options.Skills], so this is the SIGNAL that the read is worth redoing rather than the
+// result of it (recallLoadedMsg's posture, one field shorter).
+type skillsReloadedMsg struct{}
+
+// Compile-time assertion that the reload Msg is a valid tea.Msg (mirroring messages.go).
+var _ tea.Msg = skillsReloadedMsg{}
+
+// reloadSkillsCmd builds the Cmd that re-scans the skill source dirs OFF the Update loop and reports
+// the swap as a skillsReloadedMsg. It captures the seam by value so the closure holds no pointer
+// into the value-copied Model (loadRecallCmd's posture, ADR 0011). An unwired [Options.ReloadSkills]
+// yields a nil Cmd, so a build with no refresh schedules nothing at all — the pre-Cmd nil guard,
+// moved one layer out.
+//
+// The host's reload now runs on a Cmd goroutine while the loop goroutine may be resolving skills
+// against the same provider, which is precisely the concurrency that provider is built for: it swaps
+// a whole immutable catalog under an atomic pointer (internal/skills/provider.go), so a reader sees
+// either the old snapshot or the new one and never a torn one.
+func (m Model) reloadSkillsCmd() tea.Cmd {
+	reload := m.opts.ReloadSkills
+	if reload == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		reload()
+		return skillsReloadedMsg{}
+	}
+}
+
+// foldSkillsReloaded re-derives the dropdown over the catalog the finished scan installed, so the
+// skill that scan discovered shows in the menu that asked for it. It is the second half of the
+// off-loop reload: the keystroke opened the menu over the catalog as it stood, this repaints it over
+// the one on disk.
+//
+// It repaints only where a repaint is OWED. A menu the human has since closed (skillRegion false), or
+// a modal that has taken the frame since — an approval, an ask, the states the overlay is never
+// derived at (dismissAutocomplete) — leave the fold inert, so a scan landing late can never re-open a
+// dropdown over a decision surface.
+//
+// The highlighted ROW survives the repaint (reselectRow). A bare re-derivation hands the selection
+// back to the first item, and the very reason the walk is now off the loop is that it may finish long
+// after the human started arrowing down the list — a menu that jumped its highlight out from under
+// them would be a worse trade than the block it replaced.
+func (m *Model) foldSkillsReloaded() {
+	if !m.skillRegion || (m.state != stateIdle && m.state != stateRunning) {
+		return
+	}
+	prev := m.autocomplete
+	next := m.computeAutocomplete(m.caretByteOffset())
+	next.selected = reselectRow(prev, next)
+	m.autocomplete = next
+	m.layout() // the dropdown's rows come out of the viewport, and a fresh catalog may change how many
+}
+
+// reselectRow maps the highlighted row of prev onto next by the VALUE it stood on, falling back to
+// the first row when that value is gone from the list. Matching on the value rather than the index is
+// what survives a reload that inserts a row ABOVE the selection: the id sorts where it sorts, and an
+// index kept blindly would then point at the row above the one the human was looking at.
+func reselectRow(prev, next autocompleteState) int {
+	if !prev.active || prev.selected < 0 || prev.selected >= len(prev.items) {
+		return 0
+	}
+	want := prev.items[prev.selected]
+	for i, it := range next.items {
+		if it.value == want.value && it.skill == want.skill {
+			return i
+		}
+	}
+	return 0
 }
 
 // caretToken reports the whitespace-delimited token the caret stands in: the byte range
@@ -576,8 +659,15 @@ func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 // sharing the frame with the decision surface and competing with it for the same rows. Neither fold
 // cleared it, so a "/" typed a moment before the gate opened was still on the screen, still
 // highlighting a row that could no longer be chosen.
+//
+// It clears the skillRegion edge-trigger with it, so "a region is open" and "a menu is on the
+// screen" cannot disagree. That matters now the catalog re-scan is asynchronous: without it, a walk
+// dispatched by the open would land on a dismissed menu and paint it back (foldSkillsReloaded),
+// which is the one thing esc is for. The cost is one extra walk when the human goes on typing in a
+// token they dismissed the menu on — a re-opened menu is an opening, and an opening owes a re-scan.
 func (m *Model) dismissAutocomplete() {
 	m.autocomplete = autocompleteState{}
+	m.skillRegion = false
 }
 
 // autocompleteExactMatch reports whether ⏎ should fall THROUGH to submit instead of accepting the
@@ -640,12 +730,12 @@ func (m Model) acceptAutocomplete() (tea.Model, tea.Cmd) {
 	it := ac.items[ac.selected]
 	switch {
 	case it.skill:
-		return m.insertSkillToken(it.value), nil
+		return m.insertSkillToken(it.value)
 	case ac.kind == acFile:
-		return m.spliceCompletion(fileRefToken(it.value)), nil
+		return m.spliceCompletion(fileRefToken(it.value))
 	}
 	if spec, ok := commandByName(it.value); ok && spec.takesArgs {
-		return m.spliceCompletion("/" + it.value), nil
+		return m.spliceCompletion("/" + it.value)
 	}
 	parsed := parsedInput{kind: kindCommand, command: it.value}
 	if !m.commandRunnable(parsed) {
@@ -693,7 +783,7 @@ func (m Model) removeCompletionToken() Model {
 // which is the "/" token the merged menu opened on. The token IS the attachment: it stays in the
 // text the human sends, submitParse reads it back out as a skill reference, and deleting it
 // un-invokes the skill.
-func (m Model) insertSkillToken(id string) Model {
+func (m Model) insertSkillToken(id string) (Model, tea.Cmd) {
 	return m.spliceCompletion("/" + id)
 }
 
@@ -706,7 +796,12 @@ func (m Model) insertSkillToken(id string) Model {
 // middle of a sentence must not double the space before the next word. The caret then lands after
 // the token — before the space the draft already had, or after the one just written — which is where
 // the human goes on typing either way.
-func (m Model) spliceCompletion(token string) Model {
+//
+// The Cmd it returns is whatever that recompute owes (recomputeAutocomplete): a splice that leaves
+// the caret inside a "/" token the box was not in before opens the menu, and an opening menu owes a
+// catalog re-scan. It is passed out rather than dropped, because a dropped one is a refresh that
+// silently never happens.
+func (m Model) spliceCompletion(token string) (Model, tea.Cmd) {
 	value := m.input.Value()
 	start, end := m.completionRegion()
 	head, tail := value[:start], value[end:]
@@ -716,9 +811,10 @@ func (m Model) spliceCompletion(token string) Model {
 	}
 	m.input.SetValue(head + token + sep + tail)
 	m.caretToOffset(len(head) + len(token) + len(sep))
-	m = m.recomputeAutocomplete() // the separator ends the token, so this closes the overlay
+	var reload tea.Cmd
+	m, reload = m.recomputeAutocomplete() // the separator ends the token, so this closes the overlay
 	m.layout()
-	return m
+	return m, reload
 }
 
 // containsString reports whether s is in xs.
