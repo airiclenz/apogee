@@ -10,6 +10,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A server entry can now say WHERE its API key comes from instead of carrying it in plain text.**
+  Beside the literal `api-key:`, a `servers:` entry takes `api-key-cmd:` — a command whose standard
+  output IS the key (`pass show …`, `op read …`, `security find-generic-password …`) — or
+  `api-key-env:`, the name of an environment variable holding it. An entry names at most ONE of the
+  three: two sources for one value is the duplicate-name defect wearing another key, so startup
+  refuses the combination naming every source the entry set rather than inventing a precedence that
+  would leave a configured key silently ignored. Naming none is still the keyless local-server
+  default. A whitespace-only `api-key-cmd:`/`api-key-env:` is refused on the `llama-launcher:`
+  reasoning (configured while naming nothing), and the per-entry `plaintext-key-ok: true` marker —
+  the "never ask me again" answer to the coming startup migration offer — is legal only beside a
+  literal `api-key:`. Validation stays offline: it never runs the command or reads the variable,
+  because the key is resolved at first use of that entry, the way an endpoint is only ever asked by
+  the live heartbeat. The seeded config template documents all three sources, the exactly-one rule,
+  and the GUI-prompt note an interactive backend needs (apogee gives the command no terminal).
+
 - **The approval pane now says when a call reaches wider than the file it names.** `diagnostics`
   takes one filename and its `go vet` half reads every `.go` file in that file's package directory:
   the tool's description said so and both of its result strings said so, but the approval prompt —

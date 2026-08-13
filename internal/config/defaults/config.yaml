@@ -55,6 +55,37 @@
 #              permissions yourself. apogee reports whether a key was resolved (`apogee probe`,
 #              the upstream block); the value is never printed, and the provider client redacts
 #              it from server-echoed errors.
+#   api-key-cmd
+#              a command whose standard OUTPUT is that key — the way to keep the token out of
+#              this file entirely, by naming the password manager or keychain that already holds
+#              it:
+#
+#                api-key-cmd: pass show apogee/rented-box
+#                api-key-cmd: op read op://Private/rented-box/credential
+#                api-key-cmd: security find-generic-password -s apogee -a rented-box -w
+#
+#              It runs the first time this session actually needs that server's key — never at
+#              startup for entries you do not use — and the answer is remembered for the rest of
+#              the session. The line is split on spaces and quotes and run DIRECTLY, with NO
+#              shell, so pipes, redirections and $VARIABLES need a wrapper script of your own.
+#              It gets no terminal and no input, so a backend that has to ask you to unlock must
+#              prompt through a GUI agent (pinentry-mac, the Keychain dialog). Trailing
+#              whitespace is trimmed. A non-zero exit, a timeout (60 seconds) or empty output is
+#              an ERROR naming this entry — never a silent keyless request, because "no key" is
+#              spelled by leaving all three of these keys out.
+#   api-key-env
+#              the NAME of an environment variable that holds the key — not the key itself:
+#
+#                api-key-env: OPENROUTER_API_KEY
+#
+#              read when that server's key is first needed, from the environment apogee itself
+#              was started in. Unset or empty is the same error as an empty command output, not a
+#              keyless request. Useful when a launcher, a systemd unit or your shell profile
+#              already puts the token in the environment.
+#
+#              Exactly ONE of api-key, api-key-cmd and api-key-env per entry: two sources for one
+#              value is a startup error, because nothing can say which of them the file meant.
+#              None of the three is the keyless server described above.
 #   model      that server's model hint: which of the models it serves you mean. Optional —
 #              leave it out and the first heartbeat binds whatever is loaded, which is all a
 #              single-model server (e.g. llama.cpp's llama-server) needs; apogee then follows
@@ -121,6 +152,12 @@
 #   - name: rented-box
 #     endpoint: https://llm.example.com
 #     api-key: sk-rented-token
+#   - name: keychain-box
+#     endpoint: https://llm.example.com
+#     api-key-cmd: security find-generic-password -s apogee -a keychain-box -w
+#   - name: openrouter
+#     endpoint: https://openrouter.ai/api/v1
+#     api-key-env: OPENROUTER_API_KEY
 
 # =============================================================================
 # Which servers: entry a session starts on — the name of one of the entries above. apogee keeps

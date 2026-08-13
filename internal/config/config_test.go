@@ -1551,6 +1551,39 @@ server: workstation
 			},
 		},
 		{
+			// An entry names ONE key source, and all three spellings travel to the composition root
+			// exactly as written: resolving one is a first-use question there, never resolution's.
+			// The plaintext marker rides the literal key it silences the migration offer for.
+			name: "each key source travels per entry, the plaintext marker beside the literal",
+			configYAML: `servers:
+  - name: rented-box
+    endpoint: https://llm.example.com
+    api-key: sk-rented-token
+    plaintext-key-ok: true
+  - name: keychain-box
+    endpoint: https://llm.example.com
+    api-key-cmd: security find-generic-password -s apogee -a keychain-box -w
+  - name: openrouter
+    endpoint: https://openrouter.ai/api/v1
+    api-key-env: OPENROUTER_API_KEY
+  - name: laptop
+    endpoint: http://127.0.0.1:1111
+server: laptop
+`,
+			want: []ServerEntry{
+				{
+					Name: "rented-box", Endpoint: "https://llm.example.com",
+					APIKey: "sk-rented-token", PlaintextKeyOK: true,
+				},
+				{
+					Name: "keychain-box", Endpoint: "https://llm.example.com",
+					APIKeyCmd: "security find-generic-password -s apogee -a keychain-box -w",
+				},
+				{Name: "openrouter", Endpoint: "https://openrouter.ai/api/v1", APIKeyEnv: "OPENROUTER_API_KEY"},
+				{Name: "laptop", Endpoint: "http://127.0.0.1:1111"},
+			},
+		},
+		{
 			// The reply ceiling is the window pin's idiom verbatim (ADR 0046): a positive value
 			// travels as written, and both spellings of unset — the absent key and an explicit 0 —
 			// resolve to the same zero, which is what tells the engine to derive the cap instead.
@@ -1628,6 +1661,63 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 			name:       "a defect after a well-formed entry",
 			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n  - name: other\n",
 			wantErr:    []string{"servers: entry 2", "other", "has no endpoint"},
+		},
+		{
+			// One key comes from ONE place, so a second source is the duplicate-name defect wearing
+			// another key — and the refusal names every source the entry set, because choosing
+			// between them is the fix.
+			name: "an entry setting both a literal key and a command",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    api-key: sk-token\n    api-key-cmd: pass show apogee/box\n",
+			wantErr: []string{"servers: entry 1", "box", "sets api-key: and api-key-cmd:", "ONE source"},
+		},
+		{
+			name: "an entry setting both a literal key and a variable name",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    api-key: sk-token\n    api-key-env: BOX_API_KEY\n",
+			wantErr: []string{"servers: entry 1", "box", "sets api-key: and api-key-env:", "ONE source"},
+		},
+		{
+			name: "an entry setting both a command and a variable name",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    api-key-cmd: pass show apogee/box\n    api-key-env: BOX_API_KEY\n",
+			wantErr: []string{"servers: entry 1", "box", "sets api-key-cmd: and api-key-env:", "ONE source"},
+		},
+		{
+			name: "an entry setting all three key sources",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    api-key: sk-token\n    api-key-cmd: pass show apogee/box\n    api-key-env: BOX_API_KEY\n",
+			wantErr: []string{
+				"servers: entry 1", "box", "sets api-key:, api-key-cmd: and api-key-env:", "ONE source",
+			},
+		},
+		{
+			// The `llama-launcher:` reasoning: a value that is only whitespace reads as configured
+			// while naming nothing, and leaving the key out is already how "no key" is spelled.
+			name: "an entry whose api-key-cmd is only whitespace",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    api-key-cmd: \"   \"\n",
+			wantErr: []string{"servers: entry 1", "box", "api-key-cmd: is only whitespace", "remove the key"},
+		},
+		{
+			name: "an entry whose api-key-env is only whitespace",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    api-key-env: \" \"\n",
+			wantErr: []string{"servers: entry 1", "box", "api-key-env: is only whitespace", "remove the key"},
+		},
+		{
+			// The marker only silences the offer to migrate a PLAINTEXT key, so on an entry whose
+			// key comes from anywhere else it is configured while doing nothing.
+			name: "the plaintext marker on an entry whose key comes from a command",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    api-key-cmd: pass show apogee/box\n    plaintext-key-ok: true\n",
+			wantErr: []string{"servers: entry 1", "box", "plaintext-key-ok: true without an api-key:", "remove it"},
+		},
+		{
+			name: "the plaintext marker on a keyless entry",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"  - name: other\n    endpoint: http://two:1111\n    plaintext-key-ok: true\n",
+			wantErr: []string{"servers: entry 2", "other", "plaintext-key-ok: true without an api-key:"},
 		},
 		{
 			name: "an entry whose llama-launcher value is only whitespace",

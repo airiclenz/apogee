@@ -995,14 +995,43 @@ type UnconfinedHost struct {
 // server — which is why it is required and must be unique (ADR 0036 decision 1: the alias of the
 // server you are on is the name you call it). Endpoint is required for the obvious reason.
 //
-// APIKey and Model are optional. An empty key sends no Authorization header, the keyless
-// local-server default; an empty model leaves that server's discovery hint unset, so whatever it
-// serves is bound. APIKey is FILE-ONLY on purpose: APOGEE_API_KEY is a single value and it overlays
-// the key of the ONE entry this run starts on (ADR 0036 decision 6), so every other entry carries
-// its own key here rather than borrowing that one. They carry `omitempty` because this type is
-// also RENDERED into a config file — the legacy migration writes an entry through the marshaller
-// (configmigrate.go) — and an optional field the user never set must not come back as an empty
-// line in their file.
+// APIKey and Model are optional. An entry naming no key source at all sends no Authorization
+// header, the keyless local-server default; an empty model leaves that server's discovery hint
+// unset, so whatever it serves is bound. APIKey is FILE-ONLY on purpose: APOGEE_API_KEY is a
+// single value and it overlays the key of the ONE entry this run starts on (ADR 0036 decision 6),
+// so every other entry carries its own key here rather than borrowing that one. They carry
+// `omitempty` because this type is also RENDERED into a config file — the legacy migration writes
+// an entry through the marshaller (configmigrate.go) — and an optional field the user never set
+// must not come back as an empty line in their file.
+//
+// APIKeyCmd and APIKeyEnv are the other two KEY SOURCES that same token can come from, so a
+// server's key need not live in this file at all: `api-key-cmd:` is a command whose standard output
+// IS the key (`pass show …`, `op read …`, `security find-generic-password …`), and `api-key-env:`
+// is the NAME of an environment variable holding it. An entry names at most ONE of the three, and
+// ValidateServers refuses a second on the duplicate-name reasoning: two sources for one value is a
+// defect in the file rather than a precedence question, and any ranking that invited — literal over
+// command, command over variable — would leave a key that is set, read by nobody, and silently
+// ignored. Naming none is the keyless state, which is exactly why an empty ANSWER is never read as
+// one: a command that exits non-zero, times out or prints nothing, and a variable that is unset or
+// empty, are HARD ERRORS carrying this entry's name — a server the user pointed at a key for must
+// not quietly go on to talk to it unauthenticated.
+//
+// Nothing here is resolved at load. A source runs at FIRST USE of that entry's key — the startup
+// bind, a `/server` switch onto it, a delegation spawned against it, the probe or heartbeat built
+// for it — and the answer is cached for the session, so a server nobody moves onto never runs its
+// command and ValidateServers itself stays offline (the endpoint-probe reasoning: validation asks
+// the file, never the machine). The command is split into argv and executed DIRECTLY, with no shell
+// and no stdin — the `editor:` idiom — so a pipeline needs a wrapper script of the user's own, and
+// a backend that must ask the human to unlock has to prompt through a GUI agent (pinentry-mac, the
+// Keychain dialog) rather than through this terminal.
+//
+// PlaintextKeyOK is the answer "never, for this entry" to the startup offer that moves a literal
+// `api-key:` into the OS secret store: apogee raises that offer once per run for every entry
+// carrying a plaintext key, and this marker is what silences it here for good — consent recorded in
+// the file, at ADR 0035's deliberate-edit grain. It is legal ONLY beside a literal `api-key:` and
+// refused anywhere else: an entry whose key comes from a command or a variable, or from nowhere at
+// all, has no plaintext key to be offered anything about, so the marker there would read as
+// configured while doing nothing.
 //
 // LlamaLauncher is ADR 0029 decision 4's `llama-launcher:` key moved onto the entry it actually
 // describes (2026-08-07): a launcher fronts ONE server, so a global key captured `/model` on every
@@ -1081,6 +1110,9 @@ type ServerEntry struct {
 	Name            string          `yaml:"name"`
 	Endpoint        string          `yaml:"endpoint"`
 	APIKey          string          `yaml:"api-key,omitempty"`
+	APIKeyCmd       string          `yaml:"api-key-cmd,omitempty"`
+	APIKeyEnv       string          `yaml:"api-key-env,omitempty"`
+	PlaintextKeyOK  bool            `yaml:"plaintext-key-ok,omitempty"`
 	Model           string          `yaml:"model,omitempty"`
 	LlamaLauncher   string          `yaml:"llama-launcher,omitempty"`
 	ParallelAgents  int             `yaml:"parallel-agents,omitempty"`
@@ -1102,6 +1134,18 @@ type ServerEntry struct {
 // and a typo found months later has lost its context. What is deliberately NOT checked is whether
 // an endpoint answers — that is what the heartbeat asks, live, and a server that is merely off
 // today must still be listed.
+//
+// The entry's KEY SOURCE carries three defects of its own. Setting more than one of `api-key:`,
+// `api-key-cmd:` and `api-key-env:` is refused with every set key named, on the duplicate-name
+// reasoning again: one key comes from ONE place, so a second source is a defect in the file rather
+// than a precedence to resolve. A whitespace-only `api-key-cmd:` or `api-key-env:` is refused on
+// the `llama-launcher:` reasoning — it reads as configured while naming nothing, and the file's
+// spelling for "no key source" is leaving all three keys out. And `plaintext-key-ok: true` is
+// refused on an entry carrying no literal `api-key:`, because that marker's whole job is to silence
+// the offer to migrate a plaintext key such an entry does not have. What is deliberately NOT done
+// is running the command or reading the variable: the key is a first-use question — this run may
+// never move onto that entry — and validation stays offline for the reason it never probes an
+// endpoint.
 //
 // The entry's optional `llama-launcher:` value is checked on the same footing, and for the same
 // three defects the retired top-level key was checked for: a value that is only whitespace reads
@@ -1145,6 +1189,27 @@ func ValidateServers(servers []ServerEntry) error {
 		}
 		// Absent is not a defect — it is the off state — so every refusal below is about a value
 		// the user did write.
+		if set := keySourceKeys(s); len(set) > 1 {
+			return fmt.Errorf("apogee: servers: entry %d (%q): sets %s — an entry takes its key from ONE "+
+				"source, so keep the one that should answer for this server and remove the rest", i+1, s.Name,
+				joinAnd(set))
+		}
+		if s.APIKeyCmd != "" && strings.TrimSpace(s.APIKeyCmd) == "" {
+			return fmt.Errorf("apogee: servers: entry %d (%q): api-key-cmd: is only whitespace — give the "+
+				"command whose output IS the key, for example security find-generic-password -s apogee -a %s "+
+				"-w, or remove the key to send no Authorization header at all", i+1, s.Name, s.Name)
+		}
+		if s.APIKeyEnv != "" && strings.TrimSpace(s.APIKeyEnv) == "" {
+			return fmt.Errorf("apogee: servers: entry %d (%q): api-key-env: is only whitespace — name the "+
+				"environment variable the key is in, for example OPENROUTER_API_KEY, or remove the key to "+
+				"send no Authorization header at all", i+1, s.Name)
+		}
+		if s.PlaintextKeyOK && strings.TrimSpace(s.APIKey) == "" {
+			return fmt.Errorf("apogee: servers: entry %d (%q): plaintext-key-ok: true without an api-key: — "+
+				"the marker only silences the offer to move a PLAINTEXT key into this machine's secret store, "+
+				"so on an entry whose key comes from a command, a variable, or nowhere it says nothing; "+
+				"remove it", i+1, s.Name)
+		}
 		if launcher := s.LlamaLauncher; launcher != "" {
 			trimmed := strings.TrimSpace(launcher)
 			switch {
@@ -1206,6 +1271,36 @@ func posturedKeys(s ServerEntry) string {
 		return "mechanisms:"
 	}
 	return ""
+}
+
+// keySourceKeys names the key-source keys this entry sets, in file order: `api-key:`,
+// `api-key-cmd:`, `api-key-env:`. Exactly one is the ordinary case and none is the keyless one, so
+// the list is really only read for the refusal a SECOND name in it triggers — it is both that
+// refusal's condition and the message's list of what the user has to choose between. A value that
+// is only whitespace counts as set: the user wrote it, so it is a source they meant, and its own
+// emptiness is the next refusal's business rather than a reason to overlook the pair.
+func keySourceKeys(s ServerEntry) []string {
+	set := make([]string, 0, 3)
+	if s.APIKey != "" {
+		set = append(set, "api-key:")
+	}
+	if s.APIKeyCmd != "" {
+		set = append(set, "api-key-cmd:")
+	}
+	if s.APIKeyEnv != "" {
+		set = append(set, "api-key-env:")
+	}
+	return set
+}
+
+// joinAnd writes a short list the way a refusal reads it out loud: "a and b", "a, b and c". Fewer
+// than two names is the degenerate case its only caller never asks for, and returns the names
+// themselves unadorned.
+func joinAnd(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // SubAgentServer answers the one question ADR 0045 decision 1 asks of a resolved `servers:` list:

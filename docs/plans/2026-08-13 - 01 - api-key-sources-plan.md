@@ -90,7 +90,13 @@
   secret storage of any kind inside `~/.apogee`; deleting/renaming store items when an
   entry is removed or renamed (the store is the user's).
 
-## 1. Schema: key-source fields and the exactly-one rule
+## 1. Schema: key-source fields and the exactly-one rule — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item names the embedded config template as `cmd/apogee/defaults/`; the
+template's actual home is `internal/config/defaults/config.yaml` (embedded by
+internal/config/defaults.go) — edited there.
+NOTES (2026-08-13): no ADR 0047 citation in the new doc comments, since that ADR is written by
+item 7 and a reference to a file that does not exist yet would dangle until then.
 
 **What:** Add `APIKeyCmd string` (`yaml:"api-key-cmd,omitempty"`), `APIKeyEnv string`
 (`yaml:"api-key-env,omitempty"`), and `PlaintextKeyOK bool`

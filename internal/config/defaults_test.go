@@ -119,6 +119,12 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 // facts a secret in a plain-text file needs (the env var wins; restrict the file otherwise). It
 // stays a COMMENTED example — the behaviour-neutrality above already pins that the seeded file
 // resolves no key.
+//
+// The other two KEY SOURCES are documented on the same footing, because the whole point of them is
+// that the reader who has just been warned about a secret in a plain-text file needs somewhere else
+// to put it: a command spelled for the three managers people actually run, a named environment
+// variable, the exactly-one rule that stops a file setting two of them, and the GUI-prompt note
+// that says what an interactive backend has to do when apogee gives its command no terminal.
 func TestEmbeddedDefaultConfigDocumentsTheAPIKey(t *testing.T) {
 	t.Parallel()
 	template := string(defaultConfigYAML)
@@ -127,6 +133,12 @@ func TestEmbeddedDefaultConfigDocumentsTheAPIKey(t *testing.T) {
 		"APOGEE_API_KEY",           // the environment variable that overrides it
 		"no flag",                  // why the third precedence layer is deliberately absent
 		"plain text",               // the shared-machine caveat
+		"api-key-cmd: pass show apogee/rented-box",                                 // the command source, password-manager spelling
+		"api-key-cmd: op read op://",                                               // …its 1Password spelling
+		"api-key-cmd: security find-generic-password -s apogee -a keychain-box -w", // …and the macOS keychain one
+		"api-key-env: OPENROUTER_API_KEY",                                          // the environment-variable source
+		"Exactly ONE of api-key, api-key-cmd and api-key-env per entry",            // the rule ValidateServers enforces
+		"pinentry-mac", // how an interactive backend must ask
 	} {
 		if !strings.Contains(template, want) {
 			t.Errorf("embedded template does not mention %q; the api-key documentation is missing or reworded", want)
