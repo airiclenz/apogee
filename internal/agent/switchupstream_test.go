@@ -1,11 +1,12 @@
 package agent
 
 // Coverage for Agent.SwitchUpstream (ADR 0024) — the engine half of a server switch. It proves
-// the three properties the host's /server verb rests on: the wire target moves as ONE fresh
+// the four properties the host's /server verb rests on: the wire target moves as ONE fresh
 // provider client (endpoint and key together), the model is left UNBOUND so the new server's
-// first observed model binds through the ordinary Rebind, and everything that is session state
-// rather than a per-server fact survives the move. The white-box package placement is what lets
-// these inject a fake Responder through newAgent and read the swapped bindings directly.
+// first observed model binds through the ordinary Rebind, the two token bounds the new server
+// pins move WITH it (ADR 0045's window, ADR 0046's reply cap), and everything that is session
+// state rather than a per-server fact survives the move. The white-box package placement is what
+// lets these inject a fake Responder through newAgent and read the swapped bindings directly.
 
 import (
 	"context"
@@ -235,6 +236,68 @@ func TestSwitchUpstreamRefusesAnEmptyEndpoint(t *testing.T) {
 		t.Errorf("SwitchUpstream with no endpoint err = %v, want errMissingEndpoint", err)
 	}
 	assertUpstreamUnmoved(t, a, "old-key")
+}
+
+// TestSwitchUpstreamCarriesTheNewServersTokenBounds: a mid-session move takes the new server's own
+// two bounds — the `context-window:` its entry pins (ADR 0045) and its `max-output-tokens:` (ADR
+// 0046) — because both describe the SLOT rather than the conversation, and the retired server's
+// numbers describe a machine this session no longer talks to.
+//
+// The three moves are the three states an entry can be in: both pinned, neither pinned, and a window
+// with no cap — where the engine derives the cap from the reply room that very window reserves,
+// which is the whole reason the window has to move first.
+func TestSwitchUpstreamCarriesTheNewServersTokenBounds(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Context.MaxContextTokens = 8192
+	cfg.Context.MaxOutputTokens = 2048
+
+	a, err := newAgent(cfg, &modelBindingResponder{reply: "unreached"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	// Onto an entry that pins both: the Budget measures against the new window and the wire states
+	// the new ceiling, neither of them the number the session launched with.
+	if err := a.SwitchUpstream(UpstreamSpec{
+		Endpoint: "http://big.invalid:9999", MaxContextTokens: 131072, MaxOutputTokens: 16384,
+	}); err != nil {
+		t.Fatalf("SwitchUpstream onto the pinned entry: %v", err)
+	}
+	if got := a.budget().ContextLimit; got != 131072 {
+		t.Errorf("budget window = %d after the switch, want the new entry's pinned 131072", got)
+	}
+	if got := a.maxOutputTokens(); got != 16384 {
+		t.Errorf("reply cap = %d after the switch, want the new entry's pinned 16384", got)
+	}
+
+	// Onto an entry that pins neither: the previous server's numbers do NOT follow. The window falls
+	// to unknown until that server's first beat binds one — the state a session before its first beat
+	// is in — and the cap falls to the clamp floor, which is what an unknown window's zero reserve
+	// derives (never "unbounded", internal/context.Allocation).
+	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: "http://bare.invalid:9999"}); err != nil {
+		t.Fatalf("SwitchUpstream onto the unpinned entry: %v", err)
+	}
+	if got := a.budget().ContextLimit; got != 0 {
+		t.Errorf("budget window = %d after the unpinned switch, want 0 — the retired pin must not follow", got)
+	}
+	if got := a.maxOutputTokens(); got != minOutputTokenCap {
+		t.Errorf("reply cap = %d after the unpinned switch, want the derived floor %d", got, minOutputTokenCap)
+	}
+
+	// And onto an entry that pins only the window: the cap is DERIVED from that window's own reply
+	// reserve (65,536 × 0.20 = 13,107, which sits between the two clamp ends), so the request and the
+	// Budget cannot disagree about the room the reply has.
+	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: "http://windowed.invalid:9999", MaxContextTokens: 65536}); err != nil {
+		t.Fatalf("SwitchUpstream onto the window-only entry: %v", err)
+	}
+	reserve := a.budget().ResponseReserve
+	if reserve <= minOutputTokenCap || reserve >= maxOutputTokenCap {
+		t.Fatalf("the window-only reserve = %d; the case needs one strictly inside [%d, %d]",
+			reserve, minOutputTokenCap, maxOutputTokenCap)
+	}
+	if got := a.maxOutputTokens(); got != reserve {
+		t.Errorf("reply cap = %d after the window-only switch, want the new window's own reserve %d", got, reserve)
+	}
 }
 
 // assertUpstreamUnmoved checks that a refused SwitchUpstream left every binding it would have

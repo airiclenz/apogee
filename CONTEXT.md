@@ -1059,7 +1059,11 @@ per-server heartbeat Monitor is swapped whole behind the unchanged seam, and the
 **first Beat completes the move** through that same Rebind — one code path with the cold start. A
 switch guesses nothing about the new server and destroys nothing about the session: the
 conversation, Turn counters, mode, approvals and confinement all stand. What a switch *does* carry
-is the launcher: moving onto an entry that names a llama-launcher config turns the
+is what the new entry **pins** about its own server — its `context-window:` and its
+`max-output-tokens:` reply ceiling, both facts about the slot rather than about the session, and a
+pin is not a guess: the entry's window outranks the global `context-window:` key while the session
+sits there, and an entry pinning neither leaves the window to that global key and the ceiling to the
+engine's own derivation. And the launcher: moving onto an entry that names a llama-launcher config turns the
 [Launch profile](#identity-and-shape) verbs on for as long as the session sits there, and moving
 onto an entry without one turns them off again. The servers it can reach
 are the `servers:` list (plus the unlisted one an `--endpoint` override started the session on),

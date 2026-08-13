@@ -1055,9 +1055,12 @@ type UnconfinedHost struct {
 // `context-window:` key, per entry, and the same three states `parallel-agents` has: absent (or 0,
 // which yaml cannot tell from absent) ⇒ whatever the heartbeat observes stands, N ≥ 1 ⇒ that number
 // whatever the server advertises, negative ⇒ refused by ValidateServers. It is legal on ANY entry
-// because it describes the server, the way `model:` does; only the Delegation target reads it today
-// (ADR 0045 decision 3), where it earns its keep: a cloud endpoint advertises no window at all, so
-// the pin is how such a server is usable as a Sub-agent server in the first place.
+// because it describes the server, the way `model:` does, and two seams read it: the Delegation
+// target it was added for (ADR 0045 decision 3), and a session's own `/server` switch, which carries
+// the entry's window onto the engine beside the entry's reply cap (ResolveContextWindow, ADR 0046's
+// same "the bound is a property of the slot" reasoning). It earns its keep in both: a cloud endpoint
+// advertises no window at all, so the pin is how such a server is usable at all — as a Sub-agent
+// server, or as one a session moves onto.
 //
 // MaxOutputTokens PINS the ceiling on ONE reply from this server, in tokens — the number the engine
 // states on the wire so a reply stops at a bound it chose rather than at the server's context wall
@@ -1240,6 +1243,36 @@ func ResolveParallelAgents(pinned, discovered int) int {
 		return discovered
 	}
 	return 1
+}
+
+// ResolveContextWindow answers the same question one key over: which context window a session
+// running on a `servers:` entry measures its Budget against. entry is that entry's own
+// `context-window:` value (ADR 0045 — 0 when the key is absent, which yaml cannot tell from an
+// explicit 0) and session is the top-level `context-window:` key the whole run carries (ADR 0024
+// decision 9), which a `/settings` edit can move mid-session.
+//
+// The ranks are ResolveParallelAgents's, one scope further out: the SPECIFIC pin wins, because a
+// number written on the entry describes THAT server's slot while the top-level key describes
+// whatever server the session happens to be pointed at — so a session moved onto an entry that pins
+// its own window budgets against the server it is actually on. Neither pinned ⇒ 0, which is not a
+// window but the honest "nobody said": the heartbeat's own observation binds it at the next Rebind,
+// and until then the Budget stays inactive exactly as it does before a session's first beat.
+//
+// Discovery is deliberately NOT a rank here, unlike the width above: what a beat observed is held by
+// the caller that beats (the composition root's live settings), and folding it in would give this
+// function a third input only one of its callers could ever supply.
+//
+// Both inputs are guarded rather than trusted — ValidateServers refuses a negative entry pin at
+// startup, and the registry refuses a negative top-level one — so anything below 1 falls through to
+// the next rank.
+func ResolveContextWindow(entry, session int) int {
+	if entry >= 1 {
+		return entry
+	}
+	if session >= 1 {
+		return session
+	}
+	return 0
 }
 
 // validatedSetsConfig is the on-disk schema for the Validated-set surface (ADR 0016):

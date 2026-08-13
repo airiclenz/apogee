@@ -107,7 +107,7 @@ func (w *rootWiring) switchServer(name string) (tui.ServerSwitchResult, error) {
 	if err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
-	result, err := w.mover.move(entry.Endpoint, entry.Name, entry.Model, entry.APIKey)
+	result, err := w.mover.move(entry)
 	if err != nil {
 		return tui.ServerSwitchResult{}, err
 	}

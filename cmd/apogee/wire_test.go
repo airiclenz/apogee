@@ -2078,7 +2078,10 @@ func TestLoadProfileCrossAddressFollowsTheProfile(t *testing.T) {
 	if switched != want {
 		t.Errorf("the committed move = %+v; want %+v (alias = the profile name, the global pin survives)", switched, want)
 	}
-	wantSpec := apogee.UpstreamSpec{Endpoint: "http://127.0.0.1:9090", APIKey: "llamacpp-key"}
+	// The spec carries the window the display adopted, not a second number: a profile's server is in
+	// no `servers:` list, so it pins nothing of its own and the top-level pin — which survives a move
+	// — is what the engine budgets against on the other side of it.
+	wantSpec := apogee.UpstreamSpec{Endpoint: "http://127.0.0.1:9090", APIKey: "llamacpp-key", MaxContextTokens: 16384}
 	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
 		t.Errorf("SwitchUpstream specs = %+v; want exactly [%+v] — the key is the launcher config's own",
 			agent.specs, wantSpec)
@@ -2239,7 +2242,7 @@ func TestLoadProfileCrossAddressDialsTheLoopback(t *testing.T) {
 	if switched != want {
 		t.Errorf("the committed move = %+v; want %+v", switched, want)
 	}
-	wantSpec := apogee.UpstreamSpec{Endpoint: dial, APIKey: "llamacpp-key"}
+	wantSpec := apogee.UpstreamSpec{Endpoint: dial, APIKey: "llamacpp-key", MaxContextTokens: 16384}
 	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
 		t.Errorf("SwitchUpstream specs = %+v; want exactly [%+v]", agent.specs, wantSpec)
 	}
@@ -3856,5 +3859,85 @@ func TestApplySettingServersReResolvesTheParallelAgentsCap(t *testing.T) {
 	}
 	if spy.last() != 6 {
 		t.Errorf("installed %v; want the observed 6 back once the pin is gone", spy.widths)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The shared move's per-entry token bounds (ADR 0045, ADR 0046)
+// ----------------------------------------------------------------------------
+
+// A move re-points the session at a server, so it carries what that server BOUNDS a session to: the
+// entry's own `context-window:` pin and its `max-output-tokens:` cap. Both reach the engine on the
+// switch spec — the same numbers the bind hands a session that started on the entry — and the window
+// the display adopts is the very one the engine was handed, so the gauge and the Budget can never
+// describe two different servers.
+//
+// The second move is the half that would be invisible: an entry pinning nothing must DROP the
+// retired entry's numbers rather than carry them, falling back to the top-level `context-window:`
+// key (which survives every move) and to the zero the engine derives its own cap from.
+func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
+	t.Parallel()
+
+	agent := &fakeSwitcher{}
+	host := &fakeStamper{}
+	holder := newUpstreamHolder()
+	holder.Bind("http://old.invalid:1111", "old-key", "old-model",
+		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
+	live := newLiveSettings(config.Options{ContextWindow: 16384}, nil)
+	mover := sessionMover{agent: agent, holder: holder, host: host, live: live}
+
+	pinned := config.ServerEntry{
+		Name: "workstation", Endpoint: "http://192.168.64.1:1111", APIKey: "new-key",
+		Model: "gpt-oss-20b", ContextWindow: 65536, MaxOutputTokens: 8192,
+	}
+	result, err := mover.move(pinned)
+	if err != nil {
+		t.Fatalf("move onto the pinned entry: %v", err)
+	}
+
+	wantSpec := apogee.UpstreamSpec{
+		Endpoint: pinned.Endpoint, APIKey: pinned.APIKey,
+		MaxContextTokens: 65536, MaxOutputTokens: 8192,
+	}
+	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
+		t.Errorf("SwitchUpstream specs = %+v; want exactly [%+v] — the entry's own two bounds",
+			agent.specs, wantSpec)
+	}
+	wantResult := tui.ServerSwitchResult{
+		Endpoint: pinned.Endpoint, HostAlias: "workstation", ContextWindow: 65536,
+	}
+	if result != wantResult {
+		t.Errorf("move = %+v; want %+v — the display adopts the window the engine was handed",
+			result, wantResult)
+	}
+	if got := holder.Endpoint(); got != pinned.Endpoint {
+		t.Errorf("holder endpoint = %q; want the entry's %q", got, pinned.Endpoint)
+	}
+	if !slices.Equal(host.models, []string{""}) {
+		t.Errorf("SetModel calls = %v; want exactly one unbinding \"\" — a move unbinds the model", host.models)
+	}
+
+	// The pin outlives the move by more than one beat: the rebind that the new server's first
+	// observation drives resolves its window through this same holder, so it binds the entry's 65,536
+	// rather than the top-level 16,384 or whatever that server happens to advertise.
+	if _, _, pin := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
+		t.Errorf("the next rebind's pin = %d; want the moved-to entry's 65536", pin)
+	}
+
+	bare := config.ServerEntry{Name: "laptop", Endpoint: "http://127.0.0.1:8080"}
+	result, err = mover.move(bare)
+	if err != nil {
+		t.Fatalf("move onto the unpinned entry: %v", err)
+	}
+	wantSpec = apogee.UpstreamSpec{Endpoint: bare.Endpoint, MaxContextTokens: 16384}
+	if len(agent.specs) != 2 || agent.specs[1] != wantSpec {
+		t.Errorf("SwitchUpstream specs = %+v; want the second to be [%+v] — the retired entry's "+
+			"bounds must not follow", agent.specs, wantSpec)
+	}
+	if want := (tui.ServerSwitchResult{Endpoint: bare.Endpoint, HostAlias: "laptop", ContextWindow: 16384}); result != want {
+		t.Errorf("move = %+v; want %+v — the top-level pin survives a move", result, want)
+	}
+	if _, _, pin := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 16384 {
+		t.Errorf("the next rebind's pin = %d; want the top-level 16384 back", pin)
 	}
 }

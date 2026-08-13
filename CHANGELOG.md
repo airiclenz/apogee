@@ -393,6 +393,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A `/server` switch now takes the new server's context window and reply ceiling with it.** The
+  reply cap followed a `servers:` entry everywhere a session could arrive on one — the startup bind,
+  a routed sub-agent spawn — except the one place a session moves: `/server` re-pointed the wire and
+  left the engine capping replies from the new server at the old server's number, or at a ceiling
+  derived from the old server's window. The per-entry `context-window:` pin had the same hole, and a
+  wider one: even when a switch briefly carried a window, the first heartbeat seconds later re-bound
+  the observed one over the entry's pin. A move now carries both bounds — the entry's
+  `context-window:` (which outranks the top-level key, since it describes the server the session is
+  actually on) and its `max-output-tokens:`, as written — and the window pin stays in force for the
+  rebinds that follow, so the gauge, the Budget and the ceiling on the wire all describe the same
+  server. An entry that pins neither drops the retired server's numbers rather than inheriting them:
+  the window falls back to the top-level pin that survives a move, and the cap is derived afresh from
+  the window the session is now on. A profile load's follow-the-profile move is unchanged in
+  substance — a Launch profile's server is in no `servers:` list, so it pins nothing and the session
+  keeps the top-level window.
+
 - **A long streaming reply no longer starves the TUI's event loop.** While a reply streamed,
   expand/collapse clicks stopped responding — measured at 95% CPU and a 0.48 s click round-trip
   after only 180 s of streaming, still climbing, against a flat 0.05–0.07 s once the same reply was

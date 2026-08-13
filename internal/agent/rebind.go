@@ -163,17 +163,39 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	return nil
 }
 
-// UpstreamSpec carries the new Upstream target Agent.SwitchUpstream moves the session to. It is
-// deliberately only the two facts a server is: where it lives and how to authenticate to it. It
-// names no model — a switch UNBINDS the model rather than guessing what the new server serves
-// (ADR 0024's one-code-path rule: the new Upstream's first observed model binds through Rebind
-// like every other binding does).
+// UpstreamSpec carries the new Upstream target Agent.SwitchUpstream moves the session to: where the
+// server lives, how to authenticate to it, and what it BOUNDS a session to in tokens. That last pair
+// belongs here for the reason the first two do — a context window and a reply ceiling are facts
+// about the SLOT, so a session moved to another server measures against THAT server's numbers
+// rather than against the retired one's (ADR 0045's per-entry `context-window:`, ADR 0046's
+// `max-output-tokens:`). Both are computed WHOLE by the caller, the posture RebindSpec takes for the
+// per-model bindings: the engine applies what it is handed and reads no config of its own (ADR 0031).
+//
+// It still names no model — a switch UNBINDS the model rather than guessing what the new server
+// serves (ADR 0024's one-code-path rule: the new Upstream's first observed model binds through
+// Rebind like every other binding does).
 type UpstreamSpec struct {
 	// Endpoint is the new Upstream's base URL. Required — errMissingEndpoint stands.
 	Endpoint string
 	// APIKey is the new server's bearer token; "" sends no auth header. Keys are per-server, so
 	// this replaces the old one outright rather than being carried over.
 	APIKey string
+	// MaxContextTokens is the BOUND context window in tokens on the new server — the caller has
+	// already applied the new entry's `context-window:` pin over whatever the session ran on, exactly
+	// as RebindSpec.MaxContextTokens carries the resolved window for a model change. 0 ⇒ nobody named
+	// one, which leaves the Budget and automatic Compaction inactive until the new server's first
+	// observed window binds through Rebind — the state a session before its first beat is already in,
+	// and the honest one here, since no request can open while nothing is bound. Keeping the RETIRED
+	// server's window instead would budget against a number describing a machine this session no
+	// longer talks to.
+	MaxContextTokens int
+	// MaxOutputTokens is the ceiling on ONE reply from the new server — the new entry's
+	// `max-output-tokens:` pin, carried as written (ADR 0046). 0 ⇒ that entry pins no cap, and the
+	// engine derives one from the reply room the Budget reserves out of the window above. The zero is
+	// applied rather than skipped for the reason the DelegationTarget's is (delegationtarget.go): a
+	// cap of nothing is not a broken session, it is a session deriving its own, while keeping the old
+	// pin would bound a reply from this server at a number describing another one.
+	MaxOutputTokens int
 }
 
 // SwitchUpstream moves the session to another Upstream: it binds a fresh provider client at
@@ -199,6 +221,10 @@ type UpstreamSpec struct {
 // Mechanism registry and the model profile also stand, both still describing the model that just
 // went away, until the follow-up Rebind re-resolves them for the new one; they are unreachable
 // meanwhile, since no request can open while nothing is bound.
+// What MOVES with the server: the two token bounds the new entry pins — the context window the
+// Budget and Compaction measure against, and the ceiling the loop states on the wire for one reply.
+// Both are applied as the spec states them, the zeroes included, because an absent pin is a fact
+// about the new server rather than a licence to keep the old server's number (see the spec's fields).
 // What resets, with Rebind's own rationale: the token estimator (its chars→token calibration
 // described a model this session no longer speaks to) and the compaction saturation latch (it was
 // judged against a window that is no longer bound).
@@ -216,6 +242,8 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	a.cfg.Endpoint = spec.Endpoint
 	a.cfg.APIKey = spec.APIKey
 	a.cfg.Model = ""
+	a.cfg.Context.MaxContextTokens = spec.MaxContextTokens
+	a.cfg.Context.MaxOutputTokens = spec.MaxOutputTokens
 	a.tokens = apogeectx.NewTokenEstimator()
 	a.compactSat = false
 	return nil

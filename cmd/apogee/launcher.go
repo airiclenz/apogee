@@ -641,8 +641,15 @@ func (w launcherWiring) load(name string, progress func(string)) (tui.ProfileLoa
 	// them, so what crosses the seam is the one call the completion fold makes where mutating is safe
 	// (ADR 0029 D2, tui.ProfileLoadResult.Move). Nothing about the session has changed when this
 	// returns; only the launcher's world has.
+	// The move's input is a ServerEntry because arriving on a server is one input shape (sessionMover),
+	// and a Launch profile's server is an entry the `servers:` list does not hold: it names no
+	// discovery hint (a profile name is not a wire model id) and pins neither a `context-window:` nor a
+	// `max-output-tokens:`, so the session keeps the top-level window pin and derives its reply cap
+	// from it — the honest answer for a server no entry describes.
 	endpoint, apiKey := addrEndpoint(dialAddr(addr)), cfg.APIKeyFor(profile.Backend)
-	move := func() (tui.ServerSwitchResult, error) { return w.move(endpoint, name, "", apiKey) }
+	move := func() (tui.ServerSwitchResult, error) {
+		return w.move(config.ServerEntry{Name: name, Endpoint: endpoint, APIKey: apiKey})
+	}
 	return tui.ProfileLoadResult{Move: move, Notices: notices}, nil
 }
 

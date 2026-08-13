@@ -201,40 +201,60 @@ type sessionMover struct {
 	agent  upstreamSwitcher
 	holder *upstreamHolder
 	host   modelStamper
-	// live is the composition root's mutable settings holder, read for the `context-window:` pin at
-	// MOVE time rather than captured at launch: the pin is global, it survives a move, and since ADR
-	// 0037 a `/settings` edit can have changed it since the session started.
+	// live is the composition root's mutable settings holder, read for the top-level `context-window:`
+	// pin at MOVE time rather than captured at launch: that pin survives a move, and since ADR 0037 a
+	// `/settings` edit can have changed it since the session started. It is WRITTEN at the same moment
+	// with the entry's own `context-window:` pin (followEntry), which is what keeps the new server's
+	// window standing past the first beat's rebind instead of for the seconds until it.
 	live *liveSettings
 }
 
-// move re-points the whole session at endpoint and reports what the display should adopt.
+// move re-points the whole session at entry and reports what the display should adopt.
+//
+// It takes a ServerEntry for the reason serverBinder.bind does: arriving on a server is ONE input
+// shape whichever way the session arrives, so the pins that ride the entry — its `context-window:`
+// and its `max-output-tokens:` — reach the engine here exactly as they reach it at a bind, rather
+// than being dropped because a move happened to be spelled as four loose strings. entry.Name is what
+// the footer will call the server (a `servers:` entry's name for a switch, the profile name for a
+// load) and entry.Model is that server's discovery hint, which for a load is deliberately empty: a
+// Launch profile's name is not a wire model id, and guessing one would send discovery looking for a
+// model no server advertises.
 //
 // Order matters, and it is the order the `/server` closure established. The engine's own
 // validate-then-commit switch goes FIRST, so a refusal — an Exchange still open, an endpoint the
 // provider will not take — leaves the session exactly where it was. Past that call nothing can fail,
-// and the two follow-ups both describe the world the switch just made true: the Monitor is replaced
-// whole (a Monitor is per-server, endpoint and key alike), and the session's stored model is cleared,
+// and the three follow-ups all describe the world the switch just made true: the Monitor is replaced
+// whole (a Monitor is per-server, endpoint and key alike), the session's stored model is cleared,
 // because the switch UNBOUND it and a Save landing in the gap before the new server's first beat must
-// not claim the model of a server this session no longer talks to.
-//
-// alias is what the footer will call the server — a `servers:` entry's name for a switch, the profile
-// name for a load — and hint is that server's discovery hint, which for a load is deliberately empty:
-// a Launch profile's name is not a wire model id, and guessing one would send discovery looking for a
-// model no server advertises.
-func (m sessionMover) move(endpoint, alias, hint, apiKey string) (tui.ServerSwitchResult, error) {
-	if err := m.agent.SwitchUpstream(apogee.UpstreamSpec{Endpoint: endpoint, APIKey: apiKey}); err != nil {
+// not claim the model of a server this session no longer talks to, and the entry's window pin is
+// latched, so the first beat's rebind re-resolves against the server the session is on now instead of
+// binding that server's observation over the number its entry pinned.
+func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, error) {
+	// What this server bounds the session to, resolved BEFORE anything is mutated so the engine and
+	// the display adopt one number: the entry's own window pin outranks the top-level key, which
+	// itself survives a move (config.ResolveContextWindow), and the reply cap is the entry's as
+	// written — an unpinned entry sends 0 and the engine derives its own cap from the window (ADR
+	// 0046).
+	window := config.ResolveContextWindow(entry.ContextWindow, m.live.pin())
+	if err := m.agent.SwitchUpstream(apogee.UpstreamSpec{
+		Endpoint:         entry.Endpoint,
+		APIKey:           entry.APIKey,
+		MaxContextTokens: window,
+		MaxOutputTokens:  entry.MaxOutputTokens,
+	}); err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
-	m.holder.Swap(endpoint, apiKey, heartbeat.NewMonitor(endpoint, hint, apiKey))
+	m.holder.Swap(entry.Endpoint, entry.APIKey, heartbeat.NewMonitor(entry.Endpoint, entry.Model, entry.APIKey))
 	m.host.SetModel("")
+	m.live.followEntry(entry)
 	// What the display adopts: the endpoint now on the wire, the alias the footer calls it, and the
-	// `context-window:` pin — which is GLOBAL and therefore survives a move, so the renderer still
-	// needs no knowledge of it. Unpinned it is 0, the honest "unknown until the first beat binds one"
+	// very window the engine was just handed, so the gauge and the Budget cannot describe different
+	// servers. Unpinned at both scopes it is 0, the honest "unknown until the first beat binds one"
 	// that the unbound model reads as too.
 	return tui.ServerSwitchResult{
-		Endpoint:      endpoint,
-		HostAlias:     alias,
-		ContextWindow: m.live.pin(),
+		Endpoint:      entry.Endpoint,
+		HostAlias:     entry.Name,
+		ContextWindow: window,
 	}, nil
 }
 

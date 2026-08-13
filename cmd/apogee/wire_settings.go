@@ -54,6 +54,13 @@ type liveSettings struct {
 	// the rebind closure with no beat of its own, and a pin CLEARED to 0 must then bind the discovered
 	// window rather than unbind it. Nothing outside a beat knows this number.
 	observedWindow int
+	// entryWindow is the BOUND `servers:` entry's own `context-window:` pin (ADR 0045), 0 when that
+	// entry pins none. It is held beside the top-level key rather than folded into it because the two
+	// are different statements — this one describes the server the session is on, and a move replaces
+	// it whole (followEntry) while the key above survives every move. Without it a switch's window
+	// would live for one beat: the rebind that follows re-resolves from the pin and would bind the new
+	// server's observation over the number its entry pinned.
+	entryWindow int
 
 	// servers is the `servers:` list: the single upstream definition (ADR 0036), which the switch
 	// list, the `server:` recording check and the pane's picker all resolve names against.
@@ -127,6 +134,20 @@ func (s *liveSettings) setPin(tokens int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pinnedWindow = tokens
+}
+
+// followEntry takes the bound entry's own `context-window:` pin onto the entry a move just landed
+// on, dropping the retired entry's — the liveSettings half of what parallelAgentsCap.follow does for
+// the fan-out width, and called at the same moment for the same reason: a pin is a fact about one
+// server, and carrying the retired server's onto the new one is exactly the bug that would be
+// invisible. An entry that pins nothing writes 0, which leaves the top-level key answering.
+//
+// It is called AFTER the engine's own switch has committed, so a refused move leaves the session
+// budgeting against the server it is still on.
+func (s *liveSettings) followEntry(entry config.ServerEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entryWindow = entry.ContextWindow
 }
 
 // observe records the context window a landed beat reported. A beat that could not name one (0) is
@@ -262,14 +283,19 @@ func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) 
 	defer s.mu.RUnlock()
 	base.Endpoint = bound.Endpoint
 	base.APIKey = bound.APIKey
-	base.ContextWindow = s.pinnedWindow
+	// The pin the resolution applies is the one in force for the server the session is on NOW: the
+	// bound entry's `context-window:` when it names one, else the top-level key — the precedence
+	// config.ResolveContextWindow spells, called inline because the read lock is already held here.
+	// Resolved once, so the copy and the returned pin cannot disagree.
+	pin := config.ResolveContextWindow(s.entryWindow, s.pinnedWindow)
+	base.ContextWindow = pin
 	base.Servers = s.servers
 	base.Mechanisms = s.mechanisms
 	base.ValidatedSetsEnable = s.validatedEnable
 	base.ValidatedSetsAlias = s.validatedAlias
 	base.SystemPrompt = s.systemPrompt
 	base.ModelProfiles = s.modelProfiles
-	return base, s.manualIDs, s.pinnedWindow
+	return base, s.manualIDs, pin
 }
 
 // settingsApplier is everything a committed key can have to reach, in one value rather than in a

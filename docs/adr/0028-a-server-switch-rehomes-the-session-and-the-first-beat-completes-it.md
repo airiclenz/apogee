@@ -62,7 +62,9 @@ human, moved the binding away from the config'd model.
 
 **3. A server switch UNBINDS the model; the new server's first beat completes the switch.**
 `Agent.SwitchUpstream(UpstreamSpec{Endpoint, APIKey})` binds a fresh `provider.NewClient`, moves
-`cfg.Endpoint`/`cfg.APIKey`, and sets `cfg.Model = ""`. It guesses **nothing** about the new
+`cfg.Endpoint`/`cfg.APIKey`, and sets `cfg.Model = ""`. *(Amended 2026-08-13 — see the Amendment
+section below: the spec grew the two token bounds the new entry PINS, which are config facts rather
+than discovered ones.)* It guesses **nothing** about the new
 server: its model, window, system-prompt template and validated Mechanism set are facts only that
 server can report, so the heartbeat discovers them and the ordinary `Rebind` applies them — one
 code path with the cold start again, one Interval later at worst, and immediately in practice
@@ -234,3 +236,34 @@ where `rebindNote`'s silent-when-nothing-moved contract is about the observation
 - **CONTEXT.md's *Heartbeat* entry grows the switch** rather than gaining a new noun. "Rehome" is
   not introduced: the operation is `SwitchUpstream`, and Upstream, Heartbeat, Beat and Rebind carry
   the rest.
+
+## Amendment (2026-08-13) — a switch carries the new entry's two token bounds
+
+Decision 3 spells the spec `UpstreamSpec{Endpoint, APIKey}` and says a switch guesses nothing about
+the new server because "its model, window, system-prompt template and validated Mechanism set are
+facts only that server can report". Two of those stopped being discovery-only after this record was
+written: [ADR 0045](0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md) decision 3
+put a `context-window:` pin on the `servers:` entry, and
+[ADR 0046](0046-the-engine-bounds-every-reply-with-an-output-cap.md) decision 2 put a
+`max-output-tokens:` cap beside it. A pin is not a guess and not an observation — it is the
+operator's statement about that slot, and for a cloud endpoint that advertises no window it is the
+only statement there is.
+
+So `UpstreamSpec` grows `MaxContextTokens` and `MaxOutputTokens`, resolved WHOLE by the composition
+root — the entry's own window pin over the top-level `context-window:` key, which survives every
+move (`config.ResolveContextWindow`) — and applied by `SwitchUpstream` beside the endpoint and the
+key. The engine stays wire-silent either way ([ADR 0031](0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md)):
+it is handed two numbers, exactly as `RebindSpec` hands it the resolved window for a model change.
+
+The rest of decision 3 stands: the model is still unbound, the system-prompt template and the
+Mechanism set are still the follow-up `Rebind`'s to re-resolve, and an entry that pins neither bound
+sends two zeroes — the same "unknown until the first beat" the unbound model is in, and never the
+retired server's numbers.
+
+What this closes: a `/server` move left the engine capping replies from the new server at the OLD
+server's ceiling (or at one derived from the old server's window), and the entry's window pin
+reached a moved session at no point at all — the rebind seconds later bound the new server's
+observation over it. The pin is now held beside the top-level key at the composition root and is
+what the rebinds after a move resolve against, so the footer's gauge, the Budget and the ceiling on
+the wire all describe the server the session is actually on. A first bind is unchanged and still
+reads only the top-level key.
