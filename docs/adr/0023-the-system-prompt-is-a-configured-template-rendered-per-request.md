@@ -199,7 +199,7 @@ the **only** key it sets and that every other key still parses to nothing.
   model on bench evidence ([ADR 0015](0015-catalogued-mechanisms-are-enabled-by-id-through-config.md)).
   It is **accepted, not fixed, here**: a non-textual idempotency channel changes the hook API's
   contract for every Mechanism, and the alternative — opaque sentinel strings — would put text in
-  front of the model whose only reader is apogee. Recorded as a residual in `TODO.md`; revisit if a
+  front of the model whose only reader is apogee. Recorded as a residual in `ISSUES.md`; revisit if a
   real prompt trips it.
 - **[ADR 0018](0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md) §1's
   aside is now this ADR's to own.** That decision noted "the shipped config template stays

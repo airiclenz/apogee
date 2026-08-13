@@ -26,7 +26,7 @@
 // the command that performs it.
 //
 // The capability tier the model report carries is a REPORTED SIGNAL ONLY — nothing reads it.
-// Adaptive prompt complexity, the transform that would, is a recorded TODO.md follow-on: a
+// Adaptive prompt complexity, the transform that would, is a recorded ISSUES.md follow-on: a
 // model-facing transform owes the catalogue a bench campaign first (ADR 0009).
 //
 // # The files, one line each

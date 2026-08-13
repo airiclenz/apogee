@@ -108,7 +108,7 @@ func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGua
 // not a leak: the stdio command is chosen by the host in global config (the same trust level as
 // the toolchain Apogee invokes), and many MCP servers need inherited PATH/HOME/runtime vars to
 // function. It is broader than the git tool's allowlisted env (safeGitEnv) on purpose. An
-// optional env-allowlist scrub for stdio MCP launches is parked in TODO.md (L4) for a host that
+// optional env-allowlist scrub for stdio MCP launches is parked in ISSUES.md (L4) for a host that
 // wants to run a less-trusted stdio server; v1 treats a configured stdio MCP command as fully
 // trusted with the process environment.
 func buildStdioTransport(cfg ServerConfig) (mcpsdk.Transport, error) {

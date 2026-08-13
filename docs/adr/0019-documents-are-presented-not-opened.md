@@ -157,7 +157,7 @@ All of these were rejected; the ladder above is what survived.
   macOS Local Network gotcha as the first thing to check when a served URL is unreachable.
 - **Skills stay user-authored** ([ADR 0002](0002-tools-are-an-open-extension-point-mechanisms-are-curated.md)):
   nothing here edits a builtin skill. The guidance that a report-producing skill should end with
-  `present_document` is documentation, recorded in `TODO.md`.
+  `present_document` is documentation, recorded in `ISSUES.md`.
 - **CONTEXT.md gains the vocabulary** — *Present / Presentation*, *Presenter*, *presentation
   ladder*, *doc server* — worded to match this ADR.
 - **Deferred, kept additive:** a markdown→HTML rendering rung (the doc server stays

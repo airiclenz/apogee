@@ -219,7 +219,7 @@ one behavioural repair on that path is decision 2's: a staged interjection now c
   `CursorEnd`-then-`CursorDown` step, Height-aware) is now the one walk both express, and a
   deadline-guarded test fails instead of wedging `go test` if it ever spins again. The mouse
   path's `reseatCaret` (a click's VISUAL row) is unchanged and still lands imprecisely below a
-  phantom-wrapped line — pre-existing, deliberately out of scope, and parked in `TODO.md`.
+  phantom-wrapped line — pre-existing, deliberately out of scope, and parked in `ISSUES.md`.
 - **CONTEXT.md's *Skill* entry gains the token grammar** and is cross-referenced against *File
   reference* in both directions; the *Interjection* entry records the per-command policy in place
   of the blanket "commands run at idle".

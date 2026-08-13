@@ -26,7 +26,7 @@ import (
 // The count is deliberately unclamped: [promptEditor.rows] holds it to [minInputRows, maxInputRows],
 // and past that cap the widget scrolls internally rather than the box growing further.
 //
-// KNOWN DIVERGENCE: both mirrors are still wrong on tabs, which the widget expands. See TODO.md,
+// KNOWN DIVERGENCE: both mirrors are still wrong on tabs, which the widget expands. See ISSUES.md,
 // "The TUI width authority — what it did not convert".
 //
 // WIDGET MIRROR — deliberately NOT the width authority. This is one of the package's mirrors of a

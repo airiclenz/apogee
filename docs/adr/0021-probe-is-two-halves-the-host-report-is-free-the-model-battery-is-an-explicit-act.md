@@ -81,7 +81,7 @@ a Mechanism shipped default-on without evidence (the hard constraint violated at
 a catalogue row that is dead on arrival with a `TODO` where its Table B bench entry should be.
 The tier ships as a *signal* — an ordinal summary of what the model can be **asked** to do,
 derived from the battery outcomes, carrying **no automatism of its own** — and the transform is
-recorded as a named `TODO.md` follow-on with the design intact. Validated, not assumed.
+recorded as a named `ISSUES.md` follow-on with the design intact. Validated, not assumed.
 
 **3. Q2 — the model probe DOES persist, and persistence is the point.** `probe model` writes a
 **versioned probe record** under the apogee home carrying the behavioral fingerprint at
@@ -173,7 +173,7 @@ random-number generator wearing an identity's clothes.
 - **Building adaptive prompt complexity now, default-off and catalogued** (Q3's alternative).
   Rejected for this plan: a catalogued Mechanism owes the catalogue a bench-validation entry
   (ADR 0009), and manufacturing a row we cannot yet fill trades a real design for a placeholder.
-  It stays a `TODO.md` follow-on with its design recorded — and if it is ever built, it is
+  It stays a `ISSUES.md` follow-on with its design recorded — and if it is ever built, it is
   default-off and bench-gated, never a rider on the probe.
 - **A `probe --json` machine format in v1.** Deliberately not decided here; the report is
   human-first and a stable machine format is additive. Named so a later ADR is not surprised.
@@ -192,7 +192,7 @@ random-number generator wearing an identity's clothes.
   at it is updated (the edit itself belongs to the Phase-5 docs roll-up item, not here).
 - **`CONTEXT.md` gains three terms** — *Probe*, *capability tier*, *behavioral fingerprint* —
   worded to match this ADR.
-- **Adaptive prompt complexity is a named, dated `TODO.md` follow-on** carrying the tier's
+- **Adaptive prompt complexity is a named, dated `ISSUES.md` follow-on** carrying the tier's
   intended use, so mission.md item 2 is not lost — merely not assumed.
 - **Bench arms are unaffected by construction.** A Medium record is produced only by a human
   running a command; the resolver's ladder is otherwise unchanged, and ADR 0016's

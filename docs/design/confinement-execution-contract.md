@@ -422,7 +422,7 @@ one level down (D2), for free, with no threading.
 > child's side: `platform.Host.ScopeEnv` now takes the workspace root and drops workspace-resident
 > `PATH` entries, so git and the Go toolchain cannot redo the lookup the fence just refused. The
 > ergonomics cost — an activated `<repo>/.venv/bin/python3` or `node_modules/.bin` is refused, with
-> no switch — is accepted and recorded in `TODO.md` L5.
+> no switch — is accepted and recorded in `ISSUES.md` L5.
 
 A Resolution is one of five **kinds** — `Run` · `Confine` · `Gate` · `Refuse` · `Delegate` —
 computed in a fixed, load-bearing order:

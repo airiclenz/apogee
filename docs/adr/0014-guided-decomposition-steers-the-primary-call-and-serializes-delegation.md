@@ -137,7 +137,7 @@ full enumeration and every completed report.
   must-not-conflate list.
 - **Ships default-off, bench-gated** like every Mechanism (D1): it flips on only when the
   ADR 0009 non-inferiority gate passes for the decomposition + capping stack.
-- **Parked separately** (TODO.md, 2026-07-05): mid-Exchange auto-compaction at quiescent Turn
+- **Parked separately** (ISSUES.md, 2026-07-05): mid-Exchange auto-compaction at quiescent Turn
   boundaries under pressure — a structural-reducer contract change with its own blast radius;
   if it ever lands, it would loosen (not remove) this Mechanism's `Requires` coupling.
 

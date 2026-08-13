@@ -381,12 +381,12 @@ func TestClipWrapSurvivesNarrowWidths(t *testing.T) {
 // point rather than through wrapText again, so a surface that grew a wrap of its own would show up
 // here.
 //
-// The pop-up body is the third surface TODO.md named and it is deliberately NOT here: its wrap does
+// The pop-up body is the third surface ISSUES.md named and it is deliberately NOT here: its wrap does
 // move with the others, but the pane it lands in is composed by lipgloss — Style.Width pads, and
 // past its width WRAPS, in GraphemeWidth whatever the painter is doing — so a VS16 line the
 // authority calls short enough is folded back into two pane rows. That fold is the pane's, not the
 // wrap's: it is reachable today through pop-up ROWS, which never touch wrapText at all, and it is
-// tracked in TODO.md with the rest of the ADR 0030 residue.
+// tracked in ISSUES.md with the rest of the ADR 0030 residue.
 func TestWrappedSurfacesBreakInThePaintersMeasure(t *testing.T) {
 	t.Parallel()
 
@@ -5125,7 +5125,7 @@ func widgetContentRows(t *testing.T, value string, width int) (rows, effWidth in
 // height and the rows the accent pass paints on come off one ruler.
 //
 // Tabs are deliberately absent: the widget's sanitizer expands them and neither mirror does, the one
-// divergence left standing (TODO.md, "The TUI width authority — what it did not convert").
+// divergence left standing (ISSUES.md, "The TUI width authority — what it did not convert").
 func TestInputContentRowsMirrorsTheWidget(t *testing.T) {
 	cases := []struct {
 		name  string

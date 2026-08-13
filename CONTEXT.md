@@ -1112,7 +1112,7 @@ The ordinal summary of a battery run — what the model can be **asked** to do (
 structured output, multi-step chaining). Today it is a **reported signal only**: it carries no
 automatism, gates nothing, and changes no request. The *adaptive prompt complexity* idea it
 exists for — slimming tool descriptions and system prompts for a lower tier — is a parked
-follow-on (`TODO.md`), because that is a model-facing **Mechanism** and a Mechanism ships on the
+follow-on (`ISSUES.md`), because that is a model-facing **Mechanism** and a Mechanism ships on the
 non-inferiority gate, not on plausibility ([ADR 0009](docs/adr/0009-the-ab-decision-rule.md)).
 _Avoid_: "model tier" / "model size" (it describes observed behaviour, not parameters or
 quality), treating it as a config knob (it is an observation).

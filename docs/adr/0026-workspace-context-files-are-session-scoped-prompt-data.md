@@ -201,7 +201,7 @@ owns all three boundaries where the notice belongs.
   happens to contain a Mechanism's marker phrase now suppresses that directive too — the same
   accepted suppression, from one more source, with the same bounded blast radius (catalogued nudge
   Mechanisms, default-off, enabled per model on bench evidence). Still recorded as a residual in
-  `TODO.md` rather than fixed here.
+  `ISSUES.md` rather than fixed here.
 - **The shipped template documents the block, commented.** `system-prompt-text:` remains the ONE
   active key a fresh install gets (ADR 0023 §8), and `TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt`
   still holds — the defaults come from resolution, not from the file.

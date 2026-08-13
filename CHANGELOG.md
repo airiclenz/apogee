@@ -227,6 +227,51 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`TODO.md` is merged into `ISSUES.md`, and this changelog is now the closed trail.** The two
+  files had converged on one job from two directions — a defect list and a parked-work register —
+  so they are now one file with the distinction kept as sections: `ISSUES.md` carries **Open
+  defects** (verified, unfixed problems) and **Parked / deferred work** (the former `TODO.md`
+  entries, deferred by decision), and `TODO.md` is gone. Every item earned its place by
+  re-verification against the working tree (2026-08-13): 17 defects and all 22 parked entries
+  survive, with drifted file:line citations, moved helper locations and five plan paths that had
+  since been archived corrected in the process; the two topic overlaps (the `SetSampling`
+  wholesale-replace defect ↔ the parity entry's request-side knobs; the approved out-of-workspace
+  write ↔ the tool × mode matrix) are cross-referenced, not folded, so a live defect never hides
+  inside a parked design. Two entries closed on verification, both already recorded in this
+  section's own bullets: the unbounded-reply defect (shipped as the output-cap work, ADR 0046) and
+  the streaming-preview whole-buffer re-render (fixed via `previewTail`). The convention changes
+  with the merge: a resolved item now leaves `ISSUES.md` entirely and is recorded HERE — no
+  closed-entries section lives in the register. `TODO.md`'s existing one-line trail therefore
+  lands in this bullet, standing constraints intact:
+  - **Naming Sub-Agents** — shipped 2026-08-09 (`docs/plans/archived/2026-08-09 - 00 -
+    subagent-naming-and-newline-key-plan.md`). Standing: the name is display identity only, never
+    privilege (ADR 0005); it stays OPTIONAL with the task's first line as fallback; the rail
+    carries no label of its own.
+  - **VS Code agent-CLI allowlist** — moot 2026-08-03 (`docs/plans/archived/2026-08-03 - 01 -
+    session-name-on-the-top-rule-plan.md`): apogee sets no terminal title; the session name rides
+    the `▔` top rule. Standing: the terminal's title bar and tab are a closed route — do not
+    re-file an escape sequence, a settings recipe or an upstream PR for them.
+  - **Mid-string token completion** — shipped 2026-07-28 (ADR 0027 decision 5). Standing: the
+    caret walk is `seatCaret` (a `CursorEnd`-then-`CursorDown` step over LOGICAL rows, now in
+    `internal/tui/lineeditor.go`) — bubbles' phantom trailing sub-line makes a naive `CursorDown`
+    loop stall or spin, so do not "simplify" it back.
+  - **Read/list tool-name detection** — closed 2026-07-19. Standing: `syntax`/`autofix` keep the
+    narrower sim-only `isWriteTool` set; search/exec tool spellings stay out of scope.
+  - **General system-prompt / template story** — closed 2026-07-26 (ADR 0023); the
+    marker-phrase-suppression interaction and the host-override residual live on as parked
+    entries in `ISSUES.md`.
+  - **Auto-mode confinement degradation is silent** — closed 2026-07-21 (ADR 0012 amendment;
+    ADR 0021). Standing: never loosen `resolveLadderAuto` — the user's decision must stay
+    reachable, the tool never decides. The stderr-only startup-notice residue is a parked entry
+    in `ISSUES.md`.
+  - **Validated-set twin ladders** — done 2026-07-22 (`cmd/apogee/validatedsets.go`; ADR 0016 §5,
+    ADR 0021 §4).
+  - **Windows disk-label walk kept full-tree + progress notice** — shipped 2026-07-23. Standing:
+    pruning the walk stays rejected — it would dissolve the fence for excluded trees.
+  - **`internal/platform` Windows confinement file split** — closed 2026-07-25. Standing:
+    `confiner_windows_test.go`, `host.go` and `winlabel/journal_test.go` exceed the ~400-line
+    guideline BY DECISION; if `host.go` is ever picked up it wants its own entry.
+
 - **"Always allow this session" now remembers the call you read, not the tool it used.** The
   allow-for-session memory was keyed on the tool NAME alone, so one allow on `terminal` pre-cleared
   every later shell command for the rest of the Session — and since that memory belongs to the whole

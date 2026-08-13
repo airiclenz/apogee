@@ -101,7 +101,7 @@ on full success, so a bad snapshot cannot half-replace a running conversation.
 **7. Concurrency is last-write-wins per file, documented, not locked.** Ids are per-instance
 unique (a UTC-second stamp plus random suffix), so clobbering requires the *same* session
 resumed into two instances. That is documented and accepted; a cross-instance file lock is a
-recorded `TODO.md` follow-on, not built here.
+recorded `ISSUES.md` follow-on, not built here.
 
 **8. What is deliberately NOT session state.** The record carries the conversation and the
 scrollback and nothing else about the live host. **Agent mode, the allow-for-session approval

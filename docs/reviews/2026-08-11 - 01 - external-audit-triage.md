@@ -116,7 +116,7 @@ These buckets are deliberate exclusions, not oversights. No fix item may drift i
   dist` splice, unsigned laptop-built releases, the unpinned default system prompt. All presuppose
   that the audited workspace *is* the apogee repo — a different situation from a cloned repo apogee
   is pointed at.
-- **`TODO.md` L2 / L3 / L4 acceptances:** the dangerous-action guard being trivially evadable (L2),
+- **`ISSUES.md` L2 / L3 / L4 acceptances:** the dangerous-action guard being trivially evadable (L2),
   read-and-exfiltrate from inside the box (L3), stdio MCP environment inheritance (L4). Triaged
   against below.
 - **Hostile inference endpoint / transport:** unclamped `/props` and `/v1/models` values, the model
@@ -131,7 +131,7 @@ These buckets are deliberate exclusions, not oversights. No fix item may drift i
 
 ## Triaged against the L2 / L3 / L4 acceptances
 
-The audit's own strongest observation is that a deferred-acceptance in `TODO.md` is the single
+The audit's own strongest observation is that a deferred-acceptance in `ISSUES.md` is the single
 biggest predictor of a finding being answered "intended". So every ranked position was checked
 against L2, L3 and L4 before being accepted. **None of the fourteen dies on those acceptances**,
 for reasons worth stating individually:

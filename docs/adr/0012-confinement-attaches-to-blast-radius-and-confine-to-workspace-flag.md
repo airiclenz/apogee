@@ -99,7 +99,7 @@ project config may only *add* (tighten). Lives in `internal/security` (P3.6).
   for *every* user, to satisfy the VM-user subset. Offered instead as the explicit `confine=false`
   opt-in, so the default floor stays high and VM users say so once.
 - **A configurable per-tool × mode disposition matrix as the loosening mechanism** — deferred
-  (`TODO.md`), post-v1, additive. When built it is **tighten-only**; the only blanket loosen is
+  (`ISSUES.md`), post-v1, additive. When built it is **tighten-only**; the only blanket loosen is
   `confine=false`.
 
 ## Consequences
@@ -240,7 +240,7 @@ URLs. That is the **same second-class status the write axis has had since Phase 
 write tool cannot carry `workspaceScopedWriter` either, and gates. We accept it rather than export
 the funnel now: gating is the safe direction, the demand is hypothetical, and exporting a
 `NewNetworkTool`-style constructor later is purely additive (it would let an embedder **inherit** the
-marker by routing through the guard, never claim it). The door is parked in `TODO.md`, not shut.
+marker by routing through the guard, never claim it). The door is parked in `ISSUES.md`, not shut.
 
 **(d) The floor this rests on is unchanged.** The `URLGuard`'s default-on, resolved-IP SSRF floor
 (pre-flight **and** at dial time) is moved into the funnel, not revisited; the MCP transport's

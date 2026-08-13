@@ -10,8 +10,8 @@
 - `docs/plans/` — implementation plans in the house format: numbered `## N.` H2 items with What/Tests/Acceptance/commit. Plans are saved repo docs, executed item-by-item; completed plans get archived.
 - `docs/handoffs/` — multi-session work-in-flight handoffs (superseded ones move to `docs/handoffs/archived/`).
 - `docs/reviews/` — saved review reports.
-- `layout.md` — the TUI layout/rendering spec in prose.
-- `ISSUES.md` / `TODO.md` — known issues and deferred work.
+- `layout.md` - the TUI layout/rendering spec in prose.
+- `ISSUES.md` - known issues and deferred work.
 - `CHANGELOG.md` + `VERSION` — `VERSION` micro-bumps per shipped feature; `CHANGELOG.md` collects those under `[Unreleased]` and only gains a release heading when a release is cut. Versioning is deliberately 0.x while pre-production.
 
 ## Conventions not derivable from the code
@@ -25,8 +25,4 @@
 - Tests that need a live LLM are gated by `APOGEE_LIVE_ENDPOINT`; without it they skip. `make live-eval` drives the live path.
 - Early-development stance: prefer the best long-term architecture over lowest churn; the owner reshapes now to get it right.
 - **North star (ADR 0031, tiebreaker force):** the embeddable engine must stay sufficient for any **Driver** (TUI, bench, a future daemon — see `CONTEXT.md`). Its door-keeping invariants — wire-silent engine, wait-tolerant Approver, no first-party connectors, benchable-all-the-way-up — bind design work; a change that closes one of those doors must supersede ADR 0031 explicitly.
-
-## Tool-specific loading
-
-Claude Code auto-loads only `CLAUDE.md`, not this file. Create a local, untracked one-line `CLAUDE.md` containing exactly `@AGENTS.md` (it is gitignored in this repo). Tools that read `AGENTS.md` natively need nothing extra.
 

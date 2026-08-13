@@ -95,9 +95,9 @@ unrepresentable (§4).
 - **Escape-strip seam (Wave 2) is independent of C7/C11** but touches the same files — land it
   before the C7 extraction so the extraction moves already-fixed code.
 - **`MergeDangerousRules` fix ⟂ candidates, but ⟸ config surfacing.** It must land before the
-  dangerous-rule config-key surfacing parked in `TODO.md` (L1's "re-verify when wired" promise
+  dangerous-rule config-key surfacing parked in `ISSUES.md` (L1's "re-verify when wired" promise
   would today pass against tests that encode the loophole).
-- **C5 ties to the `TODO.md` `HostTools` trap** (composed in both `construct.go` and `wire.go`;
+- **C5 ties to the `ISSUES.md` `HostTools` trap** (composed in both `construct.go` and `wire.go`;
   a new field added in one place is silently dropped). The binding-set grill should settle that
   trap's fate too. C5 also shrinks `runRoot`, which C6 (config table) further shrinks — grill
   C5 and C6 together.
