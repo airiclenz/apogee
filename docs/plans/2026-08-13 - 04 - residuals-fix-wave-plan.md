@@ -285,7 +285,10 @@ doc comment at `:1502-1516`. `stripEscapes` is untouched — body text keeps its
 
 ---
 
-## 8. The `destination` key gets its path-agreement pin
+## 8. The `destination` key gets its path-agreement pin — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the plan offered "extend the test or add a sibling in the same file" — a sibling was chosen: the existing test's three subtests are per-scenario with a denied approval, while this one is a per-tool table that must ALLOW the call to reach a result string.
+NOTES (2026-08-13): the redirect is a leaf symlink pointing INSIDE the workspace (`docs/notes.md` → `store/notes.md`), not out of it as in the existing symlinked-directory subtest — an out-of-workspace target refuses at the tools' own fence, so no success sentence would exist to compare against, and the resolution divergence (not the fence) is what this item pins. Ask-Before is the mode for the same reason: it gates every write, so the approval carrier is populated while the call still executes.
 
 Depends on item 1.
 

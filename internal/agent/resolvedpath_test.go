@@ -78,6 +78,106 @@ func TestResolvedPathRidesTheCallAndTheApproval(t *testing.T) {
 	})
 }
 
+// TestResolvedPathAgreesWithTheResultForEveryWriteKey carries the disclosure above past the one
+// tool that names its target `path` and writes it directly. Three more writers reach a resolved
+// target by other spellings — copy_file and move_file write their `destination`, delete_file
+// unlinks its `path` — and each states that target a SECOND time in its own success sentence
+// (file_ops.go, resolvedTargetNote). Two independent statements of one fact drift apart silently,
+// so this pins them together: the pane a human approves, the card a Driver renders, and the
+// sentence the model reads all name the same EvalSymlinks-resolved file. The redirect stays
+// inside the workspace on purpose — the divergence is what is under test, not the fence — and
+// Ask-Before is what gates every write, so the approval carrier is populated for all three.
+func TestResolvedPathAgreesWithTheResultForEveryWriteKey(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		newTool  func(ws string) domain.Tool
+		tool     string
+		args     string
+		sentence string
+	}{
+		{
+			name:     "copy_file discloses its resolved destination",
+			newTool:  func(ws string) domain.Tool { return tools.NewCopyFile(ws, nil) },
+			tool:     "copy_file",
+			args:     `{"source":"payload.txt","destination":"docs/notes.md","overwrite":true}`,
+			sentence: "copied payload.txt to docs/notes.md",
+		},
+		{
+			name:     "move_file discloses its resolved destination",
+			newTool:  func(ws string) domain.Tool { return tools.NewMoveFile(ws) },
+			tool:     "move_file",
+			args:     `{"source":"payload.txt","destination":"docs/notes.md","overwrite":true}`,
+			sentence: "moved payload.txt to docs/notes.md",
+		},
+		{
+			name:     "delete_file discloses its resolved path",
+			newTool:  func(ws string) domain.Tool { return tools.NewDeleteFile(ws) },
+			tool:     "delete_file",
+			args:     `{"path":"docs/notes.md"}`,
+			sentence: "deleted docs/notes.md",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ws := t.TempDir()
+			want := realPath(t, redirectedWriteFixture(t, ws))
+
+			sink := &recordingSink{}
+			cfg := configWithTools(sink, tc.newTool(ws))
+			cfg.Mode = domain.ModeAskBefore
+			cfg.WorkspaceDir = ws
+			cfg.Approver = &fakeApprover{decision: domain.ApprovalAllow}
+
+			driveToolCall(t, cfg, sink, "c1", tc.tool, tc.args)
+
+			if got := resolvedPathOnCall(t, sink.events); got != want {
+				t.Errorf("ToolCallEvent.ResolvedPath = %q, want %q", got, want)
+			}
+			if got := resolvedPathOnApproval(t, sink.events); got != want {
+				t.Errorf("ApprovalRequest.ResolvedPath = %q, want %q", got, want)
+			}
+			res, ok := lastToolResult(sink.events)
+			if !ok {
+				t.Fatal("no ToolResultEvent was emitted; the approved call did not execute")
+			}
+			if res.IsError {
+				t.Fatalf("tool errored: %q", res.Content)
+			}
+			if wantSentence := tc.sentence + " → resolves to " + want; res.Content != wantSentence {
+				t.Errorf("result = %q, want %q — the sentence must name the same target the carriers do", res.Content, wantSentence)
+			}
+		})
+	}
+}
+
+// redirectedWriteFixture builds a workspace whose `docs/notes.md` is a symlink to `store/notes.md`
+// — a LEAF link, the shape the writers reach success through (a mutated symlinked PARENT is
+// refused) — alongside the `payload.txt` the copy and the move take as their source. It returns
+// the redirect target, the path every carrier must name once the resolution runs.
+func redirectedWriteFixture(t *testing.T, ws string) string {
+	t.Helper()
+	for _, dir := range []string{"store", "docs"} {
+		if err := os.MkdirAll(filepath.Join(ws, dir), 0o755); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+	target := filepath.Join(ws, "store", "notes.md")
+	if err := os.WriteFile(target, []byte("redirect target\n"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "payload.txt"), []byte("payload\n"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(filepath.Join("..", "store", "notes.md"), filepath.Join(ws, "docs", "notes.md")); err != nil {
+		t.Skipf("symlinks unavailable on this host: %v", err)
+	}
+	return target
+}
+
 // resolvedPathOnCall returns the disclosure the first ToolCallEvent carried.
 func resolvedPathOnCall(t *testing.T, events []domain.Event) string {
 	t.Helper()

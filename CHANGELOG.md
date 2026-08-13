@@ -323,6 +323,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Pinned that the approval pane, the call card, and the result sentence name the SAME resolved
+  path for every write key**: `TestResolvedPathRidesTheCallAndTheApproval` drove only `write_file`
+  (the `path` key that is written directly), so nothing held the `destination`-keyed writers to
+  the same agreement. A sibling table test now drives `copy_file` and `move_file` (resolved
+  `destination`) and `delete_file` (resolved `path`) through a gated Ask-Before call over a
+  workspace whose `docs/notes.md` is a symlink to `store/notes.md`, and asserts
+  `domain.ToolCallEvent.ResolvedPath`, `domain.ApprovalRequest.ResolvedPath` and the tool's own
+  ` → resolves to …` success sentence all carry the same `filepath.EvalSymlinks`-resolved target.
+  Two independent statements of one fact could drift apart silently; they cannot now. Test-only;
+  no behaviour moves.
+
 - **`ScopeEnv` now asks `isPathName` whether a key is PATH**: the `add` closure in
   `internal/platform/host.go` carried its own copy of the fold rule — `fold == "PATH"`, with `fold`
   upper-cased on Windows — which said the same thing as `hostRules.isPathName`, the rule
