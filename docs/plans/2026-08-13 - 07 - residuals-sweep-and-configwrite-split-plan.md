@@ -128,7 +128,7 @@ still reads as one sentence.
 
 **Commit:** `docs(readme): key-source failure list includes an empty variable`
 
-## 4. `ScopeEnv` Windows Path-scoping subtest with a real root
+## 4. `ScopeEnv` Windows Path-scoping subtest with a real root — ✅ DONE (2026-08-13)
 
 **What:** no `ScopeEnv` subtest exercises `windowsRules()` with a non-empty workspace root — the
 "windows folds duplicate names" subtest (`internal/platform/host_test.go:166`) passes root `""`,

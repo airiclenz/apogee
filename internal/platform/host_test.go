@@ -197,6 +197,30 @@ func TestScopeEnvKeepsTheCallersAllowlistAndAddsThePlatformFloor(t *testing.T) {
 		}
 	})
 
+	t.Run("windows scopes the folded Path under a real root", func(t *testing.T) {
+		t.Parallel()
+		// The Windows fold and the PATH scrub meet here: PATH and Path are one variable, so
+		// the spelling that survives the fold must be the SCOPED one — emitting the second
+		// spelling unscoped would hand the child back the workspace directories the first
+		// one dropped.
+		scoped := map[string]string{
+			"Path":       `C:\work\repo\.venv\Scripts;C:\Windows\system32;work\bin`,
+			"PATH":       `C:\work\repo\node_modules\.bin;C:\Windows`,
+			"SystemRoot": `C:\WINDOWS`,
+		}
+		got := windowsRules().ScopeEnv(`C:\work\repo`, []string{"Path", "PATH"}, func(key string) (string, bool) {
+			value, ok := scoped[key]
+			return value, ok
+		})
+		// The in-workspace entry and the relative one go — the latter names a directory
+		// relative to the child's working directory, which is the workspace itself — the
+		// system entry stays, and the platform floor follows the allowlist untouched.
+		want := []string{`Path=C:\Windows\system32`, `SystemRoot=C:\WINDOWS`}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("ScopeEnv() = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("an unscoped call keeps every PATH entry", func(t *testing.T) {
 		t.Parallel()
 		// An empty workspace root names no fence: a caller with no workspace has nothing to

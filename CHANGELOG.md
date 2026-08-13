@@ -1483,6 +1483,18 @@ point is a **minor** bump, not a breaking change.
   sentence now reads "a non-zero exit, a 60-second timeout, empty output, or an unset or empty
   variable", matching what `resolveEnvKey` actually does. Docs-only; no behaviour changes.
 
+- **Pinned that `ScopeEnv` scopes the Windows `Path` spelling under a real workspace root**: every
+  Windows subtest of `TestScopeEnvKeepsTheCallersAllowlistAndAddsThePlatformFloor` passed an empty
+  root, which scopes nothing, and the only test driving `windowsRules()` against a real root went
+  through `ScopeInheritedEnv` — so on the allowlist path the case-insensitive fold and the PATH
+  scrub could have come apart without a failing test, in the direction that matters (the spelling
+  that survives the fold handing the child back the workspace directories the other one dropped).
+  A new subtest drives `windowsRules().ScopeEnv` over `C:\work\repo` with the allowlist naming both
+  `Path` and `PATH`, each holding a value that mixes in-workspace, relative and system entries, and
+  asserts the surviving spelling is the SCOPED one: the workspace and relative entries gone, the
+  system entry kept, the folded duplicate absent, and the platform floor following the allowlist
+  untouched. Test-only; no shipped behaviour changes.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added
