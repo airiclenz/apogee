@@ -181,7 +181,13 @@ writer invoked with the entry name and id.
 
 **Commit:** `feat(tui): record explicit model picks into the server entry when remember-model is on`
 
-## 4. Launcher servers: record the loaded profile on commit
+## 4. Launcher servers: record the loaded profile on commit — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): `cmd/apogee/wire_live.go` gained the startup half of the item's "extend the followed state to carry the entry name" — outside the item's Files line. The holder is seeded there rather than through `launcherPath.follow`, so the name had to travel with the path at construction too; it comes from `w.opts.HostAlias`, which is the SELECTED entry's own name (`ApplyConfig`) and is what `newLiveSettings` already latches for the same purpose. The one start whose alias is host-derived instead — the ephemeral `--endpoint` override — carries no launcher key either, so path and name stay empty together.
+NOTES (2026-08-13): the pair is stored as one `launcherFollow` value under the existing atomic pointer, so `set`/`newLauncherPath` take two arguments now; `cmd/apogee/wire_test.go` (beside `wire.go`, not on the Files line) and `launcher_test.go` were updated for the signature.
+NOTES (2026-08-13): the seam skips when the followed entry name is no longer in the live `servers:` list (`configuredServer`), not only when it is empty — design call 8's "cannot be identified" read against a list the human can edit mid-session, and the same shape `recordServerChoice` already uses. Both skips are silent (false, nil).
+NOTES (2026-08-13): on the MOVE commit the saved line is stated BEFORE the switch note rather than after it: the pointer lands on the entry the session is LEAVING, and `foldServerSwitch` writes its own note on the way out, so appending after it would have meant type-asserting the fold's `tea.Model` back to a `Model`. The same-server commit states it after "profile X loaded — waiting for the beat", where the subject is already right.
+NOTES (2026-08-13): the note names no server (`launch-profile: saved — apogee loads it at the next start`) — the actuating entry is not necessarily the server the session ends on after a followed load, so "this server" would have been ambiguous where `modelSavedNote`'s is not.
 
 Depends on items 1 and 2 (shares files with item 3 — runs serial to it).
 

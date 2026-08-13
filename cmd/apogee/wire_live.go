@@ -228,8 +228,17 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// key is what the session begins with, and a `/server` switch or a first bind replaces it. A
 	// pre-bound start therefore begins empty — the verbs answer tui.ErrNoLauncher until a bind
 	// installs a value — and so does a run on the ephemeral `--endpoint` entry, which names no key.
-	startPath, _ := entryLauncherPath(w.opts.StartupLauncher)
-	w.launcherPath = newLauncherPath(startPath)
+	// The entry NAME travels with the path from the first moment, because it is what a committed
+	// profile load records its `launch-profile:` pointer onto (remember-model). HostAlias is that
+	// name: ApplyConfig writes the SELECTED entry's own into it, and the one start that carries a
+	// host-derived label instead — the ephemeral `--endpoint` override — carries no launcher key
+	// either, so the two are empty together exactly as launcherPath.follow keeps them.
+	startPath, startOn := entryLauncherPath(w.opts.StartupLauncher)
+	startEntry := ""
+	if startOn {
+		startEntry = w.opts.HostAlias
+	}
+	w.launcherPath = newLauncherPath(startPath, startEntry)
 
 	// The llama-launcher seams (ADR 0029 D1): four closures over the bridge in launcher.go, which is
 	// the only file that names the library. An entry's `llama-launcher:` value resolves HERE, at the

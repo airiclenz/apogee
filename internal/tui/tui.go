@@ -706,6 +706,36 @@ type Options struct {
 	// introduced to replace; every hand-built Options keeps it.
 	RecordModelChoice func(model string) (recorded bool, err error)
 
+	// RecordLaunchProfile persists the Launch profile a load just COMMITTED as the one this server comes
+	// back on NEXT time — the `launch-profile:` key of a launcher-fronted `servers:` entry, written only
+	// while the `remember-model:` toggle is on. It is the launcher class's half of what
+	// [Options.RecordModelChoice] does for a plain multi-model server: that class remembers a wire model
+	// id, this one remembers the profile that loads one, and no entry carries both — a launcher-fronted
+	// `model:` is a deliberately empty discovery hint.
+	//
+	// The renderer calls it with the profile name the load activated and knows nothing else about it.
+	// WHICH entry the pointer belongs on is the binary's question in a stronger sense than it is for the
+	// two seams above: a load can move the session onto a server no `servers:` entry names, and the
+	// pointer's home is the ACTUATING entry either way — the one whose `llama-launcher:` key this
+	// session's launcher path follows — which only the binary holds.
+	//
+	// It answers whether it WROTE, exactly as [Options.RecordServerChoice] does: the toggle off, and an
+	// actuating entry that cannot be identified, are both false with no error, and the renderer then
+	// claims no recording.
+	//
+	// Only a COMMITTED load reaches it. A load that failed, one whose health wait timed out, and one the
+	// session could not follow record nothing, because this key names what the launcher was made to
+	// serve rather than what somebody asked for. `/unload-model` and `/stop-server` leave it exactly
+	// where it is: freeing the GPU now is not the same as forgetting which model this server runs.
+	//
+	// It is best-effort persistence of something that ALREADY happened, and like the two seams above it
+	// is synchronous — one small file, spliced and renamed — and called on the Update loop, so an error
+	// is a note and never an undo.
+	//
+	// nil ⇒ nothing is recorded and every load is session-scoped, which is the behaviour this key was
+	// introduced to replace; every hand-built Options keeps it.
+	RecordLaunchProfile func(profile string) (recorded bool, err error)
+
 	// LaunchProfiles lists the Launch profiles the launcher's config defines — what `/model` offers on
 	// a host with a launcher, re-read FRESH every time the picker opens (ADR 0029 D4), so a profile
 	// added in the launcher's own TUI a moment ago is offered here without restarting apogee. The

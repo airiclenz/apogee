@@ -768,6 +768,155 @@ func TestProfileLoadPanicReleasesTheLatch(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------------
+// Recording the loaded profile — the `launch-profile:` key (remember-model)
+// ----------------------------------------------------------------------------
+
+// recordingLoad is wireLauncher with the profile-recording seam wired too — the state a human is in
+// when `remember-model:` is on and a profile load is also the choice their server comes back on.
+func recordingLoad(t *testing.T, fake *fakeLauncher, rec *fakeRecorder) Model {
+	t.Helper()
+	opts := launcherOpts(fake)
+	opts.RecordLaunchProfile = rec.record
+	m, _ := seededPicker(t, opts)
+	return m
+}
+
+// Both shapes of a COMMITTED load record the profile exactly once and say so: the one that landed on
+// the server this session is already on, and the one the session had to follow onto another. What the
+// pointer is written onto is the binary's business — the renderer offers the profile name and states
+// the answer.
+func TestProfileLoadCommitRecordsTheProfile(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		profile string
+		moves   bool
+	}{
+		{name: "loaded into the session's own server", profile: "alpha"},
+		{name: "followed onto another server", profile: "beta", moves: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fake := newLauncher()
+			if tc.moves {
+				fake.follows(ServerSwitchResult{Endpoint: "http://localhost:8081", HostAlias: "beta"}, nil)
+			}
+			rec := &fakeRecorder{saved: true}
+			m, cmd := startLoad(t, recordingLoad(t, fake, rec), tc.profile)
+
+			m, _ = driveActuation(t, m, cmd)
+
+			if want := []string{tc.profile}; !reflect.DeepEqual(rec.names, want) {
+				t.Fatalf("recorded profiles = %v, want %v — once, at the commit", rec.names, want)
+			}
+			if n := countNotes(m, launchProfileSavedNote); n != 1 {
+				t.Errorf("notes = %v, want exactly one %q", noteTexts(m), launchProfileSavedNote)
+			}
+		})
+	}
+}
+
+// Nothing that is not a load COMMIT touches the pointer: a load that failed, a load the session could
+// not follow, and the two verbs that free the GPU. The seam is wired for this test precisely so an
+// unwanted call would be caught — `/unload-model` and `/stop-server` mean "free it now", not "forget
+// which model this server runs".
+func TestNothingButACommitRecordsTheProfile(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		line    string
+		arrange func(*fakeLauncher)
+	}{
+		{
+			name: "a load that failed",
+			line: "/model alpha",
+			arrange: func(f *fakeLauncher) {
+				f.loadErr = errors.New("model file /models/alpha.gguf not found")
+			},
+		},
+		{
+			name: "a move the session could not follow",
+			line: "/model beta",
+			arrange: func(f *fakeLauncher) {
+				f.follows(ServerSwitchResult{}, errors.New("the engine is busy"))
+			},
+		},
+		{name: "/unload-model", line: "/unload-model"},
+		{name: "/stop-server", line: "/stop-server"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fake := newLauncher()
+			if tc.arrange != nil {
+				tc.arrange(fake)
+			}
+			rec := &fakeRecorder{saved: true} // would report a write if it were ever called
+			m, cmd := typeCommand(t, recordingLoad(t, fake, rec), tc.line)
+			if !m.actuation.inFlight {
+				t.Fatalf("%q took no latch", tc.line)
+			}
+
+			m, _ = driveActuation(t, m, cmd)
+
+			if len(rec.names) != 0 {
+				t.Errorf("recorded %v, want nothing — the key names what the launcher was made to serve", rec.names)
+			}
+			if n := countNotes(m, launchProfileSavedNote); n != 0 {
+				t.Errorf("notes = %v, want no saved line", noteTexts(m))
+			}
+		})
+	}
+}
+
+// The renderer cannot tell a recordable load from one the binary skips — the toggle off, no actuating
+// entry to write onto — so it offers every commit and believes the answer: false with no error is
+// announced as nothing at all, and a write that could not land is a footnote that undoes nothing.
+func TestProfileRecordingAnswerIsBelieved(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a silent skip claims nothing", func(t *testing.T) {
+		t.Parallel()
+
+		rec := &fakeRecorder{} // the binary's silent skip: no write, no error
+		m, cmd := startLoad(t, recordingLoad(t, newLauncher(), rec), "alpha")
+
+		m, _ = driveActuation(t, m, cmd)
+
+		if want := []string{"alpha"}; !reflect.DeepEqual(rec.names, want) {
+			t.Fatalf("recorded profiles = %v, want %v — the binary decides, the renderer asks", rec.names, want)
+		}
+		want := "profile alpha loaded — waiting for the beat"
+		if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+			t.Errorf("notes = %v, want %q last and no saved line", got, want)
+		}
+	})
+
+	t.Run("a failed write is a footnote", func(t *testing.T) {
+		t.Parallel()
+
+		rec := &fakeRecorder{err: errors.New("config.yaml is a directory")}
+		m, cmd := startLoad(t, recordingLoad(t, newLauncher(), rec), "alpha")
+
+		m, cmd = driveActuation(t, m, cmd)
+
+		if m.actuation.inFlight {
+			t.Fatal("a failed recording stranded the latch")
+		}
+		if cmd == nil {
+			t.Error("a failed recording swallowed the completion's beat")
+		}
+		want := "could not record the launch profile: config.yaml is a directory"
+		if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+			t.Errorf("notes = %v, want %q last", got, want)
+		}
+	})
+}
+
 // The two verbs that act on the session's own server report one note per recorded step and then
 // leave the display to the heartbeat. The steps travel even beside an error — how far a stop got
 // before it failed is exactly what the human needs.

@@ -10,6 +10,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A Launch profile you load is now remembered by the server that loaded it.** With
+  `remember-model:` on, a profile load that COMMITS — the one that landed on the server your session
+  is already talking to, and the one your session had to follow onto another server — writes that
+  profile's name into the `launch-profile:` key of the entry apogee drives the launcher through, so
+  the server can come back on the same profile. The pointer lands on that entry even when the load
+  moved your session to an address your `servers:` list does not name, because the entry whose
+  `llama-launcher:` key you follow is the one that can act on the launcher next time. Only a commit
+  records: a load that failed, one whose health wait timed out, and one your session could not follow
+  all leave the key alone — and so do `/unload-model` and `/stop-server`, because freeing the GPU now
+  is not the same as forgetting which model this server runs. Nothing is recorded with the toggle off
+  (the default) or when no launcher-fronted entry can be named, and a write that could not land is a
+  note rather than an undo: the profile is loaded either way. When the pointer is written, the
+  transcript says so on a line of its own.
+
 - **An explicit `/model` pick is now remembered by the server you made it on.** With
   `remember-model:` on, picking a model — from the `/model` overlay or by naming it as
   `/model <id>` — writes that id into the `model:` key of the `servers:` entry your session is on,

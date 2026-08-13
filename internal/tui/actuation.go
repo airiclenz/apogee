@@ -370,6 +370,11 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 		from := hostDisplay(m.opts) // the label the footer used for the old server, captured before it moves
 		switched, moveErr := ev.load.Move()
 		if moveErr == nil {
+			// One of the two commits that remember the profile, and it is stated BEFORE the move's own
+			// line rather than after it: the pointer lands on the entry this session is LEAVING (the
+			// actuating one), so the recording belongs with the load's narration above rather than with
+			// the switch below, whose subject is the server the session is arriving on.
+			m.recordLoadedProfile(profile)
 			// The /server fold repaints on its way out (it restates the start-up box and lays out), so
 			// the notices above are on screen with the move rather than one frame behind it. It also
 			// replaces the whole heartbeat state, which discards any rebind stashed under the latch —
@@ -413,9 +418,59 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.transcript.addNote("profile " + stripEscapes(profile) + " loaded — waiting for the beat")
+	// The other commit: the load landed on the very server this session is on, so the profile it now
+	// serves is the one the actuating entry should come back on (see the move's own record above).
+	m.recordLoadedProfile(profile)
 	m.refreshViewport()
 	// Armed in a statement of its own: the immediate beat opens a FRESH chain, and the generation
 	// bump has to land on the Model this returns (the spinnerAnim.arm convention, [Model.armBeat]).
 	beat := m.armBeat()
 	return m, beat
+}
+
+// ----------------------------------------------------------------------------
+// Recording the loaded profile — the `launch-profile:` key (remember-model)
+// ----------------------------------------------------------------------------
+
+// launchProfileSavedNote is what a RECORDED load says: the launcher-fronted entry this session
+// actuates through now names this profile, so apogee brings that server back on it. It names the key
+// the way [savedChoiceClause] and [modelSavedNote] do, because the key is what the human will find in
+// config.yaml — and it names no SERVER, because the entry the pointer landed on is the one the
+// session was actuating through and not necessarily the one it ends up talking to (a load that moves
+// the session leaves it somewhere the `servers:` list may not describe at all).
+const launchProfileSavedNote = "launch-profile: saved — apogee loads it at the next start"
+
+// recordLoadedProfile offers a committed load to the recording seam and states what came back: the
+// line above when the pointer landed, the failed-write footnote when the splice could not, and
+// nothing whatsoever for the skips the binary makes silently (the toggle off, an actuating entry it
+// cannot identify).
+//
+// It takes a pointer receiver for [choiceRecord.warn]'s reason — a Model is copied by value on every
+// Update (ADR 0011), so the notes have to land on the CALLER's own copy — and it lays nothing out:
+// both call sites are mid-fold and repaint on their way out.
+func (m *Model) recordLoadedProfile(profile string) {
+	record := recordLaunchProfile(m.opts.RecordLaunchProfile, profile)
+	if record.saved {
+		m.transcript.addNote(launchProfileSavedNote)
+	}
+	record.warn(&m.transcript)
+}
+
+// recordLaunchProfile persists the profile a load just committed as the one the actuating entry comes
+// back on, through the seam the binary backs. It is [recordServerChoice] one class across: the
+// renderer offers every committed load and believes the answer, because which entry may carry this
+// key — and whether the toggle allows writing it at all — are questions only the binary can settle.
+//
+// A failed write is a warning and nothing more: the launcher has already loaded the profile, and the
+// recording is best-effort persistence of something that is already true. An unwired seam records
+// nothing and says nothing, which is the pre-remember-model behaviour every hand-built Options has.
+func recordLaunchProfile(record func(profile string) (bool, error), profile string) choiceRecord {
+	if record == nil || profile == "" {
+		return choiceRecord{}
+	}
+	saved, err := record(profile)
+	if err != nil {
+		return choiceRecord{warning: "could not record the launch profile: " + stripEscapes(err.Error())}
+	}
+	return choiceRecord{saved: saved}
 }

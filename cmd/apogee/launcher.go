@@ -136,9 +136,23 @@ func entryLauncherPath(value string) (string, bool) {
 	return path, true
 }
 
+// launcherFollow is what the holder below carries: the launcher config path the next verb reads, and
+// the NAME of the `servers:` entry that path was resolved from — the ACTUATING entry, which is where
+// a committed profile load records its `launch-profile:` pointer (remember-model). The two travel as
+// one value because they are one fact seen twice: an entry with no `llama-launcher:` key names no
+// path and is no entry to actuate through, so both members are empty together.
+//
+// The name is what the pointer needs and the endpoint could not give: a load may move the session
+// onto a server the `servers:` list does not describe at all, and the entry the session actuated
+// THROUGH is still the one that must remember the profile.
+type launcherFollow struct {
+	path  string
+	entry string
+}
+
 // launcherPath is the resolved config path the local-server verbs read, held so it can MOVE: the
 // `llama-launcher:` key belongs to a `servers:` ENTRY, so the integration follows the session from
-// server to server, which for this integration means nothing more than swapping this string. There
+// server to server, which for this integration means nothing more than swapping this pair. There
 // is no connection to rebuild — every verb re-reads the config file for itself (ADR 0029 D4) — so
 // the whole install is one atomic store, and the next verb reads the new file.
 //
@@ -146,32 +160,45 @@ func entryLauncherPath(value string) (string, bool) {
 // is why the seams are wired unconditionally now: whether the integration is on is a fact that can
 // change mid-session, so it cannot be expressed by whether a func value is nil.
 //
-// It is atomic rather than mutex-guarded because there is exactly one field and no invariant across
-// two: the store comes from the Update goroutine (the pane's keypress) and the loads come from the
+// It is atomic rather than mutex-guarded because the two members are stored and read as ONE value:
+// the store comes from the Update goroutine (the pane's keypress) and the loads come from the
 // TUI's actuation Cmd goroutine, which may be mid-verb when one lands. A verb that read the old path
-// finishes against the old config — the honest outcome for work already in flight.
+// finishes against the old config — the honest outcome for work already in flight — and it can never
+// see one server's path beside another's name.
 type launcherPath struct {
-	v atomic.Pointer[string]
+	v atomic.Pointer[launcherFollow]
 }
 
-// newLauncherPath holds the path this session starts on ("" when the integration is off).
-func newLauncherPath(path string) *launcherPath {
+// newLauncherPath holds the path and actuating entry this session starts on (both "" when the
+// integration is off for the startup server).
+func newLauncherPath(path, entry string) *launcherPath {
 	p := &launcherPath{}
-	p.set(path)
+	p.set(path, entry)
 	return p
 }
 
 // get reads the path the next verb will read its config from; empty means the integration is off.
 func (p *launcherPath) get() string {
 	if v := p.v.Load(); v != nil {
-		return *v
+		return v.path
 	}
 	return ""
 }
 
-// set points every later verb at path (empty switches the integration off).
-func (p *launcherPath) set(path string) {
-	p.v.Store(&path)
+// entry reads the name of the `servers:` entry the current path came from — the entry a committed
+// profile load records onto. Empty means there is none to record on: the integration is off, or the
+// session arrived on the server some way other than through an entry of its own.
+func (p *launcherPath) entry() string {
+	if v := p.v.Load(); v != nil {
+		return v.entry
+	}
+	return ""
+}
+
+// set points every later verb at path, and every later recording at entry (empty path switches the
+// integration off).
+func (p *launcherPath) set(path, entry string) {
+	p.v.Store(&launcherFollow{path: path, entry: entry})
 }
 
 // follow installs the launcher config this entry names, and is the whole of "the integration
@@ -184,9 +211,18 @@ func (p *launcherPath) set(path string) {
 // a Launch profile load can move the session too, possibly to an endpoint no entry names, and that
 // move must leave the integration as it found it — the session that just used the launcher still
 // has it. Routing the install through the entry rather than the move is what keeps the two apart.
+//
+// The entry's NAME is installed with its path, so the session knows which entry it actuates through
+// for as long as it actuates through one. An entry that switches the integration off contributes no
+// name either: there is nothing to record a `launch-profile:` pointer onto while no launcher fronts
+// the session's server.
 func (p *launcherPath) follow(entry config.ServerEntry) {
-	path, _ := entryLauncherPath(entry.LlamaLauncher)
-	p.set(path)
+	path, on := entryLauncherPath(entry.LlamaLauncher)
+	name := ""
+	if on {
+		name = entry.Name
+	}
+	p.set(path, name)
 }
 
 // launchProfile is one row of `/model`'s launcher picker as this bridge assembles it — a Launch

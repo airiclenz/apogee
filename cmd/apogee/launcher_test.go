@@ -436,13 +436,13 @@ profiles:
     port: 8080
 `)
 	ops := &fakeLauncher{cfg: cfg}
-	path := newLauncherPath("/etc/llama-launcher/first.yaml")
+	path := newLauncherPath("/etc/llama-launcher/first.yaml", "first")
 	wiring := launcherWiring{ops: ops, path: path}
 
 	if _, err := wiring.profiles(); err != nil {
 		t.Fatalf("profiles on the startup path: %v", err)
 	}
-	path.set("/etc/llama-launcher/second.yaml")
+	path.set("/etc/llama-launcher/second.yaml", "second")
 	if _, err := wiring.profiles(); err != nil {
 		t.Fatalf("profiles after the swap: %v", err)
 	}
@@ -453,7 +453,7 @@ profiles:
 
 	// Cleared: every verb reports the integration off, in the renderer's own sentence, and none of
 	// them touches the launcher at all.
-	path.set("")
+	path.set("", "")
 	reads := len(ops.configPaths)
 	verbs := map[string]error{}
 	_, verbs["profiles"] = wiring.profiles()

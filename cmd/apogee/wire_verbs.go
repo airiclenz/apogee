@@ -186,6 +186,38 @@ func (w *rootWiring) recordModelChoice(model string) (bool, error) {
 	return true, nil
 }
 
+// recordLaunchProfile is the launcher class's half of the same remembering — the `launch-profile:`
+// key on the entry this session ACTUATES through, so the next session there comes back on the Launch
+// profile this one loaded. It sits beside recordModelChoice because it answers that seam's question
+// for the class of server that seam deliberately skips: a launcher-fronted entry's `model:` is an
+// empty discovery hint, and what such a server remembers is the profile that loads its model.
+//
+// The entry it writes onto is the ACTUATING one, which is why it asks the launcher path holder rather
+// than the session's binding: a load can follow a profile onto a server no `servers:` entry names, and
+// the session that just used the launcher is still using the entry whose `llama-launcher:` key it
+// followed there. That name is installed with the path itself (launcherPath.follow), so the two can
+// never disagree about which entry the integration belongs to.
+//
+// Two skips, both SILENT (false, nil) because neither is a failure: the `remember-model:` toggle is
+// off — read here, so a `/settings` flip governs the very next load — or there is no actuating entry
+// to write onto. The second covers a session whose launcher is off, and one whose entry has since left
+// the file: what the list holds NOW is what the splice can address, and a name it no longer carries is
+// nothing to invent an entry for.
+func (w *rootWiring) recordLaunchProfile(profile string) (bool, error) {
+	if !w.opts.RememberModel {
+		return false, nil
+	}
+	name := w.launcherPath.entry()
+	if name == "" || !configuredServer(w.live.serverList(), name) {
+		return false, nil
+	}
+	if err := config.SaveServerEntrySetting(
+		filepath.Join(w.roots.config, "config.yaml"), name, "launch-profile", profile); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // bindServer is the same resolution as the switch, ending in a CONSTRUCTION rather than a move. It
 // is the only way out of the pre-bound state, and it answers with what a switch answers so the
 // display adopts a first binding exactly as it adopts a move — the endpoint now on the wire, the

@@ -491,6 +491,118 @@ func TestRunRootRecordModelChoiceWritesOnlyWritablePicks(t *testing.T) {
 	})
 }
 
+// The LAUNCH-PROFILE recording seam, end to end through runRoot (remember-model): a committed profile
+// load is spliced into the `launch-profile:` key of the entry the session ACTUATES through — the one
+// whose `llama-launcher:` key the session's launcher path was resolved from — and skipped silently
+// when the toggle is off or no such entry can be named.
+func TestRunRootRecordLaunchProfileWritesOntoTheActuatingEntry(t *testing.T) {
+	t.Parallel()
+
+	const loaded = "gpt-oss-20b"
+
+	// wire puts a session on entry and hands back the seam the completion fold would call plus the file
+	// it writes through. The config is staged first for the model seam's reason: a splice edits the
+	// entry the user's own file carries.
+	wire := func(t *testing.T, remember bool, entry config.ServerEntry) (func(string) (bool, error), string) {
+		t.Helper()
+		configHome := t.TempDir()
+		configPath := filepath.Join(configHome, "config.yaml")
+		staged := "servers:\n  - name: " + entry.Name + "\n    endpoint: " + entry.Endpoint + "\n"
+		if entry.LlamaLauncher != "" {
+			staged += "    llama-launcher: " + entry.LlamaLauncher + "\n"
+		}
+		if err := os.WriteFile(configPath, []byte(staged), 0o600); err != nil {
+			t.Fatalf("stage the config: %v", err)
+		}
+		rec := &recordingLauncher{}
+		opts := config.Options{
+			Endpoint:      entry.Endpoint,
+			Model:         "model-a",
+			Mode:          "ask-before",
+			HostAlias:     entry.Name,
+			Workspace:     t.TempDir(),
+			ConfigDir:     configHome,
+			AutoCompact:   true,
+			RememberModel: remember,
+			Servers:       []config.ServerEntry{entry},
+			// What ApplyConfig flattens off the SELECTED entry: the launcher this session starts
+			// actuating through, which is also what names the entry the pointer lands on.
+			StartupLauncher: entry.LlamaLauncher,
+		}
+		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+			t.Fatalf("runRoot: %v", err)
+		}
+		if rec.opts.RecordLaunchProfile == nil {
+			t.Fatal("the composition root left the profile-recording seam unwired")
+		}
+		return rec.opts.RecordLaunchProfile, configPath
+	}
+
+	// assertUnwritten is what both skips have in common: the seam said no, and the file the human wrote
+	// is exactly as they left it.
+	assertUnwritten := func(t *testing.T, record func(string) (bool, error), configPath string) {
+		t.Helper()
+		before, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read the staged config: %v", err)
+		}
+		saved, err := record(loaded)
+		if saved || err != nil {
+			t.Errorf("recording = (%v, %v); want (false, nil) — a silent skip", saved, err)
+		}
+		after, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read the config back: %v", err)
+		}
+		if string(after) != string(before) {
+			t.Errorf("a skipped recording rewrote the config:\n%s\nwant:\n%s", after, before)
+		}
+	}
+
+	launcherFronted := func(t *testing.T) config.ServerEntry {
+		t.Helper()
+		srv := upstreamServer(t, "model-a", 4096)
+		return config.ServerEntry{
+			Name:          "rig",
+			Endpoint:      srv.URL,
+			LlamaLauncher: filepath.Join(t.TempDir(), "llama-launcher.yaml"),
+		}
+	}
+
+	t.Run("the actuating entry carries the pointer", func(t *testing.T) {
+		entry := launcherFronted(t)
+		record, configPath := wire(t, true, entry)
+
+		saved, err := record(loaded)
+		if !saved || err != nil {
+			t.Fatalf("recording a committed load = (%v, %v); want (true, nil)", saved, err)
+		}
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read the config the recording wrote: %v", err)
+		}
+		if !strings.Contains(string(data), "launch-profile: "+loaded) {
+			t.Errorf("config.yaml does not carry `launch-profile: %s`:\n%s", loaded, data)
+		}
+	})
+
+	t.Run("the toggle off writes nothing at all", func(t *testing.T) {
+		entry := launcherFronted(t)
+		record, configPath := wire(t, false, entry)
+
+		assertUnwritten(t, record, configPath)
+	})
+
+	// No launcher key is no actuating entry: nothing fronts this server, so there is no entry a load
+	// could be recorded onto — and on this class of entry the model id is what gets remembered instead.
+	t.Run("a session with no actuating entry is skipped", func(t *testing.T) {
+		srv := upstreamServer(t, "model-a", 4096)
+		record, configPath := wire(t, true, config.ServerEntry{Name: "workbench", Endpoint: srv.URL})
+
+		assertUnwritten(t, record, configPath)
+	})
+}
+
 // A name that resolves to nothing is refused before the engine is touched: the error names the
 // candidates and the session keeps observing — and talking to — the server it was on.
 func TestRunRootSwitchServerUnknownNameTouchesNothing(t *testing.T) {

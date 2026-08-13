@@ -85,6 +85,12 @@ func (w *rootWiring) options() tui.Options {
 		// key can honestly record: an unlisted server, or a launcher-fronted entry, whose model is
 		// chosen by loading a Launch profile instead.
 		RecordModelChoice: w.recordModelChoice,
+		// And the same persistence for the OTHER class of server: a committed profile load becomes the
+		// `launch-profile:` key on the entry whose launcher this session actuates through, so that
+		// server comes back on the profile rather than on a wire model id it never names. Always wired
+		// for RecordModelChoice's reason — the toggle is read inside — and skipped silently while there
+		// is no actuating entry to record onto.
+		RecordLaunchProfile: w.recordLaunchProfile,
 		// The `/model`-over-profiles, `/unload-model`, `/stop-server` half (ADR 0029): browse the
 		// launcher's profiles, activate one — following it onto another server when it lives
 		// there — and free or stop the server this session is on. All four are wired for the life of

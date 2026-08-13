@@ -1981,7 +1981,7 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 			keys: config.NewKeyResolver(),
 		},
 		ops:  ops,
-		path: newLauncherPath("/etc/llama-launcher/config.yaml"),
+		path: newLauncherPath("/etc/llama-launcher/config.yaml", "rig"),
 	}
 	return wiring, agent, host, holder
 }
