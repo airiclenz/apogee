@@ -143,6 +143,36 @@ the run's items deliberately did not reach.
   (`:3–4`) and the bullets it introduces (`:8–11`), so the intro now reads across a heading
   (cosmetic).
 
+### Residuals fix wave run — residuals (2026-08-13)
+
+Raised while executing `docs/plans/archived/2026-08-13 - 04 - residuals-fix-wave-plan.md`: what the
+run's items deliberately did not reach.
+
+- [ ] The `rm` rules' bare `/` branch makes their whole `/(?:etc|usr|…)` enumeration dead regex —
+  every absolute recursive delete is a no-override hard-refuse, contradicting the rule's own
+  "project files stay allowed" comment. If the floor is ever meant to be precise about system paths,
+  that branch needs narrowing.
+
+- [ ] Keystore stderr is captured into a 4 KiB `cappedBuffer` (`internal/keystore/run.go:53`, `:88`),
+  so a key straddling that byte cut leaves an unredacted key PREFIX that `redactKey`'s whole-value
+  substitution cannot match.
+
+- [ ] README's key-source failure sentence lists "empty output or an unset variable" but not an
+  *empty* variable, which `resolveEnvKey` also refuses.
+
+- [ ] `ScopeEnv`'s Windows Path-gets-scoped branch is only pinned with an empty workspace root
+  (`internal/platform/host_test.go:165`, `:210`), so scoping-on-the-Path-spelling is covered by
+  `ScopeInheritedEnv`'s test alone — a one-subtest gap.
+
+- [ ] Input-side twin of the tab fold: `lineEditor.flattenLine` (`internal/tui/lineeditor.go:157`)
+  folds only `\n`, so a bracketed paste carrying a tab survives into a one-line settings field.
+
+- [ ] Under a symlinked `TMPDIR` four `internal/tools` tests outside item 9's class still fail —
+  `exec_fence_test.go` (`TestEveryExecSiteRefusesAProgramInsideTheWorkspace`,
+  `TestPythonExecRefusesAnInRepoVirtualenvByName`,
+  `TestExecFenceCoversTheConfinementBoxNotOnlyTheRoot`) and `diagnostics_test.go:455`; same
+  raw-`t.TempDir()` root hazard, different assertion family.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
