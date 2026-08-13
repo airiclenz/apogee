@@ -474,3 +474,75 @@ func recordLaunchProfile(record func(profile string) (bool, error), profile stri
 	}
 	return choiceRecord{saved: saved}
 }
+
+// ----------------------------------------------------------------------------
+// The start-up restore — the `launch-profile:` boot half (remember-model)
+// ----------------------------------------------------------------------------
+//
+// A session whose server is launcher-fronted and whose entry names a `launch-profile:` opens by making
+// the world serve that profile again — but only while nothing is serving already, and only while the
+// launcher still defines it. Both are facts about the LAUNCHER's world, so the whole decision belongs
+// to the binary ([Options.RestoreProfile]) and exactly one of three answers lands here: load this, say
+// this, do nothing.
+//
+// The actuation itself is the ordinary one. A restore reaches [Model.startProfileLoad] exactly as
+// `/model`'s accept does, which is the whole reason this feature adds no binding machinery: the latch
+// serializes it against every other launcher verb, a beat that lands in its shadow is STASHED rather
+// than driven into the engine (observeBinding), and the completion fold commits a move and arms the
+// beat that binds (ADR 0029 D5). Nothing here has to reason about the first heartbeat at all.
+
+// restoreMsg carries the start-up restore check's answer into the Update loop. It arrives off a Cmd
+// goroutine like a beat and carries no generation guard, because there is exactly one of it in a
+// session: nothing issues a second, so there is no retired chain a stale one could belong to.
+type restoreMsg struct {
+	restore ProfileRestore
+	err     error
+}
+
+// restoreCmd asks the binary what this start-up owes a recorded `launch-profile:`, off the Update
+// loop — the seam reads a config file and probes for servers. It captures the seam func by value, so
+// no pointer into the value-copied Model crosses the goroutine (the beatCmd posture), and returns nil
+// when the seam is unwired, which is what lets [Model.Init]'s tea.Batch collapse to exactly what it
+// collapsed to before this existed.
+func (m Model) restoreCmd() tea.Cmd {
+	ask := m.opts.RestoreProfile
+	if ask == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		restore, err := ask()
+		return restoreMsg{restore: restore, err: err}
+	}
+}
+
+// foldRestore folds that answer: the binary's line when it has one, then the load when it asked for
+// one. A failed check is stated exactly like a refused restore, because to the human it IS one — the
+// recorded profile is not coming back this session, and the launcher's own words say why.
+//
+// The load is guarded by [Model.restorable] rather than performed unconditionally: the answer was
+// decided against the session as it stood when the check went out, and a human is free to have moved
+// it since. Both guards protect something real — taking the latch twice would strand the verb already
+// holding it, and closing an open picker would pull an overlay out from under the keypress that opened
+// it — so a session that has moved on simply keeps what it chose, silently.
+func (m Model) foldRestore(msg restoreMsg) (tea.Model, tea.Cmd) {
+	note := msg.restore.Note
+	if msg.err != nil {
+		note = msg.err.Error()
+	}
+	if note != "" {
+		// The binary's own words about a machine's servers and config, escape-stripped on the way to
+		// the terminal exactly as the launcher's narration steps are.
+		m.transcript.addNote(stripEscapes(note))
+		m.refreshViewport()
+	}
+	if msg.err != nil || msg.restore.Load == "" || !m.restorable() {
+		return m, nil
+	}
+	return m.startProfileLoad(msg.restore.Load)
+}
+
+// restorable reports whether the session is still in the state the restore was decided FOR: no
+// launcher verb in flight, no picker open over the transcript, and a load seam to actuate through.
+func (m Model) restorable() bool {
+	return m.opts.LoadProfile != nil && !m.actuation.inFlight && !m.picker.open
+}

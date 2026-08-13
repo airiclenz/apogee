@@ -247,7 +247,14 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// tui.ErrNoLauncher while the holder is empty, which the renderer reads as the host having no
 	// launcher — the same degrade the nil seams used to express, now able to change its mind when
 	// the session moves to another server.
-	w.launcherSeams = launcherWiring{sessionMover: w.mover, ops: realLauncher{}, path: w.launcherPath}
+	//
+	// The toggle rides in as a closure over the options this root holds, not as the bool they hold
+	// now: `remember-model:` is live-editable, and the boot restore is the one seam of the three that
+	// is answered off the Update loop — reading through the closure is what keeps its question ("is
+	// remembering on?") the same question the two record seams ask, rather than a snapshot of the
+	// launch.
+	w.launcherSeams = launcherWiring{sessionMover: w.mover, ops: realLauncher{}, path: w.launcherPath,
+		remember: func() bool { return w.opts.RememberModel }}
 
 	// The session-naming seam (ADR 0022 addendum): one out-of-band completion, built per call from
 	// whatever server and model the session is bound to at that moment — so a `/server` switch or a

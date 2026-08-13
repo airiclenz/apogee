@@ -224,7 +224,13 @@ invoked with the actuating entry's name and the profile; unidentifiable entry �
 
 **Commit:** `feat(tui): record the committed launch profile on the actuating server entry`
 
-## 5. TUI startup restore through the actuation latch
+## 5. TUI startup restore through the actuation latch — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the restore is a DECISION seam, not a set of facts — `Options.RestoreProfile` answers `ProfileRestore{Load, Note}` and the renderer either actuates or states the line. Every question behind it (toggle, pointer, whether the launcher still defines the profile, whether anything is running) is settled in `cmd/apogee/launcher.go`, which is the only file that may name the facade; ADR 0029 D1 forbids the alternative of handing the renderer instances and profile lists to judge for itself.
+NOTES (2026-08-13): `internal/tui/doc.go` gained one clause — outside the item's Files line. The package map's line for `actuation.go` enumerates what that file holds, and the boot restore landed in it; leaving the clause out would have made the map stale on the day the item shipped (the same call item 3 made for the /model narrative).
+NOTES (2026-08-13): the fold guards the actuation on `Model.restorable()` — a load seam wired, no verb in flight, no picker open. The plan does not name these, but the answer is decided against the session as it stood when the check went out: taking the latch a second time would strand the verb already holding it (the generation bump leaves the first verb's completion inert), and `startProfileLoad` closes any open overlay on its way in. Both skips are silent.
+NOTES (2026-08-13): the `remember-model` toggle reaches the bridge as a `remember func() bool` closure on `launcherWiring`, wired in `wire_live.go` over the root's own options — the record seams read `w.opts.RememberModel` on the Update loop, and this one is answered on a Cmd goroutine, so it reads through a closure for the same live-read reason rather than capturing the launch value. Item 6's live flip governs the next boot without re-wiring.
+NOTES (2026-08-13): the "headless: no restore path is reachable" acceptance is met BY CONSTRUCTION and stated in three places rather than by a test — `Model.Init` is the only issuer of the check, and `cmd/apogee/headless.go` imports `internal/tui` not at all, so a headless run builds no Model to reach an Init. `TestStartupRestoreIsSilentWhenUnwired` covers the other half (an unwired seam issues no Cmd).
 
 Depends on items 1 and 4.
 

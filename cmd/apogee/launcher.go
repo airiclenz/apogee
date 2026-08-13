@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -527,6 +528,12 @@ type launcherWiring struct {
 	sessionMover
 	ops  launcherOps
 	path *launcherPath
+	// remember reports whether `remember-model:` is on RIGHT NOW — the toggle that gates the start-up
+	// restore below. It is a closure rather than a captured bool for the reason the two record seams
+	// read the value at call time: the key is live-editable, and a boot check that consulted a snapshot
+	// would be answering a question about the process rather than about the configuration. nil ⇒ off,
+	// which is the posture of a Driver that composed no toggle and of every hand-built wiring.
+	remember func() bool
 }
 
 // enabled is every verb's first question: is the integration on right now, and against which config
@@ -793,4 +800,112 @@ func actuationResult(on *llamalauncher.RunningInstance, res *llamalauncher.StopR
 		out.Steps, out.ServerStopped = res.Steps, res.ServerStopped
 	}
 	return out, err
+}
+
+// ----------------------------------------------------------------------------
+// The start-up restore — remember-model's boot half
+// ----------------------------------------------------------------------------
+
+// restore is [tui.Options.RestoreProfile]: what this start-up owes the `launch-profile:` its server
+// was left on. It is the read-side twin of recordLaunchProfile — that seam writes the pointer on a
+// committed load, this one decides what to do with it on the next boot — and it answers with a
+// decision rather than with facts, because every question it settles is one only this layer can ask.
+//
+// The ladder, in the order the cheap questions come first, and nothing below a `false` is done:
+//
+//   - `remember-model:` off ⇒ nothing, silently. The toggle gates the restore as it gates the write,
+//     so a session nobody asked to be remembered does no launcher I/O at start-up at all.
+//   - no launcher fronting the session's server, or an actuating entry carrying no pointer ⇒ nothing.
+//     Both are the ordinary state of a plain server, which remembers its model in `model:` instead.
+//   - the launcher no longer defines that profile ⇒ a note and no load. The config is read FRESH here
+//     (ADR 0029 D4), so a profile deleted in the launcher's own TUI is gone by this boot, and the
+//     pointer is left exactly where it is: it is the human's line in their own file to remove.
+//   - ANY instance running under this launcher ⇒ yield (design call 9). Loading a second model beside
+//     one already serving is how a GPU is oversubscribed, and a server somebody started by hand is
+//     not this feature's to displace. The one running instance that earns no note is the recorded
+//     profile itself: the session's ordinary start-up bind IS the restore, and saying so would
+//     announce a thing that already happened.
+//   - nothing running ⇒ load it, which the renderer actuates through the same latch a `/model` pick
+//     takes. Nothing is bound here and nothing moves here; the load's own completion fold does both.
+//
+// It runs on a Cmd goroutine, so everything it touches it touches the way the other verbs do: the
+// holder's atomic pair, the live `servers:` list under its own lock, and a config read of its own.
+func (w launcherWiring) restore() (tui.ProfileRestore, error) {
+	if w.remember == nil || !w.remember() || w.live == nil {
+		return tui.ProfileRestore{}, nil
+	}
+	path, err := w.enabled()
+	if err != nil {
+		return tui.ProfileRestore{}, nil // no launcher for this server: nothing to restore, nothing to say
+	}
+	profile := recordedProfile(w.live.serverList(), w.path.entry())
+	if profile == "" {
+		return tui.ProfileRestore{}, nil
+	}
+
+	cfg, err := w.ops.loadConfig(path, nil)
+	if err != nil {
+		return tui.ProfileRestore{}, err
+	}
+	if !slices.Contains(cfg.ProfileNames(), profile) {
+		return tui.ProfileRestore{Note: restoreGoneNote(profile)}, nil
+	}
+
+	// ONE discovery sweep, read for a weaker question than the picker's: not "which profiles are
+	// running" but "is anything running at all", with the recorded profile's own instance the single
+	// answer that ends the check quietly.
+	serving, occupied := "", false
+	for _, instance := range w.ops.discover(cfg) {
+		if instance == nil {
+			continue
+		}
+		if instance.ActiveProfile == profile {
+			return tui.ProfileRestore{}, nil
+		}
+		occupied = true
+		if serving == "" {
+			serving = instance.ActiveProfile // "" for an instance the launcher could not attribute
+		}
+	}
+	if occupied {
+		return tui.ProfileRestore{Note: restoreYieldNote(profile, serving)}, nil
+	}
+	return tui.ProfileRestore{Load: profile}, nil
+}
+
+// recordedProfile is the `launch-profile:` value on the ACTUATING entry — the pointer the boot restore
+// is about. It reads the `servers:` list as it stands rather than the launch snapshot, for the reason
+// recordLaunchProfile resolves its own name against that list: what the human's file says now is what
+// this session can honestly act on. An unnamed entry, one the list no longer carries, and one carrying
+// no pointer are one answer — there is nothing to restore — and the value is trimmed because a
+// whitespace-only pointer is a key the human left empty rather than a profile named " ".
+func recordedProfile(entries []config.ServerEntry, name string) string {
+	if name == "" {
+		return ""
+	}
+	for _, entry := range entries {
+		if entry.Name == name {
+			return strings.TrimSpace(entry.LaunchProfile)
+		}
+	}
+	return ""
+}
+
+// restoreGoneNote is what a pointer with nothing behind it says: the entry names a Launch profile the
+// launcher's config no longer defines. It names the KEY rather than the file, because the key is what
+// the human will look for when they decide whether to repoint it or delete the line.
+func restoreGoneNote(profile string) string {
+	return "launch-profile: " + profile + " is not in the launcher's config — nothing restored"
+}
+
+// restoreYieldNote is the other refusal: something is already serving under this launcher, so the
+// recorded profile is not loaded on top of it. It names what runs when the launcher attributed the
+// instance to a profile, and says only that a server is up when it could not — an instance more than
+// one profile fits is exactly the case the launcher leaves unnamed, and guessing here would name the
+// wrong model to a human deciding whether to load theirs by hand.
+func restoreYieldNote(profile, serving string) string {
+	if serving == "" {
+		return "a server is already running under the launcher — " + profile + " not restored"
+	}
+	return "the launcher is already serving " + serving + " — " + profile + " not restored"
 }

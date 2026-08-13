@@ -104,6 +104,11 @@ func (w *rootWiring) options() tui.Options {
 		// right now? It is one atomic load rather than a verb, so the refusal a switched-off session
 		// gets is synchronous — no "unloading…" frame for a verb that never runs.
 		LauncherEnabled: w.launcherSeams.on,
+		// And the boot half of remembering (`remember-model:`), asked once from the TUI's Init: should
+		// this session open by loading the Launch profile its server was left on? The whole decision is
+		// made here — toggle, pointer, whether the launcher still defines it, whether anything is
+		// already serving — and the renderer actuates the answer through the ordinary `/model` latch.
+		RestoreProfile: w.launcherSeams.restore,
 		// The resolved `ui:` block: which animation paints the status-line spinner, whether its
 		// colour loop runs, and whether the transcript's scroll bar is painted at all. Independent
 		// values, resolved and validated by ApplyConfig, so the renderer selects rather than parses.

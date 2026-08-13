@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/tui"
 	llamalauncher "github.com/airiclenz/llama-launcher/launcher"
 )
@@ -526,5 +527,242 @@ func TestEndpointAddrBothDirections(t *testing.T) {
 				t.Errorf("endpointAddr(%q) = %q; want an error rather than a guessed address", endpoint, addr)
 			}
 		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The start-up restore — remember-model's boot half
+// ----------------------------------------------------------------------------
+
+// restoreFixture is the launcher config the boot-restore tests decide against: two profiles on two
+// ports, so "the recorded one" and "some other one" are both real answers discovery can give.
+func restoreFixture(t *testing.T) *llamalauncher.Config {
+	t.Helper()
+	return launcherFixture(t, []string{"alpha.gguf", "beta.gguf"}, `
+servers:
+  llamacpp: true
+defaults:
+  server: llamacpp
+  host: 127.0.0.1
+  context_size: 4096
+profiles:
+  alpha:
+    model: alpha.gguf
+    port: 8080
+  beta:
+    model: beta.gguf
+    port: 9090
+`)
+}
+
+// restoreWiring builds the bridge as a session that started on entry would hold it: the entry is the
+// whole `servers:` list and the one the launcher path was followed from, so what the restore reads is
+// exactly what the file says about the server this session is on.
+func restoreWiring(ops launcherOps, entry config.ServerEntry, remember bool, path string) launcherWiring {
+	return launcherWiring{
+		sessionMover: sessionMover{
+			live: newLiveSettings(config.Options{
+				Servers: []config.ServerEntry{entry}, HostAlias: entry.Name}, nil),
+		},
+		ops:      ops,
+		path:     newLauncherPath(path, entry.Name),
+		remember: func() bool { return remember },
+	}
+}
+
+// launcherEntry is a launcher-fronted `servers:` entry carrying the recorded pointer — the only shape
+// this key is ever valid on (ValidateServers refuses one without `llama-launcher:`).
+func launcherEntry(profile string) config.ServerEntry {
+	return config.ServerEntry{
+		Name: "rig", Endpoint: "http://127.0.0.1:9090",
+		LlamaLauncher: "/etc/llama-launcher/config.yaml", LaunchProfile: profile,
+	}
+}
+
+// Nothing is serving under the launcher, so the recorded profile is what this session opens on: the
+// answer names it, and nothing else is decided here — the renderer actuates it through the latch.
+func TestRestoreLoadsTheRecordedProfileWhenNothingRuns(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{cfg: restoreFixture(t)}
+	got, err := restoreWiring(ops, launcherEntry("beta"), true, "/etc/llama-launcher/config.yaml").restore()
+
+	if err != nil {
+		t.Fatalf("restore: unexpected error %v", err)
+	}
+	if want := (tui.ProfileRestore{Load: "beta"}); got != want {
+		t.Errorf("restore = %+v; want %+v", got, want)
+	}
+	if len(ops.configPaths) != 1 || ops.configPaths[0] != "/etc/llama-launcher/config.yaml" {
+		t.Errorf("config reads = %v; want one FRESH read of the entry's path (ADR 0029 D4)", ops.configPaths)
+	}
+	if ops.discoverCalls != 1 {
+		t.Errorf("discover calls = %d; want exactly one sweep", ops.discoverCalls)
+	}
+}
+
+// Design call 9: ANY instance under this launcher yields, whatever profile it serves and whatever port
+// it is on — a second model stacked onto the GPU, or a server somebody started by hand and displaced,
+// are the two mistakes this rule exists to make impossible. What runs is named when the launcher
+// attributed it, and left unnamed when it could not.
+func TestRestoreYieldsToARunningInstance(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		instance *llamalauncher.RunningInstance
+		want     string
+	}{
+		{
+			name:     "another profile",
+			instance: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "127.0.0.1", Port: 8080, ActiveProfile: "alpha"},
+			want:     "the launcher is already serving alpha — beta not restored",
+		},
+		{
+			name:     "an instance the launcher could not attribute",
+			instance: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "127.0.0.1", Port: 8080},
+			want:     "a server is already running under the launcher — beta not restored",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ops := &fakeLauncher{cfg: restoreFixture(t), instances: []*llamalauncher.RunningInstance{tc.instance}}
+			got, err := restoreWiring(ops, launcherEntry("beta"), true, "/etc/llama-launcher/config.yaml").restore()
+
+			if err != nil {
+				t.Fatalf("restore: unexpected error %v", err)
+			}
+			if want := (tui.ProfileRestore{Note: tc.want}); got != want {
+				t.Errorf("restore = %+v; want %+v", got, want)
+			}
+		})
+	}
+}
+
+// The recorded profile is ALREADY what the launcher serves, so the session's ordinary start-up bind is
+// the restore: nothing is loaded and nothing is said, because announcing a thing that has already
+// happened is noise on the first screen of a session.
+func TestRestoreIsSilentWhenTheRecordedProfileIsServing(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{
+		cfg: restoreFixture(t),
+		instances: []*llamalauncher.RunningInstance{
+			{Backend: "llamacpp", Host: "127.0.0.1", Port: 9090, ActiveProfile: "beta"},
+		},
+	}
+	got, err := restoreWiring(ops, launcherEntry("beta"), true, "/etc/llama-launcher/config.yaml").restore()
+
+	if err != nil {
+		t.Fatalf("restore: unexpected error %v", err)
+	}
+	if got != (tui.ProfileRestore{}) {
+		t.Errorf("restore = %+v; want the zero answer — the start-up bind already IS the restore", got)
+	}
+}
+
+// A pointer the launcher's config no longer defines is a note and nothing else. The pointer stays in
+// apogee's file — it is the human's line to repoint or delete — and no discovery is done for a profile
+// that could not be loaded anyway.
+func TestRestoreNotesAProfileTheLauncherNoLongerDefines(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{cfg: restoreFixture(t)}
+	got, err := restoreWiring(ops, launcherEntry("gamma"), true, "/etc/llama-launcher/config.yaml").restore()
+
+	if err != nil {
+		t.Fatalf("restore: unexpected error %v", err)
+	}
+	want := tui.ProfileRestore{Note: "launch-profile: gamma is not in the launcher's config — nothing restored"}
+	if got != want {
+		t.Errorf("restore = %+v; want %+v", got, want)
+	}
+	if ops.discoverCalls != 0 {
+		t.Errorf("discover calls = %d; want none — there is nothing to yield to a running server about", ops.discoverCalls)
+	}
+}
+
+// A launcher config that cannot be read at all is the one failure the check reports. The renderer
+// states it as a note; nothing about the session changes.
+func TestRestoreReportsAnUnreadableLauncherConfig(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{cfgErr: errors.New("open config.yaml: no such file or directory")}
+	got, err := restoreWiring(ops, launcherEntry("beta"), true, "/etc/llama-launcher/config.yaml").restore()
+
+	if err == nil || !strings.Contains(err.Error(), "no such file") {
+		t.Fatalf("restore error = %v; want the launcher's own read failure", err)
+	}
+	if got != (tui.ProfileRestore{}) {
+		t.Errorf("restore = %+v; want nothing decided from a config nobody could read", got)
+	}
+}
+
+// The three states that do no launcher I/O AT ALL. Each is the ordinary configuration of a session
+// this feature has nothing to say to, and the assertion is about the SILENCE as much as the answer: a
+// start-up that reads a launcher config and probes for servers is a start-up the user did not ask for.
+func TestRestoreDoesNoLauncherWorkWhenThereIsNothingToRestore(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		entry    config.ServerEntry
+		remember bool
+		path     string
+	}{
+		{
+			name:  "the remember-model toggle is off",
+			entry: launcherEntry("beta"),
+			path:  "/etc/llama-launcher/config.yaml",
+		},
+		{
+			name:     "the entry records no launch-profile",
+			entry:    config.ServerEntry{Name: "rig", LlamaLauncher: "/etc/llama-launcher/config.yaml"},
+			remember: true,
+			path:     "/etc/llama-launcher/config.yaml",
+		},
+		{
+			name:     "no launcher fronts this session's server",
+			entry:    config.ServerEntry{Name: "rig", LaunchProfile: "beta"},
+			remember: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ops := &fakeLauncher{cfg: restoreFixture(t)}
+			got, err := restoreWiring(ops, tc.entry, tc.remember, tc.path).restore()
+
+			if err != nil {
+				t.Fatalf("restore: unexpected error %v", err)
+			}
+			if got != (tui.ProfileRestore{}) {
+				t.Errorf("restore = %+v; want the zero answer", got)
+			}
+			if len(ops.configPaths) != 0 || ops.discoverCalls != 0 {
+				t.Errorf("launcher work = %d config reads, %d sweeps; want none at all",
+					len(ops.configPaths), ops.discoverCalls)
+			}
+		})
+	}
+}
+
+// A wiring that composed no toggle answers nothing rather than dereferencing one — the nil-degrade
+// every seam on this bridge takes, and the posture of a Driver that has no `remember-model:` at all.
+func TestRestoreWithoutAToggleRestoresNothing(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{cfg: restoreFixture(t)}
+	wiring := restoreWiring(ops, launcherEntry("beta"), true, "/etc/llama-launcher/config.yaml")
+	wiring.remember = nil
+
+	got, err := wiring.restore()
+	if err != nil {
+		t.Fatalf("restore: unexpected error %v", err)
+	}
+	if got != (tui.ProfileRestore{}) || len(ops.configPaths) != 0 {
+		t.Errorf("restore = %+v after %d config reads; want the zero answer and no launcher work",
+			got, len(ops.configPaths))
 	}
 }

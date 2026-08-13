@@ -802,6 +802,31 @@ type Options struct {
 	// hand-built Options, and the right one for a Driver whose seams cannot change their mind.
 	LauncherEnabled func() bool
 
+	// RestoreProfile asks the binary, ONCE at start-up, what to do about a `launch-profile:` the
+	// session's server was last left on — the boot half of `remember-model:`, whose recording half is
+	// [Options.RecordLaunchProfile]. [Model.Init] issues it as one Cmd beside the first beat, so it is
+	// answered off the Update loop: answering it re-reads the launcher's config and probes for running
+	// servers, neither of which may block the paint.
+	//
+	// Every question behind the answer is the binary's — whether the toggle is on, whether the
+	// actuating entry carries a pointer at all, whether the launcher still defines that profile, and
+	// whether anything is already serving under that launcher. What crosses the seam is a DECISION:
+	// load this, say this, or do nothing. The renderer acts on it through the very latch a human's
+	// `/model` pick takes ([Model.startProfileLoad]), which is what keeps the restore one more
+	// actuation rather than a second way to bind — the latch blocks what it always blocks, a beat
+	// landing in its shadow is stashed rather than driven into the engine, and the completion fold
+	// commits whatever moved and fires the beat that binds (ADR 0029 D5).
+	//
+	// The error is the one failure worth a line: a launcher config that could not be read at the path
+	// the entry names. It reaches the transcript as a note and is fatal to nothing — the session is
+	// bound to whatever start-up bound it, and a restore that did not happen costs a sentence rather
+	// than a server.
+	//
+	// nil ⇒ no restore is ever attempted. That is every hand-built Options, and every Driver that is
+	// not the interactive TUI: a headless run builds no Model, so this seam has no caller there and
+	// the boot restore is unreachable by construction.
+	RestoreProfile func() (ProfileRestore, error)
+
 	// Schedules is the scheduler this session's Schedules live in (the [Scheduler] seam the binary
 	// backs with a live schedule.Scheduler); nil ⇒ scheduling is unwired and both verbs say so.
 	// The Model drives it synchronously on the Update loop — Add, Stop and List touch no engine
@@ -998,6 +1023,24 @@ type ProfileLoadResult struct {
 	// the server it is already on. Called at most once, on the Update goroutine.
 	Move    func() (ServerSwitchResult, error)
 	Notices []string // launcher notices to surface as transcript notes, in order
+}
+
+// ProfileRestore is the start-up restore check's answer ([Options.RestoreProfile]): the one Launch
+// profile this session opens by loading, or the one line saying why it is not loading one.
+//
+// The two fields are alternatives, and the ZERO value is the ordinary answer — `remember-model:` off,
+// no pointer recorded, no launcher fronting this server, and the case where the restore has already
+// happened by itself, the recorded profile being what the launcher is serving right now. None of
+// those is news to a human who has just started the program, so none of them earns a line.
+//
+// Note is the binary's own words, stated verbatim as a transcript note. What it says is a fact about
+// the LAUNCHER's world — a profile that is no longer defined, a server already running under it —
+// which the renderer cannot see and would only be paraphrasing.
+type ProfileRestore struct {
+	// Load names the Launch profile to actuate now; "" ⇒ there is nothing to load.
+	Load string
+	// Note is the single line to state when a recorded profile was NOT restored; "" ⇒ say nothing.
+	Note string
 }
 
 // ActuationResult is what `/unload-model` and `/stop-server` did: the launcher's own [StopResult]

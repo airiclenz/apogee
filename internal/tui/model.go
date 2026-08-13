@@ -524,8 +524,8 @@ func steadyCursor(ta *textarea.Model, shape tea.CursorShape) {
 	ta.SetStyles(s)
 }
 
-// Init fires the first heartbeat, reads this workspace's prompt recall and opens the wait on the
-// config file, and that is the whole of
+// Init fires the first heartbeat, reads this workspace's prompt recall, opens the wait on the
+// config file and asks whether a recorded Launch profile has to be restored, and that is the whole of
 // its work. The window is sized by the first WindowSizeMsg the program sends, the input's focus
 // STATE is set at construction (newModel — Init holds a copy, so it could not set it here), and the
 // caret needs no start-up Cmd either: the virtual cursor is retired, so there is no blink to
@@ -534,13 +534,17 @@ func steadyCursor(ta *textarea.Model, shape tea.CursorShape) {
 // IS the first beat (the binary no longer probes before painting): the sooner it lands, the sooner
 // the footer stops saying "connecting…".
 //
-// The three are batched rather than sequenced because none waits on another — the recall read is a
-// file the box needs before the first ↑, the beat a network probe the footer needs, and the config
-// wait parks until somebody saves a file that may never be touched all session. Every Cmd is
-// nil when its seam is unwired, and tea.Batch drops nils and collapses to the single survivor (or
-// to nil), so an unwired TUI still starts nothing at all — exactly as before.
+// The four are batched rather than sequenced because none waits on another — the recall read is a
+// file the box needs before the first ↑, the beat a network probe the footer needs, the config
+// wait parks until somebody saves a file that may never be touched all session, and the restore check
+// reads the launcher's own config and answers with a decision the fold acts on (actuation.go). Every
+// Cmd is nil when its seam is unwired, and tea.Batch drops nils and collapses to the single survivor
+// (or to nil), so an unwired TUI still starts nothing at all — exactly as before.
+//
+// This is also the ONLY place the boot restore is issued from, which is what makes it interactive-TUI
+// only: a headless run builds no Model, so it never reaches an Init and never actuates a server.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.beatCmd(), m.loadRecallCmd(), m.awaitConfigChange())
+	return tea.Batch(m.beatCmd(), m.loadRecallCmd(), m.awaitConfigChange(), m.restoreCmd())
 }
 
 // ----------------------------------------------------------------------------
@@ -941,6 +945,12 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// and re-arm on, or the completion that releases the latch. It arrives off a Cmd goroutine
 		// like a beat, and carries the same kind of generation guard.
 		return m.foldActuation(msg)
+
+	case restoreMsg:
+		// The start-up restore check answered (actuation.go): load the Launch profile this server was
+		// left on, state why it is not being loaded, or do nothing at all. It lands off a Cmd goroutine
+		// like a beat, and what it may do it does through the latch above rather than beside it.
+		return m.foldRestore(msg)
 
 	case heartbeatTickMsg:
 		// The interval since the last landed beat has elapsed: issue the next one. Same generation

@@ -10,6 +10,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A launcher-fronted server now comes back on the Launch profile you left it on.** With
+  `remember-model:` on, an interactive session that starts on an entry carrying both
+  `llama-launcher:` and `launch-profile:` asks the launcher once, at start-up, whether that profile
+  should be loaded — and loads it exactly as if you had picked it from `/model`, with the same
+  progress narration and the same completion. It yields rather than insists: ANY server already
+  running under that launcher — any profile, any port — leaves the restore skipped with a line saying
+  what is serving, so a model you started by hand is joined instead of stacked on top of, and a
+  recorded profile the launcher no longer defines is a note rather than a failure. When the profile
+  you recorded is already what the launcher serves, the ordinary start-up bind is the restore and
+  nothing is said at all. With the toggle off (the default), with no pointer recorded, or on a server
+  no launcher fronts, start-up reads no launcher config and probes for no servers. Headless runs
+  never restore anything: they actuate no servers at all.
+
 - **A Launch profile you load is now remembered by the server that loaded it.** With
   `remember-model:` on, a profile load that COMMITS — the one that landed on the server your session
   is already talking to, and the one your session had to follow onto another server — writes that

@@ -609,7 +609,9 @@
 // dropdown, the ask and approval prompts — is painted through; logo.go the embedded start-up wordmark;
 // actuation.go the launcher-verb latch and the folds that close one out (ADR 0029) — at most one
 // world-changing call in flight per address, narrated while it blocks, with the next Beat rather
-// than the call's own return deciding what the world became; skills.go the browsing half of the
+// than the call's own return deciding what the world became, plus the start-up restore that enters
+// that same latch with whatever Launch profile the binary says this server was left on
+// ([Options.RestoreProfile], `remember-model:`); skills.go the browsing half of the
 // skill flow — the /skills report, and [Model.knownSkillID], the single predicate the parser, the
 // inline accents and the merged "/" menu all resolve a token through, so the three can never
 // disagree about what a skill is; workspacepath.go the presentation-only shortening of the

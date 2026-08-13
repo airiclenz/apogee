@@ -1268,3 +1268,195 @@ func TestStopThenBeatFailuresCrossOffline(t *testing.T) {
 		t.Errorf("offline notes = %d, want the crossing narrated once", n)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The start-up restore (remember-model's boot half)
+// ----------------------------------------------------------------------------
+
+// restoreOpts wires the boot-restore seam onto the launcher harness, answering with one scripted
+// decision and counting the asks — so a test can say both what the renderer DID with an answer and
+// whether it asked at all.
+func restoreOpts(fake *fakeLauncher, answer ProfileRestore, err error) (Options, *int) {
+	opts := launcherOpts(fake)
+	asks := 0
+	opts.RestoreProfile = func() (ProfileRestore, error) {
+		asks++
+		return answer, err
+	}
+	return opts, &asks
+}
+
+// firstRestore drives Init's batch and returns the restore check's answer, the way firstBeat returns
+// the first observation: the check is one of the start-up Cmds, and running the batch is the only
+// honest way to prove it went out at all.
+func firstRestore(t *testing.T, cmd tea.Cmd) restoreMsg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("Init returned no Cmd — the restore check never went out")
+	}
+	switch msg := cmd().(type) {
+	case restoreMsg:
+		return msg
+	case tea.BatchMsg:
+		out := make(chan tea.Msg, len(msg))
+		for _, c := range msg {
+			go func() { out <- c() }()
+		}
+		deadline := time.After(pumpTimeout)
+		for range msg {
+			select {
+			case landed := <-out:
+				if restore, ok := landed.(restoreMsg); ok {
+					return restore
+				}
+			case <-deadline:
+				t.Fatal("no restoreMsg after Init — the restore check never landed")
+			}
+		}
+		t.Fatal("Init's batch carried no restoreMsg — the restore check never went out")
+	default:
+		t.Fatalf("Init's Cmd yielded %T, want a batch carrying the restore check", msg)
+	}
+	return restoreMsg{}
+}
+
+// The whole point of the feature: the binary says nothing is serving and names the profile the entry
+// remembers, and the session opens by loading it — through the ordinary latch, with the ordinary
+// completion, exactly as if the human had picked it from `/model`.
+func TestStartupRestoreActuatesTheRecordedProfile(t *testing.T) {
+	t.Parallel()
+
+	fake := newLauncher()
+	opts, asks := restoreOpts(fake, ProfileRestore{Load: "beta"}, nil)
+	m, _ := seededPicker(t, opts)
+	notesBefore := len(noteTexts(m))
+
+	answer := firstRestore(t, m.Init())
+	if *asks != 1 {
+		t.Fatalf("the seam was asked %d times; want exactly one check per session", *asks)
+	}
+	m, cmd := stepCmd(t, m, answer)
+
+	if !m.actuation.inFlight || m.actuation.verb != verbLoad || m.actuation.profile != "beta" {
+		t.Fatalf("latch = %+v; want a load of %q held exactly as a picked profile holds it",
+			m.actuation, "beta")
+	}
+	m, _ = driveActuation(t, m, cmd)
+
+	if got := fake.loaded(); !reflect.DeepEqual(got, []string{"beta"}) {
+		t.Errorf("loads = %v; want the recorded profile loaded once", got)
+	}
+	want := []string{"profile beta loaded — waiting for the beat"}
+	if got := noteTexts(m)[notesBefore:]; !reflect.DeepEqual(got, want) {
+		t.Errorf("notes = %v; want the ordinary load completion %v — a restore is not a special case", got, want)
+	}
+}
+
+// The three answers that load NOTHING, and what each one says. A refusal the binary worded reaches the
+// human verbatim; a decision it made silently stays silent; and no answer at all ever reaches the load
+// seam, because a restore that did not happen must not narrate one.
+func TestStartupRestoreWithoutALoad(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		answer ProfileRestore
+		err    error
+		want   []string
+	}{
+		{
+			name:   "the recorded profile is gone from the launcher's config",
+			answer: ProfileRestore{Note: "launch-profile: beta is not in the launcher's config — nothing restored"},
+			want:   []string{"launch-profile: beta is not in the launcher's config — nothing restored"},
+		},
+		{
+			name:   "another profile is already serving",
+			answer: ProfileRestore{Note: "the launcher is already serving alpha — beta not restored"},
+			want:   []string{"the launcher is already serving alpha — beta not restored"},
+		},
+		{
+			// The recorded profile is what runs, the toggle is off, no pointer was recorded: one zero
+			// answer for every case where the start-up bind is already the whole story.
+			name:   "nothing to do",
+			answer: ProfileRestore{},
+		},
+		{
+			name: "the launcher config could not be read",
+			err:  errors.New("open /etc/llama-launcher/config.yaml: no such file or directory"),
+			want: []string{"open /etc/llama-launcher/config.yaml: no such file or directory"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fake := newLauncher()
+			opts, _ := restoreOpts(fake, tc.answer, tc.err)
+			m, _ := seededPicker(t, opts)
+			notesBefore := len(noteTexts(m))
+
+			m, cmd := stepCmd(t, m, firstRestore(t, m.Init()))
+
+			if m.actuation.inFlight {
+				t.Errorf("latch = %+v; want nothing actuated for an answer that named no profile", m.actuation)
+			}
+			if cmd != nil {
+				t.Error("the fold returned a Cmd for an answer that named no profile")
+			}
+			if got := fake.loaded(); len(got) != 0 {
+				t.Errorf("loads = %v; want the load seam never reached", got)
+			}
+			if got := noteTexts(m)[notesBefore:]; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("notes = %v; want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A session that has moved on keeps what it chose. The answer was decided against the session as it
+// stood when the check went out, so a latch already held — the human was faster than the discovery
+// sweep — is never taken a second time: doing so would strand the verb holding it, and the restore is
+// the half of the pair with nothing to lose.
+func TestStartupRestoreYieldsToAVerbAlreadyInFlight(t *testing.T) {
+	t.Parallel()
+
+	fake := newLauncher()
+	opts, _ := restoreOpts(fake, ProfileRestore{Load: "beta"}, nil)
+	m, _ := seededPicker(t, opts)
+	answer := firstRestore(t, m.Init())
+
+	m, cmd := typeCommand(t, m, "/model alpha")
+	if !m.actuation.inFlight || m.actuation.profile != "alpha" {
+		t.Fatalf("latch = %+v; want the human's own load in flight", m.actuation)
+	}
+	held := m.actuation
+
+	m, restoreCmd := stepCmd(t, m, answer)
+	if m.actuation != held {
+		t.Errorf("latch = %+v; want the human's load untouched %+v", m.actuation, held)
+	}
+	if restoreCmd != nil {
+		t.Error("the restore fold returned a Cmd over a verb already in flight")
+	}
+
+	m, _ = driveActuation(t, m, cmd)
+	if got := fake.loaded(); !reflect.DeepEqual(got, []string{"alpha"}) {
+		t.Errorf("loads = %v; want only the profile the human picked", got)
+	}
+}
+
+// With the seam unwired nothing is asked and nothing is issued — the posture of every hand-built
+// Options, and of every Driver that is not the interactive TUI. Init is the ONLY issuer, which is what
+// makes the boot restore unreachable from a headless run by construction: that driver builds no Model.
+func TestStartupRestoreIsSilentWhenUnwired(t *testing.T) {
+	t.Parallel()
+
+	fake := newLauncher()
+	m, _ := seededPicker(t, launcherOpts(fake)) // launcher wired, RestoreProfile nil
+
+	if cmd := m.restoreCmd(); cmd != nil {
+		t.Error("an unwired restore seam still issued a start-up Cmd")
+	}
+	if got := fake.loaded(); len(got) != 0 {
+		t.Errorf("loads = %v; want nothing actuated with no restore seam wired", got)
+	}
+}
