@@ -443,6 +443,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`read_file` now says when it followed a symlink.** The write tools already append
+  `→ resolves to <path>` to their result when the path they were given turns out to name
+  something else; a read still echoed the argument alone. So a read of `docs/notes.md` that was
+  really a link to `.git/config` printed a header quoting the innocuous name above the other
+  file's bytes, and both the model and the transcript read it as an ordinary in-workspace read —
+  the read half of a disclosure whose write half had already shipped. A successful read whose
+  path resolves elsewhere now ends with the same note, and only when the resolution actually
+  differs, so an ordinary read renders exactly as before. The path is resolved against the root
+  that SERVED the read, not the workspace assumed: an absolute path under a configured read-only
+  root (the skills library) still reads and gains the note when its resolution differs — the
+  disclosure adds text to a success and never turns one into a refusal.
+
 - **`copy_file`, `move_file` and `delete_file` now say where the file really was.** `write_file`
   and the two find-and-replace tools already append `→ resolves to <path>` to their result when the
   path they were given turns out to name something else; the three file-operation tools still

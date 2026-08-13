@@ -90,11 +90,6 @@ working tree on 2026-08-12 and re-verified on 2026-08-13.
   decides on. `domain.ApprovalRequest` (`internal/domain/approval.go:33`) carries no scope field,
   so a truthful pane line needs a new engine field plus a TUI renderer.
 
-- [ ] `read_file` carries no resolves-to disclosure: `internal/tools/read_file.go:94` returns
-  `okSummary` naming the literal argument, and the tool is not a `workspaceScopedWriter`, so none
-  of item 8's plumbing reaches it. Ratified design call 2 — "symlinked reads: follow, but show the
-  resolution" — is therefore only half-landed; the write path got the line, the read path did not.
-
 - [ ] `/skills` still re-walks the skill source dirs synchronously on the Bubble Tea update
   goroutine: `runSkills` calls `m.opts.ReloadSkills()` inline (`internal/tui/skills.go:45`). Item
   12 moved the merged `/` menu's re-scan off that goroutine but left this trigger on it, so the

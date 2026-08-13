@@ -235,7 +235,7 @@ success carries no note.
 
 **Commit:** `fix(tools): copy, move and delete disclose the resolved target in their results`
 
-## 6. `read_file` discloses what a symlinked read resolved to
+## 6. `read_file` discloses what a symlinked read resolved to — ✅ DONE (2026-08-13)
 
 **What:** `read_file` carries no resolves-to disclosure: `internal/tools/read_file.go:94` returns
 `okSummary` naming the literal argument, and the tool is not a `workspaceScopedWriter`, so none of

@@ -72,6 +72,10 @@ func (t *ReadFile) ReadOnly() bool { return true }
 // narrower than the former resolveInRoot + unfenced stat + unfenced read trio, which read
 // such a link; the fence is tighten-only, so the narrowing is kept and recorded in the
 // CHANGELOG (Unreleased → Security). Relative in-root symlinks read as they did before.
+//
+// A read that DOES follow a link discloses it: the result text ends with the same
+// ` → resolves to <path>` tail the write tools append when the argument named one path and the
+// operation landed on another (resolvedTargetNote). An ordinary read grows nothing.
 func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -90,8 +94,21 @@ func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, failMessage), nil
 	}
 
+	// Where these bytes REALLY came from, when that is not where the argument said
+	// (resolvedTargetNote — the writers' disclosure tail, appended to the rendered text so the
+	// model and the transcript read the same sentence the write tools give). A read FOLLOWS a
+	// symlink rather than replacing it, so the note is the only place the redirection is said
+	// out loud: without it the header quotes an argument that named one file while the body
+	// carries another's bytes.
+	//
+	// The root is the one that served the READ, not the workspace assumed (readScope.readRoot):
+	// an absolute path accepted by a configured read-only root is resolved under that root. The
+	// live roots are evaluated a second time here, which cannot disagree with the read's own
+	// evaluation about anything this note says: a relative path never consults the extra roots
+	// at all (readScope.extraRoots), and for an absolute path the root argument is unused —
+	// resolveTargetUnbounded cleans such a path on its own.
 	text, span := renderFile(args.Path, string(content), args)
-	return okSummary(call.ID, text, span), nil
+	return okSummary(call.ID, text+resolvedTargetNote(args.Path, t.scope.readRoot(args.Path)), span), nil
 }
 
 // renderFile selects the requested line range and prepends a header naming the file

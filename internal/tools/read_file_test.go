@@ -440,6 +440,99 @@ func TestReadFile_Execute_ReadsRelativeInRootSymlink(t *testing.T) {
 	}
 }
 
+// TestReadFile_Execute_DisclosesTheResolvedPath is the read side of the writers' disclosure: a
+// read FOLLOWS an in-root symlink rather than replacing it, so without a note the header quotes
+// the argument's innocuous name while the body carries another file's bytes. The result must end
+// with the same ` → resolves to <path>` tail the write tools append — for a symlinked leaf and
+// for a symlinked directory component alike — while an ordinary read keeps the bare rendering: a
+// note that fired on every read would disclose nothing.
+func TestReadFile_Execute_DisclosesTheResolvedPath(t *testing.T) {
+	t.Parallel()
+
+	// The root is resolved up front so the negative case below is a fact about the ARGUMENT,
+	// not about a box whose temp dir is itself reached through a symlink (macOS /var).
+	root := realPath(t, t.TempDir())
+	config := symlinkedReadFixture(t, root, "docs", "notes.md")
+	writeFixtureFile(t, filepath.Join(root, "real", "data.txt"), "linked bytes")
+	if err := os.Symlink("real", filepath.Join(root, "dir_link")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	writeFixtureFile(t, filepath.Join(root, "plain.txt"), "plain bytes")
+
+	tool := NewReadFile(root, nil)
+
+	cases := []struct {
+		name     string
+		path     string
+		wantReal string
+		wantBody string
+	}{
+		{"symlinked file", "docs/notes.md", config, gitConfigFixture},
+		{"symlinked directory component", "dir_link/data.txt", filepath.Join(root, "real", "data.txt"), "linked bytes"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := runFileOp(t, tool, map[string]any{"path": tc.path})
+
+			if result.IsError {
+				t.Fatalf("IsError = true on an in-workspace relative symlink (content: %q)", result.Content)
+			}
+			if !strings.Contains(result.Content, tc.wantBody) {
+				t.Errorf("content %q does not carry the linked file's body", result.Content)
+			}
+			if want := " → resolves to " + realPath(t, tc.wantReal); !strings.HasSuffix(result.Content, want) {
+				t.Errorf("content %q does not end with the disclosure %q", result.Content, want)
+			}
+		})
+	}
+
+	ordinary := runFileOp(t, tool, map[string]any{"path": "plain.txt"})
+	if ordinary.IsError {
+		t.Fatalf("unexpected tool error: %q", ordinary.Content)
+	}
+	if strings.Contains(ordinary.Content, "resolves to") {
+		t.Errorf("content %q carries a note for a path that resolves to itself", ordinary.Content)
+	}
+}
+
+// TestReadFile_Execute_DisclosesTheResolvedPathUnderAnExtraReadRoot is the standing
+// skills-access guard on this disclosure: an absolute path under a configured read-only root
+// still READS — the note is text appended to a success, never a refusal — and it resolves
+// against the root that actually served the read (readScope.readRoot), not the workspace.
+func TestReadFile_Execute_DisclosesTheResolvedPathUnderAnExtraReadRoot(t *testing.T) {
+	t.Parallel()
+
+	root, extra := realPath(t, t.TempDir()), realPath(t, t.TempDir())
+	target := filepath.Join(extra, "skill", "SKILL.md")
+	writeFixtureFile(t, target, "skill bytes")
+	if err := os.Symlink(filepath.Join("skill", "SKILL.md"), filepath.Join(extra, "linked.md")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	tool := NewReadFile(root, func() []string { return []string{extra} })
+
+	linked := runFileOp(t, tool, map[string]any{"path": filepath.Join(extra, "linked.md")})
+	if linked.IsError {
+		t.Fatalf("read under the extra root was refused: %q", linked.Content)
+	}
+	if !strings.Contains(linked.Content, "skill bytes") {
+		t.Errorf("content %q does not carry the linked file's body", linked.Content)
+	}
+	if want := " → resolves to " + realPath(t, target); !strings.HasSuffix(linked.Content, want) {
+		t.Errorf("content %q does not end with the disclosure %q", linked.Content, want)
+	}
+
+	direct := runFileOp(t, tool, map[string]any{"path": target})
+	if direct.IsError {
+		t.Fatalf("read under the extra root was refused: %q", direct.Content)
+	}
+	if strings.Contains(direct.Content, "resolves to") {
+		t.Errorf("content %q carries a note for a path that resolves to itself", direct.Content)
+	}
+}
+
 func TestReadFile_Execute_RejectsRangeOnLineTwo(t *testing.T) {
 	t.Parallel()
 
