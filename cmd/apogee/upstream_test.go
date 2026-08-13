@@ -603,6 +603,124 @@ func TestRunRootRecordLaunchProfileWritesOntoTheActuatingEntry(t *testing.T) {
 	})
 }
 
+// The `remember-model:` toggle is LIVE, end to end through runRoot: a session that started with
+// remembering off and had it switched on in `/settings` records the very next pick — and one that had
+// it switched off records nothing again. Both recording seams are asked, because both read the toggle
+// and the whole point of the key is that the two answer the same question.
+//
+// This is the seam-level half of the pane's live apply (ADR 0037 decision 1): the pane persists the
+// key and then applies it, and the apply has to reach the values the composition root's own closures
+// read — not a snapshot they captured at launch, which would leave the flip governing nothing until
+// the next start.
+func TestRunRootRememberModelTogglesLive(t *testing.T) {
+	t.Parallel()
+
+	// wire stages a config carrying entry, starts a session on it with remembering OFF, and hands back
+	// the renderer's whole seam set plus the file the recordings write through.
+	wire := func(t *testing.T, entry config.ServerEntry) (tui.Options, string) {
+		t.Helper()
+		configHome := t.TempDir()
+		configPath := filepath.Join(configHome, "config.yaml")
+		staged := "servers:\n  - name: " + entry.Name + "\n    endpoint: " + entry.Endpoint + "\n"
+		if entry.LlamaLauncher != "" {
+			staged += "    llama-launcher: " + entry.LlamaLauncher + "\n"
+		}
+		if err := os.WriteFile(configPath, []byte(staged), 0o600); err != nil {
+			t.Fatalf("stage the config: %v", err)
+		}
+		rec := &recordingLauncher{}
+		opts := config.Options{
+			Endpoint:        entry.Endpoint,
+			Model:           "model-a",
+			Mode:            "ask-before",
+			HostAlias:       entry.Name,
+			Workspace:       t.TempDir(),
+			ConfigDir:       configHome,
+			AutoCompact:     true,
+			RememberModel:   false, // the default, and what the flip below has to be able to overrule
+			Servers:         []config.ServerEntry{entry},
+			StartupLauncher: entry.LlamaLauncher,
+		}
+		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+			t.Fatalf("runRoot: %v", err)
+		}
+		if rec.opts.ApplySetting == nil {
+			t.Fatal("the composition root left the live-apply dispatcher unwired")
+		}
+		return rec.opts, configPath
+	}
+
+	flip := func(t *testing.T, opts tui.Options, on string) {
+		t.Helper()
+		if _, err := opts.ApplySetting("remember-model", on); err != nil {
+			t.Fatalf("apply remember-model=%s: %v", on, err)
+		}
+	}
+
+	t.Run("a plain entry starts and stops recording model picks", func(t *testing.T) {
+		srv := upstreamServer(t, "model-a", 4096)
+		opts, configPath := wire(t, config.ServerEntry{Name: "workbench", Endpoint: srv.URL})
+
+		if saved, err := opts.RecordModelChoice("model-b"); saved || err != nil {
+			t.Fatalf("recording with the toggle off = (%v, %v); want (false, nil)", saved, err)
+		}
+		flip(t, opts, "true")
+		if saved, err := opts.RecordModelChoice("model-b"); !saved || err != nil {
+			t.Fatalf("recording after the flip = (%v, %v); want (true, nil) — the flip governs the next pick",
+				saved, err)
+		}
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read the config the recording wrote: %v", err)
+		}
+		if !strings.Contains(string(data), "model: model-b") {
+			t.Errorf("config.yaml does not carry `model: model-b`:\n%s", data)
+		}
+
+		// And off again: a human who switches remembering off has said to stop writing their picks
+		// down, which a session that only ever learned to start would ignore for the rest of its life.
+		flip(t, opts, "false")
+		before, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read the config back: %v", err)
+		}
+		if saved, err := opts.RecordModelChoice("model-c"); saved || err != nil {
+			t.Errorf("recording after switching off = (%v, %v); want (false, nil)", saved, err)
+		}
+		after, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read the config back: %v", err)
+		}
+		if string(after) != string(before) {
+			t.Errorf("a skipped recording rewrote the config:\n%s\nwant:\n%s", after, before)
+		}
+	})
+
+	t.Run("a launcher-fronted entry starts recording profile loads", func(t *testing.T) {
+		srv := upstreamServer(t, "model-a", 4096)
+		opts, configPath := wire(t, config.ServerEntry{
+			Name:          "rig",
+			Endpoint:      srv.URL,
+			LlamaLauncher: filepath.Join(t.TempDir(), "llama-launcher.yaml"),
+		})
+
+		if saved, err := opts.RecordLaunchProfile("gpt-oss-20b"); saved || err != nil {
+			t.Fatalf("recording with the toggle off = (%v, %v); want (false, nil)", saved, err)
+		}
+		flip(t, opts, "true")
+		if saved, err := opts.RecordLaunchProfile("gpt-oss-20b"); !saved || err != nil {
+			t.Fatalf("recording after the flip = (%v, %v); want (true, nil)", saved, err)
+		}
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read the config the recording wrote: %v", err)
+		}
+		if !strings.Contains(string(data), "launch-profile: gpt-oss-20b") {
+			t.Errorf("config.yaml does not carry `launch-profile: gpt-oss-20b`:\n%s", data)
+		}
+	})
+}
+
 // A name that resolves to nothing is refused before the engine is touched: the error names the
 // candidates and the session keeps observing — and talking to — the server it was on.
 func TestRunRootSwitchServerUnknownNameTouchesNothing(t *testing.T) {

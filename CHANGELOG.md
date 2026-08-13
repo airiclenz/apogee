@@ -10,6 +10,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Switching `remember-model:` now takes effect immediately.** Turning the toggle on in `/settings`
+  — or in your config file, which apogee watches for the whole session — makes the very next explicit
+  `/model` pick and the very next Launch profile that commits get recorded, instead of the setting
+  sitting inert until you restart. Turning it back off stops the recording just as immediately, so a
+  session you would rather not have written down stays unwritten from that keystroke onward.
+
 - **A launcher-fronted server now comes back on the Launch profile you left it on.** With
   `remember-model:` on, an interactive session that starts on an entry carrying both
   `llama-launcher:` and `launch-profile:` asks the launcher once, at start-up, whether that profile

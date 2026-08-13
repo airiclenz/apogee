@@ -3015,6 +3015,53 @@ func TestApplySettingAcceptsTheEditorKey(t *testing.T) {
 	}
 }
 
+// `remember-model` is the third shape again: a toggle with no engine seam and no re-resolution, whose
+// whole apply is a store on the live holder. What makes the store the apply is that everything the
+// toggle gates is still in the future — the next explicit `/model` pick, the next committed profile
+// load, the next start-up — and all three ask the holder at the moment they have something to decide,
+// so the flip governs the very next one rather than the next process.
+func TestApplySettingRememberModelFlipsTheLiveToggle(t *testing.T) {
+	t.Parallel()
+	spy := &applySettingSpy{}
+	live := newLiveSettings(config.Options{}, nil)
+	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+
+	if live.remember() {
+		t.Fatal("the holder opened with remembering on; the key's default is off")
+	}
+	note, err := apply("remember-model", "true")
+	if err != nil {
+		t.Fatalf("apply remember-model: %v", err)
+	}
+	if note != "" {
+		t.Errorf("note = %q, want none: the toggle states its own outcome when it records", note)
+	}
+	if !live.remember() {
+		t.Error("the flip did not reach the holder the recording seams read")
+	}
+	if spy.drove() != 0 {
+		t.Errorf("applying remember-model drove an engine seam: %+v", spy)
+	}
+
+	// And back off again, since a toggle that could only be switched on would leave a session recording
+	// picks the human has just said to stop recording.
+	if _, err := apply("remember-model", "false"); err != nil {
+		t.Fatalf("apply remember-model off: %v", err)
+	}
+	if live.remember() {
+		t.Error("switching the toggle back off did not reach the holder")
+	}
+
+	// The bool vocabulary is the registry's, enforced at the write; the dispatcher refuses anything
+	// else rather than storing a reading of its own, and leaves the toggle where it was.
+	if _, err := apply("remember-model", "yes"); err == nil {
+		t.Error("apply remember-model=yes was accepted; the key is a bool")
+	}
+	if live.remember() {
+		t.Error("a refused value moved the toggle")
+	}
+}
+
 // The same sentence answers a key whose seam this Driver did not COMPOSE. Every member of the
 // applier is optional by design — a bench, a daemon or an embedder has no presenter, no launcher and
 // no skill catalogue (ADR 0031: the engine stays sufficient for any Driver) — so a missing member

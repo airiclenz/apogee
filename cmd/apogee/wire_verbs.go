@@ -160,8 +160,8 @@ func (w *rootWiring) recordServerChoice(name string) (bool, error) {
 // Three skips and no fourth, every one of them SILENT (false, nil), because none is a failure:
 //
 //   - `remember-model:` is off, which is the default. The toggle gates the write as well as the boot
-//     restore, so a session nobody asked to be remembered writes nothing at all — read here rather
-//     than captured at wiring time, so a flip in `/settings` governs the very next pick.
+//     restore, so a session nobody asked to be remembered writes nothing at all — asked of the LIVE
+//     holder rather than of the launch snapshot, so a flip in `/settings` governs the very next pick.
 //   - the session is on no configured entry (boundEntry). That is the synthesized ephemeral
 //     `--endpoint` startup, and a session a Launch profile moved onto a server the file does not list:
 //     there is no entry to splice, and inventing one would be config nobody wrote.
@@ -172,7 +172,7 @@ func (w *rootWiring) recordServerChoice(name string) (bool, error) {
 // Past those, the write goes through the same splice writer every other key uses, so the comments and
 // every sibling entry come back exactly as the human left them.
 func (w *rootWiring) recordModelChoice(model string) (bool, error) {
-	if !w.opts.RememberModel {
+	if !w.live.remember() {
 		return false, nil
 	}
 	entry, ok := w.live.boundEntry()
@@ -199,12 +199,12 @@ func (w *rootWiring) recordModelChoice(model string) (bool, error) {
 // never disagree about which entry the integration belongs to.
 //
 // Two skips, both SILENT (false, nil) because neither is a failure: the `remember-model:` toggle is
-// off — read here, so a `/settings` flip governs the very next load — or there is no actuating entry
-// to write onto. The second covers a session whose launcher is off, and one whose entry has since left
-// the file: what the list holds NOW is what the splice can address, and a name it no longer carries is
-// nothing to invent an entry for.
+// off — asked of the live holder, so a `/settings` flip governs the very next load — or there is no
+// actuating entry to write onto. The second covers a session whose launcher is off, and one whose entry
+// has since left the file: what the list holds NOW is what the splice can address, and a name it no
+// longer carries is nothing to invent an entry for.
 func (w *rootWiring) recordLaunchProfile(profile string) (bool, error) {
-	if !w.opts.RememberModel {
+	if !w.live.remember() {
 		return false, nil
 	}
 	name := w.launcherPath.entry()

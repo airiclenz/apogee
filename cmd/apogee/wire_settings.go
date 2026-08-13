@@ -110,6 +110,13 @@ type liveSettings struct {
 	// pushes the resolved profile at SetProfile straight away: without it a switch made after the
 	// edit would re-resolve against the map this process launched with.
 	modelProfiles []profiles.Entry
+
+	// rememberModel is the `remember-model:` toggle as the session holds it NOW. It earns a field here
+	// for the holder's own reason and no other: nothing re-resolves it and no engine seam takes it, but
+	// the three places that ASK it — the two recording seams and the boot restore (wire_verbs.go,
+	// launcher.go) — all ask long after launch, so a value left in the launch snapshot would be frozen
+	// for the life of the process and a `/settings` flip would govern nothing until the next start.
+	rememberModel bool
 }
 
 // newLiveSettings seeds the holder with what THIS run resolved. manualIDs is passed in rather than
@@ -139,6 +146,7 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		contextFilesEnable: len(opts.ContextFiles) > 0,
 		contextFileNames:   opts.ContextFiles,
 		modelProfiles:      opts.ModelProfiles,
+		rememberModel:      opts.RememberModel,
 	}
 }
 
@@ -347,6 +355,29 @@ func (s *liveSettings) modelProfileEntries() []profiles.Entry {
 	return s.modelProfiles
 }
 
+// remember reports whether `remember-model:` is on right now — the question the two recording seams
+// ask before they splice a key onto a `servers:` entry, and the first question the boot restore asks
+// before it does any launcher I/O at all. All three ask at the moment they have something to decide,
+// which is what makes a `/settings` flip govern the very next pick rather than the next process.
+//
+// It takes the lock like every other read here rather than being a plain field, because one of those
+// three callers is answered off the Update loop: the boot restore runs on a Cmd goroutine, and the
+// pane's flip is written from Update.
+func (s *liveSettings) remember() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rememberModel
+}
+
+// setRememberModel flips that toggle. The store IS the whole apply for the key — there is nothing to
+// push at the engine and nothing to re-resolve, since what the toggle gates has not happened yet: the
+// next explicit `/model` pick, the next committed profile load, the next start-up.
+func (s *liveSettings) setRememberModel(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rememberModel = on
+}
+
 // setValidatedSets installs a re-read `validated-sets:` block — the surface's off-switch and its
 // carry-over map, the two inputs resolveValidatedSet keys a match on, moved together for
 // setMechanisms' reason.
@@ -402,7 +433,9 @@ type settingsApplier struct {
 	// engine is the anytime-safe mutator class: a key here is in force the moment it returns.
 	engine settingsEngine
 	// live is the startup snapshot's mutable half — where a key that is re-RESOLVED rather than
-	// pushed (the window pin, the system prompt) is written before the re-resolution is driven.
+	// pushed (the window pin, the system prompt) is written before the re-resolution is driven, and
+	// where the one key that is neither (`remember-model:`) simply lands: what it gates has not
+	// happened yet, so the store is the whole apply.
 	live *liveSettings
 	// binding reads the Upstream binding as it stands now; wired to upstreamHolder.Binding. Its Model
 	// is what a rebind must be driven FOR — an empty one means nothing is bound yet.
@@ -487,6 +520,17 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 				return "", err
 			}
 			a.engine.SetCompactionEnabled(on)
+		case "remember-model":
+			on, err := settingBool(key, value)
+			if err != nil {
+				return "", err
+			}
+			// The one toggle with no engine seam behind it and no re-resolution to ride: what it gates
+			// is a WRITE apogee will make later — the entry key an explicit `/model` pick or a committed
+			// profile load records — and a decision the next start-up makes. So the holder store is the
+			// whole apply, and the seams that ask (recordModelChoice, recordLaunchProfile,
+			// launcherWiring.restore) read it from there at the moment they have something to record.
+			a.live.setRememberModel(on)
 		case "context-files.enable":
 			on, err := settingBool(key, value)
 			if err != nil {
@@ -663,6 +707,10 @@ func (a settingsApplier) unreachable(key string) error {
 		reaches = a.engine != nil && a.binding != nil && a.live != nil
 	case "context-files.enable", "context-files.names":
 		reaches = a.engine != nil && a.live != nil
+	case "remember-model":
+		// The holder alone, and for once that is the literal whole of the apply: the toggle reaches no
+		// engine seam and rides no rebind — the seams it gates read it back out of this holder.
+		reaches = a.live != nil
 	case "use-project-skills":
 		reaches = a.skills != nil
 	case "web-search-endpoint", "tools.disabled":
