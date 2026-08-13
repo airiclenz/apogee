@@ -746,3 +746,93 @@ func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
 		t.Errorf("move OUT of the control plane tier = %v, want TierHardRefuse", d.Tier)
 	}
 }
+
+// TestMoveFile_RefusesASymlinkedDestinationParent is the move's half of the mutated-chain policy,
+// and the reason the refusal must be TERMINAL rather than retried: `docs → .git` redirects the
+// destination into the control plane without leaving the workspace, and move_file's copy-then-
+// remove fallback would answer that refusal by copying the file through the link and then failing
+// to remove the source — a half-completed move that also landed the very write the policy refused.
+// So the rename's own wording must reach the model, the source must still be there, and nothing
+// may exist on the far side of the link. A clean chain in the same workspace still moves.
+func TestMoveFile_RefusesASymlinkedDestinationParent(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	gitDir := filepath.Join(root, ".git")
+	if err := os.Mkdir(gitDir, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(".git", filepath.Join(root, "docs")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	writeFixture(t, filepath.Join(root, "hook.sh"), "#!/bin/sh\n", 0o755)
+
+	tool := NewMoveFile(root)
+	result := runFileOp(t, tool, map[string]any{
+		"source": "hook.sh", "destination": "docs/pre-commit",
+	})
+	if !result.IsError {
+		t.Fatalf("move through a symlinked destination parent was allowed: %q", result.Content)
+	}
+	if !strings.Contains(result.Content, security.ErrSymlinkedParent.Error()) {
+		t.Errorf("refusal %q does not carry the rename's symlinked-parent wording", result.Content)
+	}
+	if !strings.Contains(result.Content, "docs") {
+		t.Errorf("refusal %q does not name the symlinked component", result.Content)
+	}
+	if strings.Contains(result.Content, "copied") {
+		t.Errorf("refusal %q reports a copy — the fallback must not run for this refusal", result.Content)
+	}
+	if _, err := os.Stat(filepath.Join(root, "hook.sh")); err != nil {
+		t.Errorf("a refused move removed its source: %v", err)
+	}
+	entries, err := os.ReadDir(gitDir)
+	if err != nil || len(entries) != 0 {
+		t.Errorf(".git = (%v, %v), want nothing created through the link", entries, err)
+	}
+
+	moved := runFileOp(t, tool, map[string]any{
+		"source": "hook.sh", "destination": "scripts/pre-commit",
+	})
+	if moved.IsError {
+		t.Fatalf("a cross-directory move through real directories was refused: %q", moved.Content)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "scripts", "pre-commit")); err != nil || string(got) != "#!/bin/sh\n" {
+		t.Errorf("clean-chain move = (%q, %v), want the moved bytes", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "hook.sh")); !os.IsNotExist(err) {
+		t.Errorf("the source must be gone after a clean move, stat error = %v", err)
+	}
+}
+
+// TestCopyFile_ExtraReadRootSourceFollowsSymlinksIntoTheWorkspace is the standing skills-access
+// guard against the mutated-chain refusals: they gate chains a call WRITES, never one it reads, so
+// a resource under a configured read-only root still copies into the workspace — including when
+// the path reaches it THROUGH a symlinked directory, which is what a skills tree assembled from
+// linked source dirs looks like. A refusal here would break skill materialisation outright.
+func TestCopyFile_ExtraReadRootSourceFollowsSymlinksIntoTheWorkspace(t *testing.T) {
+	t.Parallel()
+
+	root, extra, _, mounted := extraRootFixture(t)
+	if err := os.Symlink("skill", filepath.Join(extra, "linked")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	tool := NewCopyFile(root, func() []string { return []string{extra} })
+	direct := runFileOp(t, tool, map[string]any{
+		"source": mounted, "destination": "docs/run.sh",
+	})
+	if direct.IsError {
+		t.Fatalf("copying from the read-only root was refused: %q", direct.Content)
+	}
+
+	linked := runFileOp(t, tool, map[string]any{
+		"source": filepath.Join(extra, "linked", "run.sh"), "destination": "docs/linked.sh",
+	})
+	if linked.IsError {
+		t.Fatalf("copying through a symlinked SOURCE parent was refused: %q", linked.Content)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "docs", "linked.sh")); err != nil || string(got) != "#!/bin/sh\necho skill\n" {
+		t.Errorf("destination = (%q, %v), want the mounted source's bytes", got, err)
+	}
+}

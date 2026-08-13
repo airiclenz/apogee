@@ -937,3 +937,146 @@ func TestSafeRemove_RemovesWithinRootAndRefusesEscapes(t *testing.T) {
 		t.Errorf("removing a missing name = %v, want an os.ErrNotExist error", err)
 	}
 }
+
+// symlinkedParentFixture builds the shape the in-root symlink policy is written against: a
+// workspace holding a real `.git/config`, plus a `docs → .git` directory link that redirects every
+// path under `docs/` into the control plane while never leaving the root — so the fence has
+// nothing to say about it. It returns the root and the absolute path of the redirect target, and
+// skips the calling test on a platform without symlinks.
+func symlinkedParentFixture(t *testing.T) (root, config string) {
+	t.Helper()
+
+	root = t.TempDir()
+	gitDir := filepath.Join(root, ".git")
+	if err := os.Mkdir(gitDir, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	config = filepath.Join(gitDir, "config")
+	if err := os.WriteFile(config, []byte("[core]\n"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := os.Symlink(".git", filepath.Join(root, "docs")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	return root, config
+}
+
+// TestSafeRename_RefusesSymlinkedParentOnEitherChain: a rename mutates BOTH ends — the old name is
+// unlinked, the new one created — so both parent chains get the write path's refusal. Through
+// `docs → .git` an unchecked rename would carry a file INTO the control plane, or carry one OUT of
+// it, under a path the operator only ever saw as `docs/…`. Neither direction escapes the
+// workspace, so neither may be reported as an escape; and a refused rename must leave both ends
+// exactly as they were. Chains of real directories still rename.
+func TestSafeRename_RefusesSymlinkedParentOnEitherChain(t *testing.T) {
+	t.Parallel()
+
+	root, config := symlinkedParentFixture(t)
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("mine"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	srcErr := SafeRename(root, "docs/config", "stolen.txt")
+	if !errors.Is(srcErr, ErrSymlinkedParent) {
+		t.Fatalf("rename FROM a symlinked parent err = %v, want ErrSymlinkedParent", srcErr)
+	}
+	if errors.Is(srcErr, ErrPathEscape) {
+		t.Errorf("refusal reported as an escape (%v); an in-root link escapes nothing", srcErr)
+	}
+	if !strings.Contains(srcErr.Error(), "docs") {
+		t.Errorf("refusal %q does not name the symlinked component", srcErr)
+	}
+
+	dstErr := SafeRename(root, "notes.txt", "docs/config")
+	if !errors.Is(dstErr, ErrSymlinkedParent) {
+		t.Fatalf("rename INTO a symlinked parent err = %v, want ErrSymlinkedParent", dstErr)
+	}
+	if errors.Is(dstErr, ErrPathEscape) {
+		t.Errorf("refusal reported as an escape (%v); an in-root link escapes nothing", dstErr)
+	}
+
+	got, err := os.ReadFile(config)
+	if err != nil || string(got) != "[core]\n" {
+		t.Errorf(".git/config = (%q, %v), want it untouched by either refusal", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "notes.txt")); err != nil {
+		t.Errorf("a refused rename moved its source away: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "stolen.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a refused rename created its destination, stat err = %v", err)
+	}
+
+	if err := SafeRename(root, "notes.txt", "sub/renamed.txt"); err != nil {
+		t.Fatalf("rename through real directories: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "sub", "renamed.txt")); err != nil || string(got) != "mine" {
+		t.Errorf("clean-chain rename = (%q, %v), want the moved payload", got, err)
+	}
+}
+
+// TestSafeRemove_RefusesSymlinkedParent: an unlink lands wherever the parent chain leads, so
+// removing `docs/config` through `docs → .git` erases the repository's own config while the
+// operator approved a path under `docs/`. That is the write path's refusal, in its own words —
+// nothing escaped the workspace — with the redirect target still standing. A name reached through
+// real directories still goes.
+func TestSafeRemove_RefusesSymlinkedParent(t *testing.T) {
+	t.Parallel()
+
+	root, config := symlinkedParentFixture(t)
+	if err := os.WriteFile(filepath.Join(root, "gone.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	err := SafeRemove(root, "docs/config")
+	if !errors.Is(err, ErrSymlinkedParent) {
+		t.Fatalf("SafeRemove through a symlinked parent err = %v, want ErrSymlinkedParent", err)
+	}
+	if errors.Is(err, ErrPathEscape) {
+		t.Errorf("refusal reported as an escape (%v); an in-root link escapes nothing", err)
+	}
+	if _, statErr := os.Stat(config); statErr != nil {
+		t.Errorf("the refused removal deleted the redirect target: %v", statErr)
+	}
+
+	if err := SafeRemove(root, "gone.txt"); err != nil {
+		t.Fatalf("removing through real directories: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "gone.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("clean-chain removal left the file behind, stat err = %v", err)
+	}
+}
+
+// TestSafeCopyFileFrom_RefusesSymlinkedDestinationParentButFollowsTheSource holds the copy's
+// asymmetry, which is the whole reason it takes two roots: the DESTINATION chain is a write and
+// gets the refusal, while the SOURCE chain is a read and keeps following in-root links. The read
+// half is load-bearing beyond this package — materialising a skill resource copies OUT of a
+// configured read-only root, and a tree assembled from linked source dirs reaches its files
+// through exactly such a link.
+func TestSafeCopyFileFrom_RefusesSymlinkedDestinationParentButFollowsTheSource(t *testing.T) {
+	t.Parallel()
+
+	root, config := symlinkedParentFixture(t)
+	if err := os.WriteFile(filepath.Join(root, "payload.txt"), []byte("mine"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	err := SafeCopyFileFrom(root, "payload.txt", root, "docs/config")
+	if !errors.Is(err, ErrSymlinkedParent) {
+		t.Fatalf("copy INTO a symlinked parent err = %v, want ErrSymlinkedParent", err)
+	}
+	if errors.Is(err, ErrPathEscape) {
+		t.Errorf("refusal reported as an escape (%v); an in-root link escapes nothing", err)
+	}
+	got, readErr := os.ReadFile(config)
+	if readErr != nil || string(got) != "[core]\n" {
+		t.Errorf(".git/config = (%q, %v), want it untouched", got, readErr)
+	}
+	assertNoStagingLeftovers(t, root)
+
+	if err := SafeCopyFileFrom(root, "docs/config", root, "copied.txt"); err != nil {
+		t.Fatalf("copy FROM a symlinked parent: %v — the read side must follow", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "copied.txt")); err != nil || string(got) != "[core]\n" {
+		t.Errorf("copied.txt = (%q, %v), want the source's bytes", got, err)
+	}
+	assertNoStagingLeftovers(t, root)
+}

@@ -96,14 +96,6 @@ working tree on 2026-08-12 and re-verified on 2026-08-13.
   decides on. `domain.ApprovalRequest` (`internal/domain/approval.go:33`) carries no scope field,
   so a truthful pane line needs a new engine field plus a TUI renderer.
 
-- [ ] `SafeRename` (`internal/security/safeio.go:517`), `SafeRemove` (`:549`) and
-  `SafeCopyFileFrom` (`:403`) still follow symlinked parents inside the root: item 13's
-  `refuseSymlinkedParents` (`:177`) is applied by `SafeWriteFile` alone (`:120`), so `move_file` /
-  `delete_file` / `copy_file` keep the `docs → .git` redirection the write path closed. Gating them
-  requires first fixing `MoveFile.move`'s copy-then-remove fallback
-  (`internal/tools/file_ops.go:200`), which would otherwise trip the new refusal on the
-  rename-failed path.
-
 - [ ] `read_file` carries no resolves-to disclosure: `internal/tools/read_file.go:94` returns
   `okSummary` naming the literal argument, and the tool is not a `workspaceScopedWriter`, so none
   of item 8's plumbing reaches it. Ratified design call 2 — "symlinked reads: follow, but show the

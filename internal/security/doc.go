@@ -86,7 +86,9 @@
 // by so the validated path IS the path touched (H1), with the same-directory staging file and
 // rename that makes a write atomic at the target name. It also carries the in-root symlink
 // policy the fence does not decide: ErrSymlinkedParent and refuseSymlinkedParents, the
-// write-side refusal of a parent chain that crosses a link, applied by SafeWriteFile. All but one pin every end at the SAME
+// write-side refusal of a parent chain that crosses a link, applied to every chain a primitive
+// here MUTATES (SafeWriteFile's target, SafeRename's two ends, SafeRemove's target and
+// SafeCopyFileFrom's destination) and to no chain it merely reads. All but one pin every end at the SAME
 // (workspace) root; SafeCopyFileFrom is the exception that pins a root at each end, because a
 // copy's source is a read and may come from a read-only root the destination fence knows nothing
 // about — its write half is bounded by the destination root exactly as the others are.

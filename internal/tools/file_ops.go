@@ -197,12 +197,19 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 // move performs the rename, falling back to copy-then-remove, and returns the model-facing
 // failure (empty on success). A fence refusal is NEVER retried: the fallback would refuse it
 // again, and reporting the escape once is what tells the model the truth about why.
+//
+// A symlinked-parent refusal is terminal for the same reason and one more. SafeRename validates
+// BOTH chains — the source's and the destination's — before it renames anything, so this error
+// means one of them crosses an in-root link; retrying it as copy-then-remove would refuse the
+// same chain in different words, or worse, refuse only ONE half and leave the move split (the
+// copy landing while the removal is refused, duplicating the file). Passing it straight through
+// also means the fallback below runs only when both chains already cleared that gate.
 func (t *MoveFile) move(args fileOpsArgs) string {
 	err := security.SafeRename(t.root, args.Source, args.Destination)
 	if err == nil {
 		return ""
 	}
-	if errors.Is(err, ErrPathEscape) {
+	if errors.Is(err, ErrPathEscape) || errors.Is(err, security.ErrSymlinkedParent) {
 		return err.Error()
 	}
 	if copyErr := security.SafeCopyFile(t.root, args.Source, args.Destination); copyErr != nil {

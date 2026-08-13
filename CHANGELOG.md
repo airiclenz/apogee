@@ -443,6 +443,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`move_file`, `delete_file` and `copy_file` no longer write through a symlinked directory inside
+  your workspace.** The write path already refused one — a `docs → .git` link redirects a path the
+  operator approved as `docs/config` onto the repository's own config while never leaving the
+  workspace, so the fence itself has nothing to say about it — but only `write_file` and its
+  relatives went through that check. A rename, a removal and a copy still followed the link. All
+  three refuse it now, on every chain they MUTATE: both ends of a rename (which unlinks one name
+  and creates the other), the target of a removal (the unlink lands wherever the chain leads), and
+  a copy's destination. A copy's SOURCE is deliberately exempt and still follows in-root links,
+  because a source is a read — which is what keeps a skills library assembled from linked source
+  dirs readable, and reads disclose where they landed rather than refusing. `move_file`'s
+  copy-then-remove fallback, which exists for a rename the filesystem cannot perform across a
+  mount point, now treats this refusal as final instead of retrying it: retrying would have
+  performed through the link the very write that was just refused, and then failed to remove the
+  source — leaving the file in both places and the move half-done.
+
 - **The SSH-key and credential dangerous-action rules now fire on a Mac.** Both rules anchored on
   `~`, `/home/<name>`, `/root` and `$HOME` only, so on the desktop persona — macOS, where a home is
   `/Users/<name>` — a write to `/Users/alice/.ssh/id_rsa` or `/Users/alice/.aws/credentials` matched

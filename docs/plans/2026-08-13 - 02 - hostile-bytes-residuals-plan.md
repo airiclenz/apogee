@@ -168,7 +168,10 @@ at `rules_test.go:226`), plus a near-miss row that must stay unmatched.
 
 **Commit:** `fix(security): ssh-key and credential rules match macOS home paths`
 
-## 4. Rename, remove and copy refuse symlinked parents; the move fallback cannot half-complete
+## 4. Rename, remove and copy refuse symlinked parents; the move fallback cannot half-complete — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): also amended `internal/security/doc.go` (not in the item's Files list) — its package map stated the parent-chain refusal as "applied by SafeWriteFile", which this item falsifies; it now names every chain a primitive here mutates and says the read chains are exempt.
+NOTES (2026-08-13): design call 5's "validate both chains up front" lands inside `SafeRename` — it refuses both chains before its MkdirAll and rename — rather than as a second walk in `MoveFile.move`, which needs only the terminal `ErrSymlinkedParent` treatment: any OTHER rename error therefore already proves both chains cleared the gate, so the fallback can never half-complete, and `internal/security` gains no exported chain-validator it would otherwise need for one caller.
 
 **What:** `SafeRename` (`internal/security/safeio.go:517`), `SafeRemove` (`:549`) and
 `SafeCopyFileFrom` (`:403`) still follow symlinked parents inside the root:

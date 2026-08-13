@@ -162,12 +162,18 @@ func SafeWriteFile(root, input string, data []byte, perm os.FileMode) error {
 // print the error say the true thing either way.
 var ErrSymlinkedParent = errors.New("write path crosses a symlinked directory")
 
-// refuseSymlinkedParents refuses a write whose path — rel, relative to the pinned root r — reaches
-// its target through anything other than real directories, returning an error wrapping
+// refuseSymlinkedParents refuses a MUTATION whose path — rel, relative to the pinned root r —
+// reaches its target through anything other than real directories, returning an error wrapping
 // ErrSymlinkedParent as soon as a parent component is a symlink, and nil when the whole chain is
-// real. The TARGET's own name is not examined — a write replaces that name rather than
-// following it (SafeWriteFile's replace-the-name contract), which is what makes a symlinked
-// final name a disclosure question for the read side rather than a redirect on the write side.
+// real. Every chain a primitive here mutates goes through it: SafeWriteFile's target,
+// SafeRename's two ends, SafeRemove's target and SafeCopyFileFrom's destination. A chain that is
+// only READ — a copy's source — does not, because reads follow in-root links and disclose where
+// they landed.
+//
+// The TARGET's own name is not examined — these primitives replace or unlink that name rather
+// than following it (SafeWriteFile's replace-the-name contract, SafeRemove's unlink-the-name
+// one), which is what makes a symlinked final name a disclosure question for the read side rather
+// than a redirect on the write side.
 //
 // The walk is top-down through the pinned root, so the OUTERMOST offending component is the one
 // named: `docs → .git` is reported as "docs", the link the operator can actually look at, not as
@@ -391,7 +397,11 @@ func SafeOpen(root, input string) (*os.File, error) {
 // inside the fence, the bytes are staged in the destination's own parent and renamed over it,
 // and the staging file is removed on any failure after it is created. So the destination name
 // is never seen half-copied, and — the rename being the last step — an in-root symlink AT that
-// name is replaced by a regular file rather than written through.
+// name is replaced by a regular file rather than written through. The destination's PARENT chain
+// gets SafeWriteFile's refusal too: a parent that is a symlink, even one staying inside dstRoot,
+// returns an error wrapping ErrSymlinkedParent before the source is opened and before anything is
+// staged or mkdir'd. The SOURCE chain is exempt by design — a copy's source is a read, and reads
+// follow in-root links.
 //
 // Mode: the destination lands with the SOURCE's mode, whether or not it already existed. That
 // is what distinguishes a copy from a write: the point of copying a 0755 script is to end up
@@ -419,6 +429,14 @@ func SafeCopyFileFrom(srcRoot, srcInput, dstRoot, dstInput string) error {
 		return fmt.Errorf("%w: %v", ErrPathEscape, err)
 	}
 	defer dr.Close()
+
+	// Before ANY mutation, and before the source is even opened: a symlinked parent on the
+	// DESTINATION chain would land the copy somewhere the argument never named, exactly as it
+	// would redirect a SafeWriteFile. The SOURCE chain is deliberately not checked — a copy's
+	// source is a read, and reads follow (the SYMLINK POLICY note in the package header).
+	if err := refuseSymlinkedParents(dr, dstRel); err != nil {
+		return err
+	}
 
 	src, mode, err := openCopySource(sr, srcRel, srcInput)
 	if err != nil {
@@ -514,6 +532,13 @@ func copyAndClose(dst *os.File, src io.Reader, mode os.FileMode) error {
 // The rename is the filesystem's own: atomic, and it replaces an existing destination NAME
 // (including a symlink at that name) without following it. Deciding whether replacing that name
 // is allowed is the caller's policy, not this primitive's.
+//
+// BOTH parent chains must be real directories. A rename mutates both ends — the old name is
+// unlinked, the new one created — so a symlinked parent on either chain would move a file the
+// operator never named, and returns an error wrapping ErrSymlinkedParent with nothing created and
+// nothing moved. The check runs before the destination's parents are created, which also means a
+// caller that retries a FAILED rename as copy-then-remove (move_file does) knows any error other
+// than this one came from two chains that already passed the gate.
 func SafeRename(root, oldInput, newInput string) error {
 	oldRel, err := rootRelative(oldInput, root)
 	if err != nil {
@@ -528,6 +553,18 @@ func SafeRename(root, oldInput, newInput string) error {
 		return fmt.Errorf("%w: %v", ErrPathEscape, err)
 	}
 	defer r.Close()
+
+	// Before ANY mutation: BOTH ends of a rename are mutated — the old name is unlinked, the new
+	// one created — so a symlinked parent on either chain would move a file the operator never
+	// named. Both chains are validated before the MkdirAll below, so a refused rename creates
+	// nothing, and a caller that falls back to copy-then-remove on some OTHER failure knows both
+	// ends already passed this gate.
+	if err := refuseSymlinkedParents(r, oldRel); err != nil {
+		return err
+	}
+	if err := refuseSymlinkedParents(r, newRel); err != nil {
+		return err
+	}
 
 	if dir := filepath.Dir(newRel); dir != "." {
 		if err := r.MkdirAll(dir, 0o755); err != nil && isRootEscapeError(err) {
@@ -544,6 +581,10 @@ func SafeRename(root, oldInput, newInput string) error {
 // os.Root pinned at root, so a path escaping the root is refused rather than followed. It
 // removes THE NAME: a symlink is unlinked, never the file it points at.
 //
+// The name's PARENT chain must be real directories, as it must for a write: an unlink lands
+// wherever the chain leads, so a symlinked parent — even one staying inside the root — returns an
+// error wrapping ErrSymlinkedParent and nothing is removed.
+//
 // It is os.Remove's contract otherwise — a non-empty directory is refused by the filesystem —
 // and a missing name returns an error satisfying errors.Is(err, os.ErrNotExist).
 func SafeRemove(root, input string) error {
@@ -556,6 +597,14 @@ func SafeRemove(root, input string) error {
 		return fmt.Errorf("%w: %v", ErrPathEscape, err)
 	}
 	defer r.Close()
+
+	// Before ANY mutation: the unlink lands wherever the parent chain leads, so a symlinked
+	// parent would remove a file under a name the operator never approved — `docs/config` erasing
+	// `.git/config` through a `docs → .git` link. The target's OWN name is not examined: removing
+	// a symlink unlinks the link, which is this primitive's contract.
+	if err := refuseSymlinkedParents(r, rel); err != nil {
+		return err
+	}
 
 	if err := r.Remove(rel); err != nil {
 		return mapRootEscape(err)
