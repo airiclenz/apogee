@@ -431,6 +431,16 @@ computed in a fixed, load-bearing order:
    circuit-breaker ⇒ **`Refuse`** in every mode. A Tier-2 dangerous action ⇒ **force** the Approver:
    it upgrades any non-`Refuse` *leaf* verdict to a forced `Gate`. Applied to **leaf verdicts only**
    — never to a `Delegate`.
+   **What the floor never sees (amendment 2026-08-13).** A value under an argument key the tool
+   itself declares a delegation prompt (`domain.PromptArgKeys` / `domain.PromptTool` — `sub_agent`
+   declares `task` and `name`) is dropped from the inspectable text of **every** rule, not only the
+   write-shaped ones: prose addressed to another agent *describes* an action instead of performing
+   one, so a task that merely names `~/.ssh` or `.git/config` is not a dangerous call. The coverage
+   is **moved, not lost** — the delegated child's own tool calls each meet this same shared,
+   read-only floor at the action site one level down (step 2), which is where the text finally is
+   something the host performs. The declaration is per KEY, not per tool: an undeclared argument of
+   a prompt-declaring tool stays inspected, as do `command`, `code`, `path` and `url` everywhere,
+   and a key whose value this host would itself execute, open or write through must not be declared.
 2. **`sub_agent` ⇒ `Delegate`** (ADR 0013): the recursion point drives a nested Agent, not a leaf
    tool. A Tier-2 force is **deliberately not** applied here — nothing executes at delegation, so the
    shared read-only floor re-fires on the child's own dangerous call. At the depth bound the

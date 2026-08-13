@@ -112,7 +112,11 @@ command-shaped (non-WritesOnly) rule also ignores declared prompt-key text.
 
 **Commit:** `fix(security): dangerous rules no longer match a declared delegation prompt`
 
-## 3. Reconcile the guard documentation
+## 3. Reconcile the guard documentation — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): rewrapped two neighbouring comment lines in `internal/security/doc.go`'s
+dangerous.go map entry that the inserted clause pushed past the file's line width — no wording of
+the surrounding sentences changed.
 
 Depends on item 2.
 

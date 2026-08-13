@@ -227,6 +227,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Documented the dangerous-action guard's prompt-key exemption**: `internal/security/doc.go` and
+  the confinement execution contract now record that a tool-declared delegation prompt
+  (`domain.PromptTool`) is outside every rule's sight, with the child-guarded-at-the-action-site
+  rationale.
+
 - **`TODO.md` is merged into `ISSUES.md`, and this changelog is now the closed trail.** The two
   files had converged on one job from two directions — a defect list and a parked-work register —
   so they are now one file with the distinction kept as sections: `ISSUES.md` carries **Open

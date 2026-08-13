@@ -32,11 +32,16 @@
 //     project may only add — MergeDangerousRules). It matches a call's ACTION text —
 //     the tool, its target paths, its command lines and code — and never the payload a
 //     write carries, so a document that merely quotes a guarded path is not an action
-//     (payloadKeys in dangerous.go). Its write-shaped rules (Rule.WritesOnly) further
-//     respect the tool's own declared class: a read-only tool skips them and a declared
-//     read-source argument (domain.ReadSourceTool — copy_file's source) is out of their
-//     sight, so listing or materializing the home skill library under ~/.apogee is not
-//     judged a "write"; tools that declare nothing stay fully inspected.
+//     (payloadKeys in dangerous.go). Two tool-declared argument classes narrow it further,
+//     each with its own reach. A declared delegation prompt (domain.PromptTool —
+//     sub_agent's task and name) is out of EVERY rule's sight: prose handed to another
+//     agent describes an action instead of performing one, and the delegated agent's own
+//     calls are each inspected one level down at the action site, so the exemption moves
+//     the coverage rather than losing it. A declared read-source argument
+//     (domain.ReadSourceTool — copy_file's source) is out of the WRITE-shaped rules'
+//     sight only (Rule.WritesOnly), which a read-only tool skips outright, so listing or
+//     materializing the home skill library under ~/.apogee is not judged a "write". Tools
+//     that declare nothing stay fully inspected.
 //   - The circuit-breaker (CircuitBreaker): halts a runaway loop of identical failing
 //     calls, surfacing an ErrorEvent rather than spinning.
 //   - The audit record (AuditLog): an append-only call / decision / result trail.
@@ -59,11 +64,12 @@
 // machinery. dangerous.go is the mechanism: the two Tiers, the Rule and Decision types (including
 // the WritesOnly class that keeps a write-shaped rule off declared reads), Inspect,
 // and the inspectable-text derivation that reads a call's ACTION — tool name, target paths,
-// command lines, code — while skipping the payload keys a write carries, so a document that
-// merely quotes a guarded path is not an action. rules.go is the content: DefaultDangerousRules,
-// the narrow precision-over-recall built-in floor with a comment per rule saying where its
-// boundary is, and MergeDangerousRules, which encodes who may loosen it (global may add or
-// remove, project may only add — ADR 0012).
+// command lines, code — while skipping the payload keys a write carries and, for every rule,
+// the prompt keys a dispatch merely forwards (domain.PromptArgKeys), so neither a document that
+// quotes a guarded path nor a delegated task that names one is an action. rules.go is the
+// content: DefaultDangerousRules, the narrow precision-over-recall built-in floor with a comment
+// per rule saying where its boundary is, and MergeDangerousRules, which encodes who may loosen it
+// (global may add or remove, project may only add — ADR 0012).
 //
 // The runaway halt and the trail. circuitbreaker.go trips after DefaultCircuitBreakerThreshold
 // consecutive identical FAILING calls, keyed by a (tool, arguments) signature that any success
