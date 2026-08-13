@@ -123,7 +123,24 @@ sentence.
 
 **Commit:** `feat(config): server entries declare one key source — literal, command, or env`
 
-## 2. Resolver: cached first-use key resolution in internal/config
+## 2. Resolver: cached first-use key resolution in internal/config — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): a FAILED resolution is deliberately not cached (the slot is dropped and the next
+use retries). The item says the cache stores the resolved key; holding an error would lock a session
+out of a server for a locked keychain or a dismissed unlock prompt — both fixable without editing the
+config. Concurrent callers of one in-flight attempt still share that attempt's error.
+NOTES (2026-08-13): the command's stdout/stderr are read into capped buffers (64 KiB / 4 KiB) and
+output past the cap is refused as "not a key" — an unbounded read would turn a misconfigured
+`api-key-cmd:` into an out-of-memory kill. Not in the item text; tested.
+NOTES (2026-08-13): an entry setting more than one key source (which ValidateServers already refuses,
+so only an unvalidated entry can reach it) resolves literal → command → variable. Chosen so item 3's
+ADR 0036 decision 6 overlay works by writing APOGEE_API_KEY onto the startup entry's `APIKey` alone,
+without having to clear the source the file named.
+NOTES (2026-08-13): the suite gained internal/config's first `TestMain` — the sentinel re-exec of the
+test binary that stands in as the `api-key-cmd` fixture (the item's "os.Executable re-invocation"
+option, as internal/mcp and internal/platform already do it).
+NOTES (2026-08-13): doc.go's package file map gained keyresolve.go's line — the package's own
+docmap guard fails on a file the map does not name.
 
 **What:** New file `internal/config/keyresolve.go`: a `KeyResolver` type with
 `Resolve(e ServerEntry) (string, error)`. Behaviour: literal `api-key` returns as-is;

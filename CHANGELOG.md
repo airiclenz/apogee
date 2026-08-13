@@ -10,6 +10,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A key source now runs at first use of the server it belongs to, once per session.** The entry
+  a session never moves onto never runs its command, so a config listing six servers no longer pays
+  six keychain prompts at startup; the entry it does use asks its source once and every later seam
+  reads the cached answer. An `api-key-cmd:` line is split the way a POSIX shell splits one and then
+  executed DIRECTLY — no shell, no stdin, none of apogee's terminal, a 60-second bound and the
+  trailing newline trimmed off — so a pipeline needs a wrapper script of your own and a backend that
+  must ask you to unlock has to prompt through a GUI agent (pinentry-mac, the Keychain dialog) rather
+  than over the frame apogee is drawing. An empty answer is a hard error naming the entry and quoting
+  what the command said, never a silent unauthenticated request: a command that exits non-zero, times
+  out or prints nothing, and a variable that is unset or empty, are all broken sources, because
+  "this server takes no key" is spelled by naming no source at all. The cached answer is held against
+  the entry's name AND its key fields, so editing a key source in the watched config re-resolves it
+  while every other edit keeps the answer already paid for, and concurrent first uses — parallel
+  sub-agents — share one run of the command instead of racing to prompt the same keychain twice.
+
 - **A server entry can now say WHERE its API key comes from instead of carrying it in plain text.**
   Beside the literal `api-key:`, a `servers:` entry takes `api-key-cmd:` — a command whose standard
   output IS the key (`pass show …`, `op read …`, `security find-generic-password …`) — or
