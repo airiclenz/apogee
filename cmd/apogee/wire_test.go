@@ -4217,41 +4217,47 @@ func TestApplySettingServersDoesNotRebindForAnEditThatMovesNoWindow(t *testing.T
 	}
 }
 
-// The two bounds the entry decides reach the engine through the Config the Agent is CONSTRUCTED
+// The three bounds the entry decides reach the engine through the Config the Agent is CONSTRUCTED
 // from — not through a push afterwards, because at a bind there is nothing yet to push at. That
 // Config is written onto a copy no caller keeps, which is what serverBinder.build exists for: the
 // bind runs exactly as the binary runs it, and the Config it handed the construction is recorded.
 //
 // The unpinned row is why these are assignments rather than agreements. The Config arriving at this
-// step already carries the STARTUP entry's reply cap and the top-level `context-window:`, so an
-// entry that pins neither must leave the cap at 0 — the engine's own derive off the Budget (ADR
-// 0046) — while the top-level key keeps answering for the window (ADR 0045 decision 3). A move onto
-// a bare server that kept the retired entry's ceiling is the same defect stated the other way round.
+// step already carries the STARTUP entry's reply cap, its fan-out width and the top-level
+// `context-window:`, so an entry that pins none of them must leave the cap at 0 — the engine's own
+// derive off the Budget (ADR 0046) — and the width at ADR 0039's serial floor of 1, while the
+// top-level key keeps answering for the window (ADR 0045 decision 3). A move onto a bare server
+// that kept the retired entry's ceiling is the same defect stated the other way round, and a bare
+// server that kept its width is that defect a third time: a slot count is a fact about ONE server.
 func TestServerBindHandsTheEntrysBoundsToTheEngine(t *testing.T) {
 	t.Parallel()
-	// What the session arrived with: the top-level window key, and the cap of the entry it was on.
-	const topLevelWindow, retiredCap = 16384, 111
+	// What the session arrived with: the top-level window key, and the cap and fan-out width of the
+	// entry it was on.
+	const topLevelWindow, retiredCap, retiredWidth = 16384, 111, 7
 
 	tests := []struct {
-		name       string
-		entry      config.ServerEntry
-		wantWindow int
-		wantOutput int
+		name         string
+		entry        config.ServerEntry
+		wantWindow   int
+		wantOutput   int
+		wantParallel int
 	}{
 		{
 			name: "the entry's own pins outrank what the session arrived with",
 			entry: config.ServerEntry{
 				Name: "workstation", Endpoint: "http://127.0.0.1:1111", Model: "pinned-model",
-				ContextWindow: 65536, MaxOutputTokens: 4096,
+				ContextWindow: 65536, MaxOutputTokens: 4096, ParallelAgents: 3,
 			},
-			wantWindow: 65536,
-			wantOutput: 4096,
+			wantWindow:   65536,
+			wantOutput:   4096,
+			wantParallel: 3,
 		},
 		{
-			name:       "an entry pinning nothing keeps the top-level window and derives the cap",
-			entry:      config.ServerEntry{Name: "laptop", Endpoint: "http://127.0.0.1:8080"},
-			wantWindow: topLevelWindow,
-			wantOutput: 0,
+			name:         "an entry pinning nothing keeps the top-level window, derives the cap and runs serial",
+			entry:        config.ServerEntry{Name: "laptop", Endpoint: "http://127.0.0.1:8080"},
+			wantWindow:   topLevelWindow,
+			wantOutput:   0,
+			wantParallel: 1,
 		},
 	}
 	for _, tt := range tests {
@@ -4260,6 +4266,7 @@ func TestServerBindHandsTheEntrysBoundsToTheEngine(t *testing.T) {
 			base := validCfg(t)
 			base.Context.MaxContextTokens = topLevelWindow
 			base.Context.MaxOutputTokens = retiredCap
+			base.ParallelAgents = retiredWidth
 
 			engine := newLateEngine(apogee.ModeAskBefore, true)
 			t.Cleanup(func() { _ = engine.Close() })
@@ -4289,6 +4296,11 @@ func TestServerBindHandsTheEntrysBoundsToTheEngine(t *testing.T) {
 			if handed.Context.MaxOutputTokens != tt.wantOutput {
 				t.Errorf("Config.Context.MaxOutputTokens = %d; want %d — the ceiling ONE reply from "+
 					"this server may reach", handed.Context.MaxOutputTokens, tt.wantOutput)
+			}
+			if handed.ParallelAgents != tt.wantParallel {
+				t.Errorf("Config.ParallelAgents = %d; want %d — the width this session's very first "+
+					"fan-out may reach, never the retired server's %d",
+					handed.ParallelAgents, tt.wantParallel, retiredWidth)
 			}
 		})
 	}
