@@ -78,7 +78,17 @@ first 8 bytes). A companion case where the buffer is NOT full pins that no trimm
 
 **Commit:** `fix(keystore): trim a capped stderr tail that is a key prefix before redaction`
 
-## 2. `flattenLine` folds tabs and carriage returns
+## 2. `flattenLine` folds tabs and carriage returns — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's premise — that a pasted `\t` or `\r` "survives into a one-line settings
+field" — does not hold against the widget: EVERY write into a bubbles textarea (`SetValue`,
+`InsertString`, the `tea.PasteMsg` arm) runs through `insertRunesFromUserInput` → `runeutil.Sanitizer`,
+whose defaults map `\t`→four spaces and `\r`→`\n` before `flattenLine` sees the value. The ratified
+fold (design call 4) is implemented exactly as specified and is now the field's own invariant rather
+than a borrowed one, but it is unreachable through any door today. The two new subtests therefore pin
+the observable END STATE — no control rune reaches the row, caret at the flattened value's rune count
+— rather than asserting each control rune became ONE space: the pasted tab lands as the widget's four
+spaces, the pasted CRLF as two. The doc comment and the test comment both state which layer does what.
 
 **What:** `lineEditor.flattenLine` (`internal/tui/lineeditor.go:157-165`) folds only `\n` to a
 space, so a bracketed paste carrying `\t` or `\r` survives into a one-line settings field.

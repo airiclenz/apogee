@@ -1463,6 +1463,18 @@ point is a **minor** bump, not a breaking change.
   travels in (macOS quotes it onto the `security -i` command line). A capture that stopped short of
   the cap was never halved, so nothing is trimmed from it and the tool keeps its own words.
 
+- **A one-line settings field decides for itself what it may hold.**
+  `lineEditor.flattenLine` — the fold a single-line field applies to text that arrives through a door
+  no keystroke binding covers (a bracketed paste, a clipboard reply) — folded only the newline, so a
+  tab or a carriage return in that text was left to whatever the text widget underneath happened to
+  do with it. It now folds all three, each to one space, rune for rune, so the caret still stands on
+  the rune it stood on. In practice the bubbles textarea's own sanitizer still gets there first on
+  every write (a tab spends as four spaces, a carriage return as a newline), so nothing the human
+  pastes changes shape today; what changes is where the invariant lives — at the field, not borrowed
+  from a dependency's default configuration, and so still true if that default is ever reconfigured
+  or the widget replaced. The display-seam sibling `flattenField` already folded tabs for the same
+  reason.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added

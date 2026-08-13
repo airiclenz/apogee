@@ -2147,8 +2147,13 @@ func TestSettingsPaneTextEditorPaintsTheCaretWhereItStands(t *testing.T) {
 
 // A bracketed paste lands in whichever field the pane has open, and NEVER in the chat box behind it:
 // the pane is full-height, so a paste that fell through would fill a draft the human cannot see. The
-// value buffer flattens what it takes — a value carrying a newline would break the one row it is
-// painted in — while the multi-line field keeps the lines, which is what it is for.
+// value buffer flattens what it takes — a value carrying a newline, a tab or a carriage return would
+// break the one row it is painted in — while the multi-line field keeps the lines, which is what it
+// is for. What the buffer is pinned on here is the END STATE, not which layer produced it: the
+// widget's own sanitizer runs on every write ahead of [lineEditor.flattenLine] and spends a tab as
+// four spaces and a carriage return as a newline, so a pasted tab lands as that widget's four and a
+// pasted CRLF as two spaces — either way no control rune reaches the row. The caret then stands
+// where the rune count of the flattened value says it does: at its end, where the insertion left it.
 func TestSettingsPasteLandsInTheOpenField(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -2158,6 +2163,10 @@ func TestSettingsPasteLandsInTheOpenField(t *testing.T) {
 	}{
 		{"value buffer", settingsStringRow(), "/one", "http://box:1111/one"},
 		{"value buffer flattens a pasted newline", settingsStringRow(), "/one\n", "http://box:1111/one "},
+		{"value buffer leaves no pasted tab in the row", settingsStringRow(), "/one\ttwo",
+			"http://box:1111/one    two"},
+		{"value buffer leaves no pasted carriage return in the row", settingsStringRow(), "/one\r\ntwo",
+			"http://box:1111/one  two"},
 		{"multi-line field keeps the lines", settingsTextRow(), "\nAnd stop.",
 			"You are apogee.\nWork step by step.\nAnd stop."},
 	}
@@ -2170,6 +2179,9 @@ func TestSettingsPasteLandsInTheOpenField(t *testing.T) {
 
 			if got := m.settings.editor.value(); got != c.want {
 				t.Errorf("field = %q, want %q", got, c.want)
+			}
+			if got, want := m.settings.editor.caretRune(), len([]rune(c.want)); got != want {
+				t.Errorf("caret = %d, want %d — the end of the pasted value", got, want)
 			}
 			if got := m.input.Value(); got != "" {
 				t.Errorf("the chat box behind the pane took the paste: %q", got)

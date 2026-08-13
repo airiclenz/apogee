@@ -145,24 +145,43 @@ func (e *lineEditor) editMsg(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// flattenLine folds a multi-line value onto one line, each newline becoming the space that stands
-// where the break was, and leaves the caret on the same rune it stood on: the substitution is one
-// rune for one rune, so every offset into the value still names what it named. It is what keeps a
-// field built single-line single-line when text arrives from somewhere other than the keyboard
-// (lineEditor.editMsg).
+// flattenLine folds a multi-line value onto one line — each newline, each tab and each carriage
+// return becoming the space that stands where it was — and leaves the caret on the same rune it
+// stood on: the substitution is one rune for one rune, so every offset into the value still names
+// what it named. It is what keeps a field built single-line single-line when text arrives from
+// somewhere other than the keyboard (lineEditor.editMsg).
+//
+// All three, not the newline alone: the door this guards is a bracketed paste, and pasted text
+// carries whatever the clipboard held — a tab from a table cell, a CRLF from a Windows terminal —
+// none of which a single-line binding can refuse. A tab in particular is the newline's forgery
+// sideways: lipgloss counts it as one cell while the terminal expands it to the next tab stop, so a
+// value carrying one is laid out at one width and drawn at another (the display-seam sibling
+// [flattenField] folds it for that same reason).
+//
+// Today the widget's own rune sanitizer gets there first — every write into a bubbles textarea runs
+// through it, and it maps a tab to four spaces and a carriage return to a newline before this sees
+// the value — so the two widened cases are the field's OWN invariant rather than one borrowed from a
+// dependency's default configuration, which is the point: what a one-line field may hold is decided
+// here, and stays decided if that sanitizer is ever configured differently or replaced. The fold
+// stays one rune for one rune, which is what the caret arithmetic below rests on.
 //
 // A space rather than nothing at all: the two lines were separate words, and a commit trims what a
 // trailing newline leaves behind (settingsCommitBuffer's TrimSpace), so a path copied from a terminal
 // with its line ending still on it pastes as the path.
 func (e *lineEditor) flattenLine() {
 	value := e.input.Value()
-	if !strings.Contains(value, "\n") {
+	if !strings.ContainsAny(value, "\n\t\r") {
 		return
 	}
 	off := e.caretRune()
-	e.input.SetValue(strings.ReplaceAll(value, "\n", " "))
+	e.input.SetValue(lineBreaks.Replace(value))
 	e.caretToRune(off)
 }
+
+// lineBreaks is flattenLine's substitution, built once: each character it folds is a single byte in
+// and a single byte out, so the replacer walks the value in one pass and leaves every other byte —
+// an invalid one included — exactly as it found it.
+var lineBreaks = strings.NewReplacer("\n", " ", "\t", " ", "\r", " ")
 
 // stepLine walks the caret one LOGICAL line up or down, keeping the column it stands in and clamping
 // at the value's first and last lines. It is the step a surface that paints one line per logical line
