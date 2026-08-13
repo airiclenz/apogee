@@ -60,9 +60,10 @@ type parsedInput struct {
 // description the dropdown displays beside it. The four flags say how the verb behaves:
 //
 //   - takesArgs — the verb reads what follows it, and parseInput hands it the tokens in
-//     parsedInput.args. /confine, whose grammar is richer than a token list, keeps its dedicated
-//     parse (parseConfine) on top of them; every non-takesArgs verb ignores surplus tokens, as it
-//     always has. It is also what the dropdown reads to COMPLETE such a verb rather than run it
+//     parsedInput.args. The two verbs whose grammar is richer than a token list — /confine and
+//     /color-scheme — keep their dedicated parses (parseConfine, parseColorScheme) on top of them;
+//     every non-takesArgs verb ignores surplus tokens, as it always has. It is also what the
+//     dropdown reads to COMPLETE such a verb rather than run it
 //     (acceptAutocomplete), unless the row also carries runsBareAtAccept: firing a verb that is not
 //     finished would be wrong.
 //   - runsBareAtAccept — the verb takes arguments, but its BARE form is meaningful and safe to fire

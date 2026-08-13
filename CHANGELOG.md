@@ -1504,6 +1504,13 @@ point is a **minor** bump, not a breaking change.
   the system-path enumeration is retained as documentation of the worst cases, not as the
   discriminating branch. Comment only; no regex, behaviour or test change.
 
+- Corrected three drifted doc comments: `promptFS` (`internal/mechanisms/toolloop.go`) now
+  describes `prompts/` as the package's prompt text for every mechanism rather than one
+  directive's fragments; the `takesArgs` bullet (`internal/tui/command.go`) names both verbs
+  that keep a dedicated parse (`/confine` and `/color-scheme`); and the package doc
+  (`internal/tui/doc.go`) acknowledges that `/schedule`'s prompt form reads the line's raw
+  tail instead of a plain token list. Comments only; no behaviour change.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added

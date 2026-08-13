@@ -121,9 +121,11 @@
 // session's engine at no point (schedule.go, ADR 0033); /confine reports and toggles
 // Auto's blast radius through [Engine.SetConfineToWorkspace], one of the two argument-taking verbs
 // with a grammar of its own (/color-scheme is the other): [parseConfine] reads "status | off
-// [--save] | on" where every other row is handed a plain token list, and an argument it does not
-// understand is a parse error carrying the usage line — never a silent no-op on the command that
-// widens what Auto may touch; @file *resolution* stays in the agent loop (reusing the workspace
+// [--save] | on" where the remaining rows are handed a plain token list (/schedule apart: its
+// prompt form reads the line's raw tail, [parsedInput.rest], because a prompt is text the human
+// wrote and not a token list to be re-spaced), and an argument it does not understand is a parse
+// error carrying the usage line — never a silent no-op on the command that widens what Auto may
+// touch; @file *resolution* stays in the agent loop (reusing the workspace
 // fence), so the TUI only parses references — it never reads files itself. The settled questions
 // behind all of it — one namespace, tokens not chips, accept-executes, caret-aware regions, the
 // while-running policy, resolve-gated accents, the sole-token guard — are recorded in ADR 0027.

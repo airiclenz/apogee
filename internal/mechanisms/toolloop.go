@@ -113,12 +113,15 @@ func previousToolCallKey(conv domain.ConversationView) string {
 	return ""
 }
 
-// promptFS carries this package's prompt text as plain files under prompts/. The fixed sentence
-// fragments of the loop-breaking directive are assets rather than Go string literals so the
-// wording can be read and edited as prose (ISSUES.md: hard-coded prompt literals), and go:embed
-// compiles them into the binary — the text ships inside the single binary, is never read from
-// disk at runtime, and is never user-overridable. Only the fixed text moved: the branching, the
-// `%s` substitution and the joining spaces stay in buildToolLoopDirective below (design call 2).
+// promptFS carries this package's prompt text as plain files under prompts/ — the fixed wording of
+// every mechanism that speaks to the model, not one directive's: the loop-breaking fragments this
+// file joins (header, results and file recaps, the three tails), and the CoT, decompose,
+// completion-check and library-injection assets that cot.go, decompose.go, emptyresponse.go and
+// library.go load. They are assets rather than Go string literals so the wording can be read
+// and edited as prose (ISSUES.md: hard-coded prompt literals), and go:embed compiles them into the
+// binary — the text ships inside the single binary, is never read from disk at runtime, and is
+// never user-overridable. Only the fixed text moved: the branching, the `%s` substitution and the
+// joining spaces stay in buildToolLoopDirective below (design call 2).
 //
 //go:embed prompts/*.txt
 var promptFS embed.FS

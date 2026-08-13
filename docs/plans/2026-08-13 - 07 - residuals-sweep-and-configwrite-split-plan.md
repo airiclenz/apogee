@@ -196,7 +196,12 @@ discriminating branch. No regex change, no test-behaviour change.
 
 **Commit:** `docs(security): rm rules' comment owns the absolute-path hard-refuse`
 
-## 7. Comment-drift sweep: promptFS, /color-scheme, /schedule
+## 7. Comment-drift sweep: promptFS, /color-scheme, /schedule — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the promptFS rewrite kept the go:embed / never-read-from-disk /
+never-overridable and design-call-2 clauses verbatim and reflowed their wrapping to fit the
+new opening; the file-recap assets are named as loaded by toolloop.go itself (they are), with
+cot.go, decompose.go, emptyresponse.go and library.go named for the rest.
 
 **What:** three drifted doc comments, each corrected in place:
 - `internal/mechanisms/toolloop.go:116-124` — the `promptFS` comment still narrates `prompts/`
