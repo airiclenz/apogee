@@ -81,6 +81,50 @@ text and what landed under it do not describe each other exactly. The seam the r
   with the explanatory line (`internal/tools/terminal.go:143`, `:149`) kept as the body's first
   line. Better, but the item's fallback clause is narrower in practice than it reads.
 
+### Hostile-bytes residuals run — residuals (2026-08-13)
+
+Raised while executing `docs/plans/2026-08-13 - 02 - hostile-bytes-residuals-plan.md` (all 13
+items ✅ done): what the run's items deliberately did not reach.
+
+- [ ] `run_tests` still inherits an unscoped PATH — plausibly deliberate, since a
+  workspace-resident test runner IS the test command there.
+
+- [ ] `hostRules.isPathName` duplicates the PATH-fold logic inlined in `ScopeEnv`
+  (`internal/platform/host.go:120-135`) instead of `ScopeEnv` reusing it — harmless today, drifts
+  if the fold rule ever changes.
+
+- [ ] The Windows home (`%USERPROFILE%` / drive-letter `/users/`) is still unspelled in the
+  ssh-key and credential patterns; ADR 0020 already reasons about that port, so it is declared
+  debt.
+
+- [ ] The `rm-rf-root-home-system` / `rm-fr-root-home-system` rules
+  (`internal/security/rules.go:23-37`) have the same macOS blind spot — their system-path
+  alternation lists `home` but not `users`, so `rm -rf /Users/alice` stays unmatched where
+  `rm -rf /home/alice` hard-refuses.
+
+- [ ] The EXDEV copy-then-remove fallback in `MoveFile.move` remains unexercised by tests —
+  unreachable on a single-device tmpdir, as item 4's own hedge allows; the clean cross-directory
+  move is covered.
+
+- [ ] No test pins that the approval pane and the result string agree on the resolved path for
+  `copy_file` / `move_file` / `delete_file` (the write-tool pair has `TestWriteTargetsAgreeOnPath`,
+  which covers the `path` key, not `destination`).
+
+- [ ] Existing writer disclosure tests (`file_ops_test`, `write_file_test`, `file_edit_test`) build
+  roots from raw `t.TempDir()`; on a host whose temp dir is reached through a symlink their
+  bare-sentence assertions would see a spurious note.
+
+- [ ] For an absolute path `resolveTargetUnbounded` ignores its root argument, so `readRoot`'s
+  answer only ever matters for relative paths — the extra-read-root plumbing in `read_file`'s note
+  is documentation, not behaviour.
+
+- [ ] `stripEscapes` keeps `\t` and `flattenField` folds only `\n`, so a tab in any title still
+  spends unmeasured width — pre-existing across every field seam.
+
+- [ ] `internal/domain/doc.go:59` enumerates `tools.go`'s marker interfaces
+  (`ReadOnlyTool`…`PromptTool`) without the new `ApprovalScoper`; the sentence stays true, but the
+  new marker is worth naming when that map is next touched.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
