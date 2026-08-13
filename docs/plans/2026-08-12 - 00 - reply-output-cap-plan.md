@@ -178,7 +178,15 @@ renumber or amend any existing ADR — this one supersedes nothing.
 
 ---
 
-## 3. Add the per-server `max-output-tokens:` pin
+## 3. Add the per-server `max-output-tokens:` pin — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the template placement the item names — "next to the existing `context-window:` comment block (around line 383)" — is the TOP-LEVEL `context-window:` key's block; the per-entry `context-window:` pin ADR 0045 added is not documented in the template at all. The new block sits immediately after line 383 as instructed, but its example is written NESTED (`#   - name: workstation` / `#     max-output-tokens: 8192`) with prose saying the key lives on a `servers:` entry, because a `# max-output-tokens:` example at indent 0 would teach a top-level key that does not resolve, and repeating a `# servers:` header at indent 0 would break `CommentedExampleLine`/`TestEmbeddedDefaultConfigTeachesTheServersSchema`, which refuse a second commented example of one key.
+
+NOTES (2026-08-13): no CHANGELOG entry for this item — the plan's own "Suggested version bump" section assigns items 3–5 ONE shared `[Unreleased]` feature entry, and nothing reads the key until item 4, so an entry written here would describe behaviour that does not exist yet. Item 4 (or 5) writes the entry covering all three.
+
+NOTES (2026-08-13): the template block deliberately does NOT mention that a reply cut off AT the cap fails the turn — that behaviour is item 5's, whose Files list does not include this template. Worth adding there.
+
+NOTES (2026-08-13): `gofmt` re-aligned the whole `ServerEntry` field block (the new field name is longer than any existing one). Field order and every existing tag are unchanged; the realignment is the formatter's, not a restyle.
 
 **What.** Add the config surface only — nothing reads it yet; item 4 wires it in.
 

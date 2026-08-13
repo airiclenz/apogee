@@ -1508,6 +1508,28 @@ server: workstation
 				},
 			},
 		},
+		{
+			// The reply ceiling is the window pin's idiom verbatim (ADR 0046): a positive value
+			// travels as written, and both spellings of unset — the absent key and an explicit 0 —
+			// resolve to the same zero, which is what tells the engine to derive the cap instead.
+			name: "the optional max-output-tokens cap travels per entry, absent and 0 alike",
+			configYAML: `servers:
+  - name: workstation
+    endpoint: http://192.168.64.1:1111
+    max-output-tokens: 8192
+  - name: explicit-zero
+    endpoint: http://192.168.64.1:2222
+    max-output-tokens: 0
+  - name: openrouter
+    endpoint: https://openrouter.ai/api/v1
+server: workstation
+`,
+			want: []ServerEntry{
+				{Name: "workstation", Endpoint: "http://192.168.64.1:1111", MaxOutputTokens: 8192},
+				{Name: "explicit-zero", Endpoint: "http://192.168.64.1:2222"},
+				{Name: "openrouter", Endpoint: "https://openrouter.ai/api/v1"},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1618,6 +1640,14 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
 				"    context-window: -8192\n",
 			wantErr: []string{"servers: entry 1", "box", "context-window: -8192 is negative", "1 or more"},
+		},
+		{
+			// The reply ceiling is refused on that same reasoning (ADR 0046): absent and 0 mean
+			// derive, every N ≥ 1 is a pin, so a negative cap has nothing left to mean.
+			name: "an entry whose max-output-tokens cap is negative",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    max-output-tokens: -4096\n",
+			wantErr: []string{"servers: entry 1", "box", "max-output-tokens: -4096 is negative", "1 or more"},
 		},
 		{
 			// Delegations route to ONE server (ADR 0045 decision 1), so the second flag is the

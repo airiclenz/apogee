@@ -383,6 +383,22 @@ system-prompt-text: |
 # context-window: 32768
 
 # =============================================================================
+# The most tokens ONE reply may be. This one lives on a servers: entry above, beside that entry's
+# own context-window: pin, because the ceiling is a property of the server's slot rather than of
+# the session. Leave it unset and apogee derives the cap from the reply room the Budget already
+# reserves out of the window — which is what keeps a thinking model from generating for an hour
+# straight into the context wall and losing the whole turn. Set it when the derived number is wrong
+# for a server: a cloud endpoint that advertises no window at all derives from an unknown one and
+# takes the floor, so the pin is the only way to let such a server answer at length.
+# Config-file only (no flag or env).
+#
+#   (absent)  derive the cap from the reply budget.
+#   N         cap every reply at N tokens, whatever the window says.
+#
+#   - name: workstation
+#     max-output-tokens: 8192
+
+# =============================================================================
 # How a finished document is shown to you. The model calls `present_document` after writing a
 # deliverable (a report, a diagram, an HTML summary), and apogee decides how to surface it —
 # the model never reasons about your platform. Config-file only (no flag or env).

@@ -1058,17 +1058,33 @@ type UnconfinedHost struct {
 // because it describes the server, the way `model:` does; only the Delegation target reads it today
 // (ADR 0045 decision 3), where it earns its keep: a cloud endpoint advertises no window at all, so
 // the pin is how such a server is usable as a Sub-agent server in the first place.
+//
+// MaxOutputTokens PINS the ceiling on ONE reply from this server, in tokens — the number the engine
+// states on the wire so a reply stops at a bound it chose rather than at the server's context wall
+// (ADR 0046). It is the `context-window:` idiom verbatim, with the same three states and no fourth:
+//
+//   - absent (or 0, which yaml cannot tell from absent) ⇒ the engine derives the cap from the reply
+//     room the Budget already reserves out of the window.
+//   - N ≥ 1 ⇒ cap every reply at N tokens, whatever the window says.
+//   - negative ⇒ refused by ValidateServers; there is no meaning to give it.
+//
+// It rides the entry for the reason the window it is derived from does: the ceiling is a property of
+// the SLOT, not of the session, so a session moved to another server takes that server's number. And
+// it earns its keep exactly where the derivation cannot reach — a cloud endpoint advertises no
+// window at all, so the reserve it would derive from is unknown and the cap falls to its clamp
+// floor; the pin is the only way to let such a server answer at length.
 type ServerEntry struct {
-	Name           string          `yaml:"name"`
-	Endpoint       string          `yaml:"endpoint"`
-	APIKey         string          `yaml:"api-key,omitempty"`
-	Model          string          `yaml:"model,omitempty"`
-	LlamaLauncher  string          `yaml:"llama-launcher,omitempty"`
-	ParallelAgents int             `yaml:"parallel-agents,omitempty"`
-	SubAgents      bool            `yaml:"sub-agents,omitempty"`
-	Bypass         *bool           `yaml:"bypass,omitempty"`
-	Mechanisms     map[string]bool `yaml:"mechanisms,omitempty"`
-	ContextWindow  int             `yaml:"context-window,omitempty"`
+	Name            string          `yaml:"name"`
+	Endpoint        string          `yaml:"endpoint"`
+	APIKey          string          `yaml:"api-key,omitempty"`
+	Model           string          `yaml:"model,omitempty"`
+	LlamaLauncher   string          `yaml:"llama-launcher,omitempty"`
+	ParallelAgents  int             `yaml:"parallel-agents,omitempty"`
+	SubAgents       bool            `yaml:"sub-agents,omitempty"`
+	Bypass          *bool           `yaml:"bypass,omitempty"`
+	Mechanisms      map[string]bool `yaml:"mechanisms,omitempty"`
+	ContextWindow   int             `yaml:"context-window,omitempty"`
+	MaxOutputTokens int             `yaml:"max-output-tokens,omitempty"`
 }
 
 // ValidateServers rejects an entry that could never be switched to, at the startup boundary where
@@ -1096,7 +1112,8 @@ type ServerEntry struct {
 // negative cap. Absent and 0 are the same state (discover — yaml cannot distinguish them) and any
 // N ≥ 1 is a pin, so a negative number is the only value with nothing to mean, and saying so here
 // beats resolving it to a silent 1 months later. The entry's optional `context-window:` pin is
-// checked for that same one defect, on that same reasoning.
+// checked for that same one defect, on that same reasoning, and its `max-output-tokens:` cap for
+// that same one again — three keys carrying one idiom carry one refusal.
 //
 // The entry's optional `sub-agents:` flag and the posture keys that ride it carry two defects
 // between them (ADR 0045 decisions 1 and 2). A SECOND flagged entry is refused with BOTH entries
@@ -1149,6 +1166,11 @@ func ValidateServers(servers []ServerEntry) error {
 			return fmt.Errorf("apogee: servers: entry %d (%q): context-window: %d is negative — give the "+
 				"context window this server serves, in tokens (1 or more), or remove the key to take the "+
 				"window the server advertises", i+1, s.Name, s.ContextWindow)
+		}
+		if s.MaxOutputTokens < 0 {
+			return fmt.Errorf("apogee: servers: entry %d (%q): max-output-tokens: %d is negative — give the "+
+				"most tokens one reply from this server may be (1 or more), or remove the key to derive the "+
+				"cap from the reply budget", i+1, s.Name, s.MaxOutputTokens)
 		}
 		if s.SubAgents {
 			if flagged >= 0 {
