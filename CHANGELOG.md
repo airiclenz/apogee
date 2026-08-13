@@ -796,6 +796,14 @@ point is a **minor** bump, not a breaking change.
   `~/.apogee/config.yaml` is never rewritten, so this reaches a fresh install. `apogee probe model
   --help` picks up the same spelling.
 
+- **The key-source writer has its own file.** `internal/config/configwrite.go` had grown past 1,800
+  lines carrying every writer in the package, so the half that rewrites the key source of a single
+  `servers:` entry — the `api-key:` → `api-key-cmd:` swap a consented key migration persists, and
+  the per-entry `plaintext-key-ok:` marker that declines it (ADR 0047) — moves verbatim into
+  `internal/config/configwrite_keysource.go`, carrying its own section banner as the file's header.
+  A pure move: no exported name changes, no logic changes, the ADR 0035 splice contract untouched,
+  and `doc.go`'s file map gains the new file so the docmap test keeps the navigation aid honest.
+
 ### Removed
 
 - **`open_file` is gone, merged into `read_file`.** It was the read-and-locate twin of a tool that

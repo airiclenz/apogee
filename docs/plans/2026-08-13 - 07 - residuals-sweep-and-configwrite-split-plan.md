@@ -225,7 +225,12 @@ cot.go, decompose.go, emptyresponse.go and library.go named for the rest.
 
 **Commit:** `docs(comments): promptFS, takesArgs, and token-list prose match the code`
 
-## 8. configwrite split I — the key-source writer moves out
+## 8. configwrite split I — the key-source writer moves out — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's line ranges are stale — commit `2bcf0f6` (per-entry setting writer) landed after the plan was written, growing `configwrite.go` from 1631 to 1811 lines and appending a fifth section, so the key-source section now ends at `:1632` rather than EOF. Moved `:1329-1632` as it stands; the per-entry setting writer stays in `configwrite.go`.
+NOTES (2026-08-13): `configuredEntryNames` is not in the item's enumeration (commit `2bcf0f6` added it inside the key-source section, at `:1485`) but it is the key-source writer's own refusal helper, so it moved with the section.
+NOTES (2026-08-13): `listValue` and `lineCount` moved as the item names them even though `2bcf0f6`'s reshuffle left their only callers in the SCALAR section (pre-split `configwrite.go:671`, `:1004`, `:1324`); the plan's Out-of-scope note names `configwrite_keysource` as their home, so the literal text was followed rather than second-guessed.
+NOTES (2026-08-13): `doc.go`'s `configwrite.go` sentence lost "or the key source of a single `servers:` entry" and gained "or a remembered choice on a single `servers:` entry", the minimum needed to stay true of the per-entry setting writer that remains — item 10 owns the final wording.
 
 **What:** move the key-source section of `internal/config/configwrite.go` (banner at
 `:1329-1347` through end of file, `:1348-1631`: the four yaml-tag consts,
