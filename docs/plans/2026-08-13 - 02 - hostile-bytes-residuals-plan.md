@@ -297,7 +297,11 @@ unchanged.
 
 **Commit:** `fix(tui): non-JSON argument blobs render as indented body rows only`
 
-## 8. Popup titles fold newlines
+## 8. Popup titles fold newlines — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's Files list named `internal/tui/approval_test.go`, which did not exist
+— created it (the package's other approval-pane tests live in `model_test.go`; the new file follows
+the repo's file-per-source-file test layout and reuses that file's `approvalBodyRows` helper).
 
 **What:** the approval pane title is `"Approve " + stripEscapes(req.Tool) + "?"`
 (`internal/tui/approval.go:231`) with no `flattenField`, and `popupTitleLine`

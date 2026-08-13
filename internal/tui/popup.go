@@ -1243,6 +1243,14 @@ func popupHeading(spec popupSpec, body []string, hiddenBody int) string {
 // not even a clipped name survives, the count is the whole row: on a pane that narrow the name is
 // no longer identifying anything anyway.
 func popupTitleLine(th theme, title string, hidden, inner int) string {
+	// A title is a NAME, and this row — or the top border it is spliced into — is ONE row. Every
+	// arithmetic decision below counts the title's width as the width of a single line, so a title
+	// carrying "\n" would both falsify that count and paint rows the pane never budgeted for, above
+	// its body and outside its box. Folding here is the backstop for every pane: the callers that
+	// compose a title out of bytes they did not write flatten at their own site too (the approval
+	// pane's tool name, flattenField), because that is where the reason for the fold is legible —
+	// but no pane has to remember, because a name has no layout to lose.
+	title = flattenField(title)
 	if hidden == 0 {
 		return title
 	}

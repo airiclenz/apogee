@@ -71,12 +71,6 @@ those items' own fixes falsified. The hostile-bytes threat model — the operato
 bytes they operate on are not, and neither is the model. Every citation was re-read against the
 working tree on 2026-08-12 and re-verified on 2026-08-13.
 
-- [ ] The approval pane title is `"Approve " + stripEscapes(req.Tool) + "?"`
-  (`internal/tui/approval.go:231`) with no `flattenField`, and `popupTitleLine`
-  (`internal/tui/popup.go:1245`) does not fold either — so a newline in a tool NAME paints a
-  second, unindented row above the pane's own body. Reachable via an MCP-supplied tool name, which
-  apogee does not author.
-
 - [ ] `go_vet`'s package-directory scope is disclosed on the tool description
   (`internal/tools/diagnostics.go:61`) and on both vet result strings (`:192`, `:194`, via
   `vettedPackageLine` `:326`) but NOT on the approval pane — the one surface the human actually

@@ -145,8 +145,8 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // line rather than by a nested surface of its own.
 //
 // The newline stripEscapes keeps is then taken off the pane's FIELDS, and only its fields
-// (flattenField): the Sub-agent line, the Reason and the Fix each compose a label with a string
-// this pane did not write, and the body is painted one row per line, so a field carrying "\n"
+// (flattenField): the title, the Sub-agent line, the Reason and the Fix each compose a label with a
+// string this pane did not write, and the body is painted one row per line, so a field carrying "\n"
 // paints rows of its own — a second "Reason:" above the real one, in the same th.popupBody style,
 // because this pane sets no bodyLead and has no styling that tells its own rows from a forged one.
 // The same pass takes the newline off each argument's NAME (argumentDetails). What stays multi-line
@@ -228,7 +228,13 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
 	spec := popupSpec{
-		title:         "Approve " + stripEscapes(req.Tool) + "?",
+		// The tool NAME is a field like any other on this pane, and apogee does not author it — an MCP
+		// server names its own tools. So it is flattened (flattenField) before it is composed into the
+		// title: a name carrying "\n" would otherwise break the title out of the border it is spliced
+		// into and paint an unindented row of the model's choosing above the pane's own body.
+		// popupTitleLine folds again as the backstop for every OTHER pane's title; this site is the one
+		// that keeps the fold beside the pane's other field treatments, where the reason for it is.
+		title:         "Approve " + flattenField(stripEscapes(req.Tool)) + "?",
 		titleInBorder: true,
 		body:          strings.Join(parts, "\n"), // Reason: and command: adjacent, as the mockup draws them
 		maxBodyRows:   maxBodyRows,

@@ -443,6 +443,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A tool NAME can no longer paint a row of its own above the approval prompt.** The prompt folds
+  every model-authored field onto the single line a label is, but its own title — `Approve <tool>?`
+  — was composed straight out of the tool name and spliced into the pane's top border unfolded. A
+  name carrying a newline therefore broke the box open and painted a second, unindented row above
+  the body, wearing the same style the pane's own rows wear: a forged `Reason:` line sitting where
+  the human reads the pane's structure. apogee does not author tool names — an MCP server names its
+  own — so the name is now flattened where the title is composed, and `popupTitleLine` folds every
+  pane's title as the backstop, whether that title is drawn on a row of its own or spliced into the
+  border. A title is a name, and a name has no layout to lose: the folded newline shows up as the
+  space it replaced, on the one line a title has always been budgeted for.
+
 - **A tool call whose arguments are not a JSON object can no longer forge a row on the approval
   pane.** The pane tells its own rows from the model's by the column they start in: a `Reason:` or a
   `Fix:` the pane wrote begins flush-left, and every argument the model sent hangs two spaces in

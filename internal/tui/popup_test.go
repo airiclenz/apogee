@@ -1159,6 +1159,43 @@ func TestRenderPopupTitleInBorderCarriesTheElisionCount(t *testing.T) {
 	}
 }
 
+// A title is a name, and a name has no layout: whatever a caller hands as one, the pane spends
+// exactly ONE line on it (popupTitleLine folds). This is the backstop under every surface that
+// composes a title out of bytes it did not author — an MCP server's tool name reaches the approval
+// pane's border this way — where an unfolded newline broke the box open and painted a row of the
+// model's choosing outside the pane's own budget and outside its border.
+//
+// The assertion is byte-for-byte against the SAME pane titled with the folded string, on both title
+// placements, because folding must be all the fold does: no line lost, no line gained, no width
+// spent differently. The width check that follows is the box contract the broken row violated.
+func TestRenderPopupTitleFoldsNewlines(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	const width = 40
+	for _, inBorder := range []bool{false, true} {
+		name := "title row"
+		if inBorder {
+			name = "title in border"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			multi, folded := popupTitleSpec(), popupTitleSpec()
+			multi.titleInBorder, folded.titleInBorder = inBorder, inBorder
+			multi.title, folded.title = "saved sessions\nesc close", "saved sessions esc close"
+
+			got := strip(renderPopup(th, multi, width))
+			if want := strip(renderPopup(th, folded, width)); got != want {
+				t.Errorf("a title carrying \\n does not render as the folded title:\ngot:\n%s\n\nwant:\n%s", got, want)
+			}
+			for i, ln := range popupLines(renderPopup(th, multi, width)) {
+				if w := lipgloss.Width(ln); w != width {
+					t.Errorf("line %d is %d cells, want %d: %q", i, w, width, strip(ln))
+				}
+			}
+		})
+	}
+}
+
 // titleFromBody is the identity a body-is-the-heading pane keeps at the heights that seat none of
 // that body, and it is scoped to exactly those heights: the flag decides what the border says only
 // when the body block came back with every one of its own lines traded for the elision marker. With
