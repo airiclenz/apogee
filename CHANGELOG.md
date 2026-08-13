@@ -323,6 +323,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- `internal/title`: the naming call's three prompt texts (the system instruction, the closing
+  user instruction and the request-window header) are now plain files under
+  `internal/title/prompts/`, embedded with `//go:embed` — the wording is editable prose instead of
+  Go string literals, still compiled into the single binary and never read from disk at runtime.
+
 - **The compaction prompts are now plain files rather than Go string literals.** The summarizer's
   system prompt, the sentence that closes the summary call's user message, and the label on the
   folded summary were string constants in `internal/context/compact.go`, where prose that gets

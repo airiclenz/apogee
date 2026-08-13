@@ -179,7 +179,11 @@ newline after load.
 
 ---
 
-## 4. `internal/title`: title prompts become embedded files
+## 4. `internal/title`: title prompts become embedded files — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): `internal/title` has no `doc.go` — its package doc comment lives at the head of `title.go` and the package holds one non-test .go file, far under the house ~10-file docmap threshold (four other internal packages are the same). The item's "update the package doc.go file map" was therefore satisfied by extending the existing package doc in `title.go` to narrate the three new prompt assets; no `doc.go` was added and no content was moved between files.
+NOTES (2026-08-13): the loader (`mustPrompt`) also normalises CRLF→LF before stripping the trailing newline, matching item 3's `internal/context` loader and `internal/tui/logo.go` — without it a `core.autocrlf=true` checkout would bake `\r` into every prompt and break the byte-identity design call 6 requires.
+NOTES (2026-08-13): byte-identity was verified mechanically, not only by the existing contains-phrase tests: the three loaded assets were compared against the concatenated const values extracted from `git show HEAD:internal/title/title.go` — all three identical, each asset ending in exactly one newline.
 
 **What:** Same conversion as item 3 for `internal/title/title.go`: `systemInstruction`
 (`title.go:99-105`), `userInstruction` (`title.go:109`), `windowHeader` (`title.go:114`) move to

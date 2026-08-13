@@ -12,6 +12,13 @@
 // callers that own that state. ErrTruncated is the shared word for the one failure the callers on
 // both sides of the seam must agree on.
 //
+// The naming call's prompt text is not written in Go: title.go embeds the prompts/ directory,
+// whose plain files — system-instruction.txt (the naming call's system prompt),
+// user-instruction.txt (the line that closes the user message) and window-header.txt (the label on
+// the numbered block of requests) — hold the wording as editable prose inside the same single
+// binary. The assembly around them (the labelled context, the numbering, the elision marker) stays
+// in code.
+//
 // The naming call is NOT a Mechanism and NOT a Turn (ADR 0022 addendum, 2026-07-31): it fires
 // at no Hook point, never shapes the primary call, emits no events, and nothing breaks when it
 // fails. That is why the failure posture here is a quiet ok=false rather than an error: the
@@ -20,6 +27,7 @@
 package title
 
 import (
+	"embed"
 	"errors"
 	"fmt"
 	"strings"
@@ -88,30 +96,50 @@ const titleWordBoundaryFloor = titleMaxRunes * 6 / 10
 // that loop obviously terminating.
 const maxAffixPasses = 4
 
-// systemInstruction is the naming call's system prompt, shared by both naming forms so the two
-// cannot drift apart; it is worded to read correctly for one request as well as for many. It asks
-// for the task description alone: the session browser already renders the time and the workspace
-// beside the title, so a title that repeats either wastes the only 50 runes the row has (Ratified
-// design 6). It asks for the DOMINANT thread rather than a list of the requests, and says outright
-// that a session which moved on is named for what it moved to (ADR 0022 addendum): people look for
-// a session by what they were last doing, and leaving the bias implicit would buy recency by
-// accident — small models answer the last thing they read — rather than by instruction.
-const systemInstruction = "You name coding sessions. Read what the user has asked for and reply " +
-	"with a short title for the main thread of the work: 3 to 8 words, one line, plain text. " +
-	"Name the dominant task rather than listing every request; when the session has moved on to " +
-	"a different task, name the task it moved to. " +
-	"Describe the task only — never the project, the folder, or the date. " +
-	"Reply with the title and nothing else: no quotes, no code fences, no label, no explanation."
+// promptFS carries this package's prompt text as plain files under prompts/. The prompts are
+// assets rather than Go string literals so the wording can be read and edited as prose
+// (ISSUES.md: hard-coded prompt literals), and go:embed compiles them into the binary — the
+// text ships inside the single binary, is never read from disk at runtime, and is never
+// user-overridable.
+//
+//go:embed prompts/*.txt
+var promptFS embed.FS
 
-// userInstruction closes the user message. The system prompt already said it, but small models
-// answer the last thing they read, and repeating the constraint next to the material is what
-// keeps the reply to one line.
-const userInstruction = "Reply with the title only."
+// mustPrompt loads one embedded prompt asset by file name. Every asset ends with exactly one
+// trailing newline — a file without one is awkward in an editor and in a diff — and that one
+// newline is stripped here, so the string in memory is byte-identical to the literal the asset
+// replaced. CRLF endings are normalised first, the way the embedded block art is
+// (internal/tui/logo.go), so a core.autocrlf checkout cannot bake \r into a prompt. A name
+// that is not in the FS cannot happen in a built binary — go:embed fails the build first — so
+// it is a programming error rather than a runtime condition.
+func mustPrompt(name string) string {
+	b, err := promptFS.ReadFile("prompts/" + name)
+	if err != nil {
+		panic("apogee: missing embedded prompt asset " + name + ": " + err.Error())
+	}
+	return strings.TrimSuffix(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
+}
 
-// windowHeader labels the numbered block of requests. Naming the order outright is what lets the
-// model read the last entries as the most recent work, which is the half of the instruction the
-// numbering alone cannot carry.
-const windowHeader = "The user's requests in this session, oldest first:"
+// systemInstruction is the naming call's system prompt (prompts/system-instruction.txt), shared by
+// both naming forms so the two cannot drift apart; it is worded to read correctly for one request
+// as well as for many. It asks for the task description alone: the session browser already renders
+// the time and the workspace beside the title, so a title that repeats either wastes the only 50
+// runes the row has (Ratified design 6). It asks for the DOMINANT thread rather than a list of the
+// requests, and says outright that a session which moved on is named for what it moved to (ADR 0022
+// addendum): people look for a session by what they were last doing, and leaving the bias implicit
+// would buy recency by accident — small models answer the last thing they read — rather than by
+// instruction.
+var systemInstruction = mustPrompt("system-instruction.txt")
+
+// userInstruction closes the user message (prompts/user-instruction.txt). The system prompt
+// already said it, but small models answer the last thing they read, and repeating the constraint
+// next to the material is what keeps the reply to one line.
+var userInstruction = mustPrompt("user-instruction.txt")
+
+// windowHeader labels the numbered block of requests (prompts/window-header.txt). Naming the order
+// outright is what lets the model read the last entries as the most recent work, which is the half
+// of the instruction the numbering alone cannot carry.
+var windowHeader = mustPrompt("window-header.txt")
 
 // Prompt builds the naming completion for prompts — the window of the user's requests, oldest
 // first, that the composition root hands provider.Client.Respond. One request is the automatic
