@@ -143,7 +143,11 @@ Close it with `Owned by the plan docs/plans/2026-08-12 - 00 - reply-output-cap-p
 
 ---
 
-## 2. ADR 0046 — the engine bounds every reply
+## 2. ADR 0046 — the engine bounds every reply — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item asks for the sibling's "status/date header"; ADR 0045 — and every other ADR in `docs/adr/` — carries only `Status: accepted` in its front matter, with no `Date:` field. The record follows the sibling verbatim and carries the 2026-08-12 ratification date in the Context prose instead, rather than inventing a header field no ADR uses.
+
+NOTES (2026-08-13): the item's third acceptance line (`git status --porcelain` lists only the new ADR) reads clean for this item's own files, but the tree also shows item 1's `ISSUES.md` because both items were implemented in one batched dispatch. No existing ADR was renumbered or amended; the new record supersedes nothing.
 
 **What.** Write `docs/adr/0046-the-engine-bounds-every-reply-with-an-output-cap.md`, recording the
 four ratified design calls above as an accepted decision. Follow the structure and voice of
