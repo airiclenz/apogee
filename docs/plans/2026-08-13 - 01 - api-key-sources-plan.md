@@ -302,7 +302,15 @@ exactly-one satisfied.
 
 **Commit:** `feat(config): surgical key-source rewrite inside a servers entry`
 
-## 6. Startup migration offer: TUI prompt, headless notice, wiring
+## 6. Startup migration offer: TUI prompt, headless notice, wiring — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the notice for the storeless and headless cases goes to STDERR pre-alt-screen, beside the confinement warnings, rather than into the transcript — one wording and one emission point for both drivers, and the launch-notice idiom `announceConfinement` and the model-profile notice already use. A TUI-side notice would have needed a second seam and a second copy of the sentence.
+NOTES (2026-08-13): the offer GIVES WAY to the pre-bound ask — a session that opened the `/server` picker or `/settings` because it has no server raises no migration pane at all, and the entries are re-offered next start-up (which is exactly "not now"). Not in the item text; stacking a second unasked-for modal on the opening frame is the one thing this offer must not become.
+NOTES (2026-08-13): the read-back verification runs on a THROWAWAY `KeyResolver`, not the run's shared one. It is a check rather than a use: caching an answer under the entry's name from a command that has not been persisted yet would be a session-long answer derived from a file state that may never exist — and on the mismatch branch, one known to be wrong.
+NOTES (2026-08-13): the store is probed only when the config actually names a plaintext key. The Linux probe is a subprocess on the start-up path, and a machine with nothing to offer has no use for its answer.
+NOTES (2026-08-13): `plaintextKeyEntries` also skips an entry with no `name:` — a store item is addressed by that name and the surgical rewrite locates the entry by it, so a nameless entry is one neither half of the move could act on.
+NOTES (2026-08-13): the item lists `internal/config` and `internal/keystore` as the pieces; the move itself (write → verify → rewrite) is assembled in `cmd/apogee/keymigrate.go` rather than in either, since it is a policy about a credential that needs the config path, the resolved entries and both packages — and the composition root is the layer that has all three (ADR 0031: the engine is untouched).
+NOTES (2026-08-13): both package doc maps gained their new file's line (cmd/apogee and internal/tui both fail a docmap guard otherwise), and layout.md gained the offer pane's paragraph beside the picker's other kinds.
 
 **What:** At startup, after config load and store probe: collect entries carrying a literal
 `api-key` without `plaintext-key-ok: true`. With a store available and a TUI session, raise

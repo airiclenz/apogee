@@ -10,6 +10,27 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A plaintext `api-key:` now earns an offer to move it into the machine's own secret store.** At
+  start-up, every `servers:` entry whose key is written out in the config file is collected; where
+  the machine has a store apogee can both write to and read back from — the macOS Keychain through
+  `security`, a Secret Service keyring through `secret-tool`, probed live so a headless box carrying
+  the tool without a keyring is not mistaken for one that works — the session opens one pane per
+  entry: move it, not now, or never for this entry. Taking the move stores the key under service
+  `apogee` with the entry's name as the account (handed to the tool on STDIN, never in an argv where
+  `ps` could read it), then READS IT BACK by running the very `api-key-cmd:` line it is about to
+  persist and comparing the result to the key that went in — a mismatch or a failed read aborts with
+  the config file untouched, so a migration can never leave an entry pointing at a key nobody
+  stored. Only then is the entry rewritten, surgically: the `api-key:` line becomes an
+  `api-key-cmd:` line and every comment, indent and neighbouring key stays byte-identical, with the
+  writer refusing rather than guessing on any file shape it cannot edit exactly. What the file holds
+  afterwards is an ORDINARY key source, read by the same resolver as any other. "Not now" persists
+  nothing and is asked again next start-up; "never for this entry" writes `plaintext-key-ok: true`
+  on that entry alone and is never asked again. Nothing is ever migrated without that answer, and no
+  offer is made where the whole move could not be completed: a machine with no usable store — and
+  every unattended `apogee headless` run, which has nobody to consent — gets a notice instead,
+  naming the entries and the alternatives its owner can reach by hand (`api-key-env:`, an
+  `api-key-cmd:` wrapper script, or at least `chmod 600` on the file).
+
 - **Every place a session reaches for a server's API key now resolves that entry's key source.** The
   startup bind, a `/server` switch, a Sub-agent server's heartbeat, `apogee headless`, `apogee probe`
   and `apogee probe model` all ask the run's ONE resolver, so an entry whose key comes from a command

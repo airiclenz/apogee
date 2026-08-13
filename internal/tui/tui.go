@@ -627,6 +627,38 @@ type Options struct {
 	// always wires it beside SwitchServer.
 	BindServer func(name string) (ServerSwitchResult, error)
 
+	// KeyMigration is the start-up key-migration offer this session should raise, if any (ADR 0047,
+	// keymigration.go): which `servers:` entries were found carrying a plaintext `api-key:` line
+	// this machine's secret store could hold instead, and what that store is called. The zero value
+	// — no store, no entries — is the ordinary start and raises nothing at all, which is also what a
+	// hand-built Options and a headless run get.
+	//
+	// It carries NAMES and never a key. What each answer does to the file and to the store is
+	// entirely behind the two seams below, so nothing this renderer holds, paints or records can be
+	// a secret.
+	KeyMigration KeyMigrationOffer
+
+	// MigrateKey moves the named entry's key out of the config file and into the machine's secret
+	// store, leaving the entry pointing at it with an `api-key-cmd:` line, and returns the file it
+	// rewrote so the confirmation can name it.
+	//
+	// It is the whole move: the store write, the read-back of the key through the very command it
+	// is about to persist, and only then the rewrite (ADR 0047's verify-before-rewrite). A failure
+	// anywhere in that sequence means the config file was left exactly as it was, and it is
+	// REPORTED — the WriteSetting contract — because a migration that silently did not happen
+	// leaves the human believing their key has moved.
+	//
+	// Synchronous, on the keypress that answered the offer, like every other config write here.
+	// nil ⇒ no offer is raised at all.
+	MigrateKey func(entry string) (path string, err error)
+
+	// KeepPlaintextKey records the "never for this entry" answer — `plaintext-key-ok: true` on that
+	// entry, the per-entry acknowledgement that ends the offer for good (ADR 0035's deliberate-edit
+	// grain) — and returns the file it wrote, so the confirmation can say which line to delete to
+	// be asked again. Same contract as MigrateKey in every other respect. nil ⇒ the answer says it
+	// cannot be recorded, the nil-seam degrade every seam here takes.
+	KeepPlaintextKey func(entry string) (path string, err error)
+
 	// RecordServerChoice persists the entry this session starts on NEXT time — the `server:` key
 	// ADR 0036 decision 2 records on every move to a configured entry. The renderer calls it with the
 	// name it just bound or switched to and knows nothing else about it: whether that name belongs to
@@ -846,6 +878,23 @@ type PreboundStart struct {
 	// Name is the `server:` value that named no entry, carried for PreboundStaleChoice so the
 	// notice can say which one went missing. Empty for every other reason.
 	Name string
+}
+
+// KeyMigrationOffer is what this start-up found to offer about plaintext API keys (ADR 0047): the
+// `servers:` entries whose key is a literal `api-key:` line in the config file and that have not
+// already answered "never", plus the human name of the store this machine can move them into.
+//
+// Both halves have to be there for a question to exist — an entry with nowhere to go and a store
+// with nothing to hold are each an offer apogee cannot complete — so the zero value raises nothing,
+// and that is what a hand-built Options, a machine with no usable store and a headless run all get.
+type KeyMigrationOffer struct {
+	// StoreName is what the machine's own operating system calls its secret store ("macOS Keychain",
+	// "Secret Service"), so the question names something the human can go and look at afterwards.
+	// Empty ⇒ there is no store here and no offer to make.
+	StoreName string
+	// Entries are the `servers:` names to ask about, in the file's own order — one pane each, the
+	// next opening where the last one closed.
+	Entries []string
 }
 
 // LaunchProfileChoice is one Launch profile `/model` offers (CONTEXT.md: a Launch profile

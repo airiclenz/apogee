@@ -143,6 +143,15 @@ func (w *rootWiring) options() tui.Options {
 		// the on-disk format is the binary's business, like the session Save seam below.
 		SaveHostAcknowledgement: config.HostAcknowledgementSaver(
 			filepath.Join(w.roots.config, "config.yaml"), platform.HostID()),
+		// The start-up key-migration offer and the two answers that write anything (keymigrate.go,
+		// ADR 0047). The renderer is handed the entry NAMES and the store's human name — never a key
+		// — and each answer is one call back into this layer, which owns the store, the read-back
+		// verification and the file format exactly as it owns the acknowledgement above. All three
+		// stay zero on a run with no plaintext key or no usable store, and the renderer then raises
+		// nothing.
+		KeyMigration:     w.keyOffer,
+		MigrateKey:       w.keyMigrator(),
+		KeepPlaintextKey: w.plaintextKeyKeeper(),
 		// The `/settings` pane's rows: every key the registry describes, with the value THIS run
 		// resolved and the marker for a key an environment variable or a flag overrode
 		// (settingsRows.go). A provider rather than a slice because the pane derives its rows on

@@ -77,6 +77,7 @@ const (
 	pickerCycle                          // how often a new Schedule fires — /schedule's first popup
 	pickerScheduleMode                   // the mode that Schedule's Firings run in — /schedule's second
 	pickerScheduleStop                   // the live Schedules — /schedule-stop with more than one
+	pickerKeyMigration                   // what to do about one entry's plaintext key — the start-up offer
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -105,6 +106,13 @@ type picker struct {
 	// state — plain values only, so the copied Model stays copyable (ADR 0011) — and it is cleared
 	// with the rest of the overlay when the second popup accepts or esc closes either one.
 	draft scheduleDraft
+	// migration is what is left of a round of start-up key-migration offers (keymigration.go): the
+	// `servers:` entries still to be asked about, the one being asked about now at the front. It
+	// lives on the overlay so the round is one piece of state — a plain slice of plain strings, safe
+	// in the copied Model (ADR 0011) — and so the whole-struct zeroing every close and accept
+	// already does ends the round: esc leaves every remaining entry unasked, which is a "not now"
+	// and persists nothing.
+	migration []string
 }
 
 // maxPickerRows caps how many rows the overlay shows at once; a longer list scrolls a window around
@@ -130,6 +138,8 @@ func pickerHintFor(k pickerKind) string {
 		return "type to filter · ↑/↓ select · ⏎ choose · esc close"
 	case pickerScheduleStop:
 		return "type to filter · ↑/↓ select · ⏎ stop · esc close"
+	case pickerKeyMigration:
+		return keyMigrationHint
 	}
 	return pickerHint
 }
@@ -653,6 +663,8 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 		return m.acceptScheduleMode(scheduleModes[offered])
 	case pickerScheduleStop:
 		return m.acceptScheduleStop(offered)
+	case pickerKeyMigration:
+		return m.acceptKeyMigration(offered)
 	}
 	return m, nil
 }
@@ -883,6 +895,8 @@ func (m Model) pickerTitle() string {
 		return "schedule — autonomy mode"
 	case pickerScheduleStop:
 		return "stop a schedule"
+	case pickerKeyMigration:
+		return m.keyMigrationTitle()
 	}
 	return ""
 }
@@ -914,6 +928,8 @@ func (m Model) pickerOfferingRows() []popupRow {
 		return scheduleModeRows(m.opts.ScheduleAutoBlocked)
 	case pickerScheduleStop:
 		return scheduleStopRows(m.liveSchedules())
+	case pickerKeyMigration:
+		return keyMigrationRows(m.opts.KeyMigration.StoreName)
 	}
 	return nil
 }

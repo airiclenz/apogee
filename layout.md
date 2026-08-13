@@ -1503,6 +1503,21 @@ anything, so the hint under them reads `⏎ choose` and, for the stop pane, `⏎
 only panes that open while the model is working, and they claim the keyboard there exactly as they
 do at idle.
 
+**And the same overlay makes the start-up's one offer about a key.** A `servers:` entry whose
+`api-key:` is written out in the config file, on a machine whose own secret store apogee can both
+write to and read back from, opens a pane nobody asked for — after the pre-bound ask, and never
+beside it: a session with no server is asked that question alone, and this one simply comes back at
+the next start-up. One note first, naming the entries and the store; then one pane per entry, titled
+`key for <name> — move it into <store>?`, over three rows in two columns — `move it`, `— store it in
+<store> and point the entry at it`; `not now`, `— leave the file alone; the offer comes back at the
+next start-up`; `never for this entry`, `— record plaintext-key-ok: true and stop asking`. The hint
+reads `⏎ choose`, because nothing here switches anything. Every answer prints one line saying what
+was done and which file says so — a failed move included, since a key that did not move must never
+look like one that did — and the next entry's pane opens where the last one closed. `esc` ends the
+round outright: whatever is left is a `not now`, and nothing is written. On a machine with no such
+store the pane never opens at all; the notice naming the entries and the manual alternatives goes to
+stderr before the alternate screen, with the confinement warnings.
+
 **The `/sessions` browser types too, which is why its verbs are chords.** The browser filters
 exactly as those panes do — any printable key builds the same case-insensitive filter over the row's
 cells, the same `filter: …▌` line stands under the title with a blank line at each end, `⌫` undoes

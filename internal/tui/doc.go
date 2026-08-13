@@ -440,6 +440,18 @@
 // either pane. One predicate ([Model.prebound]) is the whole of the state, and the single write that
 // clears it — a committed bind — ends it everywhere at once.
 //
+// The second pane nobody asked for is the start-up key-migration offer (keymigration.go, ADR 0047),
+// and it is the same overlay again: a `servers:` entry whose API key is a literal `api-key:` line in
+// the config file, on a machine with a secret store apogee can both write to and read back from,
+// earns one three-row question — move it, not now, never for this entry. [Options.KeyMigration]
+// carries the entry NAMES and the store's human name and never a key; each answer is one call to
+// [Options.MigrateKey] or [Options.KeepPlaintextKey], the SaveHostAcknowledgement contract, so the
+// store, the read-back verification and the file format all stay the binary's business. A round of
+// several entries rides the overlay's own queue — one pane each, the next opening where the last
+// closed, esc ending the round with nothing persisted — and the whole offer gives way to the
+// pre-bound ask above, because a session with no server has the more urgent question and "not now"
+// is what this one already means.
+//
 // That fold has ONE owner (post-v0.8 architecture deepening, review candidate 06). fold.go's
 // [Model.foldEvent] is the single door every engine Event enters the view through: the Update
 // loop's eventMsg case hands it over and does nothing else with it, and foldEvent runs the three

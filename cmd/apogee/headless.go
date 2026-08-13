@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -241,6 +242,16 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
 	if err != nil {
 		return notStarted(err)
+	}
+
+	// A plaintext `api-key:` in the config file is worth saying out loud here too (ADR 0047), but
+	// only saying: the migration OFFER is the TUI's, because moving a key is a consented edit to the
+	// human's own config and an unattended run has nobody to consent (the ADR 0036 reasoning that
+	// keeps a headless start-up refusing rather than picking). So no store is probed and nothing is
+	// written — the notice names the entries and what can be done about them by hand, on stderr,
+	// where it cannot contaminate the answer.
+	if names := plaintextKeyEntries(opts.Servers); len(names) > 0 {
+		cmd.PrintErrln(plaintextKeyNotice(filepath.Join(roots.config, "config.yaml"), names))
 	}
 
 	// The host's real Confiner backend for this OS, and the teardown the Windows token backend

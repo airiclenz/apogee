@@ -73,6 +73,10 @@
 // target each of its beats resolves for the engine to route spawns against, the one
 // notice each change of routing state is worth, and the re-point a live `servers:` edit
 // drives (ADR 0045);
+// keymigrate.go the start-up key migration (ADR 0047) — which `servers:` entries still
+// hold their API key in the file, the notice a machine with no secret store gets instead
+// of an offer, and the consented move itself: store write, read-back through the very
+// command about to be persisted, then the entry rewrite;
 // launcher.go the only file
 // importing the llama-launcher facade, kept behind
 // the nil-degrading actuation seams (ADR 0029); schedule.go the scheduler's three

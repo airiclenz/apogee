@@ -89,6 +89,13 @@ func runRoot(ctx context.Context, opts config.Options, launch launcher) error {
 	}
 	w.announceConfinement()
 
+	// What this run does about a plaintext `api-key:` in the config file (keymigrate.go, ADR 0047):
+	// raise the migration offer where the machine has a store that can complete the move, or say on
+	// stderr what can be done by hand where it has not. It goes here, beside the confinement
+	// sentences, because it is the same kind of thing — a start-up fact about the human's own
+	// machine, told while stderr is still a safe place to write.
+	w.prepareKeyMigration(probeKeyStore, os.Stderr)
+
 	// The running session: connections, registry, holders, hosts, and the one bind that fills
 	// them (wire_live.go).
 	if err := w.wireSession(ctx); err != nil {
@@ -127,10 +134,16 @@ type rootWiring struct {
 	// session however many seams read it (config.KeyResolver).
 	keys          *config.KeyResolver
 	skillProvider *skills.Provider
-	bridge        *tui.Bridge
-	presentation  *livePresentation
-	confiner      domain.Confiner
-	cfg           apogee.Config
+	// The start-up key migration (keymigrate.go): the machine's secret store, when it has one this
+	// run can complete a move into, and the offer the renderer raises over it. Both stay zero on a
+	// config that names no plaintext key — the store is not even probed then — and the nil store is
+	// what leaves the two migration seams unwired.
+	secrets      secretStore
+	keyOffer     tui.KeyMigrationOffer
+	bridge       *tui.Bridge
+	presentation *livePresentation
+	confiner     domain.Confiner
+	cfg          apogee.Config
 
 	// The live session (wire_live.go). The tool registry and the Mechanism list are folded onto
 	// cfg above rather than held here — the engine reads them off the Config it is built from.

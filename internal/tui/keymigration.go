@@ -1,0 +1,192 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+)
+
+// ----------------------------------------------------------------------------
+// The start-up key-migration offer (ADR 0047)
+// ----------------------------------------------------------------------------
+//
+// A `servers:` entry may carry its API key as a literal `api-key:` line, which means the key is
+// sitting in a file the human edits, a watcher re-reads and a backup tool copies. Where the machine
+// has a secret store apogee can BOTH write into and read back out of, the start-up offers, once per
+// entry, to move the key there and leave the entry pointing at it with an ordinary `api-key-cmd:`
+// line — after which the file holds a command instead of a secret and every read path is the
+// resolver's usual one.
+//
+// It is an OFFER, not a migration. Nothing is written until the human takes the "move it" row: that
+// is ADR 0035's deliberate-edit grain, one entry at a time, and it is why "never for this entry"
+// exists at all — an answer that is not "yes" has to be able to be final, or the question becomes a
+// recurring nag the human learns to dismiss without reading.
+//
+// The pane is the shared picker (picker.go) over three fixed rows, for the reason /schedule's two
+// question panes are: this is a single-select question, and a second modal surface with its own keys
+// would be one more thing to learn for one more question. What is different is that the pane comes
+// up UNASKED, so it opens under a notice saying why (the prebound.go posture) — and that it can be
+// asked more than once, which is what the queue on the overlay's own state is for: one entry per
+// pane, the next opening where the last one closed, esc ending the whole round (every remaining
+// entry is a "not now", which persists nothing and is re-offered at the next start-up).
+//
+// The renderer never sees a key. It is handed the entry NAMES and the store's human name, and each
+// answer is one call to a seam the binary owns ([Options.MigrateKey], [Options.KeepPlaintextKey]) —
+// the SaveHostAcknowledgement contract, for the same reasons: the file format, the store and the
+// read-back verification are the binary's business, and a secret that never crosses into the
+// renderer cannot be painted, logged or recorded by it.
+
+// The three answers, in the order the rows are offered — least surprising first. The indexes are the
+// offering's, so they are what acceptKeyMigration switches on.
+const (
+	keyMigrationMove = iota
+	keyMigrationNotNow
+	keyMigrationNever
+)
+
+// keyMigrationHint is the legend under the offer. It says "choose" rather than "switch" for the
+// reason /schedule's panes do: taking a row answers a question, it does not move the session.
+const keyMigrationHint = "type to filter · ↑/↓ select · ⏎ choose · esc close"
+
+// openKeyMigration raises the first offer at construction, before the first frame is painted — the
+// openPrebound seam, and for the same reason: the overlay is STATE, so it has to be set on the
+// stored Model rather than returned as a Cmd.
+//
+// It gives way to anything already up. A pre-bound session opens the `/server` picker or the
+// `/settings` pane here, and that ask is the more urgent one — a session with no server can do
+// nothing at all, while a plaintext key is a file that has been readable for as long as it has
+// existed. Standing a second unasked-for pane on top would also be the one thing this offer must
+// never be: a stack of questions the human clears without reading. The offer costs nothing by
+// waiting, because "not now" is exactly what it is: it comes back at the next start-up.
+func (m *Model) openKeyMigration() {
+	offer := m.opts.KeyMigration
+	if offer.StoreName == "" || len(offer.Entries) == 0 || m.opts.MigrateKey == nil {
+		return
+	}
+	if m.picker.open || m.settings.open {
+		return
+	}
+	m.transcript.addNote(keyMigrationNotice(offer))
+	// The queue is COPIED out of the Options: the overlay owns it from here (an answered entry is
+	// dropped from the front), and the Options keep describing what this start-up found.
+	m.picker = picker{
+		open:      true,
+		kind:      pickerKeyMigration,
+		migration: append([]string(nil), offer.Entries...),
+	}
+}
+
+// keyMigrationNotice is the line the unasked-for pane comes up under: what was found, and what the
+// pane is about to offer to do about it. It names the entries rather than counting them, because
+// which server's key is in the file is the fact that decides how the human answers.
+func keyMigrationNotice(offer KeyMigrationOffer) string {
+	return fmt.Sprintf("api-key: is stored in plain text in config.yaml for %s — %s can hold it instead",
+		entryNameList(offer.Entries), stripEscapes(offer.StoreName))
+}
+
+// entryNameList spells a list of entry names for a sentence — "a", "a and b", "a, b and c" — each
+// name sanitized, because a `servers:` name is text out of a file this package never wrote.
+func entryNameList(names []string) string {
+	clean := make([]string, 0, len(names))
+	for _, name := range names {
+		clean = append(clean, stripEscapes(name))
+	}
+	switch len(clean) {
+	case 0:
+		return ""
+	case 1:
+		return clean[0]
+	}
+	return strings.Join(clean[:len(clean)-1], ", ") + " and " + clean[len(clean)-1]
+}
+
+// keyMigrationTitle names the entry THIS pane is asking about and the store it would move to, so a
+// round of several offers can never be answered for the wrong server. The current entry is the head
+// of the overlay's queue; a queue that emptied under the pane (which no path reaches) titles
+// nothing rather than inventing a name.
+func (m Model) keyMigrationTitle() string {
+	if len(m.picker.migration) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("key for %s — move it into %s?",
+		stripEscapes(m.picker.migration[0]), stripEscapes(m.opts.KeyMigration.StoreName))
+}
+
+// keyMigrationRows is the offering: three answers, each with a gloss saying what it does to the
+// file, because every one of them is a decision about a secret and none of the three verbs says on
+// its own what it costs. Two cells, so the glosses line up in one column.
+func keyMigrationRows(storeName string) []popupRow {
+	return []popupRow{
+		{"move it", "— store it in " + stripEscapes(storeName) + " and point the entry at it"},
+		{"not now", "— leave the file alone; the offer comes back at the next start-up"},
+		{"never for this entry", "— record plaintext-key-ok: true and stop asking"},
+	}
+}
+
+// acceptKeyMigration answers the open offer and moves to the next entry in the round.
+//
+// Each answer is one seam call and one note, and the note is the whole feedback: these seams are
+// synchronous file work on a keypress the human is waiting on (the WriteSetting contract), and an
+// error is REPORTED rather than swallowed, because a migration that silently did not happen leaves
+// the human believing their key has moved.
+//
+// The queue advances the same way whatever the answer was — including a failed one. The entry keeps
+// its plaintext key, which is exactly the state "not now" leaves it in, so the next start-up asks
+// again; re-asking about the same entry now would only put the same failure up twice.
+func (m Model) acceptKeyMigration(choice int) (tea.Model, tea.Cmd) {
+	if len(m.picker.migration) == 0 {
+		return m, nil
+	}
+	entry, rest := m.picker.migration[0], m.picker.migration[1:]
+
+	switch choice {
+	case keyMigrationMove:
+		m.transcript.addNote(m.migrateKeyNote(entry))
+	case keyMigrationNotNow:
+		m.transcript.addNote(fmt.Sprintf("%s keeps its key in config.yaml — the offer comes back at "+
+			"the next start-up", stripEscapes(entry)))
+	case keyMigrationNever:
+		m.transcript.addNote(m.keepPlaintextKeyNote(entry))
+	}
+
+	// The whole overlay is replaced rather than edited, so nothing of the answered pane — the
+	// filter above all — can survive into the next entry's question.
+	m.picker = picker{}
+	if len(rest) > 0 {
+		m.picker = picker{open: true, kind: pickerKeyMigration, migration: rest}
+	}
+	m.layout()
+	return m, nil
+}
+
+// migrateKeyNote performs the move and words what came of it. The seam does the whole of it — the
+// store write, the read-back through the very command it is about to persist, and the rewrite —
+// and reports the file it wrote, so the confirmation can name where to look.
+func (m Model) migrateKeyNote(entry string) string {
+	if m.opts.MigrateKey == nil {
+		return "moving a key is not available in this build"
+	}
+	path, err := m.opts.MigrateKey(entry)
+	if err != nil {
+		return fmt.Sprintf("could not move %s's key: %s", stripEscapes(entry), stripEscapes(err.Error()))
+	}
+	return fmt.Sprintf("%s's key is in %s now — %s reads it back with api-key-cmd",
+		stripEscapes(entry), stripEscapes(m.opts.KeyMigration.StoreName), stripEscapes(path))
+}
+
+// keepPlaintextKeyNote records the "never" answer and words it. The marker is a per-entry
+// acknowledgement that this key stays in the file (ADR 0035), so the note says how to take it back:
+// the line it wrote is the line to delete.
+func (m Model) keepPlaintextKeyNote(entry string) string {
+	if m.opts.KeepPlaintextKey == nil {
+		return "recording that answer is not available in this build"
+	}
+	path, err := m.opts.KeepPlaintextKey(entry)
+	if err != nil {
+		return fmt.Sprintf("could not record that answer for %s: %s",
+			stripEscapes(entry), stripEscapes(err.Error()))
+	}
+	return fmt.Sprintf("%s keeps its key in the file — %s records plaintext-key-ok: true, and "+
+		"deleting that line asks again", stripEscapes(entry), stripEscapes(path))
+}
