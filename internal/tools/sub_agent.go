@@ -66,6 +66,14 @@ type SubAgent struct{ toolSpec }
 // entry and is the registry handle Subset narrows on.
 func NewSubAgent() *SubAgent { return &SubAgent{toolSpec: subAgentSpec} }
 
+// PromptArgKeys declares `task` and `name` as delegation prompts (domain.PromptTool): both
+// carry prose written FOR the nested agent, never an action this host performs. The
+// dangerous-action guard therefore matches no rule against their text — a task that merely
+// NAMES a guarded path ("report on the readable git surfaces — .git/config") is a
+// description, and every tool call the child makes off the back of it is inspected at its
+// own action site, one level down.
+func (t *SubAgent) PromptArgKeys() []string { return []string{"task", "name"} }
+
 // Execute is never reached on the real path: dispatch recognises SubAgentToolName as the
 // recursion point and drives a nested Agent instead. Reaching it means the recursion point
 // was not wired, so it returns an error result rather than silently doing nothing.
@@ -77,8 +85,9 @@ func (t *SubAgent) Execute(_ context.Context, call domain.ToolCall) (domain.Tool
 	}, nil
 }
 
-// Compile-time proof the sub_agent tool carries NONE of the disposition markers — it is a
-// plain domain.Tool. The dispatch recursion point owns its blast radius (per-child, one level
+// Compile-time proof the sub_agent tool carries NONE of the disposition markers — its only
+// declaration is the prompt-carrying argument keys above, an inspection hint rather than a
+// disposition. The dispatch recursion point owns its blast radius (per-child, one level
 // down), so it must not be classified as read-only / workspace-writer / external / subprocess.
 var (
 	_ domain.Tool = (*SubAgent)(nil)

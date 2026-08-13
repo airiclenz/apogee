@@ -2,9 +2,17 @@ package tools
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
+
+// Compile-time proof sub_agent declares its prompt-carrying arguments (domain.PromptTool).
+// The guard's exemption for delegated prose hangs off this declaration: lose it and a task
+// that merely names a guarded path is hard-refused again.
+var _ domain.PromptTool = (*SubAgent)(nil)
 
 // TestSubAgentDescriptionInvitesConcurrentDelegations guards the one sentence that tells the
 // model it may fan out: the ADR 0039 concurrent dispatch is only ever exercised when the model
@@ -52,6 +60,33 @@ func TestSubAgentSchemaOffersAnOptionalName(t *testing.T) {
 	}
 	if len(schema.Required) != 1 || schema.Required[0] != "task" {
 		t.Errorf("required = %v, want [task] — the name must stay optional", schema.Required)
+	}
+}
+
+// TestSubAgentDeclaresBothArgumentsAsDelegationPrompts pins WHICH arguments the guard is
+// allowed to look away from. Both of sub_agent's arguments are prose for the child — the task
+// and the display name — so both are declared; a third argument added later is inspected by
+// default until it is deliberately listed here.
+func TestSubAgentDeclaresBothArgumentsAsDelegationPrompts(t *testing.T) {
+	t.Parallel()
+
+	got := domain.PromptArgKeys(NewSubAgent())
+
+	if want := []string{"task", "name"}; !slices.Equal(got, want) {
+		t.Errorf("PromptArgKeys = %v, want %v", got, want)
+	}
+}
+
+// TestPromptArgKeysAreNoneForAToolThatDeclaresNone holds the safe default at the helper: a
+// tool that makes no declaration exempts nothing. terminal is the case that matters — its
+// `command` is prose-shaped text this host DOES execute, so every byte of it stays inspected.
+func TestPromptArgKeysAreNoneForAToolThatDeclaresNone(t *testing.T) {
+	t.Parallel()
+
+	got := domain.PromptArgKeys(NewTerminal(t.TempDir()))
+
+	if got != nil {
+		t.Errorf("terminal declares prompt keys %v, want none — its command text is acted on", got)
 	}
 }
 

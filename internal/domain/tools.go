@@ -81,6 +81,31 @@ func ReadSourceArgKeys(t Tool) []string {
 	return nil
 }
 
+// PromptTool is an optional interface a Tool implements to declare which of its argument
+// keys carry instruction PROSE addressed to ANOTHER agent — a delegated task, never
+// something this host itself acts on. The dangerous-action guard consults it so no rule
+// matches text the tool only forwards: a delegation prompt that merely NAMES a guarded path
+// is a description, and the delegated agent's own tool calls are each inspected at the
+// action site one level down, so the exemption loses no coverage. It declares ARGUMENT
+// ROLES, not trust: a key whose value this host would itself execute, open or write through
+// must NOT be declared here. PromptArgKeys is the helper the guard calls rather than the
+// type assertion directly.
+type PromptTool interface {
+	Tool
+	// PromptArgKeys returns the argument keys whose value is prose for another agent.
+	PromptArgKeys() []string
+}
+
+// PromptArgKeys returns the argument keys t has declared as delegation prompts via
+// PromptTool. A tool that makes no such declaration — including a nil t — has none, the
+// safe default: every one of its arguments stays fully inspected.
+func PromptArgKeys(t Tool) []string {
+	if pt, ok := t.(PromptTool); ok {
+		return pt.PromptArgKeys()
+	}
+	return nil
+}
+
 // SubprocessTool is an optional interface a Tool implements to declare that it launches
 // an OS subprocess (a shell, an interpreter, a child program) whose blast radius is the
 // whole filesystem unless OS-confined — the unbounded surface ADR 0012 fences with the

@@ -41,7 +41,19 @@
   gaps, PATH scoping, read-path disclosure); any change to the rule patterns themselves
   or to `terminal.go`'s result content format.
 
-## 1. Domain prompt-keys class, declared by sub_agent
+## 1. Domain prompt-keys class, declared by sub_agent — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): added `internal/domain/doc.go` beyond the item's Files list — its package
+map enumerates the marker interfaces tools.go carries, so the new `PromptTool` goes in the same
+sentence (one-word upkeep; the repo's package-map convention would otherwise go stale). No other
+plan item owns that file — item 3 reconciles `internal/security/doc.go` and the confinement
+contract only.
+NOTES (2026-08-13): the compile-time proof comment in `sub_agent.go` said sub_agent "is a plain
+domain.Tool"; reworded to say its only declaration is the prompt-key one (an inspection hint, not
+a disposition marker), since that sentence would otherwise be false. The assertion list itself is
+unchanged — no disposition marker was added.
+NOTES (2026-08-13): no CHANGELOG entry — this item adds an unread seam and changes no observable
+behaviour; the user-visible fix lands with item 2.
 
 **What:** In `internal/domain/tools.go`, add a `PromptTool` interface — `Tool` plus
 `PromptArgKeys() []string` — and a nil-tolerant helper
