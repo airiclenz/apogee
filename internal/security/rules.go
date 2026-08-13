@@ -50,7 +50,7 @@ func DefaultDangerousRules() []Rule {
 			ID:         "write-ssh-keys",
 			Tier:       TierHardRefuse,
 			Reason:     "write or delete under the SSH key directory (~/.ssh)",
-			Pattern:    `(?:~|/home/[^/\s]+|/root|\$home)/\.ssh\b`,
+			Pattern:    `(?:~|/home/[^/\s]+|/users/[^/\s]+|/root|\$home)/\.ssh\b`,
 			WritesOnly: true,
 		},
 		// Writes targeting credential / persistence files an autonomous mistake must
@@ -60,7 +60,7 @@ func DefaultDangerousRules() []Rule {
 			ID:     "write-credential-persistence",
 			Tier:   TierHardRefuse,
 			Reason: "write to a credential or shell-persistence file",
-			Pattern: `(?:~|/home/[^/\s]+|/root|\$home)/` +
+			Pattern: `(?:~|/home/[^/\s]+|/users/[^/\s]+|/root|\$home)/` +
 				`(?:\.bashrc|\.bash_profile|\.zshrc|\.profile|\.aws/credentials|\.config/gcloud|\.netrc|\.npmrc)\b`,
 			WritesOnly: true,
 		},

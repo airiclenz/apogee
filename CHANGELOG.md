@@ -443,6 +443,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The SSH-key and credential dangerous-action rules now fire on a Mac.** Both rules anchored on
+  `~`, `/home/<name>`, `/root` and `$HOME` only, so on the desktop persona — macOS, where a home is
+  `/Users/<name>` — a write to `/Users/alice/.ssh/id_rsa` or `/Users/alice/.aws/credentials` matched
+  nothing and the hard-refuse floor never fired for the exact paths it exists to protect. Both
+  patterns now spell the macOS home alongside the Linux one, the way the newer
+  `write-apogee-control-plane` rule already did. Precision is unchanged: an ordinary file in a macOS
+  home, `~/.aws/config` (not `credentials`), and a name that merely starts with `.ssh` still pass.
+
 - **`terminal` and `python_exec` no longer let the workspace supply the programs their child
   resolves.** Both tools inherit your environment as it stands — that is what makes them usable for
   real development — and that included a `PATH` naming directories inside the workspace: an

@@ -143,7 +143,12 @@ survives unchanged; `pythonSafePathVar` still appended last.
 
 **Commit:** `fix(tools): terminal and python_exec scope PATH entries out of the workspace`
 
-## 3. The ssh-key and credential rules learn the macOS home
+## 3. The ssh-key and credential rules learn the macOS home — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the two rules had no existing coverage in `rules_test.go` at all, so the item's
+rows landed as a new `TestDefaultDangerousRules_HomeAnchoredRulesMatchTheMacOSHome` table rather
+than as additions to the existing control-plane tables (whose stated scope is `.git/` and
+`~/.apogee` only); it carries three near-miss rows, not one.
 
 **What:** the `write-ssh-keys` (`internal/security/rules.go:53`) and
 `write-credential-persistence` (`:63-64`) dangerous-action rules anchor on

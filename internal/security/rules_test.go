@@ -280,6 +280,51 @@ func TestDefaultDangerousRules_ControlPlaneNearMissesNotBlocked(t *testing.T) {
 	}
 }
 
+func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheMacOSHome(t *testing.T) {
+	t.Parallel()
+	// The desktop persona is macOS, where a home is `/Users/<name>` rather than
+	// `/home/<name>` — so the home-anchored rules spell both. `normalize` lower-cases the
+	// inspectable text (dangerous.go), which is why the patterns carry `/users/`.
+	// Precision-over-recall still holds: a macOS home path that is not an SSH key or one
+	// of the named credential / persistence files is a normal coding step (wantRule "").
+	g := DefaultDangerousActionGuard()
+
+	cases := []struct {
+		name     string
+		call     domain.ToolCall
+		wantRule string
+	}{
+		{"write an SSH key on macOS", writeCall("/Users/alice/.ssh/id_rsa"), "write-ssh-keys"},
+		{"write AWS credentials on macOS", writeCall("/Users/alice/.aws/credentials"), "write-credential-persistence"},
+		{"write a zsh rc on macOS", writeCall("/Users/alice/.zshrc"), "write-credential-persistence"},
+		{"delete an SSH key on macOS", terminalCall("rm -f /Users/alice/.ssh/id_ed25519"), "write-ssh-keys"},
+		{"write a project file in a macOS home", writeCall("/Users/alice/code/app/main.go"), ""},
+		{"write the AWS config, not its credentials", writeCall("/Users/alice/.aws/config"), ""},
+		{"write a file whose name merely starts with .ssh", writeCall("/Users/alice/.sshconfig.bak"), ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(tc.call, nil)
+
+			if tc.wantRule == "" {
+				if d.Triggered() {
+					t.Fatalf("Inspect(%q) wrongly triggered: tier=%v rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
+				}
+				return
+			}
+			if d.Tier != TierHardRefuse {
+				t.Fatalf("Inspect(%q) tier = %v, want TierHardRefuse (rule=%q)", tc.name, d.Tier, d.RuleID)
+			}
+			if d.RuleID != tc.wantRule {
+				t.Errorf("Inspect(%q) rule = %q, want %q", tc.name, d.RuleID, tc.wantRule)
+			}
+		})
+	}
+}
+
 func TestMergeDangerousRules_DefaultRulesetMergesCleanly(t *testing.T) {
 	t.Parallel()
 	// The real default ruleset round-trips through a no-op merge unchanged in count.

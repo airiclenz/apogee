@@ -109,12 +109,6 @@ working tree on 2026-08-12 and re-verified on 2026-08-13.
   of item 8's plumbing reaches it. Ratified design call 2 — "symlinked reads: follow, but show the
   resolution" — is therefore only half-landed; the write path got the line, the read path did not.
 
-- [ ] The `write-ssh-keys` and `write-credential-persistence` dangerous-action rules
-  (`internal/security/rules.go:53,66`) anchor on `(?:~|/home/[^/\s]+|/root|\$home)` with no macOS
-  `/users/<name>` alternative, so `/Users/<name>/.ssh/id_rsa` and `/Users/<name>/.aws/credentials`
-  never match — confirmed inert on the desktop persona. The newer `write-apogee-control-plane` rule
-  (`:104`) already spells the macOS home; these two were not updated alongside it.
-
 - [ ] `/skills` still re-walks the skill source dirs synchronously on the Bubble Tea update
   goroutine: `runSkills` calls `m.opts.ReloadSkills()` inline (`internal/tui/skills.go:45`). Item
   12 moved the merged `/` menu's re-scan off that goroutine but left this trigger on it, so the
