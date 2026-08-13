@@ -393,6 +393,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A Schedule's Firing now runs under the `max-output-tokens:` of the server the session is ON, not
+  the one it launched against.** Every other fact a Firing composes itself from is read at fire
+  time — the endpoint, the model, the system prompt, the Mechanism set, the fan-out width, the
+  context window — but the reply ceiling was not: it was inherited from the Config copied at launch,
+  so after a `/server` move a Firing was bounded by a ceiling belonging to a server the session had
+  left. A Firing that moved onto a roomier entry was cut off early, and one that moved onto a
+  tighter entry could run past the very ceiling an operator set to stop it — unattended, which is
+  the case the cap exists for. The ceiling now travels with the rest of the per-Firing resolution,
+  and an entry that pins nothing hands the derivation back to the engine's own reply budget rather
+  than un-bounding anything: a resolution that says NOTHING about the ceiling leaves the Firing's
+  existing bound standing.
+
 - **A `max-output-tokens:` edited on the `servers:` entry the session is ON now applies at once, not
   at the next bind or `/server` move.** The window pin beside it started riding the rebind the moment
   it committed; the reply ceiling could not, because `RebindSpec` carried no ceiling to hand the

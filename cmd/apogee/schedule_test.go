@@ -313,6 +313,91 @@ func TestScheduleFiringCarriesTheParallelAgentsWidth(t *testing.T) {
 	}
 }
 
+// A Firing's reply is bounded by the entry the session is ON, never by the one it launched against
+// (ADR 0046). The ceiling is a property of the SLOT, like the width above it, and the base Config a
+// Firing copies was seeded with the LAUNCH entry's `max-output-tokens:` (wire_boot.go) — so a Firing
+// raised after a `/server` move would be bounded by a server this session has left unless the
+// per-Firing resolution restates the number, which is exactly the case a runaway reply must not
+// happen in.
+//
+// The unpinned case is the same invariant read from the other end: an entry that pins nothing
+// resolves to the STATED zero, which ADR 0046 decision 3 defines as "derive the cap from the reply
+// budget again, clamped" — never "no cap" — and which is the very number an interactive session that
+// moved onto that entry is handed (sessionMover.move passes the entry's field as written). The third
+// state, a spec SILENT about the ceiling, leaves whatever is bound standing; the composition root's
+// resolver always has something to say, so that branch is the engine's own nil contract and is pinned
+// where it lives (internal/agent/rebind_test.go).
+//
+// Composed against the package's runner seam rather than a live model, which is why this test does
+// not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
+func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
+	// The launch entry's own ceiling — the number seeded onto the Config a Firing copies, and the one
+	// that must not survive the move below.
+	const launchCap = 2048
+
+	for _, tt := range []struct {
+		name    string
+		moved   config.ServerEntry
+		wantCap int
+	}{
+		{
+			name:    "the moved-onto entry pins its own ceiling",
+			moved:   config.ServerEntry{Name: "roomy", MaxOutputTokens: 8192},
+			wantCap: 8192,
+		},
+		{
+			name:    "the moved-onto entry pins nothing",
+			moved:   config.ServerEntry{Name: "unpinned"},
+			wantCap: 0,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			roots, err := resolveRoots(t.TempDir(), t.TempDir())
+			if err != nil {
+				t.Fatalf("resolveRoots: %v", err)
+			}
+			stub := &stubRunner{}
+			prevRunner := runOnce
+			runOnce = stub.once
+			t.Cleanup(func() { runOnce = prevRunner })
+
+			// The session as it LAUNCHED: bound to an entry pinning launchCap, which reached both the
+			// startup snapshot and the Config the scheduler copies.
+			launchOpts := config.Options{HostAlias: "launch", StartupMaxOutputTokens: launchCap}
+			base := apogee.Config{WorkspaceDir: roots.workspace}
+			base.Context.MaxOutputTokens = launchCap
+			live := newLiveSettings(launchOpts, nil)
+			// ...and the move: the one call `/server` makes once the engine's own switch committed
+			// (sessionMover.move), which is what makes the moved-onto entry's pins this session's.
+			live.followEntry(tt.moved)
+
+			w := scheduleWiring{
+				base:  base,
+				opts:  launchOpts,
+				roots: roots,
+				live:  live,
+				binding: func() upstreamBinding {
+					return upstreamBinding{Endpoint: "http://moved.invalid", Model: "bound-model"}
+				},
+				width: func() int { return 1 },
+			}
+
+			firing := schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan}
+			if _, err := w.fire(context.Background(), firing); err != nil {
+				t.Fatalf("fire: %v", err)
+			}
+			if !stub.called {
+				t.Fatal("the firing composed no run at all")
+			}
+			if got := stub.spec.Config.Context.MaxOutputTokens; got != tt.wantCap {
+				t.Errorf("the firing runs at Context.MaxOutputTokens = %d, want the moved-onto entry's "+
+					"%d — it carried the LAUNCH server's ceiling %d instead of the ceiling of the "+
+					"server this session is on", got, tt.wantCap, launchCap)
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------------
 // What the Fire seam reports back
 // ----------------------------------------------------------------------------

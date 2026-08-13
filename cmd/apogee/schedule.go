@@ -100,6 +100,18 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	cfg.Model, cfg.SystemPrompt = spec.Model, spec.SystemPrompt
 	cfg.EnableMechanisms = spec.EnableMechanisms
 	cfg.Context.MaxContextTokens = spec.MaxContextTokens
+	// And the other bound the server states: how big ONE reply of this Firing may be (ADR 0046). It is
+	// taken off the spec for the window's own reason — the base Config was seeded with the LAUNCH
+	// entry's `max-output-tokens:` (wire_boot.go), so a Firing raised after a `/server` move would
+	// otherwise be bounded by the ceiling of a server this session has left, and an unattended run is
+	// precisely the one a runaway reply must not happen in. Guarded exactly as Agent.Rebind guards it
+	// (rebind.go): a spec that says NOTHING about the ceiling — a nil — leaves the bound this Config
+	// already carries standing, because un-bounding a reply by omission is the one thing a cap may
+	// never do, while a stated ZERO is the operator having dropped the pin and hands the derivation
+	// back to the engine's own reply budget, never "no cap".
+	if spec.MaxOutputTokens != nil {
+		cfg.Context.MaxOutputTokens = *spec.MaxOutputTokens
+	}
 	// The Model profile the same resolution matched (ADR 0044). Taken off the spec rather than left
 	// on the base Config for the reason every other field here is: the base carries what the SESSION
 	// launched with, and a Firing that runs on another model must read responses in that model's
