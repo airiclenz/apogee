@@ -604,6 +604,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The `rm -rf` hard-refuse rules now spell the macOS home in their own system-path list.**
+  `rm-rf-root-home-system` and `rm-fr-root-home-system` (`internal/security/rules.go`) listed
+  `home` but not `users`, so the enumeration that documents what a "root, home, or system path"
+  means was missing the spelling the desktop persona actually uses — the same `/users/` the
+  `write-ssh-keys` and `write-credential-persistence` rules already carry. Both patterns now list
+  it. Behaviour is unchanged today: the alternation's leading bare `/` branch already matched every
+  absolute target, so `rm -rf /Users/alice` and `rm -fr /Users/alice` hard-refused before this
+  change and are now pinned by tests in `TestDangerousActionGuard_Tier1HardRefuse` and
+  `TestDefaultDangerousRules_HomeAnchoredRulesMatchTheMacOSHome`. The fix matters the moment that
+  bare `/` branch is ever narrowed — at which point the enumeration becomes the live boundary and
+  a missing `users` would be a real hole.
+
 - **A copy now also reaches the clipboard of a terminal that ignores OSC 52.** Selecting text with
   the mouse flashed `copied N chars` and handed the selection to `tea.SetClipboard` — the OSC 52
   escape, which is cross-terminal and survives an SSH hop, and which several terminals drop on the

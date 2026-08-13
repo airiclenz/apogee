@@ -20,13 +20,16 @@ func DefaultDangerousRules() []Rule {
 		// `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`, and root/home/system absolute
 		// targets. The target alternation is the precision boundary: a relative or
 		// ./ target (./build, node_modules, src/) never matches, so destructive
-		// recursive deletes of project files stay allowed.
+		// recursive deletes of project files stay allowed. The system-path list spells
+		// `users` beside `home` because the desktop persona is macOS, where a home is
+		// `/Users/<name>` — lower-case, because `normalize` (dangerous.go) lower-cases
+		// the inspected text, the same `/users/` spelling the write-* rules below carry.
 		{
 			ID:     "rm-rf-root-home-system",
 			Tier:   TierHardRefuse,
 			Reason: "recursive force-delete of a root, home, or system path",
 			Pattern: `\brm\s+(?:-[a-z]*\s+)*-?[a-z]*r[a-z]*f[a-z]*\s+` +
-				`(?:/|~|\$home|/\*|/(?:etc|usr|bin|sbin|lib|boot|dev|var|sys|proc|root|home|opt)\b)`,
+				`(?:/|~|\$home|/\*|/(?:etc|usr|bin|sbin|lib|boot|dev|var|sys|proc|root|home|users|opt)\b)`,
 		},
 		// `rm -fr` flag-order variant of the above (force then recurse).
 		{
@@ -34,7 +37,7 @@ func DefaultDangerousRules() []Rule {
 			Tier:   TierHardRefuse,
 			Reason: "recursive force-delete of a root, home, or system path",
 			Pattern: `\brm\s+(?:-[a-z]*\s+)*-?[a-z]*f[a-z]*r[a-z]*\s+` +
-				`(?:/|~|\$home|/\*|/(?:etc|usr|bin|sbin|lib|boot|dev|var|sys|proc|root|home|opt)\b)`,
+				`(?:/|~|\$home|/\*|/(?:etc|usr|bin|sbin|lib|boot|dev|var|sys|proc|root|home|users|opt)\b)`,
 		},
 		// Classic shell fork bomb `:(){ :|:& };:` (whitespace-normalized).
 		{

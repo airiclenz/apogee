@@ -42,6 +42,8 @@ func TestDangerousActionGuard_Tier1HardRefuse(t *testing.T) {
 		{"rm -rf /etc", terminalCall("rm -rf /etc")},
 		{"rm -rf /usr/lib", terminalCall("rm -rf /usr/lib")},
 		{"rm -fr flag order", terminalCall("rm -fr /var")},
+		{"rm -rf a macOS home", terminalCall("rm -rf /Users/alice")},
+		{"rm -fr a macOS home", terminalCall("rm -fr /Users/alice")},
 		{"rm -rf with extra flags", terminalCall("rm -v -rf /boot")},
 		{"fork bomb", terminalCall(":(){ :|:& };:")},
 		{"write to ~/.ssh", writeCall("~/.ssh/authorized_keys")},

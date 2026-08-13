@@ -298,6 +298,8 @@ func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheMacOSHome(t *testing.T) 
 		{"write AWS credentials on macOS", writeCall("/Users/alice/.aws/credentials"), "write-credential-persistence"},
 		{"write a zsh rc on macOS", writeCall("/Users/alice/.zshrc"), "write-credential-persistence"},
 		{"delete an SSH key on macOS", terminalCall("rm -f /Users/alice/.ssh/id_ed25519"), "write-ssh-keys"},
+		{"recursively delete a macOS home", terminalCall("rm -rf /Users/alice"), "rm-rf-root-home-system"},
+		{"recursively delete a macOS home, flag order", terminalCall("rm -fr /Users/alice"), "rm-fr-root-home-system"},
 		{"write a project file in a macOS home", writeCall("/Users/alice/code/app/main.go"), ""},
 		{"write the AWS config, not its credentials", writeCall("/Users/alice/.aws/config"), ""},
 		{"write a file whose name merely starts with .ssh", writeCall("/Users/alice/.sshconfig.bak"), ""},

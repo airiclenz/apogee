@@ -86,7 +86,21 @@ succeeds and `ls "docs/plans/2026-08-13 - 03 - open-defects-fix-wave-plan.md"` f
 
 ---
 
-## 2. `rm -rf /Users/...` joins the hard-refuse floor
+## 2. `rm -rf /Users/...` joins the hard-refuse floor — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): The item's premise is factually wrong and the plan/ISSUES.md entry it cites
+(`ISSUES.md:102-105`) with it — `rm -rf /Users/alice` did NOT pass before this change. Both `rm`
+patterns open their target alternation with a bare `/`, which matches ANY absolute target, so the
+`/(?:etc|usr|…|home|opt)` enumeration is unreachable in these two rules today. Verified by probe
+before editing: `rm -rf /Users/alice` → hard-refuse `rm-rf-root-home-system`; `rm -fr /Users/alice`
+→ hard-refuse `rm-fr-root-home-system`. The edit was made as written anyway (it is behaviour-
+neutral, corrects the enumeration's documented intent, and pre-empts a real hole if the bare `/`
+branch is ever narrowed), and the prescribed tests were added as regression pins. Item 12 should
+still remove the ISSUES entry, but the closed trail must not claim a gap was closed.
+NOTES (2026-08-13): Acceptance ran as `go build ./internal/security/ && go test
+./internal/security/` instead of the item's `go build ./...` — a concurrently-implemented item's
+in-flight tree breaks the repo-wide build (`internal/keystore/keystore.go:177: undefined:
+redactKey`, item 3). Nothing in this item's packages is affected; `go vet` and `gofmt -l` are clean.
 
 Depends on item 1.
 
