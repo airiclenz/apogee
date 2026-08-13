@@ -29,8 +29,11 @@ func (w *rootWiring) options() tui.Options {
 	return tui.Options{
 		// Both upstream facts are now honestly launch-time-only: Model is the configured pin ("" on
 		// a cold start, where the footer says "connecting…" until the first beat binds one), and
-		// ContextWindow is the `context-window:` pin (0 when unpinned). Neither is a discovery
-		// result any more — the heartbeat and the rebind verb own everything after launch.
+		// ContextWindow is the `context-window:` pin in force for the server this session STARTS on
+		// — the startup entry's own pin over the top-level key (ResolveContextWindow), which is the
+		// very number the bind handed the engine, so the gauge and the Budget open on one server's
+		// window. 0 when neither scope pins one. Neither is a discovery result any more — the
+		// heartbeat and the rebind verb own everything after launch.
 		Model:     w.opts.Model,
 		Endpoint:  w.opts.Endpoint,
 		Mode:      w.mode,
@@ -40,7 +43,7 @@ func (w *rootWiring) options() tui.Options {
 		// names a path — /skills telling an empty catalog where discovery looked — names the folder
 		// the run actually walks rather than the ~/.apogee default it may not be using.
 		ConfigHome:    w.roots.config,
-		ContextWindow: w.opts.ContextWindow,
+		ContextWindow: w.live.window(),
 		HostAlias:     w.opts.HostAlias,
 		// The two upstream seams (ADR 0024): the monitor observes on the TUI's cadence, and the
 		// verb applies what the observation implies. Wiring both is what makes the display live.

@@ -302,8 +302,12 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// set matched against its fingerprint, and the enable list with the manual-suppresses-a-set
 	// rule applied. The observed window is passed as unknown — nothing beats here to observe one —
 	// so a `context-window:` pin binds the Budget and an unpinned run leaves it inactive, which
-	// for one bounded prompt is the honest degrade rather than a guess.
-	spec, notices, err := rebindSpecFor(*opts, roots, manualIDs, opts.Model, 0, opts.ContextWindow)
+	// for one bounded prompt is the honest degrade rather than a guess. The pin is the bound
+	// entry's own over the top-level key (ResolveContextWindow), honoured here for the reason its
+	// reply ceiling below is: one configuration, so a headless run budgets against the same window
+	// a session on that entry would.
+	spec, notices, err := rebindSpecFor(*opts, roots, manualIDs, opts.Model, 0,
+		config.ResolveContextWindow(opts.StartupContextWindow, opts.ContextWindow))
 	if err != nil {
 		return notStarted(err)
 	}

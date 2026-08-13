@@ -16,8 +16,8 @@ import (
 )
 
 // startupEntry re-assembles the server selection resolved (ADR 0036) from the flattened fields it
-// left on options: the endpoint, the key, the discovery hint, the fan-out pin, the reply cap, and
-// the alias —
+// left on options: the endpoint, the key, the discovery hint, the fan-out pin, the reply cap, the
+// window pin, and the alias —
 // which for a configured entry IS its `servers:` name and for the ephemeral override entry is the
 // endpoint's host. It exists so the bind step below has ONE input shape, the ServerEntry, whether it
 // is binding the startup server or the one a human picked out of the list.
@@ -29,6 +29,7 @@ func startupEntry(opts config.Options) config.ServerEntry {
 		Model:           opts.Model,
 		ParallelAgents:  opts.StartupParallelAgents,
 		MaxOutputTokens: opts.StartupMaxOutputTokens,
+		ContextWindow:   opts.StartupContextWindow,
 	}
 }
 
@@ -43,9 +44,9 @@ func startupEntry(opts config.Options) config.ServerEntry {
 // runs within seconds, for a late bind exactly as it does for the cold start a launch-time bind
 // with no model already is.
 type serverBinder struct {
-	// cfg is everything about the session the server does not decide. The five fields it does —
-	// endpoint, key, model hint, fan-out width, reply cap — are overwritten from the entry, so
-	// nothing that reached this struct can contradict the server being bound.
+	// cfg is everything about the session the server does not decide. The six fields it does —
+	// endpoint, key, model hint, fan-out width, reply cap, context window — are overwritten from the
+	// entry, so nothing that reached this struct can contradict the server being bound.
 	cfg     apogee.Config
 	resumed *session.Record
 	engine  *lateEngine
@@ -79,6 +80,14 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// the honest absent value: the engine then derives the cap from the reply room its Budget
 	// already reserves out of the window.
 	cfg.Context.MaxOutputTokens = entry.MaxOutputTokens
+	// And the sixth, the number that ceiling is derived from when nobody pins it: what this server
+	// BOUNDS a session to (ADR 0045 decision 3). The entry's own `context-window:` outranks the
+	// top-level key already in cfg — the precedence config.ResolveContextWindow spells, single-sited
+	// there, the same call the `/server` move makes — and it goes in through the Config for the
+	// reply cap's reason: a session that STARTS on a pinned entry must budget against that pin from
+	// its first Turn rather than from the first beat that rebinds. Unpinned at both scopes it stays
+	// 0, the honest "unknown until the first beat binds one".
+	cfg.Context.MaxContextTokens = config.ResolveContextWindow(entry.ContextWindow, cfg.Context.MaxContextTokens)
 
 	if err := b.engine.Bind(func() (*apogee.Agent, error) {
 		agent, err := buildAgent(cfg, b.resumed)

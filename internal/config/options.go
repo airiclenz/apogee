@@ -104,6 +104,18 @@ type Options struct {
 	// composition root carries it into the engine's ContextConfig.
 	StartupMaxOutputTokens int
 
+	// startupContextWindow is the SELECTED startup entry's own `context-window:` value, exactly as
+	// the user wrote it: 0 (the key absent) ⇒ that entry pins nothing, so the top-level
+	// `context-window:` key answers and, unpinned there too, the first beat's observation binds the
+	// window (ADR 0045 decision 3). It is a fact about the entry this session starts ON for the
+	// reason the two fields above are — the window bounds the SLOT, not the run — and the ephemeral
+	// `--endpoint`/`APOGEE_ENDPOINT` override entry carries none, which leaves an override run on
+	// the top-level key. Resolved-not-flag-bound; ApplyConfig sets it from the startup entry, and the
+	// composition root resolves it over that key (ResolveContextWindow) at the bind, so a session
+	// that STARTS on a pinned entry budgets against the pin from its first Turn rather than from its
+	// first beat.
+	StartupContextWindow int
+
 	// prebound says this session starts with NO upstream bound, and why — the zero value being the
 	// ordinary start, on the server selection determined. It is the one resolution outcome that
 	// does not come out of ApplyConfig's write-back but out of its refusal: the root command

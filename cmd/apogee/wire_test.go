@@ -3941,3 +3941,123 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 		t.Errorf("the next rebind's pin = %d; want the top-level 16384 back", pin)
 	}
 }
+
+// A session that STARTS on an entry pinning its own `context-window:` budgets against that pin from
+// its first Turn, not from its first beat. The pin is flattened onto options at resolution and rides
+// the ServerEntry the bind step takes, so it reaches the Config the Agent is CONSTRUCTED from — the
+// window the launch projection hands the display is that same resolved number, which is the only
+// place a test can read the bind's answer back. The rebind is the other half of the same defect: the
+// latch has to be seeded too, or the first beat would bind the observed window over the pin seconds
+// after the session opened.
+//
+// The unpinned row is what keeps the precedence honest in the other direction: an entry that pins
+// nothing leaves the top-level `context-window:` key answering, exactly as it did before the entry
+// could pin anything at all.
+func TestStartupBindHonoursTheEntrysContextWindow(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		entryPin  int
+		wantBound int
+	}{
+		{name: "the startup entry's own pin outranks the top-level key", entryPin: 65536, wantBound: 65536},
+		{name: "an entry pinning nothing leaves the top-level key answering", entryPin: 0, wantBound: 16384},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rec := &recordingLauncher{}
+			opts := config.Options{
+				Endpoint:  "http://127.0.0.1:1111",
+				Model:     "fake",
+				Mode:      "ask-before",
+				HostAlias: "workstation",
+				Workspace: t.TempDir(),
+				ConfigDir: t.TempDir(),
+				// The two scopes, as ApplyConfig leaves them: the top-level key the whole run
+				// carries, and the SELECTED entry's own pin flattened off the `servers:` list.
+				ContextWindow:        16384,
+				StartupContextWindow: tt.entryPin,
+				Servers: []config.ServerEntry{
+					{Name: "workstation", Endpoint: "http://127.0.0.1:1111", ContextWindow: tt.entryPin},
+				},
+				AutoCompact: true,
+			}
+
+			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+				t.Fatalf("runRoot: %v", err)
+			}
+			if rec.opts.ContextWindow != tt.wantBound {
+				t.Errorf("tui.Options.ContextWindow = %d; want %d — the window the bind handed the "+
+					"engine, so the gauge and the Budget open on one server's number",
+					rec.opts.ContextWindow, tt.wantBound)
+			}
+			// And the first beat cannot undo it: the rebind that observation drives re-resolves the
+			// pin off the same latch, so a server advertising 131,072 does not displace it.
+			result, err := rec.opts.Rebind("fake", 131072)
+			if err != nil {
+				t.Fatalf("Rebind: %v", err)
+			}
+			if result.ContextWindow != tt.wantBound {
+				t.Errorf("the first beat's bound window = %d; want the pinned %d rather than the "+
+					"observed 131072", result.ContextWindow, tt.wantBound)
+			}
+		})
+	}
+}
+
+// The `servers:` row's live apply reaches the bound entry's window pin as well as its fan-out width:
+// a `context-window:` edited on the entry this session is ON is an ADR 0037 key like every other, so
+// the latch the next rebind resolves against re-derives from the re-read list rather than keeping
+// what the file said at the last move. Clearing it hands the window back to the top-level key.
+func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	write := func(pin string) {
+		t.Helper()
+		body := "servers:\n  - name: here\n    endpoint: http://127.0.0.1:1111\n" + pin
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+	}
+
+	// The holder as a startup bind onto `here` leaves it: the entry's own 32,768 latched over the
+	// top-level 16,384.
+	live := newLiveSettings(config.Options{
+		ContextWindow: 16384, HostAlias: "here", StartupContextWindow: 32768,
+	}, nil)
+	if got := live.window(); got != 32768 {
+		t.Fatalf("the bound window = %d; want the startup entry's 32768", got)
+	}
+	apply := applySettingFor(settingsApplier{live: live, configPath: path})
+
+	write("    context-window: 65536\n")
+	if _, err := apply("servers", ""); err != nil {
+		t.Fatalf("apply servers: %v", err)
+	}
+	if _, _, pin := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
+		t.Errorf("the next rebind's pin = %d; want the edited 65536 — the latch went stale", pin)
+	}
+
+	write("")
+	if _, err := apply("servers", ""); err != nil {
+		t.Fatalf("apply servers with the pin removed: %v", err)
+	}
+	if _, _, pin := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 16384 {
+		t.Errorf("the next rebind's pin = %d; want the top-level 16384 back once the entry pins nothing", pin)
+	}
+
+	// A list that no longer names this session's server leaves the pin exactly where it was: the
+	// file stopped describing the server, which is not the server changing.
+	live.followEntry(config.ServerEntry{Name: "here", ContextWindow: 65536})
+	if err := os.WriteFile(path, []byte("servers:\n  - name: elsewhere\n    endpoint: http://127.0.0.1:2222\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := apply("servers", ""); err != nil {
+		t.Fatalf("apply servers naming another entry: %v", err)
+	}
+	if _, _, pin := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
+		t.Errorf("the next rebind's pin = %d; want the bound entry's 65536 kept", pin)
+	}
+}

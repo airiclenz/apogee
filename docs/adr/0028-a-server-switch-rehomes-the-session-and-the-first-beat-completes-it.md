@@ -265,5 +265,20 @@ server's ceiling (or at one derived from the old server's window), and the entry
 reached a moved session at no point at all — the rebind seconds later bound the new server's
 observation over it. The pin is now held beside the top-level key at the composition root and is
 what the rebinds after a move resolve against, so the footer's gauge, the Budget and the ceiling on
-the wire all describe the server the session is actually on. A first bind is unchanged and still
-reads only the top-level key.
+the wire all describe the server the session is actually on.
+
+**Follow-up (2026-08-13) — the BIND resolves the same pin.** The sentence this amendment first
+closed with said a first bind was unchanged and still read only the top-level key. That was the
+other half of the same defect: a session that STARTS on a pinned entry — the determined startup, a
+pre-bound session's first pick, a headless run — budgeted against the top-level window until its
+first beat, because the entry's `context-window:` was never flattened onto `config.Options` the way
+`max-output-tokens:` already was. So it is (`StartupContextWindow`), it rides the `ServerEntry` the
+bind step takes, and `serverBinder.bind` resolves it over the top-level key through the same
+`config.ResolveContextWindow` the move calls — into the `Config` the Agent is CONSTRUCTED from,
+because a bind has no engine to push at yet and the pin has to bound the session's first Turn. The
+latch the move writes is seeded from the same flattened field, so the first beat's rebind re-resolves
+against the entry rather than binding that server's observation over its pin. A live `servers:` edit
+re-derives the latch from the re-read list, matched back by name, exactly as the fan-out cap's own
+pin is re-derived (`parallelAgentsCap.relist`) — the ADR 0037 rule that a key moved in the pane is in
+force in the running session. Nothing about the ranks changed: the entry's pin outranks the top-level
+key, and neither pinned is still 0.

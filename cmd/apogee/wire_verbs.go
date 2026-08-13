@@ -153,9 +153,9 @@ func (w *rootWiring) recordServerChoice(name string) (bool, error) {
 // bindServer is the same resolution as the switch, ending in a CONSTRUCTION rather than a move. It
 // is the only way out of the pre-bound state, and it answers with what a switch answers so the
 // display adopts a first binding exactly as it adopts a move — the endpoint now on the wire, the
-// entry's name as the alias, and the global window pin, which was never per-server. The binder
-// refuses a second construction, so an already-bound session is told to use `/server` instead of
-// quietly growing a second engine.
+// entry's name as the alias, and the window in force on the server just bound. The binder refuses a
+// second construction, so an already-bound session is told to use `/server` instead of quietly
+// growing a second engine.
 func (w *rootWiring) bindServer(name string) (tui.ServerSwitchResult, error) {
 	entry, err := findServer(w.live.choices(w.opts), name)
 	if err != nil {
@@ -168,9 +168,14 @@ func (w *rootWiring) bindServer(name string) (tui.ServerSwitchResult, error) {
 	// arrives ON an entry, so a pre-bound start that binds the launcher-fronted server has the
 	// integration from that moment. A refused bind installs nothing.
 	w.launcherPath.follow(entry)
+	// And the same latch, for the switch's reason (liveSettings.followEntry): the binder has already
+	// handed the engine this entry's window, and without the latch the FIRST beat's rebind would
+	// re-resolve from the top-level key alone and bind that server's observation over the number its
+	// entry pinned. It follows the bind, so a refused construction latches nothing.
+	w.live.followEntry(entry)
 	return tui.ServerSwitchResult{
 		Endpoint:      entry.Endpoint,
 		HostAlias:     entry.Name,
-		ContextWindow: w.live.pin(),
+		ContextWindow: w.live.window(),
 	}, nil
 }

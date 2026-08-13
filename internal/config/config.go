@@ -1055,12 +1055,13 @@ type UnconfinedHost struct {
 // `context-window:` key, per entry, and the same three states `parallel-agents` has: absent (or 0,
 // which yaml cannot tell from absent) ⇒ whatever the heartbeat observes stands, N ≥ 1 ⇒ that number
 // whatever the server advertises, negative ⇒ refused by ValidateServers. It is legal on ANY entry
-// because it describes the server, the way `model:` does, and two seams read it: the Delegation
-// target it was added for (ADR 0045 decision 3), and a session's own `/server` switch, which carries
-// the entry's window onto the engine beside the entry's reply cap (ResolveContextWindow, ADR 0046's
-// same "the bound is a property of the slot" reasoning). It earns its keep in both: a cloud endpoint
-// advertises no window at all, so the pin is how such a server is usable at all — as a Sub-agent
-// server, or as one a session moves onto.
+// because it describes the server, the way `model:` does, and three seams read it: the Delegation
+// target it was added for (ADR 0045 decision 3), a session's own `/server` switch, and the BIND that
+// puts a session on a server in the first place — the last two carrying the entry's window onto the
+// engine beside the entry's reply cap (ResolveContextWindow, ADR 0046's same "the bound is a
+// property of the slot" reasoning). It earns its keep in all three: a cloud endpoint advertises no
+// window at all, so the pin is how such a server is usable at all — as a Sub-agent server, as one a
+// session moves onto, or as the one a session starts on.
 //
 // MaxOutputTokens PINS the ceiling on ONE reply from this server, in tokens — the number the engine
 // states on the wire so a reply stops at a bound it chose rather than at the server's context wall
@@ -1908,6 +1909,12 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// value, carried as written for the composition root to hand the engine. The ephemeral override
 	// entry pins nothing, which leaves an override run deriving the cap from its reply budget.
 	opts.StartupMaxOutputTokens = startup.MaxOutputTokens
+	// And what that entry's server BOUNDS a session to (ADR 0045 decision 3). It is flattened for the
+	// reply ceiling's reason and travels the same way — the SELECTED entry's own value, carried as
+	// written for the composition root to resolve over the top-level `context-window:` key
+	// (ResolveContextWindow) at the bind. The ephemeral override entry pins nothing, which leaves an
+	// override run on that top-level key and, unpinned there too, on what the first beat observes.
+	opts.StartupContextWindow = startup.ContextWindow
 	opts.Mode = s.Mode
 	opts.Bypass = s.Bypass
 	opts.Servers = s.Servers

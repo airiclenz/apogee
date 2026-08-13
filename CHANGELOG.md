@@ -393,6 +393,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A session that STARTS on a pinned entry now budgets against that entry's window.** The
+  per-entry `context-window:` pin reached a session that MOVED onto the entry, but not one that was
+  bound to it: the pin was never flattened onto the resolved options the way `max-output-tokens:`
+  already was, so a startup bind, a pre-bound session's first pick and a headless run all budgeted
+  against the top-level `context-window:` key — and, on a cloud endpoint that advertises no window
+  at all, against nothing — until the first beat rebound seconds later. The pin now rides the entry
+  the bind step takes and is resolved over the top-level key into the Config the engine is built
+  from, so it bounds the session's first Turn rather than its second; the same resolved number is
+  what the footer's gauge opens on, so the gauge and the Budget cannot describe two different
+  servers. The second half of the same hole: a `context-window:` edited in the pane on the entry the
+  session is already on now re-resolves in the running session, exactly as `parallel-agents:` on
+  that entry does, instead of leaving the pin describing the file as it stood at the last move.
+  Precedence is unchanged and still single-sited — the entry's pin outranks the top-level key,
+  neither pinned leaves the window to what the heartbeat observes.
+
 - **A `/server` switch now takes the new server's context window and reply ceiling with it.** The
   reply cap followed a `servers:` entry everywhere a session could arrive on one — the startup bind,
   a routed sub-agent spawn — except the one place a session moves: `/server` re-pointed the wire and

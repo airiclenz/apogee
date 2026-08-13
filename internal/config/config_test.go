@@ -741,6 +741,48 @@ func TestApplyConfigStartupLauncherComesFromTheSelectedEntry(t *testing.T) {
 	}
 }
 
+// The window a session STARTS bounded by is the selected entry's own `context-window:`, flattened
+// exactly as the launcher key above is and for the same reason: the pin belongs to the entry, so the
+// composition root resolves it over the top-level key at the bind rather than a beat later. An entry
+// that pins none carries a zero, which leaves that top-level key answering — and so does the
+// ephemeral entry a raw `--endpoint`/`APOGEE_ENDPOINT` override builds, which is in no list at all.
+func TestApplyConfigStartupContextWindowComesFromTheSelectedEntry(t *testing.T) {
+	t.Parallel()
+	const servers = "servers:\n" +
+		"  - name: cloud\n    endpoint: https://openrouter.ai/api/v1\n    context-window: 65536\n" +
+		"  - name: workstation\n    endpoint: http://192.168.1.9:1111\n"
+
+	tests := []struct {
+		name     string
+		start    string
+		endpoint string
+		want     int
+	}{
+		{name: "the selected entry pins its own window", start: "cloud", want: 65536},
+		{name: "the selected entry pins none", start: "workstation"},
+		{name: "an endpoint override pins nothing", start: "cloud", endpoint: "http://rented.example:8080/v1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := Options{ConfigDir: testConfigHome(t, servers+"server: "+tt.start+"\n")}
+			getenv := func(name string) string {
+				if name == EnvEndpoint {
+					return tt.endpoint
+				}
+				return ""
+			}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.StartupContextWindow != tt.want {
+				t.Errorf("startupContextWindow = %d; want %d — the pin travels from the SELECTED entry, unresolved",
+					opts.StartupContextWindow, tt.want)
+			}
+		})
+	}
+}
+
 // --server beats APOGEE_SERVER beats `server:` at selection too, not only in resolution: the value
 // that wins is the one the entry is looked up by.
 func TestApplyConfigStartupServerOverrideSelects(t *testing.T) {

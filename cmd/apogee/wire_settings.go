@@ -61,6 +61,12 @@ type liveSettings struct {
 	// would live for one beat: the rebind that follows re-resolves from the pin and would bind the new
 	// server's observation over the number its entry pinned.
 	entryWindow int
+	// entryName is that entry's `servers:` name — how a re-read list is matched back to the server
+	// this session is on, so a `context-window:` edited on the BOUND entry re-resolves the pin above
+	// instead of leaving it describing the file as it was at the last move (parallelAgentsCap.name,
+	// for its reason and with its posture: the ephemeral `--endpoint` entry is in no list, matches
+	// nothing, and keeps what it was bound with). Empty until something is bound.
+	entryName string
 
 	// servers is the `servers:` list: the single upstream definition (ADR 0036), which the switch
 	// list, the `server:` recording check and the pane's picker all resolve names against.
@@ -107,7 +113,14 @@ type liveSettings struct {
 // list at startup, so an enable read back off that list and a row showing `false` say the same thing.
 func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveSettings {
 	return &liveSettings{
-		pinnedWindow:       opts.ContextWindow,
+		pinnedWindow: opts.ContextWindow,
+		// The latch a determined startup binds with, seeded rather than pushed: the entry this
+		// session STARTS on is the one the composition root already flattened onto options
+		// (startupEntry), and its bind runs before this holder exists. A pre-bound start flattened
+		// nothing, so both fields are the honest zero until the human's first pick latches one
+		// through followEntry.
+		entryWindow:        opts.StartupContextWindow,
+		entryName:          opts.HostAlias,
 		servers:            opts.Servers,
 		manualIDs:          manualIDs,
 		mechanisms:         opts.Mechanisms,
@@ -140,14 +153,30 @@ func (s *liveSettings) setPin(tokens int) {
 // on, dropping the retired entry's — the liveSettings half of what parallelAgentsCap.follow does for
 // the fan-out width, and called at the same moment for the same reason: a pin is a fact about one
 // server, and carrying the retired server's onto the new one is exactly the bug that would be
-// invisible. An entry that pins nothing writes 0, which leaves the top-level key answering.
+// invisible. An entry that pins nothing writes 0, which leaves the top-level key answering. The
+// name travels with the pin, because it is what a later re-read of `servers:` matches this session's
+// server back by.
 //
-// It is called AFTER the engine's own switch has committed, so a refused move leaves the session
-// budgeting against the server it is still on.
+// It is called at every point a session ARRIVES on a server that this holder already exists for — a
+// `/server` move, and the first pick that ends a pre-bound start — and AFTER that arrival committed,
+// so a refused one leaves the session budgeting against the server it is still on. The determined
+// startup's own bind is the one arrival it is NOT called at: it runs before the holder exists, and
+// newLiveSettings seeds both fields from the flattened startup entry instead.
 func (s *liveSettings) followEntry(entry config.ServerEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.entryWindow = entry.ContextWindow
+	s.entryWindow, s.entryName = entry.ContextWindow, entry.Name
+}
+
+// window reports the context window in force right now for the server this session is on: the bound
+// entry's own `context-window:` when it names one, else the top-level key — the precedence
+// config.ResolveContextWindow spells. It is what a bind and the launch-time projection adopt for the
+// display, so the gauge and the engine's Budget cannot describe two different servers. 0 is the
+// honest "nobody said", which the unbound model reads as "unknown until the first beat binds one".
+func (s *liveSettings) window() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return config.ResolveContextWindow(s.entryWindow, s.pinnedWindow)
 }
 
 // observe records the context window a landed beat reported. A beat that could not name one (0) is
@@ -220,10 +249,25 @@ func (s *liveSettings) setContextFileNames(names []string) bool {
 // switch and the `server:` recording all resolve names against this field (ADR 0036: one upstream
 // definition) — so this store IS the whole apply for that key. The caller validates first, the
 // setSystemPrompt posture: a list with a nameless or duplicated entry never displaces a working one.
+//
+// The bound entry's window pin is re-resolved from the same list, under the same lock, because it is
+// DERIVED from it: a `context-window:` the human edits on the entry this session is already on is an
+// ADR 0037 key like `parallel-agents:` beside it (parallelAgentsCap.relist), and a list installed
+// without re-deriving the pin would leave the latch describing the file as it stood at the last
+// move. Matched back by NAME, which is what identifies an entry across a re-read (ADR 0036 decision
+// 1); a list that no longer names this session's server leaves the pin exactly where it was — the
+// posture the switch list takes toward an entry the human deleted while the session was on it — and
+// an entry that has DROPPED its pin resolves back to the top-level key.
 func (s *liveSettings) setServers(servers []config.ServerEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.servers = servers
+	for _, e := range servers {
+		if e.Name != "" && e.Name == s.entryName {
+			s.entryWindow = e.ContextWindow
+			break
+		}
+	}
 }
 
 // setMechanisms installs a re-read `mechanisms:` block: the validated enabled ids and the block
