@@ -443,6 +443,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A failed command's outcome slot now names its exit code instead of whatever line its output
+  opened with.** A `terminal` or `python_exec` call that exited non-zero was summarised as `error:`
+  plus the first line of its output — for a failed `ls -la` that read `error: total 20760`, a
+  listing header rather than a diagnostic — and the rest of what the command printed was not shown
+  in the block at all. Such a call now reads `error: exit 2` in the slot, the red twin of a clean
+  run's `exit 0`, with the lines the command printed laid out beneath it exactly as a successful
+  run's are. The code is read off the `[exit code N]` marker the tool appends at the END of its
+  output, so a command that printed the same phrase itself cannot forge it, and a negative code (a
+  run whose leader exited but whose pipe stayed held) is named as it stands. A result carrying no
+  marker — a run refused before the process started — keeps the first-line wording, as does every
+  other tool: for a tool that fails in prose, that first line IS the error message. What the model
+  receives is unchanged.
+
 - **A delegated task is no longer refused for naming a guarded path in its instructions.** The
   dangerous-action guard read a `sub_agent` dispatch's task prose as if the host were about to
   perform it, so a delegation that merely NAMED a fenced literal was hard-refused with no per-call

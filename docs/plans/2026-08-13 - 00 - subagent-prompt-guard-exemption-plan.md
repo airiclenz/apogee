@@ -137,7 +137,10 @@ lists both files.
 
 **Commit:** `docs(security): record the prompt-key exemption on the guard contract`
 
-## 4. Failed subprocess calls name their exit code in the slot
+## 4. Failed subprocess calls name their exit code in the slot — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's What words the slot only, but design call 4's second clause ("the full output stays in the details body") was NOT true of the code — `enrichWithResult` returned on `IsError` before any body was built, so an errored subprocess block had no body at all and its first output line was the only thing shown (verified against the real presenter before changing it). Wording the slot alone would therefore have hidden a failed command's output entirely — strictly less than before. So the new `failure` hook also hands back the output left once the marker is read off, and `absorbFailure` lays it out as the body: the failed half of the clean-exit mirror design call 4 asks for. Pinned by the new test's body assertions, plus its `groupable` check (a body changes what the block shows, never its shape).
+NOTES (2026-08-13): extracted `outputBody` out of `outputDetail` (behaviour-preserving: same trim, same leading-blank skip, same per-line clip) rather than duplicating that logic in the failure path; `outputDetail` now calls it and words the two cases it alone owns ("(no output)", the one-line promotion).
 
 Independent of items 1–3.
 

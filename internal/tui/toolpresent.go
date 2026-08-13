@@ -361,6 +361,18 @@ type toolPresenter struct {
 	verb   string
 	target func(args map[string]any) string
 
+	// failure words a FAILED result's summary — the text after "error: " — for a tool whose output
+	// does not open with its error message. The two subprocess tools are what it is for: a command
+	// that failed says so in its EXIT CODE, and the first line it printed is as likely to be a
+	// listing header as a diagnostic. The bool is "this result is not the shape I read", which
+	// leaves the result's own first line as the wording — what every tool without the hook keeps.
+	//
+	// Its second string is the output left once the failure has been read off it. That lays out as
+	// the body beneath the branch, so a failed call shows what it printed exactly as a clean one
+	// does — the failed half of the mirror the slot wording completes (design call 4 of
+	// docs/plans/"2026-08-13 - 00").
+	failure func(content string) (word, output string, ok bool)
+
 	// detail renders a result that carries NO domain.ToolSummary — the degraded floor for a
 	// summary-bearing tool (its verbatim first line) and the only path for the tools that
 	// report nothing structured (a fixed sentence, free-form output).
@@ -548,18 +560,20 @@ var toolRegistry = map[string]toolPresenter{
 		stat:   blankStat,
 	},
 	"terminal": {
-		label:  "Terminal",
-		verb:   "running",
-		target: stringArg("command"),
-		detail: outputDetail,
-		stat:   exitCodeStat,
+		label:   "Terminal",
+		verb:    "running",
+		target:  stringArg("command"),
+		failure: exitCodeFailure,
+		detail:  outputDetail,
+		stat:    exitCodeStat,
 	},
 	"python_exec": {
-		label:  "Python",
-		verb:   "running python",
-		target: firstLineArg("code"),
-		detail: outputDetail,
-		stat:   exitCodeStat,
+		label:   "Python",
+		verb:    "running python",
+		target:  firstLineArg("code"),
+		failure: exitCodeFailure,
+		detail:  outputDetail,
+		stat:    exitCodeStat,
 	},
 	"git_branch": {
 		label:  "Git Branch",
@@ -1037,10 +1051,11 @@ func countPhrase(text string) (n int, noun string, ok bool) {
 }
 
 // enrichWithResult folds a tool's result into the view, in four layers. An error result
-// (the tool flagged it IsError — a normal in-band outcome the model reacts to) is the
-// one-line summary, so an errored call still groups with its neighbours. A result carrying a
-// typed domain.ToolSummary skips the prose layers, its body coming from the presenter's `body`
-// hook and its slot from its stat hook. Everything else falls to prose, through one of
+// (the tool flagged it IsError — a normal in-band outcome the model reacts to) is worded by
+// absorbFailure, which fills the one-line summary and — for a tool that reads its own failure off
+// its output — the body under it, so an errored call still groups with its neighbours. A result
+// carrying a typed domain.ToolSummary skips the prose layers, its body coming from the presenter's
+// `body` hook and its slot from its stat hook. Everything else falls to prose, through one of
 // two extractor shapes: a presenter's `outcome` hook reads the retained REQUEST beside the result
 // (ask_user alone — its block records the question the answer replies to), and a plain `detail`
 // extractor reads the result alone. An unknown tool's result is shown raw as body lines, so
@@ -1059,7 +1074,7 @@ func countPhrase(text string) (n int, noun string, ok bool) {
 func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot) {
 	defer tv.finishDisplay(ws)
 	if result.IsError {
-		tv.Summary = namedSummary(detailLine{Text: errorSummaryPrefix + firstLine(result.Content)})
+		tv.absorbFailure(result.Content)
 		return
 	}
 	p, known := toolRegistry[tv.name]
@@ -1073,6 +1088,26 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 	if known && p.stat != nil {
 		tv.applyStat(p.stat(result))
 	}
+}
+
+// absorbFailure fills the halves from a FAILED result. The summary is the "error: …" line the
+// painter reads as the block's red (errorSummaryPrefix), worded by the tool's own failure hook
+// where it has one and by the result's first line everywhere else — for a tool that fails in prose
+// that first line IS the error message, which is why it stays the floor.
+//
+// A hook that worded the slot also hands back the output left once it has read the failure off it,
+// and that output lays out beneath the branch. A failed subprocess call therefore reads as its
+// clean twin does — the exit code in the slot over the lines the command printed — instead of
+// spending the slot on whichever line the output happened to open with.
+func (tv *toolView) absorbFailure(content string) {
+	if p, known := toolRegistry[tv.name]; known && p.failure != nil {
+		if word, output, ok := p.failure(content); ok {
+			tv.Summary = namedSummary(detailLine{Text: errorSummaryPrefix + word})
+			tv.Details = tv.Details.with(outputBody(output))
+			return
+		}
+	}
+	tv.Summary = namedSummary(detailLine{Text: errorSummaryPrefix + firstLine(content)})
 }
 
 // absorbProse fills the two halves from the result's PROSE — the layers that predate the ratified
@@ -1291,6 +1326,30 @@ func fileEditStat(args map[string]any) (string, bool) {
 // layer above — so a result reaching here exited cleanly, and the slot says so. The table asks
 // for a duration beside it; no result carries one, so the code stands alone (design call 14).
 func exitCodeStat(domain.ToolResult) (string, bool) { return "exit 0", true }
+
+// exitCodeMarker matches the "[exit code N]" line subprocessToolResult appends to a FAILED
+// subprocess result (internal/tools/terminal.go). It is anchored at the end of the output, where
+// the tool writes it, so a command that printed the same phrase cannot be read as the marker — the
+// real one is always appended after it. The code may be negative: a run whose leader exited but
+// whose pipe stayed held is reported as -1.
+var exitCodeMarker = regexp.MustCompile(`\n?\[exit code (-?\d+)\]\s*$`)
+
+// exitCodeFailure words a failed subprocess call's slot from that marker — "exit 2", the red
+// counterpart of a clean exit's "exit 0" (exitCodeStat) — and hands back the output with the
+// marker taken off, which is the body laid out beneath it. The code is the one thing that always
+// says the command failed; its first output line often says something else entirely ("total
+// 20760"), which is what the slot used to spend itself on.
+//
+// A result with no marker is not this shape — a run the tool refused, a fault raised before the
+// process started — so it falls back to that first line, where such a result does word its own
+// failure.
+func exitCodeFailure(content string) (string, string, bool) {
+	m := exitCodeMarker.FindStringSubmatchIndex(content)
+	if m == nil {
+		return "", "", false
+	}
+	return "exit " + content[m[2]:m[3]], content[:m[0]], true
+}
 
 // cleanStat words diagnostics' slot. Findings come back flagged as an error result, so a result
 // that reaches here found none — the table's `clean` half; its `N issues` half is the red error
@@ -1828,26 +1887,37 @@ func answerLines(content string) []string {
 // as promotedOutput and the shortening seam leaves it alone. "(no output)" is this function's own
 // phrase and goes the other way, as a named summary.
 func outputDetail(content string) toolOutcome {
+	body := outputBody(content)
+	if len(body) == 0 {
+		return summaryOnly("(no output)")
+	}
+	if len(body) == 1 {
+		// The one-line half is a promotion the painter may still refuse, so the stat travels with
+		// it: the line count this output would have been summarised by had it come to two lines,
+		// which is exactly the shape the guard demotes it into (promotedOutput, design call 5).
+		return promotedOutput(body[0].Text, plural(len(body), "line"))
+	}
+	return toolOutcome{Details: body}
+}
+
+// outputBody is the body half of that split on its own: free-form output as the lines it lays out
+// as, trailing blank lines and a leading run of them dropped, each under the per-line clip. Output
+// that is blank throughout has no lines at all — the callers word that case themselves, one as
+// "(no output)" and the other as the exit code standing alone (absorbFailure).
+func outputBody(content string) []detailLine {
 	lines := splitLines(strings.TrimRight(content, "\n"))
 	first := 0
 	for first < len(lines) && strings.TrimSpace(lines[first]) == "" {
 		first++
 	}
 	if first == len(lines) {
-		return summaryOnly("(no output)")
+		return nil
 	}
-	body := lines[first:]
-	if len(body) == 1 {
-		// The one-line half is a promotion the painter may still refuse, so the stat travels with
-		// it: the line count this output would have been summarised by had it come to two lines,
-		// which is exactly the shape the guard demotes it into (promotedOutput, design call 5).
-		return promotedOutput(clipDetail(body[0]), plural(len(body), "line"))
+	body := make([]detailLine, 0, len(lines)-first)
+	for _, ln := range lines[first:] {
+		body = append(body, detailLine{Text: clipDetail(ln)})
 	}
-	details := make([]detailLine, 0, len(body))
-	for _, ln := range body {
-		details = append(details, detailLine{Text: clipDetail(ln)})
-	}
-	return toolOutcome{Details: details}
+	return body
 }
 
 // commitDetail is git_commit's prose half: outputDetail's split with its one-line PROMOTION

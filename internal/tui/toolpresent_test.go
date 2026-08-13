@@ -502,6 +502,91 @@ func TestPresentToolCallErrorResult(t *testing.T) {
 	}
 }
 
+// TestPresentToolCallFailedSubprocessNamesItsExitCode pins the failed half of the two subprocess
+// tools' mirror. What says such a call failed is its EXIT CODE — the "[exit code N]" marker
+// internal/tools appends — so the slot says that over the lines the command printed, the red twin
+// of a clean run's "exit 0", instead of spending itself on whichever line the output happened to
+// open with ("total 20760" is a listing header, not a diagnostic). A result carrying no marker, and
+// every other tool, keeps the first line: for a tool that fails in prose that line IS the message.
+func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name        string
+		call        domain.ToolCall
+		content     string
+		wantSummary string
+		wantBody    []string
+	}{{
+		name:        "a failed command's slot is its exit code, its output the body",
+		call:        domain.ToolCall{ID: "1", Tool: "terminal", Arguments: []byte(`{"command":"ls -la"}`)},
+		content:     "total 20760\nsome output\n[exit code 2]",
+		wantSummary: "error: exit 2",
+		wantBody:    []string{"total 20760", "some output"},
+	}, {
+		name:        "python_exec is read the same way",
+		call:        domain.ToolCall{ID: "2", Tool: "python_exec", Arguments: []byte(`{"code":"raise SystemExit(1)"}`)},
+		content:     "Traceback (most recent call last):\nSystemExit: 1\n[exit code 1]",
+		wantSummary: "error: exit 1",
+		wantBody:    []string{"Traceback (most recent call last):", "SystemExit: 1"},
+	}, {
+		// The wedged-drain shape: the leader exited but something it left running held the pipe,
+		// which internal/tools reports as -1 rather than as a success.
+		name:        "a negative exit code is named as it stands",
+		call:        domain.ToolCall{ID: "3", Tool: "terminal", Arguments: []byte(`{"command":"./daemon.sh"}`)},
+		content:     "output was cut short: something the command left running still held the pipe and was killed\n\n[exit code -1]",
+		wantSummary: "error: exit -1",
+		wantBody:    []string{"output was cut short: something the command left running still held the pipe and was killed"},
+	}, {
+		name:        "a failure that printed nothing is the exit code alone",
+		call:        domain.ToolCall{ID: "4", Tool: "terminal", Arguments: []byte(`{"command":"false"}`)},
+		content:     "\n[exit code 1]",
+		wantSummary: "error: exit 1",
+	}, {
+		// The marker is read at the END of the output, where the tool writes it: output that spells
+		// the phrase itself is a line of the body like any other.
+		name:        "a command that printed the marker's phrase cannot forge it",
+		call:        domain.ToolCall{ID: "5", Tool: "terminal", Arguments: []byte(`{"command":"echo '[exit code 0]'; exit 3"}`)},
+		content:     "[exit code 0]\n[exit code 3]",
+		wantSummary: "error: exit 3",
+		wantBody:    []string{"[exit code 0]"},
+	}, {
+		name:        "a subprocess result with no marker keeps the first line",
+		call:        domain.ToolCall{ID: "6", Tool: "terminal", Arguments: []byte(`{"command":"sleep 90"}`)},
+		content:     "command timed out\npartial output",
+		wantSummary: "error: command timed out",
+	}, {
+		name:        "another tool's failure keeps the first line",
+		call:        domain.ToolCall{ID: "7", Tool: "read_file", Arguments: []byte(`{"path":"missing"}`)},
+		content:     "file not found: missing",
+		wantSummary: "error: file not found: missing",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tv := presentToolCall(tc.call, "", workspaceRoot{})
+
+			tv.enrichWithResult(domain.ToolResult{CallID: tc.call.ID, Content: tc.content, IsError: true}, workspaceRoot{})
+
+			if tv.Summary.Text != tc.wantSummary {
+				t.Errorf("summary = %q, want %q", tv.Summary.Text, tc.wantSummary)
+			}
+			body := make([]string, 0, tv.Details.len())
+			for _, d := range tv.Details.all() {
+				body = append(body, d.Text)
+			}
+			if !slices.Equal(body, tc.wantBody) {
+				t.Errorf("body = %q, want %q", body, tc.wantBody)
+			}
+			// The output moving under the branch is a body like any other: it changes what the block
+			// SHOWS, never what shape it is, so a failed call still groups with its neighbours.
+			if !groupable(tv) {
+				t.Error("an errored call must still group with its neighbours")
+			}
+		})
+	}
+}
+
 // TestPresentToolCallOutcomeSplit pins which half of the outcome each kind of producer fills —
 // the split the block's shape is read off. A fixed result header is summary-only (it fills the
 // branch row's outcome slot). Free-form command output fills the half its own size dictates:
