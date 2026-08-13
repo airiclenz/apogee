@@ -48,7 +48,13 @@ and `settingsrows.go` (pre-existing, noted only).
 
 ---
 
-## 1. Keystore stderr redaction survives the 4 KiB cut
+## 1. Keystore stderr redaction survives the 4 KiB cut — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the trim checks the QUOTED spelling as well as the raw key — the item text names
+only "a proper prefix of the key", but `redactKey` already redacts both spellings for the same
+reason, and a key carrying `"` or `\` diverges from its escaped form (a cut after `"sk\"l` leaves a
+tail that is a prefix of no raw key). One extra spelling in the loop; covered by the quoted-key
+subtest.
 
 **What:** `internal/keystore/run.go` caps captured store-tool stderr at `maxToolStderr` (4096
 bytes) with a raw byte cut (`cappedBuffer`, `run.go:124-157`), and redaction runs only afterwards

@@ -785,6 +785,73 @@ func TestWriteRedactsTheSecretFromWhatTheStoreSaid(t *testing.T) {
 	}
 }
 
+// The cap the capture runs under is a BYTE cut, and redaction only finds whole occurrences: a key
+// straddling maxToolStderr leaves its first bytes behind as a fragment no ReplaceAll can see, and
+// those bytes reach the terminal, the session log and the pasted bug report that the redaction exists
+// to keep the secret out of. The fixture is the same leaky tool, padded so the cut falls INSIDE the
+// key; the padding is blank because said() folds whitespace away, which leaves the fragment inside
+// the window a human actually reads.
+func TestWriteRedactsASecretTheStderrCapCutInHalf(t *testing.T) {
+	const complaint = "security: User interaction is not allowed."
+	const plainKey = "sk-live-3f9c2b7a"
+
+	tests := []struct {
+		name string
+		goos string
+		key  string
+		keep int // bytes of the key's spelling left on this side of the cut
+	}{
+		{name: "the cut leaves a single byte of the key", goos: "linux", key: plainKey, keep: 1},
+		{name: "the cut leaves the first eight bytes", goos: "linux", key: plainKey, keep: 8},
+		{name: "the cut leaves all but the last byte", goos: "linux", key: plainKey, keep: len(plainKey) - 1},
+		{name: "the keychain line is cut inside the key", goos: "darwin", key: plainKey, keep: 8},
+		{
+			name: "a quoted key is cut inside the spelling that went over the wire",
+			goos: "darwin",
+			key:  `sk live "3f9c2b7a"`,
+			keep: 8,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tools := useFakeTools(t)
+			store := probedStore(t, tc.goos)
+			tools.leakStdin(t, padToCutInsideTheKey(t, store, complaint, tc.key, tc.keep), 1)
+
+			err := store.Write("prod", tc.key)
+
+			if err == nil {
+				t.Fatal("Write() = nil, want the refusal surfaced")
+			}
+			assertNoCutKeyTail(t, err.Error(), tc.key)
+			if !strings.Contains(err.Error(), "User interaction") {
+				t.Errorf("Write() = %v, want what the tool said kept — it is the part that names the fix", err)
+			}
+		})
+	}
+}
+
+// Trimming is the cut's remedy and nothing more: a capture that stopped short of the cap was never
+// halved, so a tool's own words that happen to begin like the key stay — they are the part of the
+// complaint that names the fix.
+func TestWriteKeepsWhatAToolSaidWhenTheCapWasNeverReached(t *testing.T) {
+	const said = "secret-tool: cannot store an item for sk-live"
+
+	tools := useFakeTools(t)
+	store := probedStore(t, "linux")
+	tools.breakWith(t, said, 1)
+
+	err := store.Write("prod", "sk-live-3f9c2b7a")
+
+	if err == nil {
+		t.Fatal("Write() = nil, want the refusal surfaced")
+	}
+	if !strings.Contains(err.Error(), said) {
+		t.Errorf("Write() = %v, want the tool's own words kept whole when nothing was cut", err)
+	}
+}
+
 // The other error path quotes the same captured stderr, so it carries the same leak. A tool that
 // never finished cannot be staged with a tool that runs, so this one is driven through the exec seam.
 func TestWriteRedactsTheSecretWhenTheToolNeverFinished(t *testing.T) {
@@ -823,6 +890,52 @@ func assertRedacted(t *testing.T, err error, key, fragment string) {
 	}
 	if !strings.Contains(message, "User interaction") {
 		t.Errorf("Write() = %v, want what the tool said kept — it is the part that names the fix", message)
+	}
+}
+
+// padToCutInsideTheKey is the complaint a fake tool has to print for the maxToolStderr cut to land
+// inside the key it echoes, leaving exactly keep bytes of the key's spelling in the buffer. The fake
+// prints its complaint, one space, then the standard input it was handed — so the padding is measured
+// against where the secret sits in that input, which differs per tool: `secret-tool` is handed the
+// bare key, while `security -i` is handed a whole command line ending in it.
+func padToCutInsideTheKey(t *testing.T, store Store, complaint, key string, keep int) string {
+	t.Helper()
+
+	_, stdin := store.writeCommand("prod", key)
+	echoed := strings.TrimSpace(stdin)
+	start := strings.LastIndex(echoed, key)
+	if start < 0 {
+		start = strings.LastIndex(echoed, securityWord(key))
+	}
+	if start < 0 {
+		t.Fatalf("the fake tool would not echo the key at all: %q", echoed)
+	}
+
+	padding := maxToolStderr - keep - start - 1 - len(complaint)
+	if padding < 0 {
+		t.Fatalf("the complaint is %d bytes too long to put the cut inside the key", -padding)
+	}
+	return complaint + strings.Repeat(" ", padding)
+}
+
+// assertNoCutKeyTail is the claim the byte cut must not break: what survived it stops short of the
+// secret, in every spelling the secret travels in. A fragment the cut left is always the TAIL of what
+// was captured, so the suffix check is exact at any length; the containment check, held to lengths
+// distinctive enough not to match ordinary words, catches a fragment that moved.
+func assertNoCutKeyTail(t *testing.T, message, key string) {
+	t.Helper()
+
+	for _, spelling := range []string{key, securityWord(key)} {
+		for n := 1; n < len(spelling); n++ {
+			if strings.HasSuffix(message, spelling[:n]) {
+				t.Errorf("Write() = %s, want no beginning of the secret left by the cut — it ends in %q",
+					message, spelling[:n])
+			}
+			if n >= 4 && strings.Contains(message, spelling[:n]) {
+				t.Errorf("Write() = %s, want no beginning of the secret anywhere — %q survived the cut",
+					message, spelling[:n])
+			}
+		}
 	}
 }
 

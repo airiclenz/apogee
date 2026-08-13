@@ -173,8 +173,9 @@ func (s Store) Write(entry, key string) error {
 	outcome, err := s.run(ctx, argv, stdin)
 	// What the tool said is quoted back in both failures below, and a failing store tool can say the
 	// secret: it is fed one on stdin, and complaining about input it could not use means echoing that
-	// input. Redact before either message is built — never between them.
-	complaint := redactKey(outcome.stderr, key)
+	// input. Redact before either message is built — never between them. The cap the capture ran under
+	// is a byte cut, so the tail goes first: a key the cut halved is a fragment no redaction can match.
+	complaint := redactKey(trimCappedKeyTail(outcome.stderr, key), key)
 	if err != nil {
 		return fmt.Errorf("apogee: server %q: could not be stored in %s: %w%s",
 			entry, s.Name(), err, said(complaint))

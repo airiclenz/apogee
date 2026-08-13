@@ -123,6 +123,37 @@ func said(text string) string {
 	return " — it said: " + folded
 }
 
+// trimCappedKeyTail drops a secret the cap cut in half.
+//
+// maxToolStderr is a BYTE cut: it falls wherever 4096 bytes into a tool's complaint happens to land,
+// and when that is inside the key the tool echoed, the buffer keeps the key's first bytes as a
+// fragment. Redaction cannot take that back — it replaces whole occurrences of the secret, and half a
+// secret is not one — so the fragment would ride into the refusal message, which is the readable
+// place (terminal, session log, pasted bug report) the migration exists to get the key out of. Half a
+// key is worth having, too: it names the issuer and the shape, and shortens a guess.
+//
+// So when, and only when, the buffer filled to the cap — the one condition under which the text may
+// have been cut mid-word — the longest tail that spells the beginning of the key is dropped. Both
+// spellings are checked for the reason redactKey checks both: on macOS the key travels quoted, so
+// what the cut leaves behind is the beginning of the quoted word. A tail that is the WHOLE key is
+// left to redactKey, which marks its place — that reads better than a sentence ending nowhere.
+func trimCappedKeyTail(text, key string) string {
+	if key == "" || len(text) < maxToolStderr {
+		return text
+	}
+
+	cut := 0
+	for _, spelling := range []string{key, securityWord(key)} {
+		for n := min(len(spelling)-1, len(text)); n > cut; n-- {
+			if strings.HasSuffix(text, spelling[:n]) {
+				cut = n
+				break
+			}
+		}
+	}
+	return text[:len(text)-cut]
+}
+
 // cappedBuffer is the bounded sink a tool's stderr is read into: it keeps the first limit bytes,
 // drops the rest, and never fails a write. Failing one would kill the tool with a broken pipe and
 // report THAT instead of what the tool was trying to say.

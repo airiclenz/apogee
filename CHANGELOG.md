@@ -449,6 +449,10 @@ point is a **minor** bump, not a breaking change.
   equal-roots case and behaves exactly as before, so no tool's fence moves with this entry:
   `copy_file` still fences both of its ends at the workspace.
 
+- **The residuals-sweep + configwrite-split plan is a saved, committed repo doc.**
+  `docs/plans/2026-08-13 - 07 - residuals-sweep-and-configwrite-split-plan.md` landed in `73e8cf1`,
+  closing the remember-model run's untracked-plan-doc residual; the plan itself stays unexecuted.
+
 ### Changed
 
 - Docs: swept the accept-behaviour prose that predated `runsBareAtAccept` — ADR 0028's decision 7
@@ -1448,6 +1452,16 @@ point is a **minor** bump, not a breaking change.
   tool failure on an unfenced call — the error is shown and the model is told the call failed —
   while a genuinely fenced run that cannot establish its fence still demotes to the approval prompt
   exactly as before.
+
+- **A store tool's complaint can no longer leak the beginning of a key it was cut off mid-secret.**
+  Stderr from `security` or `secret-tool` is captured under a 4 KiB cap, and the cap is a BYTE cut:
+  when it fell inside the key the tool had echoed back, the key's first bytes stayed in the buffer as
+  a fragment the whole-value redaction could not match, and rode into the refusal message — the
+  terminal, the session log and the pasted bug report that migrating the key out of the config file
+  exists to keep it away from. A capture that filled the cap now has its tail trimmed of the longest
+  run that spells the beginning of the secret before redaction runs, in both spellings the secret
+  travels in (macOS quotes it onto the `security -i` command line). A capture that stopped short of
+  the cap was never halved, so nothing is trimmed from it and the tool keeps its own words.
 
 ## [0.13.0] — 2026-08-11
 
