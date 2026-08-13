@@ -218,7 +218,28 @@ at closeout.
 
 **Commit:** `feat(config): entry keys resolve through the key resolver at every seam`
 
-## 4. Keystore: probe the OS store and write a secret into it
+## 4. Keystore: probe the OS store and write a secret into it — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the Linux probe reads the lookup's STDERR, not its exit status, as the live-service
+signal — "no such secret" is a non-zero exit on a healthy keyring, so a status test would call every
+working machine broken; a missing bus is what makes secret-tool complain ("Cannot autolaunch D-Bus…").
+Tested both ways.
+NOTES (2026-08-13): the item's "fake tool on PATH (testdata scripts)" is implemented as this test binary
+re-invoked under the tool's own name (`security`, `secret-tool` linked into a temp dir on PATH,
+dispatched in TestMain by argv[0]) — the fork-and-exec fixture idiom items 2 and 3 already use, portable
+to every OS `go test` runs on and with no script to keep executable.
+NOTES (2026-08-13): the store's human name is the method `Name()` rather than a field, so item 6 can
+declare its own consumer-side interface (`Name`/`Write`/`ReadCmd`) and fake it; `Store` itself keeps
+unexported state and is returned concrete by `Probe` per the standards.
+NOTES (2026-08-13): two timeouts rather than the resolver's one — 60s for a write (a locked keychain may
+put a GUI unlock in front of a human) but 5s for the Linux probe, which runs at startup on every Linux
+machine and must degrade to "no store" rather than hold the first frame.
+NOTES (2026-08-13): `Write` also refuses an empty key, an unnamed entry and any key or entry name
+containing a line break (neither store round-trips one, and the keychain is written one command LINE at
+a time) — argument guards not in the item text, tested.
+NOTES (2026-08-13): no CHANGELOG entry for this item — the package is not reachable from any run yet
+(item 6 wires it), so the user-visible change is the startup migration offer that item ships; the entry
+belongs there.
 
 **What:** New package `internal/keystore` (ADR 0043 grain: one concern, one package).
 `Probe() (Store, bool)` detects the platform's usable store per design call 10:
