@@ -377,7 +377,12 @@ not sentences — informational).
 
 ---
 
-## 11. `SetSampling` merges field-wise
+## 11. `SetSampling` merges field-wise — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the test carries two subtests beyond the item's two named cases — an
+overwrite pin (a second non-nil set replaces the first, the half of the contract the merge could
+regress) and a revision pin (an all-nil `SetSampling` still bumps, per design call 2's
+"`revision++` stays unconditional", which nothing else in the suite covered).
 
 Depends on item 1.
 

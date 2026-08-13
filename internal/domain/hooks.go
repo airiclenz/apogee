@@ -584,10 +584,19 @@ func (r *Request) SetExtra(key string, v json.RawMessage) {
 	r.revision++
 }
 
-// SetSampling overrides sampling parameters. Forward-looking — no current Mechanism
-// mutates these; included so the surface need not change to add one.
+// SetSampling merges sampling overrides field-wise: a non-nil field overwrites the
+// current value, a nil field leaves it untouched — the contract SamplingParams states.
+// The merge is what makes a partial set safe: the loop stamps the reply ceiling before
+// any hook runs (ADR 0046, loop.go), and the summarizer sets both fields
+// (agent/compact.go), so a hook setting only Temperature must not nil the cap. There is
+// no clearing surface — a hook cannot reset a field back to nil.
 func (r *Request) SetSampling(p SamplingParams) {
-	r.sampling = p
+	if p.Temperature != nil {
+		r.sampling.Temperature = p.Temperature
+	}
+	if p.MaxTokens != nil {
+		r.sampling.MaxTokens = p.MaxTokens
+	}
 	r.revision++
 }
 

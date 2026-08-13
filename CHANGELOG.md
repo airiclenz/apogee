@@ -647,6 +647,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A hook that sets one sampling field no longer erases the other — most consequentially the
+  reply ceiling.** `SamplingParams` has said since it was written that "a nil field leaves the
+  loop's value untouched", and the loop leans on exactly that: it stamps the output cap into the
+  Request before any pre-request hook runs, precisely so the cap is the loop's own value rather
+  than a projection-time constant and a hook can override it (ADR 0046). But `SetSampling`
+  replaced the whole struct, so the promise was false in the one direction that matters: a
+  Mechanism setting only `Temperature` handed back a `SamplingParams` whose `MaxTokens` was nil,
+  and the request went to the Upstream with no ceiling at all — a silent un-capping, from a hook
+  that never mentioned the cap. `SetSampling` now merges field-wise: a non-nil field overwrites,
+  a nil field leaves the current value alone. A hook that sets `MaxTokens` still overrides the
+  loop's stamp exactly as before, `revision` still bumps on every call (it is the acted-fire
+  probe, counting mutator calls rather than fields written), and there is deliberately no
+  clearing surface — a hook cannot reset a field back to nil, which would be new API.
+
 - **A tab in a one-row field is now folded like a newline, so the width a row is laid out at is the
   width it draws at.** `stripEscapes` deliberately keeps `\n` and `\t`, because the wrapped bodies
   that are its biggest callers are railed by both — but a FIELD is a name rather than a body, and

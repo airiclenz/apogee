@@ -207,6 +207,72 @@ func TestRequestSetToolsAndExtraAndSampling(t *testing.T) {
 	}
 }
 
+func TestRequestSetSamplingMergesFieldWise(t *testing.T) {
+	t.Run("a temperature-only set keeps the stamped cap", func(t *testing.T) {
+		// The loop stamps the reply ceiling before any hook runs (ADR 0046); a hook
+		// setting only Temperature must not silently un-cap the reply.
+		r := sysUserReq(t)
+		outputCap := 512
+		r.SetSampling(SamplingParams{MaxTokens: &outputCap})
+
+		temp := 0.3
+		r.SetSampling(SamplingParams{Temperature: &temp})
+
+		st := r.State()
+		if st.Sampling.MaxTokens == nil || *st.Sampling.MaxTokens != 512 {
+			t.Errorf("the partial set dropped the stamped cap: %+v", st.Sampling)
+		}
+		if st.Sampling.Temperature == nil || *st.Sampling.Temperature != 0.3 {
+			t.Errorf("the set temperature did not land: %+v", st.Sampling)
+		}
+	})
+
+	t.Run("a max-tokens-only set keeps the stamped temperature", func(t *testing.T) {
+		r := sysUserReq(t)
+		temp := 0.7
+		r.SetSampling(SamplingParams{Temperature: &temp})
+
+		outputCap := 128
+		r.SetSampling(SamplingParams{MaxTokens: &outputCap})
+
+		st := r.State()
+		if st.Sampling.Temperature == nil || *st.Sampling.Temperature != 0.7 {
+			t.Errorf("the partial set dropped the stamped temperature: %+v", st.Sampling)
+		}
+		if st.Sampling.MaxTokens == nil || *st.Sampling.MaxTokens != 128 {
+			t.Errorf("the set max-tokens did not land: %+v", st.Sampling)
+		}
+	})
+
+	t.Run("a non-nil field overwrites", func(t *testing.T) {
+		r := sysUserReq(t)
+		first, firstCap := 0.1, 64
+		r.SetSampling(SamplingParams{Temperature: &first, MaxTokens: &firstCap})
+
+		second, secondCap := 0.9, 4096
+		r.SetSampling(SamplingParams{Temperature: &second, MaxTokens: &secondCap})
+
+		st := r.State()
+		if st.Sampling.Temperature == nil || *st.Sampling.Temperature != 0.9 {
+			t.Errorf("a later temperature did not overwrite: %+v", st.Sampling)
+		}
+		if st.Sampling.MaxTokens == nil || *st.Sampling.MaxTokens != 4096 {
+			t.Errorf("a later max-tokens did not overwrite: %+v", st.Sampling)
+		}
+	})
+
+	t.Run("an all-nil set still counts as a mutation", func(t *testing.T) {
+		// revision is the acted-fire probe (R4) — it bumps per mutator call, not per
+		// field actually written.
+		r := sysUserReq(t)
+		before := r.Revision()
+		r.SetSampling(SamplingParams{})
+		if got := r.Revision(); got != before+1 {
+			t.Errorf("revision = %d after an all-nil set, want %d", got, before+1)
+		}
+	})
+}
+
 func TestRequestView(t *testing.T) {
 	budget := Budget{ContextLimit: 8192, CharsPerToken: 4}
 	r := NewRequest("model-x", []Message{
