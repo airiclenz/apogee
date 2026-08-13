@@ -393,6 +393,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A `max-output-tokens:` edited on the `servers:` entry the session is ON now applies at once, not
+  at the next bind or `/server` move.** The window pin beside it started riding the rebind the moment
+  it committed; the reply ceiling could not, because `RebindSpec` carried no ceiling to hand the
+  engine — so two pins in the same block of the same file applied at two different times, and a
+  ceiling edited to rein in a session that was already running away did nothing until that session
+  moved servers. The spec now carries the ceiling and a `servers:` apply rides one rebind for both
+  bounds, driven only when the edit actually MOVED the window or the ceiling this session resolves
+  to — an edit to another entry, or one restating the number already in force, installs the list and
+  rebinds nothing. Dropping the pin is as live as adding one: the ceiling goes straight back to the
+  engine's own derivation from the reply budget. A rebind that says NOTHING about the ceiling leaves
+  it exactly where it was, so no model change can silently un-bound a reply an operator bounded.
+
 - **A `context-window:` edited on the `servers:` entry the session is ON now applies at once, not at
   the next beat.** The two spellings of one pin applied at two different times: the top-level
   `context-window:` key re-drove the per-model resolution the moment it was committed, while the same

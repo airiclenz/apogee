@@ -61,6 +61,14 @@ type liveSettings struct {
 	// would live for one beat: the rebind that follows re-resolves from the pin and would bind the new
 	// server's observation over the number its entry pinned.
 	entryWindow int
+	// entryCap is the BOUND entry's own `max-output-tokens:` pin (ADR 0046), 0 when that entry pins
+	// none and the engine derives the ceiling from the reply room the Budget reserves. It is held
+	// beside the window for the window's reasons — it describes THIS server's slot, a move replaces
+	// it whole (followEntry), and a re-read list re-derives it (setServers) — and it is the whole
+	// resolved answer rather than one rank of a ladder: ADR 0046 deliberately grew no top-level
+	// `max-output-tokens:` key for an entry's pin to outrank, so what the entry says IS what the
+	// session is bound to.
+	entryCap int
 	// entryName is that entry's `servers:` name — how a re-read list is matched back to the server
 	// this session is on, so a `context-window:` edited on the BOUND entry re-resolves the pin above
 	// instead of leaving it describing the file as it was at the last move (parallelAgentsCap.name,
@@ -120,6 +128,7 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		// nothing, so both fields are the honest zero until the human's first pick latches one
 		// through followEntry.
 		entryWindow:        opts.StartupContextWindow,
+		entryCap:           opts.StartupMaxOutputTokens,
 		entryName:          opts.HostAlias,
 		servers:            opts.Servers,
 		manualIDs:          manualIDs,
@@ -149,13 +158,14 @@ func (s *liveSettings) setPin(tokens int) {
 	s.pinnedWindow = tokens
 }
 
-// followEntry takes the bound entry's own `context-window:` pin onto the entry a move just landed
-// on, dropping the retired entry's — the liveSettings half of what parallelAgentsCap.follow does for
-// the fan-out width, and called at the same moment for the same reason: a pin is a fact about one
-// server, and carrying the retired server's onto the new one is exactly the bug that would be
-// invisible. An entry that pins nothing writes 0, which leaves the top-level key answering. The
-// name travels with the pin, because it is what a later re-read of `servers:` matches this session's
-// server back by.
+// followEntry takes the bound entry's own two token pins — its `context-window:` and its
+// `max-output-tokens:` — onto the entry a move just landed on, dropping the retired entry's: the
+// liveSettings half of what parallelAgentsCap.follow does for the fan-out width, and called at the
+// same moment for the same reason: a pin is a fact about one server, and carrying the retired
+// server's onto the new one is exactly the bug that would be invisible. An entry that pins nothing
+// writes 0 for both, which leaves the top-level key answering for the window and the engine deriving
+// the reply ceiling. The name travels with the pins, because it is what a later re-read of `servers:`
+// matches this session's server back by.
 //
 // It is called at every point a session ARRIVES on a server that this holder already exists for — a
 // `/server` move, and the first pick that ends a pre-bound start — and AFTER that arrival committed,
@@ -165,7 +175,7 @@ func (s *liveSettings) setPin(tokens int) {
 func (s *liveSettings) followEntry(entry config.ServerEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.entryWindow, s.entryName = entry.ContextWindow, entry.Name
+	s.entryWindow, s.entryCap, s.entryName = entry.ContextWindow, entry.MaxOutputTokens, entry.Name
 }
 
 // window reports the context window in force right now for the server this session is on: the bound
@@ -250,34 +260,37 @@ func (s *liveSettings) setContextFileNames(names []string) bool {
 // definition) — so this store IS the whole apply for that key. The caller validates first, the
 // setSystemPrompt posture: a list with a nameless or duplicated entry never displaces a working one.
 //
-// The bound entry's window pin is re-resolved from the same list, under the same lock, because it is
-// DERIVED from it: a `context-window:` the human edits on the entry this session is already on is an
-// ADR 0037 key like `parallel-agents:` beside it (parallelAgentsCap.relist), and a list installed
-// without re-deriving the pin would leave the latch describing the file as it stood at the last
-// move. Matched back by NAME, which is what identifies an entry across a re-read (ADR 0036 decision
-// 1); a list that no longer names this session's server leaves the pin exactly where it was — the
-// posture the switch list takes toward an entry the human deleted while the session was on it — and
-// an entry that has DROPPED its pin resolves back to the top-level key.
+// The bound entry's two token pins are re-resolved from the same list, under the same lock, because
+// both are DERIVED from it: a `context-window:` or a `max-output-tokens:` the human edits on the
+// entry this session is already on is an ADR 0037 key like `parallel-agents:` beside them
+// (parallelAgentsCap.relist), and a list installed without re-deriving them would leave the latches
+// describing the file as it stood at the last move. Matched back by NAME, which is what identifies
+// an entry across a re-read (ADR 0036 decision 1); a list that no longer names this session's server
+// leaves both pins exactly where they were — the posture the switch list takes toward an entry the
+// human deleted while the session was on it — and an entry that has DROPPED one resolves back to
+// what answers without it: the top-level key for the window, the engine's own derivation for the cap.
 //
-// It reports whether that re-derivation MOVED the window this session is bound to — the RESOLVED
-// answer, entry pin over top-level key, compared across the install rather than the entry's own
-// field. That answer is what the caller's ride turns on (applySettingFor's `servers` case): a latch
-// nobody re-reads describes the session only from the next rebind onwards, so an edit that moves it
-// has to drive one, and an edit that does not must not. Resolved-not-raw is what makes "does not"
-// honest: an entry that drops a 65,536 pin onto a top-level key already saying 65,536 has changed
-// the file without changing this session's window.
+// It reports whether that re-derivation MOVED either token bound this session is held to — the
+// RESOLVED answers, compared across the install rather than the entry's own fields. That is what the
+// caller's ride turns on (applySettingFor's `servers` case): a latch nobody re-reads describes the
+// session only from the next rebind onwards, so an edit that moves one has to drive one, and an edit
+// that moves neither must not. Resolved-not-raw is what makes "moves neither" honest for the window:
+// an entry that drops a 65,536 pin onto a top-level key already saying 65,536 has changed the file
+// without changing this session's window. For the CAP the resolved answer is the entry's own field —
+// ADR 0046 grew no top-level key to fall back to — so the two comparisons read differently while
+// asking one question.
 func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	before := config.ResolveContextWindow(s.entryWindow, s.pinnedWindow)
+	window, outputCap := config.ResolveContextWindow(s.entryWindow, s.pinnedWindow), s.entryCap
 	s.servers = servers
 	for _, e := range servers {
 		if e.Name != "" && e.Name == s.entryName {
-			s.entryWindow = e.ContextWindow
+			s.entryWindow, s.entryCap = e.ContextWindow, e.MaxOutputTokens
 			break
 		}
 	}
-	return config.ResolveContextWindow(s.entryWindow, s.pinnedWindow) != before
+	return config.ResolveContextWindow(s.entryWindow, s.pinnedWindow) != window || s.entryCap != outputCap
 }
 
 // setMechanisms installs a re-read `mechanisms:` block: the validated enabled ids and the block
@@ -320,10 +333,12 @@ func (s *liveSettings) setValidatedSets(enable bool, alias map[string]string) {
 	s.validatedEnable, s.validatedAlias = enable, alias
 }
 
-// rebindInputs projects the live values onto a COPY of the startup snapshot and hands back the three
+// rebindInputs projects the live values onto a COPY of the startup snapshot and hands back the
 // arguments rebindSpecFor takes them as. It is the one place the overlay is spelled out, so a caller
 // cannot re-resolve half from the holder and half from the launch: every re-resolution — the rebind
-// closure, a scheduled Firing — opens with this call.
+// closure, a scheduled Firing — opens with this call. The two token bounds come back beside the copy
+// for that same reason rather than through accessors of their own: read under ONE lock, they cannot
+// describe two different instants of a `servers:` list that is being installed as they are read.
 //
 // The charter covers the WIRE too, which this settings holder deliberately does not own: bound is the
 // upstreamHolder's snapshot, and it is overlaid unconditionally because the holder — not the launch
@@ -332,7 +347,7 @@ func (s *liveSettings) setValidatedSets(enable bool, alias map[string]string) {
 // input that is keyed on the endpoint — the probe record behind the identity ladder's middle rung,
 // and so the Validated-set decision above it — would be resolved against a server the session left.
 // Both live callers run only after the startup bind, so the snapshot is always a real binding.
-func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) (config.Options, []apogee.MechanismID, int) {
+func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) (config.Options, []apogee.MechanismID, int, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	base.Endpoint = bound.Endpoint
@@ -349,7 +364,11 @@ func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) 
 	base.ValidatedSetsAlias = s.validatedAlias
 	base.SystemPrompt = s.systemPrompt
 	base.ModelProfiles = s.modelProfiles
-	return base, s.manualIDs, pin
+	// And the other bound the server states: the reply ceiling the bound entry pins (ADR 0046). It
+	// travels beside the window because the spec the caller builds carries it beside the window, and
+	// it is handed back rather than written onto the copy because `config.Options` spells this number
+	// as the STARTUP entry's — a session that has moved since is bound to the entry it is on now.
+	return base, s.manualIDs, pin, s.entryCap
 }
 
 // settingsApplier is everything a committed key can have to reach, in one value rather than in a
@@ -538,18 +557,20 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			if err != nil {
 				return "", err
 			}
-			// The rest of it is one number the engine is already holding: the window the BOUND entry
-			// pins (ADR 0045 decision 3). Installing that on the latch alone would leave an edited
-			// window describing the session only from the next rebind onwards — the next beat that
-			// happens to observe a change, seconds or minutes away — so this key rides the rebind
-			// exactly as the top-level `context-window:` key above does, through the same door, for the
-			// same reason: the pin has no engine setter of its own.
+			// The rest of it is two numbers the engine is already holding: the window the BOUND entry
+			// pins (ADR 0045 decision 3) and the reply ceiling it pins beside it (ADR 0046). Installing
+			// those on the latches alone would leave an edited bound describing the session only from
+			// the next rebind onwards — the next beat that happens to observe a change, seconds or
+			// minutes away — so this key rides the rebind exactly as the top-level `context-window:`
+			// key above does, through the same door, for the same reason: neither pin has an engine
+			// setter of its own.
 			//
-			// Only when the resolved window actually MOVED, though. A rebind is not free — it re-resolves
-			// every per-model binding, resets the token estimator and the compaction latch, and is
-			// idle-only, so an edit to some OTHER entry that drove one would refuse mid-Exchange to
-			// install numbers nobody changed. And a Driver that composed no rebind to ride installs the
-			// list and stands still on the window, the posture reloadServers' own optional members take.
+			// Only when a resolved bound actually MOVED, though — EITHER of them, since both ride the
+			// one spec and one ride carries both. A rebind is not free: it re-resolves every per-model
+			// binding, resets the token estimator and the compaction latch, and is idle-only, so an
+			// edit to some OTHER entry that drove one would refuse mid-Exchange to install numbers
+			// nobody changed. And a Driver that composed no rebind to ride installs the list and stands
+			// still on both bounds, the posture reloadServers' own optional members take.
 			if !moved || !a.rides() {
 				return "", nil
 			}
@@ -633,8 +654,8 @@ func (a settingsApplier) unreachable(key string) error {
 		reaches = a.rides()
 	case "servers":
 		// The holder alone is enough to ACCEPT this key: the list itself reaches no engine seam (ADR
-		// 0036), and the rebind the bound entry's window pin rides is conditional — asked for only by
-		// an edit that moved that window. Requiring the whole riding triple here would refuse every
+		// 0036), and the rebind the bound entry's two token pins ride is conditional — asked for only
+		// by an edit that moved one of them. Requiring the whole riding triple here would refuse every
 		// list edit on a Driver that composed no rebind, for a ride most list edits never ask for.
 		reaches = a.live != nil
 	case "mcp-servers":
@@ -653,8 +674,8 @@ func (a settingsApplier) unreachable(key string) error {
 // It is asked in two voices. unreachable asks it about the keys that are NOTHING but a ride — a
 // missing member there is the honest refusal, since the file changed and the session cannot. The
 // `servers:` case asks it about a ride that is one part of a larger apply, where a missing member
-// leaves the list installed and only the window standing still, exactly as a nil caps or a nil
-// delegation leaves the width and the routing standing still.
+// leaves the list installed and only the entry's two token bounds standing still, exactly as a nil
+// caps or a nil delegation leaves the width and the routing standing still.
 func (a settingsApplier) rides() bool {
 	return a.live != nil && a.binding != nil && a.rebind != nil
 }
@@ -711,9 +732,9 @@ func (a settingsApplier) reloadSystemPrompt() error {
 // re-reading that one layer resolves it exactly as startup resolved it — reloadSystemPrompt's own
 // reasoning, and the reason the migration notice is dropped here too.
 //
-// It reports whether the re-read moved the window the BOUND entry resolves to (setServers' own
-// answer), which is what tells the caller a rebind has to ride this apply. A refusal reports false
-// with the error: nothing was installed, so nothing moved.
+// It reports whether the re-read moved either token bound the BOUND entry resolves to — its window
+// or its reply ceiling (setServers' own answer) — which is what tells the caller a rebind has to ride
+// this apply. A refusal reports false with the error: nothing was installed, so nothing moved.
 func (a settingsApplier) reloadServers() (bool, error) {
 	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
@@ -736,8 +757,9 @@ func (a settingsApplier) reloadServers() (bool, error) {
 	// session is on (ADR 0039 decision 2). Re-resolving it here is what makes `parallel-agents:` an
 	// ADR 0037 key like the rest — moved in the pane, in force in the running session — rather than one
 	// that waits for the next switch. The entry is matched back by name and the observed slot count is
-	// kept: the file changed, the server did not. (The other such number, the bound entry's window pin,
-	// has no setter to push at and reaches the engine on the caller's ride instead.)
+	// kept: the file changed, the server did not. (The other two such numbers, the bound entry's window
+	// pin and its reply ceiling, have no setter to push at and reach the engine on the caller's ride
+	// instead.)
 	if a.caps != nil {
 		a.caps.relist(l.Servers)
 	}
@@ -866,6 +888,12 @@ func settingBool(key, value string) (bool, error) {
 //     is why manualIDs is passed in rather than re-derived from the map here;
 //   - the context window, applying the pin: pinnedWindow > 0 is the user's `context-window:` key and
 //     outranks whatever the server reports (decision 9), else the observed window is bound as-is;
+//   - the reply ceiling, which is not per-model at all and is re-stated here anyway: outputCap is the
+//     bound `servers:` entry's `max-output-tokens:` (ADR 0046), and stating it on EVERY spec is what
+//     lets a live edit of that pin ride a rebind — including an edit that DROPS it, which arrives as
+//     the zero that means "derive the cap again" rather than as silence. The spec's field is a
+//     pointer so silence is still expressible; this resolver simply never has anything to be silent
+//     about, since it always knows what the bound entry says;
 //   - the Model profile, because `model-profiles:` keys on the model name and the shipped shape
 //     table matches on it too (ADR 0044) — the shape a model speaks the wire in travels with the
 //     model, so it rides the same atomic Rebind as the prompt and the Mechanisms.
@@ -881,7 +909,7 @@ func rebindSpecFor(
 	roots stateRoots,
 	manualIDs []apogee.MechanismID,
 	model string,
-	window, pinnedWindow int,
+	window, pinnedWindow, outputCap int,
 ) (apogee.RebindSpec, []string, error) {
 	next := opts
 	next.Model = model
@@ -917,6 +945,7 @@ func rebindSpecFor(
 		Model:            model,
 		SystemPrompt:     sysPrompt,
 		MaxContextTokens: bound,
+		MaxOutputTokens:  &outputCap,
 		EnableMechanisms: enable,
 		Profile:          profile,
 	}, notices, nil

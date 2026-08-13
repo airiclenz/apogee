@@ -307,7 +307,8 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// reply ceiling below is: one configuration, so a headless run budgets against the same window
 	// a session on that entry would.
 	spec, notices, err := rebindSpecFor(*opts, roots, manualIDs, opts.Model, 0,
-		config.ResolveContextWindow(opts.StartupContextWindow, opts.ContextWindow))
+		config.ResolveContextWindow(opts.StartupContextWindow, opts.ContextWindow),
+		opts.StartupMaxOutputTokens)
 	if err != nil {
 		return notStarted(err)
 	}

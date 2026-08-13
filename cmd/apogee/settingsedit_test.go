@@ -398,7 +398,7 @@ func TestApplySettingMechanismBlocksRideTheRebind(t *testing.T) {
 	if _, err := apply("validated-sets", "off"); err != nil {
 		t.Fatalf("apply validated-sets: %v", err)
 	}
-	base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
+	base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
 	if base.ValidatedSetsEnable {
 		t.Error("validated-sets stayed on; the re-read block must reach the resolution inputs")
 	}

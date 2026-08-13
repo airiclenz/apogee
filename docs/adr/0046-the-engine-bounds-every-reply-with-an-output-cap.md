@@ -99,6 +99,7 @@ reasoning) and no retry Mechanism (a retry re-runs the same request into the sam
   message shape its two siblings use.
 - The agent's context configuration and the Delegation target both carry the pin, so a child on the
   flagged server derives from that server's numbers (ADR 0045 decision 3's pin, one field wider).
+  *(Amended 2026-08-13 — `RebindSpec` carries it as well; see the Amendment below.)*
 - The loop gains `maxOutputTokens()` beside `budget()`, applied at both `domain.NewRequest` sites
   BEFORE the pre-request hooks run — which is what makes `SamplingParams`'s "a nil field leaves the
   loop's value untouched" contract true of `MaxTokens` for the first time: a hook that sets it
@@ -111,3 +112,37 @@ reasoning) and no retry Mechanism (a retry re-runs the same request into the sam
   ([ADR 0018](0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md)),
   `defaultReserveFraction`, and the `Allocate` split are all untouched — this record adds a
   statement of the reserve on the wire, not a new allocation policy.
+
+## Amendment (2026-08-13) — `RebindSpec` carries the ceiling, so a live edit of the pin applies at once
+
+Decision 2 put the pin on the `servers:` entry and left WHEN an edited one reaches a running session
+to the seams that already carried it: construction, `SwitchUpstream`
+([ADR 0028](0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)'s own
+amendment), and a sub-agent spawn. None of those is a `/settings` edit. So a `max-output-tokens:`
+changed on the entry the session is ON reached nothing the engine reads — `RebindSpec` carried no
+reply ceiling and `Agent.Rebind` never wrote `cfg.Context.MaxOutputTokens` — and the new ceiling
+waited for the next bind or `/server` move, while the `context-window:` pin in the same block of the
+same file was in force the moment it committed. Two pins on one entry applying at two different times
+is the defect ADR 0028's second follow-up closed for the window, stated again for the ceiling.
+
+So `RebindSpec` grows an optional `MaxOutputTokens`, `Rebind` applies it, and the `servers:` apply
+rides that rebind when EITHER resolved bound moved — one rebind carrying both numbers. Three things
+about the shape are load-bearing:
+
+- **A pointer, not an int.** `nil` ⇒ the spec says NOTHING about the ceiling and the bound one
+  stands. The ceiling describes the slot while a rebind is a per-model re-resolution, so silence has
+  to be expressible: with a plain int, every caller that re-resolved only the per-model bindings
+  would un-bound the reply by omission, which is the one thing a cap must never do. It is
+  `SamplingParams`'s "a nil field leaves the loop's value untouched" contract one layer up, and the
+  composition root's resolver simply always has something to say.
+- **A stated zero is a statement, not silence.** An operator DROPPING the pin resolves to 0 and
+  reaches the engine as 0, which decision 3 already defines: derive the cap from the reply budget
+  again, clamped, never "no cap".
+- **The ride stays conditional.** A rebind re-resolves every per-model binding, resets the token
+  estimator and the compaction latch, and is idle-only, so it is driven only when the resolved window
+  or the resolved ceiling actually MOVED — ADR 0028's follow-up rule, one bound wider. "Resolved" for
+  the ceiling is the bound entry's own field, because this record deliberately grew no top-level key
+  for an entry's pin to outrank.
+
+The engine stays wire-silent ([ADR 0031](0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md)):
+it is handed a number it did not read from any file, exactly as it is handed the window beside it.

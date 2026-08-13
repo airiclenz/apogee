@@ -297,4 +297,16 @@ drives nothing, because a rebind re-resolves every per-model binding, resets the
 the compaction latch, and is idle-only; a gratuitous one would refuse mid-Exchange to install numbers
 nobody changed. What is unchanged, and deliberately so: the entry's `max-output-tokens:` does not
 ride, because `RebindSpec` carries no reply ceiling — that pin reaches the engine through a bind or a
-move, exactly as ADR 0046 and this amendment already describe.
+move, exactly as ADR 0046 and this amendment already describe. *(Superseded by the follow-up below.)*
+
+**Follow-up (2026-08-13) — the reply ceiling rides it too.** The sentence the paragraph above closes
+with is the last one standing: the entry's `max-output-tokens:` waited for a bind or a move only
+because `RebindSpec` carried no ceiling to hand it, and that is a fact about the spec rather than a
+decision about the pin. It carries one now — an optional `MaxOutputTokens` whose nil means "this spec
+says nothing about the ceiling, leave the bound one standing" — `Agent.Rebind` applies it, and the
+`servers:` ride's condition widened from the resolved window to EITHER resolved bound. One rebind
+carries both numbers, so an edit that moves both drives exactly one. Everything else in the paragraph
+above stands unchanged: the ride is still conditional, still keyed on what the session RESOLVES
+rather than on what the file says, and still refused mid-Exchange. The shape of the spec's field, and
+why it is a pointer, are in
+[ADR 0046](0046-the-engine-bounds-every-reply-with-an-output-cap.md)'s own amendment.

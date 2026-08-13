@@ -30,8 +30,8 @@ func (w *rootWiring) rebind(model string, window int) (tui.RebindResult, error) 
 	// against the pin: a later pin EDIT re-drives this seam with no beat of its own, and a
 	// cleared pin has to bind the discovered window rather than unbind it (ADR 0024).
 	w.live.observe(window)
-	base, manualIDs, pinnedWindow := w.live.rebindInputs(w.opts, w.holder.Binding())
-	spec, notices, err := rebindSpecFor(base, w.roots, manualIDs, model, window, pinnedWindow)
+	base, manualIDs, pinnedWindow, outputCap := w.live.rebindInputs(w.opts, w.holder.Binding())
+	spec, notices, err := rebindSpecFor(base, w.roots, manualIDs, model, window, pinnedWindow, outputCap)
 	if err != nil {
 		return tui.RebindResult{}, err
 	}

@@ -88,8 +88,8 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	// used for the wire below: every input the resolution keys on the ENDPOINT — the probe record
 	// behind the identity ladder's behavioral rung, and so the Validated-set decision above it — must
 	// be read for the server this session is on NOW, not the one it launched against.
-	base, manualIDs, pinnedWindow := w.live.rebindInputs(w.opts, binding)
-	spec, _, err := rebindSpecFor(base, w.roots, manualIDs, binding.Model, 0, pinnedWindow)
+	base, manualIDs, pinnedWindow, outputCap := w.live.rebindInputs(w.opts, binding)
+	spec, _, err := rebindSpecFor(base, w.roots, manualIDs, binding.Model, 0, pinnedWindow, outputCap)
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: resolve the firing's bindings: %w", err)
 	}

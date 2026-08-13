@@ -418,3 +418,70 @@ func TestRebindToZeroProfileResetsTheParsers(t *testing.T) {
 		t.Errorf("cfg.Profile = %+v after a zero-profile rebind, want the zero profile", a.cfg.Profile)
 	}
 }
+
+// TestRebindCarriesTheReplyCeiling: the reply ceiling is a fact about the SERVER rather than about
+// the model, and it rides RebindSpec anyway (ADR 0046) — the `max-output-tokens:` pin has no engine
+// setter of its own, so a live edit of it reaches the engine only through the re-resolution the
+// composition root is already driving.
+//
+// The three states the field has are the three the pin has, and the middle one is what makes
+// carrying it safe at all: a spec SILENT about the ceiling leaves the bound one standing, so a
+// rebind driven for a model change — or by any caller that resolved the per-model bindings alone —
+// can never un-bound a reply the operator bounded.
+func TestRebindCarriesTheReplyCeiling(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Context.MaxContextTokens = 98304
+	cfg.Context.MaxOutputTokens = 2048
+	responder := &captureAllResponder{scripts: [][]provider.Delta{contentScript("bounded")}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	// Stated: the ceiling binds, and the very NEXT request states that number on the wire. The
+	// assertion is the wire's own max_tokens rather than the field, because the field is only
+	// interesting insofar as the server is told about it.
+	pinned := 8192
+	if err := a.Rebind(RebindSpec{
+		Model: "new-model", MaxContextTokens: 98304, MaxOutputTokens: &pinned,
+	}); err != nil {
+		t.Fatalf("Rebind with a stated ceiling: %v", err)
+	}
+	if got := a.maxOutputTokens(); got != 8192 {
+		t.Errorf("reply cap = %d after the rebind, want the spec's 8192", got)
+	}
+	runExchange(t, a, "answer within the edited ceiling")
+	if len(responder.got) != 1 {
+		t.Fatalf("responder saw %d requests, want 1", len(responder.got))
+	}
+	sent := responder.got[0].Sampling.MaxTokens
+	if sent == nil {
+		t.Fatalf("the request carried a nil max_tokens — the rebound ceiling reached the engine only halfway")
+	}
+	if *sent != 8192 {
+		t.Errorf("wire max_tokens = %d, want the rebound 8192", *sent)
+	}
+
+	// Silent: the ceiling stands. This is the invariant ADR 0046 turns on — the ceiling describes the
+	// server, and a spec that re-resolved only the per-model bindings has said nothing about it.
+	if err := a.Rebind(RebindSpec{Model: "another-model", MaxContextTokens: 98304}); err != nil {
+		t.Fatalf("Rebind with no ceiling stated: %v", err)
+	}
+	if got := a.maxOutputTokens(); got != 8192 {
+		t.Errorf("reply cap = %d after a spec silent about it, want the 8192 still in force — a nil "+
+			"field must leave the bound ceiling untouched, never clear it", got)
+	}
+
+	// The stated ZERO: the operator DROPPED the pin, which is a statement and not silence. The engine
+	// derives the cap from the reply room the Budget already reserves (98,304 × 0.20), never "no cap".
+	dropped := 0
+	if err := a.Rebind(RebindSpec{
+		Model: "third-model", MaxContextTokens: 98304, MaxOutputTokens: &dropped,
+	}); err != nil {
+		t.Fatalf("Rebind with the pin dropped: %v", err)
+	}
+	if got := a.maxOutputTokens(); got != 19660 {
+		t.Errorf("reply cap = %d after the pin was dropped, want the derived 19660", got)
+	}
+}

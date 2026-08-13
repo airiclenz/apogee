@@ -167,6 +167,7 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 		model        string
 		window       int
 		pinnedWindow int
+		outputCap    int
 		wantPrompt   string
 		wantWindow   int
 		wantEnable   func(t *testing.T, got []apogee.MechanismID)
@@ -242,6 +243,17 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 			model:      "model-a",
 			wantWindow: 0,
 		},
+		{
+			// The one bound here that is not per-model: the bound entry's `max-output-tokens:` (ADR
+			// 0046) rides the spec because the pin has no engine setter of its own, so a rebind is the
+			// only door a live edit of it can reach the engine through.
+			name:       "the bound entry's reply ceiling is stated beside the window",
+			opts:       config.Options{},
+			model:      "model-a",
+			window:     32768,
+			outputCap:  8192,
+			wantWindow: 32768,
+		},
 	}
 
 	for _, tt := range tests {
@@ -249,9 +261,19 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 			t.Parallel()
 			roots := stateRoots{config: t.TempDir(), validated: t.TempDir(), probe: t.TempDir()}
 
-			spec, _, err := rebindSpecFor(tt.opts, roots, tt.manualIDs, tt.model, tt.window, tt.pinnedWindow)
+			spec, _, err := rebindSpecFor(tt.opts, roots, tt.manualIDs, tt.model, tt.window,
+				tt.pinnedWindow, tt.outputCap)
 			if err != nil {
 				t.Fatalf("rebindSpecFor: %v", err)
+			}
+			// Stated on EVERY spec, never left nil: nil is the spec's way of saying nothing about the
+			// ceiling, and this resolver always knows what the bound entry says — including that it
+			// says nothing, which is the 0 that means "derive the cap again" (ADR 0046).
+			if spec.MaxOutputTokens == nil {
+				t.Fatalf("spec.MaxOutputTokens is nil; want the bound entry's ceiling stated")
+			}
+			if *spec.MaxOutputTokens != tt.outputCap {
+				t.Errorf("spec.MaxOutputTokens = %d; want the bound entry's %d", *spec.MaxOutputTokens, tt.outputCap)
 			}
 			if spec.Model != tt.model {
 				t.Errorf("spec.Model = %q; want the observed %q", spec.Model, tt.model)
@@ -279,7 +301,7 @@ func TestRebindInputsOverlayTheBoundUpstream(t *testing.T) {
 	live := newLiveSettings(launchOpts, nil)
 	bound := upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model", APIKey: "bound-key"}
 
-	base, _, _ := live.rebindInputs(launchOpts, bound)
+	base, _, _, _ := live.rebindInputs(launchOpts, bound)
 
 	if base.Endpoint != bound.Endpoint {
 		t.Errorf("endpoint = %q; want the bound %q, not the launch snapshot's", base.Endpoint, bound.Endpoint)
@@ -320,8 +342,8 @@ func TestRebindResolutionKeysOnTheBoundEndpoint(t *testing.T) {
 	var notices []string
 	rebind := func(model string, window int) (tui.RebindResult, error) {
 		bound := upstreamBinding{Endpoint: boundEndpoint, Model: model}
-		base, manualIDs, pinnedWindow := live.rebindInputs(launchOpts, bound)
-		got, ns, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow)
+		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, bound)
+		got, ns, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
@@ -3166,8 +3188,8 @@ func TestApplySettingSystemPromptReResolvesFromTheFile(t *testing.T) {
 	// dispatcher installed there is what the spec carries.
 	var spec apogee.RebindSpec
 	rebind := func(model string, window int) (tui.RebindResult, error) {
-		base, manualIDs, pinnedWindow := live.rebindInputs(launchOpts, upstreamBinding{Model: "bound-model"})
-		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow)
+		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: "bound-model"})
+		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
@@ -3920,8 +3942,14 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	// The pin outlives the move by more than one beat: the rebind that the new server's first
 	// observation drives resolves its window through this same holder, so it binds the entry's 65,536
 	// rather than the top-level 16,384 or whatever that server happens to advertise.
-	if _, _, pin := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
+	if _, _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
 		t.Errorf("the next rebind's pin = %d; want the moved-to entry's 65536", pin)
+	}
+	// And so does the ceiling beside it, for the same span and the same reason: a rebind now re-states
+	// the reply cap on its spec, so a latch left behind on the retired entry's number would have the
+	// first beat after a move un-bound — or wrongly bound — a reply on the server just arrived at.
+	if _, _, _, outputCap := live.rebindInputs(config.Options{}, upstreamBinding{}); outputCap != 8192 {
+		t.Errorf("the next rebind's ceiling = %d; want the moved-to entry's 8192", outputCap)
 	}
 
 	bare := config.ServerEntry{Name: "laptop", Endpoint: "http://127.0.0.1:8080"}
@@ -3937,8 +3965,13 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	if want := (tui.ServerSwitchResult{Endpoint: bare.Endpoint, HostAlias: "laptop", ContextWindow: 16384}); result != want {
 		t.Errorf("move = %+v; want %+v — the top-level pin survives a move", result, want)
 	}
-	if _, _, pin := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 16384 {
+	if _, _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 16384 {
 		t.Errorf("the next rebind's pin = %d; want the top-level 16384 back", pin)
+	}
+	// The ceiling has no top-level key to fall back to (ADR 0046), so an entry that pins none hands
+	// the next rebind the 0 that means "derive it" — never the retired entry's 8,192.
+	if _, _, _, outputCap := live.rebindInputs(config.Options{}, upstreamBinding{}); outputCap != 0 {
+		t.Errorf("the next rebind's ceiling = %d; want 0 — the retired entry's pin must not follow", outputCap)
 	}
 }
 
@@ -4036,7 +4069,7 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	if _, err := apply("servers", ""); err != nil {
 		t.Fatalf("apply servers: %v", err)
 	}
-	if _, _, pin := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
+	if _, _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
 		t.Errorf("the next rebind's pin = %d; want the edited 65536 — the latch went stale", pin)
 	}
 
@@ -4044,7 +4077,7 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	if _, err := apply("servers", ""); err != nil {
 		t.Fatalf("apply servers with the pin removed: %v", err)
 	}
-	if _, _, pin := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 16384 {
+	if _, _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 16384 {
 		t.Errorf("the next rebind's pin = %d; want the top-level 16384 back once the entry pins nothing", pin)
 	}
 
@@ -4057,7 +4090,7 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	if _, err := apply("servers", ""); err != nil {
 		t.Fatalf("apply servers naming another entry: %v", err)
 	}
-	if _, _, pin := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
+	if _, _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
 		t.Errorf("the next rebind's pin = %d; want the bound entry's 65536 kept", pin)
 	}
 }
@@ -4097,8 +4130,8 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysWindow(t *testing.T) 
 	drives := 0
 	rebind := func(model string, window int) (tui.RebindResult, error) {
 		drives++
-		base, manualIDs, pinnedWindow := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
-		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow)
+		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
+		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
@@ -4210,8 +4243,164 @@ func TestApplySettingServersDoesNotRebindForAnEditThatMovesNoWindow(t *testing.T
 				t.Errorf("installed list = %v, want %v: the list applies whether or not a ride does",
 					names, tt.wantNames)
 			}
-			if _, _, pin := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != tt.wantPin {
+			if _, _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != tt.wantPin {
 				t.Errorf("the next rebind's pin = %d; want the unchanged %d", pin, tt.wantPin)
+			}
+		})
+	}
+}
+
+// The reply ceiling beside that window is the other half of one ride, and it was the half that
+// waited: `RebindSpec` carried no ceiling at all, so a `max-output-tokens:` edited on the bound entry
+// re-derived a latch nothing read and reached the engine only at the next bind or `/server` move —
+// while the window, edited in the same block of the same file, was in force the moment it committed.
+// It rides now, on the same spec through the same door: the ceiling the engine states on the wire is
+// the number the file says, without a beat of its own. Dropping the pin is the same act — the 0 the
+// engine reads as "derive the cap from the reply budget again" is in force at once, which is why the
+// spec's field is a pointer and this resolver always fills it in.
+func TestApplySettingServersRidesTheRebindForTheBoundEntrysReplyCap(t *testing.T) {
+	t.Parallel()
+
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	path := filepath.Join(roots.config, "config.yaml")
+	write := func(pin string) {
+		t.Helper()
+		body := "servers:\n  - name: here\n    endpoint: http://127.0.0.1:1111\n" + pin
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+	}
+
+	// The holder as a startup bind onto `here` leaves it: that entry's own 2,048-token ceiling, the
+	// top-level window key, and a beat that has since reported what the server advertises.
+	launchOpts := config.Options{ContextWindow: 16384, HostAlias: "here", StartupMaxOutputTokens: 2048}
+	live := newLiveSettings(launchOpts, nil)
+	live.observe(131072)
+
+	// The rebind closure the composition root wires: it re-resolves through the holder, so the spec it
+	// builds is what the engine would be handed.
+	var spec apogee.RebindSpec
+	drives := 0
+	rebind := func(model string, window int) (tui.RebindResult, error) {
+		drives++
+		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
+		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
+		if err != nil {
+			return tui.RebindResult{}, err
+		}
+		spec = got
+		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
+	}
+	apply := applySettingFor(settingsApplier{
+		engine:     &applySettingSpy{},
+		live:       live,
+		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
+		rebind:     rebind,
+		configPath: path,
+	})
+
+	write("    max-output-tokens: 8192\n")
+	if _, err := apply("servers", ""); err != nil {
+		t.Fatalf("apply servers: %v", err)
+	}
+	if drives != 1 {
+		t.Fatalf("rebind drives = %d, want 1: the edited ceiling must not wait for the next bind", drives)
+	}
+	if spec.MaxOutputTokens == nil {
+		t.Fatalf("RebindSpec.MaxOutputTokens is nil; want the edited ceiling stated on the spec")
+	}
+	if *spec.MaxOutputTokens != 8192 {
+		t.Errorf("RebindSpec.MaxOutputTokens = %d; want the edited 8192 in force at once",
+			*spec.MaxOutputTokens)
+	}
+	// The window is untouched throughout, which is what makes this the CAP's own arm of the ride
+	// condition rather than the window's arm firing for it.
+	if spec.MaxContextTokens != 16384 {
+		t.Errorf("RebindSpec.MaxContextTokens = %d; want the unmoved top-level 16384", spec.MaxContextTokens)
+	}
+
+	write("")
+	if _, err := apply("servers", ""); err != nil {
+		t.Fatalf("apply servers with the ceiling removed: %v", err)
+	}
+	if drives != 2 {
+		t.Fatalf("rebind drives = %d, want 2: dropping the pin moves the ceiling as much as adding one", drives)
+	}
+	if spec.MaxOutputTokens == nil || *spec.MaxOutputTokens != 0 {
+		t.Errorf("RebindSpec.MaxOutputTokens = %v; want the stated 0 that hands the ceiling back to the "+
+			"engine's own derivation", spec.MaxOutputTokens)
+	}
+}
+
+// And the other side of the cap's ride, the guard the window's own no-ride table states for the
+// window: a `servers:` edit that leaves this session's ceiling exactly where it was must not rebind
+// for it. The list still installs; only the ride is conditional, and the condition is the ceiling
+// this session RESOLVES — which for the cap is the bound entry's own field, since ADR 0046 grew no
+// top-level key to fall back to.
+func TestApplySettingServersDoesNotRebindForACapEditThatMovesNothing(t *testing.T) {
+	t.Parallel()
+
+	const bound = "servers:\n  - name: here\n    endpoint: http://127.0.0.1:1111\n"
+	tests := []struct {
+		name     string
+		entryCap int
+		list     string
+		wantCap  int
+	}{
+		{
+			name:     "a ceiling edited on an entry this session is not on",
+			entryCap: 2048,
+			list: bound + "    max-output-tokens: 2048\n  - name: elsewhere\n" +
+				"    endpoint: http://127.0.0.1:2222\n    max-output-tokens: 32768\n",
+			wantCap: 2048,
+		},
+		{
+			name:     "a ceiling restating the number already in force",
+			entryCap: 2048,
+			list:     bound + "    max-output-tokens: 2048\n",
+			wantCap:  2048,
+		},
+		{
+			name:     "an entry that pinned no ceiling and still pins none",
+			entryCap: 0,
+			list:     bound + "    parallel-agents: 5\n",
+			wantCap:  0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.list), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			live := newLiveSettings(config.Options{
+				HostAlias: "here", StartupMaxOutputTokens: tt.entryCap,
+			}, nil)
+			probe := &rebindProbe{}
+			apply := applySettingFor(settingsApplier{
+				engine:     &applySettingSpy{},
+				live:       live,
+				binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
+				rebind:     probe.rebind,
+				configPath: path,
+			})
+
+			if _, err := apply("servers", ""); err != nil {
+				t.Fatalf("apply servers: %v", err)
+			}
+			if len(probe.calls) != 0 {
+				t.Errorf("rebind drives = %+v, want none: this edit moved no bound this session holds",
+					probe.calls)
+			}
+			if len(live.serverList()) == 0 {
+				t.Error("the re-read list was not installed: the list applies whether or not a ride does")
+			}
+			if _, _, _, outputCap := live.rebindInputs(config.Options{}, upstreamBinding{}); outputCap != tt.wantCap {
+				t.Errorf("the next rebind's ceiling = %d; want the unchanged %d", outputCap, tt.wantCap)
 			}
 		})
 	}
