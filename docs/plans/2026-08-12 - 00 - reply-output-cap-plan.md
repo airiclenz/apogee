@@ -100,7 +100,11 @@ Decided by the owner (Airic Lenz) on 2026-08-12, in session; binding on every it
 
 ---
 
-## 1. Record the two 2026-08-12 defects in ISSUES.md
+## 1. Record the two 2026-08-12 defects in ISSUES.md — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the placement anchor named by the item — the `## External security audit — confirmed findings (2026-08-11)` heading — no longer exists; it was removed from ISSUES.md by commit 2f0d4d7 (current HEAD). Both entries were placed at the end of the top undated list, immediately above the file's first section heading (`## Hostile-bytes hardening run — open follow-ups (2026-08-12)`), which is where that instruction points now.
+
+NOTES (2026-08-13): two citations corrected against the working tree — `SamplingParams` is declared at `internal/domain/hooks.go:621` (the item's `:622` is its `Temperature` field), and the 30 ms sink flush is folded at `internal/tui/model.go:648` (the item's `:646` is the `ctrlCResetMsg` return). The blink citation `internal/tui/model.go:884` is accurate and was kept; `:904` (the conditional repaint) and `internal/tui/spinner.go:347` (`starBlinkHalfPeriod = 500ms`, the 2 Hz claim's source) were added so the "2 Hz" figure is checkable.
 
 **What.** Add two entries to `ISSUES.md`, so both defects are tracked independently of this plan's
 execution. Place each as a `- [ ]` bullet in the top (undated) list, above the
