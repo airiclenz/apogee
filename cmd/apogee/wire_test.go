@@ -4062,6 +4062,161 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	}
 }
 
+// Re-deriving the latch is only half of an apply: a latch is read at the NEXT rebind, so an edited
+// window would describe the session from whenever the next beat happens to drive one — seconds or
+// minutes away — while the top-level `context-window:` key edited on the row above is in force the
+// moment it commits. So a `servers:` edit that moves the bound entry's window rides the rebind too,
+// through the same door and with the same result: the spec the engine is handed carries the edited
+// number without a beat of its own. Clearing the entry's pin is the same act — the window it hands
+// back to the top-level key is in force at once, not at the next observation.
+func TestApplySettingServersRidesTheRebindForTheBoundEntrysWindow(t *testing.T) {
+	t.Parallel()
+
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	path := filepath.Join(roots.config, "config.yaml")
+	write := func(pin string) {
+		t.Helper()
+		body := "servers:\n  - name: here\n    endpoint: http://127.0.0.1:1111\n" + pin
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+	}
+
+	// The holder as a startup bind onto `here` leaves it: the entry's own 32,768 over the top-level
+	// 16,384, and a beat that has since reported what the server itself advertises.
+	launchOpts := config.Options{ContextWindow: 16384, HostAlias: "here", StartupContextWindow: 32768}
+	live := newLiveSettings(launchOpts, nil)
+	live.observe(131072)
+
+	// The rebind closure the composition root wires: it re-resolves through the holder, so the spec
+	// it builds is what the engine would be handed.
+	var spec apogee.RebindSpec
+	drives := 0
+	rebind := func(model string, window int) (tui.RebindResult, error) {
+		drives++
+		base, manualIDs, pinnedWindow := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
+		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow)
+		if err != nil {
+			return tui.RebindResult{}, err
+		}
+		spec = got
+		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
+	}
+	apply := applySettingFor(settingsApplier{
+		engine:     &applySettingSpy{},
+		live:       live,
+		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
+		rebind:     rebind,
+		configPath: path,
+	})
+
+	write("    context-window: 65536\n")
+	if _, err := apply("servers", ""); err != nil {
+		t.Fatalf("apply servers: %v", err)
+	}
+	if drives != 1 {
+		t.Fatalf("rebind drives = %d, want 1: the edited window must not wait for the next beat", drives)
+	}
+	if spec.MaxContextTokens != 65536 {
+		t.Errorf("RebindSpec.MaxContextTokens = %d; want the edited 65536 in force at once",
+			spec.MaxContextTokens)
+	}
+
+	write("")
+	if _, err := apply("servers", ""); err != nil {
+		t.Fatalf("apply servers with the pin removed: %v", err)
+	}
+	if drives != 2 {
+		t.Fatalf("rebind drives = %d, want 2: dropping the pin moves the window as much as adding one", drives)
+	}
+	if spec.MaxContextTokens != 16384 {
+		t.Errorf("RebindSpec.MaxContextTokens = %d; want the top-level 16384 back at once rather than "+
+			"the observed 131072", spec.MaxContextTokens)
+	}
+}
+
+// The other side of that ride: a `servers:` edit that leaves this session's window exactly where it
+// was must not rebind for it. A rebind re-resolves every per-model binding, resets the token
+// estimator and the compaction latch, and is idle-only — so driving one for an entry the session is
+// not on would refuse mid-Exchange to install numbers nothing changed. The list still installs; only
+// the ride is conditional, and the condition is the RESOLVED window rather than the entry's field.
+func TestApplySettingServersDoesNotRebindForAnEditThatMovesNoWindow(t *testing.T) {
+	t.Parallel()
+
+	const bound = "servers:\n  - name: here\n    endpoint: http://127.0.0.1:1111\n"
+	tests := []struct {
+		name      string
+		entryPin  int
+		list      string
+		wantNames []string
+		wantPin   int
+	}{
+		{
+			name:      "an edit to an entry this session is not on",
+			entryPin:  32768,
+			list:      bound + "    context-window: 32768\n  - name: elsewhere\n    endpoint: http://127.0.0.1:2222\n    context-window: 131072\n",
+			wantNames: []string{"here", "elsewhere"},
+			wantPin:   32768,
+		},
+		{
+			name:      "another key on the bound entry's own block",
+			entryPin:  32768,
+			list:      bound + "    context-window: 32768\n    parallel-agents: 5\n",
+			wantNames: []string{"here"},
+			wantPin:   32768,
+		},
+		{
+			name:      "a pin dropped onto a top-level key that already said the same",
+			entryPin:  16384,
+			list:      bound,
+			wantNames: []string{"here"},
+			wantPin:   16384,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.list), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			live := newLiveSettings(config.Options{
+				ContextWindow: 16384, HostAlias: "here", StartupContextWindow: tt.entryPin,
+			}, nil)
+			probe := &rebindProbe{}
+			apply := applySettingFor(settingsApplier{
+				engine:     &applySettingSpy{},
+				live:       live,
+				binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
+				rebind:     probe.rebind,
+				configPath: path,
+			})
+
+			if _, err := apply("servers", ""); err != nil {
+				t.Fatalf("apply servers: %v", err)
+			}
+			if len(probe.calls) != 0 {
+				t.Errorf("rebind drives = %+v, want none: this edit moved no bound this session holds",
+					probe.calls)
+			}
+			var names []string
+			for _, e := range live.serverList() {
+				names = append(names, e.Name)
+			}
+			if !slices.Equal(names, tt.wantNames) {
+				t.Errorf("installed list = %v, want %v: the list applies whether or not a ride does",
+					names, tt.wantNames)
+			}
+			if _, _, pin := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != tt.wantPin {
+				t.Errorf("the next rebind's pin = %d; want the unchanged %d", pin, tt.wantPin)
+			}
+		})
+	}
+}
+
 // The two bounds the entry decides reach the engine through the Config the Agent is CONSTRUCTED
 // from — not through a push afterwards, because at a bind there is nothing yet to push at. That
 // Config is written onto a copy no caller keeps, which is what serverBinder.build exists for: the

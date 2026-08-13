@@ -282,3 +282,19 @@ re-derives the latch from the re-read list, matched back by name, exactly as the
 pin is re-derived (`parallelAgentsCap.relist`) — the ADR 0037 rule that a key moved in the pane is in
 force in the running session. Nothing about the ranks changed: the entry's pin outranks the top-level
 key, and neither pinned is still 0.
+
+**Follow-up (2026-08-13) — that live edit RIDES the rebind, it does not wait for one.** The paragraph
+above claims the ADR 0037 rule for a re-derived latch, and re-deriving a latch is not that rule: a
+latch is read at the NEXT rebind, so an edited window described the session only from whenever the
+next beat happened to drive one — seconds or minutes away — while the top-level `context-window:`
+key, the same pin spelled at the other scope, is in force the moment it commits. The `servers:` key
+had never ridden anything (its list reaches no engine seam at all, ADR 0036), so the two spellings of
+one pin applied at two different times. It rides now, through the same `rideTheRebind` the top-level
+key takes, and the ride is CONDITIONAL: only an edit that actually moved the window this session
+resolves to — the entry's pin over the top-level key, compared across the install — drives one. An
+edit to another entry, or one that re-states the number already in force, installs the list and
+drives nothing, because a rebind re-resolves every per-model binding, resets the token estimator and
+the compaction latch, and is idle-only; a gratuitous one would refuse mid-Exchange to install numbers
+nobody changed. What is unchanged, and deliberately so: the entry's `max-output-tokens:` does not
+ride, because `RebindSpec` carries no reply ceiling — that pin reaches the engine through a bind or a
+move, exactly as ADR 0046 and this amendment already describe.

@@ -393,6 +393,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A `context-window:` edited on the `servers:` entry the session is ON now applies at once, not at
+  the next beat.** The two spellings of one pin applied at two different times: the top-level
+  `context-window:` key re-drove the per-model resolution the moment it was committed, while the same
+  pin on the bound entry only re-derived a latch that nothing reads until the next rebind — so an
+  edited window described the running session from whenever the heartbeat next happened to observe a
+  model change, seconds or minutes away, and a window edited to fix a session that was already
+  budgeting wrong did nothing until then. A `servers:` apply now rides that same rebind, through the
+  one door the top-level key takes. It rides only when the edit actually MOVED the window this
+  session resolves to — the entry's pin over the top-level key, compared across the install — so an
+  edit to another entry, another key on the same entry, or a pin dropped onto a top-level key that
+  already said the same number installs the list and rebinds nothing; a rebind re-resolves every
+  per-model binding, resets the token estimator and is refused mid-Exchange, so a gratuitous one
+  would cost a running turn for numbers nobody changed. The reply ceiling beside it is unchanged: a
+  `max-output-tokens:` pin still reaches the engine through a bind or a `/server` move.
+
 - **A session that STARTS on a pinned entry now budgets against that entry's window.** The
   per-entry `context-window:` pin reached a session that MOVED onto the entry, but not one that was
   bound to it: the pin was never flattened onto the resolved options the way `max-output-tokens:`

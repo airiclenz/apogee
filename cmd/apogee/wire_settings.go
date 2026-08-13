@@ -258,9 +258,18 @@ func (s *liveSettings) setContextFileNames(names []string) bool {
 // 1); a list that no longer names this session's server leaves the pin exactly where it was — the
 // posture the switch list takes toward an entry the human deleted while the session was on it — and
 // an entry that has DROPPED its pin resolves back to the top-level key.
-func (s *liveSettings) setServers(servers []config.ServerEntry) {
+//
+// It reports whether that re-derivation MOVED the window this session is bound to — the RESOLVED
+// answer, entry pin over top-level key, compared across the install rather than the entry's own
+// field. That answer is what the caller's ride turns on (applySettingFor's `servers` case): a latch
+// nobody re-reads describes the session only from the next rebind onwards, so an edit that moves it
+// has to drive one, and an edit that does not must not. Resolved-not-raw is what makes "does not"
+// honest: an entry that drops a 65,536 pin onto a top-level key already saying 65,536 has changed
+// the file without changing this session's window.
+func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	before := config.ResolveContextWindow(s.entryWindow, s.pinnedWindow)
 	s.servers = servers
 	for _, e := range servers {
 		if e.Name != "" && e.Name == s.entryName {
@@ -268,6 +277,7 @@ func (s *liveSettings) setServers(servers []config.ServerEntry) {
 			break
 		}
 	}
+	return config.ResolveContextWindow(s.entryWindow, s.pinnedWindow) != before
 }
 
 // setMechanisms installs a re-read `mechanisms:` block: the validated enabled ids and the block
@@ -519,12 +529,31 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			}
 			return "", a.rideTheRebind()
 		case "servers":
-			// The `servers:` list reaches no engine seam at all: it is the single upstream definition
-			// (ADR 0036) that the picker, the `/server` switch and the choice recording resolve names
-			// against, and all three read the holder — so installing the re-read list IS the apply. The
-			// value the pane persisted is not read, for the system-prompt keys' reason: a list of blocks
-			// is a shape no single string spells.
-			return "", a.reloadServers()
+			// Most of the `servers:` list reaches no engine seam at all: it is the single upstream
+			// definition (ADR 0036) that the picker, the `/server` switch and the choice recording
+			// resolve names against, and all three read the holder — so installing the re-read list is
+			// most of the apply. The value the pane persisted is not read, for the system-prompt keys'
+			// reason: a list of blocks is a shape no single string spells.
+			moved, err := a.reloadServers()
+			if err != nil {
+				return "", err
+			}
+			// The rest of it is one number the engine is already holding: the window the BOUND entry
+			// pins (ADR 0045 decision 3). Installing that on the latch alone would leave an edited
+			// window describing the session only from the next rebind onwards — the next beat that
+			// happens to observe a change, seconds or minutes away — so this key rides the rebind
+			// exactly as the top-level `context-window:` key above does, through the same door, for the
+			// same reason: the pin has no engine setter of its own.
+			//
+			// Only when the resolved window actually MOVED, though. A rebind is not free — it re-resolves
+			// every per-model binding, resets the token estimator and the compaction latch, and is
+			// idle-only, so an edit to some OTHER entry that drove one would refuse mid-Exchange to
+			// install numbers nobody changed. And a Driver that composed no rebind to ride installs the
+			// list and stands still on the window, the posture reloadServers' own optional members take.
+			if !moved || !a.rides() {
+				return "", nil
+			}
+			return "", a.rideTheRebind()
 		case "mechanisms":
 			// Neither block is a value the engine holds either: they are INPUTS to the per-model
 			// resolution — the enable list and the whole-set-or-nothing suppression rule (ADR 0016) —
@@ -579,9 +608,6 @@ func cannotApply(key string) error {
 // test: TestApplySettingRefusesEveryKeyItCannotReach drives EVERY registry key through a zero
 // applier, so a key added to the dispatcher without a line here fails as the panic it would be.
 func (a settingsApplier) unreachable(key string) error {
-	// The rebind-riding keys share one triple: the value lands in the holder and the per-model
-	// resolution is re-driven over it, so all three members are what makes the apply an apply.
-	rides := a.live != nil && a.binding != nil && a.rebind != nil
 	reaches := true
 	switch key {
 	case "mode", "bypass", "auto-compact":
@@ -604,9 +630,12 @@ func (a settingsApplier) unreachable(key string) error {
 		reaches = a.present != nil
 	case "context-window", "system-prompt-text", "system-prompt-file", "system-prompt-models",
 		"mechanisms", "validated-sets":
-		reaches = rides
+		reaches = a.rides()
 	case "servers":
-		// The one re-read key with no rebind behind it: the holder IS the whole apply.
+		// The holder alone is enough to ACCEPT this key: the list itself reaches no engine seam (ADR
+		// 0036), and the rebind the bound entry's window pin rides is conditional — asked for only by
+		// an edit that moved that window. Requiring the whole riding triple here would refuse every
+		// list edit on a Driver that composed no rebind, for a ride most list edits never ask for.
 		reaches = a.live != nil
 	case "mcp-servers":
 		reaches = a.mcp != nil && a.tools != nil && a.engine != nil
@@ -615,6 +644,19 @@ func (a settingsApplier) unreachable(key string) error {
 		return nil
 	}
 	return cannotApply(key)
+}
+
+// rides reports whether this applier was composed with everything a rebind-riding key needs: the
+// value lands in the holder and the per-model resolution is re-driven over it, so all three members
+// together are what makes that apply an apply.
+//
+// It is asked in two voices. unreachable asks it about the keys that are NOTHING but a ride — a
+// missing member there is the honest refusal, since the file changed and the session cannot. The
+// `servers:` case asks it about a ride that is one part of a larger apply, where a missing member
+// leaves the list installed and only the window standing still, exactly as a nil caps or a nil
+// delegation leaves the width and the routing standing still.
+func (a settingsApplier) rides() bool {
+	return a.live != nil && a.binding != nil && a.rebind != nil
 }
 
 // rideTheRebind re-drives the per-model resolution for the model the session is bound to right now.
@@ -668,13 +710,17 @@ func (a settingsApplier) reloadSystemPrompt() error {
 // Only the FILE layer carries the list (no flag, no environment variable names an upstream), so
 // re-reading that one layer resolves it exactly as startup resolved it — reloadSystemPrompt's own
 // reasoning, and the reason the migration notice is dropped here too.
-func (a settingsApplier) reloadServers() error {
+//
+// It reports whether the re-read moved the window the BOUND entry resolves to (setServers' own
+// answer), which is what tells the caller a rebind has to ride this apply. A refusal reports false
+// with the error: nothing was installed, so nothing moved.
+func (a settingsApplier) reloadServers() (bool, error) {
 	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := config.ValidateServers(l.Servers); err != nil {
-		return err
+		return false, err
 	}
 	// The Sub-agent server the list now flags (ADR 0045), re-pointed BEFORE anything is installed:
 	// it is the one part of this apply that can still refuse — a flagged entry whose `mechanisms:`
@@ -682,19 +728,20 @@ func (a settingsApplier) reloadServers() error {
 	// already running, not half-way onto a new one.
 	if a.delegation != nil {
 		if err := a.delegation.relist(l.Servers); err != nil {
-			return err
+			return false, err
 		}
 	}
-	a.live.setServers(l.Servers)
-	// The one thing in that list an engine DOES hold: the fan-out width of the server this session is
-	// on (ADR 0039 decision 2). Re-resolving it here is what makes `parallel-agents:` an ADR 0037 key
-	// like the rest — moved in the pane, in force in the running session — rather than one that waits
-	// for the next switch. The entry is matched back by name and the observed slot count is kept: the
-	// file changed, the server did not.
+	moved := a.live.setServers(l.Servers)
+	// One thing in that list the engine holds and can be PUSHED: the fan-out width of the server this
+	// session is on (ADR 0039 decision 2). Re-resolving it here is what makes `parallel-agents:` an
+	// ADR 0037 key like the rest — moved in the pane, in force in the running session — rather than one
+	// that waits for the next switch. The entry is matched back by name and the observed slot count is
+	// kept: the file changed, the server did not. (The other such number, the bound entry's window pin,
+	// has no setter to push at and reaches the engine on the caller's ride instead.)
 	if a.caps != nil {
 		a.caps.relist(l.Servers)
 	}
-	return nil
+	return moved, nil
 }
 
 // reloadMechanisms re-reads the `mechanisms:` block and installs both halves of it. The ids are
