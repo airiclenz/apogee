@@ -3,6 +3,8 @@
 The single register of known issues and deliberately deferred work (it absorbed `TODO.md` on
 2026-08-13). Two sections:
 
+## Conventions
+
 - **Open defects** — verified, unfixed problems, each with current file:line evidence.
 - **Parked / deferred work** — work deferred by decision, each entry recording *enough* design
   that it is not re-derived when picked up. A deferral or a denial recorded here never becomes a
@@ -13,28 +15,10 @@ This file holds OPEN work only. A resolved or executed item is REMOVED from it a
 no closed-entries section, and no "done" narration, lives here. When a run leaves residuals, record
 only the still-open findings; the work the run completed belongs in `CHANGELOG.md`.
 
+[ ] New/Open Items not handled yet
+[P] Planned Items - if you add an item to an implementation plan, mark it with `P`
+
 ## Open defects
-
-- [ ] all hard-coded prompts need to be plain files. The prompt literals live at
-  `internal/context/compact.go:94` (`summaryInstruction`), `internal/title/title.go:91`
-  (`systemInstruction`), `internal/mechanisms/toolloop.go:122` and `internal/probe/battery.go:307`
-  (citations re-verified 2026-08-13; the originally cited `internal/agent/loop.go:887` no longer
-  holds a prompt).
-
-- [ ] Copying selected text does not put anything into the clipboard. The copy path is
-  single-mechanism: `copyFlash` (`internal/tui/mouse.go:578`) emits `tea.SetClipboard` (`:590`),
-  which is OSC 52 only, with no system-clipboard fallback — the symptom is consistent with a
-  terminal that does not honour OSC 52 (verified 2026-08-13: nothing in the tree changed it).
-
-- [ ] when calling the slash command /settings I can do this: type `/sett`, make sure that the
-  correct menu item in the pop up is selected, then press tab or enter to select the command. This
-  automatically opens the settings page. This does not work for the /server command nor for the
-  /model command. pressing tab/enter just completes the term in the prompt editor - I still need to
-  press enter another time to open the popup menu. Please update this so that /server and /model
-  behave the same way as /settings. (Mechanism, verified 2026-08-13: `model` and `server` carry
-  `takesArgs: true` at `internal/tui/command.go:156`/`:161` while `settings` at `:163` does not,
-  and `acceptAutocomplete` branches exactly on that flag at `internal/tui/autocomplete.go:737` —
-  complete-in-place vs run-at-accept.)
 
 - [ ] an *approved* out-of-workspace write still errors at Execute — the confinement contract's §4
   "WS-write, target out of workspace → gate" row is now half-landed: dispatch classifies the target
@@ -53,7 +37,7 @@ only the still-open findings; the work the run completed belongs in `CHANGELOG.m
   *Configurable tool × mode security matrix* entry below sits on the same
   dispatch-gate-vs-tool-level-fence seam; whichever way this call goes constrains that design.
 
-- [ ] `domain.Request.SetSampling` replaces `SamplingParams` wholesale
+- [P] `domain.Request.SetSampling` replaces `SamplingParams` wholesale
   (`internal/domain/hooks.go:589`), so a future hook setting only `Temperature` would nil the
   loop's `MaxTokens` and un-bound the reply — the "a nil field leaves the loop's value untouched"
   contract at `hooks.go:619` is only half-true. Latent today (no Mechanism mutates sampling), but
@@ -64,6 +48,22 @@ only the still-open findings; the work the run completed belongs in `CHANGELOG.m
   deferred by owner decision on 2026-08-13. Cross-reference: the parked *request-side knobs*
   sub-item (apogee-code feature parity, P1, below) is the feature that would first arm this
   defect — its design must land the merge first.
+
+- [ ] A transient in-band provider error mid-stream faults the whole exchange — no retry. The
+  provider client retries transport faults, 429 and 5xx *before* a reply streams
+  (`internal/provider/client.go:72`), but an error member an aggregator wraps in an HTTP 200
+  mid-stream becomes a terminal `DeltaError` (`inBandErrorDelta`,
+  `internal/provider/stream.go:96`): the loop surfaces one ErrorEvent and fails the Turn
+  (`internal/agent/loop.go:303`), and in a delegated exchange that single fault abandons the
+  sub-agent with no result (`internal/agent/subagent.go:120`). Observed 2026-08-13 (session
+  `20260813T100440Z-104eaf7a`): OpenRouter delivered
+  `{"error":{"code":502,…,"error_type":"provider_unavailable"}}` mid-generation ("Upstream error
+  from DigitalOcean: Connection closed.") and a /security-audit check-family sub-agent lost its
+  entire run to one blip. Wanted: a bounded retry (one re-stream of the Turn, same
+  retryable-class policy as the client's HTTP retries — 429 / 5xx / `provider_unavailable`)
+  before the fault; an in-band 4xx stays terminal. Distinct from the empty-reply sibling the same
+  session showed (`finish: stop` — `empty_response_recovery` already has first claim there,
+  `internal/agent/loop.go:406`).
 
 ### Sub-agent prompt-guard exemption run — residuals (2026-08-13)
 
@@ -91,7 +91,7 @@ run's items deliberately did not reach.
 - [ ] `run_tests` still inherits an unscoped PATH — plausibly deliberate, since a
   workspace-resident test runner IS the test command there.
 
-- [ ] `hostRules.isPathName` duplicates the PATH-fold logic inlined in `ScopeEnv`
+- [P] `hostRules.isPathName` duplicates the PATH-fold logic inlined in `ScopeEnv`
   (`internal/platform/host.go:120-135`) instead of `ScopeEnv` reusing it — harmless today, drifts
   if the fold rule ever changes.
 
@@ -99,7 +99,7 @@ run's items deliberately did not reach.
   ssh-key and credential patterns; ADR 0020 already reasons about that port, so it is declared
   debt.
 
-- [ ] The `rm-rf-root-home-system` / `rm-fr-root-home-system` rules
+- [P] The `rm-rf-root-home-system` / `rm-fr-root-home-system` rules
   (`internal/security/rules.go:23-37`) have the same macOS blind spot — their system-path
   alternation lists `home` but not `users`, so `rm -rf /Users/alice` stays unmatched where
   `rm -rf /home/alice` hard-refuses.
@@ -108,11 +108,11 @@ run's items deliberately did not reach.
   unreachable on a single-device tmpdir, as item 4's own hedge allows; the clean cross-directory
   move is covered.
 
-- [ ] No test pins that the approval pane and the result string agree on the resolved path for
+- [P] No test pins that the approval pane and the result string agree on the resolved path for
   `copy_file` / `move_file` / `delete_file` (the write-tool pair has `TestWriteTargetsAgreeOnPath`,
   which covers the `path` key, not `destination`).
 
-- [ ] Existing writer disclosure tests (`file_ops_test`, `write_file_test`, `file_edit_test`) build
+- [P] Existing writer disclosure tests (`file_ops_test`, `write_file_test`, `file_edit_test`) build
   roots from raw `t.TempDir()`; on a host whose temp dir is reached through a symlink their
   bare-sentence assertions would see a spurious note.
 
@@ -120,10 +120,10 @@ run's items deliberately did not reach.
   answer only ever matters for relative paths — the extra-read-root plumbing in `read_file`'s note
   is documentation, not behaviour.
 
-- [ ] `stripEscapes` keeps `\t` and `flattenField` folds only `\n`, so a tab in any title still
+- [P] `stripEscapes` keeps `\t` and `flattenField` folds only `\n`, so a tab in any title still
   spends unmeasured width — pre-existing across every field seam.
 
-- [ ] `internal/domain/doc.go:59` enumerates `tools.go`'s marker interfaces
+- [P] `internal/domain/doc.go:59` enumerates `tools.go`'s marker interfaces
   (`ReadOnlyTool`…`PromptTool`) without the new `ApprovalScoper`; the sentence stays true, but the
   new marker is worth naming when that map is next touched.
 
@@ -146,26 +146,26 @@ items deliberately did not reach.
 Raised while executing `docs/plans/2026-08-13 - 01 - api-key-sources-plan.md`: what the run's items
 deliberately did not reach.
 
-- [ ] `README.md` (`:547` servers schema, `:612` "the upstream API key") documents only `api-key`;
+- [P] `README.md` (`:547` servers schema, `:612` "the upstream API key") documents only `api-key`;
   no plan item names README, so the new keys have no user-facing doc outside the seeded template.
 
-- [ ] Item text cites `cmd/apogee/defaults/` for the embedded template; its real home is
+- [P] Item text cites `cmd/apogee/defaults/` for the embedded template; its real home is
   `internal/config/defaults/` — later items (and any future plan) should use the corrected path.
 
-- [ ] Untracked `docs/plans/2026-08-13 - 03 - open-defects-fix-wave-plan.md` is a prior session's
+- [P] Untracked `docs/plans/2026-08-13 - 03 - open-defects-fix-wave-plan.md` is a prior session's
   artifact, not this run's work — left unstaged; it still needs its own commit decision.
 
 - [ ] `/server` back onto a configured startup entry resolves that entry's own source, not the
   `APOGEE_API_KEY` overlay (pre-existing; ADR 0036 decision 6).
 
-- [ ] Store-tool stderr is quoted into keystore `Write`'s error; on darwin the failing
+- [P] Store-tool stderr is quoted into keystore `Write`'s error; on darwin the failing
   `security -i` line could carry the secret — worth a redaction pass.
 
 - [ ] `internal/config/configwrite.go` is now 1631 lines against the coding-standards ~400-line
   guide — a split by writer concern (acknowledgement / scalar setting / key source) would need its
   own item.
 
-- [ ] The migration notice wording asserts "this machine has no secret store apogee can move it
+- [P] The migration notice wording asserts "this machine has no secret store apogee can move it
   into" — false in the headless-on-macOS/Linux case; could name the reason per driver.
 
 ## Parked / deferred work

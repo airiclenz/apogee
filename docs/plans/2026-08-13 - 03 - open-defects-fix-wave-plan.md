@@ -271,7 +271,11 @@ only state. Existing `internal/library/proberecord_test.go` version pins stay gr
 
 ---
 
-## 7. `ISSUES.md`: remove the three resolved defects
+## 7. `ISSUES.md`: remove the three resolved defects — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the three resolved entries (hard-coded prompts, clipboard copy, `/server`+`/model` bare accept) are deleted from "Open defects" as the item specifies; the closed trail stays in the per-item `CHANGELOG.md` entries, so this item adds no changelog text of its own.
+NOTES (2026-08-13): deviation from "nothing else in the file moves", per the owner's DECISION for this dispatch — the commit also carries the owner's own concurrent hand edits to `ISSUES.md` (new `## Conventions` heading, the `[ ]`/`[P]` legend relocated above `## Open defects`, and ~10 entries re-marked `[ ]` → `[P]`), preserved as authorized content rather than reverted.
+NOTES (2026-08-13): resolved the outstanding stash, also per DECISION — `stash@{0}` ("ISSUES.md: unrelated in-band provider-error defect entry, set aside during item 2") held the "transient in-band provider error mid-stream faults the whole exchange" / `provider_unavailable` defect, which was absent from the current file. Its text was merged back by hand (not `git stash pop`) as the last "Open defects" entry, immediately before the *Sub-agent prompt-guard exemption run — residuals* heading, which is the position the stash held it in; the stash's only other hunk was an older wording of the legend block the owner has since rewritten in place, so nothing else needed carrying over. `git stash drop stash@{0}` then ran clean. The surviving `stash@{1}` ("implement-plan: pre-run shelf") is untouched and is now `stash@{0}`.
 
 Depends on items 1–6.
 
