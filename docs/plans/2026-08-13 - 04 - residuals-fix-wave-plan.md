@@ -201,7 +201,11 @@ of the notice body (`:116-121` — the `api-key-env:`/`api-key-cmd:` alternative
 
 ---
 
-## 5. README documents the key sources
+## 5. README documents the key sources — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the schema example carries the two alternative keys as a comment on the
+existing `api-key:` line rather than as extra YAML keys — an entry may name only one source,
+so spelling all three as live keys in one entry would show a config that is a startup refusal.
 
 Depends on item 1.
 

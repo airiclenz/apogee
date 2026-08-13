@@ -323,6 +323,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- README documents the three per-entry API key sources: the `servers:` schema example and
+  the optional-key enumeration now name `api-key-cmd` and `api-key-env` alongside
+  `api-key`, and "The upstream API key" gains a paragraph on the exactly-one-source rule,
+  the no-shell command whose trimmed stdout is the key, and the variable-name form.
+
 - The capability battery's two prompts are now plain files, and the rule that governs them is
   enforced rather than stated. `batterySystemPrompt` and `candidatePrompt` moved out of
   `internal/probe/battery.go`'s const block into `internal/probe/prompts/system-prompt.txt` and

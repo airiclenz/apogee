@@ -544,7 +544,7 @@ servers:
     model: gpt-oss-20b           # optional hint; the heartbeat binds what is served
   - name: rented-box
     endpoint: https://llm.example.com
-    api-key: sk-rented-token     # optional; only if that server wants one
+    api-key: sk-rented-token     # optional; or api-key-cmd: / api-key-env: — exactly one of the three
 
 server: workstation
 ```
@@ -552,9 +552,10 @@ server: workstation
 An entry's `name` is the label `/server` lists it under, the argument
 `/server <name>` takes, the value `server:` points at, and the host name the status
 footer shows while the session is on it — one name for all four jobs, so no two
-entries may share one. `endpoint` is required; `api-key`, `model` and `parallel-agents`
-are optional, as is `llama-launcher`, which lets apogee start, switch and stop that
-server itself — [below](#local-servers--llama-launcher).
+entries may share one. `endpoint` is required; `api-key` (or `api-key-cmd` /
+`api-key-env` — exactly one of the three), `model` and `parallel-agents` are optional, as
+is `llama-launcher`, which lets apogee start, switch and stop that server itself —
+[below](#local-servers--llama-launcher).
 
 **Several sub-agents at once.** When one reply asks for several delegations, apogee
 runs them concurrently — as many at a time as that server's cap allows. Unset, the cap
@@ -641,6 +642,22 @@ summarizes the whole `servers:` block rather than rendering it, and the provider
 client redacts the key from any error text the server echoes back. One caveat is
 yours to weigh: `config.yaml` is plain text, so on a shared machine prefer the
 environment variable, or restrict the file's permissions yourself.
+
+**The key need not live in this file.** An entry names its key one of three ways, and
+**exactly one** of them — a second source on one entry is a startup refusal, because
+nothing can say which one the file meant. `api-key:` is the literal token above.
+`api-key-cmd:` is a command whose standard output *is* the key
+(`api-key-cmd: pass show apogee/rented-box`,
+`api-key-cmd: op read op://Private/rented-box/credential`), so the token stays in the
+manager that already holds it: the line is split on spaces and quotes and run **with no
+shell** — pipes, redirections and `$VARIABLES` need a wrapper script of your own — and
+the command's stdout, trailing whitespace trimmed, is the key. `api-key-env:` names an
+environment variable rather than holding a key (`api-key-env: OPENROUTER_API_KEY`), read
+from the environment apogee itself was started in. Both resolve the first time this
+session actually needs that server's key — never at startup for entries you do not
+use — and the answer is remembered for the rest of the session. A non-zero exit, a
+60-second timeout, empty output or an unset variable is an **error** naming the entry,
+never a silent keyless request: "no key" is spelled by leaving all three keys out.
 
 ### Local servers — llama-launcher
 
