@@ -63,27 +63,6 @@ until a release is cut) — the changelog is the closed trail; no closed-entries
   sub-item (apogee-code feature parity, P1, below) is the feature that would first arm this
   defect — its design must land the merge first.
 
-### Hostile-bytes hardening run — open follow-ups (2026-08-12)
-
-Raised while executing `docs/plans/private/2026-08-11 - 06 - hostile-bytes-hardening-plan.md` (all
-20 items now ✅ done): residuals the plan's items deliberately did not reach, plus two doc claims
-those items' own fixes falsified. The hostile-bytes threat model — the operator is trusted, the
-bytes they operate on are not, and neither is the model. Every citation was re-read against the
-working tree on 2026-08-12 and re-verified on 2026-08-13.
-
-- [ ] `internal/domain/events.go:122` still states the wire-silent invariant as "nothing is added
-  to a tool's arguments or its result", which item 8 falsified:
-  `internal/tools/workspace_scoped.go:109` appends ` → resolves to <path>` to the result string of
-  every write whose target differs from its argument. The arguments half of the invariant is
-  intact; the comment needs to name result strings as the exception.
-
-- [ ] `internal/present/server.go:61` and `internal/present/server_test.go:180` both list `.xhtml`
-  among what rung 2 shows, but `.xhtml` is in neither `browserRenderableExts`
-  (`internal/tui/presenter.go:181` — `.html`, `.htm`, `.svg`, `.pdf`) nor `openerRenderableExts`
-  (`internal/present/opener.go:297`). Item 4 dropped it from rung 1 without ever adding it to
-  rung 2, so both comments — and the CSP rationale one of them carries — name a format no rung
-  serves.
-
 ### Sub-agent prompt-guard exemption run — residuals (2026-08-13)
 
 Raised while executing `docs/plans/2026-08-13 - 00 - subagent-prompt-guard-exemption-plan.md` (all

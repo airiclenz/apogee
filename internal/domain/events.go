@@ -119,8 +119,15 @@ type ToolCallEvent struct {
 	// are not only the gated ones: in Allow-Edits and Auto an in-workspace write runs with no
 	// prompt at all, and the tool card is then the only place a human ever reads where it
 	// went. Observation only and additive, like every other field here — the engine stays
-	// wire-silent (ADR 0031): nothing is added to a tool's arguments or its result, and a
-	// Driver that ignores this renders exactly what it rendered before.
+	// wire-silent (ADR 0031): nothing is added to a tool's arguments, and a Driver that ignores
+	// this renders exactly what it rendered before.
+	//
+	// A tool's RESULT has one deliberate exception, and it is not the engine's doing: a
+	// workspace-scoped writer, and read_file, append their own " → resolves to <path>" note to
+	// the sentence they report when the path resolved elsewhere (internal/tools,
+	// resolvedTargetNote). That disclosure has to reach the MODEL as well as the human — a
+	// field only a Driver reads cannot tell the caller its write landed somewhere else — so it
+	// travels in the result string, while this field carries the same fact to the surfaces.
 	ResolvedPath string
 }
 

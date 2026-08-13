@@ -177,7 +177,7 @@ func cspDirectives(t *testing.T, header string) map[string][]string {
 	return directives
 }
 
-// Rung 2 is the only rung that still shows active content — .html, .htm, .xhtml and .svg left the
+// Rung 2 is the only rung that still shows active content — .html, .htm and .svg left the
 // OS opener's allow-list on 2026-08-12 (ADR 0019, fourth amendment) because a file:// launch can
 // carry no policy — so the served document's POLICY is what bounds it, and this test asserts the
 // directives rather than the header's presence. That distinction is the whole point: a page served

@@ -58,7 +58,7 @@ const idleTimeout = 60 * time.Second
 const maxConnections = 32
 
 // documentCSP is the Content-Security-Policy every served document carries. Rung 2 is the ONLY
-// rung that still shows active content: .html, .htm, .xhtml and .svg left rung 1's allow-list
+// rung that still shows active content: .html, .htm and .svg left rung 1's allow-list
 // precisely because a file:// launch can carry no policy at all (ADR 0019, fourth amendment
 // 2026-08-12), so this header is the whole of the bound here — and the DIRECTIVES are the fix, not
 // the header's presence. A permissive policy would satisfy an assertion that a policy exists while

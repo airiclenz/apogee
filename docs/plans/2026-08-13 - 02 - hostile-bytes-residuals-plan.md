@@ -428,7 +428,16 @@ re-triggers the re-scan edge.
 
 **Commit:** `fix(tui): prompt reset clears the skill-region edge trigger`
 
-## 12. Two falsified comments tell the truth again
+## 12. Two falsified comments tell the truth again — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the entry belongs under `### Changed` in `[Unreleased]`, following the
+"Documented the dangerous-action guard's prompt-key exemption" precedent for a comment-only change,
+not under the `### Fixed` heading this plan's behaviour items used.
+NOTES (2026-08-13): this item closes TWO ISSUES.md bullets (the `events.go:122` one and the
+`.xhtml` one).
+NOTES (2026-08-13): the `events.go` rewording also names `read_file` beside the workspace-scoped
+writers, because items 5 and 6 of this plan (both ✅ done) widened the note to it — a comment naming
+only the writers would have been falsified the day it was written.
 
 **What:** two doc comments the parent run's own fixes falsified, plus a phantom format:
 

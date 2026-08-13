@@ -243,6 +243,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Three code comments state the shipped behaviour again**: `internal/domain/events.go` recorded
+  the wire-silent invariant as "nothing is added to a tool's arguments or its result", which the
+  resolves-to disclosure notes falsified — the arguments half is intact, and the comment now names
+  the result-string note (` → resolves to <path>`, written by the tool, not the engine) as the
+  deliberate exception and says why it travels in the result rather than only on the Event.
+  `internal/present/server.go` and `internal/present/server_test.go` both listed `.xhtml` among the
+  active-content formats rung 2 shows; `.xhtml` left rung 1's allow-list on 2026-08-12 without ever
+  entering rung 2's, so both comments now name only formats a rung actually serves. No behaviour
+  moves.
+
 - **Documented the dangerous-action guard's prompt-key exemption**: `internal/security/doc.go` and
   the confinement execution contract now record that a tool-declared delegation prompt
   (`domain.PromptTool`) is outside every rule's sight, with the child-guarded-at-the-action-site
