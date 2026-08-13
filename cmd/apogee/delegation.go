@@ -49,10 +49,17 @@ type delegationSetter interface {
 // replaced WITH it whenever the file re-points the flag somewhere else.
 type subAgentServer struct {
 	entry config.ServerEntry
-	// beat observes the Sub-agent server. It is a func rather than the *heartbeat.Monitor itself for
-	// the reason every seam this root hands across is: the resolution is then exercisable against an
-	// observation a test writes down, with no server behind it.
-	beat func(context.Context) heartbeat.Beat
+	// beat observes the Sub-agent server with the key that server's entry resolved to. It is a func
+	// rather than the *heartbeat.Monitor itself for the reason every seam this root hands across is:
+	// the resolution is then exercisable against an observation a test writes down, with no server
+	// behind it.
+	//
+	// The key is an ARGUMENT rather than something baked in at build time because a Monitor is per
+	// key as much as per endpoint, and the key of an entry whose source is a command is not known
+	// until that command has run — which is a thing to do on the beat goroutine, once, and to RETRY
+	// on the next beat when it fails, rather than at the startup that has no business waiting on a
+	// keychain for a server this session may never delegate to.
+	beat func(ctx context.Context, apiKey string) heartbeat.Beat
 	// catalogue builds the Mechanism registry ONE routed child runs with, and is nil when the entry
 	// carries no `mechanisms:` map — which is the engine's signal to inherit the parent's catalogue
 	// as it always has (ADR 0045 §2). It is a factory because siblings in a fan-out run at once and
@@ -99,6 +106,12 @@ type delegationWiring struct {
 	// notify puts one routing notice in front of the human, and is nil for a Driver that shows
 	// nothing (a bench, a headless run) — the degrade every seam this root hands across takes.
 	notify func(string)
+	// keys resolves the flagged entry's key source. It is asked on every beat rather than once at
+	// wiring time, and that is the whole reason a resolver caches: the command runs on the first
+	// beat and the ten thousand after it read the answer — while a beat whose resolution FAILED
+	// asks again ten seconds later, which is what lets a keychain the human unlocks mid-session
+	// bring the Sub-agent server back without a relaunch.
+	keys *config.KeyResolver
 	// engine is where a resolved target is latched.
 	engine delegationSetter
 }
@@ -123,11 +136,13 @@ func newDelegationWiring(
 	engine delegationSetter,
 	userProfiles func() []profiles.Entry,
 	notify func(string),
+	keys *config.KeyResolver,
 ) (*delegationWiring, error) {
 	wiring := &delegationWiring{
 		base:         base,
 		userProfiles: userProfiles,
 		notify:       notify,
+		keys:         keys,
 		engine:       engine,
 	}
 	entry, ok := config.SubAgentServer(entries)
@@ -152,14 +167,41 @@ func newSubAgentServer(entry config.ServerEntry, base apogee.Config) (*subAgentS
 		return nil, err
 	}
 	return &subAgentServer{
-		entry: entry,
-		// The discovery hint is the entry's own `model:` pin, empty when it pins none — the session
-		// Monitor's contract verbatim (heartbeat.NewMonitor): while the server still serves the pinned
-		// id, discovery resolves ITS window rather than the first advertised model's, and once the pin
-		// vanishes the beat reports what is actually loaded.
-		beat:      heartbeat.NewMonitor(entry.Endpoint, entry.Model, entry.APIKey).Beat,
+		entry:     entry,
+		beat:      subAgentBeat(entry),
 		catalogue: catalogue,
 	}, nil
+}
+
+// subAgentBeat builds the beat for one flagged entry: the Monitor that observes it, constructed on
+// the first beat that has a key in hand and reused by every beat after it.
+//
+// The discovery hint it is built with is the entry's own `model:` pin, empty when it pins none — the
+// session Monitor's contract verbatim (heartbeat.NewMonitor): while the server still serves the
+// pinned id, discovery resolves ITS window rather than the first advertised model's, and once the
+// pin vanishes the beat reports what is actually loaded.
+//
+// What is deliberately NOT settled at build time is the key. A Monitor holds the key it was built
+// with for its whole life, and the key of an entry whose source is a command is not known until that
+// command has run — so building the Monitor here would mean running a keychain command inside a
+// `servers:` re-read, on the Update goroutine, for a server the session may never delegate to. The
+// key therefore arrives per beat and the Monitor is rebuilt whenever it CHANGES, which is the same
+// per-server-per-key rule a `/server` switch obeys one layer up (upstreamHolder.Swap).
+func subAgentBeat(entry config.ServerEntry) func(context.Context, string) heartbeat.Beat {
+	var (
+		mu      sync.Mutex
+		monitor *heartbeat.Monitor
+		built   string
+	)
+	return func(ctx context.Context, apiKey string) heartbeat.Beat {
+		mu.Lock()
+		if monitor == nil || built != apiKey {
+			monitor, built = heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey), apiKey
+		}
+		current := monitor
+		mu.Unlock()
+		return current.Beat(ctx)
+	}
 }
 
 // observe starts one beat on the Sub-agent server and hands back the join for it. With no Sub-agent
@@ -184,8 +226,20 @@ func (d *delegationWiring) observe(ctx context.Context) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		// The key that server takes, resolved on THIS goroutine and before anything is observed: it
+		// is what the beat authenticates with, so a Monitor built without it would report a keyed
+		// grunt box permanently unreachable while the box was perfectly fine. A source that refuses
+		// resolves no target — nothing is beaten, nothing is latched, and the refusal is what the
+		// human is told (land below), because a delegation sent to a server this session cannot
+		// authenticate against would fail in the child, far from the entry that caused it.
+		apiKey, err := d.keys.Resolve(server.entry)
+		if err != nil {
+			d.land(generation, server.entry.Name, nil, err)
+			return
+		}
 		d.land(generation, server.entry.Name,
-			resolveDelegationTarget(server.entry, server.beat(ctx), d.userProfiles(), server.catalogue))
+			resolveDelegationTarget(server.entry, apiKey, server.beat(ctx, apiKey), d.userProfiles(),
+				server.catalogue), nil)
 	}()
 	return func() { <-done }
 }
@@ -213,13 +267,17 @@ func (d *delegationWiring) observe(ctx context.Context) func() {
 // that preceded the latch would announce routing that is not in force yet, and the notice seam blocks
 // until the renderer's Update loop takes it — so holding the mutex across it would park the beat
 // goroutine on the very loop a config reload calls relist from.
-func (d *delegationWiring) land(generation int, name string, target *apogee.DelegationTarget) {
+// keyErr is the refusal the entry's key source earned, or nil — it lands exactly like an unusable
+// beat (no target, delegations on the session's own server) and differs only in what the human is
+// told: an unreachable server is a fact about the network, a refused key source is a fact about
+// their config, and only the second one can be fixed by editing something.
+func (d *delegationWiring) land(generation int, name string, target *apogee.DelegationTarget, keyErr error) {
 	d.mu.Lock()
 	if generation != d.generation {
 		d.mu.Unlock()
 		return
 	}
-	note := d.stateChange(name, target)
+	note := d.stateChange(name, target, keyErr)
 	d.engine.SetDelegationTarget(target)
 	d.mu.Unlock()
 
@@ -240,16 +298,24 @@ func (d *delegationWiring) land(generation int, name string, target *apogee.Dele
 // grunt box reloaded with another model keeps taking the delegations it was taking, and re-stating
 // the routing on every model swap would edge back towards the per-spawn narration ADR 0045 §4 rules
 // out.
-func (d *delegationWiring) stateChange(name string, target *apogee.DelegationTarget) string {
+func (d *delegationWiring) stateChange(name string, target *apogee.DelegationTarget, keyErr error) string {
 	routed := target != nil
 	if d.stated && routed == d.routed {
 		return ""
 	}
 	d.routed, d.stated = routed, true
-	if routed {
+	switch {
+	case routed:
 		return "sub-agents: routing to " + name + " (" + target.Model + ")"
+	case keyErr != nil:
+		// The resolver's own sentence, which already names the entry and quotes what the command
+		// said. It is carried through whole rather than summarized: it is the only place the human
+		// is told why a server they flagged is taking no delegations, and "unavailable" would send
+		// them looking at a network that is working.
+		return "sub-agents: delegations run on the session server — " + keyErr.Error()
+	default:
+		return "sub-agents: " + name + " unavailable — delegations run on the session server"
 	}
-	return "sub-agents: " + name + " unavailable — delegations run on the session server"
 }
 
 // relist re-points the wiring at the `servers:` list as it now stands — the Sub-agent server's half
@@ -341,6 +407,7 @@ func (d *delegationWiring) relist(entries []config.ServerEntry) error {
 // neither is something a server can be observed to have.
 func resolveDelegationTarget(
 	entry config.ServerEntry,
+	apiKey string,
 	observed heartbeat.Beat,
 	userProfiles []profiles.Entry,
 	catalogue func() *apogee.MechanismRegistry,
@@ -365,8 +432,11 @@ func resolveDelegationTarget(
 	// they are not — a beat is no place to repeat a sentence.
 	profile, _ := resolveModelProfile(model, userProfiles)
 	return &apogee.DelegationTarget{
-		Endpoint:      entry.Endpoint,
-		APIKey:        entry.APIKey,
+		Endpoint: entry.Endpoint,
+		// The key the beat above just authenticated with, resolved from the entry's key source by
+		// the caller: the child talks to the same server, with the same credential, and cannot be
+		// handed a source it would have to run again for itself.
+		APIKey:        apiKey,
 		Model:         model,
 		ContextWindow: window,
 		// The entry's `max-output-tokens:` pin, carried as written (ADR 0046). There is no observed

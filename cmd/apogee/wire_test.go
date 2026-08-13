@@ -1978,6 +1978,7 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 		sessionMover: sessionMover{
 			agent: agent, holder: holder, host: host,
 			live: newLiveSettings(config.Options{ContextWindow: 16384}, nil),
+			keys: config.NewKeyResolver(),
 		},
 		ops:  ops,
 		path: newLauncherPath("/etc/llama-launcher/config.yaml"),
@@ -3906,7 +3907,7 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	holder.Bind("http://old.invalid:1111", "old-key", "old-model",
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	live := newLiveSettings(config.Options{ContextWindow: 16384}, nil)
-	mover := sessionMover{agent: agent, holder: holder, host: host, live: live}
+	mover := sessionMover{agent: agent, holder: holder, host: host, live: live, keys: config.NewKeyResolver()}
 
 	pinned := config.ServerEntry{
 		Name: "workstation", Endpoint: "http://192.168.64.1:1111", APIKey: "new-key",
@@ -4465,6 +4466,7 @@ func TestServerBindHandsTheEntrysBoundsToTheEngine(t *testing.T) {
 				engine: engine,
 				holder: newUpstreamHolder(),
 				caps:   newParallelAgentsCap(engine),
+				keys:   config.NewKeyResolver(),
 				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
 					handed = cfg
 					return buildAgent(cfg, resumed)

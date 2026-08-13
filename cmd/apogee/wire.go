@@ -122,6 +122,10 @@ type rootWiring struct {
 	roots stateRoots
 
 	// The boot phase (wire_boot.go): the facilities one run owns, and the Config built from them.
+	// keys is this run's ONE key resolver: every seam that needs a server entry's API key asks it,
+	// so an entry whose key comes from a command or a variable pays for that source once per
+	// session however many seams read it (config.KeyResolver).
+	keys          *config.KeyResolver
 	skillProvider *skills.Provider
 	bridge        *tui.Bridge
 	presentation  *livePresentation

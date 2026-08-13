@@ -78,6 +78,17 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// The bearer token the reachability probe below sends, resolved from the startup
+			// entry's own key SOURCE exactly as a session resolves it — a keyed server has to
+			// answer this command the way it answers a session, or the report describes a
+			// machine nobody runs on. A source that refuses fails the command with its own
+			// message rather than probing without the key: "unreachable" would be the wrong
+			// finding, and it would send the user looking at their server instead of at the
+			// entry that could not produce a key (design call 4).
+			apiKey, err := config.NewKeyResolver().Resolve(startupEntry(opts))
+			if err != nil {
+				return err
+			}
 
 			// Mandatory labels an interrupted Windows run left on the disk — "" on every
 			// other OS and on the normal Windows path. It is read HERE, before the backend
@@ -103,12 +114,12 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 				Workspace:  roots.workspace,
 				ConfigHome: roots.config,
 				Endpoint:   opts.Endpoint,
-				// The resolved bearer token (the startup `servers:` entry's own `api-key`,
-				// which APOGEE_API_KEY overlays; no flag): the
+				// The bearer token resolved above (the startup `servers:` entry's own key
+				// source, which APOGEE_API_KEY overlays; no flag): the
 				// probe must authenticate exactly as a session would, or a keyed server
 				// would be reported unreachable here and perfectly fine in a session. The
 				// report states its PRESENCE only; the value never reaches Host.
-				APIKey:             opts.APIKey,
+				APIKey:             apiKey,
 				ConfineToWorkspace: opts.ConfineToWorkspace,
 				Residue:            residue,
 			})

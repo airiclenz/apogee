@@ -50,9 +50,13 @@ type Host struct {
 	ConfigHome         string
 	Residue            string
 	Discovery          Discovery
-	// APIKeyConfigured reports whether an upstream bearer token was resolved — the PRESENCE
-	// of Inputs.APIKey and nothing more. The value never enters the report: a boolean is the
-	// whole of what a reader needs to tell "my key is not loaded" from "my key is wrong".
+	// APIKeyConfigured reports whether the startup entry names a KEY SOURCE that answered —
+	// the PRESENCE of Inputs.APIKey and nothing more. Since an entry may point at a command or
+	// an environment variable rather than carry the key itself, "configured" is the same
+	// question either way: a source that refused never reaches this report (the command that
+	// gathers it fails first, naming the entry), so true means a token is in hand and false
+	// means the entry named no source at all. The value never enters the report: a boolean is
+	// the whole of what a reader needs to tell "my key is not loaded" from "my key is wrong".
 	APIKeyConfigured bool
 }
 

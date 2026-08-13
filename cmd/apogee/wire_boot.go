@@ -55,6 +55,14 @@ func shouldPrewarmLabelWalk(mode apogee.Mode, confineToWorkspace, fsWrite bool) 
 func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *rootWiring {
 	w := &rootWiring{opts: opts, mode: mode, roots: roots}
 
+	// The one key resolver this run has. Every seam that needs a server's API key — the startup
+	// Config below, the bind, a `/server` switch, the Sub-agent server's beat — resolves through
+	// THIS value, because the cache is the point: a second resolver would ask the keychain a second
+	// time, and a `/server` switch back and forth would prompt the human twice for a key they
+	// already gave. It reaches nothing on its own (an entry with a literal key, or none at all,
+	// never leaves the process), so it belongs here with the facilities that cannot fail.
+	w.keys = config.NewKeyResolver()
+
 	// Discover the user's skills from the layered source dirs: the global library
 	// (~/.apogee/skills), the project's .apogee/skills, and — when use-project-skills is on —
 	// the project's bare skills/. The Provider holds the current catalog and can Reload it from
@@ -124,13 +132,29 @@ func (w *rootWiring) resolveConfig() error {
 		fmt.Fprintln(os.Stderr, notice)
 	}
 
+	// The upstream bearer token this session starts with, resolved from the startup entry's own KEY
+	// SOURCE — its literal `api-key:`, the output of its `api-key-cmd:`, or the variable its
+	// `api-key-env:` names — through the run's one resolver, so the bind below and every later seam
+	// share the single answer. This is the first use of that source, and the only one an ordinary
+	// launch pays for.
+	//
+	// A source that refuses fails the RUN, right here, carrying the entry's name and what the
+	// command said: a session pointed at a server it cannot authenticate against can do nothing at
+	// all, and sending no header instead would put the user's prompts on that server as anonymous
+	// requests they would learn about from a 401 (design call 4). A pre-bound start resolves the
+	// zero entry, which names no source and answers "" without running anything.
+	apiKey, err := w.keys.Resolve(startupEntry(w.opts))
+	if err != nil {
+		return err
+	}
+
 	w.cfg = apogee.Config{
 		Endpoint: w.opts.Endpoint,
 		Model:    w.opts.Model,
-		// The upstream bearer token, resolved from the startup `servers:` entry's own `api-key`,
-		// which APOGEE_API_KEY overlays. Empty — the keyless local default — sends no
+		// The upstream bearer token resolved above, from the startup `servers:` entry's own key
+		// source, which APOGEE_API_KEY overlays. Empty — the keyless local default — sends no
 		// Authorization header at all.
-		APIKey:       w.opts.APIKey,
+		APIKey:       apiKey,
 		Mode:         w.mode,
 		Bypass:       w.opts.Bypass,
 		Events:       w.bridge.Sink(),

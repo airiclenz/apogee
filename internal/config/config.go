@@ -1980,6 +1980,14 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	opts.Endpoint = startup.Endpoint
 	opts.Model = startup.Model
 	opts.APIKey = startup.APIKey
+	// And the other two spellings of that same token: the command to run for it and the variable to
+	// read it from, carried as written for the composition root to RESOLVE at the seam that needs
+	// the key (KeyResolver). They travel beside the literal rather than in place of it because the
+	// overlay above is a literal — an `APOGEE_API_KEY` run is a literal-source run whatever the
+	// entry named — and because nothing here may run a command: resolution stays offline at load,
+	// exactly as ValidateServers does (design call 4).
+	opts.APIKeyCmd = startup.APIKeyCmd
+	opts.APIKeyEnv = startup.APIKeyEnv
 	opts.HostAlias = startup.Name
 	// Whether that entry came out of the list or out of the invocation. A configured entry always
 	// has a name (ValidateServers refuses one without) and the ephemeral override entry never does,

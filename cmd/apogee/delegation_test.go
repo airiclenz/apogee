@@ -28,8 +28,19 @@ func (s *delegationSpy) SetDelegationTarget(target *apogee.DelegationTarget) {
 
 // beatSource is a Sub-agent server's observation written down: the wiring takes its beat as a func
 // exactly so a resolution can be exercised against one of these rather than against a live server.
-func beatSource(observed heartbeat.Beat) func(context.Context) heartbeat.Beat {
-	return func(context.Context) heartbeat.Beat { return observed }
+// The key the beat is handed is recorded, because "the beat authenticates with the key the entry's
+// source resolved to" is itself a claim these tests make.
+func beatSource(observed heartbeat.Beat) func(context.Context, string) heartbeat.Beat {
+	return func(context.Context, string) heartbeat.Beat { return observed }
+}
+
+// keyedBeatSource is beatSource with the key written down: the pointer it fills is what a test reads
+// to see which token the Sub-agent server was actually observed with.
+func keyedBeatSource(observed heartbeat.Beat, seen *string) func(context.Context, string) heartbeat.Beat {
+	return func(_ context.Context, apiKey string) heartbeat.Beat {
+		*seen = apiKey
+		return observed
+	}
 }
 
 // noProfiles is a host whose `model-profiles:` map is empty — the tier read every resolution takes,
@@ -55,6 +66,7 @@ func testDelegationWiring(
 	wiring := &delegationWiring{
 		server:       &subAgentServer{entry: entry, beat: beatSource(observed)},
 		userProfiles: noProfiles,
+		keys:         config.NewKeyResolver(),
 		engine:       engine,
 	}
 	if notices != nil {
@@ -85,13 +97,15 @@ func TestResolveDelegationTargetPinsOutrankTheBeat(t *testing.T) {
 		TotalSlots:    8,
 	}
 
-	target := resolveDelegationTarget(entry, observed, nil, nil)
+	// The key is the RESOLVED one the caller hands in — the entry names a source, and turning that
+	// source into a token is the resolver's job one layer up (delegationWiring.observe).
+	target := resolveDelegationTarget(entry, "grunt-key", observed, nil, nil)
 	if target == nil {
 		t.Fatal("a reachable server resolved to no target; want the pinned one")
 	}
-	if target.Endpoint != entry.Endpoint || target.APIKey != entry.APIKey {
-		t.Errorf("dial facts = %q/%q; want the entry's %q/%q",
-			target.Endpoint, target.APIKey, entry.Endpoint, entry.APIKey)
+	if target.Endpoint != entry.Endpoint || target.APIKey != "grunt-key" {
+		t.Errorf("dial facts = %q/%q; want the entry's %q and the resolved key",
+			target.Endpoint, target.APIKey, entry.Endpoint)
 	}
 	if target.Model != "pinned-model" {
 		t.Errorf("Model = %q; want the entry's pin to outrank the observed model", target.Model)
@@ -113,7 +127,7 @@ func TestResolveDelegationTargetObservesWhatIsNotPinned(t *testing.T) {
 	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
 	observed := heartbeat.Beat{Reachable: true, ActiveModel: "loaded-model", ContextWindow: 8192}
 
-	target := resolveDelegationTarget(entry, observed, nil, nil)
+	target := resolveDelegationTarget(entry, "", observed, nil, nil)
 	if target == nil {
 		t.Fatal("a reachable server resolved to no target; want the observed one")
 	}
@@ -126,7 +140,7 @@ func TestResolveDelegationTargetObservesWhatIsNotPinned(t *testing.T) {
 
 	// And the slot count the same server reports a beat later widens it, with nothing else moving.
 	observed.TotalSlots = 4
-	if wider := resolveDelegationTarget(entry, observed, nil, nil); wider.ParallelAgents != 4 {
+	if wider := resolveDelegationTarget(entry, "", observed, nil, nil); wider.ParallelAgents != 4 {
 		t.Errorf("ParallelAgents with 4 observed slots = %d; want 4", wider.ParallelAgents)
 	}
 }
@@ -144,7 +158,7 @@ func TestResolveDelegationTargetResolvesTheProfileForTheBoundModel(t *testing.T)
 		Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited}},
 	}}
 
-	target := resolveDelegationTarget(entry, observed, user, nil)
+	target := resolveDelegationTarget(entry, "", observed, user, nil)
 	if target == nil {
 		t.Fatal("a reachable server resolved to no target")
 	}
@@ -153,7 +167,7 @@ func TestResolveDelegationTargetResolvesTheProfileForTheBoundModel(t *testing.T)
 	}
 	// A model no tier knows keeps the zero profile — native tool calls, no inline thinking — which is
 	// how an unprofiled delegation has always parsed.
-	unmatched := resolveDelegationTarget(entry, heartbeat.Beat{Reachable: true, ActiveModel: "nobody-knows"}, user, nil)
+	unmatched := resolveDelegationTarget(entry, "", heartbeat.Beat{Reachable: true, ActiveModel: "nobody-knows"}, user, nil)
 	if unmatched.Profile != (domain.ModelProfile{}) {
 		t.Errorf("Profile for an unmatched model = %+v; want the zero profile", unmatched.Profile)
 	}
@@ -169,7 +183,7 @@ func TestResolveDelegationTargetCarriesThePostureVerbatim(t *testing.T) {
 	observed := heartbeat.Beat{Reachable: true, ActiveModel: "loaded-model"}
 
 	// Nothing on the entry: both postures are absent, and absent is what makes a child inherit.
-	bare := resolveDelegationTarget(entry, observed, nil, nil)
+	bare := resolveDelegationTarget(entry, "", observed, nil, nil)
 	if bare.Bypass != nil {
 		t.Errorf("Bypass with none on the entry = %v; want absent so the child inherits the parent's live flag", bare.Bypass)
 	}
@@ -180,7 +194,7 @@ func TestResolveDelegationTargetCarriesThePostureVerbatim(t *testing.T) {
 	on := true
 	entry.Bypass = &on
 	catalogue := func() *apogee.MechanismRegistry { return apogee.NewMechanismRegistry() }
-	dressed := resolveDelegationTarget(entry, observed, nil, catalogue)
+	dressed := resolveDelegationTarget(entry, "", observed, nil, catalogue)
 	if dressed.Bypass == nil || !*dressed.Bypass {
 		t.Errorf("Bypass = %v; want the entry's own true", dressed.Bypass)
 	}
@@ -200,18 +214,18 @@ func TestResolveDelegationTargetRefusesAnUnusableBeat(t *testing.T) {
 	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
 
 	unreachable := heartbeat.Beat{Failure: "connection refused"}
-	if target := resolveDelegationTarget(entry, unreachable, nil, nil); target != nil {
+	if target := resolveDelegationTarget(entry, "", unreachable, nil, nil); target != nil {
 		t.Errorf("an unreachable server resolved to %+v; want no target", target)
 	}
 	// Reachable but serving nothing this session can name, and no pin to name it with: a delegation
 	// that cannot say which model it is talking to is not a usable target either.
 	nameless := heartbeat.Beat{Reachable: true}
-	if target := resolveDelegationTarget(entry, nameless, nil, nil); target != nil {
+	if target := resolveDelegationTarget(entry, "", nameless, nil, nil); target != nil {
 		t.Errorf("a server with no model bound resolved to %+v; want no target", target)
 	}
 	// The pin is what rescues that case: the file names the model the server will serve.
 	entry.Model = "pinned-model"
-	if target := resolveDelegationTarget(entry, nameless, nil, nil); target == nil || target.Model != "pinned-model" {
+	if target := resolveDelegationTarget(entry, "", nameless, nil, nil); target == nil || target.Model != "pinned-model" {
 		t.Errorf("target with a pinned model on a model-less beat = %+v; want the pin", target)
 	}
 }
@@ -227,7 +241,7 @@ func TestNewDelegationWiringWithoutAFlagObservesNothing(t *testing.T) {
 		{Name: "there", Endpoint: "http://127.0.0.1:2222"},
 	}
 	spy := &delegationSpy{}
-	wiring, err := newDelegationWiring(entries, validCfg(t), spy, noProfiles, nil)
+	wiring, err := newDelegationWiring(entries, validCfg(t), spy, noProfiles, nil, config.NewKeyResolver())
 	if err != nil {
 		t.Fatalf("newDelegationWiring with no flagged entry: %v", err)
 	}
@@ -325,7 +339,7 @@ func TestNewDelegationWiringRefusesADefectiveMechanismsMap(t *testing.T) {
 		SubAgents:  true,
 		Mechanisms: map[string]bool{"libary": true},
 	}}
-	_, err := newDelegationWiring(entries, validCfg(t), &delegationSpy{}, noProfiles, nil)
+	_, err := newDelegationWiring(entries, validCfg(t), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver())
 	if err == nil {
 		t.Fatal("a misspelled mechanism key was accepted; want the run refused")
 	}
@@ -433,7 +447,7 @@ func TestDelegationDropsALandingFromASupersededServer(t *testing.T) {
 	notices := &noticeSpy{}
 	wiring := testDelegationWiring(entry, heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, notices)
 
-	wiring.land(wiring.generation-1, "grunt", &apogee.DelegationTarget{Model: "cheap-7b"})
+	wiring.land(wiring.generation-1, "grunt", &apogee.DelegationTarget{Model: "cheap-7b"}, nil)
 	if len(spy.pushes) != 0 || len(notices.notes) != 0 {
 		t.Errorf("a superseded landing pushed %+v and said %q; want neither", spy.pushes, notices.notes)
 	}
@@ -492,7 +506,7 @@ func TestDelegationLandLosesToAnEditThatUnflagsTheServer(t *testing.T) {
 	landed := make(chan struct{})
 	go func() {
 		defer close(landed)
-		wiring.land(generation, entry.Name, &apogee.DelegationTarget{Model: "cheap-7b"})
+		wiring.land(generation, entry.Name, &apogee.DelegationTarget{Model: "cheap-7b"}, nil)
 	}()
 	<-gate.arrived // the beat is mid-push, which is the only place the edit can overtake it
 
@@ -532,7 +546,7 @@ func TestDelegationRelistAddsTheFlag(t *testing.T) {
 	notices := &noticeSpy{}
 	wiring, err := newDelegationWiring(
 		[]config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
-		validCfg(t), spy, noProfiles, notices.add)
+		validCfg(t), spy, noProfiles, notices.add, config.NewKeyResolver())
 	if err != nil {
 		t.Fatalf("newDelegationWiring: %v", err)
 	}
@@ -763,5 +777,90 @@ func TestApplySettingServersDrivesTheSubAgentServer(t *testing.T) {
 	}
 	if len(spy.pushes) != 1 || spy.pushes[0] != nil {
 		t.Errorf("pushes = %+v; want exactly the edit's clearing push", spy.pushes)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The Sub-agent server's key source
+// ----------------------------------------------------------------------------
+
+// A flagged entry may name a key SOURCE rather than a key, and the beat is where it is run: the
+// Monitor that observes the grunt box authenticates with what the source answered, and the target
+// the engine latches carries that same token, so the child talks to the server on the credential the
+// beat proved works.
+func TestDelegationBeatAndTargetCarryTheResolvedKey(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{
+		Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true,
+		APIKeyCmd: keyCommandFor(t, "sk-grunt-from-the-keychain"),
+	}
+	spy := &delegationSpy{}
+	wiring := testDelegationWiring(entry, heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, nil)
+	var beatenWith string
+	wiring.server.beat = keyedBeatSource(heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, &beatenWith)
+
+	wiring.observe(context.Background())()
+
+	if beatenWith != "sk-grunt-from-the-keychain" {
+		t.Errorf("the Sub-agent server was observed with key %q; want what the entry's command "+
+			"printed — a keyed grunt box answers /v1/models with 401 like anything else", beatenWith)
+	}
+	if len(spy.pushes) != 1 || spy.pushes[0] == nil {
+		t.Fatalf("pushes = %+v; want the one resolved target", spy.pushes)
+	}
+	if got := spy.pushes[0].APIKey; got != "sk-grunt-from-the-keychain" {
+		t.Errorf("the latched target carries key %q; want the resolved one", got)
+	}
+}
+
+// A key source that refuses takes the Sub-agent server out of routing for that beat — nothing is
+// observed and no target is latched, so no delegation is sent to a server this session cannot
+// authenticate against — and the human is told WHY in the resolver's own words, which name the entry
+// and quote what the command said. The next beat asks again, because a locked keychain is fixable
+// without editing a line of config.
+func TestDelegationKeySourceFailureStopsRoutingAndSaysWhy(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{
+		Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true,
+		APIKeyCmd: missingKeyProgram,
+	}
+	spy := &delegationSpy{}
+	notices := &noticeSpy{}
+	wiring := testDelegationWiring(entry, heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, notices)
+	beaten := 0
+	wiring.server.beat = func(context.Context, string) heartbeat.Beat {
+		beaten++
+		return heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}
+	}
+
+	wiring.observe(context.Background())()
+
+	if beaten != 0 {
+		t.Errorf("the server was beaten %d time(s) with no key in hand; the beat needs the key it "+
+			"could not produce", beaten)
+	}
+	if len(spy.pushes) != 1 || spy.pushes[0] != nil {
+		t.Fatalf("pushes = %+v; want exactly the one clearing push — delegations fall back to the "+
+			"session's own server", spy.pushes)
+	}
+	if len(notices.notes) != 1 {
+		t.Fatalf("notices = %q; want the one refusal", notices.notes)
+	}
+	if !strings.Contains(notices.notes[0], "grunt") || !strings.Contains(notices.notes[0], "api-key-cmd") {
+		t.Errorf("notice = %q; want the resolver's own sentence, naming the entry and its source",
+			notices.notes[0])
+	}
+
+	// A second beat is not a second sentence — the routing state has not moved — but it DOES ask the
+	// source again: nothing about the failure was cached.
+	wiring.observe(context.Background())()
+	if len(notices.notes) != 1 {
+		t.Errorf("notices after a second failing beat = %q; want no repeat of a state that never "+
+			"changed", notices.notes)
+	}
+	if len(spy.pushes) != 2 || spy.pushes[1] != nil {
+		t.Errorf("pushes = %+v; want the second beat's clearing push too", spy.pushes)
 	}
 }

@@ -95,6 +95,16 @@ func probeModelCommand() *cobra.Command {
 			if opts.Endpoint == "" {
 				return errProbeModelNeedsEndpoint
 			}
+			// The bearer token both clients below send, resolved from the startup entry's own
+			// key SOURCE the way a session resolves it — literal, command output, or named
+			// variable — and resolved ONCE, before a single token is spent, so the discovery
+			// call and the battery cannot end up authenticating differently. A source that
+			// refuses fails the command here: this one spends real money on a live server, and
+			// probing it unauthenticated would buy a 401 and record nothing.
+			apiKey, err := config.NewKeyResolver().Resolve(startupEntry(opts))
+			if err != nil {
+				return err
+			}
 
 			// Said BEFORE the first call, per ADR 0021 §4: a command that spends tokens and
 			// switches automatism on announces both in advance, not in its epilogue.
@@ -106,7 +116,7 @@ func probeModelCommand() *cobra.Command {
 			label := opts.Model
 			if label == "" {
 				info, derr := provider.NewClient(opts.Endpoint, "",
-					provider.WithAPIKey(opts.APIKey)).Discover(cmd.Context())
+					provider.WithAPIKey(apiKey)).Discover(cmd.Context())
 				if derr != nil {
 					return derr
 				}
@@ -121,12 +131,12 @@ func probeModelCommand() *cobra.Command {
 			}
 
 			// The battery client, carrying the resolved bearer token exactly as the label
-			// discovery above does (the startup `servers:` entry's own `api-key`, which
+			// discovery above does (the startup `servers:` entry's own key source, which
 			// APOGEE_API_KEY overlays; no flag — a secret does not belong in shell history).
 			// Both of this command's clients are keyed, so a keyed
 			// Upstream cannot refuse the probe while a session against it works.
 			client := provider.NewClient(opts.Endpoint, label,
-				provider.WithRequestTimeout(batteryRequestTimeout), provider.WithAPIKey(opts.APIKey))
+				provider.WithRequestTimeout(batteryRequestTimeout), provider.WithAPIKey(apiKey))
 			result := probe.GatherModel(cmd.Context(), probe.ModelInputs{
 				Endpoint: opts.Endpoint,
 				Model:    label,

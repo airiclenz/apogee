@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Every place a session reaches for a server's API key now resolves that entry's key source.** The
+  startup bind, a `/server` switch, a Sub-agent server's heartbeat, `apogee headless`, `apogee probe`
+  and `apogee probe model` all ask the run's ONE resolver, so an entry whose key comes from a command
+  or from a variable works wherever a literal `api-key:` worked — and pays for its source once per
+  session, which is why switching back onto a server this session has already been on prompts no
+  keychain a second time. A source that refuses fails the thing the user was doing rather than
+  degrading the request: startup exits with the resolver's message, a `/server` switch is refused
+  with the entry named and the session stays where it was, an unattended run stops before spending a
+  token, and a Sub-agent server whose key could not be produced takes no delegations — they run on
+  the session's own server and the reason is said once, instead of surfacing as a 401 inside a child.
+  `APOGEE_API_KEY` still overlays the startup entry over whichever source the file named for it.
+
 - **A key source now runs at first use of the server it belongs to, once per session.** The entry
   a session never moves onto never runs its command, so a config listing six servers no longer pays
   six keychain prompts at startup; the entry it does use asks its source once and every later seam

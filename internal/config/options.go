@@ -45,6 +45,19 @@ type Options struct {
 	// never logged, persisted, or displayed — only its presence is ever reported.
 	APIKey string
 
+	// apiKeyCmd and apiKeyEnv are the startup entry's other two KEY SOURCES, carried exactly as the
+	// entry wrote them: the command whose output IS the key, and the NAME of the variable holding
+	// it. They are flattened beside apiKey above for the reason every other per-entry fact is —
+	// the composition root re-assembles the startup ServerEntry out of these fields (startupEntry)
+	// — and they stay UNRESOLVED here on purpose: a source runs at the seam that needs the key,
+	// never at load, so a config listing six servers runs no command for the five this session
+	// never talks to (KeyResolver). At most one of the three is ever set, which ValidateServers has
+	// already refused a file for breaking; `APOGEE_API_KEY` overlays apiKey over whichever of them
+	// the entry named (ADR 0036 decision 6), and a literal beats the other two at resolution, which
+	// is what makes that overlay work without erasing what the file says.
+	APIKeyCmd string
+	APIKeyEnv string
+
 	// servers is the resolved `servers:` list — the named upstream endpoints besides the one this
 	// session started on, in file order. Loaded from the config file only (default-empty ⇒ no
 	// alternatives are configured); ApplyConfig sets it from the resolved settings, having already

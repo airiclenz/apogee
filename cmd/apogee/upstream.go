@@ -201,6 +201,11 @@ type sessionMover struct {
 	agent  upstreamSwitcher
 	holder *upstreamHolder
 	host   modelStamper
+	// keys resolves the key SOURCE the entry names into the token this move sends. It is the run's
+	// one resolver, so switching back to a server this session has already been on costs no second
+	// run of its command — and moving to one it has not yet touched is the first use of that
+	// entry's source, which is precisely when design call 2 says it should run.
+	keys *config.KeyResolver
 	// live is the composition root's mutable settings holder, read for the top-level `context-window:`
 	// pin at MOVE time rather than captured at launch: that pin survives a move, and since ADR 0037 a
 	// `/settings` edit can have changed it since the session started. It is WRITTEN at the same moment
@@ -236,15 +241,23 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	// written — an unpinned entry sends 0 and the engine derives its own cap from the window (ADR
 	// 0046).
 	window := config.ResolveContextWindow(entry.ContextWindow, m.live.pin())
+	// The key that server takes, resolved from the source its entry names and resolved FIRST, in
+	// front of the engine's own validate-then-commit switch: a source that refuses is one more way
+	// this move cannot be made, and it must fail like the others — with the session still on the
+	// server it was on, and with a message naming the entry the user just picked (design call 4).
+	apiKey, err := m.keys.Resolve(entry)
+	if err != nil {
+		return tui.ServerSwitchResult{}, err
+	}
 	if err := m.agent.SwitchUpstream(apogee.UpstreamSpec{
 		Endpoint:         entry.Endpoint,
-		APIKey:           entry.APIKey,
+		APIKey:           apiKey,
 		MaxContextTokens: window,
 		MaxOutputTokens:  entry.MaxOutputTokens,
 	}); err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
-	m.holder.Swap(entry.Endpoint, entry.APIKey, heartbeat.NewMonitor(entry.Endpoint, entry.Model, entry.APIKey))
+	m.holder.Swap(entry.Endpoint, apiKey, heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey))
 	m.host.SetModel("")
 	m.live.followEntry(entry)
 	// What the display adopts: the endpoint now on the wire, the alias the footer calls it, and the

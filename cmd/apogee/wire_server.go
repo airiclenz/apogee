@@ -16,16 +16,21 @@ import (
 )
 
 // startupEntry re-assembles the server selection resolved (ADR 0036) from the flattened fields it
-// left on options: the endpoint, the key, the discovery hint, the fan-out pin, the reply cap, the
-// window pin, and the alias —
+// left on options: the endpoint, the key SOURCE — all three spellings of it, since which one the
+// entry named is exactly what the resolver has to be told — the discovery hint, the fan-out pin, the
+// reply cap, the window pin, and the alias —
 // which for a configured entry IS its `servers:` name and for the ephemeral override entry is the
 // endpoint's host. It exists so the bind step below has ONE input shape, the ServerEntry, whether it
-// is binding the startup server or the one a human picked out of the list.
+// is binding the startup server or the one a human picked out of the list — and, since the key is
+// resolved from the entry rather than carried on it, so that every command in the composition root
+// that needs the startup server's key asks for it the same way a switch does.
 func startupEntry(opts config.Options) config.ServerEntry {
 	return config.ServerEntry{
 		Name:            opts.HostAlias,
 		Endpoint:        opts.Endpoint,
 		APIKey:          opts.APIKey,
+		APIKeyCmd:       opts.APIKeyCmd,
+		APIKeyEnv:       opts.APIKeyEnv,
 		Model:           opts.Model,
 		ParallelAgents:  opts.StartupParallelAgents,
 		MaxOutputTokens: opts.StartupMaxOutputTokens,
@@ -51,6 +56,11 @@ type serverBinder struct {
 	resumed *session.Record
 	engine  *lateEngine
 	holder  *upstreamHolder
+	// keys is the run's one key resolver: the entry names a key SOURCE, and this is what turns it
+	// into the token the Agent and the Monitor send. It is the resolver the whole session shares,
+	// so binding the server a startup already resolved for — a first pick on the entry the launch
+	// snapshot named — costs no second run of that entry's command.
+	keys *config.KeyResolver
 	// caps is the session's Parallel agents cap (ADR 0039). The bind is where it FOLLOWS the entry:
 	// the resolved width seeds the Config the Agent is constructed from, so a session is capped from
 	// its first Turn rather than from its first beat.
@@ -74,10 +84,20 @@ type serverBinder struct {
 // only release one Agent at shutdown: a session that already has an engine moves with
 // sessionMover.move, which switches the one it has.
 func (b serverBinder) bind(entry config.ServerEntry) error {
+	// The key this server takes, resolved from the source the entry names BEFORE anything is
+	// constructed: a source that refuses — a keychain that would not open, a variable nobody
+	// exported — leaves the session exactly as unbound as a refused construction does, and says so
+	// with the entry's own name. A literal key and an entry with no key source at all never leave
+	// the process; a command source runs once per session and every later seam reads the cache.
+	apiKey, err := b.keys.Resolve(entry)
+	if err != nil {
+		return err
+	}
+
 	cfg := b.cfg
 	cfg.Endpoint = entry.Endpoint
 	cfg.Model = entry.Model
-	cfg.APIKey = entry.APIKey
+	cfg.APIKey = apiKey
 	// The fourth field the server decides, and the one that cannot be pushed after the fact here:
 	// the Agent does not exist yet, so the resolved cap goes in through the Config it is built from.
 	// follow's own push at the still-unbound engine is the no-op that says so.
@@ -101,7 +121,7 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	if b.build != nil {
 		construct = b.build
 	}
-	if err := b.engine.Bind(func() (*apogee.Agent, error) {
+	if err = b.engine.Bind(func() (*apogee.Agent, error) {
 		agent, err := construct(cfg, b.resumed)
 		if err != nil {
 			return nil, friendlyConstructErr(err)
@@ -110,8 +130,8 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	}); err != nil {
 		return err
 	}
-	b.holder.Bind(entry.Endpoint, entry.APIKey, entry.Model,
-		heartbeat.NewMonitor(entry.Endpoint, entry.Model, entry.APIKey))
+	b.holder.Bind(entry.Endpoint, apiKey, entry.Model,
+		heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey))
 	return nil
 }
 

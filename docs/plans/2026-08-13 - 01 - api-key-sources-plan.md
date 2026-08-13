@@ -166,7 +166,34 @@ run the command once; keyless entry resolves to "" without error. Command fixtur
 
 **Commit:** `feat(config): cached first-use key resolver — command and env sources`
 
-## 3. Wire the seams: every entry-key read resolves through the resolver
+## 3. Wire the seams: every entry-key read resolves through the resolver — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): `config.Options` gained `APIKeyCmd`/`APIKeyEnv`, flattened off the selected startup
+entry by ApplyConfig beside the literal `APIKey`. Not in the item text, but unavoidable: every startup
+seam it names re-assembles the startup `ServerEntry` from Options (`startupEntry`), which carried only
+the resolved literal — a command-source startup entry would have reached all of them keyless.
+NOTES (2026-08-13): the item lists `wire_settings.go` (RebindSpec, :944) as a seam; it reads no key.
+`apogee.RebindSpec` carries no `APIKey` field, and `liveSettings.rebindInputs` (:354) overlays the
+upstreamHolder's binding — which the bind and the switch now fill with the RESOLVED token — so that
+seam resolves through the resolver by construction and needed no edit.
+NOTES (2026-08-13): two seams the item's list does not name were wired for the same reason the ones it
+names were — `cmd/apogee/probemodel.go` (both of `probe model`'s clients) and headless's
+`discoverSlots` call both read the startup entry's `opts.APIKey`. Left alone, `apogee probe model`
+would have spent real tokens against a keyed server with no key on the wire.
+NOTES (2026-08-13): the delegation seam narrates a failed key resolution and latches NO target
+(delegations fall back to the session's own server, ADR 0045 §4's floor) rather than failing an
+individual delegation. The engine latches a target VALUE and offers no per-spawn error channel, so
+failing one spawn would need an engine-side seam — which design call 7 and ADR 0031 rule out. The
+resolver's own sentence, naming the entry, is what the human is told, once per routing state change.
+NOTES (2026-08-13): `subAgentServer.beat` now takes the resolved key and builds its Monitor lazily
+(rebuilt when the key changes). A Monitor holds its key for life, so building it in
+`newSubAgentServer` would run the flagged entry's key command inside a `servers:` re-read on the
+Update goroutine — and would fail a whole startup over a locked keychain on a server this session may
+never delegate to. Per-beat resolution is also what makes the resolver's uncached failures retry.
+NOTES (2026-08-13): the `api-key-cmd:` fixture for the cmd/apogee seam tests is this test binary
+re-invoked behind a marker argument (`keysource_test.go`), the idiom item 2's suite uses in
+internal/config; the program is single-quoted so the resolver's POSIX split leaves a Windows path
+intact.
 
 **What:** Construct ONE `KeyResolver` in the composition root and route every seam that
 reads `entry.APIKey` today through `Resolve`: `cmd/apogee/upstream.go` (:241 and the startup

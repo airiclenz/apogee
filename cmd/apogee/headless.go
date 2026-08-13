@@ -298,6 +298,20 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	if err != nil {
 		return notStarted(err)
 	}
+
+	// The bearer token this run sends, resolved from the startup entry's own key SOURCE — the
+	// literal, the command's output, or the named variable — exactly as a session resolves it, so
+	// one configuration means one credential whichever Driver reads it. Resolved ONCE and used by
+	// both halves that need it (the Config below and the slot probe beside it), which is also what
+	// keeps an unattended run from asking a keychain twice.
+	//
+	// A source that refuses fails the run before a single token is spent, carrying the entry's name
+	// and what the command said: an unattended run that degraded to sending no key would put the
+	// prompt on the wire unauthenticated and report a 401 as the model's answer.
+	apiKey, err := config.NewKeyResolver().Resolve(startupEntry(*opts))
+	if err != nil {
+		return notStarted(err)
+	}
 	// The per-model half of the Config: the system prompt selected for THIS model, the validated
 	// set matched against its fingerprint, and the enable list with the manual-suppresses-a-set
 	// rule applied. The observed window is passed as unknown — nothing beats here to observe one —
@@ -329,7 +343,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	cfg := apogee.Config{
 		Endpoint:     opts.Endpoint,
 		Model:        spec.Model,
-		APIKey:       opts.APIKey,
+		APIKey:       apiKey,
 		Mode:         mode,
 		Bypass:       opts.Bypass,
 		ConfigDir:    roots.config,
@@ -386,7 +400,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	pin := startupEntry(*opts).ParallelAgents
 	slots := 0
 	if pin < 1 {
-		slots = discoverSlots(cmd.Context(), opts.Endpoint, spec.Model, opts.APIKey)
+		slots = discoverSlots(cmd.Context(), opts.Endpoint, spec.Model, apiKey)
 	}
 	cfg.ParallelAgents = config.ResolveParallelAgents(pin, slots)
 
