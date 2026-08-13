@@ -152,6 +152,30 @@ working tree on 2026-08-12 and re-verified on 2026-08-13.
   rung 2, so both comments — and the CSP rationale one of them carries — name a format no rung
   serves.
 
+### Sub-agent prompt-guard exemption run — residuals (2026-08-13)
+
+Raised while executing `docs/plans/2026-08-13 - 00 - subagent-prompt-guard-exemption-plan.md` (all
+4 items ✅ done): what the run's items deliberately did not reach, plus two places where an item's
+text and what landed under it do not describe each other exactly. The seam the run added is live —
+`Inspect` reads `domain.PromptArgKeys` at `internal/security/dangerous.go:141`.
+
+- [ ] No test covers a tool declaring BOTH prompt keys and read-source keys — the union branch in
+  `Inspect` (`internal/security/dangerous.go:148`, which appends `prompts` and `sources` into one
+  `dropKeys` slice for the write-shaped view). Every `stubTool` in `internal/security/dangerous_test.go`
+  declares one class or neither (`:384` sourceKeys, `:423` and `:470` promptKeys), and no shipped
+  tool declares both today, so the branch is correct-by-inspection but unpinned.
+
+- [ ] `internal/security/doc.go`'s first hunk (the guard's contract paragraph, `:29–44`) also
+  reworded the existing read-class sentence, to contrast "every rule" against "write-shaped only";
+  accurate and inside the paragraph item 3 names, but wider than that item's NOTES line admits.
+
+- [ ] Item 4's text assumed timeout / wedged-drain results carry no `[exit code N]` marker and so
+  would keep the first-line fallback, but `subprocessToolResult` (`internal/tools/terminal.go:152`)
+  emits the marker whenever the exit code is non-zero and those shapes report `-1`, which
+  `exitCodeMarker` (`internal/tui/toolpresent.go:1335`) matches — they now read `error: exit -1`
+  with the explanatory line (`internal/tools/terminal.go:143`, `:149`) kept as the body's first
+  line. Better, but the item's fallback clause is narrower in practice than it reads.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
