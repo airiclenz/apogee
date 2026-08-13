@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -219,6 +220,132 @@ func TestAccessMaskForABIRightsTrackTheKernel(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestDeviceAccessMaskForABI(t *testing.T) {
+	t.Parallel()
+
+	// The mask carried by the /dev/null exemption rule. Its parent_fd is a file, so the mask is
+	// derived separately from the roots' directory mask — see the subset/file-applicability
+	// properties pinned in TestDeviceAccessMaskStaysRuleApplicable below.
+	tests := []struct {
+		name string
+		abi  int
+		want uint64
+	}{
+		// Not a valid input (applyLandlock refuses below the floor); pinned so the clamp stays a
+		// mask that still grants the write the exemption exists for.
+		{"below_floor_clamps_to_write_file", -1, unix.LANDLOCK_ACCESS_FS_WRITE_FILE},
+		{"abi1_kernel_5_13", 1, unix.LANDLOCK_ACCESS_FS_WRITE_FILE},
+		{"abi2_kernel_5_19", 2, unix.LANDLOCK_ACCESS_FS_WRITE_FILE},
+		// From ABI 3 the ruleset handles TRUNCATE, so `> /dev/null` (O_TRUNC) is denied unless
+		// the exemption rule carries it too.
+		{"abi3_kernel_6_2", 3, devNullAccessWithTruncate},
+		{"abi4_kernel_6_7", 4, devNullAccessWithTruncate},
+		{"abi6_newer", 6, devNullAccessWithTruncate},
+		{"abi99_future", 99, devNullAccessWithTruncate},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := deviceAccessMaskForABI(tt.abi); got != tt.want {
+				t.Errorf("deviceAccessMaskForABI(%d) = %#x, want %#x", tt.abi, got, tt.want)
+			}
+		})
+	}
+}
+
+// devNullAccessWithTruncate is the ABI-3+ shape of the exemption mask, spelled from the unix
+// constants rather than from the production function so the table pins a value instead of
+// restating the code.
+const devNullAccessWithTruncate = uint64(unix.LANDLOCK_ACCESS_FS_WRITE_FILE | unix.LANDLOCK_ACCESS_FS_TRUNCATE)
+
+func TestDeviceAccessMaskStaysRuleApplicable(t *testing.T) {
+	t.Parallel()
+
+	// The two properties the kernel enforces on the exemption rule. Breaking either one does not
+	// merely lose the exemption: landlock_add_rule answers EINVAL, applyLandlock fails, and every
+	// confined call on the host dies before exec.
+	for abi := landlockABIFSWrite; abi <= 8; abi++ {
+		mask := deviceAccessMaskForABI(abi)
+
+		// A rule's allowed_access must be a subset of the ruleset's handled_access_fs.
+		if handled := accessMaskForABI(abi); mask&^handled != 0 {
+			t.Errorf("abi %d: device mask %#x is not a subset of the handled mask %#x (landlock_add_rule EINVAL)", abi, mask, handled)
+		}
+		// A rule on a FILE parent_fd may carry only file-applicable rights.
+		for _, dirOnly := range []struct {
+			name string
+			bit  uint64
+		}{
+			{"LANDLOCK_ACCESS_FS_MAKE_DIR", unix.LANDLOCK_ACCESS_FS_MAKE_DIR},
+			{"LANDLOCK_ACCESS_FS_MAKE_REG", unix.LANDLOCK_ACCESS_FS_MAKE_REG},
+			{"LANDLOCK_ACCESS_FS_MAKE_SYM", unix.LANDLOCK_ACCESS_FS_MAKE_SYM},
+			{"LANDLOCK_ACCESS_FS_MAKE_SOCK", unix.LANDLOCK_ACCESS_FS_MAKE_SOCK},
+			{"LANDLOCK_ACCESS_FS_MAKE_FIFO", unix.LANDLOCK_ACCESS_FS_MAKE_FIFO},
+			{"LANDLOCK_ACCESS_FS_MAKE_BLOCK", unix.LANDLOCK_ACCESS_FS_MAKE_BLOCK},
+			{"LANDLOCK_ACCESS_FS_MAKE_CHAR", unix.LANDLOCK_ACCESS_FS_MAKE_CHAR},
+			{"LANDLOCK_ACCESS_FS_REMOVE_DIR", unix.LANDLOCK_ACCESS_FS_REMOVE_DIR},
+			{"LANDLOCK_ACCESS_FS_REMOVE_FILE", unix.LANDLOCK_ACCESS_FS_REMOVE_FILE},
+			{"LANDLOCK_ACCESS_FS_REFER", unix.LANDLOCK_ACCESS_FS_REFER},
+		} {
+			if mask&dirOnly.bit != 0 {
+				t.Errorf("abi %d: device mask %#x carries directory-only %s on a file parent_fd (landlock_add_rule EINVAL)", abi, mask, dirOnly.name)
+			}
+		}
+		// And the exemption must still grant the write it exists for.
+		if mask&unix.LANDLOCK_ACCESS_FS_WRITE_FILE == 0 {
+			t.Errorf("abi %d: device mask %#x grants no WRITE_FILE; `2>/dev/null` stays denied inside the box", abi, mask)
+		}
+	}
+}
+
+func TestLandlockAllowsDevNullThroughTheFence(t *testing.T) {
+	// Not parallel: the confined children are real subprocesses of this binary.
+	c := newTestConfiner(t)
+	if !c.Capabilities().FSWrite {
+		t.Skip("landlock unavailable on this host (FSWrite==false); skipping the live /dev/null exemption probe")
+	}
+
+	ws := t.TempDir()
+	outside := t.TempDir()
+	box := domain.ConfinementBox{WorkspaceRoot: ws}
+
+	t.Run("dev_null_write_succeeds", func(t *testing.T) {
+		// Both halves of the idiom that the fence broke: the stderr redirect every confined
+		// terminal call uses, and a truncating `>` redirect (O_TRUNC, hence the TRUNCATE right).
+		const line = `: 2>/dev/null && echo x > /dev/null`
+		if err := runConfinedShellLine(t, c, box, line); err != nil {
+			t.Fatalf("confined `sh -c %q` failed, want success (/dev/null is exempt from the fence): %v", line, err)
+		}
+	})
+
+	t.Run("out_of_box_write_still_denied", func(t *testing.T) {
+		// The exemption is exactly one device, not a hole in the fence: an ordinary out-of-box
+		// write must still be OS-denied.
+		target := filepath.Join(outside, "escape.txt")
+		if err := runConfinedShellLine(t, c, box, "echo x > "+Current().Quote(target)); err == nil {
+			t.Fatalf("confined write to %q succeeded, want OS denial (the exemption must not widen the fence)", target)
+		}
+		if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stat %q = %v, want not-exist: the out-of-box write was not blocked", target, err)
+		}
+	})
+}
+
+// runConfinedShellLine runs line through the platform shell, confined to box by c, and returns
+// the run error. It mirrors confinetest's runConfined for probes that are landlock-specific and
+// so cannot join the cross-platform battery — /dev/null is a POSIX device with no Windows
+// counterpart the battery could assert on.
+func runConfinedShellLine(t *testing.T, c *landlockConfiner, box domain.ConfinementBox, line string) error {
+	t.Helper()
+	ctx := context.Background()
+	argv := Current().Command(line)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	if err := c.Confine(ctx, box, cmd); err != nil {
+		t.Fatalf("Confine(%v): %v", argv, err)
+	}
+	return cmd.Run()
 }
 
 func TestLandlockConfineRewritesCmd(t *testing.T) {

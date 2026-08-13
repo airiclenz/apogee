@@ -38,6 +38,14 @@ import (
 // real argv. Both halves use raw golang.org/x/sys/unix syscalls (SYS_LANDLOCK_* over
 // the typed attrs); x/sys exposes no high-level wrappers, so raw syscalls are the only
 // CGO-free option and the github.com/landlock-l/go-landlock helper was not needed.
+//
+// The box bounds where a confined child may WRITE, with exactly one exemption: the device
+// file /dev/null. It is a data sink whose writes are side-effect-free, and without the
+// exemption the POSIX shell idiom `2>/dev/null` is denied inside every confined tool call.
+// The exemption is backend-level — it is not part of ConfinementBox and does not widen the
+// exec fence's writable set — and the exempt set is exactly /dev/null; extending it is a
+// change to the confinement-execution contract. Reads are unaffected either way: this
+// backend never handles read, so a confined child may read any device it can open.
 
 // confinedExecSentinel is the argv[1] marker that puts the apogee binary into the
 // in-child landlock helper mode (confinement-execution-contract §2.3). The normal CLI
@@ -114,6 +122,27 @@ func accessMaskForABI(abi int) uint64 {
 	if abi >= landlockABIRefer {
 		mask |= unix.LANDLOCK_ACCESS_FS_REFER
 	}
+	if abi >= landlockABITruncate {
+		mask |= unix.LANDLOCK_ACCESS_FS_TRUNCATE
+	}
+	return mask
+}
+
+// deviceAccessMaskForABI returns the access mask to ALLOW on the /dev/null exemption rule, on a
+// kernel reporting landlock ABI abi. It is deliberately NOT accessMaskForABI: a path-beneath rule
+// whose parent_fd is a FILE may carry only file-applicable rights, and landlock_add_rule answers
+// EINVAL for the directory-only ones (MAKE_*, REMOVE_*, REFER) — an EINVAL that would kill every
+// confined call rather than just the exemption.
+//
+//   - ABI 1/2: WRITE_FILE alone, the whole exemption. TRUNCATE has no bit here, and the ruleset
+//     does not handle it either, so `> /dev/null` is unfenced anyway.
+//   - ABI >= 3: + TRUNCATE. `> /dev/null` opens with O_TRUNC, which the ruleset handles from this
+//     ABI on — without the right in the rule, the redirect the exemption exists for is denied.
+//
+// Every bit it returns is a subset of accessMaskForABI(abi) at the same ABI, as landlock_add_rule
+// requires of a rule's allowed_access.
+func deviceAccessMaskForABI(abi int) uint64 {
+	mask := uint64(unix.LANDLOCK_ACCESS_FS_WRITE_FILE)
 	if abi >= landlockABITruncate {
 		mask |= unix.LANDLOCK_ACCESS_FS_TRUNCATE
 	}
@@ -272,6 +301,13 @@ func applyLandlock(box domain.ConfinementBox) error {
 		}
 	}
 
+	// The /dev/null exemption (see the header block). Its parent_fd is a FILE, not a directory,
+	// so the rule carries the file-applicable mask — the directory mask the roots above use would
+	// make landlock_add_rule answer EINVAL and take the whole confinement down with it.
+	if err := allowWriteBeneath(fd, os.DevNull, deviceAccessMaskForABI(abi)); err != nil {
+		return err
+	}
+
 	// NO_NEW_PRIVS is mandatory before restrict_self for an unprivileged process.
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return fmt.Errorf("apogee: confined-exec: prctl(NO_NEW_PRIVS): %w", err)
@@ -306,11 +342,14 @@ func networkDenyDecision(box domain.ConfinementBox, abi int) (handleNet bool, er
 	return true, nil
 }
 
-// allowWriteBeneath adds a path-beneath rule granting access — the same ABI-derived mask the
-// ruleset handles (accessMaskForABI), passed in so the rule can never ask for a right the
-// ruleset did not handle — under root. A root that cannot be opened (e.g. a not-yet-created
-// WritablePaths entry) is skipped rather than failing the whole confinement — the box should
-// not have to exist in full for the writable roots that do exist to be honoured.
+// allowWriteBeneath adds a path-beneath rule granting access under root — an ABI-derived mask
+// (accessMaskForABI for the box's writable roots, deviceAccessMaskForABI for the /dev/null
+// exemption), passed in by the caller so the rule can never ask for a right the ruleset did not
+// handle. root may be a directory or a file; landlock takes either as the rule's parent, and the
+// mask must be applicable to what it is. A root that cannot be opened (e.g. a not-yet-created
+// WritablePaths entry, or a host with no /dev/null) is skipped rather than failing the whole
+// confinement — the box should not have to exist in full for the writable roots that do exist to
+// be honoured. Every other open error fails the confinement closed.
 func allowWriteBeneath(rulesetFD int, root string, access uint64) error {
 	rootFD, err := unix.Open(root, unix.O_PATH|unix.O_CLOEXEC, 0)
 	if err != nil {

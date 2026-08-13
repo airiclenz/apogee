@@ -42,7 +42,11 @@ exempts the single device file `/dev/null` from the write fence.
 - Network policy, read fencing, or any other confinement semantics.
 - Version bump (see closing note).
 
-## 1. Landlock: allow /dev/null writes through the fence
+## 1. Landlock: allow /dev/null writes through the fence — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): live-kernel coverage landed in `internal/platform/landlock_linux_test.go` (new `TestLandlockAllowsDevNullThroughTheFence`) rather than `cmd/apogee/confinement_e2e_test.go`, which is unchanged — the existing landlock write-denial test is the cross-platform `confinetest.Probe` battery, and a `/dev/null` step inside that shared battery would also run against the Windows backend, which the plan puts out of scope.
+NOTES (2026-08-13): the rule reuses the existing `allowWriteBeneath` helper instead of a second open path — it already does exactly the specified `O_PATH|O_CLOEXEC` open, ENOENT-skip, fail-closed-on-any-other-error; the path is spelled `os.DevNull`, a compile-time `"/dev/null"` under this file's linux build tag.
+NOTES (2026-08-13): the new live test was confirmed to fail without the fix (`exit status 2`, the exact symptom in the plan's intro) and pass with it; landlock is enforceable on this host, so it ran for real rather than skipping.
 
 **What:** In `internal/platform/landlock_linux.go`, after the writable-roots loop in
 `applyLandlock`, add a path-beneath allow rule for the literal file `/dev/null`.

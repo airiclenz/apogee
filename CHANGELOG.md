@@ -485,6 +485,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`2>/dev/null` works again inside a confined tool call.** Both POSIX confinement backends deny
+  file writes by default and re-grant them only beneath the box's writable roots, and `/dev/null`
+  was quietly taken with them: the most common shell idiom there is died with
+  `cannot create /dev/null: Permission denied` in every confined terminal call on a landlock
+  kernel. The landlock backend now adds one path-beneath allow rule for the literal `/dev/null`
+  after the writable roots. Because that rule's parent is a file rather than a directory it
+  carries a file-applicable mask of its own — `WRITE_FILE`, plus `TRUNCATE` from ABI 3 so
+  `> /dev/null` still opens — where asking for the directory-only rights the roots use would make
+  `landlock_add_rule` answer `EINVAL` and take the whole confinement down with it, not just the
+  exemption. The exempt set is exactly one device, and the exemption lives inside the backend:
+  `ConfinementBox` is unchanged, the exec fence's writable set is unchanged, and an ordinary
+  out-of-box write is still OS-denied — both halves pinned live on a landlock kernel, alongside
+  per-ABI unit tests for the new mask.
+
 - **The `/` menu re-scans your skills again after you send a line that ends in a skill token.** The
   menu re-reads the skill folders when it OPENS — that is what makes a skill added since launch show
   up in it — and "opens" is tracked by a flag saying the box currently sits in a `/` region. Sending
