@@ -1380,7 +1380,7 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		in, spans = m.joinedInterjections(parsed)
 		m.pendingInterjections = nil
 	}
-	m.promptEditor.reset()         // empties the textarea and closes the overlay
+	m.promptEditor.reset()         // empties the textarea, closes the overlay, clears the skill region
 	m, record = m.recordSend(sent) // the send is committed: this line is recallable from here on
 	m.detached = false             // a fresh prompt re-arms follow-the-tail: sending means "done reading history"
 	m.transcript.addUser(in.Text, spans)

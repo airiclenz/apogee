@@ -71,12 +71,6 @@ those items' own fixes falsified. The hostile-bytes threat model — the operato
 bytes they operate on are not, and neither is the model. Every citation was re-read against the
 working tree on 2026-08-12 and re-verified on 2026-08-13.
 
-- [ ] `promptEditor.reset()` (`internal/tui/prompteditor.go:223`) clears the textarea and the
-  autocomplete overlay but not `skillRegion` (`:61`), so submitting on an exact `/skill` token
-  leaves the edge-trigger true and the next `/` menu opens with no re-scan — listing a stale
-  catalog. `dismissAutocomplete` (`internal/tui/autocomplete.go:670`) clears both, which is the
-  shape `reset` should share.
-
 - [ ] `internal/domain/events.go:122` still states the wire-silent invariant as "nothing is added
   to a tool's arguments or its result", which item 8 falsified:
   `internal/tools/workspace_scoped.go:109` appends ` → resolves to <path>` to the result string of

@@ -216,13 +216,20 @@ func (e *promptEditor) setKeyDisambiguation(ok bool) {
 	}
 }
 
-// reset clears the editor back to empty after a message is sent: it empties the textarea and
-// closes the autocomplete overlay. Emptying the textarea is all it takes to drop the skills too —
-// they are /tokens IN the text, not state beside it. The prompt drag-selection is already gone by
-// here — the keypress that reached submit cleared it (handleKey).
+// reset clears the editor back to empty after a message is sent: it empties the textarea, closes
+// the autocomplete overlay and clears the skillRegion edge-trigger with it. Emptying the textarea
+// is all it takes to drop the skills too — they are /tokens IN the text, not state beside it. The
+// prompt drag-selection is already gone by here — the keypress that reached submit cleared it
+// (handleKey).
+//
+// The edge-trigger is cleared for dismissAutocomplete's reason: an emptied box sits in no menu
+// region, so leaving it true would make the NEXT "/" typed a non-opening — recomputeAutocomplete
+// would skip its re-scan and the menu would list the catalog as it stood before the submit. Submit
+// on an exact "/skill" token is the reachable case: the region is open at the moment ⏎ lands.
 func (e *promptEditor) reset() {
 	e.input.Reset()
 	e.autocomplete = autocompleteState{}
+	e.skillRegion = false
 }
 
 // rows reports the textarea's height in visual rows for a given text width: the rows its current

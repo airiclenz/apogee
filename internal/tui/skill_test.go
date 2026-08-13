@@ -645,6 +645,42 @@ func TestSlashMenuReloadsTheCatalogOnOpen(t *testing.T) {
 	}
 }
 
+// Sending on an exact "/skill" token re-arms the edge: the box empties, the region behind it closes
+// with it, and the NEXT "/" is therefore an opening that re-scans. The trigger is state BESIDE the
+// text, so the text going away is not what closes the region — reset has to clear it, or the next
+// menu opens over the catalog as it stood before the send and a skill added since is missing from
+// it.
+func TestSubmitReArmsTheRescanEdge(t *testing.T) {
+	o, reloads := reloadOpts()
+	m := newTestModelEng(t, &fakeEngine{}, o)
+
+	for _, r := range "/clean-code" {
+		var cmd tea.Cmd
+		m, cmd = stepCmd(t, m, keyRune(r))
+		m = runCmd(t, m, cmd)
+	}
+	if *reloads != 1 {
+		t.Fatalf("typing the token triggered %d reloads, want exactly 1 — the region's opening", *reloads)
+	}
+	if !m.skillRegion {
+		t.Fatalf("precondition: the input does not sit in a menu region: %+v", m.autocomplete)
+	}
+
+	m = step(t, m, keyEnter()) // an exact token falls through to submit rather than accepting the row
+	if v := m.input.Value(); v != "" {
+		t.Fatalf("the box still holds %q; this case must send, not accept a completion", v)
+	}
+	if m.skillRegion {
+		t.Error("the emptied box still reports an open menu region")
+	}
+
+	m, cmd := stepCmd(t, m, keyRune('/')) // a fresh region: an opening owes a re-scan
+	m = runCmd(t, m, cmd)
+	if *reloads != 2 {
+		t.Errorf("the next opening left the total at %d reloads, want 2 — the edge never re-armed", *reloads)
+	}
+}
+
 // The reload's message repaints the menu the human left open — and leaves their highlighted row
 // where it was. The walk now finishes after the keystroke, so a re-derivation that reset the
 // selection would move the highlight out from under someone already arrowing down the list.

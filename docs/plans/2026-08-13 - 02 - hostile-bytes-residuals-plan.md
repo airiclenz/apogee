@@ -401,7 +401,17 @@ listing after the reload ran exactly once.
 
 **Commit:** `fix(tui): /skills re-scans off the update goroutine`
 
-## 11. `promptEditor.reset` clears the skill-region edge trigger
+## 11. `promptEditor.reset` clears the skill-region edge trigger — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the edge-retrigger half of the item's Tests line landed in
+`internal/tui/skill_test.go`, not in the item's `internal/tui/prompteditor_test.go` — it needs a
+Model (`recomputeAutocomplete` is a Model method) and the reload-counting fixtures it asserts
+through (`reloadOpts`, `runCmd`) live in skill_test.go beside the other edge-trigger tests, while
+prompteditor_test.go's stated scope is editor-direct tests with no Model and no Update loop. The
+`skillRegion`-after-`reset()` half landed in prompteditor_test.go as the item names.
+NOTES (2026-08-13): also corrected the trailing comment at `internal/tui/model.go:1383` (not in the
+item's Files list), which named `reset`'s effects as "empties the textarea and closes the overlay" —
+this item's change gives it a third.
 
 **What:** `promptEditor.reset()` (`internal/tui/prompteditor.go:223`) clears the textarea and the
 autocomplete overlay but not `skillRegion` (`:61`), so submitting on an exact `/skill` token

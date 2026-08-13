@@ -459,6 +459,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The `/` menu re-scans your skills again after you send a line that ends in a skill token.** The
+  menu re-reads the skill folders when it OPENS — that is what makes a skill added since launch show
+  up in it — and "opens" is tracked by a flag saying the box currently sits in a `/` region. Sending
+  emptied the box but left that flag set, so the next `/` you typed did not read as an opening: the
+  menu came back listing the catalog as it stood before the send, and a skill added in between was
+  missing from it until you dismissed a menu by hand. Sending now clears the flag along with the
+  text, so a menu opening on a freshly emptied box re-scans exactly as the first one of the session
+  does. The scan still runs off the render loop and still fires once per opening, not per keystroke.
+
 - **`/skills` no longer freezes the interface while it re-reads your skill folders.** The verb
   re-scans the skill source dirs before it lists them — that is what makes a skill added since
   launch show up — but it ran that walk on the goroutine that paints the screen, so on a large

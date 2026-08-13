@@ -63,18 +63,23 @@ func TestPromptEditorSubmitParseExtractsSkillTokens(t *testing.T) {
 	}
 }
 
-// reset empties every editable part of the editor: the textarea and the overlay. Emptying the text
-// is what drops the skills too — they live in it as /tokens, not beside it.
+// reset empties every editable part of the editor: the textarea, the overlay and the skillRegion
+// edge-trigger that says a "/" menu region is open. Emptying the text is what drops the skills too
+// — they live in it as /tokens, not beside it.
 func TestPromptEditorResetClearsEverything(t *testing.T) {
 	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 	e.input.SetValue("half-typed /go")
 	e.autocomplete = autocompleteState{active: true, kind: acCommand}
+	e.skillRegion = true
 	e.reset()
 	if v := e.input.Value(); v != "" {
 		t.Errorf("input = %q, want empty after reset", v)
 	}
 	if e.autocomplete.active {
 		t.Error("autocomplete still active after reset")
+	}
+	if e.skillRegion {
+		t.Error("skillRegion still set after reset; an emptied box sits in no menu region")
 	}
 	if got := e.submitParse(knownSkills("go")); len(got.skillIDs) != 0 {
 		t.Errorf("skillIDs = %v, want none once the text is gone", got.skillIDs)
