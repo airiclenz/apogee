@@ -139,6 +139,35 @@ run's items deliberately did not reach.
   `TestExecFenceCoversTheConfinementBoxNotOnlyTheRoot`) and `diagnostics_test.go:455`; same
   raw-`t.TempDir()` root hazard, different assertion family.
 
+### In-band retry and prompt-asset sweep run — residuals (2026-08-13)
+
+Raised while executing `docs/plans/archived/2026-08-13 - 05 - inband-retry-and-prompt-asset-sweep-plan.md`:
+what the run's items deliberately did not reach.
+
+- [ ] A cancel landing inside the 1s hold-off (`restreamHoldoff` / `holdOffRestream`,
+  `internal/agent/loop.go:315`, `:320`, taken at `:382`) now ends the Turn `endAbandoned`
+  (ErrorEvent, deferred queue cleared) where a cancel 100ms earlier gives the resumable
+  `endCancelled` (`internal/agent/turn.go:60`, `:61`) — plan-ratified, narrow window, but a real
+  cancel-semantics seam worth tracking.
+
+- [ ] `internal/mechanisms/toolloop.go`'s `promptFS` doc comment (`:116`) still narrates prompts/ as
+  "the fixed sentence fragments of the loop-breaking directive" — accurate but narrow now that nine
+  whole-text assets joined it.
+
+- [ ] The new `internal/agent/prompts/` (like `internal/context/prompts/` and
+  `internal/mechanisms/prompts/`) carries no wording-drift README — design call 9 scoped that README
+  to `internal/title` only.
+
+- [ ] `internal/tui/command.go:62-64` names only /confine's "dedicated parse … richer than a token
+  list" and never mentions /color-scheme — same drift family, pre-existing.
+
+- [ ] README's accept paragraph now carries a short trailing line from the inserted clause (wrap
+  cosmetics only, within the file's existing width).
+
+- [ ] `internal/tui/doc.go`'s "every other row is handed a plain token list" is true of the parse
+  layer but glosses `/schedule`, which also receives — and uses — the raw tail
+  (`parsedInput.rest`, `internal/tui/command.go:128-134`); prose nit, not a defect.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
