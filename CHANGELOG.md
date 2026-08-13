@@ -565,6 +565,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Accepting the `/model` or `/server` row in the completion menu now opens its picker instead of
+  parking the verb in the box.** Both verbs read an argument, and the accept path treated every
+  argument-taking verb the same way: it spliced `/model ` into the draft and waited for a token the
+  human was never going to type — the picker was reachable only by typing the whole verb and
+  pressing ⏎ a second time. Their bare form is a whole verb, though: it opens a chooser and changes
+  nothing until that chooser's own accept, exactly like `/settings`. A new `runsBareAtAccept` flag
+  on the command registry says so, carried by `/model` and `/server` alone, and the accept path
+  completes an argument-taking verb only when the row does not carry it. `/color-scheme`,
+  `/confine`, `/rename` and `/schedule` still complete and wait, and the whole-line argument form
+  (`/model qwen`) is untouched — an argument token never reaches the accept path. A registry pin
+  fails if a third verb ever picks the flag up.
+
 - **`2>/dev/null` works again inside a confined tool call on macOS.** The seatbelt profile is
   deny-default for `file-write*` and re-grants writes only beneath the box's writable roots, so
   the most ordinary line of POSIX shell there is — redirecting output into the null device — died

@@ -1442,9 +1442,10 @@ everything on either side is untouched.
 **Accepting a command RUNS it.** The `/verb` is cut out of the draft and the command fires; the
 rest of what was typed stays in the box with the caret where it belongs. The verbs that need what
 follows them are the exception and complete instead: the ones that take arguments — today
-`/color-scheme`, `/confine`, `/model`, `/rename`, `/schedule` and `/server` (and arguments are
-only ever read from a whole-line invocation). Accepting a skill row writes that skill's own
-`/id ` token into the text.
+`/color-scheme`, `/confine`, `/rename` and `/schedule` (and arguments are only ever read from a
+whole-line invocation). `/model` and `/server` take an argument too, but their bare form is a whole
+verb — it opens a picker and changes nothing until that picker is accepted — so accepting their row
+runs them like any other. Accepting a skill row writes that skill's own `/id ` token into the text.
 
 **One overlay for "which one?".** `/model` and `/server` with nothing after them open a
 picker: the same bordered pane as the `/sessions` browser, one row per choice, one highlight,

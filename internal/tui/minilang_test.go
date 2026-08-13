@@ -786,6 +786,103 @@ func TestAcceptConfineSplicesWithoutFiring(t *testing.T) {
 	}
 }
 
+// /model reads an argument, but its BARE form is the whole verb: accepting its row opens the picker
+// instead of parking "/model " in the box for an argument the human was never going to type. Both
+// accept keys take the same path, so both are driven here.
+func TestAcceptModelRunsItAndOpensThePicker(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  tea.KeyPressMsg
+	}{
+		{name: "tab", key: keyTab()},
+		{name: "enter", key: keyEnter()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, rb := seededPicker(t, testOpts)
+			m.input.SetValue("/mod")
+			m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+			m, cmd := stepCmd(t, m, tc.key)
+
+			if !m.picker.open || m.picker.kind != pickerModel {
+				t.Fatalf("picker = {open:%v kind:%v}, want an open model picker", m.picker.open, m.picker.kind)
+			}
+			if got := m.input.Value(); got != "" {
+				t.Errorf("editor = %q, want the accepted token consumed — nothing spliced in", got)
+			}
+			if m.autocomplete.active {
+				t.Error("overlay still open after the command ran")
+			}
+			if cmd != nil {
+				t.Error("accepting /model returned a Cmd; opening the picker launches no worker")
+			}
+			if len(rb.calls) != 0 {
+				t.Errorf("rebind calls = %v, want none — the picker's own accept switches, not this one", rb.calls)
+			}
+		})
+	}
+}
+
+// /server is /model's twin here: an argument-taking verb whose bare form opens the picker, so its
+// row runs rather than completing.
+func TestAcceptServerRunsItAndOpensThePicker(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  tea.KeyPressMsg
+	}{
+		{name: "tab", key: keyTab()},
+		{name: "enter", key: keyEnter()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sw := &fakeSwitch{}
+			opts := testOpts
+			opts.Servers = staticServers(twoServers)
+			opts.SwitchServer = sw.switchTo
+			m := newTestModelEng(t, &fakeEngine{}, opts)
+			m.input.SetValue("/serv")
+			m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+			m, cmd := stepCmd(t, m, tc.key)
+
+			if !m.picker.open || m.picker.kind != pickerServer {
+				t.Fatalf("picker = {open:%v kind:%v}, want an open server picker", m.picker.open, m.picker.kind)
+			}
+			if got := m.input.Value(); got != "" {
+				t.Errorf("editor = %q, want the accepted token consumed — nothing spliced in", got)
+			}
+			if m.autocomplete.active {
+				t.Error("overlay still open after the command ran")
+			}
+			if cmd != nil {
+				t.Error("accepting /server returned a Cmd; opening the picker launches no worker")
+			}
+			if len(sw.calls) != 0 {
+				t.Errorf("switch calls = %v, want none — accepting the row only offers the choice", sw.calls)
+			}
+		})
+	}
+}
+
+// Drift guard on the accept carve-out: exactly the two picker verbs fire from the menu while still
+// reading an argument. The flag is one word on a table row and invisible once copied onto a
+// neighbour — a /rename or /schedule that quietly started firing bare would destroy the argument
+// the human was about to type — so the set is pinned by name, and every member is checked to be
+// argument-taking (the flag says nothing on a verb that reads no arguments).
+func TestOnlyThePickerVerbsRunBareAtAccept(t *testing.T) {
+	var got []string
+	for _, spec := range commandSpecs {
+		if !spec.runsBareAtAccept {
+			continue
+		}
+		got = append(got, spec.name)
+		if !spec.takesArgs {
+			t.Errorf("/%s carries runsBareAtAccept without takesArgs; the flag only qualifies an argument-taking verb", spec.name)
+		}
+	}
+
+	if want := []string{"model", "server"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("runsBareAtAccept verbs = %v, want exactly %v — every other argument-taking verb completes and waits", got, want)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // @file autocomplete + the bounded workspace walk
 // ----------------------------------------------------------------------------

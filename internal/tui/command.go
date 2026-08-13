@@ -57,13 +57,21 @@ type parsedInput struct {
 
 // commandSpec is one verb of the "/" namespace: what the parser does with it and what the
 // dropdown shows for it. name is the verb without its leading slash; summary is the one-line
-// description the dropdown displays beside it. The three flags say how the verb behaves:
+// description the dropdown displays beside it. The four flags say how the verb behaves:
 //
 //   - takesArgs — the verb reads what follows it, and parseInput hands it the tokens in
 //     parsedInput.args. /confine, whose grammar is richer than a token list, keeps its dedicated
 //     parse (parseConfine) on top of them; every non-takesArgs verb ignores surplus tokens, as it
 //     always has. It is also what the dropdown reads to COMPLETE such a verb rather than run it
-//     (acceptAutocomplete): firing a verb that is not finished would be wrong.
+//     (acceptAutocomplete), unless the row also carries runsBareAtAccept: firing a verb that is not
+//     finished would be wrong.
+//   - runsBareAtAccept — the verb takes arguments, but its BARE form is meaningful and safe to fire
+//     from the completion menu: it opens a chooser and mutates nothing until the picker's own accept.
+//     /model and /server are the only rows of that shape, so accepting one RUNS it — the same answer
+//     /settings' row gives — instead of leaving a "/model " nobody meant to finish standing in the
+//     box. It qualifies takesArgs at the accept path alone: the parser still reads the flag above it,
+//     so the argument form "/model qwen" is untouched (an argument token never reaches the accept
+//     path — caretSlashToken completes a NAME).
 //   - whileRunning — the verb is safe to run while a worker is working, because nothing it does
 //     needs this session's engine quiescent: it either only REPORTS, or — the Schedule pair
 //     /schedule and /schedule-stop — writes only to the scheduler library, whose Schedules fire as
@@ -80,11 +88,12 @@ type parsedInput struct {
 //     Interjections, every other whole-line /command — stays recallable (parsedInput.recallable is
 //     where the flag is read).
 type commandSpec struct {
-	name         string
-	summary      string
-	takesArgs    bool
-	whileRunning bool
-	noRecall     bool
+	name             string
+	summary          string
+	takesArgs        bool
+	runsBareAtAccept bool
+	whileRunning     bool
+	noRecall         bool
 }
 
 // commandSpecs is THE registry of "/" verbs, in display order (alphabetical — see below): one table
@@ -153,12 +162,12 @@ var commandSpecs = []commandSpec{
 	{name: "compact", summary: "summarise the conversation to reclaim context"},
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
 	{name: "continue", summary: "ask the model to keep going"},
-	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true},
+	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true},
 	{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true},
 	{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true},
 	{name: "schedule", summary: "run a prompt on a cycle (bare = list what is live)", takesArgs: true, whileRunning: true},
 	{name: "schedule-stop", summary: "take a schedule off the clock", whileRunning: true},
-	{name: "server", summary: "switch to another configured server", takesArgs: true},
+	{name: "server", summary: "switch to another configured server", takesArgs: true, runsBareAtAccept: true},
 	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
 	{name: "settings", summary: "view the configuration this session resolved", noRecall: true},
 	{name: "skills", summary: "list the available skills", whileRunning: true},
@@ -251,8 +260,8 @@ func unknownSlashNote(token string) string {
 
 // commandByName looks a verb up in commandSpecs by its bare name (no leading slash). It is the one
 // membership test over the table: the parser asks it what a line opens with, the dropdown's accept
-// path asks it what an accepted row DOES (a takesArgs verb completes, every other verb
-// runs on the spot), and the merged menu asks it which skill ids a command verb shadows.
+// path asks it what an accepted row DOES (a takesArgs verb completes unless it also runs bare, every
+// other verb runs on the spot), and the merged menu asks it which skill ids a command verb shadows.
 func commandByName(name string) (commandSpec, bool) {
 	for _, c := range commandSpecs {
 		if c.name == name {

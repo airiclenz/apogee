@@ -58,7 +58,10 @@ files embedded into their packages.
 
 ---
 
-## 1. Accepting the bare `/model` or `/server` completion runs the command
+## 1. Accepting the bare `/model` or `/server` completion runs the command — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): also refreshed the stale `commandByName` doc comment (`command.go:254`), which
+described the same two-way accept branch as the four sites the item named.
 
 **What:** Add `runsBareAtAccept bool` to `commandSpec` (`internal/tui/command.go:82-88`) with a
 doc comment stating its meaning: the verb takes args, but its bare form is meaningful and safe to

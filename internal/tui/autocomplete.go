@@ -29,7 +29,9 @@ import (
 // "/verb" out of the draft and leaving everything else in the box — which is what lets a command be
 // invoked from the middle of a half-written message without destroying it. The verbs that need what
 // follows them — the takesArgs rows of commandSpecs (command.go), today /color-scheme, /confine,
-// /model, /rename, /schedule and /server — complete instead.
+// /rename and /schedule — complete instead. /model and /server take arguments too, but their bare
+// form opens a picker rather than waiting for one, so they carry runsBareAtAccept and RUN like the
+// rest.
 
 // maxAutocompleteItems caps how many suggestions the overlay OFFERS (and how far the file walk
 // runs) — enough to be useful, small enough that a large workspace walk stays cheap. Type more to
@@ -724,7 +726,9 @@ func (m Model) autocompleteExactMatch() bool {
 //     started typing: a bare "@my" partial completing to a spaced path still splices the quoted
 //     token, because only that one resolves;
 //   - /confine completes to "/verb " and waits — it reads arguments, and firing a verb that is not
-//     finished would be wrong;
+//     finished would be wrong. /model and /server read arguments as well, but their bare form is the
+//     whole verb (it opens a picker and mutates nothing until that picker's own accept), so
+//     runsBareAtAccept puts them back among the rows that run;
 //   - every other command RUNS — if it may run NOW. Its token is cut out of the draft
 //     (removeCompletionToken) and runCommand drives it, so invoking a command from the middle of a
 //     half-written message costs the message nothing. An idle-only verb accepted while a worker
@@ -744,7 +748,7 @@ func (m Model) acceptAutocomplete() (tea.Model, tea.Cmd) {
 	case ac.kind == acFile:
 		return m.spliceCompletion(fileRefToken(it.value))
 	}
-	if spec, ok := commandByName(it.value); ok && spec.takesArgs {
+	if spec, ok := commandByName(it.value); ok && spec.takesArgs && !spec.runsBareAtAccept {
 		return m.spliceCompletion("/" + it.value)
 	}
 	parsed := parsedInput{kind: kindCommand, command: it.value}
