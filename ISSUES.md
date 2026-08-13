@@ -8,8 +8,10 @@ The single register of known issues and deliberately deferred work (it absorbed 
   that it is not re-derived when picked up. A deferral or a denial recorded here never becomes a
   silent drop.
 
-A resolved item is REMOVED from this file and recorded in `CHANGELOG.md` (under `[Unreleased]`
-until a release is cut) — the changelog is the closed trail; no closed-entries section lives here.
+This file holds OPEN work only. A resolved or executed item is REMOVED from it and recorded in
+`CHANGELOG.md` (under `[Unreleased]` until a release is cut) — the changelog is the closed trail;
+no closed-entries section, and no "done" narration, lives here. When a run leaves residuals, record
+only the still-open findings; the work the run completed belongs in `CHANGELOG.md`.
 
 ## Open defects
 
@@ -65,10 +67,10 @@ until a release is cut) — the changelog is the closed trail; no closed-entries
 
 ### Sub-agent prompt-guard exemption run — residuals (2026-08-13)
 
-Raised while executing `docs/plans/2026-08-13 - 00 - subagent-prompt-guard-exemption-plan.md` (all
-4 items ✅ done): what the run's items deliberately did not reach, plus two places where an item's
-text and what landed under it do not describe each other exactly. The seam the run added is live —
-`Inspect` reads `domain.PromptArgKeys` at `internal/security/dangerous.go:141`.
+Raised while executing `docs/plans/2026-08-13 - 00 - subagent-prompt-guard-exemption-plan.md`: what
+the run's items deliberately did not reach, plus two places where an item's text and what landed
+under it do not describe each other exactly. The seam the run added is live — `Inspect` reads
+`domain.PromptArgKeys` at `internal/security/dangerous.go:141`.
 
 - [ ] `internal/security/doc.go`'s first hunk (the guard's contract paragraph, `:29–44`) also
   reworded the existing read-class sentence, to contrast "every rule" against "write-shaped only";
@@ -83,8 +85,8 @@ text and what landed under it do not describe each other exactly. The seam the r
 
 ### Hostile-bytes residuals run — residuals (2026-08-13)
 
-Raised while executing `docs/plans/2026-08-13 - 02 - hostile-bytes-residuals-plan.md` (all 13
-items ✅ done): what the run's items deliberately did not reach.
+Raised while executing `docs/plans/2026-08-13 - 02 - hostile-bytes-residuals-plan.md`: what the
+run's items deliberately did not reach.
 
 - [ ] `run_tests` still inherits an unscoped PATH — plausibly deliberate, since a
   workspace-resident test runner IS the test command there.
@@ -127,8 +129,8 @@ items ✅ done): what the run's items deliberately did not reach.
 
 ### /dev/null confinement run — residuals (2026-08-13)
 
-Raised while executing `docs/plans/2026-08-13 - 02 - dev-null-confinement-plan.md` (all 3 items
-✅ done): what the run's items deliberately did not reach.
+Raised while executing `docs/plans/2026-08-13 - 02 - dev-null-confinement-plan.md`: what the run's
+items deliberately did not reach.
 
 - [ ] Commit `70c3586` carries the message "feat(confinement): implement /dev/null device exemption
   for landlock and seatbelt backends" but only adds the plan doc
@@ -148,8 +150,9 @@ becomes a silent drop, and the file never becomes an archive.
 
 ### apogee-code feature parity — user-facing affordances not yet ported
 
-**Status:** parked 2026-06-25; most of the surface has since shipped (ledger at the end of this
-entry). Additive TUI/UX layers on top of the agent core, which is already at parity. Scope is
+**Status:** parked 2026-06-25; most of the surface has since shipped (`CHANGELOG.md` and the
+archived plans hold that record). Additive TUI/UX layers on top of the agent core, which is
+already at parity. Scope is
 *user-facing* parity with the apogee-code VS Code extension (`airic-lenz.apogee-code` v0.2.58)
 only — the by-design Phase-4 items were tracked separately.
 
@@ -163,7 +166,7 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
 - **[P1] Server / model switching** — **every switch SHIPPED (2026-07-28 the two user-facing ones,
   2026-07-29 the local-server half, 2026-08-12 the profile half); only two request-side knobs
   remain.** The shipped bodies have
-  left this file for their authoritative records — see the ledger at the end of this entry
+  left this file for their authoritative records
   ([ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)
   for `/model` + `/server`,
   [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md)
@@ -207,77 +210,10 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
 automatic/ask-first/excluded) — apogee-code surfaces this in config; apogee has the internal
 disposition table but no user-facing override. See *Configurable tool × mode security matrix*.
 
-**Shipped since parking (full records in the named docs):**
-
-- Chat-input mini-language core (`/clear`, `/continue`, autocomplete for `/` and `@`, the
-  agent-side `@file` resolver) — 2026-06-26,
-  `docs/handoffs/archived/2026-06-26 - 00 - chat-mini-language-core.md`.
-- Skills system + `/skill` picker — 2026-06-26, `docs/plans/archived/skills-system-plan.md`;
-  authoring guidance (a report-producing skill ends with `present_document`) in
-  [ADR 0019](docs/adr/0019-documents-are-presented-not-opened.md).
-- `@`-file-listing cache — 2026-06-26, `internal/tui/filecache.go`.
-- Throughput display + live context-fill gauge — 2026-06-26; the context-window discovery fix
-  (llama.cpp `/props` runtime `n_ctx`) — 2026-06-28, `internal/provider/discovery.go`.
-- `/compact` generative reducer — 2026-07-01 (`internal/context.Compact`); the automatic
-  budget-driven trigger — 2026-07-04, Phase-4 item 9 (`Agent.autoCompact`).
-- Session management UI (per-Turn autosave, `/sessions` browser, `--continue`, id-or-path
-  `--resume`, scrollback replay) — 2026-07-24,
-  [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md) +
-  `docs/plans/archived/2026-07-24 - 02 - session-system-plan.md`.
-- The upstream **Heartbeat** (a ten-second monitor, async startup, offline state, live rebind on
-  an observed model/window change, the `/v1/models` data layer) — 2026-07-27,
-  [ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md) +
-  `docs/plans/archived/2026-07-27 - 00 - upstream-heartbeat-plan.md`. It is the engine half of the `/server`
-  item above, not that item's close-out.
-- **One `/` namespace** — direct `/skill-id` invocation as inline text tokens (the chip strip
-  retired), one merged command+skill menu that runs a command at accept without destroying the
-  draft, `/skills`, the sole-token typo guard, resolve-gated inline accents, and the per-command
-  while-running policy — 2026-07-28,
-  [ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md) +
-  `docs/plans/archived/2026-07-28 - 03 - slash-skills-inline-plan.md`. It closes the payload half of the
-  oracle note above (`{text, skillIds, fileRefs}`) — parity of payload, not of UI.
-- **`/model` and `/server`** — the picker UI over the heartbeat's prepared seams and the endpoint
-  switch, both halves of the *Server / model switching* item above: the `/model` picker over
-  `hb.models` driving the existing `Agent.Rebind`; the discovery hint following the bound model (the
-  flap-back fix); `Agent.SwitchUpstream` + `apogee.UpstreamSpec`; the swappable per-server Monitor
-  behind the unchanged `tui.Options` seams plus the new `SwitchServer` one; and the file-only
-  `servers:` config key — 2026-07-28,
-  [ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md) +
-  `docs/plans/archived/2026-07-28 - 05 - model-server-picker-plan.md`.
-- **Local server start/stop — the launcher half** of the *Server / model switching* item above:
-  `/model` over the launcher's **Launch profiles** when one is configured, plus `/unload-model` and
-  `/stop-server`, all over llama-launcher **v1.6.1** imported as a library at the composition root,
-  behind the file-only `llama-launcher:` key (unset = auto-detect), with **Launch profile** now a
-  CONTEXT.md term — 2026-07-29,
-  [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md) +
-  `docs/plans/archived/2026-07-29 - 00 - llama-launcher-integration-plan.md`. The owner-run live
-  pass closed with it (six of seven scenarios; (7) waived), so nothing of this half is open —
-  a later live failure reopens the item it belongs to, not this entry.
-- **`/schedule` and `/schedule-stop`** — a prompt put on a cycle for as long as apogee is open, and
-  the two library layers under the surface: `internal/schedule` owns every when-and-how decision
-  (the cycle floor, the skip-the-tick overlap policy, the quiescence Gate, lifetime), `internal/run`
-  performs one **Firing** — a fresh Agent, a fail-safe-denier Approver, the record saved at
-  completion — and the TUI owns nothing but the three panes, the status note and the notices. A
-  Firing browses as an ordinary session, tagged `⟳ <schedule>` in `/sessions` off two new optional
-  `Meta` fields — 2026-08-04,
-  [ADR 0033](docs/adr/0033-the-scheduler-is-a-library-and-the-tui-is-its-first-driver-surface.md) +
-  `docs/plans/archived/2026-08-03 - 08 - scheduler-library-plan.md`. It settles all four branch
-  points this bullet parked (overlap, which modes, `Meta`, fresh-vs-resumed) and leaves durability
-  to the future daemon over the *same* library, which is the layering the enrichment asked for.
-- **Server persistence** — the three non-goals this entry parked (`/server --save`, a `server:`
-  startup key, a switched endpoint surviving into the session record) were subsumed rather than
-  added: the `servers:` list is the single definition and the last switch *is* the startup choice —
-  2026-08-05,
-  [ADR 0036](docs/adr/0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-the-startup-choice.md) +
-  `docs/plans/archived/2026-08-05 - 05 - servers-single-definition-plan.md`.
-- **Per-model Model profiles — the profile half** of the *Server / model switching* item above: the
-  global `model-profile:` block retired (a config still spelling it is refused at startup) for a
-  file-only `model-profiles:` pattern map, a shipped shape table that auto-applies by model name
-  and announces itself, resolution layered user-entry ▸ shipped ▸ zero in the composition root, and
-  the resolved profile carried on `RebindSpec` so a model switch swaps the parser atomically with
-  the other per-model bindings — 2026-08-12,
-  [ADR 0044](docs/adr/0044-model-profiles-are-per-model-and-mostly-shipped.md). **Standing:** the
-  table grows one entry per *sighting*, never per guess.
+**Standing rules the shipped work left behind:** the `model-profiles:` shape table grows one
+entry per *sighting*, never per guess ([ADR 0044](docs/adr/0044-model-profiles-are-per-model-and-mostly-shipped.md)).
+What has shipped out of this entry since it was parked is recorded in `CHANGELOG.md` and the
+archived plans and ADRs it names — only the open remainder above lives here.
 
 ---
 
@@ -653,15 +589,8 @@ rather than here, together with the operator-armed footguns, the attacks on apog
 release, and the hostile-inference-endpoint set — all different threat models from the hostile-bytes
 one the batch answers.
 
-**Closeout, 2026-08-12 — what the batch closed and what it deliberately left.** All fourteen ranked
-positions are now answered in code (plan items 2–19): the writable-box exec fence and the absolutely
-resolved opener, `python_exec`'s load path, the active-content formats out of rung 1 and a policy on
-rung 2, the approval pane's forged rows / head-only truncation / duplicate keys / undisclosed
-resolved path, skill ids that were command lines and skill sources that were unnamed, the skill
-loader's anchor containment, symlink-crossing write parents, `.git/` and `~/.apogee` on the
-dangerous floor, repo-supplied git hooks and textconv/ext-diff drivers, a session grant that keyed
-on the bare tool name, bidi controls at three TUI seams, teardown on every exit path, and the Go
-toolchain's own environment. **Left, deliberately:** everything in the plan's **Out of scope**
+**Closeout, 2026-08-12 — what the batch deliberately left** (what it closed is in `CHANGELOG.md`).
+**Left, deliberately:** everything in the plan's **Out of scope**
 section — operator-armed footguns (`present.command`, `--workspace /`, `APOGEE_MODE=auto`, the
 stdio MCP command surface), attacks presupposing the audited workspace *is* the apogee repo, the
 hostile-inference-endpoint set, the gate-reason wording (owned by
@@ -803,11 +732,8 @@ opaque sentinel strings would put text in front of the model whose only reader i
 
 **Status:** carried forward 2026-07-22 from the "Owner-run checklist" of the archived
 [`docs/plans/archived/2026-07-22 - 00 - phase5-cross-platform-hardening-plan.md`](docs/plans/archived/2026-07-22%20-%2000%20-%20phase5-cross-platform-hardening-plan.md)
-(read it for full context). Phase 5 is **implemented**, and everything runnable here has since
-run green (2026-07-23, recorded in the CHANGELOG + the archived plans): `make check` under
-`-race` on the Linux devbox including the live landlock enforcement battery, `make live-eval`,
-`TestSmokeLiveProfileSeam`, and the **Linux** arm of the live Auto-confined deliverable run.
-What remains needs hardware this environment does not have:
+(read it for full context). What the checklist's runnable passes covered is in `CHANGELOG.md` and
+the archived plans; what remains open needs hardware this environment does not have:
 
 - **Live Auto-confined deliverable run on Windows** — the ADR 0020 backend is proven natively
   (escape battery + the real `Terminal` tool under `platform.NewConfiner()`); an end-to-end
@@ -874,33 +800,18 @@ moment to give `ConfineWritablePaths` its first writer.
 `docs/plans/`, archived on completion) —
 [ADR 0030](docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md). Nothing
 here breaks the absolute width cap; each is a place the package still measures in a measure the
-painter may not be using, or mirrors a widget imperfectly. The `inputContentRows` residue was
-closed on 2026-07-31 (owner-approved follow-up); its entry stays below with what remains of it. The
-`wrapText` residue — the last site ADR 0030 itself named — was closed on 2026-08-03, and so was the
-one it uncovered: the boxed surfaces composed by `lipgloss.Style.Width`, which turned out to be two
-sites rather than the one the entry named. What is still open here is the two width entries at the
-end: the widget mirrors' tab handling, and `hangingPrefixes` at block width 1–2.
+painter may not be using, or mirrors a widget imperfectly. What is open here is the two width
+entries below: the widget mirrors' tab handling, and `hangingPrefixes` at block width 1–2. The rest
+of the residue is closed — see `CHANGELOG.md` for what landed.
 
-**~~The four sites the plan could not touch~~** — FIXED 2026-08-03: `popup.go`'s four helpers and
-`interject.go`'s `queuedRow` measure and cut with `th.measure` now, pinned in `paint_test.go` under
-both width methods.
+**Standing rules the closed work left behind** (they bind future work, so they are not in the
+changelog alone): the one `lipgloss.Style.Width` still in the package — the prompt box framing a
+widget that wraps in GraphemeWidth itself — is ADR 0030 §6's widget-mirror exception, so do not
+re-file it, and never put a `Width` style on a *bordered* surface (§5). `inputContentRows`' taller
+counts need no clamping change: `promptEditor.rows` and `layout()` already clamp
+(`TestPromptEditorRowsClampsTheWidgetCount`).
 
-**~~`wrapText` still wraps with `ansi.Wrap`~~** — FIXED 2026-08-03 (`render.go`): it breaks with
-`th.measure.Wrap`, and `renderUserBlock`'s rows are `squareLine`d to match (`render_test.go`,
-`TestUserBlockRowsAreOneSquareLineEach`).
-
-**~~The pop-up pane is composed in lipgloss's measure~~** — FIXED 2026-08-03: the pane and the
-start-up card were one class at two sites; both are drawn by `drawBox` (`model.go`) now, pinned by
-`TestPaintedBoxRowsAreNotFolded`. **Standing:** the one `lipgloss.Style.Width` left — the prompt box
-framing a widget that wraps in GraphemeWidth itself — is ADR 0030 §6's widget-mirror exception, so
-do not re-file it, and never put a `Width` style on a *bordered* surface (§5).
-
-**~~`inputContentRows` is an unfaithful widget mirror~~** — FIXED 2026-07-31 (`render.go`): it is
-`Σ len(wrapRowStarts(line, w))` now, pinned to a real textarea by
-`TestInputContentRowsMirrorsTheWidget`. **Standing:** its taller counts need no clamping change —
-`promptEditor.rows` and `layout()` already clamp (`TestPromptEditorRowsClampsTheWidgetCount`).
-
-**What is left of this entry:** both mirrors are still wrong on **tabs**, which the widget's input
+**The widget mirrors mis-measure tabs:** both are still wrong on **tabs**, which the widget's input
 sanitizer expands and neither mirror does. Fixing it means expanding tabs the same way before
 measuring, in `wrapRowStarts` (now `internal/tui/inputaccent.go:211`; both mirrors then inherit
 it — `inputContentRows` itself moved to `internal/tui/chromelayout.go:39`).
@@ -1010,16 +921,16 @@ experiment, not a decision:
 
 - **(a)** remove `single_find_and_replace` — flagged in all four polls.
 - **(b)** patch-only vs find-replace editing — Qwen vs both Gemmas, a falsifiable disagreement.
-- **(c)** `open_file`/`read_file` merge — **RESOLVED 2026-08-11 by owner call, and shipped WITHOUT
-  the bench experiment this section otherwise requires** — an owner-ratified exception for this arm
-  alone; the standing rule above still binds (a), (b), (d), (e) and (f). The recorded lean is what
-  shipped: `read_file` kept and given a `locate` parameter (whole-file scan, absolute 1-based line
-  numbers), `open_file` removed along with its summary variant and presenters — full record in
-  `docs/plans/archived/2026-08-11 - 03 - open-file-read-file-merge-plan.md` and the CHANGELOG. **Watch-item:**
-  the very thing the skipped experiment would have measured is untested — whether sub-35B models find
-  a locate *parameter* as readily as they found an `open_file` *name*. Method lesson 2 below says
-  they may not; `read_file`'s description advertises locate by name to hedge it, and a sighting of
-  models no longer locating reopens this arm rather than re-filing it as a gap.
+- **(c)** `open_file`/`read_file` merge — **open watch-item, not an experiment arm.** This arm was
+  decided by owner call on 2026-08-11 and shipped without the bench experiment the standing rule
+  otherwise requires (an owner-ratified exception for this arm alone; the rule still binds (a),
+  (b), (d), (e) and (f) — see `CHANGELOG.md` and
+  `docs/plans/archived/2026-08-11 - 03 - open-file-read-file-merge-plan.md` for what landed). What
+  stays open is what the skipped experiment would have measured: whether sub-35B models find
+  `read_file`'s `locate` *parameter* as readily as they found the `open_file` *name*. Method
+  lesson 2 below says they may not; `read_file`'s description advertises locate by name to hedge
+  it, and a sighting of models no longer locating reopens this arm rather than re-filing it as a
+  gap.
 - **(d)** measure whether sub-35B models use `view_diff` at all.
 - **(e)** `web_fetch` → `http_request` merge — the real question is whether sub-35B models
   distinguish GET from POST; if they don't, the separate named GET tool earns its slot. Both are

@@ -11,7 +11,7 @@
 - `docs/handoffs/` — multi-session work-in-flight handoffs (superseded ones move to `docs/handoffs/archived/`).
 - `docs/reviews/` — saved review reports.
 - `layout.md` - the TUI layout/rendering spec in prose.
-- `ISSUES.md` - known issues and deferred work.
+- `ISSUES.md` - known issues and deferred work; **open only**. A resolved or executed item is REMOVED from it and recorded in `CHANGELOG.md` (under `[Unreleased]`) — the changelog is the sole closed trail. Never leave a done item, or a narration of one, in `ISSUES.md`.
 - `CHANGELOG.md` + `VERSION` — `VERSION` micro-bumps per shipped feature; `CHANGELOG.md` collects those under `[Unreleased]` and only gains a release heading when a release is cut. Versioning is deliberately 0.x while pre-production.
 
 ## Conventions not derivable from the code
