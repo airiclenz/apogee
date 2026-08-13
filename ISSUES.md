@@ -141,6 +141,33 @@ items deliberately did not reach.
   `internal/platform/seatbelt_darwin_test.go` only delegates to the shared `confinetest.Probe`
   battery, so the seatbelt exemption is pinned by the hermetic profile-string tests alone.
 
+### API-key sources run — residuals (2026-08-13)
+
+Raised while executing `docs/plans/2026-08-13 - 01 - api-key-sources-plan.md`: what the run's items
+deliberately did not reach.
+
+- [ ] `README.md` (`:547` servers schema, `:612` "the upstream API key") documents only `api-key`;
+  no plan item names README, so the new keys have no user-facing doc outside the seeded template.
+
+- [ ] Item text cites `cmd/apogee/defaults/` for the embedded template; its real home is
+  `internal/config/defaults/` — later items (and any future plan) should use the corrected path.
+
+- [ ] Untracked `docs/plans/2026-08-13 - 03 - open-defects-fix-wave-plan.md` is a prior session's
+  artifact, not this run's work — left unstaged; it still needs its own commit decision.
+
+- [ ] `/server` back onto a configured startup entry resolves that entry's own source, not the
+  `APOGEE_API_KEY` overlay (pre-existing; ADR 0036 decision 6).
+
+- [ ] Store-tool stderr is quoted into keystore `Write`'s error; on darwin the failing
+  `security -i` line could carry the secret — worth a redaction pass.
+
+- [ ] `internal/config/configwrite.go` is now 1631 lines against the coding-standards ~400-line
+  guide — a split by writer concern (acknowledgement / scalar setting / key source) would need its
+  own item.
+
+- [ ] The migration notice wording asserts "this machine has no secret store apogee can move it
+  into" — false in the headless-on-macOS/Linux case; could name the reason per driver.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
