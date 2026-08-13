@@ -280,7 +280,13 @@ to `internal/config/doc.go`'s map.
 
 **Commit:** `refactor(config): scalar-setting writer moves to configwrite_scalar.go`
 
-## 10. configwrite split III — shared splice plumbing gets its own file
+## 10. configwrite split III — shared splice plumbing gets its own file — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's premise is stale — commit `2bcf0f6` appended a FIFTH section, the per-entry setting writer, to `configwrite.go` after this plan was written, so design call 3's "`configwrite.go` ends as the acknowledgement writer alone" met a five-concern reality. The owner authorized this run to leave that writer where it is rather than invent a sixth file, so `configwrite.go` ends at 422 lines carrying two sections (acknowledgement + per-entry setting) instead of the item's projected ack-only ~400. A design-call amendment is the owner's to make.
+NOTES (2026-08-13): `ReadConfigForWrite` is listed under "from `configwrite.go`", but item 9's move had already carried it into `configwrite_scalar.go`; it was moved from there. Same function, same bytes — only the item's source attribution was stale.
+NOTES (2026-08-13): the item's single-writer clause was taken for three of the seven helpers named "from `configwrite_scalar.go`". `indentLines`, `isCommentLine` and `deleteLines` have callers in exactly one writer file (`configwrite_scalar.go`), so they stay with that writer; `rootMapping`, `isNullNode`, `scalarLineParts` and `indentLine` are each called from two or more of `configwrite.go` / `configwrite_keysource.go` / `configmigrate.go` and moved as listed.
+NOTES (2026-08-13): two prose passages in `configwrite.go` were rewritten because the move made them false — the header banner's second paragraph (which restated the textual-splice mechanism now owned by `configsplice.go`'s header) and the per-entry section's "the machinery above serves this whole". The pre-existing "writers above" / "verification below" phrases that items 8 and 9 already left pointing across files were not touched: they belong to those items' spans, not this one's.
+NOTES (2026-08-13): `appendBlock` is shared by `configwrite.go`, `configwrite_scalar.go` and `configmigrate.go` but is not in the item's move list, so it stayed in `configwrite.go` rather than being added to the move on my own judgment.
 
 Depends on item 9.
 

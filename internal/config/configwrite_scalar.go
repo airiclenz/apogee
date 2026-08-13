@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -135,22 +134,6 @@ func writableKey(key string) (Key, error) {
 		return Key{}, fmt.Errorf("apogee: %s is nested too deeply to write in place; edit it in config.yaml", k.Path)
 	}
 	return k, nil
-}
-
-// ReadConfigForWrite seeds the config from the embedded template if it is not there yet and reads
-// it back — the state every splice below starts from.
-func ReadConfigForWrite(path string) ([]byte, error) {
-	if path == "" {
-		return nil, errors.New("apogee: cannot write a setting: no config file path is known")
-	}
-	if _, err := seedConfig(path, defaultConfigYAML); err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("apogee: read config %q: %w", path, err)
-	}
-	return data, nil
 }
 
 // setScalarSetting returns the config bytes with key set to value, or nil bytes when the edit would
@@ -381,30 +364,6 @@ func ScalarTargetIn(doc *yaml.Node, k Key) (ScalarTarget, error) {
 	return t, nil
 }
 
-// rootMapping returns the document's top-level mapping, or nil for a document that has none —
-// an empty file, or one that is nothing but comments, which is the shape of a config whose every
-// setting the user has commented out. A top level that is a list or a scalar, or a mapping
-// written in flow style, is refused: neither has the block structure a setting's line lives in.
-func rootMapping(doc *yaml.Node) (*yaml.Node, error) {
-	if doc == nil || len(doc.Content) == 0 {
-		return nil, nil
-	}
-	root := doc.Content[0]
-	switch {
-	case root.Kind != yaml.MappingNode:
-		return nil, errors.New("its top level is not a mapping of settings; edit the file by hand")
-	case root.Style&yaml.FlowStyle != 0:
-		return nil, errors.New("its top level is written in flow style ({...}); edit the file by hand")
-	}
-	return root, nil
-}
-
-// isNullNode reports whether a node is the empty value a bare `key:` parses to — a value there is
-// no text of, so it can be written over but not read from.
-func isNullNode(n *yaml.Node) bool {
-	return n != nil && n.Kind == yaml.ScalarNode && n.Tag == "!!null"
-}
-
 // spliceScalarSet rewrites the key's active line, or inserts one where the key has none. A text key
 // is the one that occupies more than a line: its block replaces the block already there
 // (spliceTextBlock), and an insert puts the whole block where a scalar's single line would have gone.
@@ -478,49 +437,6 @@ func spliceScalarDelete(data []byte, k Key) ([]byte, error) {
 		drop = append(drop, t.ParentKey.Line)
 	}
 	return deleteLines(lines, drop...)
-}
-
-// scalarLineParts splits the target's active line into the text through its colon, the gap before
-// the value, and any trailing comment — the pieces a replacement rebuilds the line from, keeping
-// the user's own indentation, alignment and end-of-line note. Splitting it is also the check that
-// the line IS a single plain `key: value`, which is what makes removing it safe: a value spanning
-// lines, a block scalar, or a key the text spells differently from the node tree is refused, since
-// rewriting one line of it would leave the rest behind.
-func scalarLineParts(lines []string, t ScalarTarget) (head, gap, tail string, err error) {
-	line := t.KeyNode.Line
-	if line < 1 || line > len(lines) {
-		return "", "", "", fmt.Errorf("its %s: sits on line %d, which is outside the file", t.Key, line)
-	}
-	raw := lines[line-1]
-	indent := t.KeyNode.Column - 1
-	if indent < 0 || indent > len(raw) || !strings.HasPrefix(raw[indent:], t.Key+":") {
-		return "", "", "", fmt.Errorf("its %s: line reads unexpectedly at line %d; edit the file by hand", t.Key, line)
-	}
-	head, gap = raw[:indent+len(t.Key)+1], " "
-	if !isNullNode(t.ValueNode) {
-		if err := t.valueFitsOneLine(line); err != nil {
-			return "", "", "", err
-		}
-		if start := t.ValueNode.Column - 1; start > len(head) && start <= len(raw) && strings.TrimSpace(raw[len(head):start]) == "" {
-			gap = raw[len(head):start]
-		}
-	}
-	// The end-of-line note belongs to the value, except on a bare `key:` — with no value text to
-	// hang off, the parser attaches it to the key instead. Either way it is the user's note about
-	// this setting, and it stays on the line.
-	comment := t.ValueNode.LineComment
-	if comment == "" {
-		comment = t.KeyNode.LineComment
-	}
-	if comment != "" {
-		if at := strings.LastIndex(raw, comment); at > len(head) {
-			for at > 0 && (raw[at-1] == ' ' || raw[at-1] == '\t') {
-				at--
-			}
-			tail = raw[at:]
-		}
-	}
-	return head, gap, tail, nil
 }
 
 // valueFitsOneLine reports whether the target's EXISTING value is one this writer may rewrite in
@@ -715,11 +631,6 @@ func settingLines(t ScalarTarget, text string) []string {
 		return []string{t.Key + ": " + text}
 	}
 	return append([]string{t.Key + ": " + blockScalarHeader(text, listIndent)}, textBlockBody(text)...)
-}
-
-// indentLine pads a rendered setting to the column it belongs in.
-func indentLine(indent int, text string) string {
-	return strings.Repeat(" ", indent) + text
 }
 
 // indentLines pads a whole rendered setting into its column, leaving empty lines empty — a blank line

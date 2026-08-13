@@ -27,13 +27,15 @@
 // once — its type, default, env var, flag, validator and /settings visibility — guarded as a
 // bijection with fileConfig, so a key added to the schema breaks the build gate until it is
 // described. defaults.go is the starter config embedded from defaults/config.yaml and seeded on
-// first run, plus the seed-if-absent write everything else reuses. configwrite.go is the textual
-// splice writer that persists ONE key — a host acknowledgement, or a remembered choice on a
-// single `servers:` entry — into the user's file without moving a comment (ADR 0035).
-// configwrite_scalar.go is that writer's scalar half: it sets or resets one /settings key,
-// addressed by its registry path, under the same contract. configwrite_keysource.go is that
-// writer's key-source half: it points one `servers:` entry at a key command, or marks the entry
-// as keeping the plaintext key it already carries (ADR 0047).
+// first run, plus the seed-if-absent write everything else reuses. configsplice.go is the line and
+// node machinery every write into config.yaml shares — read, parse for positions, cut and rejoin
+// the text, verify the result against the original, replace the file atomically — which is what
+// keeps ONE key writable without moving a comment (ADR 0035). configwrite.go is the
+// acknowledgement writer that records a host `/confine off --save` names, and the per-entry writer
+// that remembers a choice on a single `servers:` entry. configwrite_scalar.go sets or resets one
+// /settings key, addressed by its registry path. configwrite_keysource.go points one `servers:`
+// entry at a key command, or marks the entry as keeping the plaintext key it already carries
+// (ADR 0047).
 // keyresolve.go turns a `servers:` entry's KEY SOURCE — a
 // literal key, a command whose output is the key, or the name of an environment variable — into the
 // token a seam sends, running it at first use and caching the answer for the session.

@@ -809,6 +809,16 @@ point is a **minor** bump, not a breaking change.
   as the file header and the shared splice helpers embedded in that span. Behaviour-preserving:
   no exported name or logic changed.
 
+- **The splice machinery every config writer shares has its own file.** The line-and-node plumbing
+  the acknowledgement writer, the scalar `/settings` writer, the key-source writer, the per-entry
+  setting writer and the legacy fold all reach for — read the file, parse it for positions, find a
+  key in the node tree, cut and rejoin the text, verify the result against the original, replace the
+  file atomically — moves verbatim out of `internal/config/configwrite.go` and
+  `internal/config/configwrite_scalar.go` into a new `internal/config/configsplice.go`, whose header
+  states the ADR 0035 contract those writers now inherit rather than each restate. A pure move: no
+  exported name changed, no logic changed, `cmd/apogee`'s callers compile untouched, and `doc.go`'s
+  file map gains a line per writer file so the navigation aid keeps up.
+
 ### Removed
 
 - **`open_file` is gone, merged into `read_file`.** It was the read-and-locate twin of a tool that

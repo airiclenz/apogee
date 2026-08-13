@@ -1,13 +1,9 @@
 package config
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -28,11 +24,10 @@ import (
 // from its one active key — so a re-marshal would hand the user back a file with a setting or two
 // in it, having silently deleted every word of documentation they started with.
 //
-// So the edit is textual, guided by the parsed node positions: the entry is rendered by the YAML
-// marshaller (which owns quoting and escaping) and spliced into the existing bytes, leaving every
-// other byte — comments, key order, indentation, the user's own edits — exactly as found. The
-// result is re-parsed and compared against the original before anything is written, so a file
-// shape the line arithmetic mis-reads fails loudly instead of corrupting a config.
+// So the edit is textual, guided by the parsed node positions — the shape configsplice.go now holds
+// for every writer in this package. What this file adds to it is the entry itself: rendered by the
+// YAML marshaller (which owns quoting and escaping) and spliced into the existing bytes, leaving
+// every other byte — comments, key order, indentation, the user's own edits — exactly as found.
 
 // unconfinedHostsKey is the top-level config key the acknowledgement list lives under — the same
 // spelling as fileConfig's yaml tag, named here because the writer matches it in the node tree.
@@ -197,30 +192,6 @@ func spliceHostAcknowledgement(data []byte, entry UnconfinedHost) ([]byte, error
 	}
 }
 
-// Document decodes the config's single YAML document node, or nil when the file holds no
-// document at all — empty, or nothing but comments, the shape of a config whose every setting the
-// user has commented out (the seeded template keeps one key active, so it decodes to a document).
-// A second document is refused: yaml.Unmarshal reads only the first, so an entry appended to the
-// last one would be written and never read.
-func Document(data []byte) (*yaml.Node, error) {
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	var doc yaml.Node
-	if err := decoder.Decode(&doc); err != nil {
-		if errors.Is(err, io.EOF) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var second yaml.Node
-	switch err := decoder.Decode(&second); {
-	case err == nil:
-		return nil, errors.New("it holds more than one YAML document, and apogee reads only the first; edit the file by hand")
-	case !errors.Is(err, io.EOF):
-		return nil, err
-	}
-	return &doc, nil
-}
-
 // unconfinedHostsNode returns the value node of the top-level `unconfined-hosts:` key and the line
 // its key sits on. A nil value node means the key is absent — the common case, since the template
 // ships it commented out.
@@ -237,33 +208,6 @@ func unconfinedHostsNode(doc *yaml.Node) (*yaml.Node, int) {
 		return nil, 0
 	}
 	return value, key.Line
-}
-
-// mappingEntry finds one key of a block mapping and returns its key and value nodes, or two nils
-// when the mapping does not have it. The first match wins, which is also the only match a config
-// apogee can read has: a duplicate key fails the parse both writers do before they splice.
-func mappingEntry(mapping *yaml.Node, key string) (*yaml.Node, *yaml.Node) {
-	if mapping == nil || mapping.Kind != yaml.MappingNode {
-		return nil, nil
-	}
-	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if mapping.Content[i].Value == key {
-			return mapping.Content[i], mapping.Content[i+1]
-		}
-	}
-	return nil, nil
-}
-
-// maxNodeLine is the last line the node's subtree reaches — for a list item whose fields each sit
-// on their own line, the line to append the next item after.
-func maxNodeLine(n *yaml.Node) int {
-	last := n.Line
-	for _, c := range n.Content {
-		if l := maxNodeLine(c); l > last {
-			last = l
-		}
-	}
-	return last
 }
 
 // renderHostEntry renders one list item through the YAML marshaller — which owns the quoting, so
@@ -301,36 +245,6 @@ func appendBlock(lines, block []string) []string {
 	return append(lines, block...)
 }
 
-// insertAt splices insert into lines after the 1-based line number at, which must name a line the
-// file actually has — a position outside it means the node tree and the text disagree, which is a
-// refusal, not something to clamp into place. subject names what pointed at that line, so the
-// refusal says which part of the file was mis-read.
-func insertAt(lines, insert []string, at int, subject string) ([]byte, error) {
-	if at < 1 || at > len(lines) {
-		return nil, fmt.Errorf("%s points at line %d, which is outside the file", subject, at)
-	}
-	out := make([]string, 0, len(lines)+len(insert))
-	out = append(out, lines[:at]...)
-	out = append(out, insert...)
-	out = append(out, lines[at:]...)
-	return joinConfigLines(out), nil
-}
-
-// SplitConfigLines splits the file into lines without a trailing empty element, so a rejoin plus
-// one closing newline reproduces the file exactly. A blank file has no lines at all.
-func SplitConfigLines(data []byte) []string {
-	text := string(data)
-	if strings.TrimSpace(text) == "" {
-		return nil
-	}
-	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-}
-
-// joinConfigLines rejoins the lines, always ending the file with a newline.
-func joinConfigLines(lines []string) []byte {
-	return []byte(strings.Join(lines, "\n") + "\n")
-}
-
 // hostsAppended reports whether after is exactly before plus entry, appended last — the shape a
 // splice must produce. Anything else (a reordered, dropped, or altered neighbour) is a mis-read.
 func hostsAppended(before, after []UnconfinedHost, entry UnconfinedHost) bool {
@@ -345,107 +259,6 @@ func hostsAppended(before, after []UnconfinedHost, entry UnconfinedHost) bool {
 	return after[len(after)-1] == entry
 }
 
-// sameApartFrom reports whether two parsed configs agree on every setting but the ones at the given
-// dotted registry paths — the guarantee that a textual splice touched nothing else. Each path is
-// blanked in both copies and what is left is compared whole, so a key the line arithmetic clipped,
-// reordered or re-typed shows up as a difference even though the writer never meant to touch it.
-//
-// One path is the ordinary case, an edit being one setting; the legacy migration passes two,
-// because folding the retired keys writes `servers:` and `server:` as a single change.
-//
-// A path the schema does not have reports false: the comparison it was asked for cannot be made,
-// and a verification step that cannot verify must refuse.
-func sameApartFrom(before, after fileConfig, paths ...string) bool {
-	b, a := before, after
-	for _, path := range paths {
-		if !zeroConfigPath(reflect.ValueOf(&b).Elem(), path) || !zeroConfigPath(reflect.ValueOf(&a).Elem(), path) {
-			return false
-		}
-	}
-	return reflect.DeepEqual(b, a)
-}
-
-// zeroConfigPath blanks the field at a dotted yaml path — `ui.spinner`, `endpoint` — in the struct
-// v addresses, and reports whether the schema has that path at all.
-//
-// A block reached through a pointer is COPIED before its leaf is blanked, so the caller's own
-// parsed config is never mutated through the shared pointer, and a block left holding nothing but
-// zero fields is set back to nil. That last step is what makes the comparison honest across an
-// insert: a `ui:` block the writer created for this one key must compare equal to the absent block
-// it replaced, while a block that still holds another setting stays non-nil and any difference in
-// it is still caught.
-func zeroConfigPath(v reflect.Value, path string) bool {
-	head, rest, nested := strings.Cut(path, ".")
-	field, ok := fieldByYAMLTag(v, head)
-	if !ok {
-		return false
-	}
-	if !nested {
-		field.Set(reflect.Zero(field.Type()))
-		return true
-	}
-	if field.Kind() != reflect.Pointer || field.Type().Elem().Kind() != reflect.Struct {
-		return false
-	}
-	if field.IsNil() { // nothing to blank, but the rest of the path must still exist in the schema
-		return zeroConfigPath(reflect.New(field.Type().Elem()).Elem(), rest)
-	}
-	block := reflect.New(field.Type().Elem())
-	block.Elem().Set(field.Elem())
-	field.Set(block)
-	if !zeroConfigPath(block.Elem(), rest) {
-		return false
-	}
-	if block.Elem().IsZero() {
-		field.Set(reflect.Zero(field.Type()))
-	}
-	return true
-}
-
-// fieldByYAMLTag finds the struct field a yaml key names — the same tags the decoder reads, so the
-// schema stays the single description of what a config file may hold.
-func fieldByYAMLTag(v reflect.Value, tag string) (reflect.Value, bool) {
-	typ := v.Type()
-	for i := range typ.NumField() {
-		if name, _, _ := strings.Cut(typ.Field(i).Tag.Get("yaml"), ","); name == tag {
-			return v.Field(i), true
-		}
-	}
-	return reflect.Value{}, false
-}
-
-// writeConfigAtomically replaces path's contents through a temp file in the same directory and a
-// rename, so an interrupted write leaves the old config intact rather than a truncated one. The
-// existing file mode is carried over: a config may hold endpoint details, so a rewrite must never
-// widen its permissions.
-func writeConfigAtomically(path string, data []byte) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("apogee: stat config %q: %w", path, err)
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return fmt.Errorf("apogee: create a temporary config beside %q: %w", path, err)
-	}
-	name := tmp.Name()
-	defer os.Remove(name) // a no-op once the rename below has moved it into place
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("apogee: write %q: %w", name, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("apogee: close %q: %w", name, err)
-	}
-	if err := os.Chmod(name, info.Mode().Perm()); err != nil {
-		return fmt.Errorf("apogee: preserve the mode of %q: %w", path, err)
-	}
-	if err := os.Rename(name, path); err != nil {
-		return fmt.Errorf("apogee: replace %q: %w", path, err)
-	}
-	return nil
-}
-
 // ----------------------------------------------------------------------------
 // The per-entry setting writer (the remembered-model-choice half)
 // ----------------------------------------------------------------------------
@@ -454,8 +267,8 @@ func writeConfigAtomically(path string, data []byte) error {
 // a plain server's `model:` key, or the committed Launch profile into a launcher-fronted entry's
 // `launch-profile:` key, so the next launch comes back where the user left off. The ADDRESSING is
 // the key-source writer's exactly — a key inside a list item, picked out of the list by its
-// `name:` — so the machinery above serves this whole: parse for positions, splice text, re-parse and
-// compare, and refuse a rewritten list that would no longer load.
+// `name:` — so the shared machinery (configsplice.go) serves this whole: parse for positions, splice
+// text, re-parse and compare, and refuse a rewritten list that would no longer load.
 //
 // What is new is the ALLOW-LIST. Each writer above spells its own key, while this one takes the key
 // from its caller, so the caller is checked before the file is even opened: a writer that trusted its
