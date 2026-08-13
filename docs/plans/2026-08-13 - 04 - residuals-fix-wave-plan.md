@@ -161,7 +161,16 @@ sites; `said` itself (`run.go:115`) is unchanged.
 
 ---
 
-## 4. The migration notice names the real reason per driver
+## 4. The migration notice names the real reason per driver — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the two reason sentences are unexported constants (`reasonNoStore`,
+`reasonHeadless`) beside `plaintextKeyNotice` rather than literals at the call sites — the clause is
+grammar-coupled to the notice template (lower-case, no trailing period) and the constants document
+that at one place; the tests pin the sentences as literals, so the coupling stays checked.
+NOTES (2026-08-13): the plan listed `TestPrepareKeyMigrationNoticesWithoutAStore` as "existing stays
+green — asserts the TUI sentence", but it did not assert any sentence; added one assertion line
+there so the session path's reason is pinned too (without it nothing would catch both callers
+passing the headless reason).
 
 Depends on item 1.
 

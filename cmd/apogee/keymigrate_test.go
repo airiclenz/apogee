@@ -113,15 +113,18 @@ func TestPlaintextKeyEntriesNamesOnlyTheKeysInTheFile(t *testing.T) {
 	}
 }
 
-// The notice a machine with no store gets names the entries and every alternative its owner can
-// reach without apogee's help, and it names the file this run actually read.
+// The notice a run with no offer to make gives names the entries and every alternative their owner
+// can reach without apogee's help, it names the file this run actually read, and it carries the
+// caller's own reason rather than a reason of its own — the two drivers do not share one.
 func TestPlaintextKeyNoticeNamesTheEntriesAndTheAlternatives(t *testing.T) {
 	t.Parallel()
 
-	notice := plaintextKeyNotice("/somewhere/else/config.yaml", []string{"workstation", "laptop"})
+	notice := plaintextKeyNotice("/somewhere/else/config.yaml", "this run cannot offer anything better",
+		[]string{"workstation", "laptop"})
 
 	for _, want := range []string{
 		"workstation", "laptop", "/somewhere/else/config.yaml",
+		"this run cannot offer anything better",
 		"api-key-env", "api-key-cmd", "chmod 600", "plaintext-key-ok",
 	} {
 		if !strings.Contains(notice, want) {
@@ -283,6 +286,11 @@ func TestPrepareKeyMigrationNoticesWithoutAStore(t *testing.T) {
 		!strings.Contains(got, filepath.Join(home, "config.yaml")) {
 		t.Errorf("notice = %q; want the entry and the file named", got)
 	}
+	// This path — and only this path — has actually asked the machine, so it is the only one allowed
+	// to say the machine has nothing to offer.
+	if got := notices.String(); !strings.Contains(got, "has no secret store apogee can move it into") {
+		t.Errorf("notice = %q; want the probe-failed reason", got)
+	}
 }
 
 // A config with no plaintext key asks nothing, says nothing, and does not even probe: the Linux
@@ -346,6 +354,15 @@ func TestHeadlessNoticesPlaintextKeysAndNeverPrompts(t *testing.T) {
 	if got := errOut.String(); !strings.Contains(got, "workstation") ||
 		!strings.Contains(got, "api-key-env") {
 		t.Errorf("stderr = %q; want the plaintext-key notice", got)
+	}
+	// The reason has to be the true one for THIS driver: a headless run never probes, so it cannot
+	// claim the machine has no store — it may well have one, and the human would go looking for a
+	// missing keyring instead of reading on.
+	if got := errOut.String(); !strings.Contains(got, "headless runs never prompt") {
+		t.Errorf("stderr = %q; want the headless reason for the notice", got)
+	}
+	if got := errOut.String(); strings.Contains(got, "has no secret store") {
+		t.Errorf("stderr = %q; the headless notice claims a machine it never probed has no store", got)
 	}
 	if strings.Contains(out.String(), "workstation") {
 		t.Errorf("the notice contaminated the answer: %q", out.String())

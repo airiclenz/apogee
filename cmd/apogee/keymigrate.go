@@ -65,7 +65,7 @@ func (w *rootWiring) prepareKeyMigration(probe func() (secretStore, bool), notic
 	}
 	store, ok := probe()
 	if !ok {
-		fmt.Fprintln(notices, plaintextKeyNotice(w.configPath(), names))
+		fmt.Fprintln(notices, plaintextKeyNotice(w.configPath(), reasonNoStore, names))
 		return
 	}
 	w.secrets = store
@@ -106,20 +106,30 @@ func plaintextKeyFor(servers []config.ServerEntry, name string) (string, bool) {
 	return "", false
 }
 
-// plaintextKeyNotice is what a machine that cannot be offered a migration is told instead: which
-// entries hold a key in the file, and the three things its owner can do about it without apogee's
-// help (ADR 0042 — an external program is an enhancement, and this is the case where there is none).
+// The two reasons a plaintext key is reported rather than offered a move. Which one is true is the
+// caller's knowledge, not the notice's: the interactive path reaches the notice only after a probe
+// found no store, while a headless run never probes at all and would be asserting something it
+// never checked if it said the same. Each is a lower-case clause with no trailing period, because
+// plaintextKeyNotice folds it into the middle of its first sentence.
+const (
+	reasonNoStore  = "this machine has no secret store apogee can move it into"
+	reasonHeadless = "headless runs never prompt, so apogee cannot offer to move it into a secret store"
+)
+
+// plaintextKeyNotice is what a run that cannot offer a migration says instead: which entries hold a
+// key in the file, why no offer is coming, and the three things its owner can do about it without
+// apogee's help (ADR 0042 — an external program is an enhancement, and this is the case where there
+// is none). The reason comes from the caller — see the two constants above.
 //
 // It names the file rather than assuming ~/.apogee, because --config and APOGEE_CONFIG both move it,
 // and a notice pointing at a file the run never read would send the human to edit the wrong one.
-func plaintextKeyNotice(path string, names []string) string {
-	return fmt.Sprintf("apogee: the api-key for %s is stored in plain text in %s, and this machine "+
-		"has no secret store apogee can move it into. You can point the entry at a variable "+
-		"(api-key-env: APOGEE_WORK_KEY), at any command that prints the key "+
-		"(api-key-cmd: pass show apogee/work — a wrapper script for anything needing a pipe), or "+
-		"at least keep the file to your own account (chmod 600 %s). Adding "+
+func plaintextKeyNotice(path, reason string, names []string) string {
+	return fmt.Sprintf("apogee: the api-key for %s is stored in plain text in %s, and %s. You can "+
+		"point the entry at a variable (api-key-env: APOGEE_WORK_KEY), at any command that prints "+
+		"the key (api-key-cmd: pass show apogee/work — a wrapper script for anything needing a "+
+		"pipe), or at least keep the file to your own account (chmod 600 %s). Adding "+
 		"`plaintext-key-ok: true` to an entry answers this for good.",
-		strings.Join(names, ", "), path, path)
+		strings.Join(names, ", "), path, reason, path)
 }
 
 // keyMigrator is the [tui.Options.MigrateKey] seam: the whole move for one entry, reported by the

@@ -604,6 +604,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The plaintext-key notice now states the reason that is actually true for the run it came from.**
+  The notice hard-coded "this machine has no secret store apogee can move it into" — true in the
+  session, where it is printed only after a live probe came back empty, but false in a headless run,
+  which never probes at all and prints the notice for any plaintext `api-key:` (ADR 0047 — the
+  migration offer is a consented edit, so an unattended run only reports). A headless user with a
+  perfectly good Keychain or keyring was being sent to look for a store that was there all along.
+  `plaintextKeyNotice` now takes the reason from its caller: the session passes the probe-failed
+  sentence unchanged, and headless says "headless runs never prompt, so apogee cannot offer to move
+  it into a secret store". The rest of the notice — the `api-key-env:` / `api-key-cmd:`
+  alternatives, `chmod 600`, and `plaintext-key-ok: true` — is unchanged on both paths.
+
 - **A store tool that echoes the secret back can no longer publish it through apogee's own error
   message.** Migration hands the key to `security` or `secret-tool` on STDIN, and a tool that cannot
   use its input tends to quote that input: `security -i` reports on the command LINE it read — the

@@ -251,7 +251,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// written — the notice names the entries and what can be done about them by hand, on stderr,
 	// where it cannot contaminate the answer.
 	if names := plaintextKeyEntries(opts.Servers); len(names) > 0 {
-		cmd.PrintErrln(plaintextKeyNotice(filepath.Join(roots.config, "config.yaml"), names))
+		cmd.PrintErrln(plaintextKeyNotice(filepath.Join(roots.config, "config.yaml"), reasonHeadless, names))
 	}
 
 	// The host's real Confiner backend for this OS, and the teardown the Windows token backend
