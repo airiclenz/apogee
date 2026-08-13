@@ -109,9 +109,14 @@ type usageJSON struct {
 // as a string slug; Metadata is raw because its shape is provider-specific (OpenRouter
 // carries the originating provider's own error text in metadata.raw).
 type wireError struct {
-	Message  string          `json:"message"`
-	Code     json.RawMessage `json:"code"`
-	Metadata json.RawMessage `json:"metadata"`
+	Message string          `json:"message"`
+	Code    json.RawMessage `json:"code"`
+	// ErrorType is the aggregator's own class slug (OpenRouter sends
+	// "provider_unavailable" when the upstream it fanned out to went away). It is read
+	// because it is the only signal that a failure is transient when the code is a
+	// non-numeric slug or absent altogether.
+	ErrorType string          `json:"error_type"`
+	Metadata  json.RawMessage `json:"metadata"`
 }
 
 // intCode returns the error code as an int, or 0 when the server sent a non-numeric one

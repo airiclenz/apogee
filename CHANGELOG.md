@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **An in-band stream error now says whether its class is worth another attempt.** The wire error
+  member an OpenAI-compatible aggregator delivers inside an HTTP 200 gained its `error_type` slug
+  (it was parsed away before, surviving only as raw text), and the terminal `Delta` it becomes
+  carries a new `Retryable` flag: set when the error's own code is one the client already retries at
+  the HTTP layer — 429 or any 5xx, via the same `isRetryableStatus` — or when the aggregator typed
+  the failure `provider_unavailable`, which is the observed OpenRouter shape where the code alone
+  (a 404, a non-numeric slug, nothing at all) reads as terminal while the upstream is merely gone.
+  An in-band 4xx stays terminal, and a `context_overflow` is never retryable — a prompt too long
+  stays too long. The rendered error text and the kind selection are byte-for-byte unchanged, and
+  the provider still never retries mid-stream itself: it classifies, and the loop decides.
+
 - **The key-source decision now has a written record.**
   [ADR 0047](docs/adr/0047-api-keys-resolve-through-a-per-entry-key-source.md) states why a
   `servers:` entry names ONE key source instead of always carrying the secret itself (the config

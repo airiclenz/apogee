@@ -183,21 +183,23 @@ func TestStream_InBandError(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name         string
-		apiKey       string
-		body         string
-		wantKind     DeltaKind
-		wantContent  string
-		wantContains []string
-		wantAbsent   string
+		name          string
+		apiKey        string
+		body          string
+		wantKind      DeltaKind
+		wantContent   string
+		wantContains  []string
+		wantAbsent    string
+		wantRetryable bool
 	}{
 		{
 			name: "error only stream",
 			body: `data: {"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"temporarily rate-limited upstream"}}}
 
 `,
-			wantKind:     DeltaError,
-			wantContains: []string{"429", "Provider returned error", "rate-limited upstream"},
+			wantKind:      DeltaError,
+			wantContains:  []string{"429", "Provider returned error", "rate-limited upstream"},
+			wantRetryable: true,
 		},
 		{
 			name: "error after a content delta",
@@ -208,9 +210,10 @@ data: {"error":{"message":"upstream died","code":502}}
 data: [DONE]
 
 `,
-			wantKind:     DeltaError,
-			wantContent:  "partial",
-			wantContains: []string{"502", "upstream died"},
+			wantKind:      DeltaError,
+			wantContent:   "partial",
+			wantContains:  []string{"502", "upstream died"},
+			wantRetryable: true,
 		},
 		{
 			name: "context overflow",
@@ -227,6 +230,25 @@ data: [DONE]
 `,
 			wantKind:     DeltaError,
 			wantContains: []string{"rate limited"},
+		},
+		{
+			name: "in-band 400 is terminal",
+			body: `data: {"error":{"message":"invalid request payload","code":400}}
+
+`,
+			wantKind:     DeltaError,
+			wantContains: []string{"400", "invalid request payload"},
+		},
+		{
+			// The observed OpenRouter shape (session 20260813T100440Z-104eaf7a): the class
+			// slug is the retry signal when the code alone would read as terminal.
+			name: "provider unavailable retries on its error_type alone",
+			body: `data: {"error":{"message":"Upstream error from provider","code":404,"error_type":"provider_unavailable","metadata":{"raw":"no instances available"}}}
+
+`,
+			wantKind:      DeltaError,
+			wantContains:  []string{"Upstream error from provider", "no instances available"},
+			wantRetryable: true,
 		},
 		{
 			name:   "api key redacted",
@@ -282,6 +304,9 @@ data: [DONE]
 			}
 			if tc.wantAbsent != "" && strings.Contains(last.Err, tc.wantAbsent) {
 				t.Errorf("error = %q leaks %q", last.Err, tc.wantAbsent)
+			}
+			if last.Retryable != tc.wantRetryable {
+				t.Errorf("retryable = %v, want %v — the loop re-streams exactly the classes the client retries at the HTTP layer", last.Retryable, tc.wantRetryable)
 			}
 		})
 	}

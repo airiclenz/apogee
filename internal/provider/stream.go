@@ -44,6 +44,12 @@ type Delta struct {
 	FinishReason string
 	Usage        *Usage
 	Err          string
+	// Retryable is meaningful only on DeltaError: it reports that the fault's class is one
+	// the client would have retried had it arrived as an HTTP status (429, 5xx, or an
+	// aggregator's "provider_unavailable"), so the caller may re-stream the same request.
+	// It is never set on DeltaContextOverflow — a prompt too long stays too long — and the
+	// provider itself never acts on it, because retrying mid-stream is the loop's call.
+	Retryable bool
 }
 
 // Stream performs a streaming completion and yields Deltas as they arrive. It is the SSE
@@ -90,17 +96,24 @@ func (c *Client) statusDelta(resp *http.Response) Delta {
 	return Delta{Kind: DeltaError, Err: fmt.Sprintf("apogee: upstream HTTP %d: %s", resp.StatusCode, text)}
 }
 
+// providerUnavailable is the aggregator error_type slug for "the upstream I routed to is
+// gone" — a transient class even when it arrives with a 4xx or a non-numeric code.
+const providerUnavailable = "provider_unavailable"
+
 // inBandErrorDelta classifies an in-band error member into a terminal Delta, mirroring
 // statusDelta but for a failure the server wrapped in an HTTP 200. The text is the whole raw
 // SSE payload (sanitised), so provider-specific metadata — OpenRouter's metadata.raw, say —
-// reaches the user verbatim instead of being flattened away.
+// reaches the user verbatim instead of being flattened away. Retryable mirrors the client's
+// own HTTP retry policy (isRetryableStatus) so an in-band 502 is treated exactly like a 502
+// status, with the error_type slug covering the shapes that carry no usable code.
 func (c *Client) inBandErrorDelta(werr wireError, raw string) Delta {
 	code := werr.intCode()
 	text := fmt.Sprintf("apogee: upstream in-band error %d: %s", code, c.sanitize(raw))
 	if code == http.StatusBadRequest && isContextOverflow(werr.Message) {
 		return Delta{Kind: DeltaContextOverflow, Err: text}
 	}
-	return Delta{Kind: DeltaError, Err: text}
+	retryable := isRetryableStatus(code) || werr.ErrorType == providerUnavailable
+	return Delta{Kind: DeltaError, Err: text, Retryable: retryable}
 }
 
 // parseSSE reads the SSE body line by line and yields Deltas. It accumulates a tool call

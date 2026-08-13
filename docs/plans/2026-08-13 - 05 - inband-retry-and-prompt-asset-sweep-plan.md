@@ -111,7 +111,7 @@ succeeds and `ls "docs/plans/2026-08-13 - 04 - residuals-fix-wave-plan.md"` fail
 
 ---
 
-## 2. The provider classifies retryable in-band stream errors
+## 2. The provider classifies retryable in-band stream errors — ✅ DONE (2026-08-13)
 
 Depends on item 1.
 
