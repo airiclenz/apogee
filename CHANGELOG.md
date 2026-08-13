@@ -565,6 +565,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A copy now also reaches the clipboard of a terminal that ignores OSC 52.** Selecting text with
+  the mouse flashed `copied N chars` and handed the selection to `tea.SetClipboard` — the OSC 52
+  escape, which is cross-terminal and survives an SSH hop, and which several terminals drop on the
+  floor (some until the human turns the feature on). Where it was dropped the confirmation was a
+  promise about an empty clipboard. The same text now goes out over a second channel beside it: a
+  best-effort write to the host's own clipboard program (`pbcopy`, `xclip`/`xsel`/`wl-copy`,
+  `clip.exe`) through `github.com/atotto/clipboard`, already linked into the binary and still
+  CGO-free. OSC 52 stays first and unchanged, so nothing regresses over SSH; the system write runs
+  off the render path and swallows its error, so a machine with no clipboard program degrades to
+  exactly the old behaviour rather than reporting a failure for a copy that may well have landed.
+  The confirmation flash stays unconditional. The write sits behind one injectable package-level
+  seam, so a test can watch what a copy actually hands over.
+
 - **Accepting the `/model` or `/server` row in the completion menu now opens its picker instead of
   parking the verb in the box.** Both verbs read an argument, and the accept path treated every
   argument-taking verb the same way: it spliced `/model ` into the draft and waited for a token the

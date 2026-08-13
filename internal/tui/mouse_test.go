@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -183,6 +185,97 @@ func TestDragSelectsAndCopies(t *testing.T) {
 	if !strings.Contains(m.flash, "copied 5 chars") {
 		t.Fatalf("flash = %q, want it to mention 'copied 5 chars'", m.flash)
 	}
+}
+
+// recordSystemClipboard substitutes the system-clipboard seam (clipboard.go) with a recorder that
+// returns err, restoring the real one when the test ends. The returned channel carries every text
+// handed over. The seam exists precisely because the real write shells out to a platform program
+// (pbcopy, xclip, clip.exe) that a unit test cannot count on having.
+func recordSystemClipboard(t *testing.T, err error) <-chan string {
+	t.Helper()
+	previous := writeSystemClipboard
+	t.Cleanup(func() { writeSystemClipboard = previous })
+	wrote := make(chan string, 4)
+	writeSystemClipboard = func(text string) error {
+		wrote <- text
+		return err
+	}
+	return wrote
+}
+
+// fireBatch runs the Cmds inside a tea.Batch the way the runtime does — each on its own goroutine,
+// no ordering — and returns WITHOUT waiting for them. Waiting would mean sitting out copyFlash's
+// two-second flash tick, which shares the batch with the two clipboard writes; the caller waits on
+// the one Cmd it cares about instead.
+func fireBatch(t *testing.T, cmd tea.Cmd) {
+	t.Helper()
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("copy Cmd produced %T, want a tea.BatchMsg of the clipboard writes and the tick", msg)
+	}
+	for _, c := range batch {
+		go c() //nolint:errcheck // the msgs go nowhere in a test that drives the seam directly
+	}
+}
+
+// TestDragCopyAlsoWritesTheSystemClipboard pins the fallback the ISSUES defect asked for: the copy
+// a drag-release produces hands the SAME text to the host's clipboard program, so a terminal that
+// silently drops OSC 52 still ends up holding the selection. OSC 52 stays in the batch beside it —
+// this asserts the addition, not a replacement.
+func TestDragCopyAlsoWritesTheSystemClipboard(t *testing.T) {
+	wrote := recordSystemClipboard(t, nil)
+
+	m := modelWithInput(t, "hello world")
+	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+
+	m = step(t, m, leftClick(2+0, y))
+	m = step(t, m, leftDrag(2+5, y))
+	_, cmd := stepCmd(t, m, leftRelease(2+5, y))
+	if cmd == nil {
+		t.Fatal("release of a non-empty selection should return a copy Cmd, got nil")
+	}
+	fireBatch(t, cmd)
+
+	select {
+	case got := <-wrote:
+		if got != "hello" {
+			t.Fatalf("system clipboard received %q, want the selection %q", got, "hello")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the copy never reached the system clipboard")
+	}
+}
+
+// TestSystemClipboardFailureStillConfirmsTheCopy pins the fallback as BEST-EFFORT: on a machine
+// with no clipboard program the copy must degrade to exactly the old OSC-52-only behaviour — the
+// confirmation flash stands, the error surfaces nowhere, and nothing panics.
+func TestSystemClipboardFailureStillConfirmsTheCopy(t *testing.T) {
+	wrote := recordSystemClipboard(t, errors.New("no clipboard program on this host"))
+
+	m := modelWithInput(t, "hello world")
+	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+
+	m = step(t, m, leftClick(2+0, y))
+	m = step(t, m, leftDrag(2+5, y))
+	m, cmd := stepCmd(t, m, leftRelease(2+5, y))
+	if cmd == nil {
+		t.Fatal("release of a non-empty selection should return a copy Cmd, got nil")
+	}
+	if !strings.Contains(m.flash, "copied 5 chars") {
+		t.Fatalf("flash = %q, want a failed system write to leave 'copied 5 chars' standing", m.flash)
+	}
+	fireBatch(t, cmd)
+
+	select {
+	case <-wrote:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the copy never reached the system clipboard")
+	}
+	if msg := systemClipboardCmd("hello")(); msg != nil {
+		t.Fatalf("a failed system write produced msg %#v, want nil — it must dispatch nothing", msg)
+	}
+	<-wrote
 }
 
 // TestBareClickReleaseDoesNotCopy ensures a click without a drag leaves the caret but copies

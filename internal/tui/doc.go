@@ -214,7 +214,10 @@
 // beneath it, and it drops the moment the text under it moves (the streaming tail, a rewrap, a tool
 // call joining its group). Freezing repaints under a held button was rejected — the stream must not
 // visibly stall — and the release slices the very lines the rule protected, which is what makes copy
-// equal sight by construction rather than by care.
+// equal sight by construction rather than by care. clipboard.go holds the second half of the copy
+// itself: OSC52 stays the primary and SSH-safe channel, and beside it a best-effort write to the
+// host's own clipboard program covers the terminals that ignore the escape, behind one injectable
+// package-level seam so a test can watch what a copy actually hands over.
 //
 // blockcursor.go is that same reach from the KEYBOARD: a modal block cursor over the transcript
 // (docs/layout/tool-layout.md, design call 7). ⌥↑/⌥↓ enter the walk and move it, plain ↑/↓ move

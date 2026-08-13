@@ -97,7 +97,26 @@ the accept-behavior prose in `layout.md:1444-1447`.
 
 ---
 
-## 2. System-clipboard fallback for copy
+## 2. System-clipboard fallback for copy — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's Files list named `go.sum`, but it needed no change — the module's
+hashes were already recorded there from the indirect dependency, so `go mod tidy` only moved the
+`require` line in `go.mod`.
+NOTES (2026-08-13): retry — per the dispatch DECISION the unrelated `ISSUES.md` change was set
+aside with `git stash push -- ISSUES.md` (now `stash@{0}`, message "ISSUES.md: unrelated in-band
+provider-error defect entry, set aside during item 2 of the 2026-08-13 - 03 fix wave"). It held two
+things, neither part of this plan: a new open-defect entry on mid-stream in-band provider errors,
+and a raw draft of a marking-convention note.
+NOTES (2026-08-13): `ISSUES.md` is being edited BY HAND CONCURRENTLY — it went dirty again ~26s
+after the stash with a reworked `## Marking Convention` section and `[P]` markers on this plan's
+three defects. That live edit was deliberately left in place (not stashed, not reverted): it is not
+item 2's file, item 7 owns `ISSUES.md`, and a concurrent write would collide with the human's
+editor buffer. Item 2's own five files are unaffected and the tree is otherwise clean.
+NOTES (2026-08-13): ACTION FOR THE RUN — the stashed provider-error defect entry is NOT in the
+current `ISSUES.md` (`grep -c provider_unavailable ISSUES.md` = 0); it now survives only in
+`stash@{0}`. Restore it (`git stash pop stash@{0}`, resolving against the hand edit) before the run
+closes, and note that item 7's "touches only ISSUES.md" acceptance is measured against whatever the
+hand edit leaves.
 
 **What:** Promote `github.com/atotto/clipboard v0.1.4` from `// indirect` to a direct dependency
 (`go.mod:26`; run `go mod tidy`). Add `internal/tui/clipboard.go`: an unexported package-level

@@ -575,10 +575,13 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// copyFlash copies text to the system clipboard over OSC52 (tea.SetClipboard — cross-terminal and
-// SSH-safe, no pbcopy dependency) and shows a transient confirmation counting the runes taken
-// (flashClearMsg clears it after flashDuration). Shared by the prompt and transcript drag-release
-// paths so both confirm a copy identically.
+// copyFlash copies text to the clipboard over BOTH channels and shows a transient confirmation
+// counting the runes taken (flashClearMsg clears it after flashDuration). OSC52
+// (tea.SetClipboard) stays the primary: it is cross-terminal and SSH-safe, needing no local
+// program, and it is unchanged. The system write beside it (systemClipboardCmd, clipboard.go) is
+// the fallback for terminals that ignore the escape — where the flash used to promise a copy that
+// went nowhere (the ISSUES defect) — and is best-effort, so the confirmation stays unconditional.
+// Shared by the prompt and transcript drag-release paths so both confirm a copy identically.
 func (m Model) copyFlash(text string) (tea.Model, tea.Cmd) {
 	n := len([]rune(text))
 	noun := "chars"
@@ -588,6 +591,7 @@ func (m Model) copyFlash(text string) (tea.Model, tea.Cmd) {
 	m.flash = fmt.Sprintf("copied %d %s", n, noun)
 	return m, tea.Batch(
 		tea.SetClipboard(text),
+		systemClipboardCmd(text),
 		tea.Tick(flashDuration, func(time.Time) tea.Msg { return flashClearMsg{} }),
 	)
 }
