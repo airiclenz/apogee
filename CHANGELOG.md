@@ -243,6 +243,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`resolvedTargetNote`'s doc comment covers its reader caller too**: the comment at
+  `internal/tools/workspace_scoped.go` still described the ` → resolves to <path>` tail as "the tail
+  a write tool appends", which stopped being the whole truth when `read_file` began appending the
+  same tail. It now names both callers — a write tool says where the write landed, `read_file` says
+  where the bytes came from — and records why the reader's case is the one that most needs saying
+  out loud: a read FOLLOWS the link rather than replacing its final name, so this tail is the only
+  place that redirection is disclosed. The marker note gains the matching caveat that a reader does
+  not carry the marker at all. Comment-only; no behaviour moves.
+
 - **Pinned the dangerous-action guard's two-class branch**: a tool declaring BOTH a delegation
   prompt key (`domain.PromptTool`) and a read-source key (`domain.ReadSourceTool`) has both classes
   of value dropped from the write-shaped view, and `TestWriteShapedViewDropsPromptAndSourceKeysTogether`

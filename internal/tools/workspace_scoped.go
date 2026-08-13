@@ -91,16 +91,18 @@ func ResolvedWriteTarget(t domain.Tool, call domain.ToolCall) string {
 	return target.Real
 }
 
-// resolvedTargetNote is the RESULT-STRING half of the same disclosure: the tail a write tool
-// appends to the sentence it reports, naming where the write really landed when that is not
-// where the argument said. It is "" for an ordinary write, so a result the model reads — and
-// the transcript prints — grows nothing on the common path.
+// resolvedTargetNote is the RESULT-STRING half of the same disclosure: the tail a tool appends
+// to the sentence it reports, naming the path the call really touched when that is not the one
+// the argument named. A write tool says where the write landed; read_file says where the bytes
+// came from — a read FOLLOWS the link rather than replacing its final name, so for a reader this
+// tail is the only place the redirection is said out loud. It is "" for an ordinary call, so a
+// result the model reads — and the transcript prints — grows nothing on the common path.
 //
-// A tool holds its root and its own decoded argument, so this takes the two directly rather
-// than re-deriving them through the marker: same resolution, one less round trip through the
-// call's JSON. The sentence a surface renders is its own (the pane and the card share the
-// TUI's); what all three must not do is disagree about the path, which is why they all read
-// resolveTargetUnbounded.
+// A tool holds its root and its own decoded argument, so this takes the two directly rather than
+// re-deriving them through the marker — which a reader does not carry at all: same resolution,
+// one less round trip through the call's JSON. The sentence a surface renders is its own (the
+// pane and the card share the TUI's); what all three must not do is disagree about the path,
+// which is why they all read resolveTargetUnbounded.
 func resolvedTargetNote(input, root string) string {
 	target, ok := resolveTargetUnbounded(input, root)
 	if !ok || target.Real == target.Named {
