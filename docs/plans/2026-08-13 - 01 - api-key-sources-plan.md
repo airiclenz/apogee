@@ -334,7 +334,10 @@ headless run emits the notice and never prompts; storeless machine emits the not
 
 **Commit:** `feat(tui): startup offer migrates plaintext keys into the OS store`
 
-## 7. Docs: CONTEXT.md "Key source", ADR 0047, changelog
+## 7. Docs: CONTEXT.md "Key source", ADR 0047, changelog — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the CONTEXT.md term carries the item's definition verbatim, plus the two lines every neighbouring term has — a `See [ADR 0047]` link and an `_Avoid_:` line ("credential provider", "keychain support", "key fallback"). Glossary house style rather than implementation detail, which is what the item's "glossary only" rules out.
+NOTES (2026-08-13): the ADR's decision 5 records the delegation failure semantics AS LANDED — a Sub-agent server whose key cannot be produced takes no delegations and they fall back to the session's own server with one notice per routing state change — rather than design call 4's "fails that delegation". Item 3's NOTES explain why (the engine latches a target value and offers no per-spawn error channel); the ADR is the record, so it records the code.
 
 **What:** CONTEXT.md gains the glossary term **Key source**: "The one place a server entry's
 API key comes from: a literal `api-key`, a command (`api-key-cmd`) whose output is the key,

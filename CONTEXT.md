@@ -230,6 +230,16 @@ unlisted, unpersisted entry for one run
 _Avoid_: "the model server", "the backend" (a `backend` detector package may exist, but
 it detects Upstreams — it is not the Upstream).
 
+**Key source**:
+The one place a server entry's API key comes from: a literal `api-key`, a command (`api-key-cmd`)
+whose output is the key, or a named environment variable (`api-key-env`). An entry has at most one;
+having none is the keyless state. **Key migration** is the startup offer that moves a plaintext key
+into the OS secret store and turns the entry into a command source. See
+[ADR 0047](docs/adr/0047-api-keys-resolve-through-a-per-entry-key-source.md).
+_Avoid_: "credential provider", "keychain support" (apogee keeps no secret of its own and links no
+keychain library — a source is a line in the entry), "key fallback" (an entry names one source, not
+a chain).
+
 **Model profile**:
 The per-model description Apogee carries of *how a given small model speaks the wire* — two
 **orthogonal** axes: its **tool-call format** (native structured `tool_calls`, or a text format

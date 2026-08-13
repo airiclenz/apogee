@@ -10,6 +10,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The key-source decision now has a written record.**
+  [ADR 0047](docs/adr/0047-api-keys-resolve-through-a-per-entry-key-source.md) states why a
+  `servers:` entry names ONE key source instead of always carrying the secret itself (the config
+  file is hand-edited, watched every second, and the file a user copies to a second machine), why
+  the source runs at first use of that entry rather than at load, why an empty answer is a hard
+  error rather than "no auth", and why a plaintext key earns a consented offer rather than a silent
+  move — together with what was turned down on the way: a keychain library and a fourth
+  `api-key-keychain:` source (a D-Bus client and a Keychain framework inside a CGO-free six-target
+  binary, to reach a store a command already reaches, on hosts that half the time have no store at
+  all — ADR 0042), an encrypted config (passphrase management for one field), precedence or fallback
+  chains between sources (a configured key silently ignored, or a stale one silently used), running
+  the command through a shell, and silent auto-migration (against ADR 0035's deliberate-edit grain).
+  Windows migration is recorded as deferred rather than denied — there is no built-in generic-secret
+  CLI to build the write-and-read-back pair from. `CONTEXT.md` gains **Key source** as a term of the
+  language beside **Upstream**, and the thirteen comments across the code that were already citing
+  ADR 0047 now cite a document that exists.
+
 - **A plaintext `api-key:` now earns an offer to move it into the machine's own secret store.** At
   start-up, every `servers:` entry whose key is written out in the config file is collected; where
   the machine has a store apogee can both write to and read back from — the macOS Keychain through
