@@ -6,9 +6,13 @@ package agent
 // commit a blank assistant message that leaves the Turn looking answered. These tests pin the two
 // halves of that contract: what the guard faults, and what it must let past — a post-response hook
 // that retried and recovered real content keeps first claim, so the off-ramp still owns the Turn.
+// A third set pins what the guard SAYS: a reply cut off at the engine's own output cap (ADR 0046)
+// is told apart from an upstream that answered with nothing, because calling a 20k-token reasoning
+// run "empty" names neither the cap nor what was burned reaching it.
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -47,8 +51,8 @@ func TestEmptyReplyFailsTheTurn(t *testing.T) {
 		},
 		{
 			name:    "the finish reason rides along for diagnosis",
-			script:  []provider.Delta{{Kind: provider.DeltaDone, FinishReason: "length"}},
-			wantErr: "upstream returned an empty reply (finish: length)",
+			script:  []provider.Delta{{Kind: provider.DeltaDone, FinishReason: "content_filter"}},
+			wantErr: "upstream returned an empty reply (finish: content_filter)",
 		},
 	}
 
@@ -119,5 +123,95 @@ func TestEmptyReplyGuardYieldsToRecoveredRetry(t *testing.T) {
 	}
 	if got := a.conv.Len(); got != 2 {
 		t.Errorf("conv.Len() = %d, want 2 (user + the recovered assistant reply)", got)
+	}
+}
+
+// cutOffScript is a stream that reasons and is then cut off mid-thought — the shape the 2026-08-12
+// incident produces now that the engine states a ceiling: reasoning, not one visible token, and a
+// finish reason of "length".
+func cutOffScript() []provider.Delta {
+	return []provider.Delta{
+		{Kind: provider.DeltaThinking, Thinking: "let me enumerate every file in the repository before I answer..."},
+		{Kind: provider.DeltaDone, FinishReason: "length"},
+	}
+}
+
+// TestCutOffReplyNamesTheOutputCap pins the honest failure for the incident this branch exists for
+// (ADR 0046): a reply that reasoned itself into the engine's OWN ceiling is not "an empty reply"
+// — the model answered at length and apogee stopped it — so the fault names the cap, the remedy
+// key, and what the reasoning cost, while failing the Turn exactly as every other empty reply does.
+func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
+	tests := []struct {
+		name          string
+		script        []provider.Delta
+		wantReasoning bool
+	}{
+		{
+			name:          "a reply cut off mid-reasoning reports what it spent",
+			script:        cutOffScript(),
+			wantReasoning: true,
+		},
+		{
+			name:          "a cut-off reply with no reasoning at all still names the cap",
+			script:        []provider.Delta{{Kind: provider.DeltaDone, FinishReason: "length"}},
+			wantReasoning: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			cfg := baseConfig(sink)
+			cfg.Context.MaxContextTokens = 98304 // the incident's window: a 19,660-token derived cap
+			responder := &captureAllResponder{scripts: [][]provider.Delta{tc.script}}
+			a, err := newAgent(cfg, responder)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			if err := a.Submit(domain.UserInput{Text: "audit the repository"}); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+
+			res, err := a.Step(context.Background())
+			if err != nil {
+				t.Fatalf("Step: %v", err)
+			}
+
+			if res.Status != domain.StatusExchangeComplete || !res.Faulted {
+				t.Errorf("StepResult = {Status:%q Faulted:%v}, want {Status:%q Faulted:true}",
+					res.Status, res.Faulted, domain.StatusExchangeComplete)
+			}
+			errs := errorEvents(sink.events)
+			if len(errs) != 1 {
+				t.Fatalf("ErrorEvents = %d (%v), want exactly 1", len(errs), errs)
+			}
+			if errs[0].Source != "loop" {
+				t.Errorf("ErrorEvent.Source = %q, want %q", errs[0].Source, "loop")
+			}
+			got := errs[0].Err
+			if strings.Contains(got, "empty reply") {
+				t.Errorf("ErrorEvent.Err = %q, want the cut-off message, not the empty-reply one", got)
+			}
+			if !strings.Contains(got, "19660") {
+				t.Errorf("ErrorEvent.Err = %q, want it to name the cap the engine sent (19660)", got)
+			}
+			if !strings.Contains(got, "max-output-tokens") {
+				t.Errorf("ErrorEvent.Err = %q, want it to name the key that raises the cap", got)
+			}
+			if spent := strings.Contains(got, "tokens of reasoning"); spent != tc.wantReasoning {
+				t.Errorf("ErrorEvent.Err = %q, reasoning spend reported = %v, want %v",
+					got, spent, tc.wantReasoning)
+			}
+			if hasEvent[domain.MessageEvent](sink.events) {
+				t.Error("a MessageEvent was emitted for a Turn that produced no reply")
+			}
+			if got := a.conv.Len(); got != 1 {
+				t.Errorf("conv.Len() = %d, want 1 — only the user message survives a faulted Turn", got)
+			}
+			// Naming the cap changes the message, not the control flow: still no retry.
+			if got := len(responder.got); got != 1 {
+				t.Errorf("provider was called %d times, want 1 (the branch re-requests nothing)", got)
+			}
+		})
 	}
 }

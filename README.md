@@ -499,7 +499,9 @@ one answer may take, using the room it already reserves for the reply — clampe
 thinking model can reason for an hour and hit the context wall instead of answering. Set
 `max-output-tokens:` on a `servers:` entry (in tokens) to pin your own ceiling for that
 server, whatever its window says — which is how you let a cloud endpoint that advertises no
-window answer at length.
+window answer at length. A reply that runs into that ceiling with nothing visible to show
+for it fails the turn and names the cap and roughly what the reasoning cost, rather than
+reporting an empty reply: the remedy is a bigger ceiling or a smaller task, not a retry.
 
 The prompt's caret is the **real terminal cursor**, and it never blinks. Set
 `cursor-shape:` (a file-only key) to `block` (the default), `underline`, or `bar` to say

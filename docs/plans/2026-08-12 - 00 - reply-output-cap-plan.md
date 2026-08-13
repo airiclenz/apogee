@@ -281,7 +281,21 @@ delegation.
 
 ---
 
-## 5. Name the cap when a reply is cut off
+## 5. Name the cap when a reply is cut off — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the reasoning spend the new message reports is an ESTIMATE, through the Agent's calibrated chars→token estimator (`a.tokens.EstimateTokens`), and the message says "roughly" so it reads as one. `domain.Response` carries the reasoning TEXT, never the server's count of it, and the per-call usage report is not threaded to `reviewedOutcome` today — threading it would be the control-flow change the item forbids ("a message change and a branch").
+
+NOTES (2026-08-13): the cap the message names is `maxOutputTokens()` — the loop's own value — not the number actually stamped on that one request, so a pre-request hook that overrode `MaxTokens` for it would leave the message naming the engine's ceiling rather than the hook's. Documented at the helper: the engine's number is the one an operator can act on with `max-output-tokens:`, and `domain.Response`'s view exposes no sampling to read the other from.
+
+NOTES (2026-08-13): the existing table row "the finish reason rides along for diagnosis" scripted finish `length`, which the new branch now answers, so its expectation was false the moment the branch landed. The row keeps its purpose with an arbitrary open-set reason (`content_filter`) instead; the `length` shape moved to the new `TestCutOffReplyNamesTheOutputCap`, which covers it both with and without reasoning.
+
+NOTES (2026-08-13): two files outside the item's Files list were touched, both documentation for now-user-visible behaviour (procedure step 6). `README.md` gained one sentence after item 4's cap paragraph, and the `max-output-tokens:` block in `internal/config/defaults/config.yaml` gained one clause — which closes item 3's own recorded follow-up that the template "deliberately does NOT mention that a reply cut off AT the cap fails the turn ... Worth adding there". Neither edit changes an example line, so `TestEmbeddedDefaultConfigTeachesTheServersSchema` stays green.
+
+NOTES (2026-08-13): the CHANGELOG text above is a standalone bullet meant to sit under the same `### Added` block, immediately after item 4's cap entry, rather than an in-place amendment of that paragraph as the plan's "items 3–5 as one feature entry" would suggest: the sidecar's single-writer flow applies text, it cannot express an edit to an already-committed paragraph. The behaviour is part of the cap feature, not a fix to previously-shipped behaviour, which is why `### Added` and not `### Fixed`.
+
+NOTES (2026-08-13): `internal/tui/render.go` and `internal/tui/render_test.go` are dirty in the working tree from item 6 being implemented concurrently. They are untouched by this item and are deliberately absent from FILES.
+
+NOTES (2026-08-13): no VERSION, CHANGELOG release heading, package-manifest version or tag was touched.
 
 Depends on item 4.
 

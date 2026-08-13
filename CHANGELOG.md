@@ -27,6 +27,17 @@ point is a **minor** bump, not a breaking change.
   only way to let a cloud endpoint that advertises no window answer at length, and the compaction
   summarizer and the session namer keep the 4,096 caps they already bounded themselves with.
 
+- **A reply stopped by that ceiling no longer reports itself as empty.** A thinking model that
+  reasons all the way to the cap without emitting one visible word used to fail the turn as
+  `upstream returned an empty reply (finish: length)` — a message naming neither the cap that
+  stopped it nor the tokens burned reaching it (20,653 of them in the incident), and one that reads
+  like an upstream fault worth retrying. That one case now gets its own failure: it names the
+  ceiling apogee sent, roughly what the reasoning cost, and the key that raises it, so the remedy
+  reads as a bigger `max-output-tokens:` or a smaller task rather than a retry into the same wall.
+  Every other empty reply keeps exactly the message it had, and a cut-off turn still fails exactly
+  as it did — the change is what you are told, not what happens, and being engine-level it holds
+  under `--bypass` too.
+
 - **The `/` menu and `/skills` now say where each skill came from.** A loaded skill's row carried
   only fields the `SKILL.md` writes for itself — the id, the display name, the summary — so a skill
   a cloned repo shipped and one from your own library read exactly alike. That is the residual the

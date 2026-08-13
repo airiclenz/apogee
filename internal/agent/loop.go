@@ -381,6 +381,18 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 // without one.
 const emptyReplyErrFmt = "upstream returned an empty reply (finish: %s)"
 
+// cappedReplyErrFmt is the fault text for the one empty reply emptyReplyErrFmt would misdescribe:
+// a reply that ran into the ceiling the engine itself stated (ADR 0046). The model DID answer — at
+// length, for as long as apogee allowed it to — and stopped only because apogee said stop, so
+// calling that "an empty reply" hides both the cap and the tokens burned reaching it (the
+// 2026-08-12 incident spent 20,653 reasoning tokens and would have reported nothing but "empty").
+// So the message names the ceiling and, when the model reasoned, roughly what it spent under it:
+// those are the two numbers the remedy turns on — a larger max-output-tokens: for this server, or a
+// task small enough to answer inside the current one. It deliberately does not invite a retry; the
+// same request meets the same ceiling.
+const cappedReplyErrFmt = "reply hit the output cap apogee set (%d tokens) with no visible text to " +
+	"show for it%s — raise max-output-tokens: for this server or narrow the task; a retry meets the same ceiling"
+
 // reviewedOutcome resolves a reviewed response into respondAndReview's return, guarding the one
 // case the Turn must not commit: a reply with nothing in it for the user — no visible text and no
 // tool calls. That is an Upstream failure wearing a success's clothes (an in-band error delivered
@@ -396,6 +408,11 @@ const emptyReplyErrFmt = "upstream returned an empty reply (finish: %s)"
 // re-streams the Turn before this is ever reached) and a hook retry that DID produce content passes
 // through untouched. Being engine-level, the guard also fires in Bypass, where no Mechanism is there
 // to catch the empty reply — failure honesty is provider/engine correctness, not a Mechanism's job.
+//
+// What the fault SAYS splits by finish reason (emptyReplyFault): a reply cut off at the engine's own
+// output cap names that cap instead of calling a 20k-token reply "empty". What the fault DOES is
+// unchanged for every reply — one ErrorEvent from source "loop", then turnFailed — so the split is a
+// message, not a second control flow: no retry, no salvage of the reasoning, no Mechanism.
 func (a *Agent) reviewedOutcome(turn int, resp *domain.Response) (*domain.Response, turnOutcome, string) {
 	if strings.TrimSpace(resp.Text()) != "" || len(resp.ToolCalls()) > 0 {
 		return resp, turnOK, ""
@@ -403,9 +420,33 @@ func (a *Agent) reviewedOutcome(turn int, resp *domain.Response) (*domain.Respon
 	a.cfg.Events.Emit(domain.ErrorEvent{
 		EventBase: a.base(turn),
 		Source:    "loop",
-		Err:       fmt.Sprintf(emptyReplyErrFmt, resp.FinishReason()),
+		Err:       a.emptyReplyFault(resp),
 	})
 	return nil, turnFailed, ""
+}
+
+// emptyReplyFault picks the fault text for a reply with nothing in it, on the one diagnostic that
+// tells the two kinds of empty apart. A finish reason of "length" says the reply was CUT OFF — and
+// since ADR 0046 every request states a ceiling, that cut is the engine's own cap far more often
+// than anything upstream — so it gets cappedReplyErrFmt, naming the cap and the reasoning spent
+// under it. Every other reason (an in-band error on an HTTP 200, a stream that ended before its
+// first token, a reason the engine has never heard of) keeps emptyReplyErrFmt verbatim.
+//
+// Two limits of the numbers it reports are deliberate, not defects. The reasoning spend is an
+// ESTIMATE through the calibrated chars→token estimator — the Response carries the reasoning text,
+// never the server's count of it — hence "roughly". And the cap named is the loop's own value for
+// this Agent, so a pre-request hook that overrode MaxTokens for that one request would leave the
+// message naming the engine's ceiling rather than the hook's; the engine's is the one an operator
+// can act on with max-output-tokens:.
+func (a *Agent) emptyReplyFault(resp *domain.Response) string {
+	if resp.FinishReason() != domain.FinishLength {
+		return fmt.Sprintf(emptyReplyErrFmt, resp.FinishReason())
+	}
+	spent := ""
+	if thinking, ok := resp.Thinking(); ok {
+		spent = fmt.Sprintf(", after roughly %d tokens of reasoning", a.tokens.EstimateTokens(len(thinking)))
+	}
+	return fmt.Sprintf(cappedReplyErrFmt, a.maxOutputTokens(), spent)
 }
 
 // assembleResponse applies the model profile at the parse seam (D5/D6). It strips the reply's
