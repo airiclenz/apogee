@@ -477,6 +477,53 @@ func TestPromptKeyExemptionCoversOnlyTheDeclaredKeys(t *testing.T) {
 	}
 }
 
+// TestWriteShapedViewDropsPromptAndSourceKeysTogether pins Inspect's UNION branch: a tool
+// declaring BOTH a prompt key and a read-source key has both classes dropped from the
+// write-shaped view, neither shadowing the other. Every other case here declares one class
+// or none, and no shipped tool declares both today — a delegating tool that also reads from
+// the skill library is the shape that would arrive first, and it would arrive with the
+// branch unpinned. The floor is asserted in the same breath: the same guarded literal under
+// an ordinary argument still hard-refuses, so the drop is earned per declared key.
+func TestWriteShapedViewDropsPromptAndSourceKeysTogether(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+	both := stubTool{
+		name:       "delegate_copy",
+		sourceKeys: []string{"source"},
+		promptKeys: []string{"task"},
+	}
+
+	inPrompt := argCall("delegate_copy", map[string]any{
+		"task":        "Copy the methodology the security-audit skill keeps under ~/.apogee.",
+		"source":      "docs/methodology.md",
+		"destination": "docs/skill-runs/security-audit/methodology.md",
+	})
+	if d := g.Inspect(inPrompt, both); d.Triggered() {
+		t.Errorf("declared prompt text triggered rule %q (tier %v), want no trigger — "+
+			"the source declaration must not cost the prompt its drop", d.RuleID, d.Tier)
+	}
+
+	inSource := argCall("delegate_copy", map[string]any{
+		"task":        "Stage the resource for the run.",
+		"source":      "/root/.apogee/skills/security-audit/resources/methodology.md",
+		"destination": "docs/skill-runs/security-audit/methodology.md",
+	})
+	if d := g.Inspect(inSource, both); d.Triggered() {
+		t.Errorf("declared read source triggered rule %q (tier %v), want no trigger — "+
+			"the prompt declaration must not cost the source its drop", d.RuleID, d.Tier)
+	}
+
+	inDestination := argCall("delegate_copy", map[string]any{
+		"task":        "Stage the resource for the run.",
+		"source":      "docs/methodology.md",
+		"destination": "/root/.apogee/skills/evil/SKILL.md",
+	})
+	if d := g.Inspect(inDestination, both); d.Tier != TierHardRefuse {
+		t.Errorf("write INTO the control plane tier = %v, want TierHardRefuse — "+
+			"an undeclared argument on a two-class tool is judged as any other write target", d.Tier)
+	}
+}
+
 // TestWriteShapedDefaultRulesCarryWritesOnly pins WHICH shipped rules carry the class
 // exemption: exactly the four whose pattern is a bare write/delete target path. A new
 // path-shaped rule must set the field deliberately; a command-shaped rule must not carry

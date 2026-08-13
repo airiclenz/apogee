@@ -243,6 +243,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Pinned the dangerous-action guard's two-class branch**: a tool declaring BOTH a delegation
+  prompt key (`domain.PromptTool`) and a read-source key (`domain.ReadSourceTool`) has both classes
+  of value dropped from the write-shaped view, and `TestWriteShapedViewDropsPromptAndSourceKeysTogether`
+  now holds that. No shipped tool declares both today — the branch was correct only by inspection —
+  and the test asserts the floor in the same breath: the same guarded literal under an ordinary
+  argument still hard-refuses. Test-only; no behaviour moves.
+
 - **Three code comments state the shipped behaviour again**: `internal/domain/events.go` recorded
   the wire-silent invariant as "nothing is added to a tool's arguments or its result", which the
   resolves-to disclosure notes falsified — the arguments half is intact, and the comment now names

@@ -70,12 +70,6 @@ Raised while executing `docs/plans/2026-08-13 - 00 - subagent-prompt-guard-exemp
 text and what landed under it do not describe each other exactly. The seam the run added is live —
 `Inspect` reads `domain.PromptArgKeys` at `internal/security/dangerous.go:141`.
 
-- [ ] No test covers a tool declaring BOTH prompt keys and read-source keys — the union branch in
-  `Inspect` (`internal/security/dangerous.go:148`, which appends `prompts` and `sources` into one
-  `dropKeys` slice for the write-shaped view). Every `stubTool` in `internal/security/dangerous_test.go`
-  declares one class or neither (`:384` sourceKeys, `:423` and `:470` promptKeys), and no shipped
-  tool declares both today, so the branch is correct-by-inspection but unpinned.
-
 - [ ] `internal/security/doc.go`'s first hunk (the guard's contract paragraph, `:29–44`) also
   reworded the existing read-class sentence, to contrast "every rule" against "write-shaped only";
   accurate and inside the paragraph item 3 names, but wider than that item's NOTES line admits.

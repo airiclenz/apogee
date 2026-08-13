@@ -466,7 +466,11 @@ reading the three hunks that the new wording matches the shipped behaviour cited
 
 **Commit:** `docs(code): wire-silence exception and rung-2 formats stated truthfully`
 
-## 13. The prompt-guard union branch gets its pinning test
+## 13. The prompt-guard union branch gets its pinning test — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the new test was mutation-checked against the branch it pins — dropping only
+`sources` and only `prompts` in turn each makes it fail on the corresponding assertion — so it
+cannot pass on a half-implemented union.
 
 **What:** no test covers a tool declaring BOTH prompt keys and read-source keys — the union
 branch in `Inspect` (`internal/security/dangerous.go:147-153`, which appends `prompts` and
