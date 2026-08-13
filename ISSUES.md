@@ -13,7 +13,10 @@ The single register of known issues and deliberately deferred work (it absorbed 
 This file holds OPEN work only. A resolved or executed item is REMOVED from it and recorded in
 `CHANGELOG.md` (under `[Unreleased]` until a release is cut) — the changelog is the closed trail;
 no closed-entries section, and no "done" narration, lives here. When a run leaves residuals, record
-only the still-open findings; the work the run completed belongs in `CHANGELOG.md`.
+only the still-open, ACTIONABLE findings — a defect, or a concrete missing test or doc with
+`file:line` evidence to act on. Narration of how an item's text and its landed change differ,
+costs a plan already ratified, and cosmetic observations belong in the run's closing report (the
+closeout commit message), never here; the work the run completed belongs in `CHANGELOG.md`.
 
 [ ] New/Open Items not handled yet
 [P] Planned Items - if you add an item to an implementation plan, mark it with `P`
@@ -37,156 +40,36 @@ only the still-open findings; the work the run completed belongs in `CHANGELOG.m
   *Configurable tool × mode security matrix* entry below sits on the same
   dispatch-gate-vs-tool-level-fence seam; whichever way this call goes constrains that design.
 
-### Sub-agent prompt-guard exemption run — residuals (2026-08-13)
+### Run residuals — open (2026-08-13)
 
-Raised while executing `docs/plans/2026-08-13 - 00 - subagent-prompt-guard-exemption-plan.md`: what
-the run's items deliberately did not reach, plus two places where an item's text and what landed
-under it do not describe each other exactly. The seam the run added is live — `Inspect` reads
-`domain.PromptArgKeys` at `internal/security/dangerous.go:141`.
-
-- [ ] `internal/security/doc.go`'s first hunk (the guard's contract paragraph, `:29–44`) also
-  reworded the existing read-class sentence, to contrast "every rule" against "write-shaped only";
-  accurate and inside the paragraph item 3 names, but wider than that item's NOTES line admits.
-
-- [ ] Item 4's text assumed timeout / wedged-drain results carry no `[exit code N]` marker and so
-  would keep the first-line fallback, but `subprocessToolResult` (`internal/tools/terminal.go:152`)
-  emits the marker whenever the exit code is non-zero and those shapes report `-1`, which
-  `exitCodeMarker` (`internal/tui/toolpresent.go:1335`) matches — they now read `error: exit -1`
-  with the explanatory line (`internal/tools/terminal.go:143`, `:149`) kept as the body's first
-  line. Better, but the item's fallback clause is narrower in practice than it reads.
-
-### Hostile-bytes residuals run — residuals (2026-08-13)
-
-Raised while executing `docs/plans/2026-08-13 - 02 - hostile-bytes-residuals-plan.md`: what the
-run's items deliberately did not reach.
-
-- [ ] `run_tests` still inherits an unscoped PATH — plausibly deliberate, since a
-  workspace-resident test runner IS the test command there.
+The still-open findings the 2026-08-13 plan runs left, merged into one section under the
+conventions' actionability bar (the closed and accepted remainder of every run is in
+`CHANGELOG.md`); each bullet names its origin run.
 
 - [ ] The Windows home (`%USERPROFILE%` / drive-letter `/users/`) is still unspelled in the
   ssh-key and credential patterns; ADR 0020 already reasons about that port, so it is declared
-  debt.
-
-- [ ] The EXDEV copy-then-remove fallback in `MoveFile.move` remains unexercised by tests —
-  unreachable on a single-device tmpdir, as item 4's own hedge allows; the clean cross-directory
-  move is covered.
-
-- [ ] For an absolute path `resolveTargetUnbounded` ignores its root argument, so `readRoot`'s
-  answer only ever matters for relative paths — the extra-read-root plumbing in `read_file`'s note
-  is documentation, not behaviour.
-
-### /dev/null confinement run — residuals (2026-08-13)
-
-Raised while executing `docs/plans/2026-08-13 - 02 - dev-null-confinement-plan.md`: what the run's
-items deliberately did not reach.
-
-- [ ] Commit `70c3586` carries the message "feat(confinement): implement /dev/null device exemption
-  for landlock and seatbelt backends" but only adds the plan doc
-  (`docs/plans/2026-08-13 - 02 - dev-null-confinement-plan.md`, 132 insertions, the commit's sole
-  file) — a misleading message on an already-landed commit.
-
-- [ ] Darwin live coverage of the `/dev/null` exemption is untested —
-  `internal/platform/seatbelt_darwin_test.go` only delegates to the shared `confinetest.Probe`
-  battery, so the seatbelt exemption is pinned by the hermetic profile-string tests alone.
-
-### API-key sources run — residuals (2026-08-13)
-
-Raised while executing `docs/plans/2026-08-13 - 01 - api-key-sources-plan.md`: what the run's items
-deliberately did not reach.
+  debt. (hostile-bytes run)
 
 - [ ] `/server` back onto a configured startup entry resolves that entry's own source, not the
-  `APOGEE_API_KEY` overlay (pre-existing; ADR 0036 decision 6).
-
-- [ ] `internal/config/configwrite.go` is now 1631 lines against the coding-standards ~400-line
-  guide — a split by writer concern (acknowledgement / scalar setting / key source) would need its
-  own item.
-
-### Open-defects fix wave run — residuals (2026-08-13)
-
-Raised while executing `docs/plans/archived/2026-08-13 - 03 - open-defects-fix-wave-plan.md`: what
-the run's items deliberately did not reach.
-
-- [ ] `internal/context` and `internal/title` have no `doc.go` file map (both sit under the house
-  ~10-file docmap threshold); their new prompt assets are named in the package narration instead.
-
-### Residuals fix wave run — residuals (2026-08-13)
-
-Raised while executing `docs/plans/archived/2026-08-13 - 04 - residuals-fix-wave-plan.md`: what the
-run's items deliberately did not reach.
-
-- [ ] The `rm` rules' bare `/` branch makes their whole `/(?:etc|usr|…)` enumeration dead regex —
-  every absolute recursive delete is a no-override hard-refuse, contradicting the rule's own
-  "project files stay allowed" comment. If the floor is ever meant to be precise about system paths,
-  that branch needs narrowing.
-
-- [ ] Keystore stderr is captured into a 4 KiB `cappedBuffer` (`internal/keystore/run.go:53`, `:88`),
-  so a key straddling that byte cut leaves an unredacted key PREFIX that `redactKey`'s whole-value
-  substitution cannot match.
-
-- [ ] README's key-source failure sentence lists "empty output or an unset variable" but not an
-  *empty* variable, which `resolveEnvKey` also refuses.
-
-- [ ] `ScopeEnv`'s Windows Path-gets-scoped branch is only pinned with an empty workspace root
-  (`internal/platform/host_test.go:165`, `:210`), so scoping-on-the-Path-spelling is covered by
-  `ScopeInheritedEnv`'s test alone — a one-subtest gap.
-
-- [ ] Input-side twin of the tab fold: `lineEditor.flattenLine` (`internal/tui/lineeditor.go:157`)
-  folds only `\n`, so a bracketed paste carrying a tab survives into a one-line settings field.
-
-- [ ] Under a symlinked `TMPDIR` four `internal/tools` tests outside item 9's class still fail —
-  `exec_fence_test.go` (`TestEveryExecSiteRefusesAProgramInsideTheWorkspace`,
-  `TestPythonExecRefusesAnInRepoVirtualenvByName`,
-  `TestExecFenceCoversTheConfinementBoxNotOnlyTheRoot`) and `diagnostics_test.go:455`; same
-  raw-`t.TempDir()` root hazard, different assertion family.
-
-### In-band retry and prompt-asset sweep run — residuals (2026-08-13)
-
-Raised while executing `docs/plans/archived/2026-08-13 - 05 - inband-retry-and-prompt-asset-sweep-plan.md`:
-what the run's items deliberately did not reach.
+  `APOGEE_API_KEY` overlay (pre-existing; ADR 0036 decision 6). (api-key sources run)
 
 - [ ] A cancel landing inside the 1s hold-off (`restreamHoldoff` / `holdOffRestream`,
   `internal/agent/loop.go:315`, `:320`, taken at `:382`) now ends the Turn `endAbandoned`
   (ErrorEvent, deferred queue cleared) where a cancel 100ms earlier gives the resumable
   `endCancelled` (`internal/agent/turn.go:60`, `:61`) — plan-ratified, narrow window, but a real
-  cancel-semantics seam worth tracking.
-
-- [ ] `internal/mechanisms/toolloop.go`'s `promptFS` doc comment (`:116`) still narrates prompts/ as
-  "the fixed sentence fragments of the loop-breaking directive" — accurate but narrow now that nine
-  whole-text assets joined it.
-
-- [ ] The new `internal/agent/prompts/` (like `internal/context/prompts/` and
-  `internal/mechanisms/prompts/`) carries no wording-drift README — design call 9 scoped that README
-  to `internal/title` only.
-
-- [ ] `internal/tui/command.go:62-64` names only /confine's "dedicated parse … richer than a token
-  list" and never mentions /color-scheme — same drift family, pre-existing.
-
-- [ ] README's accept paragraph now carries a short trailing line from the inserted clause (wrap
-  cosmetics only, within the file's existing width).
-
-- [ ] `internal/tui/doc.go`'s "every other row is handed a plain token list" is true of the parse
-  layer but glosses `/schedule`, which also receives — and uses — the raw tail
-  (`parsedInput.rest`, `internal/tui/command.go:128-134`); prose nit, not a defect.
-
-### Remember-model run — residuals (2026-08-13)
-
-Raised while executing `docs/plans/archived/2026-08-13 - 06 - remember-model-plan.md`: what the
-run's items deliberately did not reach.
-
-- [ ] The plan doc `docs/plans/2026-08-13 - 07 - residuals-sweep-and-configwrite-split-plan.md` sits
-  untracked in the tree unstaged; it needs its own `feat(plans)` commit, and its `configwrite.go`
-  split overlaps this plan's item 2 work.
+  cancel-semantics seam worth tracking. (in-band retry run)
 
 - [ ] `verifiedEntrySplice`'s refusal message still says "did not put the key source on the %q entry"
   (`internal/config/configwrite.go:1602`), now reachable from a model / launch-profile write.
+  (remember-model run; the fix waits for plan `2026-08-13 - 07`'s configwrite split)
 
 - [ ] `/model <id>` naming the already-bound model returns early and records nothing
   (`internal/tui/picker.go:695`), so a user cannot pin the model the heartbeat put them on — faithful
-  to the `/server` twin, a feature gap not a defect.
+  to the `/server` twin, a feature gap not a defect. (remember-model run)
 
 - [ ] `auto-title` has no case in `applySettingFor` (`cmd/apogee/wire_settings.go:495`) — committing
   it in `/settings` writes the file and answers that it cannot be applied to the running session
-  while `tui.Options.AutoTitle` stays launch-frozen; pre-existing.
+  while `tui.Options.AutoTitle` stays launch-frozen; pre-existing. (remember-model run)
 
 ## Parked / deferred work
 
@@ -439,7 +322,8 @@ documented rather than silently shut. **Neither is a live gap.**
   catalogue (`register` already panics at `init()` on an empty `descriptor.ID`, and the ID keys the
   table), so the only way in is a hand-built row from an embedder or a test. Worth a guard later, as
   its own small change with its own test: reject an empty `Descriptor.ID` in `Add` alongside the
-  reserved-ID gate, with a message in the same voice as the other three.
+  reserved-ID gate, with a message in the same voice as the other three. (Planned in
+  `docs/plans/2026-08-13 - 08 - register-shrink-and-small-guards-plan.md`.)
 
 - **`internal/mechanisms` declares which `Deps` a row needs, but does not construct them.** A row now
   carries `needs DepNeeds`, and `DepsNeeded(ids)` ORs the flags for an enabled set, so the engine
@@ -789,7 +673,11 @@ the archived plans; what remains open needs hardware this environment does not h
   machine.
 - **Live Auto-confined deliverable run on macOS (seatbelt) + runtime smoke** — same shape; the
   darwin binary cross-builds clean (amd64+arm64, re-verified 2026-07-23), so what remains on a
-  Mac is `--help`, a trivial session, and the confined Auto run.
+  Mac is `--help`, a trivial session, and the confined Auto run. That run should also probe the
+  `/dev/null` seatbelt exemption live — `internal/platform/seatbelt_darwin_test.go` only
+  delegates to the shared `confinetest.Probe` battery, so the exemption is pinned by the hermetic
+  profile-string tests alone (folded here from the /dev/null confinement run's residuals,
+  2026-08-13).
 - **Degradation notice on a below-floor Windows host (< build 17763)** — the deny-vs-token
   decision itself is table-proven (`TestBelowWindowsFloor` in the untagged `winguard.go`
   predicate); only the on-host UX observation of the notice stays untested (recorded so in
@@ -862,7 +750,8 @@ counts need no clamping change: `promptEditor.rows` and `layout()` already clamp
 **The widget mirrors mis-measure tabs:** both are still wrong on **tabs**, which the widget's input
 sanitizer expands and neither mirror does. Fixing it means expanding tabs the same way before
 measuring, in `wrapRowStarts` (now `internal/tui/inputaccent.go:211`; both mirrors then inherit
-it — `inputContentRows` itself moved to `internal/tui/chromelayout.go:39`).
+it — `inputContentRows` itself moved to `internal/tui/chromelayout.go:39`). (Planned in
+`docs/plans/2026-08-13 - 08 - register-shrink-and-small-guards-plan.md`.)
 
 **`hangingPrefixes` can draw three cells at block width 1–2** (now `internal/tui/wrap.go:31`). It floors its wrap
 width at 1 column and then prepends a two-column marker, so a bullet list in a two-column block

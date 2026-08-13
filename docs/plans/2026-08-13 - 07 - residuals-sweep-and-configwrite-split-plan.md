@@ -315,7 +315,12 @@ callers compile and pass untouched); `git diff --stat` shows no changes under `c
 
 **Commit:** `refactor(config): shared splice plumbing moves to configsplice.go`
 
-## 11. ISSUES.md sweep — the resolved entries leave the register
+## 11. ISSUES.md sweep — the resolved entries leave the register — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's section names and grep strings are stale — a concurrent session restructured `ISSUES.md` before this item ran, merging "Residuals fix wave run", "In-band retry and prompt-asset sweep run" and "API-key sources run" into a single "Run residuals — open (2026-08-13)" section whose entries carry `[ ]`/`[P]` markers plus a parenthetical origin-run tag. Worked from the file as it stands (owner-authorized): removed exactly the ten `[P]` bullets items 1–10 resolved — keystore `cappedBuffer` (item 1), `flattenLine` tab fold (2), README key-source sentence (3), `ScopeEnv` Windows Path (4), symlinked `TMPDIR` four tests (5), `rm` rules dead regex (6), the `promptFS` / `command.go:62-64` / `tui/doc.go` comment-drift trio (7), and the `configwrite.go` 1631-line split (8–10) — and left every other bullet untouched, including the sibling session's own entries. No heading or intro line could be removed as the item's text projects: the merged section still holds six open `[ ]` bullets, so heading and intro stay.
+NOTES (2026-08-13): the section intro's closing sentence ("Every `[P]` bullet below is planned in `docs/plans/2026-08-13 - 07 - …`") left with the bullets — it pointed only at the ten entries that just went, so keeping it would have left the register pointing at a completed plan with no referent. The rest of that paragraph is the concurrent session's wording, unchanged.
+NOTES (2026-08-13): the surviving `verifiedEntrySplice` bullet's evidence went stale under items 8–10 (`internal/config/configwrite.go:1602` is now `configwrite_keysource.go:288`), but it is an open entry the item's "no other ISSUES edits" clause protects, so it was left exactly as written and reported on the FOLLOW-UP line instead.
+NOTES (2026-08-13): `ISSUES.md` also carries the concurrent session's uncommitted restructure of the same file, so staging `ISSUES.md` necessarily commits that work with this item — the two edits cannot be separated at file granularity. `CHANGELOG.md`, `README.md` and the untracked `docs/plans/2026-08-13 - 08 - register-shrink-and-small-guards-plan.md` are also that session's and were not touched.
 
 Depends on items 1–10.
 
