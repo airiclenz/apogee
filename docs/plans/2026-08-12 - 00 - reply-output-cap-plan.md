@@ -222,7 +222,19 @@ NOTES (2026-08-13): `gofmt` re-aligned the whole `ServerEntry` field block (the 
 
 ---
 
-## 4. Cap every turn's reply at the reply budget
+## 4. Cap every turn's reply at the reply budget — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's Files list names four files, but the pin cannot reach the engine from those four alone. `ContextConfig` lives in `internal/domain/config.go`, not in the listed `internal/agent/agent.go` (which needed no change), and "carry the pin from the selected server entry" crosses the composition root: `internal/config/options.go` + `internal/config/config.go` flatten the startup entry's value the way `StartupParallelAgents` is flattened, `cmd/apogee/wire_server.go` reconstitutes it into the bound `ServerEntry` and applies it at the one bind seam, `cmd/apogee/wire_boot.go` seeds the base Config a scheduled Firing copies, `cmd/apogee/headless.go` gives the headless Driver the same bound, `cmd/apogee/delegation.go` fills the new `DelegationTarget` field, and `internal/agent/subagent.go` reads it onto the child. All eight are additive; no existing behaviour moved.
+
+NOTES (2026-08-13): a routed child takes the target's `MaxOutputTokens` UNCONDITIONALLY, which is deliberately not the treatment `ContextWindow` gets beside it (0 there keeps the parent's). A zero cap is not a broken child — it derives from the window it inherited, which by then is the routed server's — whereas keeping the parent's pin would bound a reply from the sub-agent server by a number describing the orchestrator's. This is the item's "derives from that server's numbers rather than the parent's" read literally.
+
+NOTES (2026-08-13): the second `domain.NewRequest` site the item names (`loop.go:959`) is `loopView`, which builds a read-only `LoopView` for the tool-stage hooks and reaches no server — `LoopView` does not even expose sampling. The stamp was added there as instructed and is documented in place as a consistency stamp rather than a wire bound; the wire effect is entirely `buildRequest`'s.
+
+NOTES (2026-08-13): `README.md` is not in the item's Files list but the cap is user-visible behaviour (a reply now stops at a bound apogee chose), so a paragraph was added after the existing context-window one, in that section's voice, naming the derivation, the clamp and the `max-output-tokens:` pin. It also closes item 3's own follow-up note that the key was documented only in the config template.
+
+NOTES (2026-08-13): a mid-session `/server` switch does NOT re-push the new entry's cap — `Agent.SwitchUpstream` carries no window or cap today, and the per-entry `context-window:` pin has the same gap (ADR 0045: "only the Delegation target reads it"). The cap follows the entry at bind time and at every routed spawn; a live switch-time push would need a new engine setter, which this item does not authorise.
+
+NOTES (2026-08-13): no VERSION, CHANGELOG release heading or tag touched. The CHANGELOG text above is the shared items 3–5 feature entry the plan's "Suggested version bump" section calls for, written here because this is where the behaviour lands; item 5 amends it with the cut-off failure message.
 
 Depends on item 3.
 

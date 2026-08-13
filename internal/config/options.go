@@ -94,6 +94,16 @@ type Options struct {
 	// the startup entry, and the composition root resolves it into the engine's cap (ADR 0039).
 	StartupParallelAgents int
 
+	// startupMaxOutputTokens is the SELECTED startup entry's own `max-output-tokens:` value, exactly
+	// as the user wrote it: 0 (the key absent) ⇒ nothing is pinned for this server, so the engine
+	// derives the reply cap from the room its Budget already reserves (ADR 0046). It is a fact about
+	// the entry this session starts ON for the reason startupParallelAgents beside it is — the
+	// ceiling belongs to the slot, not to the run — and the ephemeral
+	// `--endpoint`/`APOGEE_ENDPOINT` override entry carries none, which leaves an override run
+	// deriving. Resolved-not-flag-bound; ApplyConfig sets it from the startup entry, and the
+	// composition root carries it into the engine's ContextConfig.
+	StartupMaxOutputTokens int
+
 	// prebound says this session starts with NO upstream bound, and why — the zero value being the
 	// ordinary start, on the server selection determined. It is the one resolution outcome that
 	// does not come out of ApplyConfig's write-back but out of its refusal: the root command

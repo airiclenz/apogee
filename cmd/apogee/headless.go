@@ -355,7 +355,12 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		ExtraReadRoots:   skillProvider.SourceDirs,
 		EnableMechanisms: spec.EnableMechanisms,
 		Context: apogee.ContextConfig{
-			MaxContextTokens:  spec.MaxContextTokens,
+			MaxContextTokens: spec.MaxContextTokens,
+			// The bound entry's `max-output-tokens:` pin, honoured here for the reason every other
+			// per-entry fact is: one configuration, so a headless run's reply is bounded exactly as
+			// a session's is (ADR 0046). Unpinned it stays 0 and the engine derives the cap — which
+			// for an unattended run with no window discovered is the clamp floor, deliberately.
+			MaxOutputTokens:   opts.StartupMaxOutputTokens,
 			CompactionEnabled: opts.AutoCompact,
 		},
 		// Tools stays nil: a headless run reaches no external MCP server (the Firing posture,

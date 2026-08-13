@@ -16,17 +16,19 @@ import (
 )
 
 // startupEntry re-assembles the server selection resolved (ADR 0036) from the flattened fields it
-// left on options: the endpoint, the key, the discovery hint, the fan-out pin, and the alias —
+// left on options: the endpoint, the key, the discovery hint, the fan-out pin, the reply cap, and
+// the alias —
 // which for a configured entry IS its `servers:` name and for the ephemeral override entry is the
 // endpoint's host. It exists so the bind step below has ONE input shape, the ServerEntry, whether it
 // is binding the startup server or the one a human picked out of the list.
 func startupEntry(opts config.Options) config.ServerEntry {
 	return config.ServerEntry{
-		Name:           opts.HostAlias,
-		Endpoint:       opts.Endpoint,
-		APIKey:         opts.APIKey,
-		Model:          opts.Model,
-		ParallelAgents: opts.StartupParallelAgents,
+		Name:            opts.HostAlias,
+		Endpoint:        opts.Endpoint,
+		APIKey:          opts.APIKey,
+		Model:           opts.Model,
+		ParallelAgents:  opts.StartupParallelAgents,
+		MaxOutputTokens: opts.StartupMaxOutputTokens,
 	}
 }
 
@@ -41,9 +43,9 @@ func startupEntry(opts config.Options) config.ServerEntry {
 // runs within seconds, for a late bind exactly as it does for the cold start a launch-time bind
 // with no model already is.
 type serverBinder struct {
-	// cfg is everything about the session the server does not decide. The four fields it does —
-	// endpoint, key, model hint, fan-out width — are overwritten from the entry, so nothing that
-	// reached this struct can contradict the server being bound.
+	// cfg is everything about the session the server does not decide. The five fields it does —
+	// endpoint, key, model hint, fan-out width, reply cap — are overwritten from the entry, so
+	// nothing that reached this struct can contradict the server being bound.
 	cfg     apogee.Config
 	resumed *session.Record
 	engine  *lateEngine
@@ -71,6 +73,12 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// the Agent does not exist yet, so the resolved cap goes in through the Config it is built from.
 	// follow's own push at the still-unbound engine is the no-op that says so.
 	cfg.ParallelAgents = b.caps.follow(entry)
+	// And the fifth: how big ONE reply from this server may be (ADR 0046). Like the width above it
+	// is a property of the slot, so it follows the entry rather than the run — and it goes in the
+	// same way, through the Config, because the pin must bound the session's very first Turn. 0 is
+	// the honest absent value: the engine then derives the cap from the reply room its Budget
+	// already reserves out of the window.
+	cfg.Context.MaxOutputTokens = entry.MaxOutputTokens
 
 	if err := b.engine.Bind(func() (*apogee.Agent, error) {
 		agent, err := buildAgent(cfg, b.resumed)

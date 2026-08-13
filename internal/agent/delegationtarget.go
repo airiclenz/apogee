@@ -51,6 +51,13 @@ type DelegationTarget struct {
 	// built windowless — with a dead Budget, no automatic Compaction and readings stamped 0 — over a
 	// number nobody supplied (subagent.go).
 	ContextWindow int
+	// MaxOutputTokens is the ceiling on ONE reply from this server, in tokens — the flagged entry's
+	// `max-output-tokens:` pin (ADR 0046). 0 means the target pins NO cap, and — unlike the window
+	// above — the zero is carried to the child as written rather than left to the parent's: a cap of
+	// nothing is not a broken child, it is a child that derives its own cap from the window it runs
+	// in, which by then is the TARGET's window. Inheriting the parent's pin instead would cap a
+	// reply from this server at a number describing another one.
+	MaxOutputTokens int
 	// ParallelAgents is the RECEIVING server's fan-out width — the cap that bounds a routed
 	// depth-0 fan-out and the guided-decomposition batch alike (ADR 0039's one width everywhere,
 	// sourced from the server actually holding the slots). Anything < 2 means serial.

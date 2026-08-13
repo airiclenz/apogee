@@ -493,6 +493,14 @@ wrong for how you run it; that key is a **pin** the heartbeat never overrides. W
 window known, the Budget and automatic compaction stay inactive and apogee says so in the
 transcript the moment it binds a model without one.
 
+Every reply is **bounded**, and by the same budget: apogee tells the server how many tokens
+one answer may take, using the room it already reserves for the reply — clamped to between
+4,096 and 32,768 tokens, and to the floor when no window is known. Without that ceiling a
+thinking model can reason for an hour and hit the context wall instead of answering. Set
+`max-output-tokens:` on a `servers:` entry (in tokens) to pin your own ceiling for that
+server, whatever its window says — which is how you let a cloud endpoint that advertises no
+window answer at length.
+
 The prompt's caret is the **real terminal cursor**, and it never blinks. Set
 `cursor-shape:` (a file-only key) to `block` (the default), `underline`, or `bar` to say
 which shape it takes; your terminal's own cursor comes back when apogee exits. A

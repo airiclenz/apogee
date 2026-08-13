@@ -365,14 +365,18 @@ func resolveDelegationTarget(
 	// they are not — a beat is no place to repeat a sentence.
 	profile, _ := resolveModelProfile(model, userProfiles)
 	return &apogee.DelegationTarget{
-		Endpoint:       entry.Endpoint,
-		APIKey:         entry.APIKey,
-		Model:          model,
-		ContextWindow:  window,
-		ParallelAgents: config.ResolveParallelAgents(entry.ParallelAgents, observed.TotalSlots),
-		Profile:        profile,
-		Bypass:         entry.Bypass,
-		Mechanisms:     catalogue,
+		Endpoint:      entry.Endpoint,
+		APIKey:        entry.APIKey,
+		Model:         model,
+		ContextWindow: window,
+		// The entry's `max-output-tokens:` pin, carried as written (ADR 0046). There is no observed
+		// half to fall back to — a server advertises no reply ceiling — so an absent key stays 0 and
+		// the child derives its cap from the window resolved above.
+		MaxOutputTokens: entry.MaxOutputTokens,
+		ParallelAgents:  config.ResolveParallelAgents(entry.ParallelAgents, observed.TotalSlots),
+		Profile:         profile,
+		Bypass:          entry.Bypass,
+		Mechanisms:      catalogue,
 	}
 }
 

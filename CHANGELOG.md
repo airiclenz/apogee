@@ -10,6 +10,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Every reply is now bounded: apogee tells the server how big one answer may be.** Every agent and
+  sub-agent turn went out with no `max_tokens` at all, so a thinking model could generate until the
+  server's context wall and the turn then failed wearing the wrong error — a `/security-audit`
+  sub-agent was measured spending 20,653 reasoning tokens over ~50 minutes, still going, with the
+  server reporting `n_predict: -1`. The engine had already decided how big that reply was allowed to
+  be — its Budget reserves 20% of the window for the answer and sizes the prompt around it — it just
+  never told the server. It does now: every request states a ceiling derived from that same reserve,
+  clamped to between 4,096 and 32,768 tokens, and an unknown window takes the floor rather than
+  going uncapped (an unknown window must never read as "unbounded"). A routed sub-agent derives
+  its own from the server it actually runs on, not from its parent's. Nothing about the ceiling is
+  a Mechanism — it is engine behaviour, so it holds under `--bypass` too — and a pre-request hook
+  that sets `MaxTokens` still overrides it, which is what makes `SamplingParams`'s "a nil field
+  leaves the loop's value untouched" true of that field for the first time. Set `max-output-tokens:`
+  on a `servers:` entry to pin your own ceiling for that server whatever its window says: it is the
+  only way to let a cloud endpoint that advertises no window answer at length, and the compaction
+  summarizer and the session namer keep the 4,096 caps they already bounded themselves with.
+
 - **The `/` menu and `/skills` now say where each skill came from.** A loaded skill's row carried
   only fields the `SKILL.md` writes for itself — the id, the display name, the summary — so a skill
   a cloned repo shipped and one from your own library read exactly alike. That is the residual the

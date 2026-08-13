@@ -246,6 +246,11 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 		if target.ContextWindow > 0 {
 			childCfg.Context.MaxContextTokens = target.ContextWindow
 		}
+		// The reply ceiling, unconditionally — the one routed field whose zero IS the answer (ADR
+		// 0046). An unpinned target leaves the child deriving its cap from the window just settled
+		// above, which is the routed server's; keeping the parent's pin would bound a reply from
+		// this server by a number that describes the one the parent happens to be on.
+		childCfg.Context.MaxOutputTokens = target.MaxOutputTokens
 		childCfg.Profile = target.Profile
 		if target.Bypass != nil {
 			childCfg.Bypass = *target.Bypass

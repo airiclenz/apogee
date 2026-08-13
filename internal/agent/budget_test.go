@@ -102,3 +102,94 @@ func TestBudgetDoesNotReshapeRequests(t *testing.T) {
 		t.Errorf("assistant message = %q, want it unaltered by the budget", got)
 	}
 }
+
+// TestMaxOutputTokensDerivesFromTheReplyBudget pins the cap the engine states on the wire (ADR
+// 0046) across the four inputs that decide it: an ordinary window derives the Budget's own
+// ResponseReserve, a large one is clamped to the ceiling, an UNKNOWN one takes the floor rather
+// than going uncapped (Allocation's contract: unknown is never "unbounded"), and a per-server pin
+// beats the derivation outright at exactly the value written.
+func TestMaxOutputTokensDerivesFromTheReplyBudget(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		window int
+		pin    int
+		want   int
+	}{
+		// The 2026-08-12 incident's server: 20% of 98,304 is the room the Budget already reserved,
+		// so the runaway would have ended at ~53 minutes instead of running to the context wall.
+		{name: "the reserve of an ordinary window", window: 98304, want: 19660},
+		{name: "a big window is clamped to the ceiling", window: 200000, want: maxOutputTokenCap},
+		{name: "an unknown window takes the floor", window: 0, want: minOutputTokenCap},
+		{name: "the pin beats the derivation", window: 98304, pin: 500, want: 500},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := baseConfig(&recordingSink{})
+			cfg.Context.MaxContextTokens = tc.window
+			cfg.Context.MaxOutputTokens = tc.pin
+			a, err := newAgent(cfg, echoResponder{reply: "unused"})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			if got := a.maxOutputTokens(); got != tc.want {
+				t.Errorf("maxOutputTokens() = %d, want %d (window %d, pin %d)", got, tc.want, tc.window, tc.pin)
+			}
+		})
+	}
+}
+
+// TestTurnRequestCarriesTheOutputCap is the regression guard for the defect itself: before ADR 0046
+// every agent Turn went out with no max_tokens at all, so a thinking model generated until the
+// server's context wall. The provider request a Turn builds must now carry the derived cap.
+func TestTurnRequestCarriesTheOutputCap(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.Context.MaxContextTokens = 98304
+	resp := &capturingResponder{reply: "ok"}
+	driveOneStep(t, cfg, resp)
+
+	got := resp.got.Sampling.MaxTokens
+	if got == nil {
+		t.Fatalf("provider request carried a nil MaxTokens — the reply is unbounded again")
+	}
+	if *got != 19660 {
+		t.Errorf("MaxTokens = %d, want the derived cap 19660", *got)
+	}
+	if resp.got.Sampling.Temperature != nil {
+		t.Errorf("Temperature = %v, want it left nil (the server's own default)", *resp.got.Sampling.Temperature)
+	}
+}
+
+// cappingHook is a pre-request hook that states its own reply ceiling, standing in for any
+// Mechanism that would.
+type cappingHook struct{ tokens int }
+
+func (h cappingHook) PreRequest(_ context.Context, req *domain.Request) error {
+	req.SetSampling(domain.SamplingParams{MaxTokens: &h.tokens})
+	return nil
+}
+
+// TestPreRequestHookBeatsTheOutputCap pins the ordering the loop's stamp depends on: the engine's
+// derived cap is the LOOP's value, set before the hooks run, so a hook that sets MaxTokens still
+// wins — SamplingParams's standing contract, true of this field for the first time (ADR 0046).
+func TestPreRequestHookBeatsTheOutputCap(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.Context.MaxContextTokens = 98304
+	cfg.Mechanisms = domain.NewMechanismRegistry()
+	if err := cfg.Mechanisms.AddExperimental(domain.HookPreRequest, cappingHook{tokens: 77}); err != nil {
+		t.Fatalf("AddExperimental: %v", err)
+	}
+	resp := &capturingResponder{reply: "ok"}
+	driveOneStep(t, cfg, resp)
+
+	got := resp.got.Sampling.MaxTokens
+	if got == nil || *got != 77 {
+		t.Fatalf("MaxTokens = %v, want the hook's 77 rather than the loop's derived cap", got)
+	}
+}

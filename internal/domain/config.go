@@ -208,8 +208,18 @@ type Config struct {
 // ContextConfig governs the structural context reducers — Budget and Compaction —
 // which are NOT Mechanisms and stay on under Bypass (CONTEXT: Budget, Compaction).
 type ContextConfig struct {
-	MaxContextTokens  int // 0 ⇒ window unknown; the CLI discovers it or the context-window key supplies it (the Budget then allocates nothing and the engine's growth bounds fall back to one conservative assumed ceiling — internal/agent, ADR 0018)
-	ResponseReserve   int
+	MaxContextTokens int // 0 ⇒ window unknown; the CLI discovers it or the context-window key supplies it (the Budget then allocates nothing and the engine's growth bounds fall back to one conservative assumed ceiling — internal/agent, ADR 0018)
+	ResponseReserve  int
+
+	// MaxOutputTokens CAPS one reply, in tokens — the ceiling the engine states on the wire so a
+	// reply stops where the engine already budgeted for it rather than at the server's context wall
+	// (ADR 0046). 0 ⇒ nothing pinned, and the engine derives the cap from the Budget's own
+	// ResponseReserve, clamped; > 0 ⇒ that ceiling whatever the window says. It is fed the bound
+	// server entry's `max-output-tokens:` pin, the way MaxContextTokens is fed `context-window:`,
+	// and it is the escape hatch for an unknown window — which the derivation must read as the
+	// clamp floor rather than as "unbounded" (internal/context.Allocation).
+	MaxOutputTokens int
+
 	CompactionEnabled bool // generative summarisation; default true
 }
 

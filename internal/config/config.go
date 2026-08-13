@@ -1870,6 +1870,11 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// what the server itself advertises. The ephemeral override entry pins nothing, which leaves an
 	// override run discovering — and falling back to one agent at a time.
 	opts.StartupParallelAgents = startup.ParallelAgents
+	// And how long a single reply from that entry's server may run (ADR 0046). Same reasoning again:
+	// the ceiling belongs to the entry, so what the session starts with is the SELECTED entry's own
+	// value, carried as written for the composition root to hand the engine. The ephemeral override
+	// entry pins nothing, which leaves an override run deriving the cap from its reply budget.
+	opts.StartupMaxOutputTokens = startup.MaxOutputTokens
 	opts.Mode = s.Mode
 	opts.Bypass = s.Bypass
 	opts.Servers = s.Servers

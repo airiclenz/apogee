@@ -185,7 +185,15 @@ func (w *rootWiring) resolveConfig() error {
 		// first heartbeat rebind binds the observed window. CompactionEnabled carries the
 		// `auto-compact` key (default on) — the budget-driven automatic trigger (item 9); the
 		// on-demand /compact runs regardless of it.
-		Context: apogee.ContextConfig{MaxContextTokens: w.opts.ContextWindow, CompactionEnabled: w.opts.AutoCompact},
+		// MaxOutputTokens is the startup entry's own `max-output-tokens:` pin (0 ⇒ unpinned, and the
+		// engine derives the reply cap from the room its Budget reserves — ADR 0046). It is seeded
+		// here as well as at the bind, because this Config is also what a scheduled Firing copies:
+		// a Firing running while nobody watches is exactly the case a runaway reply must not.
+		Context: apogee.ContextConfig{
+			MaxContextTokens:  w.opts.ContextWindow,
+			MaxOutputTokens:   w.opts.StartupMaxOutputTokens,
+			CompactionEnabled: w.opts.AutoCompact,
+		},
 	}
 	return nil
 }

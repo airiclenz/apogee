@@ -642,6 +642,14 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
 	}
 	req := domain.NewRequest(a.cfg.Model, msgs, a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
+	// The reply ceiling the engine states on the wire (ADR 0046), stamped HERE — after construction
+	// and before any pre-request hook sees the Request — for two reasons. It is the engine's own
+	// bound, so it holds under Bypass, where no hook runs at all; and being the loop's value rather
+	// than a projection-time constant, a hook that sets MaxTokens overrides it, which is what makes
+	// SamplingParams's "a nil field leaves the loop's value untouched" true of this field at last.
+	// Temperature stays nil: the server's own default is still the right answer for it.
+	outputCap := a.maxOutputTokens()
+	req.SetSampling(domain.SamplingParams{MaxTokens: &outputCap})
 	req.SetDepth(a.depth)                      // surface this Agent's nesting level through req.View().Depth() (ADR 0013/0014)
 	req.SetParallelAgents(a.delegationWidth()) // and the width a delegation batch may take through req.View().ParallelAgents() (ADR 0039)
 	deferred, ok := a.conv.TakeDeferred()
@@ -911,6 +919,49 @@ func (a *Agent) budget() domain.Budget {
 	}
 }
 
+// minOutputTokenCap and maxOutputTokenCap bound the cap the engine derives from the reply budget
+// (ADR 0046), so neither end of the window range produces a ceiling nobody would want. The floor
+// is the room a thinking model needs to reason AND still answer — internal/title measured a
+// qwen3.6-35B naming call spending 4,045 characters of reasoning before its first word, and a
+// working Turn's reply is the larger job — so a small window must not derive a cap that truncates
+// every reply. The ceiling is where a bigger window stops buying anything: a reply past ~32k
+// tokens is a runaway rather than an answer, and the point of the cap is to end that at a bound
+// the engine chose. A window that names a reserve between the two is taken as written — it IS the
+// number the Budget already reserved.
+const (
+	minOutputTokenCap = 4096
+	maxOutputTokenCap = 32768
+)
+
+// maxOutputTokens reports the ceiling on ONE reply, in tokens — the number every request states on
+// the wire (ADR 0046). The pin wins outright when the bound server's entry carries one, at exactly
+// the value written: it is an operator's statement about the slot, and clamping it would silently
+// refuse the small cap a cheap endpoint is worth as readily as the large one a cloud endpoint can
+// serve.
+//
+// With no pin it is the Budget's OWN ResponseReserve — the room the engine already holds back for
+// the reply when it sizes the prompt (internal/context.Allocate) — clamped to [minOutputTokenCap,
+// maxOutputTokenCap]. Deriving it there is what stops the request and the budget disagreeing: the
+// engine stops reserving room it never told the server about.
+//
+// An unknown window (a zero Allocation, so a zero reserve) takes the floor rather than going
+// uncapped, because Allocation's contract forbids reading unknown as "unbounded" — the defect that
+// wedged an unbudgeted session — and the pin is the escape hatch for a server that advertises no
+// window at all.
+func (a *Agent) maxOutputTokens() int {
+	if pin := a.cfg.Context.MaxOutputTokens; pin > 0 {
+		return pin
+	}
+	switch reserve := a.budget().ResponseReserve; {
+	case reserve < minOutputTokenCap: // including the unknown window's zero
+		return minOutputTokenCap
+	case reserve > maxOutputTokenCap:
+		return maxOutputTokenCap
+	default:
+		return reserve
+	}
+}
+
 // toolMenu builds the model's tool menu from the resolved registry (nil ⇒ no tools). In
 // Plan mode it offers only the tools Plan can actually run — the model is never shown a call
 // it cannot make (ADR: Plan is read-only).
@@ -957,6 +1008,11 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 // far" — which is why the profile's tool-instruction block is likewise absent from it.
 func (a *Agent) loopView(turn int) domain.LoopView {
 	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn, a.tracker.fireCounts)
+	// Stamped here too, on the same call as buildRequest's, so the two projections of one Turn
+	// never state different ceilings (ADR 0046). This one reaches no server — a LoopView is read by
+	// the tool-stage hooks and drained by nobody — so it is a consistency stamp, not a wire bound.
+	outputCap := a.maxOutputTokens()
+	req.SetSampling(domain.SamplingParams{MaxTokens: &outputCap})
 	req.SetDepth(a.depth)                      // the tool-stage view reports the same nesting level as the request view
 	req.SetParallelAgents(a.delegationWidth()) // and the same delegation width (ADR 0039)
 	return req.View()
