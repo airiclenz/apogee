@@ -10,6 +10,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The remember-model decision now has a written record.**
+  [ADR 0048](docs/adr/0048-apogee-remembers-the-model-choice-per-server.md) states why the model
+  choice is persisted in apogee's own config rather than in llama-launcher's — that file is a curated
+  library of presets a human copies between machines and reads with more clients than this one, while
+  which profile a session happened to load last is apogee's session state (ADR 0029 decision 4 stands
+  untouched) — why the two server classes remember in two different keys (a wire model id in a plain
+  entry's `model:`, a Launch profile name in a launcher-fronted entry's `launch-profile:`, and never
+  both on one entry), why only an explicit pick or a committed load records, why the pointer lands on
+  the **actuating** entry even when the load moved the session to an endpoint no entry names, and why
+  the start-up restore yields to ANY instance already running under that launcher instead of stacking
+  a second model onto the GPU. It records what was turned down on the way: an "active profile" key in
+  the launcher's own YAML, one key for both server classes, validating the recorded profile's
+  existence at config load, insisting on the restore by unloading what runs, restoring in
+  headless/bench runs, and recording heartbeat-observed rebinds. A per-server override of the toggle
+  is recorded as deferred rather than denied. `CONTEXT.md` gains **remember-model** in the Launch
+  profile section of the language, defined against the actuating entry and the yield rule.
+
 - **Switching `remember-model:` now takes effect immediately.** Turning the toggle on in `/settings`
   — or in your config file, which apogee watches for the whole session — makes the very next explicit
   `/model` pick and the very next Launch profile that commits get recorded, instead of the setting

@@ -310,7 +310,10 @@ live-apply flips the Options value.
 
 **Commit:** `feat(settings): remember-model row, live-editable`
 
-## 7. ADR and CONTEXT.md
+## 7. ADR and CONTEXT.md — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): 0048 confirmed free (47 ADRs, highest 0047, no in-code citation of 0048 existed to fix). The CONTEXT.md paragraph landed INSIDE the **Launch profile** term, after its `See [ADR 0029]` line and before its `_Avoid_` line, rather than as a new term of its own — that is where the section already discusses the session/launcher relationship, and it leaves the "server profile" avoid-term byte-identical.
+NOTES (2026-08-13): the ADR carries two decisions beyond the item's enumerated list — decision 8 (the entry-scoped writer: two-key allow-list, set-only, no delete form) and the rejection of recording passive rebinds — because both are load-bearing calls items 2 and 3 shipped, and an ADR that recorded the pointer's home but not who may write it would leave the next reader guessing. Nothing outside `docs/` and `CONTEXT.md` was touched.
 
 Depends on items 1–6 (records what shipped).
 
