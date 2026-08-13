@@ -238,7 +238,12 @@ number of `%s` verbs).
 
 ---
 
-## 6. `internal/probe`: battery prompts become embedded files, fingerprint invariant intact
+## 6. `internal/probe`: battery prompts become embedded files, fingerprint invariant intact — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the loader (`mustPrompt`) normalises CRLF→LF before stripping the trailing newline, matching items 3–5 and `internal/tui/logo.go` — beyond design call 6's literal wording, but without it a `core.autocrlf=true` checkout would bake `\r` into a prompt and move the probe fingerprint, which is exactly what the item's invariant forbids.
+NOTES (2026-08-13): no separate "assets load non-empty and without a trailing newline" loader test was added here (items 3–5 have one). The item mandates the pin test instead, and the pin is strictly stronger: exact equality against the hard-coded literal fails on an empty asset, a stray newline or any other drift.
+NOTES (2026-08-13): byte-identity was verified mechanically as well as by the pin — both asset files were compared against the const literals extracted from `git show HEAD:internal/probe/battery.go`: identical, each asset ending in exactly one newline.
+NOTES (2026-08-13): the marker const block keeps a shortened form of the old comment (the markers are equally part of the fingerprint), so the "a BatteryVersion bump is required" sentence now stands in three places — the embed var doc, `prompts/README.md`, and that block — one per set of strings it governs.
 
 **What:** Move `batterySystemPrompt` (`internal/probe/battery.go:307`) and `candidatePrompt`
 (`:308`) to `internal/probe/prompts/*.txt` behind an `embed.FS`; consts become vars,

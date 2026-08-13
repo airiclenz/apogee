@@ -45,7 +45,11 @@
 // through, the probes themselves — native tool call, structured JSON, multi-step chain, and the
 // one-token candidate distribution — the thinking observation, and BatteryVersion, which stamps
 // every record because a label earned under one battery is not comparable to one earned under
-// another. modelfingerprint.go is what a run is turned INTO: the ordinal Tier, the
+// another. The two prompts it sends are not in that file but beside it, as plain embedded assets:
+// prompts/system-prompt.txt and prompts/candidate-prompt.txt, with prompts/README.md — the one
+// file there that is NOT embedded — stating the rule that governs the directory, that every byte
+// under it is folded into the fingerprint and so editing one is a BatteryVersion bump.
+// modelfingerprint.go is what a run is turned INTO: the ordinal Tier, the
 // domain.ModelFingerprint, the BehaviorSignature (a fuzzy feature match, never a hash of a
 // response, which sampling alone would move), and the suggested ModelProfile with its YAML
 // rendering. model.go is the model report — ModelInputs, GatherModel, the SaveOutcome the

@@ -323,6 +323,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- The capability battery's two prompts are now plain files, and the rule that governs them is
+  enforced rather than stated. `batterySystemPrompt` and `candidatePrompt` moved out of
+  `internal/probe/battery.go`'s const block into `internal/probe/prompts/system-prompt.txt` and
+  `prompts/candidate-prompt.txt`, compiled in with `//go:embed` — still one binary, still nothing
+  read from disk at runtime and nothing user-overridable, only the wording moves to where it can be
+  edited as prose. The loader strips the single trailing newline each asset ends in (normalising a
+  CRLF checkout first, as the embedded block art already does), so both strings are byte-identical
+  to the constants they replace and every probe goes out exactly as before. The fingerprint markers
+  (`chainSecret`, the harmony and `<think>` tokens) are not prompt text and stay in code beside the
+  observation that reads them. The invariant the old block comment could only assert — every byte
+  here is folded into the probe fingerprint, so re-wording one requires a `BatteryVersion` bump —
+  now travels with the text: it is stated on the embed var and in a non-embedded
+  `prompts/README.md`, and a new pin test holds each asset to its exact wording, so an edit that
+  forgets the bump fails the suite instead of silently making new records incomparable with stored
+  ones.
+
 - The tool-loop interceptor's directive text now lives in plain files: the eight fixed sentence
   fragments of `tool_loop_interceptor`'s loop-breaking correction moved out of Go string literals
   into `internal/mechanisms/prompts/*.txt`, embedded into the binary with `go:embed`. The wording

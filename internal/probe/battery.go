@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -300,16 +301,59 @@ func observeThinking(responses ...provider.RawResponse) ThinkingObservation {
 	return obs
 }
 
-// The battery's fixed prompt material. Every string here is part of the fingerprint's
-// derivation by construction — re-wording one changes what models are observed to do, which is
-// why doing so requires a BatteryVersion bump.
+// promptFS carries the battery's prompt text as plain files under prompts/. The prompts are
+// assets rather than Go string literals so the wording can be read and edited as prose
+// (ISSUES.md: hard-coded prompt literals), and go:embed compiles them into the binary — the text
+// ships inside the single binary, is never read from disk at runtime, and is never
+// user-overridable.
+//
+// The invariant the old const block stated travels with the text: every byte under prompts/ is
+// part of the fingerprint's derivation by construction — re-wording one changes what models are
+// observed to do, and every claim recorded under the old wording stops being comparable — which
+// is why editing an asset requires a BatteryVersion bump. An asset cannot say so in its own
+// file, because a comment line inside a .txt would be sent to the model as prompt text; it is
+// said in prompts/README.md beside the files, and TestBatteryPromptsPinTheFingerprintText makes
+// forgetting the bump fail the suite rather than silently re-spelling models.
+//
+//go:embed prompts/*.txt
+var promptFS embed.FS
+
+// mustPrompt loads one embedded prompt asset by file name. Every asset ends with exactly one
+// trailing newline — a file without one is awkward in an editor and in a diff — and that one
+// newline is stripped here, so the string in memory is byte-identical to the literal the asset
+// replaced. CRLF endings are normalised first, the way the embedded block art is
+// (internal/tui/logo.go), so a core.autocrlf checkout cannot bake \r into a prompt and move the
+// fingerprint. A name that is not in the FS cannot happen in a built binary — go:embed fails the
+// build first — so it is a programming error rather than a runtime condition.
+func mustPrompt(name string) string {
+	b, err := promptFS.ReadFile("prompts/" + name)
+	if err != nil {
+		panic("apogee: missing embedded prompt asset " + name + ": " + err.Error())
+	}
+	return strings.TrimSuffix(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
+}
+
+// batterySystemPrompt is the system message every probe in the suite is asked under
+// (prompts/system-prompt.txt): it states the role and forbids the extra prose that would leave a
+// one-word answer unparseable. Editing it is a BatteryVersion bump — see promptFS.
+var batterySystemPrompt = mustPrompt("system-prompt.txt")
+
+// candidatePrompt is the one-token completion the candidate-distribution probe sends
+// (prompts/candidate-prompt.txt): a question with one overwhelmingly likely next word, so the
+// returned distribution reports how sharply a model commits rather than what it knows. Editing
+// it is a BatteryVersion bump — see promptFS.
+var candidatePrompt = mustPrompt("candidate-prompt.txt")
+
+// The battery's fixed fingerprint markers. These are not prompt text — chainSecret is the value
+// planted in a tool RESULT and looked for in the model's next call, and the other three are
+// tokens looked for in a reply — so they stay in code beside the observation that reads them.
+// Every string here is part of the fingerprint's derivation by construction just as the prompt
+// assets are, which is why re-wording one likewise requires a BatteryVersion bump.
 const (
-	batterySystemPrompt = "You are a capability probe. Follow the instruction exactly and add no extra prose."
-	candidatePrompt     = "Complete with a single word: the capital of France is"
-	chainSecret         = "omega-7"
-	harmonyMarker       = "<|channel|>"
-	thinkOpen           = "<think>"
-	thinkClose          = "</think>"
+	chainSecret   = "omega-7"
+	harmonyMarker = "<|channel|>"
+	thinkOpen     = "<think>"
+	thinkClose    = "</think>"
 )
 
 // The tools the battery offers. Their schemas are deliberately tiny: the probe asks whether the

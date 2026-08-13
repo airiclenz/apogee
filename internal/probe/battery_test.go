@@ -284,3 +284,36 @@ func TestBatteryObservesInlineThinking(t *testing.T) {
 		t.Errorf("the suggestion must paste as a model-profiles: entry keyed by the probed model:\n%s", yaml)
 	}
 }
+
+// TestBatteryPromptsPinTheFingerprintText holds the battery's prompt assets to their exact
+// wording. The text now lives in prompts/*.txt rather than in a const block, where an edit reads
+// like a harmless prose tweak; every byte of it is folded into what models are observed to do, so
+// changing one without bumping BatteryVersion would silently make new records incomparable with
+// stored ones. The literals below are therefore deliberately duplicated rather than derived: this
+// test is the loud half of the invariant prompts/README.md states, and an intended re-wording is
+// meant to change this test AND BatteryVersion in the same commit.
+func TestBatteryPromptsPinTheFingerprintText(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{
+			name: "system prompt",
+			got:  batterySystemPrompt,
+			want: "You are a capability probe. Follow the instruction exactly and add no extra prose.",
+		},
+		{
+			name: "candidate prompt",
+			got:  candidatePrompt,
+			want: "Complete with a single word: the capital of France is",
+		},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("the %s changed:\n got  %q\n want %q\nan intended re-wording must bump BatteryVersion (internal/probe/battery.go) and update this pin",
+				tc.name, tc.got, tc.want)
+		}
+	}
+}
