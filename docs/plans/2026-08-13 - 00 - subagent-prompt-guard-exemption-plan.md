@@ -74,7 +74,16 @@ interface.
 
 **Commit:** `feat(domain): tools declare prompt-carrying argument keys`
 
-## 2. Guard drops prompt-key text for every rule
+## 2. Guard drops prompt-key text for every rule — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): widened `inspectableText`'s own doc comment (dangerous.go) beyond the item's
+literal text, which called for no change there — its description of `dropKeys` ("the argument keys
+the tool declared as read-only sources (nil for the full view)") became false once the full view
+also drops prompt keys. Item 3 reconciles `internal/security/doc.go` and the confinement contract,
+not dangerous.go's own comments, so no other item owns this sentence.
+NOTES (2026-08-13): the second new test pins one boundary case beyond the item's listed set — a
+guarded literal in an UNDECLARED argument of the prompt-declaring tool still hard-refuses — because
+the drop is per key, not per tool, and nothing else pinned that.
 
 Depends on item 1.
 

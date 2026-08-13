@@ -298,13 +298,15 @@ func TestDangerousActionGuard_UnparseableArgsStillInspected(t *testing.T) {
 }
 
 // stubTool is the minimal domain.Tool the class-aware cases need: a name, an inert
-// Execute, and the two optional class declarations under test (domain.ReadOnlyTool via
-// readOnly, domain.ReadSourceTool via sourceKeys — nil means no declaration takes effect,
-// since ReadSourceArgKeys treats an empty answer as "none").
+// Execute, and the three optional class declarations under test (domain.ReadOnlyTool via
+// readOnly, domain.ReadSourceTool via sourceKeys, domain.PromptTool via promptKeys — nil
+// means no declaration takes effect, since ReadSourceArgKeys and PromptArgKeys both treat
+// an empty answer as "none").
 type stubTool struct {
 	name       string
 	readOnly   bool
 	sourceKeys []string
+	promptKeys []string
 }
 
 func (s stubTool) Name() string             { return s.name }
@@ -312,6 +314,7 @@ func (s stubTool) Description() string      { return "" }
 func (s stubTool) Schema() json.RawMessage  { return nil }
 func (s stubTool) ReadOnly() bool           { return s.readOnly }
 func (s stubTool) ReadSourceKeys() []string { return s.sourceKeys }
+func (s stubTool) PromptArgKeys() []string  { return s.promptKeys }
 func (s stubTool) Execute(context.Context, domain.ToolCall) (domain.ToolResult, error) {
 	return domain.ToolResult{}, nil
 }
@@ -403,6 +406,74 @@ func TestWritesOnlyRulesJudgeTheWriteTargetNotADeclaredReadSource(t *testing.T) 
 	})
 	if d := g.Inspect(drain, mover); d.Tier != TierHardRefuse {
 		t.Errorf("move OUT of the control plane tier = %v, want TierHardRefuse — an undeclared source is a delete target", d.Tier)
+	}
+}
+
+// TestEveryRuleSkipsADeclaredPromptKey pins the delegation exemption: a tool that declares
+// an argument key a prompt for ANOTHER agent (domain.PromptTool) has that value dropped
+// from BOTH views, so NO rule — write-shaped or command-shaped — fires on a task
+// description that merely NAMES a guarded literal. The load-bearing row is the live repro:
+// a security-audit delegation whose task prose listed the readable git surfaces was
+// hard-refused by write-git-control-plane, with no per-call override. The same call through
+// a tool that declares nothing is still matched on that text, so the exemption is earned by
+// a declaration, never by the shape of the argument name.
+func TestEveryRuleSkipsADeclaredPromptKey(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+	dispatcher := stubTool{name: "sub_agent", promptKeys: []string{"task", "name"}}
+	undeclared := stubTool{name: "sub_agent"}
+
+	for _, tc := range []struct {
+		name, task string
+	}{
+		{
+			"the live repro",
+			"Report what the readable git surfaces — .git/logs/HEAD, .git/config, .git/packed-refs — disclose.",
+		},
+		{"the apogee control plane", "Check whether anything secret is stored under ~/.apogee."},
+		{"a credential path", "Confirm that no tool reads ~/.ssh/id_rsa."},
+		{"a command-shaped description", "Explain what rm -rf / would do to the host machine."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			call := argCall("sub_agent", map[string]any{
+				"name": "audit-secret-exposure-config",
+				"task": tc.task,
+			})
+
+			if d := g.Inspect(call, dispatcher); d.Triggered() {
+				t.Errorf("declared prompt text triggered rule %q (tier %v), want no trigger",
+					d.RuleID, d.Tier)
+			}
+			if d := g.Inspect(call, undeclared); d.Tier != TierHardRefuse {
+				t.Errorf("undeclared tool carrying the same text: tier = %v, want TierHardRefuse — the exemption must not be the default",
+					d.Tier)
+			}
+		})
+	}
+}
+
+// TestPromptKeyExemptionCoversOnlyTheDeclaredKeys pins the boundary of that exemption:
+// text the HOST itself acts on stays inspected. A terminal heredoc writing to ~/.ssh still
+// hard-refuses (the heredoc lives in `command`, a key no tool may declare a prompt), and so
+// does an undeclared argument on the declaring tool itself — the drop is per key, not
+// per tool.
+func TestPromptKeyExemptionCoversOnlyTheDeclaredKeys(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+
+	heredoc := terminalCall("cat <<'EOF' > ~/.ssh/authorized_keys\nssh-rsa AAAA attacker\nEOF")
+	if d := g.Inspect(heredoc, stubTool{name: "terminal"}); d.Tier != TierHardRefuse {
+		t.Errorf("terminal heredoc writing to ~/.ssh: tier = %v, want TierHardRefuse — command text stays inspected", d.Tier)
+	}
+
+	dispatcher := stubTool{name: "sub_agent", promptKeys: []string{"task", "name"}}
+	sneaked := argCall("sub_agent", map[string]any{
+		"task": "Tidy the workspace.",
+		"path": "~/.ssh/id_rsa",
+	})
+	if d := g.Inspect(sneaked, dispatcher); d.Tier != TierHardRefuse {
+		t.Errorf("undeclared argument on a prompt-declaring tool: tier = %v, want TierHardRefuse — only the declared keys are dropped", d.Tier)
 	}
 }
 

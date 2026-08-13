@@ -127,20 +127,29 @@ func DefaultDangerousActionGuard() *DangerousActionGuard {
 // names no known tool, which is treated as write-capable and fully inspected, the
 // conservative direction. It extracts the call's inspectable text (the tool name plus
 // every string value in its JSON arguments except the payload-bearing ones —
-// payloadKeys), normalizes it, and returns the strictest matching rule's Decision
-// (TierNone when nothing matches). A WritesOnly rule additionally respects the tool's
-// own declared class: it is skipped when the tool is read-only, and judges a text that
-// omits the tool's declared read-source values (see the Rule field's doc). It never
-// errors and never executes anything — pure inspection.
+// payloadKeys — and any value the tool declares a delegation prompt, domain.PromptTool),
+// normalizes it, and returns the strictest matching rule's Decision (TierNone when
+// nothing matches). A WritesOnly rule additionally respects the tool's own declared
+// class: it is skipped when the tool is read-only, and judges a text that omits the
+// tool's declared read-source values (see the Rule field's doc). It never errors and
+// never executes anything — pure inspection.
 func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool) Decision {
-	full := normalize(inspectableText(call, nil))
+	// A value the tool only FORWARDS — prose it hands to another agent — is outside
+	// EVERY rule's sight, not just the write-shaped ones: it describes an action rather
+	// than performing one, and the delegated agent's own calls are inspected one level
+	// down, at the action site.
+	prompts := domain.PromptArgKeys(tool)
+	full := normalize(inspectableText(call, prompts))
 	readOnly := domain.IsReadOnly(tool)
 
 	// The write-shaped view of the same call: identical unless the tool declares
-	// read-source keys, in which case those values are out of a write rule's sight.
+	// read-source keys, in which case those values are out of a write rule's sight too.
 	writes := full
-	if keys := domain.ReadSourceArgKeys(tool); len(keys) > 0 {
-		writes = normalize(inspectableText(call, keys))
+	if sources := domain.ReadSourceArgKeys(tool); len(sources) > 0 {
+		dropped := make([]string, 0, len(prompts)+len(sources))
+		dropped = append(dropped, prompts...)
+		dropped = append(dropped, sources...)
+		writes = normalize(inspectableText(call, dropped))
 	}
 
 	for _, r := range g.rules {
@@ -185,8 +194,14 @@ func (g *DangerousActionGuard) Rules() []Rule {
 // This is a DENY-list, not an allow-list: an unrecognized key — an MCP tool's arbitrary
 // argument — stays inspected, so recall narrows only for keys deliberately classified here.
 // The keys that decide what the host does are deliberately absent: `command`, `code`,
-// `path`, `url` and `task` are all still inspected, so a shell heredoc writing to ~/.ssh
-// still matches (the heredoc lives in `command`).
+// `path` and `url` are all still inspected, so a shell heredoc writing to ~/.ssh still
+// matches (the heredoc lives in `command`).
+//
+// A delegation prompt is exempt by a different route: not this global list, but the calling
+// tool's OWN declaration (domain.PromptTool — sub_agent declares `task` and `name`), so an
+// MCP tool with a coincidental `task` argument stays fully inspected. That exemption costs
+// no coverage: the delegated agent's tool calls are each inspected one level down, where
+// the text is an action the host performs rather than a description of one.
 var payloadKeys = map[string]bool{
 	"content":    true, // file_edit: the body written
 	"newcontent": true, // diff: the proposed body
@@ -217,9 +232,10 @@ func isPayloadKey(key string) bool {
 
 // inspectableText pulls the strings the guard matches against out of a tool call: the
 // tool name and every string leaf in the JSON arguments (command lines, paths, scripts)
-// except the payload-bearing ones (isPayloadKey) and — for the write-shaped view a
-// WritesOnly rule matches — the values under dropKeys, the argument keys the tool
-// declared as read-only sources (nil for the full view). A non-object / malformed
+// except the payload-bearing ones (isPayloadKey) and the values under dropKeys — the
+// argument keys the tool itself declared out of a rule's sight: its delegation prompts in
+// the full view, those plus its read-only sources in the write-shaped view a WritesOnly
+// rule matches (nil when the tool declares neither). A non-object / malformed
 // argument payload degrades to the raw argument bytes, so a guard rule still sees the
 // text even when the shape is unexpected.
 func inspectableText(call domain.ToolCall, dropKeys []string) string {

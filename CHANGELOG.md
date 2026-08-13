@@ -438,6 +438,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A delegated task is no longer refused for naming a guarded path in its instructions.** The
+  dangerous-action guard read a `sub_agent` dispatch's task prose as if the host were about to
+  perform it, so a delegation that merely NAMED a fenced literal was hard-refused with no per-call
+  override — a `/security-audit` sub-agent briefed to report what "the readable git surfaces —
+  `.git/logs/HEAD`, `.git/config`, `.git/packed-refs`" disclose never launched, stopped by the rule
+  that fences writes to a repository's git control plane. A tool now declares which of its arguments
+  carry instruction prose addressed to another agent (`sub_agent` declares `task` and `name`), and
+  that text is outside EVERY rule's sight, not just the write-shaped ones: a prompt describes an
+  action, it never performs one. The floor is unmoved where it matters — the exemption is per
+  declared key, so the declaring tool's other arguments stay inspected, a shell heredoc writing to
+  `~/.ssh` still refuses, an MCP tool with a coincidental `task` argument is inspected in full, and
+  the delegated agent's own tool calls are each judged one level down, at the action site, where the
+  text is a command rather than a description of one.
+
 - **A Schedule's Firing now runs under the `max-output-tokens:` of the server the session is ON, not
   the one it launched against.** Every other fact a Firing composes itself from is read at fire
   time — the endpoint, the model, the system prompt, the Mechanism set, the fan-out width, the
