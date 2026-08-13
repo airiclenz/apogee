@@ -347,6 +347,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The emergency fold's user bridge is now a plain file rather than a Go string literal.** The
+  message appended after an overflow fold — the user turn that closes the folded conversation's
+  turn structure and tells the model, in-band, that the history it can see is a summary — was a
+  string constant in `internal/agent/compact.go`. It now lives in
+  `internal/agent/prompts/overflow-bridge.txt`, the engine package's first embedded prompt asset,
+  compiled in with `//go:embed`: still one binary, still nothing read from disk at runtime and
+  nothing user-overridable — only the wording moves to where it can be edited as prose. The loader
+  strips the single trailing newline the asset ends in (normalising a CRLF checkout first, as
+  `internal/context` already does), so the bridge text is byte-identical to the constant it
+  replaced and the folded request goes out exactly as before.
+
 - **Every Mechanism's prompt text is now editable prose, not a Go string literal.** The nine
   remaining hard-coded prompt literals in `internal/mechanisms` — the three cot nudges, the two
   decompose directives, the two library behavioural notes plus that Mechanism's injection-block

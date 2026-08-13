@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"embed"
 	"errors"
 	"strings"
 
@@ -202,15 +203,39 @@ func (a *Agent) historyExceedsAllocation() bool {
 	return b.HistoryExceedsAllocation(a.conv.Messages())
 }
 
-// overflowBridge is the user-role message appended after an emergency fold. Its ROLE is the
-// load-bearing half: the fold leaves the conversation ending in the assistant summary, and a
-// request whose last message is an assistant turn is what a strict chat template refuses (and
-// what an instruct model reads as "keep writing that summary") — the user bridge closes the turn
-// structure back to a legal …user → assistant → user. Its TEXT is the other half: the model is
-// told, in-band, that the history it can see is a summary of a conversation that outgrew the
-// window, so it resumes the task instead of re-asking for context it will never get back.
-const overflowBridge = "The conversation above was compacted because the previous request " +
-	"exceeded the model's context window. Continue the task from the summary."
+// promptFS carries this package's prompt text as plain files under prompts/. The prompt is an
+// asset rather than a Go string literal so the wording can be read and edited as prose
+// (ISSUES.md: hard-coded prompt literals), and go:embed compiles it into the binary — the text
+// ships inside the single binary, is never read from disk at runtime, and is never
+// user-overridable.
+//
+//go:embed prompts/*.txt
+var promptFS embed.FS
+
+// mustPrompt loads one embedded prompt asset by file name. Every asset ends with exactly one
+// trailing newline — a file without one is awkward in an editor and in a diff — and that one
+// newline is stripped here, so the string in memory is byte-identical to the literal the asset
+// replaced. CRLF endings are normalised first, the way the embedded block art is
+// (internal/tui/logo.go), so a core.autocrlf checkout cannot bake \r into a prompt. A name that
+// is not in the FS cannot happen in a built binary — go:embed fails the build first — so it is a
+// programming error rather than a runtime condition.
+func mustPrompt(name string) string {
+	b, err := promptFS.ReadFile("prompts/" + name)
+	if err != nil {
+		panic("apogee: missing embedded prompt asset " + name + ": " + err.Error())
+	}
+	return strings.TrimSuffix(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
+}
+
+// overflowBridge is the user-role message appended after an emergency fold
+// (prompts/overflow-bridge.txt). Its ROLE is the load-bearing half: the fold leaves the
+// conversation ending in the assistant summary, and a request whose last message is an assistant
+// turn is what a strict chat template refuses (and what an instruct model reads as "keep writing
+// that summary") — the user bridge closes the turn structure back to a legal …user → assistant →
+// user. Its TEXT is the other half: the model is told, in-band, that the history it can see is a
+// summary of a conversation that outgrew the window, so it resumes the task instead of re-asking
+// for context it will never get back.
+var overflowBridge = mustPrompt("overflow-bridge.txt")
 
 // emergencyFold folds the conversation so an overflowed request can be retried against a history
 // that fits, reporting whether the caller may retry (true ⇒ the conversation WAS folded; false ⇒

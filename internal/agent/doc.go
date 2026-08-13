@@ -35,8 +35,9 @@
 // hooks — each under one recover boundary and attributed by MechanismID. wire.go is the
 // translation onto the provider seam: the domain request drained into a domain-free
 // provider.Request (ADR 0010). compact.go is conversation compaction — the explicit Compact,
-// the auto-compaction trigger and its allocation arithmetic, the emergency fold, and the
-// summarizer's own fixed sampling. selfreg.go is per-Session self-regulation: the proxy-signal
+// the auto-compaction trigger and its allocation arithmetic, the emergency fold, the user bridge
+// that fold appends (this package's one embedded prompt asset, prompts/overflow-bridge.txt), and
+// the summarizer's own fixed sampling. selfreg.go is per-Session self-regulation: the proxy-signal
 // safety net that withdraws a Mechanism hurting the model, deliberately weaker than the
 // bench's A/B gate and reset on Resume.
 //

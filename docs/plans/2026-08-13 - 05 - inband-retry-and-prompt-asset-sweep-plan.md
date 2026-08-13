@@ -234,7 +234,7 @@ test; the "one file here that embeds prompt assets" sentence (`:53-54`) is corre
 
 ---
 
-## 5. `overflowBridge` becomes an embedded asset
+## 5. `overflowBridge` becomes an embedded asset — ✅ DONE (2026-08-13)
 
 Depends on item 1.
 
