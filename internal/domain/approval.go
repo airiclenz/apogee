@@ -92,6 +92,24 @@ type ApprovalRequest struct {
 	// Today only a write target populates it; a read that follows a symlink is the same fact
 	// about a different verb and rides this same field.
 	ResolvedPath string
+	// Scope is the OPTIONAL one-line statement of what this call reaches BEYOND what its
+	// arguments name — the fact a pane painted from Arguments alone cannot show. It is the
+	// tool's own words, read off the ApprovalScoper marker at this request's construction:
+	// diagnostics says that a `go vet` on one filename reads every .go file in that file's
+	// package directory, because "I approved foo.go" and "it read the directory around
+	// foo.go" are two different sentences and this pane is where the second one is decided.
+	//
+	// It is EMPTY whenever the arguments name their own reach — the overwhelming majority of
+	// calls, every tool that declares no scope included — so a host rendering it
+	// unconditionally adds nothing to an ordinary prompt. Like Reason it is a bare sentence:
+	// any label a Driver paints in front of it is that Driver's presentation, not the
+	// engine's (ADR 0031, wire-silent).
+	//
+	// It is DISCLOSURE, not permission: nothing about what the call may do is decided here,
+	// and the text is the TOOL's — a host-registered or MCP-backed tool authors its own — so a
+	// Driver treats it as untrusted display text exactly like Arguments, stripping and
+	// flattening it before it reaches a surface that paints one row per line.
+	Scope string
 }
 
 // ApprovalDecision is the Approver's verdict.

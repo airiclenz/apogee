@@ -10,6 +10,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The approval pane now says when a call reaches wider than the file it names.** `diagnostics`
+  takes one filename and its `go vet` half reads every `.go` file in that file's package directory:
+  the tool's description said so and both of its result strings said so, but the approval prompt —
+  the one surface a human actually decides on — quoted the model's `path` argument and nothing
+  else, so "I approved `diagnostics.go`" and "it read every file beside `diagnostics.go`" were two
+  different sentences and only one of them was on the screen. A tool can now state that widening in
+  one line of its own words (the new optional `domain.ApprovalScoper` marker), the engine reads the
+  marker at the single site it builds an approval request and carries the line on
+  `ApprovalRequest.Scope` (an additive field, so no embedder's Approver breaks), and the TUI paints
+  it as `Scope: …` under the reason and above the arguments it widens — stripped and flattened like
+  its `Reason:`/`Fix:` neighbours, so a scope carrying a newline cannot paint a forged row of its
+  own. The pane and the result string derive that sentence from the same clause, so the surface you
+  approve on and the surface that records the run cannot describe one call differently. It is
+  disclosure and nothing else — what the call may do is still the gate's decision — and every tool
+  that declares no scope (all of them but `diagnostics`) raises exactly the prompt it always did.
+
 - **Every reply is now bounded: apogee tells the server how big one answer may be.** Every agent and
   sub-agent turn went out with no `max_tokens` at all, so a thinking model could generate until the
   server's context wall and the turn then failed wearing the wrong error — a `/security-audit`

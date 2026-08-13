@@ -130,6 +130,38 @@ func IsSubprocessTool(t Tool) bool {
 	return ok && st.Subprocess()
 }
 
+// ApprovalScoper is an optional interface a Tool implements to state, in ONE human-readable
+// line, what a given call REACHES beyond what its arguments name — the fact an approval pane
+// built from the call's arguments alone cannot show. diagnostics carries it because `go vet`
+// takes a filename and reads the whole package directory around it: "I approved one file" and
+// "it read every file beside it" are two different sentences, and the pane is where the second
+// one has to be said. The engine reads the marker at the single ApprovalRequest construction
+// site and carries the line on ApprovalRequest.Scope; no Driver knows which tool declared it.
+//
+// The line is DISCLOSURE, never permission: it changes nothing about what the call may do, and
+// the gate's own Reason still says why the approval is required. A tool with nothing to add —
+// one whose arguments name their own blast radius — does not implement it, or returns "" for
+// the call at hand, which is the ordinary case and leaves the prompt exactly as it was.
+// ApprovalScopeOf is the helper the loop calls rather than the type assertion directly.
+type ApprovalScoper interface {
+	Tool
+	// ApprovalScope returns the one-line scope of this call, or "" when the arguments already
+	// name everything it reaches. It is called on the approval path, so it must be cheap and
+	// must never block: derive from the call's arguments, do not run the tool's work.
+	ApprovalScope(call ToolCall) string
+}
+
+// ApprovalScopeOf returns the one-line scope t has declared for this call via ApprovalScoper. A
+// tool that makes no such declaration — including a nil t — has none, so the empty string means
+// "the arguments name their own reach" and a host rendering it unconditionally stays silent on
+// every ordinary prompt.
+func ApprovalScopeOf(t Tool, call ToolCall) string {
+	if as, ok := t.(ApprovalScoper); ok {
+		return as.ApprovalScope(call)
+	}
+	return ""
+}
+
 // ExternalEffectKind classifies a non-forkable external effect.
 type ExternalEffectKind string
 

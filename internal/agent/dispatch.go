@@ -652,6 +652,10 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		// this request carries that the model did not write, and the reason the pane can no
 		// longer be shown a path the executor will not use (domain.ApprovalRequest.ResolvedPath).
 		ResolvedPath: a.resolvedPath(call),
+		// What the call reaches beyond what its arguments name, in the TOOL's own line — the
+		// second fact on this request the model did not write. Empty for every tool that
+		// declares no scope, which is all but one of them (domain.ApprovalRequest.Scope).
+		Scope: a.approvalScope(call),
 	}
 	decision, err := a.cfg.Approver.Approve(ctx, areq)
 	if err != nil {
@@ -811,6 +815,20 @@ func (a *Agent) resolvedPath(call domain.ToolCall) string {
 		return ""
 	}
 	return tools.ResolvedWriteTarget(tool, call)
+}
+
+// approvalScope is the ApprovalRequest's other tool-derived fact (domain.ApprovalScoper): the
+// one line a tool states about what THIS call reaches beyond what its arguments name — go vet's
+// package directory around the file the call named. It looks the tool up itself for the same
+// reason resolvedPath does, and an unknown tool declares nothing, exactly as it classifies as
+// nothing. It rides the Approval only: the gate is the surface where the widening is decided,
+// while a tool that runs ungated states the same scope on its own result string.
+func (a *Agent) approvalScope(call domain.ToolCall) string {
+	tool, ok := a.lookupTool(call.Tool)
+	if !ok {
+		return ""
+	}
+	return domain.ApprovalScopeOf(tool, call)
 }
 
 // fsConfinementAvailable reports whether the injected Confiner can enforce filesystem

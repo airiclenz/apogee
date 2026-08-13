@@ -192,6 +192,16 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	if req.Remedy != "" {
 		parts = append(parts, "Fix: "+flattenField(stripEscapes(req.Remedy)))
 	}
+	// What the call reaches beyond what its arguments name, in the tool's own line
+	// (ApprovalRequest.Scope) — go vet's package directory around the file the call named. It sits
+	// above the arguments because it widens the whole call rather than annotating one of them, and
+	// it is treated exactly like its Reason:/Fix: neighbours: stripped and FLATTENED, because the
+	// text is a tool's and this pane paints one row per line — a scope carrying "\n" would
+	// otherwise paint a second "Reason:" of its own choosing in the pane's own body style. Tools
+	// that declare no scope send nothing and their prompts are unchanged to the byte.
+	if req.Scope != "" {
+		parts = append(parts, "Scope: "+flattenField(stripEscapes(req.Scope)))
+	}
 	if args := approvalArgsBlock(req); args != "" {
 		parts = append(parts, args)
 	}

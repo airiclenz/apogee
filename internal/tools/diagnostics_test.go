@@ -430,3 +430,66 @@ func TestDiagnostics_RunsWithoutAConfinementHandle(t *testing.T) {
 		t.Errorf("clean file errored: %q", res.Content)
 	}
 }
+
+// The vet half reads WIDER than the call that asks for it — one filename in, every .go file in
+// that file's directory read — and the tool said so on its description and on both result
+// strings while the approval pane, the surface a human actually decides on, said nothing.
+// ApprovalScope (domain.ApprovalScoper) is the tool's line for that pane, and the fact worth
+// pinning is that it names the SAME package directory the result will name: two surfaces
+// describing one call differently is the failure the disclosure exists to prevent.
+func TestDiagnostics_ApprovalScopeNamesTheSamePackageAsTheResult(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	pkg := filepath.Join(root, "pkgdir")
+	if err := os.Mkdir(pkg, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	abs := writeGoFile(t, pkg, "ok.go", "package pkgdir\n\nfunc Add(a, b int) int { return a + b }\n")
+	named := filepath.Join("pkgdir", "ok.go")
+
+	d := NewDiagnostics(root)
+	scope := d.ApprovalScope(diagnosticsCall("c1", named))
+
+	clause := vettedPackageScope(abs, root)
+	if !strings.Contains(scope, clause) {
+		t.Errorf("ApprovalScope = %q, want it to carry the vetted-package clause %q", scope, clause)
+	}
+	if !strings.Contains(vettedPackageLine(abs, root), clause) {
+		t.Errorf("the result line stopped deriving the clause the pane shows: %q", vettedPackageLine(abs, root))
+	}
+	if !strings.Contains(scope, "pkgdir") || !strings.Contains(scope, "ok.go") {
+		t.Errorf("ApprovalScope = %q, want the package directory named beside the requested file", scope)
+	}
+	if strings.Contains(scope, "\n") {
+		t.Errorf("ApprovalScope = %q, want ONE line — the pane gives it a single row", scope)
+	}
+}
+
+// Every call whose arguments already name their own reach declares no scope, so the pane it
+// raises is unchanged: an explicit vet:false reads only the named file, a non-Go file has no vet
+// half at all, and a path that escapes the workspace is a call Execute refuses outright.
+func TestDiagnostics_ApprovalScopeIsEmptyWhenTheCallReadsOnlyWhatItNames(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeGoFile(t, root, "ok.go", "package main\n\nfunc main() {}\n")
+	writeGoFile(t, root, "app.ts", "export const x = 1;\n")
+	d := NewDiagnostics(root)
+
+	cases := []struct {
+		name string
+		call domain.ToolCall
+	}{
+		{name: "vet explicitly off", call: diagnosticsCallNoVet("c1", "ok.go")},
+		{name: "not a Go file", call: diagnosticsCall("c2", "app.ts")},
+		{name: "path escapes the workspace", call: diagnosticsCall("c3", filepath.Join("..", "elsewhere.go"))},
+		{name: "no path at all", call: diagnosticsCall("c4", "")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := d.ApprovalScope(tc.call); got != "" {
+				t.Errorf("ApprovalScope = %q, want empty — the call reads only what its arguments name", got)
+			}
+		})
+	}
+}

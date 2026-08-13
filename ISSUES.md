@@ -71,12 +71,6 @@ those items' own fixes falsified. The hostile-bytes threat model — the operato
 bytes they operate on are not, and neither is the model. Every citation was re-read against the
 working tree on 2026-08-12 and re-verified on 2026-08-13.
 
-- [ ] `go_vet`'s package-directory scope is disclosed on the tool description
-  (`internal/tools/diagnostics.go:61`) and on both vet result strings (`:192`, `:194`, via
-  `vettedPackageLine` `:326`) but NOT on the approval pane — the one surface the human actually
-  decides on. `domain.ApprovalRequest` (`internal/domain/approval.go:33`) carries no scope field,
-  so a truthful pane line needs a new engine field plus a TUI renderer.
-
 - [ ] `/skills` still re-walks the skill source dirs synchronously on the Bubble Tea update
   goroutine: `runSkills` calls `m.opts.ReloadSkills()` inline (`internal/tui/skills.go:45`). Item
   12 moved the merged `/` menu's re-scan off that goroutine but left this trigger on it, so the

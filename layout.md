@@ -337,6 +337,18 @@ in the same words, follows the target on the **tool card** in the transcript, an
 result sentence names it too — three surfaces, one fact, so a call cannot read one way where you
 approve it and another way where it is recorded.
 
+**A call that reaches wider than its arguments say carries a `Scope:` line.** Some tools read more
+than the argument they were handed — `diagnostics` takes one filename and its `go vet` half reads
+every `.go` file in that file's package directory — and a body built from the arguments alone cannot
+show it: "I approved `diagnostics.go`" and "it read the directory around `diagnostics.go`" are two
+different sentences. The tool states the widening in one line of its own words, and the pane paints
+it under the reason and above the arguments it widens, as `Scope: go vet reads the whole package
+directory internal/tools — every .go file in it, not only diagnostics.go.` It is disclosure and
+nothing else: what the call may do was already decided by the gate the `Reason:` names. Tools whose
+arguments name their own reach — all but one of them today — declare nothing, so the line is absent
+rather than blank and their prompts read exactly as they always have. The label is this pane's, like
+`Reason:` and `Fix:`: the engine carries the bare sentence.
+
 **When a sub-agent raised the call, the body says so first.** A request from a child leads with
 `Sub-agent: <its delegated task>`, above the reason, because that is the one fact the rest of the
 pane cannot supply: with several children running at once their prompts QUEUE — one on the screen at

@@ -322,7 +322,11 @@ spec with a multi-line title renders a single title line.
 
 **Commit:** `fix(tui): popup and approval titles fold embedded newlines`
 
-## 9. `go_vet`'s scope reaches the approval pane
+## 9. `go_vet`'s scope reaches the approval pane — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the CHANGELOG entry belongs under `### Added` in `[Unreleased]` (a new engine seam, matching the item's `feat(approval)` commit), not under the `### Fixed` heading this plan's earlier items used.
+NOTES (2026-08-13): also updated `layout.md` (not in the item's Files list) — it is the TUI rendering spec and already specs the pane's `Reason:` and `→ resolves to` lines, so a new pane line left it stale; one paragraph added, no other change.
+NOTES (2026-08-13): `vettedPackageLine` was split into a shared `vettedPackageScope` clause the marker and the result string both build on, rather than duplicating the derivation — the item's "deriving the same package-directory text" read as literally the same text. Only the verb tense differs (the pane speaks of a call about to run, the result of one that did).
 
 **What:** `go_vet`'s package-directory scope is disclosed on the tool description
 (`internal/tools/diagnostics.go:61`) and on both vet result strings (via `vettedPackageLine`,

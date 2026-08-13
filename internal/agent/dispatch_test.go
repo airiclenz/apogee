@@ -968,6 +968,73 @@ func TestExternalEffects_RoutesExternalToolThroughBoundary(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// ApprovalScoper — a tool's own line about what the call reaches
+// ----------------------------------------------------------------------------
+
+// scopingTool is a write-capable fakeTool that also declares an approval scope
+// (domain.ApprovalScoper) — the marker diagnostics carries for go vet's package directory.
+type scopingTool struct {
+	fakeTool
+	scope string
+}
+
+func (t scopingTool) ApprovalScope(_ domain.ToolCall) string { return t.scope }
+
+// The pane a human decides on is built from the call's arguments, so a tool whose reach is WIDER
+// than its arguments — go vet takes a filename and reads the directory around it — had no way to
+// say so where the decision is made. The marker is that seam, and the engine is the only place it
+// is read: dispatch carries the tool's line on the request (domain.ApprovalRequest.Scope), and a
+// tool that declares nothing leaves the field empty, so every other prompt is unchanged.
+func TestApprovalScopeRidesTheRequest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a tool declaring a scope puts its line on the request", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		scoped := scopingTool{
+			fakeTool: fakeTool{name: "diagnostics", result: "clean"},
+			scope:    "go vet reads the whole package directory internal/tools.",
+		}
+		cfg := configWithTools(sink, scoped)
+		cfg.Mode = domain.ModeAskBefore
+		cfg.Approver = &fakeApprover{decision: domain.ApprovalAllow}
+
+		driveToolCall(t, cfg, sink, "c1", "diagnostics", `{"path":"internal/tools/x.go"}`)
+
+		if got := scopeOnApproval(t, sink.events); got != scoped.scope {
+			t.Errorf("ApprovalRequest.Scope = %q, want the tool's declared line %q", got, scoped.scope)
+		}
+	})
+
+	t.Run("a tool declaring none leaves the scope empty", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		cfg := configWithTools(sink, fakeTool{name: "write_file", result: "written"})
+		cfg.Mode = domain.ModeAskBefore
+		cfg.Approver = &fakeApprover{decision: domain.ApprovalAllow}
+
+		driveToolCall(t, cfg, sink, "c1", "write_file", `{"path":"notes.md"}`)
+
+		if got := scopeOnApproval(t, sink.events); got != "" {
+			t.Errorf("ApprovalRequest.Scope = %q, want empty — the tool declares no scope", got)
+		}
+	})
+}
+
+// scopeOnApproval returns the scope the first ApprovalEvent's request carried — the request the
+// Approver itself was handed, since dispatch emits the very value it sent.
+func scopeOnApproval(t *testing.T, events []domain.Event) string {
+	t.Helper()
+	for _, e := range events {
+		if approval, ok := e.(domain.ApprovalEvent); ok {
+			return approval.Request.Scope
+		}
+	}
+	t.Fatal("no ApprovalEvent was emitted; the call did not gate")
+	return ""
+}
+
+// ----------------------------------------------------------------------------
 // helpers
 // ----------------------------------------------------------------------------
 

@@ -98,6 +98,32 @@ func (t *Diagnostics) ReadOnly() bool { return true }
 // 2026-07-26), so the call takes the subprocess row: confined in Auto, gated below it.
 func (t *Diagnostics) Subprocess() bool { return true }
 
+// ApprovalScope states, for the approval pane, the same widening the result strings state
+// (vettedPackageLine): the call names one file and the vet half reads the whole package
+// directory around it. Until this marker existed the pane was the ONE surface that did not say
+// so — the tool's description and its results both did — and the pane is where the human
+// actually decides. The scope is derived from the call's arguments alone (no disk read beyond
+// the same path resolution Execute performs, no subprocess), because it is computed on the
+// approval path, before anything runs.
+//
+// It is EMPTY for every call whose arguments already name their own reach: a non-Go file (no
+// vet half at all), an explicit vet:false (the syntax check reads only the named file), and a
+// path that does not resolve inside the workspace (a call Execute will refuse). The scope
+// deliberately says nothing about the TOOLCHAIN being present — that is discovered at run time,
+// and a pane that promised "go vet may be skipped" would understate the reach the human is
+// asked to authorise.
+func (t *Diagnostics) ApprovalScope(call domain.ToolCall) string {
+	args, _, ok := decodeToolArgs[diagnosticsArgs](call)
+	if !ok || strings.TrimSpace(args.Path) == "" || !args.runVet() {
+		return ""
+	}
+	abs, err := resolveInRoot(args.Path, t.root)
+	if err != nil || detectLanguage(abs) != langGo {
+		return ""
+	}
+	return "go vet reads " + vettedPackageScope(abs, t.root) + "."
+}
+
 // Execute diagnoses the file at the requested path. An invalid path, a path escape,
 // or an unsupported language are surfaced as results (the last as a graceful "no
 // diagnostics available", not an error); the Go error is reserved for ctx
@@ -320,12 +346,20 @@ func cleanGoMessage(abs string) string {
 // until this line existed no surface said so — "I approved foo.go" and "it read every file
 // beside foo.go" were two different sentences.
 //
-// It rides the result string, which is the surface this tool owns: the approval pane paints
-// the model's own arguments plus the engine's resolved-path disclosure, and neither is a
-// place a tool can state a derived scope from.
+// It rides the result string, which is the surface this tool owns once the call has run; the
+// approval pane gets the SAME scope before it runs, off the ApprovalScoper marker above, so the
+// two cannot describe one call differently (they share vettedPackageScope, and only their verb
+// tense differs — the pane speaks of a call about to happen, the result of one that did).
 func vettedPackageLine(abs, root string) string {
-	return "go vet checked the whole package directory " + packageDirName(filepath.Dir(abs), root) +
-		" — every .go file in it, not only " + filepath.Base(abs) + "."
+	return "go vet checked " + vettedPackageScope(abs, root) + "."
+}
+
+// vettedPackageScope is the scope clause both surfaces are built from: the package DIRECTORY
+// around the requested file, spelled relative to the workspace root, said in the same breath as
+// the file the call named and carrying no verb of its own so each caller supplies its own tense.
+func vettedPackageScope(abs, root string) string {
+	return "the whole package directory " + packageDirName(filepath.Dir(abs), root) +
+		" — every .go file in it, not only " + filepath.Base(abs)
 }
 
 // packageDirName spells a package directory for a human: relative to the workspace root,
