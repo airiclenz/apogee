@@ -90,7 +90,9 @@ command-registry flag prose predating `runsBareAtAccept` (`:173`); and the mispl
 
 ---
 
-## 1. Verify the residuals fix-wave plan is archived
+## 1. Verify the residuals fix-wave plan is archived — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): gate passed — `docs/plans/archived/2026-08-13 - 04 - residuals-fix-wave-plan.md` exists, `docs/plans/2026-08-13 - 04 - residuals-fix-wave-plan.md` does not. Working tree clean and `go build ./...` succeeds, so the residuals run left no transient breakage.
 
 **What:** Confirm `docs/plans/2026-08-13 - 04 - residuals-fix-wave-plan.md` no longer exists
 at that path and `docs/plans/archived/2026-08-13 - 04 - residuals-fix-wave-plan.md` does —
