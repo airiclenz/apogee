@@ -28,8 +28,9 @@
 // bijection with fileConfig, so a key added to the schema breaks the build gate until it is
 // described. defaults.go is the starter config embedded from defaults/config.yaml and seeded on
 // first run, plus the seed-if-absent write everything else reuses. configwrite.go is the textual
-// splice writer that persists ONE key — or one host acknowledgement — into the user's file
-// without moving a comment (ADR 0035). keyresolve.go turns a `servers:` entry's KEY SOURCE — a
+// splice writer that persists ONE key — a setting, a host acknowledgement, or the key source of a
+// single `servers:` entry — into the user's file without moving a comment (ADR 0035).
+// keyresolve.go turns a `servers:` entry's KEY SOURCE — a
 // literal key, a command whose output is the key, or the name of an environment variable — into the
 // token a seam sends, running it at first use and caching the answer for the session.
 // configmigrate.go is the one-time fold of the retired

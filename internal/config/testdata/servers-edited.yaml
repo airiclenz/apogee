@@ -1,0 +1,36 @@
+# my apogee config — hand-edited, and every word of it must survive a key-source write
+
+# =============================================================================
+# Which servers: entry a session starts on.
+# server: my-box
+server: workbench
+
+# =============================================================================
+# The servers a session can move between.
+# servers:
+#   - name: my-box
+#     endpoint: http://127.0.0.1:1111
+#     api-key: sk-example
+servers:
+    # the box under the desk — its key sits in this file today
+    - name: workbench
+      endpoint: http://127.0.0.1:1111
+      api-key:    sk-desk-0001    # the one the migration offers to move
+      model: gpt-oss-20b
+
+    # the spare box, keyless: nothing here is the migration's business
+    - name: spare
+      endpoint: http://192.168.64.1:1111
+      parallel-agents: 3
+
+    # the last entry, so an appended marker has nothing after it
+    - name: cloud
+      endpoint: https://api.example.test/v1
+      api-key: sk-cloud-0002
+      context-window: 128000
+
+# =============================================================================
+# ui:
+#   spinner: snake         # snake | glitter | classic
+ui:
+  spinner: snake           # my pick, and this note stays put

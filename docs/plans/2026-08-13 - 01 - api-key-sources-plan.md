@@ -264,7 +264,25 @@ keychain) — a live-gated smoke test behind an env guard, skipped by default, i
 
 **Commit:** `feat(keystore): probe the OS secret store and write apogee entries via its CLI`
 
-## 5. Configwrite: entry-scoped key-source rewrite
+## 5. Configwrite: entry-scoped key-source rewrite — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): no CHANGELOG entry for this item — nothing reaches the writer until item 6 wires
+the startup offer, so the user-visible change is that offer and the entry belongs there (item 4's
+precedent).
+NOTES (2026-08-13): the marker branch also rewrites an entry that already spells `plaintext-key-ok:
+false`, not only appending to one that omits it. The item names the append; an entry spelling the key
+false is still one the offer targets, so "never" has to be able to write true over it, and the rewrite
+keeps the user's end-of-line note.
+NOTES (2026-08-13): both writers are no-ops when the file already reads the way the call asks for —
+saveHostAcknowledgement's idempotence, so a re-offer (or the watcher re-reading a rewritten file,
+ADR 0041) cannot churn the file. Not in the item text; tested.
+NOTES (2026-08-13): `readConfigForEntryEdit` deliberately does NOT seed an absent config from the
+template the way `ReadConfigForWrite` does — these edits address an entry the file must already carry,
+so a missing config has no entry to rewrite and seeding one would answer "which server?" with a
+template that never named it.
+NOTES (2026-08-13): doc.go's configwrite.go line was widened to name the new edit beside the setting
+and the host acknowledgement — the line is a concern list and would otherwise have gone stale on the
+package map.
 
 **What:** Extend `internal/config/configwrite.go` with a surgical edit addressed INTO a
 `servers:` list entry, in the file's existing paranoia style: locate the entry block by its
