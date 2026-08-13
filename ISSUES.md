@@ -152,9 +152,6 @@ deliberately did not reach.
 - [P] Item text cites `cmd/apogee/defaults/` for the embedded template; its real home is
   `internal/config/defaults/` — later items (and any future plan) should use the corrected path.
 
-- [P] Untracked `docs/plans/2026-08-13 - 03 - open-defects-fix-wave-plan.md` is a prior session's
-  artifact, not this run's work — left unstaged; it still needs its own commit decision.
-
 - [ ] `/server` back onto a configured startup entry resolves that entry's own source, not the
   `APOGEE_API_KEY` overlay (pre-existing; ADR 0036 decision 6).
 
@@ -167,6 +164,35 @@ deliberately did not reach.
 
 - [P] The migration notice wording asserts "this machine has no secret store apogee can move it
   into" — false in the headless-on-macOS/Linux case; could name the reason per driver.
+
+### Open-defects fix wave run — residuals (2026-08-13)
+
+Raised while executing `docs/plans/archived/2026-08-13 - 03 - open-defects-fix-wave-plan.md`: what
+the run's items deliberately did not reach.
+
+- [ ] No sweep was run for other command-registry flag prose predating `runsBareAtAccept`
+  (`internal/tui/command.go:94`). Item 1's plan text named four doc sites; a fifth — the
+  `commandByName` comment (`internal/tui/command.go:261`) — was also stale and was corrected with
+  them, so prose written before the flag may still describe the old accept behaviour elsewhere.
+
+- [ ] Untracked `docs/plans/2026-08-13 - 04 - residuals-fix-wave-plan.md` is concurrent owner work,
+  not this run's — left unstaged; it still needs its own commit decision.
+
+- [ ] `internal/title/prompts/` has no README pinning the wording-drift rule the way
+  `internal/probe/prompts/README.md` now does; the contains-phrase assertions in
+  `internal/title/title_test.go` (`:97`, `:103`, `:246`) remain the only drift guard.
+
+- [ ] Design call 3's out-of-scope sweep stands: ~9 prompt literals remain hard-coded in Go rather
+  than embedded assets — `internal/mechanisms/cot.go:69`, `:75`, `:79`;
+  `internal/mechanisms/decompose.go:38`, `:44`; `internal/mechanisms/library.go:97`, `:101`;
+  `internal/mechanisms/emptyresponse.go:56`; and `internal/agent/compact.go:212`.
+
+- [ ] `internal/context` and `internal/title` have no `doc.go` file map (both sit under the house
+  ~10-file docmap threshold); their new prompt assets are named in the package narration instead.
+
+- [ ] In `ISSUES.md` the `## Conventions` heading (`:6`) sits between the "Two sections:" sentence
+  (`:3–4`) and the bullets it introduces (`:8–11`), so the intro now reads across a heading
+  (cosmetic).
 
 ## Parked / deferred work
 
