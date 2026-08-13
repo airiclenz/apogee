@@ -76,7 +76,15 @@ operate on are not, and neither is the model.
 
 ---
 
-## 1. `run_tests` stops inheriting apogee's credentials
+## 1. `run_tests` stops inheriting apogee's credentials — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the spec-capture seam is a new package var `runTestsSubprocess = runSubprocess`
+in `run_tests.go` (the shape `runPythonSubprocess` already uses), not the `shellHost` swap the item's
+Tests line pointed at — `run_tests` does not route through `shellHost`, so that pattern could not
+observe the spec it builds.
+NOTES (2026-08-13): also corrected `internal/tools/doc.go:136`, a third comment the item did not
+list, which described run_tests as running with "the inherited environment the toolchains need" —
+now "…, minus apogee's own credentials".
 
 **What:** `run_tests` is the one execution tool whose child inherits the parent environment whole:
 the `subprocessSpec` literal at `internal/tools/run_tests.go:251-255` leaves `env` nil, so

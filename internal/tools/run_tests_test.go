@@ -41,6 +41,20 @@ func runTestsCall(t *testing.T, root string, args map[string]any) domain.ToolRes
 	return res
 }
 
+// withCapturedTestRun swaps the runner subprocess for one that records the spec and launches
+// nothing, so a test can pin the exact argv and environment the tool builds.
+func withCapturedTestRun(t *testing.T) *subprocessSpec {
+	t.Helper()
+	orig := runTestsSubprocess
+	var captured subprocessSpec
+	runTestsSubprocess = func(_ context.Context, spec subprocessSpec) (subprocessResult, error) {
+		captured = spec
+		return subprocessResult{}, nil
+	}
+	t.Cleanup(func() { runTestsSubprocess = orig })
+	return &captured
+}
+
 // TestRunTestsDetectsRunnerByMarkerPrecedence pins ratified call 6: which runner a project gets is
 // a fact about its markers, in one fixed order — a polyglot repository must resolve the same way
 // every time rather than by whichever marker a directory listing happened to yield first.
@@ -330,6 +344,45 @@ func TestRunTestsMissingRunnerProgramDegradesGracefully(t *testing.T) {
 		if !strings.Contains(res.Content, want) {
 			t.Errorf("the unavailable message must contain %q: %q", want, res.Content)
 		}
+	}
+}
+
+// TestRunTestsDropsApogeeCredentialsFromTheRunnerEnvironment pins that a repo-authored test
+// runner — untrusted bytes under this threat model — is not handed the key apogee talks to its
+// inference server with, while the rest of the operator's environment (the toolchain variables a
+// suite actually needs) still travels. This is the targeted removal terminal and python_exec make,
+// not git's allowlist.
+func TestRunTestsDropsApogeeCredentialsFromTheRunnerEnvironment(t *testing.T) {
+	// Not parallel: t.Setenv, plus the package-level program/runner swaps.
+	t.Setenv("APOGEE_API_KEY", "sk-secret-value")
+	t.Setenv("APOGEE_ENDPOINT", "http://192.0.2.1:1111")
+	// A resolver pointing outside the workspace, so neither the exec fence nor the host's own
+	// toolchain decides whether this test runs.
+	program := filepath.Join(t.TempDir(), "go")
+	original := lookTestProgram
+	lookTestProgram = func(string) (string, bool) { return program, true }
+	t.Cleanup(func() { lookTestProgram = original })
+	captured := withCapturedTestRun(t)
+
+	root := writeProject(t, map[string]string{"go.mod": "module example.test/x\n\ngo 1.21\n"})
+	runTestsCall(t, root, nil)
+
+	if captured.env == nil {
+		t.Fatal("spec.env is nil: the runner would inherit the parent environment whole, credentials included")
+	}
+	if value, ok := envValue(captured.env, "APOGEE_API_KEY"); ok {
+		t.Errorf("APOGEE_API_KEY = %q reached the runner environment, want it dropped", value)
+	}
+	for _, entry := range captured.env {
+		if strings.Contains(entry, "sk-secret-value") {
+			t.Errorf("the api key survived under another name: %q", entry)
+		}
+	}
+	if value, _ := envValue(captured.env, "APOGEE_ENDPOINT"); value != "http://192.0.2.1:1111" {
+		t.Errorf("APOGEE_ENDPOINT = %q, want it inherited (only the SECRETS are dropped)", value)
+	}
+	if _, ok := envValue(captured.env, "PATH"); !ok {
+		t.Error("PATH did not survive: a test suite runs in the operator's environment")
 	}
 }
 

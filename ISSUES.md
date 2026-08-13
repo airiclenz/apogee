@@ -122,12 +122,6 @@ working tree on 2026-08-12 and re-verified on 2026-08-13.
   landed for git (`internal/tools/git.go:82`) and the Go toolchain
   (`internal/tools/diagnostics.go:308`) only.
 
-- [ ] `run_tests` is the one execution tool that inherits the environment whole: it leaves
-  `spec.env` nil (`internal/tools/run_tests.go:247`), so `os/exec` hands the child the parent's
-  full environment including `APOGEE_API_KEY` — the credential `terminal` and `python_exec`
-  deliberately withhold. A repo-authored test suite is untrusted bytes under this threat model, so
-  it is the widest of the three environments.
-
 - [ ] `/skills` still re-walks the skill source dirs synchronously on the Bubble Tea update
   goroutine: `runSkills` calls `m.opts.ReloadSkills()` inline (`internal/tui/skills.go:45`). Item
   12 moved the merged `/` menu's re-scan off that goroutine but left this trigger on it, so the

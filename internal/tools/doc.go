@@ -133,7 +133,7 @@
 // discovery lesson find_files embodies: a capability found by tool NAME beats one found by
 // parameter. It is a write-capable SubprocessTool on terminal's disposition — a suite runs the
 // project's own code — over the shared runSubprocess, with a 5-minute ceiling and the inherited
-// environment the toolchains need.
+// environment the toolchains need, minus apogee's own credentials.
 //
 // present_document (ADR 0019) is the Asker pattern applied to showing a finished document:
 // the model names a deliverable it has written and the HOST picks the mechanism (the

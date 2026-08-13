@@ -443,6 +443,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`run_tests` no longer hands the project's test runner apogee's own API key.** It was the one
+  execution tool that gave its child the parent environment whole — `terminal` and `python_exec`
+  both strip `APOGEE_API_KEY` before they start anything for the model, but the test runner got it,
+  and a test suite is repo-authored code running under a threat model where the bytes in the
+  workspace are untrusted. The runner now starts in exactly the environment those two tools use: the
+  operator's environment, toolchain variables and all (build caches, virtualenv, `NODE_PATH` — an
+  allowlist there would break runs that work in your shell), minus apogee's own credentials.
+
 - **A failed command's outcome slot now names its exit code instead of whatever line its output
   opened with.** A `terminal` or `python_exec` call that exited non-zero was summarised as `error:`
   plus the first line of its output — for a failed `ls -la` that read `error: total 20760`, a

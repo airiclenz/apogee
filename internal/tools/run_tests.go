@@ -244,14 +244,17 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	}
 
 	runnerArgs := runner.args(subtree, filter)
-	// The environment is INHERITED (spec.env stays nil) — the one execution tool that inherits it
-	// whole, where terminal and python_exec go through subprocessEnv(): a test suite reads the
-	// toolchain's own variables (build caches, virtualenv, NODE_PATH) and an allowlist written for
-	// git would break runs that work in the user's shell.
-	res, err := runSubprocess(ctx, subprocessSpec{
+	// The environment is the caller's MINUS apogee's own credentials (subprocessEnv, the same
+	// environment terminal and python_exec run in): a test suite reads the toolchain's own
+	// variables (build caches, virtualenv, NODE_PATH) and an allowlist written for git would break
+	// runs that work in the user's shell — but the runner it starts is repo-authored code, which
+	// under this threat model is untrusted bytes with no business reading the key apogee talks to
+	// its inference server with.
+	res, err := runTestsSubprocess(ctx, subprocessSpec{
 		argv:    append([]string{program}, runnerArgs...),
 		dir:     t.root,
 		timeout: runTestsTimeout,
+		env:     subprocessEnv(),
 	})
 	if err != nil {
 		return domain.ToolResult{}, err
@@ -375,6 +378,11 @@ var lookTestProgram = func(program string) (string, bool) {
 	path, err := exec.LookPath(program)
 	return path, err == nil
 }
+
+// runTestsSubprocess runs the detected test runner (a package var so a test can capture the exact
+// argv and environment this tool builds without launching one — the shape runPythonSubprocess
+// already uses).
+var runTestsSubprocess = runSubprocess
 
 // displayCommand renders the command that produced a result, as the model would type it into
 // terminal — the closing note names it so "I need the whole log" has an obvious next step.
