@@ -42,7 +42,8 @@
 // path read over and over without progress and hints at it; readrepeat.go catches the redundant
 // re-read in the response about to be sent. syntax.go is the write-content syntax-check Mechanism
 // (the checker itself is syntaxengine.go, below). toolfilter.go narrows the tool menu before the
-// request goes out. toolloop.go is tool_loop_interceptor, the identical-repeat-turn detector.
+// request goes out. toolloop.go is tool_loop_interceptor, the identical-repeat-turn detector, and
+// the one file here that embeds prompt assets (the prompts/ directory, below).
 // toolresultcap.go caps oversized tool results mid-Exchange — the one reducer that shapes a
 // request rather than the history. tooluseenforcer.go is the narration off-ramp: an action request
 // answered in prose is corrected into a tool call. truncatehistory.go is the drop-the-middle
@@ -69,6 +70,16 @@
 // read and rewrite a call's path/content. syntaxengine.go is the pure syntax checker — the Go
 // parser path and the bracket/string/truncation heuristic for everything else — called by
 // syntax.go and registering nothing itself.
+//
+// # The prompt assets
+//
+// prompts/ is not Go: it holds the fixed sentence fragments of tool_loop_interceptor's
+// loop-breaking directive as plain .txt files — the wording as editable prose rather than string
+// literals buried in code (ISSUES.md: hard-coded prompt literals) — which toolloop.go compiles
+// into the binary with go:embed, so nothing is read from disk at runtime and nothing is
+// user-overridable. Only the fixed text lives there: the branching, the %s substitution and the
+// joining spaces stay in buildToolLoopDirective. The other Mechanisms' prompt literals are still
+// in code, a follow-up sweep.
 //
 // And doc.go this map.
 package mechanisms

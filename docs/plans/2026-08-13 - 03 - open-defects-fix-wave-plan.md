@@ -206,7 +206,12 @@ loader test as item 3.
 
 ---
 
-## 5. `internal/mechanisms`: the tool-loop directive fragments become embedded files
+## 5. `internal/mechanisms`: the tool-loop directive fragments become embedded files — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the sentence-separating space that ended five of the eight literals is appended in Go (`mustPrompt(...) + " "`) instead of living as trailing whitespace at the end of an asset file — following item 3's `internal/context` precedent (`compact.go`'s `summaryMessagePrefix + "\n\n"`). Byte-identity per design call 6 is unaffected: each package-level var equals its old const exactly, and only the on-disk asset differs, by the one invisible character an editor that trims line ends would silently delete.
+NOTES (2026-08-13): the loader (`mustPrompt`) normalises CRLF→LF before stripping the trailing newline, matching items 3 and 4 and `internal/tui/logo.go`, so a `core.autocrlf=true` checkout cannot bake `\r` into a directive fragment.
+NOTES (2026-08-13): byte-identity was verified mechanically, not only by the existing behaviour tests — a scratch test compared all eight loaded vars against the literals extracted from `git show HEAD:internal/mechanisms/toolloop.go` (all identical; the scratch test was deleted afterwards).
+NOTES (2026-08-13): the item's Files line does not name `toolloop_test.go`, but its Tests line mandates the new loader test; it was appended there (the package's existing tool-loop tests are unmodified) and is listed above.
 
 **What:** `buildToolLoopDirective` (`internal/mechanisms/toolloop.go:117-136`) keeps its
 `strings.Builder`, its six branches, and its `fmt.Fprintf` placeholder substitution (design

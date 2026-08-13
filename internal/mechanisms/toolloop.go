@@ -2,6 +2,7 @@ package mechanisms
 
 import (
 	"context"
+	"embed"
 	"fmt"
 	"sort"
 	"strings"
@@ -112,6 +113,57 @@ func previousToolCallKey(conv domain.ConversationView) string {
 	return ""
 }
 
+// promptFS carries this package's prompt text as plain files under prompts/. The fixed sentence
+// fragments of the loop-breaking directive are assets rather than Go string literals so the
+// wording can be read and edited as prose (ISSUES.md: hard-coded prompt literals), and go:embed
+// compiles them into the binary — the text ships inside the single binary, is never read from
+// disk at runtime, and is never user-overridable. Only the fixed text moved: the branching, the
+// `%s` substitution and the joining spaces stay in buildToolLoopDirective below (design call 2).
+//
+//go:embed prompts/*.txt
+var promptFS embed.FS
+
+// mustPrompt loads one embedded prompt asset by file name. Every asset ends with exactly one
+// trailing newline — a file without one is awkward in an editor and in a diff — and that one
+// newline is stripped here, so the loaded text carries no line ending of its own. CRLF endings
+// are normalised first, the way the embedded block art is (internal/tui/logo.go), so a
+// core.autocrlf checkout cannot bake \r into a prompt. A name that is not in the FS cannot happen
+// in a built binary — go:embed fails the build first — so it is a programming error rather than a
+// runtime condition.
+func mustPrompt(name string) string {
+	b, err := promptFS.ReadFile("prompts/" + name)
+	if err != nil {
+		panic("apogee: missing embedded prompt asset " + name + ": " + err.Error())
+	}
+	return strings.TrimSuffix(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
+}
+
+// The directive's fixed fragments, each one asset file (prompts/*.txt) named for its role. The
+// five that a further fragment always follows carry the sentence-separating space, appended HERE
+// rather than left as invisible trailing whitespace at the end of an asset — the internal/context
+// precedent (compact.go's summaryMessagePrefix) — so the wording in the file stays editable prose
+// and an editor that trims line ends cannot silently run two sentences together. Each var's value
+// is byte-identical to the literal it replaced; the three tail sentences end the directive and
+// take no separator.
+var (
+	// toolLoopHeader opens the directive with the repeated tool names (%s).
+	toolLoopHeader = mustPrompt("loop-header.txt") + " "
+	// toolLoopResultsAbove is the fixed reminder that the repeat bought nothing.
+	toolLoopResultsAbove = mustPrompt("results-above.txt") + " "
+	// toolLoopTask restates the user's first request (%s), when there is one.
+	toolLoopTask = mustPrompt("task-reminder.txt") + " "
+	// toolLoopFilesWritten credits the files already written (%s).
+	toolLoopFilesWritten = mustPrompt("files-written.txt") + " "
+	// toolLoopFilesRead credits the files already read (%s).
+	toolLoopFilesRead = mustPrompt("files-read.txt") + " "
+	// toolLoopContinueWork tails the wrote-something branch.
+	toolLoopContinueWork = mustPrompt("tail-continue-work.txt")
+	// toolLoopWriteImplementation tails the read-only branch.
+	toolLoopWriteImplementation = mustPrompt("tail-write-implementation.txt")
+	// toolLoopDifferentAction tails the branch with no file activity to credit.
+	toolLoopDifferentAction = mustPrompt("tail-different-action.txt")
+)
+
 // buildToolLoopDirective renders the loop-breaking correction (apogee-sim buildToolLoopDirective
 // @pin), naming the repeated tools and steering the model toward its remaining work.
 func buildToolLoopDirective(conv domain.ConversationView, calls []domain.ToolCall) string {
@@ -119,20 +171,20 @@ func buildToolLoopDirective(conv domain.ConversationView, calls []domain.ToolCal
 	names := toolCallNames(calls)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "STOP. You are in a loop — you just called [%s] with identical arguments as your previous turn. ", strings.Join(names, ", "))
-	b.WriteString("The results are already in your conversation above. ")
+	fmt.Fprintf(&b, toolLoopHeader, strings.Join(names, ", "))
+	b.WriteString(toolLoopResultsAbove)
 	if ctx.task != "" {
-		fmt.Fprintf(&b, "Your task is: %s. ", ctx.task)
+		fmt.Fprintf(&b, toolLoopTask, ctx.task)
 	}
 	switch {
 	case len(ctx.filesWritten) > 0:
-		fmt.Fprintf(&b, "You have already written: %s. ", strings.Join(ctx.filesWritten, ", "))
-		b.WriteString("Continue with the remaining work or finalize by running tests.")
+		fmt.Fprintf(&b, toolLoopFilesWritten, strings.Join(ctx.filesWritten, ", "))
+		b.WriteString(toolLoopContinueWork)
 	case len(ctx.filesRead) > 0:
-		fmt.Fprintf(&b, "You have read: %s. ", strings.Join(ctx.filesRead, ", "))
-		b.WriteString("You have enough context — now use write_file to create the implementation.")
+		fmt.Fprintf(&b, toolLoopFilesRead, strings.Join(ctx.filesRead, ", "))
+		b.WriteString(toolLoopWriteImplementation)
 	default:
-		b.WriteString("You MUST take a DIFFERENT action now. Use write_file to make modifications, or read a file you haven't read yet.")
+		b.WriteString(toolLoopDifferentAction)
 	}
 	return b.String()
 }

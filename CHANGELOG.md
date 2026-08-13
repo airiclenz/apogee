@@ -323,6 +323,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- The tool-loop interceptor's directive text now lives in plain files: the eight fixed sentence
+  fragments of `tool_loop_interceptor`'s loop-breaking correction moved out of Go string literals
+  into `internal/mechanisms/prompts/*.txt`, embedded into the binary with `go:embed`. The wording
+  is editable as prose; the branching, the `%s` substitution and the joining spaces stay in code,
+  and every branch's directive text is byte-identical to before.
+
 - `internal/title`: the naming call's three prompt texts (the system instruction, the closing
   user instruction and the request-window header) are now plain files under
   `internal/title/prompts/`, embedded with `//go:embed` — the wording is editable prose instead of
