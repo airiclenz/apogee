@@ -412,7 +412,11 @@ now do) to state the merge semantics.
 
 ---
 
-## 12. `ISSUES.md`: remove the ten closed entries and fix the stale template citation
+## 12. `ISSUES.md`: remove the ten closed entries and fix the stale template citation — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): The item's text names the "untracked plan doc `2026-08-13 - 03`" entry, but the only untracked-plan entry in `ISSUES.md` named `2026-08-13 - 04` (this plan's own doc). Removed that one — it is the entry the item means, and it is now false: the doc is tracked and committed (`7136b9b`), and plan `- 03` is archived per item 1.
+NOTES (2026-08-13): Twelve entries left the file, not eleven — the ten `[P]` closures plus the `[P]` stale-citation entry (confirmed no other `cmd/apogee/defaults/` text remained) plus the untracked-plan entry, exactly as the item's What describes.
+NOTES (2026-08-13): No CHANGELOG entry for this item — the item's own text makes the per-item entries this run's verifiers wrote the closed trail; item 12 is the removal half of that same bookkeeping.
 
 Depends on items 2–11.
 

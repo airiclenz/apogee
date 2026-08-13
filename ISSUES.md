@@ -37,18 +37,6 @@ only the still-open findings; the work the run completed belongs in `CHANGELOG.m
   *Configurable tool × mode security matrix* entry below sits on the same
   dispatch-gate-vs-tool-level-fence seam; whichever way this call goes constrains that design.
 
-- [P] `domain.Request.SetSampling` replaces `SamplingParams` wholesale
-  (`internal/domain/hooks.go:589`), so a future hook setting only `Temperature` would nil the
-  loop's `MaxTokens` and un-bound the reply — the "a nil field leaves the loop's value untouched"
-  contract at `hooks.go:619` is only half-true. Latent today (no Mechanism mutates sampling), but
-  the stakes rose with ADR 0046: the loop itself now stamps `MaxTokens` through `SetSampling` at
-  both request sites (`internal/agent/loop.go:692`, `:1055`), so a hook's partial set would
-  silently un-cap the reply the engine just bounded. The fix is a field-wise merge in
-  `SetSampling`. Raised while executing `docs/plans/2026-08-12 - 00 - reply-output-cap-plan.md`;
-  deferred by owner decision on 2026-08-13. Cross-reference: the parked *request-side knobs*
-  sub-item (apogee-code feature parity, P1, below) is the feature that would first arm this
-  defect — its design must land the merge first.
-
 - [ ] A transient in-band provider error mid-stream faults the whole exchange — no retry. The
   provider client retries transport faults, 429 and 5xx *before* a reply streams
   (`internal/provider/client.go:72`), but an error member an aggregator wraps in an HTTP 200
@@ -91,41 +79,17 @@ run's items deliberately did not reach.
 - [ ] `run_tests` still inherits an unscoped PATH — plausibly deliberate, since a
   workspace-resident test runner IS the test command there.
 
-- [P] `hostRules.isPathName` duplicates the PATH-fold logic inlined in `ScopeEnv`
-  (`internal/platform/host.go:120-135`) instead of `ScopeEnv` reusing it — harmless today, drifts
-  if the fold rule ever changes.
-
 - [ ] The Windows home (`%USERPROFILE%` / drive-letter `/users/`) is still unspelled in the
   ssh-key and credential patterns; ADR 0020 already reasons about that port, so it is declared
   debt.
-
-- [P] The `rm-rf-root-home-system` / `rm-fr-root-home-system` rules
-  (`internal/security/rules.go:23-37`) have the same macOS blind spot — their system-path
-  alternation lists `home` but not `users`, so `rm -rf /Users/alice` stays unmatched where
-  `rm -rf /home/alice` hard-refuses.
 
 - [ ] The EXDEV copy-then-remove fallback in `MoveFile.move` remains unexercised by tests —
   unreachable on a single-device tmpdir, as item 4's own hedge allows; the clean cross-directory
   move is covered.
 
-- [P] No test pins that the approval pane and the result string agree on the resolved path for
-  `copy_file` / `move_file` / `delete_file` (the write-tool pair has `TestWriteTargetsAgreeOnPath`,
-  which covers the `path` key, not `destination`).
-
-- [P] Existing writer disclosure tests (`file_ops_test`, `write_file_test`, `file_edit_test`) build
-  roots from raw `t.TempDir()`; on a host whose temp dir is reached through a symlink their
-  bare-sentence assertions would see a spurious note.
-
 - [ ] For an absolute path `resolveTargetUnbounded` ignores its root argument, so `readRoot`'s
   answer only ever matters for relative paths — the extra-read-root plumbing in `read_file`'s note
   is documentation, not behaviour.
-
-- [P] `stripEscapes` keeps `\t` and `flattenField` folds only `\n`, so a tab in any title still
-  spends unmeasured width — pre-existing across every field seam.
-
-- [P] `internal/domain/doc.go:59` enumerates `tools.go`'s marker interfaces
-  (`ReadOnlyTool`…`PromptTool`) without the new `ApprovalScoper`; the sentence stays true, but the
-  new marker is worth naming when that map is next touched.
 
 ### /dev/null confinement run — residuals (2026-08-13)
 
@@ -146,24 +110,12 @@ items deliberately did not reach.
 Raised while executing `docs/plans/2026-08-13 - 01 - api-key-sources-plan.md`: what the run's items
 deliberately did not reach.
 
-- [P] `README.md` (`:547` servers schema, `:612` "the upstream API key") documents only `api-key`;
-  no plan item names README, so the new keys have no user-facing doc outside the seeded template.
-
-- [P] Item text cites `cmd/apogee/defaults/` for the embedded template; its real home is
-  `internal/config/defaults/` — later items (and any future plan) should use the corrected path.
-
 - [ ] `/server` back onto a configured startup entry resolves that entry's own source, not the
   `APOGEE_API_KEY` overlay (pre-existing; ADR 0036 decision 6).
-
-- [P] Store-tool stderr is quoted into keystore `Write`'s error; on darwin the failing
-  `security -i` line could carry the secret — worth a redaction pass.
 
 - [ ] `internal/config/configwrite.go` is now 1631 lines against the coding-standards ~400-line
   guide — a split by writer concern (acknowledgement / scalar setting / key source) would need its
   own item.
-
-- [P] The migration notice wording asserts "this machine has no secret store apogee can move it
-  into" — false in the headless-on-macOS/Linux case; could name the reason per driver.
 
 ### Open-defects fix wave run — residuals (2026-08-13)
 
@@ -174,9 +126,6 @@ the run's items deliberately did not reach.
   (`internal/tui/command.go:94`). Item 1's plan text named four doc sites; a fifth — the
   `commandByName` comment (`internal/tui/command.go:261`) — was also stale and was corrected with
   them, so prose written before the flag may still describe the old accept behaviour elsewhere.
-
-- [ ] Untracked `docs/plans/2026-08-13 - 04 - residuals-fix-wave-plan.md` is concurrent owner work,
-  not this run's — left unstaged; it still needs its own commit decision.
 
 - [ ] `internal/title/prompts/` has no README pinning the wording-drift rule the way
   `internal/probe/prompts/README.md` now does; the contains-phrase assertions in
@@ -237,8 +186,9 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
     `internal/context/budget.go:53`). Distinct from the
     launcher's **Launch profiles**, which are **launch-side** (model file, server flags); these
     knobs are **request-side** — the grill they need must keep the two "profile" namespaces from
-    colliding in the UX, and must first land the field-wise `SetSampling` merge (the open defect
-    above), since a profile that sets only temperature would today nil the engine's stamped cap.
+    colliding in the UX. Its one prerequisite is discharged: the field-wise `SetSampling` merge
+    landed 2026-08-13, so a profile that sets only temperature no longer nils the engine's
+    stamped cap.
     [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md) §6 still
     defers the user-after-tool wire risk to this layer by name.
 
