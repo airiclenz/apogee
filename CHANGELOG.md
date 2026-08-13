@@ -1475,6 +1475,14 @@ point is a **minor** bump, not a breaking change.
   or the widget replaced. The display-seam sibling `flattenField` already folded tabs for the same
   reason.
 
+- **The README's key-source failure list now names the empty variable.** `api-key-env:` refuses a
+  variable that is set but *empty* — its own message, separate from the unset one, because the two
+  have separate fixes (nobody exported it, versus a command that produced nothing) — but the
+  README's sentence listed only "an unset variable" among the failures, so a reader could take an
+  exported-but-empty variable for a working key source and expect a request to go out keyless. The
+  sentence now reads "a non-zero exit, a 60-second timeout, empty output, or an unset or empty
+  variable", matching what `resolveEnvKey` actually does. Docs-only; no behaviour changes.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added

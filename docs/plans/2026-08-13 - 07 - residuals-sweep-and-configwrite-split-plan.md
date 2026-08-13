@@ -108,7 +108,11 @@ caret lands where the rune count says.
 
 **Commit:** `fix(tui): flattenLine folds tabs and carriage returns like newlines`
 
-## 3. README names the empty-variable key-source failure
+## 3. README names the empty-variable key-source failure — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the amended sentence is ten characters longer, so the paragraph's last two lines
+were re-wrapped to absorb it — 89 columns, inside the paragraph's existing maximum of 90. No other
+line of the paragraph moved.
 
 **What:** `README.md:662` lists the key-resolution failure cases as "A non-zero exit, a
 60-second timeout, empty output or an unset variable" — but `resolveEnvKey` also refuses a

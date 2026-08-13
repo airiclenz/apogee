@@ -659,8 +659,8 @@ environment variable rather than holding a key (`api-key-env: OPENROUTER_API_KEY
 from the environment apogee itself was started in. Both resolve the first time this
 session actually needs that server's key — never at startup for entries you do not
 use — and the answer is remembered for the rest of the session. A non-zero exit, a
-60-second timeout, empty output or an unset variable is an **error** naming the entry,
-never a silent keyless request: "no key" is spelled by leaving all three keys out.
+60-second timeout, empty output, or an unset or empty variable is an **error** naming the
+entry, never a silent keyless request: "no key" is spelled by leaving all three keys out.
 
 ### Local servers — llama-launcher
 
