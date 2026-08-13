@@ -703,21 +703,20 @@ func TestSlashMenuReloadNilSafe(t *testing.T) {
 // /skills — listing the catalog
 // ----------------------------------------------------------------------------
 
-// runSkillsNote runs "/skills" from idle and returns the note it recorded, asserting the verb
-// stayed local: no worker, no Cmd, and the input emptied like every other command.
+// runSkillsNote runs "/skills" from idle, runs the re-scan Cmd it dispatched as the runtime would,
+// and returns the note the listing recorded. It asserts the verb stayed local: no worker (the state
+// never leaves idle), and the input emptied like every other command.
 func runSkillsNote(t *testing.T, m Model) string {
 	t.Helper()
 	m.input.SetValue("/skills")
 	m, cmd := stepCmd(t, m, keyEnter())
-	if cmd != nil {
-		t.Error("/skills returned a Cmd; it is a local report and must not launch a worker")
-	}
 	if m.state != stateIdle {
 		t.Errorf("state = %v after /skills, want idle", m.state)
 	}
 	if v := m.input.Value(); v != "" {
 		t.Errorf("input not cleared after /skills: %q", v)
 	}
+	m = runCmd(t, m, cmd) // the re-scan runs off the loop; the listing lands on its message
 	last := lastEntry(t, m)
 	if last.kind != entryNote {
 		t.Fatalf("/skills wrote a %v entry, want a note", last.kind)
@@ -761,6 +760,38 @@ func TestSkillsCommandReloadsBeforeListing(t *testing.T) {
 	}
 	if !strings.Contains(note, "/fresh") {
 		t.Errorf("the listing predates the reload (no /fresh row):\n%s", note)
+	}
+}
+
+// The re-scan /skills asks for runs OFF the Update goroutine, exactly as the merged "/" menu's does:
+// it is the same blocking walk of the source dirs, and running it on the loop stalls the render for
+// its length (ADR 0011) — behind a verb instead of a keystroke, but the same freeze. So ⏎ must
+// return with the reload unrun and nothing written yet, and the listing must land on the message
+// the dispatched Cmd delivers, over the catalog that one completed scan installed.
+func TestSkillsCommandRescansOffTheUpdateLoop(t *testing.T) {
+	o, reloads := reloadOpts()
+	m := newTestModelEng(t, &fakeEngine{}, o)
+	m.input.SetValue("/skills")
+	before := len(m.transcript.entries)
+
+	m, cmd := stepCmd(t, m, keyEnter())
+	if *reloads != 0 {
+		t.Fatalf("the re-scan ran inline during Update (%d reloads); it belongs on the Cmd goroutine", *reloads)
+	}
+	if cmd == nil {
+		t.Fatal("/skills dispatched no Cmd; its re-scan has nowhere to run")
+	}
+	if got := len(m.transcript.entries) - before; got != 0 {
+		t.Errorf("/skills wrote %d entries before its scan finished, want none — the listing is the scan's result", got)
+	}
+
+	m = runCmd(t, m, cmd)
+	if *reloads != 1 {
+		t.Errorf("the dispatched Cmd ran %d reloads, want exactly 1", *reloads)
+	}
+	note := lastEntry(t, m).text
+	if !strings.Contains(note, "/fresh") {
+		t.Errorf("the folded listing does not reflect the completed re-scan (no /fresh row):\n%s", note)
 	}
 }
 

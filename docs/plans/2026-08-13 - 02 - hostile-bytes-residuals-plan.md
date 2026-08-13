@@ -362,7 +362,21 @@ it empty, no line.
 
 **Commit:** `feat(approval): tool-declared scope rides the request and renders on the pane`
 
-## 10. `/skills` reloads off the update goroutine
+## 10. `/skills` reloads off the update goroutine — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's Files list named `internal/tui/skills_test.go`, which does not exist —
+the package's `/skills` tests (and the `runSkillsNote` helper this item had to rework) live in
+`internal/tui/skill_test.go`, so the new off-loop test landed there beside them rather than in a new
+file that would split one subject's tests across two.
+NOTES (2026-08-13): rather than duplicate the reload closure, `reloadSkillsCmd`'s body was generalised
+in place (`internal/tui/autocomplete.go`) into `skillRescanCmd(done tea.Msg)` — one nil guard and one
+by-value capture (ADR 0011) for both triggers — with `reloadSkillsCmd` kept as the menu's named
+wrapper. `/skills` carries its own `skillsRescannedMsg` (implementer latitude per the item), because
+the two folds owe different repaints: the menu's re-derives the dropdown, this one writes the note.
+NOTES (2026-08-13): also corrected three comments this item's own change falsified, none in the item's
+Files list — `internal/tui/commandrun.go`'s `"skills"` case ("Synchronous like /version"),
+`internal/tui/tui.go`'s `Options.ReloadSkills` doc (which stated "/skills report still calls it
+inline" as deliberate) and its neighbouring sentence about which message rides the scan's return.
 
 **What:** `/skills` still re-walks the skill source dirs synchronously on the Bubble Tea update
 goroutine: `runSkills` calls `m.opts.ReloadSkills()` inline (`internal/tui/skills.go:44-46`). The

@@ -485,15 +485,14 @@ type Options struct {
 	// refreshed skill both shows in the menu AND resolves when attached. The menu edge-
 	// triggers it on open, not per keystroke; every caller guards for nil.
 	//
-	// It is a BLOCKING disk walk, and the menu therefore calls it from a Cmd goroutine rather than
-	// from Update (reloadSkillsCmd) — a walk on the Update goroutine stalls the render loop on the
-	// keystroke that opened the menu. (The /skills report still calls it inline, where the human
-	// asked for a listing and is waiting on it: there the walk IS the answer, not a side effect of a
-	// keystroke.) Two obligations follow for whoever wires it: it must be safe
-	// to call concurrently with the catalog reads (Skills, and the loop's own resolver), and it must
-	// return when the scan is done rather than detaching, since the message that repaints the menu
-	// is sent on its return. The bounded walk and the atomic snapshot swap of skills.Provider
-	// satisfy both.
+	// It is a BLOCKING disk walk, so every trigger calls it from a Cmd goroutine rather than from
+	// Update (skillRescanCmd) — a walk on the Update goroutine stalls the render loop on the
+	// keystroke that opened the menu, and equally on the ⏎ that ran /skills, where the report lands
+	// when the scan does. Two obligations follow for whoever wires it: it must be safe to call
+	// concurrently with the catalog reads (Skills, and the loop's own resolver), and it must return
+	// when the scan is done rather than detaching, since the message that repaints the menu — or
+	// writes the /skills listing — is sent on its return. The bounded walk and the atomic snapshot
+	// swap of skills.Provider satisfy both.
 	ReloadSkills func()
 
 	// Sessions is the session-persistence host (the store-backed [SessionHost] the binary

@@ -459,6 +459,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`/skills` no longer freezes the interface while it re-reads your skill folders.** The verb
+  re-scans the skill source dirs before it lists them — that is what makes a skill added since
+  launch show up — but it ran that walk on the goroutine that paints the screen, so on a large
+  library the whole interface sat still until the disk answered. The merged `/` menu's copy of the
+  same walk was moved off that goroutine already; this was the same block surviving behind a
+  different key. The scan now runs beside the render loop and the listing is written when it lands,
+  so the box stays live throughout. The report itself is unchanged, it still touches no engine and
+  launches no worker, and it still answers mid-run.
+
 - **A tool NAME can no longer paint a row of its own above the approval prompt.** The prompt folds
   every model-authored field onto the single line a label is, but its own title — `Approve <tool>?`
   — was composed straight out of the tool name and spliced into the pane's top border unfolded. A

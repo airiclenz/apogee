@@ -35,15 +35,51 @@ func (m Model) knownSkillID(id string) bool {
 	return ok
 }
 
-// runSkills routes /skills: re-scan the skill source dirs, then record the catalog as one
-// transcript note. The re-scan is the same live refresh the merged "/" menu edge-triggers on open
-// — ReloadSkills swaps the shared skills.Provider that both this listing and the agent loop
-// read — so a skill added since launch is listed, and because the provider is shared, listed
-// means resolvable. It never launches a worker, so it always returns a nil Cmd.
+// runSkills routes /skills: re-scan the skill source dirs, then record the catalog that scan
+// installed as one transcript note. The re-scan is the same live refresh the merged "/" menu
+// edge-triggers on open — ReloadSkills swaps the shared skills.Provider that both this listing and
+// the agent loop read — so a skill added since launch is listed, and because the provider is
+// shared, listed means resolvable.
+//
+// The walk is dispatched as a Cmd (skillRescanCmd) rather than run here, for the reason the menu's
+// trigger already is: it is a full walk of the source dirs, and on this goroutine it stalls the
+// render loop for the length of that walk (ADR 0011). A report the human asked for is no better a
+// reason to freeze the frame than the keystroke that opens the menu was — and the freeze is longest
+// exactly where the library is biggest. The listing therefore lands on skillsRescannedMsg, over the
+// catalog the completed scan holds. It still launches no worker and touches no engine: the verb
+// answers from disk alone, mid-run as readily as at idle.
+//
+// With no ReloadSkills wired there is nothing to walk, so the listing is a pure read of the catalog
+// as loaded and lands on this loop like /version's note.
 func (m Model) runSkills() (tea.Model, tea.Cmd) {
-	if m.opts.ReloadSkills != nil {
-		m.opts.ReloadSkills() // before the read below: the listing must show what is on disk NOW
+	if rescan := m.skillRescanCmd(skillsRescannedMsg{}); rescan != nil {
+		return m, rescan
 	}
+	m.noteSkillCatalog()
+	return m, nil
+}
+
+// skillsRescannedMsg reports that the catalog re-scan /skills dispatched has finished and the shared
+// skills.Provider now holds the fresh snapshot. Like skillsReloadedMsg (autocomplete.go) it carries
+// no payload — the catalog is read through [Options.Skills], so the message is the SIGNAL that the
+// read is now worth doing rather than the result of it. The two stay separate types because they owe
+// different repaints: the menu's fold re-derives the open dropdown, this one writes the listing the
+// human asked the verb for.
+type skillsRescannedMsg struct{}
+
+// Compile-time assertion that the listing Msg is a valid tea.Msg (mirroring messages.go).
+var _ tea.Msg = skillsRescannedMsg{}
+
+// noteSkillCatalog reads the catalog as it now stands and records it as one transcript note — the
+// /skills report itself. Both ways into the report go through it (the fold of a finished re-scan,
+// model.go, and the inline read runSkills takes when no re-scan is wired), so the two can never come
+// to report different things.
+//
+// Unlike the menu's fold (foldSkillsReloaded) it is owed unconditionally, whatever the frame has
+// become since the verb ran: the note is scrollback rather than an overlay, so a scan landing late
+// cannot paint over a decision surface, and dropping the report the human explicitly asked for would
+// be the worse failure.
+func (m *Model) noteSkillCatalog() {
 	var list []skills.Skill
 	var skipped []skills.SkipError
 	if m.opts.Skills != nil { // nil ⇒ no catalog is wired; the empty note answers that too
@@ -52,7 +88,6 @@ func (m Model) runSkills() (tea.Model, tea.Cmd) {
 	}
 	m.transcript.addNote(skillCatalogNote(list, skipped, m.opts.ConfigHome, m.opts.Workspace))
 	m.layout()
-	return m, nil
 }
 
 // skillCatalogNote renders the /skills report from one scan's halves: the skills that loaded, the

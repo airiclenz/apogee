@@ -874,6 +874,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.foldSkillsReloaded()
 		return m, nil
 
+	case skillsRescannedMsg:
+		// The catalog re-scan /skills dispatched has finished: record the listing over the snapshot
+		// the provider now holds (skills.go). Same walk as the menu's and on the same Cmd goroutine
+		// — the verb no longer freezes the render loop for the length of a disk walk (ADR 0011) —
+		// and the note it writes here is the report the human ran the verb for.
+		m.noteSkillCatalog()
+		return m, nil
+
 	case recallLoadedMsg:
 		// Recall.LoadPrompts() returned (Init's start-up read): install what this workspace has
 		// sent before as the box's recall state (recall.go). It repaints nothing — the entries are

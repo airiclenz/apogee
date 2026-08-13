@@ -71,11 +71,6 @@ those items' own fixes falsified. The hostile-bytes threat model — the operato
 bytes they operate on are not, and neither is the model. Every citation was re-read against the
 working tree on 2026-08-12 and re-verified on 2026-08-13.
 
-- [ ] `/skills` still re-walks the skill source dirs synchronously on the Bubble Tea update
-  goroutine: `runSkills` calls `m.opts.ReloadSkills()` inline (`internal/tui/skills.go:45`). Item
-  12 moved the merged `/` menu's re-scan off that goroutine but left this trigger on it, so the
-  same render-loop block (ADR 0011) survives behind a different key.
-
 - [ ] `promptEditor.reset()` (`internal/tui/prompteditor.go:223`) clears the textarea and the
   autocomplete overlay but not `skillRegion` (`:61`), so submitting on an exact `/skill` token
   leaves the edge-trigger true and the next `/` menu opens with no re-scan — listing a stale

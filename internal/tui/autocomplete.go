@@ -215,25 +215,35 @@ type skillsReloadedMsg struct{}
 // Compile-time assertion that the reload Msg is a valid tea.Msg (mirroring messages.go).
 var _ tea.Msg = skillsReloadedMsg{}
 
-// reloadSkillsCmd builds the Cmd that re-scans the skill source dirs OFF the Update loop and reports
-// the swap as a skillsReloadedMsg. It captures the seam by value so the closure holds no pointer
-// into the value-copied Model (loadRecallCmd's posture, ADR 0011). An unwired [Options.ReloadSkills]
-// yields a nil Cmd, so a build with no refresh schedules nothing at all — the pre-Cmd nil guard,
-// moved one layer out.
+// skillRescanCmd builds the Cmd that re-scans the skill source dirs OFF the Update loop and reports
+// the finished swap as done — the Msg the caller passes, which is what decides which repaint the
+// scan is owed. It captures the seam by value so the closure holds no pointer into the value-copied
+// Model (loadRecallCmd's posture, ADR 0011). An unwired [Options.ReloadSkills] yields a nil Cmd, so
+// a build with no refresh schedules nothing at all — the pre-Cmd nil guard, moved one layer out.
+//
+// Every trigger of the walk is built here — the menu opening (reloadSkillsCmd) and the /skills
+// listing (runSkills, skills.go) — so a re-scan is dispatched in exactly ONE way and no future
+// trigger can quietly acquire its own inline walk or its own capture rule.
 //
 // The host's reload now runs on a Cmd goroutine while the loop goroutine may be resolving skills
 // against the same provider, which is precisely the concurrency that provider is built for: it swaps
 // a whole immutable catalog under an atomic pointer (internal/skills/provider.go), so a reader sees
 // either the old snapshot or the new one and never a torn one.
-func (m Model) reloadSkillsCmd() tea.Cmd {
+func (m Model) skillRescanCmd(done tea.Msg) tea.Cmd {
 	reload := m.opts.ReloadSkills
 	if reload == nil {
 		return nil
 	}
 	return func() tea.Msg {
 		reload()
-		return skillsReloadedMsg{}
+		return done
 	}
+}
+
+// reloadSkillsCmd is the menu's half of the re-scan: the walk dispatched off the Update loop,
+// reported as the skillsReloadedMsg that repaints the open dropdown over the fresh catalog.
+func (m Model) reloadSkillsCmd() tea.Cmd {
+	return m.skillRescanCmd(skillsReloadedMsg{})
 }
 
 // foldSkillsReloaded re-derives the dropdown over the catalog the finished scan installed, so the

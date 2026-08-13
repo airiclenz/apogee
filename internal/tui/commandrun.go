@@ -324,8 +324,10 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "skills":
-		// Synchronous like /version: re-scan the source dirs and print the catalog as a note
-		// (skills.go). No upstream call, no worker — it only reports what discovery found.
+		// Re-scan the source dirs and print the catalog as a note (skills.go). No upstream call and
+		// no worker — it only reports what discovery found — but the walk itself rides a Cmd
+		// goroutine like the merged "/" menu's, so the listing lands on that scan's message rather
+		// than holding the render loop for the length of a disk walk.
 		return m.runSkills()
 
 	case "schedule":
