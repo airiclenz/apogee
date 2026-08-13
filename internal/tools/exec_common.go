@@ -44,10 +44,11 @@ type subprocessSpec struct {
 	// env, when non-nil, is the exact environment the process runs with (each entry
 	// "KEY=value"); nil means it inherits the caller's environment. EVERY tool that runs
 	// something for the MODEL sets it — none of them inherits whole: git and the Go toolchain
-	// take an allowlist scoped by platform.Host.ScopeEnv, while the shell, interpreter and
-	// test-runner tools take subprocessEnv() — the caller's environment minus apogee's own
-	// credentials, because a test suite needs the toolchain variables its user's shell has but
-	// no subprocess of the model's needs apogee's key.
+	// take an allowlist scoped by platform.Host.ScopeEnv; the shell and interpreter tools take
+	// subprocessEnvScopedPath() — the caller's environment minus apogee's own credentials, with
+	// the child's PATH scoped out of the workspace; and the test runner takes subprocessEnv(),
+	// the same minus the credentials, because a test suite needs the toolchain variables its
+	// user's shell has but no subprocess of the model's needs apogee's key.
 	env []string
 	// cmdline, when non-empty, is the verbatim process command line to launch argv with
 	// instead of letting os/exec join it (platform.Shell.CommandLine). It is empty on
@@ -88,6 +89,24 @@ func subprocessEnv(extra ...string) []string {
 		env = append(env, entry)
 	}
 	return append(env, extra...)
+}
+
+// subprocessEnvScopedPath returns subprocessEnv's environment with one further scrub applied to
+// the inherited half: the child's PATH drops every entry that lies inside workspaceRoot and every
+// entry that is not an absolute location (platform.Shell.ScopeInheritedEnv).
+//
+// It is what the tools handing the MODEL a shell or an interpreter take. They inherit the
+// operator's environment because that is the developer tooling they exist to run, but a
+// workspace-resident PATH entry — an activated .venv, node_modules/.bin — would otherwise let
+// bytes the model wrote become the `git`, the `ssh` or the `curl` that the subprocess, or
+// anything it spawns, resolves for itself: the plant-then-exec chain apogee refuses at its own
+// resolution sites (refuseExecFromWritablePath) and cannot check inside somebody else's process.
+//
+// The extras are appended AFTER the scoping — they are apogee's own additions rather than
+// inherited values, and appending keeps them last-wins in the child, which is how every exec
+// implementation resolves a duplicate.
+func subprocessEnvScopedPath(workspaceRoot string, extra ...string) []string {
+	return append(shellHost.ScopeInheritedEnv(workspaceRoot, subprocessEnv()), extra...)
 }
 
 // isApogeeSecretEnv reports whether a "KEY=value" entry names one of apogee's own credentials.

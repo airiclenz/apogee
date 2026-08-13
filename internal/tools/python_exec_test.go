@@ -34,7 +34,7 @@ func withFakeInterpreter(t *testing.T, found bool, path string) {
 func withFakePythonVersion(t *testing.T, major, minor int, ok bool) {
 	t.Helper()
 	orig := interpreterVersion
-	interpreterVersion = func(context.Context, string) (int, int, bool) { return major, minor, ok }
+	interpreterVersion = func(context.Context, string, string) (int, int, bool) { return major, minor, ok }
 	t.Cleanup(func() { interpreterVersion = orig })
 }
 
@@ -60,6 +60,31 @@ func envValue(env []string, key string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// envPathEntries returns the PATH entries of a "KEY=value" environment, split under this host's
+// list separator. The name is matched case-insensitively because Windows spells it Path and
+// resolves the two spellings as one variable.
+func envPathEntries(t *testing.T, env []string) []string {
+	t.Helper()
+	for _, entry := range env {
+		if name, value, ok := strings.Cut(entry, "="); ok && strings.EqualFold(name, "PATH") {
+			return filepath.SplitList(value)
+		}
+	}
+	t.Fatalf("no PATH in the child environment %q", env)
+	return nil
+}
+
+// workspacePATH returns a PATH value shaped like the operator's: one entry inside the workspace
+// (an activated virtualenv), one outside it, and one that is not an absolute location — plus the
+// two it should keep, so a test can tell scoping from wholesale replacement.
+func workspacePATH(t *testing.T, root string) (value, inside, outside string) {
+	t.Helper()
+	inside = filepath.Join(root, ".venv", "bin")
+	outside = filepath.Join(t.TempDir(), "bin")
+	return strings.Join([]string{inside, outside, filepath.Join("relative", "bin")},
+		string(os.PathListSeparator)), inside, outside
 }
 
 func TestPythonExec_Markers(t *testing.T) {
@@ -263,6 +288,59 @@ func TestPythonExec_DropsApogeeCredentialsFromTheChildEnvironment(t *testing.T) 
 	}
 }
 
+// TestPythonExec_ScopesTheWorkspaceOffTheChildPATH pins the second subtraction: the snippet still
+// inherits the operator's environment, but its PATH cannot name a directory the model can write —
+// otherwise a planted .venv/bin becomes the `git` or the `curl` the snippet shells out to.
+func TestPythonExec_ScopesTheWorkspaceOffTheChildPATH(t *testing.T) {
+	// Not parallel: t.Setenv, plus the package-level interpreter/runner swaps.
+	root := t.TempDir()
+	path, inside, outside := workspacePATH(t, root)
+	t.Setenv("PATH", path)
+	t.Setenv("APOGEE_PYTHON_ENV_PROBE", "kept")
+	withFakeInterpreter(t, true, filepath.Join(outside, "python3"))
+	withFakePythonVersion(t, 3, 12, true)
+	captured := withCapturedPythonRun(t)
+
+	if _, err := NewPythonExec(root).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	entries := envPathEntries(t, captured.env)
+	if slices.Contains(entries, inside) {
+		t.Errorf("PATH = %q still names the in-workspace entry %q", entries, inside)
+	}
+	if !slices.Contains(entries, outside) {
+		t.Errorf("PATH = %q dropped the out-of-workspace entry %q; only the workspace is scoped off", entries, outside)
+	}
+	if got := slices.Contains(entries, filepath.Join("relative", "bin")); got {
+		t.Errorf("PATH = %q kept a non-absolute entry, which names a directory inside the child's own cwd", entries)
+	}
+	if value, _ := envValue(captured.env, "APOGEE_PYTHON_ENV_PROBE"); value != "kept" {
+		t.Errorf("APOGEE_PYTHON_ENV_PROBE = %q, want it inherited (only PATH is rewritten)", value)
+	}
+	if last := captured.env[len(captured.env)-1]; last != pythonSafePathVar {
+		t.Errorf("env tail = %q, want %q appended last so it wins over an inherited spelling", last, pythonSafePathVar)
+	}
+}
+
+// TestPythonVersionSpec_ScopesTheWorkspaceOffTheProbePATH covers the interpreter probe, the second
+// subprocess python_exec launches: it runs before the snippet and takes the same environment, so
+// it must not resolve programs out of the workspace either.
+func TestPythonVersionSpec_ScopesTheWorkspaceOffTheProbePATH(t *testing.T) {
+	// Not parallel: t.Setenv.
+	root := t.TempDir()
+	path, inside, outside := workspacePATH(t, root)
+	t.Setenv("PATH", path)
+
+	spec := pythonVersionSpec(filepath.Join(outside, "python3"), root)
+	entries := envPathEntries(t, spec.env)
+	if slices.Contains(entries, inside) {
+		t.Errorf("probe PATH = %q still names the in-workspace entry %q", entries, inside)
+	}
+	if !slices.Contains(entries, outside) {
+		t.Errorf("probe PATH = %q dropped the out-of-workspace entry %q", entries, outside)
+	}
+}
+
 func TestParsePythonVersion(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -306,7 +384,9 @@ func TestPythonExec_WorkspaceDoesNotShadowTheStdlib(t *testing.T) {
 	if !found {
 		t.Skip("no Python interpreter on PATH; the stdlib-shadowing mechanism cannot be exercised here")
 	}
-	major, minor, known := interpreterVersion(context.Background(), interp)
+	// No workspace root: this probe only reports which mechanism the run below exercises, so
+	// there is no box to scope its PATH out of.
+	major, minor, known := interpreterVersion(context.Background(), interp, "")
 	if !known {
 		t.Logf("%s did not report a version; the run below exercises the -I fallback", interp)
 	} else {

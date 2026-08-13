@@ -443,6 +443,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`terminal` and `python_exec` no longer let the workspace supply the programs their child
+  resolves.** Both tools inherit your environment as it stands — that is what makes them usable for
+  real development — and that included a `PATH` naming directories inside the workspace: an
+  activated `<repo>/.venv/bin`, a `node_modules/.bin`. Bytes the model was allowed to write could
+  therefore become the `git`, the `ssh` or the `curl` that a shell line, a Python snippet, or
+  anything either of them spawns resolves for itself — the plant-then-exec chain apogee already
+  refuses at its own resolution sites but cannot check inside somebody else's process. The child's
+  `PATH` now drops every entry resolving inside the workspace root, plus every entry that is not an
+  absolute location (an empty or relative entry names a directory inside the child's own working
+  directory, which is the workspace itself). Everything else is inherited exactly as before, only
+  apogee's own credentials are still removed, `PYTHONSAFEPATH` still wins over an inherited
+  spelling, and python's interpreter-version probe is scoped the same way. The per-entry rule is
+  the one the git tools and the Go toolchain already applied through `platform.Host.ScopeEnv`; it
+  simply had no shape that fitted a tool inheriting everything, and now it does
+  (`platform.Host.ScopeInheritedEnv`). `run_tests` deliberately keeps the unscoped inheritance its
+  repo-authored runners need — a workspace-resident `node_modules/.bin/jest` IS the test command
+  there.
+
 - **`run_tests` no longer hands the project's test runner apogee's own API key.** It was the one
   execution tool that gave its child the parent environment whole — `terminal` and `python_exec`
   both strip `APOGEE_API_KEY` before they start anything for the model, but the test runner got it,

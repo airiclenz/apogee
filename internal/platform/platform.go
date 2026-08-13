@@ -57,6 +57,23 @@ type Shell interface {
 	// children cannot resolve a program out of the box the model can write. An empty
 	// workspaceRoot scopes nothing — a caller with no workspace has no fence to apply.
 	ScopeEnv(workspaceRoot string, keys []string, lookup func(string) (string, bool)) []string
+
+	// ScopeInheritedEnv returns env — a whole inherited environment, each entry
+	// "KEY=value" — with exactly one value rewritten: PATH, scoped to workspaceRoot
+	// under the same per-entry rule ScopeEnv applies (entries inside the workspace,
+	// and entries that are not absolute locations, are dropped). Every other variable
+	// is passed through byte for byte, in the order given, and an entry that is not a
+	// "KEY=value" pair at all is passed through as it stands.
+	//
+	// It is the shape ScopeEnv cannot express. The tools that hand the MODEL a shell
+	// or an interpreter inherit the operator's environment whole — an allowlist there
+	// would break the developer tooling they exist to run — but the box the model can
+	// write must still not supply the programs their children resolve, which is the
+	// half of the exec fence that happens inside somebody else's process. PATH is
+	// matched the way the OS resolves it: case-insensitively on Windows, where Path
+	// and PATH are one variable, and exactly on POSIX, where they are two. An empty
+	// workspaceRoot scopes nothing and returns env as it stands.
+	ScopeInheritedEnv(workspaceRoot string, env []string) []string
 }
 
 // Path abstracts the one path semantic the standard library's path/filepath does

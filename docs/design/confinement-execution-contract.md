@@ -424,6 +424,17 @@ one level down (D2), for free, with no threading.
 > ergonomics cost — an activated `<repo>/.venv/bin/python3` or `node_modules/.bin` is refused, with
 > no switch — is accepted and recorded in `ISSUES.md` L5.
 
+> **Amended 2026-08-13 (the shell and the interpreter scope their child's `PATH` too;
+> hostile-bytes residuals, item 2).** The scrub above reached only the allowlisted environments:
+> `terminal` and `python_exec` inherit the operator's environment whole — minus apogee's own
+> credentials — because an allowlist would break the developer tooling they exist to run, and
+> `ScopeEnv` cannot express "everything inherited, with only `PATH` scoped". It now has a
+> counterpart that can: `platform.Host.ScopeInheritedEnv` applies the same per-entry `PATH` rule
+> to a whole inherited environment, and both tools (including python's interpreter-version probe)
+> take `subprocessEnvScopedPath(root, …)`. `run_tests` deliberately keeps the unscoped inheritance
+> its repo-authored runners need — a workspace-resident `node_modules/.bin/jest` IS the test
+> command there.
+
 A Resolution is one of five **kinds** — `Run` · `Confine` · `Gate` · `Refuse` · `Delegate` —
 computed in a fixed, load-bearing order:
 

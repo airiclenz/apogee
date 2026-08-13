@@ -115,13 +115,6 @@ working tree on 2026-08-12 and re-verified on 2026-08-13.
   never match — confirmed inert on the desktop persona. The newer `write-apogee-control-plane` rule
   (`:104`) already spells the macOS home; these two were not updated alongside it.
 
-- [ ] `terminal` (`internal/tools/terminal.go:98`) and `python_exec`
-  (`internal/tools/python_exec.go:110`, `:241`) still inherit an unscoped `PATH` through
-  `subprocessEnv` (`internal/tools/exec_common.go:80`), which strips only apogee's own credentials.
-  PATH scoping — `shellHost.ScopeEnv`, which drops the entries that live inside the workspace —
-  landed for git (`internal/tools/git.go:82`) and the Go toolchain
-  (`internal/tools/diagnostics.go:308`) only.
-
 - [ ] `/skills` still re-walks the skill source dirs synchronously on the Bubble Tea update
   goroutine: `runSkills` calls `m.opts.ReloadSkills()` inline (`internal/tui/skills.go:45`). Item
   12 moved the merged `/` menu's re-scan off that goroutine but left this trigger on it, so the

@@ -145,6 +145,40 @@ func (r hostRules) ScopeEnv(workspaceRoot string, keys []string, lookup func(str
 	return out
 }
 
+// ScopeInheritedEnv returns env with its PATH value scoped to workspaceRoot and every other
+// entry untouched — the whole-environment counterpart to ScopeEnv's allowlist, for the callers
+// that must inherit everything and still not let the workspace supply their child's programs.
+//
+// The per-entry PATH rule is scopePathValue's, so the two callers scope identically; what
+// differs is only which VARIABLES survive, which is not this method's business. An entry
+// carrying no "=" is not a variable this can judge, so it is passed through rather than dropped.
+func (r hostRules) ScopeInheritedEnv(workspaceRoot string, env []string) []string {
+	if workspaceRoot == "" {
+		return env
+	}
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || !r.isPathName(key) {
+			out = append(out, entry)
+			continue
+		}
+		out = append(out, key+"="+r.scopePathValue(value, workspaceRoot))
+	}
+	return out
+}
+
+// isPathName reports whether key names the PATH variable under this platform's rules. Windows
+// environment names are case-insensitive, so Path and PATH are one variable there and both
+// spellings must be scoped; on POSIX they are two variables, and only the exact spelling is the
+// one a child resolves its programs through.
+func (r hostRules) isPathName(key string) bool {
+	if r.windows {
+		return strings.EqualFold(key, "PATH")
+	}
+	return key == "PATH"
+}
+
 // scopePathValue returns a PATH value with every entry that lies inside workspaceRoot removed,
 // plus every entry that is not absolute — an empty entry and a relative one both name a
 // directory relative to the CHILD's working directory, which for every subprocess apogee

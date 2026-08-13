@@ -219,6 +219,58 @@ func TestScopeEnvKeepsTheCallersAllowlistAndAddsThePlatformFloor(t *testing.T) {
 	})
 }
 
+// TestScopeInheritedEnvScopesOnlyPATH pins the whole-environment scrub the shell and interpreter
+// tools take: they inherit everything the operator has, so the ONE thing that may be rewritten is
+// where their child resolves programs from. Rewriting anything else would break the developer
+// tooling those tools exist to run.
+func TestScopeInheritedEnvScopesOnlyPATH(t *testing.T) {
+	t.Parallel()
+
+	t.Run("posix scopes PATH and passes everything else through", func(t *testing.T) {
+		t.Parallel()
+		env := []string{
+			"PATH=/work/repo/.venv/bin:/usr/bin:/work/repo2/bin:bin::/work/repo",
+			"HOME=/home/u",
+			// Two variables on POSIX: only the exact spelling is the one the child resolves
+			// programs through, so this one keeps its workspace entry.
+			"Path=/work/repo/bin",
+			"NOT_A_PAIR",
+		}
+		got := posixRules().ScopeInheritedEnv("/work/repo", env)
+		want := []string{
+			"PATH=/usr/bin:/work/repo2/bin",
+			"HOME=/home/u",
+			"Path=/work/repo/bin",
+			"NOT_A_PAIR",
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("ScopeInheritedEnv() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("windows scopes the Path spelling too", func(t *testing.T) {
+		t.Parallel()
+		env := []string{
+			`Path=C:\work\repo\.venv\Scripts;C:\Windows\system32;work\bin`,
+			`SystemRoot=C:\WINDOWS`,
+		}
+		got := windowsRules().ScopeInheritedEnv(`C:\work\repo`, env)
+		want := []string{`Path=C:\Windows\system32`, `SystemRoot=C:\WINDOWS`}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("ScopeInheritedEnv() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("an unscoped call passes the environment through", func(t *testing.T) {
+		t.Parallel()
+		env := []string{"PATH=/work/repo/.venv/bin:/usr/bin"}
+		got := posixRules().ScopeInheritedEnv("", env)
+		if !reflect.DeepEqual(got, env) {
+			t.Errorf("ScopeInheritedEnv(\"\") = %q, want the environment untouched", got)
+		}
+	})
+}
+
 func TestScopeEnvDefaultsToTheProcessEnvironment(t *testing.T) {
 	// No t.Parallel: t.Setenv mutates process state.
 	t.Setenv("APOGEE_SCOPEENV_PROBE", "set")

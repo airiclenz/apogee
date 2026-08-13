@@ -95,24 +95,33 @@ const (
 )
 
 // interpreterVersion reports interp's own (major, minor) version, with ok=false when the probe
-// could not be run or its output could not be read. It is a package var so a test can pin
-// either side of the 3.11 boundary without depending on the Python the host happens to ship.
-//
-// The probe runs in the INTERPRETER's own directory rather than the workspace: the exec fence
-// has already refused an interpreter resolving inside a model-writable path, so that directory
-// holds bytes the model cannot have authored — and the working directory is precisely what
-// would otherwise front sys.path for the -c program.
-var interpreterVersion = func(ctx context.Context, interp string) (major, minor int, ok bool) {
-	res, err := runSubprocess(ctx, subprocessSpec{
-		argv:    []string{interp, "-c", pythonVersionProgram},
-		dir:     filepath.Dir(interp),
-		timeout: pythonVersionProbeTimeout,
-		env:     subprocessEnv(),
-	})
+// could not be run or its output could not be read. workspaceRoot is the box the probe's own
+// PATH is scoped out of (pythonVersionSpec). It is a package var so a test can pin either side
+// of the 3.11 boundary without depending on the Python the host happens to ship.
+var interpreterVersion = func(ctx context.Context, interp, workspaceRoot string) (major, minor int, ok bool) {
+	res, err := runSubprocess(ctx, pythonVersionSpec(interp, workspaceRoot))
 	if err != nil || res.exitCode != 0 {
 		return 0, 0, false
 	}
 	return parsePythonVersion(res.combinedOutput)
+}
+
+// pythonVersionSpec is the version probe's subprocess spec, named so a test can read the
+// environment it builds without launching an interpreter.
+//
+// The probe runs in the INTERPRETER's own directory rather than the workspace: the exec fence
+// has already refused an interpreter resolving inside a model-writable path, so that directory
+// holds bytes the model cannot have authored — and the working directory is precisely what
+// would otherwise front sys.path for the -c program. Its environment is the same one the
+// snippet itself gets (minus PYTHONSAFEPATH, which only matters for the snippet): inherited,
+// less apogee's credentials, with the workspace scoped off PATH.
+func pythonVersionSpec(interp, workspaceRoot string) subprocessSpec {
+	return subprocessSpec{
+		argv:    []string{interp, "-c", pythonVersionProgram},
+		dir:     filepath.Dir(interp),
+		timeout: pythonVersionProbeTimeout,
+		env:     subprocessEnvScopedPath(workspaceRoot),
+	}
 }
 
 // parsePythonVersion reads a "major.minor" pair out of a probe's combined output. It takes the
@@ -173,8 +182,9 @@ var runPythonSubprocess = runSubprocess
 //
 // The snippet runs in the workspace but never IMPORTS from it: the load-path policy above keeps
 // the working directory off sys.path, so the standard library a snippet asks for is the one it
-// gets. The interpreter inherits the caller's environment minus apogee's own credentials
-// (subprocessEnv), which the model's snippet has no use for.
+// gets. The interpreter inherits the caller's environment minus apogee's own credentials, which
+// the model's snippet has no use for, and with the workspace scoped off its PATH so a planted
+// .venv/bin cannot supply the programs the snippet shells out to (subprocessEnvScopedPath).
 type PythonExec struct {
 	toolSpec
 	root string
@@ -234,11 +244,11 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	// Both are decided here rather than in the snippet, so nothing is injected into the `code`
 	// the operator approved.
 	spec := subprocessSpec{
-		argv:    pythonArgv(interp, !honoursSafePath(interpreterVersion(ctx, interp))),
+		argv:    pythonArgv(interp, !honoursSafePath(interpreterVersion(ctx, interp, t.root))),
 		dir:     dir,
 		timeout: time.Duration(args.TimeoutSeconds) * time.Second,
 		stdin:   args.Code,
-		env:     subprocessEnv(pythonSafePathVar),
+		env:     subprocessEnvScopedPath(t.root, pythonSafePathVar),
 	}
 	res, err := runPythonSubprocess(ctx, spec)
 	if err != nil {

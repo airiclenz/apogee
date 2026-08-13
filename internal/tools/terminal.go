@@ -39,8 +39,10 @@ type terminalArgs struct {
 // unavailable ("confine if you can, gate if you can't"). It is stateless across Turns
 // (ADR 0008) — a fresh process per call, no persistent shell — and is path-scoped to root
 // for its working directory. The command line runs in the operator's own environment, minus
-// apogee's own credentials (subprocessEnv): a shell line the model chose has no use for the key
-// apogee authenticates to its inference server with.
+// apogee's own credentials and with its PATH scoped out of the workspace
+// (subprocessEnvScopedPath): a shell line the model chose has no use for the key apogee
+// authenticates to its inference server with, and must not resolve its programs out of the box
+// the model can write.
 type Terminal struct {
 	toolSpec
 	root string
@@ -56,6 +58,11 @@ func (t *Terminal) ReadOnly() bool { return false }
 // Subprocess reports that terminal launches an OS subprocess — the marker the disposition
 // keys on to confine it in Auto rather than gating it (domain.SubprocessTool).
 func (t *Terminal) Subprocess() bool { return true }
+
+// runTerminalSubprocess runs the shell command (a package var so a test can capture the exact
+// argv and environment this tool builds without launching one — the shape python_exec and
+// run_tests already use).
+var runTerminalSubprocess = runSubprocess
 
 // Execute runs the command line through the platform shell, honouring ctx cancellation and
 // the confinement handle the disposition installed (if any). A command line the target shell
@@ -94,10 +101,12 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		dir:     dir,
 		timeout: time.Duration(args.TimeoutSeconds) * time.Second,
 		// The command line runs in the operator's own environment — minus apogee's
-		// credentials, which a model-chosen command line has no use for and could exfiltrate.
-		env: subprocessEnv(),
+		// credentials, which a model-chosen command line has no use for and could exfiltrate,
+		// and minus the PATH entries that resolve inside the workspace, which would let the
+		// model plant the programs its own command line then executes.
+		env: subprocessEnvScopedPath(t.root),
 	}
-	res, err := runSubprocess(ctx, spec)
+	res, err := runTerminalSubprocess(ctx, spec)
 	if err != nil {
 		return domain.ToolResult{}, err
 	}

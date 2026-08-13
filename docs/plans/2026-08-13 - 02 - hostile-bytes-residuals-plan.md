@@ -106,7 +106,10 @@ behaviour: `run_tests.go:247-250` (which documents the nil-env inheritance as de
 
 **Commit:** `fix(tools): run_tests no longer hands the test runner apogee credentials`
 
-## 2. `terminal` and `python_exec` scope PATH away from the workspace
+## 2. `terminal` and `python_exec` scope PATH away from the workspace — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): also amended `docs/design/confinement-execution-contract.md` (not in the item's Files list) — its 2026-08-12 amendment names `ScopeEnv`/git/Go as the whole of the child-side PATH scrub, which this item widens, so a new dated amendment paragraph records the `ScopeInheritedEnv` counterpart and why `run_tests` is excepted.
+NOTES (2026-08-13): under the item's seam latitude, `interpreterVersion` gained a `workspaceRoot` parameter and its spec moved into a new `pythonVersionSpec` helper (the probe at the old `python_exec.go:110` needs the root to scope against, and a callable seam to assert its environment without launching an interpreter), and `terminal.go` gained a `runTerminalSubprocess` package var mirroring `runPythonSubprocess`/`runTestsSubprocess` so the shell tool's spec is capturable on every platform.
 
 **What:** `terminal` (`internal/tools/terminal.go:98`) and `python_exec`
 (`internal/tools/python_exec.go:110`, `:241`) inherit an unscoped `PATH` through

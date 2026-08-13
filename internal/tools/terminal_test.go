@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,6 +117,50 @@ func TestTerminal_DropsApogeeCredentialsFromTheChildEnvironment(t *testing.T) {
 	}
 	if !strings.Contains(res.Content, "path=[set]") {
 		t.Errorf("output = %q, want PATH still inherited", res.Content)
+	}
+}
+
+// withCapturedTerminalRun swaps the shell runner for one that records the spec and launches
+// nothing, so a test can pin the exact environment the tool builds on every platform.
+func withCapturedTerminalRun(t *testing.T) *subprocessSpec {
+	t.Helper()
+	orig := runTerminalSubprocess
+	var captured subprocessSpec
+	runTerminalSubprocess = func(_ context.Context, spec subprocessSpec) (subprocessResult, error) {
+		captured = spec
+		return subprocessResult{}, nil
+	}
+	t.Cleanup(func() { runTerminalSubprocess = orig })
+	return &captured
+}
+
+// TestTerminal_ScopesTheWorkspaceOffTheChildPATH pins the second subtraction the shell tool makes
+// from the operator's environment (the first is apogee's credentials): a PATH entry that resolves
+// inside the workspace is dropped, so a `git` or a `curl` the model planted in the box cannot be
+// what the command line — or anything it spawns — resolves. Everything else is still inherited.
+func TestTerminal_ScopesTheWorkspaceOffTheChildPATH(t *testing.T) {
+	// Not parallel: t.Setenv, plus the package-level runner swap.
+	root := t.TempDir()
+	path, inside, outside := workspacePATH(t, root)
+	t.Setenv("PATH", path)
+	t.Setenv("APOGEE_TERMINAL_ENV_PROBE", "kept")
+
+	captured := withCapturedTerminalRun(t)
+	if _, err := NewTerminal(root).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	entries := envPathEntries(t, captured.env)
+	if slices.Contains(entries, inside) {
+		t.Errorf("PATH = %q still names the in-workspace entry %q", entries, inside)
+	}
+	if !slices.Contains(entries, outside) {
+		t.Errorf("PATH = %q dropped the out-of-workspace entry %q; only the workspace is scoped off", entries, outside)
+	}
+	if slices.Contains(entries, filepath.Join("relative", "bin")) {
+		t.Errorf("PATH = %q kept a non-absolute entry, which names a directory inside the child's own cwd", entries)
+	}
+	if value, _ := envValue(captured.env, "APOGEE_TERMINAL_ENV_PROBE"); value != "kept" {
+		t.Errorf("APOGEE_TERMINAL_ENV_PROBE = %q, want it inherited (only PATH is rewritten)", value)
 	}
 }
 
