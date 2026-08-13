@@ -104,6 +104,11 @@ type Settings struct {
 	// `auto-title: false`.
 	AutoTitle bool
 
+	// rememberModel gates remembering the model choice: the write into the session's `servers:`
+	// entry on an explicit pick, and the TUI's startup restore of what was recorded. File-only, and
+	// default FALSE — writing back into the human's own config is opted into, never assumed.
+	RememberModel bool
+
 	// contextWindow PINS the model context window in tokens (item 3 / S3). File-only (no flag/env,
 	// like autoCompact) and default 0 ⇒ unpinned, so the window is whatever the ten-second
 	// heartbeat observes, live, and follows a model switch with it; a positive value is never
@@ -490,6 +495,12 @@ type Layer struct {
 	// `auto-title: false` is distinguishable from an absent key (which keeps the default true).
 	AutoTitle *bool
 
+	// rememberModel is set only by the FILE layer (the toggle is config'd, with no flag/env — like
+	// autoTitle above). A pointer so an explicit `remember-model: false` is distinguishable from an
+	// absent key; both resolve to off, and the distinction is what tells /settings which of the two
+	// the file says.
+	RememberModel *bool
+
 	// contextWindow is set only by the FILE layer (the window pin is config'd, no flag/env — like
 	// autoCompact). A nil pointer means the source pins no window, so resolution leaves it 0 and
 	// the heartbeat's live observation stands; only a positive `context-window:` projects to a
@@ -680,6 +691,9 @@ func ResolveSettings(file, env, flag Layer, hostID string) (Settings, []string) 
 	}
 	if file.AutoTitle != nil {
 		s.AutoTitle = *file.AutoTitle
+	}
+	if file.RememberModel != nil {
+		s.RememberModel = *file.RememberModel
 	}
 	if file.ContextWindow != nil {
 		s.ContextWindow = *file.ContextWindow
@@ -890,6 +904,16 @@ type fileConfig struct {
 	// this one is cosmetic — with it off the heuristic title stands and `/rename` still regenerates
 	// on demand, because the key gates only the automatic firing, not the generator.
 	AutoTitle *bool `yaml:"auto-title"`
+	// RememberModel gates BOTH halves of remembering a model choice: the WRITE apogee makes back
+	// into THIS file when the user picks a model explicitly — the picked id into the session's
+	// `servers:` entry's `model:` on a plain server, the loaded profile's name into that entry's
+	// `launch-profile:` on a launcher-fronted one — and the TUI's startup RESTORE of what was
+	// recorded. File-only (no flag/env), and a pointer for the reason auto-title is one; the default
+	// is the other way round though: absent ⇒ OFF, because writing a session's choices back into a
+	// hand-written config is a thing to ask for rather than to discover. Only an explicit pick
+	// records — a rebind the heartbeat merely observed, and the one-shot `--model`/`APOGEE_MODEL`
+	// overrides, never do.
+	RememberModel *bool `yaml:"remember-model"`
 	// ContextWindow PINS the model context window in tokens (item 3 / S3). File-only (no flag/env),
 	// like auto-compact. Absent or ≤ 0 ⇒ unpinned, so the window follows what the ten-second
 	// heartbeat observes, live, across a model switch; a positive value is never overridden by a
@@ -1106,6 +1130,17 @@ type UnconfinedHost struct {
 // it earns its keep exactly where the derivation cannot reach — a cloud endpoint advertises no
 // window at all, so the reserve it would derive from is unknown and the cap falls to its clamp
 // floor; the pin is the only way to let such a server answer at length.
+//
+// LaunchProfile names the llama-launcher Launch profile the interactive TUI comes back on when it
+// starts on this entry and nothing is serving there yet. apogee writes it itself on a profile-load
+// commit while `remember-model:` is on — which is what makes "pick a model, come back on it
+// tomorrow" true of a launcher-fronted server — and it is as hand-settable as any other key here,
+// so a config can arrive with the choice already made. It rides an entry that carries
+// `llama-launcher:`, because the profile is loaded THROUGH that launcher and an entry with none has
+// nothing to actuate it (ValidateServers refuses that pairing). A plain multi-model server records
+// its choice in `model:` instead: same feature, the key each server class already has for it.
+// Whether the named profile still EXISTS is not asked here — the launcher's config is read fresh at
+// use time (ADR 0029 D4), so a profile renamed since is a note at startup, not a refusal to start.
 type ServerEntry struct {
 	Name            string          `yaml:"name"`
 	Endpoint        string          `yaml:"endpoint"`
@@ -1115,6 +1150,7 @@ type ServerEntry struct {
 	PlaintextKeyOK  bool            `yaml:"plaintext-key-ok,omitempty"`
 	Model           string          `yaml:"model,omitempty"`
 	LlamaLauncher   string          `yaml:"llama-launcher,omitempty"`
+	LaunchProfile   string          `yaml:"launch-profile,omitempty"`
 	ParallelAgents  int             `yaml:"parallel-agents,omitempty"`
 	SubAgents       bool            `yaml:"sub-agents,omitempty"`
 	Bypass          *bool           `yaml:"bypass,omitempty"`
@@ -1155,6 +1191,15 @@ type ServerEntry struct {
 // would let two files mean the same thing differently. Whether the named file EXISTS is
 // deliberately not asked — a launcher config is a property of the machine rather than of the
 // config that travels between machines, so a missing one degrades at the verb that wants it.
+//
+// The entry's optional `launch-profile:` pointer carries two defects of its own, on that same
+// reasoning. A value that is only whitespace reads as configured while naming no profile. And a
+// pointer on an entry with no `llama-launcher:` key is refused because nothing there could ever
+// actuate it: the profile is loaded through the launcher, so the pair is what makes the key mean
+// anything, and a lone pointer is a defect in the file rather than a preference to honour silently.
+// Whether the named profile EXISTS is deliberately not asked, for the reason the launcher config's
+// own existence is not: the launcher's file is a property of the machine and is read fresh at use
+// time, so a profile that has since been renamed is answered by the startup restore with a note.
 //
 // The entry's optional `parallel-agents:` value is checked for the one defect it can carry: a
 // negative cap. Absent and 0 are the same state (discover — yaml cannot distinguish them) and any
@@ -1224,6 +1269,19 @@ func ValidateServers(servers []ServerEntry) error {
 				return fmt.Errorf("apogee: servers: entry %d (%q): llama-launcher: %q looks like a URL — "+
 					"this key takes auto or the path of a LOCAL llama-launcher config file; a launcher on "+
 					"another machine is reached as an mcp-servers: entry instead", i+1, s.Name, launcher)
+			}
+		}
+		if profile := s.LaunchProfile; profile != "" {
+			switch {
+			case strings.TrimSpace(profile) == "":
+				return fmt.Errorf("apogee: servers: entry %d (%q): launch-profile: is only whitespace — name "+
+					"the llama-launcher launch profile this server should come back on, or remove the key to "+
+					"start on whatever the server already has loaded", i+1, s.Name)
+			case strings.TrimSpace(s.LlamaLauncher) == "":
+				return fmt.Errorf("apogee: servers: entry %d (%q): launch-profile: %q without a "+
+					"llama-launcher: key — a launch profile is loaded THROUGH the launcher, so on an entry "+
+					"apogee cannot launch there is nothing to actuate it; add llama-launcher: auto, or name "+
+					"the model with model: instead", i+1, s.Name, profile)
 			}
 		}
 		if s.ParallelAgents < 0 {
@@ -1631,6 +1689,9 @@ func (fc fileConfig) layer() Layer {
 	if fc.AutoTitle != nil {
 		l.AutoTitle = fc.AutoTitle
 	}
+	if fc.RememberModel != nil {
+		l.RememberModel = fc.RememberModel
+	}
 	if fc.ContextWindow > 0 {
 		l.ContextWindow = &fc.ContextWindow
 	}
@@ -2029,6 +2090,7 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	opts.UseProjectSkills = s.UseProjectSkills
 	opts.AutoCompact = s.AutoCompact
 	opts.AutoTitle = s.AutoTitle
+	opts.RememberModel = s.RememberModel
 	opts.ContextWindow = s.ContextWindow
 	opts.MCPServers = s.MCPServers
 	opts.ToolsDisabled = s.ToolsDisabled

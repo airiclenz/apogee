@@ -125,6 +125,23 @@
 #              file, so a profile you add in the launcher's own TUI is offered by the next
 #              /model. A launcher running on ANOTHER machine is a different thing: reach that one
 #              as an mcp-servers: entry below; the two compose.
+#   launch-profile
+#              the launch profile this launcher-fronted server comes back on: with
+#              remember-model: true above, apogee writes the profile you load with /model here, and
+#              the next start loads it again for you — but only when nothing is serving on that
+#              launcher yet, so a model you started by hand, or left running, is joined rather than
+#              stacked on top of. Set it by hand to choose the profile a fresh machine starts with.
+#              It rides an entry that carries llama-launcher: (the profile is loaded THROUGH the
+#              launcher, so an entry apogee cannot launch has nothing to actuate it, and apogee says
+#              so at startup); a plain multi-model server records its choice in model: instead, and
+#              a launcher-fronted entry leaves model: empty. Whether the profile still exists is not
+#              checked at startup — the launcher's own config is re-read every time, so a profile
+#              you renamed since is reported in the transcript and the restore is skipped.
+#
+#                launch-profile: gpt-oss-20b
+#
+#              llama-launcher's own config is never written by apogee: this pointer is apogee's
+#              record of your choice, not a change to the launcher's profiles.
 #   parallel-agents
 #              how many sub-agents this server may run at once. When one model reply asks for
 #              several delegations, apogee runs up to this many of them side by side instead of
@@ -408,6 +425,19 @@ system-prompt-text: |
 # naming — /rename still sets a title by hand, and bare /rename still asks the model for one.
 # Config-file only (no flag or env). Default: true.
 # auto-title: false
+
+# =============================================================================
+# Come back on the model you were using. With this on, picking a model with /model is remembered:
+# apogee writes the choice into the servers: entry the session is on — into that entry's model: key
+# on an ordinary multi-model server, and into its launch-profile: key (below) on a server fronted by
+# llama-launcher — so the next start binds the same model, and a launcher-fronted server has the
+# profile loaded again for you when nothing is serving there yet. Only a pick YOU made is recorded:
+# a model swapped under a running session (which apogee follows within ten seconds either way) is
+# not, and neither are the one-shot --model / APOGEE_MODEL overrides. llama-launcher's own config is
+# never written — the pointer lives here, in apogee's file. /unload-model and /stop-server leave it
+# alone: they free the GPU, they do not forget what you were on. Config-file only (no flag or env).
+# Default: false.
+# remember-model: true
 
 # =============================================================================
 # The model's context window in tokens. This one IS a pin: the ten-second heartbeat never overrides

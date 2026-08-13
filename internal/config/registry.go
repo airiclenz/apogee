@@ -250,6 +250,11 @@ var KeyRegistry = []Key{
 		Desc:     "Name a new session from its first prompt with one small extra completion.",
 	},
 	{
+		Path: "remember-model", Kind: KindBool, Default: "false",
+		Editable: true,
+		Desc:     "Record the model you pick into its servers: entry and come back on it next start.",
+	},
+	{
 		Path: "context-window", Kind: KindInt, Default: "0",
 		Editable: true,
 		Validate: validateContextWindow,

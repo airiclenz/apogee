@@ -54,7 +54,10 @@ Precedents to imitate, per item: `/server`'s choice recording
 `cmd/apogee/wire_verbs.go:145-155`, wired at `cmd/apogee/wire_options.go:80`) and
 the actuation latch (`internal/tui/actuation.go`).
 
-## 1. Config schema: `remember-model` toggle and `launch-profile` pointer
+## 1. Config schema: `remember-model` toggle and `launch-profile` pointer — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the registry row and the `/settings` value formatter for `remember-model` — item 6's first two bullets — had to land WITH the schema key, not after it: `TestRegistryIsBijectionWithFileConfig` fails the moment a `fileConfig` field has no registry row (so item 1's own `go test ./internal/config/` acceptance could not pass without it), and `TestSettingValuesCoverEveryRegistryKey` plus the pinned value table in `cmd/apogee/settingsrows_test.go` fail the moment a registry row has no formatter (which would have left `./cmd/apogee/` red for items 3–5). That formatter needs a value to read, so the ordinary resolution chain for a file-only toggle came with it: `fileConfig` → `Layer` → `Settings` → `Options`. Item 6 is left with its live-apply check and its own tests; its registry and pane rows are already in place. Out of item-1 scope by the plan's own Files line: `internal/config/registry.go`, `internal/config/options.go`, `cmd/apogee/settingsrows.go`, `cmd/apogee/settingsrows_test.go`.
+NOTES (2026-08-13): `launch-profile:` is documented in the per-server key documentation block (with an inline `launch-profile: gpt-oss-20b` example) rather than added to the commented `# servers:` example entry — that entry is launcher-fronted AND carries `model:`, and showing a pointer beside it would teach the pairing design call 5 refuses.
 
 **What:** In `internal/config/config.go`:
 

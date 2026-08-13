@@ -10,6 +10,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **apogee can be told to remember which model you were on.** The schema half of it lands first: a
+  top-level `remember-model:` toggle, off by default, which gates both halves of the feature — the
+  write apogee makes back into this file when you pick a model explicitly, and the restore the
+  interactive TUI does at the next start — and a per-server `launch-profile:` pointer, the key a
+  launcher-fronted entry records its Launch profile in (a plain multi-model server keeps recording
+  into the `model:` key it already has, and llama-launcher's own config is never written). Both keys
+  are hand-settable too, and the pointer is checked at startup like every other entry key: one on an
+  entry with no `llama-launcher:` key is refused, because a profile is loaded THROUGH the launcher
+  and an entry apogee cannot launch has nothing to actuate it, and a whitespace-only value is
+  refused on the reasoning `llama-launcher:` already carried. Whether the named profile still exists
+  is deliberately not asked here — the launcher's config is read fresh at use time. Nothing records
+  or restores yet; the toggle shows up in `/settings` and the keys parse.
+
 - **The naming call's prompt assets now state what an edit to them costs.**
   `internal/title/prompts/` gained the wording-drift README the probe battery's assets already
   carry: re-word one of these files and every session named from then on is named by a different

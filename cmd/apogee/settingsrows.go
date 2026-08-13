@@ -119,6 +119,7 @@ var settingValues = map[string]func(config.Options) string{
 	"use-project-skills": func(o config.Options) string { return boolValue(o.UseProjectSkills) },
 	"auto-compact":       func(o config.Options) string { return boolValue(o.AutoCompact) },
 	"auto-title":         func(o config.Options) string { return boolValue(o.AutoTitle) },
+	"remember-model":     func(o config.Options) string { return boolValue(o.RememberModel) },
 	"context-window":     func(o config.Options) string { return strconv.Itoa(o.ContextWindow) },
 	"present.auto-open":  func(o config.Options) string { return boolValue(o.Present.AutoOpen) },
 	"present.command":    func(o config.Options) string { return o.Present.Command },

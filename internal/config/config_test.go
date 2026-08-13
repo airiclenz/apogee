@@ -1326,6 +1326,41 @@ func TestApplyConfigAutoTitle(t *testing.T) {
 	}
 }
 
+// The remember-model config block parses into opts.rememberModel: a file-only key like auto-title,
+// with the default the other way round — absent ⇒ OFF, so a config that says nothing has apogee
+// write nothing back into it. The seeded template is in the table for the same reason it is in
+// auto-title's: the key ships commented, so a first run must land on the same default as an empty
+// file.
+func TestApplyConfigRememberModel(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		fileYAML string
+		want     bool
+	}{
+		{name: "absent key ⇒ off", want: false},
+		{name: "an explicit true opts in", fileYAML: "remember-model: true\n", want: true},
+		{name: "an explicit false is the default, said out loud", fileYAML: "remember-model: false\n", want: false},
+		{name: "the seeded template resolves the default", fileYAML: string(defaultConfigYAML), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			if tt.fileYAML != "" {
+				writeConfigHome(t, home, tt.fileYAML)
+			}
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.RememberModel != tt.want {
+				t.Errorf("opts.rememberModel = %v; want %v", opts.RememberModel, tt.want)
+			}
+		})
+	}
+}
+
 // The context-window config block parses into opts.contextWindow (item 3): a file-only key (no
 // flag/env). This proves the config-file surface lands in opts; the downstream opts →
 // ContextConfig.MaxContextTokens threading (which the Budget and Compaction bind against) is
@@ -1492,6 +1527,26 @@ server: workstation
 				{Name: "workstation", Endpoint: "http://192.168.64.1:1111", LlamaLauncher: "auto"},
 				{Name: "rented-box", Endpoint: "https://llm.example.com", LlamaLauncher: "~/elsewhere/launcher.yaml"},
 				{Name: "openrouter", Endpoint: "https://openrouter.ai/api/v1"},
+			},
+		},
+		{
+			// The recorded launch profile rides the entry whose launcher loads it, and reaches the
+			// root as written: whether that profile still exists is asked at use time, not here.
+			name: "the optional launch-profile pointer travels per entry, as written",
+			configYAML: `servers:
+  - name: workstation
+    endpoint: http://192.168.64.1:1111
+    llama-launcher: auto
+    launch-profile: gpt-oss-20b
+  - name: laptop
+    endpoint: http://127.0.0.1:1111
+    llama-launcher: ~/elsewhere/launcher.yaml
+server: workstation
+`,
+			want: []ServerEntry{
+				{Name: "workstation", Endpoint: "http://192.168.64.1:1111", LlamaLauncher: "auto",
+					LaunchProfile: "gpt-oss-20b"},
+				{Name: "laptop", Endpoint: "http://127.0.0.1:1111", LlamaLauncher: "~/elsewhere/launcher.yaml"},
 			},
 		},
 		{
@@ -1750,6 +1805,27 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
 				"  - name: other\n    endpoint: http://two:1111\n    llama-launcher: off\n",
 			wantErr: []string{"servers: entry 2", "other", "off is not a value"},
+		},
+		{
+			// The pointer names a profile the launcher loads, so on an entry apogee cannot launch
+			// there is nothing to actuate it — the lone-key defect the `llama-launcher` checks share.
+			name: "an entry pointing at a launch profile with no launcher to load it",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    launch-profile: gpt-oss-20b\n",
+			wantErr: []string{"servers: entry 1", "box", "launch-profile: \"gpt-oss-20b\" without a llama-launcher:",
+				"llama-launcher: auto"},
+		},
+		{
+			name: "an entry whose launch-profile value is only whitespace",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    llama-launcher: auto\n    launch-profile: \"   \"\n",
+			wantErr: []string{"servers: entry 1", "box", "launch-profile: is only whitespace", "remove the key"},
+		},
+		{
+			name: "a launch-profile defect below a well-formed entry",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n    llama-launcher: auto\n" +
+				"  - name: other\n    endpoint: http://two:1111\n    launch-profile: qwen3\n",
+			wantErr: []string{"servers: entry 2", "other", "without a llama-launcher:"},
 		},
 		{
 			// Absent and 0 already mean discover and every N ≥ 1 is a pin, so a negative cap is the
