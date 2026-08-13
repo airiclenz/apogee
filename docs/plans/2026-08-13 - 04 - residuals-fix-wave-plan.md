@@ -67,7 +67,7 @@ proceed.
 
 ---
 
-## 1. Verify the open-defects fix-wave plan is archived
+## 1. Verify the open-defects fix-wave plan is archived — ✅ DONE (2026-08-13)
 
 **What:** Confirm `docs/plans/2026-08-13 - 03 - open-defects-fix-wave-plan.md` no longer exists
 at that path and `docs/plans/archived/2026-08-13 - 03 - open-defects-fix-wave-plan.md` does —
