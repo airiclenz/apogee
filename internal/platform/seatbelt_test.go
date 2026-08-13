@@ -127,6 +127,44 @@ func TestSeatbeltProfileCanonicalizesSymlinkedRoot(t *testing.T) {
 	}
 }
 
+func TestSeatbeltProfileAllowsDevNull(t *testing.T) {
+	t.Parallel()
+
+	// The device exemption: /dev/null is a side-effect-free sink, so the profile re-grants
+	// writes to it whatever the box holds — otherwise the POSIX shell idiom `2>/dev/null`
+	// fails with "Permission denied" inside every confined tool call.
+	const clause = `(allow file-write* (literal "/dev/null"))`
+
+	tests := []struct {
+		name string
+		box  domain.ConfinementBox
+	}{
+		{"box_with_roots", domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/tmp/build"}}},
+		{"empty_box", domain.ConfinementBox{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			profile := seatbeltProfile(tt.box)
+
+			clauseIdx := strings.Index(profile, clause)
+			if clauseIdx < 0 {
+				t.Fatalf("profile must exempt /dev/null from the write fence:\n%s", profile)
+			}
+			// A later SBPL rule overrides an earlier one, so the exemption is only effective
+			// after the deny-default clause.
+			denyIdx := strings.Index(profile, "(deny file-write*)")
+			if denyIdx < 0 || denyIdx > clauseIdx {
+				t.Errorf("the /dev/null exemption must follow the deny-default clause:\n%s", profile)
+			}
+			// The exemption is exactly /dev/null — no directory-wide grant on /dev.
+			if strings.Contains(profile, `(subpath "/dev")`) {
+				t.Errorf("profile must not open /dev wholesale:\n%s", profile)
+			}
+		})
+	}
+}
+
 func TestSeatbeltProfileNetworkOpenByDefault(t *testing.T) {
 	t.Parallel()
 

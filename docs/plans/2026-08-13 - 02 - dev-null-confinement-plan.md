@@ -83,7 +83,12 @@ survives the fence).
 
 **Commit:** `fix(confine): allow /dev/null writes through the landlock fence`
 
-## 2. Seatbelt: allow /dev/null writes through the fence
+## 2. Seatbelt: allow /dev/null writes through the fence — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): No darwin live coverage added — the item conditions it on a live write-denial
+test already existing in `seatbelt_darwin_test.go`, and that file holds no local write test: it
+delegates to the shared `confinetest.Probe` battery, so covering `/dev/null` there would mean new
+shared harness machinery, which the item forbids.
 
 **What:** In `internal/platform/seatbelt.go`, `seatbeltProfile` emits an unconditional
 `(allow file-write* (literal "/dev/null"))` clause after the `(deny file-write*)`

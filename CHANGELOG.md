@@ -485,6 +485,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`2>/dev/null` works again inside a confined tool call on macOS.** The seatbelt profile is
+  deny-default for `file-write*` and re-grants writes only beneath the box's writable roots, so
+  the most ordinary line of POSIX shell there is — redirecting output into the null device — died
+  with `cannot create /dev/null: Permission denied` in every confined call, and a command that
+  merely silenced its own noise failed as if the work itself had failed. The profile now emits one
+  unconditional `(allow file-write* (literal "/dev/null"))` clause after the deny, so writes to the
+  single device file that swallows them are exempt from the fence whatever the box holds —
+  including a box with no writable roots at all. The exemption is backend-level: it is not part of
+  `ConfinementBox`, it does not widen the exec fence's writable set, and it is exactly `/dev/null`
+  — `/dev` itself stays closed, no other device is granted, and every other out-of-box write is
+  denied exactly as before.
+
 - **`2>/dev/null` works again inside a confined tool call.** Both POSIX confinement backends deny
   file writes by default and re-grant them only beneath the box's writable roots, and `/dev/null`
   was quietly taken with them: the most common shell idiom there is died with

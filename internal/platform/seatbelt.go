@@ -132,6 +132,10 @@ func (c *seatbeltConfiner) Confine(_ context.Context, box domain.ConfinementBox,
 //     ConfinementBox's workspace-write-only semantics, like landlock not handling read);
 //   - re-allows file-write* beneath WorkspaceRoot and each WritablePaths entry via
 //     (subpath ...) so writes are fenced to the box;
+//   - re-allows file-write* to the literal /dev/null unconditionally — the box bounds
+//     where a child may WRITE, and /dev/null is a data sink whose writes are
+//     side-effect-free, so it is exempted from the fence to keep the POSIX shell idiom
+//     (`2>/dev/null`) working inside the box. The exempt set is exactly /dev/null;
 //   - leaves the network OPEN by default (ADR 0012), adding a (deny network*) clause only
 //     when the box opts into network-deny via a non-empty NetworkAllow — a coarse
 //     tightening matching landlock's deny-all-TCP behaviour (per-host allow is a later
@@ -150,6 +154,14 @@ func seatbeltProfile(box domain.ConfinementBox) string {
 
 	// Deny all file writes, then re-grant beneath the writable roots.
 	b.WriteString("(deny file-write*)\n")
+
+	// The device exemption: /dev/null is a side-effect-free data sink, so writes to it are
+	// re-granted whatever the box holds — including a box with no writable roots at all —
+	// so `2>/dev/null` and friends survive the fence. It needs no canonicalization (/dev/null
+	// is not a symlink on macOS) and, being a single device file, is matched by (literal ...)
+	// rather than (subpath ...). Emitted after the deny clause because a later SBPL rule
+	// overrides an earlier one.
+	b.WriteString("(allow file-write* (literal \"/dev/null\"))\n")
 
 	roots := make([]string, 0, 1+len(box.WritablePaths))
 	if box.WorkspaceRoot != "" {
