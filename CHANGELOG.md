@@ -604,6 +604,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A store tool that echoes the secret back can no longer publish it through apogee's own error
+  message.** Migration hands the key to `security` or `secret-tool` on STDIN, and a tool that cannot
+  use its input tends to quote that input: `security -i` reports on the command LINE it read — the
+  `add-generic-password … -w <key>` line the secret travels in — and a `secret-tool` wrapper logging
+  what it received would echo the raw key the same way. Both of `Store.Write`'s failures fold that
+  captured stderr into their error, and an error goes to the terminal, the session log, and the bug
+  report a user pastes it into: exactly the readable place the migration exists to get the key out
+  of. The captured text is now redacted before either message is built — every occurrence of the key
+  becomes `[redacted]`, in the raw spelling and in the quoted spelling that went over the wire, since
+  `security -i` parses the line apogee wrote and a key needing quotes appears there escaped. The rest
+  of the tool's words are kept unchanged, because the tool's own sentence is almost always the part
+  that names the fix.
+
 - **The `rm -rf` hard-refuse rules now spell the macOS home in their own system-path list.**
   `rm-rf-root-home-system` and `rm-fr-root-home-system` (`internal/security/rules.go`) listed
   `home` but not `users`, so the enumeration that documents what a "root, home, or system path"

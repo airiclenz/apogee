@@ -129,7 +129,10 @@ system-path alternation of both `rm-rf-root-home-system` (`rules.go:25-29`) and
 
 ---
 
-## 3. Keystore errors redact the secret from store-tool stderr
+## 3. Keystore errors redact the secret from store-tool stderr — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): design call 3 says "every occurrence of the key value"; the helper also replaces the `securityWord`-escaped spelling of the key, since a key needing quotes does not appear literally in a `security -i` echo — a superset of the ratified rule, pinned by its own test row.
+NOTES (2026-08-13): the fake-tool fixture gained an echo-stdin mode (`APOGEE_KEYSTORE_FAKE_ECHO` + `fakeTools.leakStdin`; `fakeFailure` now takes the stdin it echoes) — the plan's "fake store tool that echoes its stdin to stderr". The spawn/exec-failure path cannot be staged with a tool that runs, so it is driven through the package's existing `runner` seam.
 
 Depends on item 1.
 

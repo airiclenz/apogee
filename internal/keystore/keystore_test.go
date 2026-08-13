@@ -14,7 +14,9 @@ package keystore
 // live_test.go and, at runtime, migration's read-back verification are for.
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,6 +39,7 @@ const (
 	fakeStoreEnv  = "APOGEE_KEYSTORE_FAKE_STORE"
 	fakeStderrEnv = "APOGEE_KEYSTORE_FAKE_STDERR"
 	fakeExitEnv   = "APOGEE_KEYSTORE_FAKE_EXIT"
+	fakeEchoEnv   = "APOGEE_KEYSTORE_FAKE_ECHO"
 )
 
 // fakeToolDir is the directory holding the two fake tools, built once for the whole package run.
@@ -135,7 +138,7 @@ func linkOrCopy(source, destination string) error {
 func runFakeKeychain(args []string) int {
 	stdin := readAllStdin()
 	recordInvocation(os.Args, stdin)
-	if code, failed := fakeFailure(); failed {
+	if code, failed := fakeFailure(stdin); failed {
 		return code
 	}
 
@@ -177,7 +180,7 @@ func runFakeKeychain(args []string) int {
 func runFakeSecretService(args []string) int {
 	stdin := readAllStdin()
 	recordInvocation(os.Args, stdin)
-	if code, failed := fakeFailure(); failed {
+	if code, failed := fakeFailure(stdin); failed {
 		return code
 	}
 
@@ -203,11 +206,16 @@ func runFakeSecretService(args []string) int {
 
 // fakeFailure is the broken-machine mode: when a test asked for one, the tool says what it was told
 // to say and exits with the status it was told to use (a dead D-Bus exits non-zero; `security -i`
-// can report a refusal and still exit 0 for having read its input).
-func fakeFailure() (int, bool) {
+// can report a refusal and still exit 0 for having read its input). When the test also asked for a
+// leaky tool, the standard input the tool was fed is echoed after the complaint — the shape a real
+// tool takes when it reports on input it could not use, and the one that puts the secret on stderr.
+func fakeFailure(stdin string) (int, bool) {
 	text := os.Getenv(fakeStderrEnv)
 	if text == "" {
 		return 0, false
+	}
+	if os.Getenv(fakeEchoEnv) != "" {
+		text += " " + strings.TrimSpace(stdin)
 	}
 	fmt.Fprintln(os.Stderr, text)
 	code, err := strconv.Atoi(os.Getenv(fakeExitEnv))
@@ -366,6 +374,7 @@ func useFakeTools(t *testing.T) fakeTools {
 	t.Setenv(fakeStoreEnv, tools.store)
 	t.Setenv(fakeStderrEnv, "")
 	t.Setenv(fakeExitEnv, "")
+	t.Setenv(fakeEchoEnv, "")
 	return tools
 }
 
@@ -380,6 +389,15 @@ func (f fakeTools) breakWith(t *testing.T, text string, code int) {
 	t.Helper()
 	t.Setenv(fakeStderrEnv, text)
 	t.Setenv(fakeExitEnv, strconv.Itoa(code))
+}
+
+// leakStdin makes every later run of a fake tool complain with text AND echo back the standard input
+// it was handed — the leaky tool: `security -i` reporting on the `add-generic-password … -w <key>`
+// line it could not run, `secret-tool` quoting the secret it was fed.
+func (f fakeTools) leakStdin(t *testing.T, text string, code int) {
+	t.Helper()
+	f.breakWith(t, text, code)
+	t.Setenv(fakeEchoEnv, "1")
 }
 
 // invocations is every run of a fake tool since this test began, in order.
@@ -704,6 +722,107 @@ func TestWriteReportsWhatTheStoreSaid(t *testing.T) {
 				t.Errorf("Write() = %v, want the entry name and what the tool said", err)
 			}
 		})
+	}
+}
+
+// Quoting the tool must not quote the secret back. A store tool is fed the key on its standard input,
+// and a tool complaining about input it could not use echoes that input — so the error apogee builds
+// out of that complaint is the migration publishing the very key it was moving out of a readable
+// place, into the terminal, the session log and whatever the user pastes into a bug report.
+func TestWriteRedactsTheSecretFromWhatTheStoreSaid(t *testing.T) {
+	const complaint = "security: User interaction is not allowed."
+
+	tests := []struct {
+		name     string
+		goos     string
+		key      string
+		fragment string // a distinctive run of the key that must survive in no spelling
+		code     int
+	}{
+		{
+			name:     "the keychain tool echoes the line it could not run",
+			goos:     "darwin",
+			key:      "sk-live-3f9c2b7a",
+			fragment: "3f9c2b7a",
+			code:     1,
+		},
+		{
+			name:     "the keychain tool complains but exits zero, as security -i does",
+			goos:     "darwin",
+			key:      "sk-live-3f9c2b7a",
+			fragment: "3f9c2b7a",
+			code:     0,
+		},
+		{
+			name:     "a key that had to be quoted is redacted in the spelling that went over the wire",
+			goos:     "darwin",
+			key:      `sk live "3f9c2b7a"`,
+			fragment: "3f9c2b7a",
+			code:     1,
+		},
+		{
+			name:     "the secret service tool echoes the stdin it was handed",
+			goos:     "linux",
+			key:      "sk-live-3f9c2b7a",
+			fragment: "3f9c2b7a",
+			code:     1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tools := useFakeTools(t)
+			store := probedStore(t, tc.goos)
+			tools.leakStdin(t, complaint, tc.code)
+
+			err := store.Write("prod", tc.key)
+
+			if err == nil {
+				t.Fatal("Write() = nil, want the refusal surfaced")
+			}
+			assertRedacted(t, err, tc.key, tc.fragment)
+		})
+	}
+}
+
+// The other error path quotes the same captured stderr, so it carries the same leak. A tool that
+// never finished cannot be staged with a tool that runs, so this one is driven through the exec seam.
+func TestWriteRedactsTheSecretWhenTheToolNeverFinished(t *testing.T) {
+	t.Parallel()
+
+	const key = "sk-live-3f9c2b7a"
+
+	store := Store{
+		kind:    kindKeychain,
+		program: keychainProgram,
+		run: func(context.Context, []string, string) (toolResult, error) {
+			return toolResult{stderr: "security: User interaction is not allowed. add-generic-password -w " + key},
+				errors.New("security did not answer in time")
+		},
+	}
+
+	err := store.Write("prod", key)
+
+	if err == nil {
+		t.Fatal("Write() = nil, want the failure surfaced")
+	}
+	assertRedacted(t, err, key, "3f9c2b7a")
+}
+
+// assertRedacted is the whole claim about a quoted complaint: no spelling of the secret survives in
+// it, the secret's place is marked, and the tool's own words — the part that names the fix — are kept.
+func assertRedacted(t *testing.T, err error, key, fragment string) {
+	t.Helper()
+
+	message := err.Error()
+	if strings.Contains(message, key) || strings.Contains(message, fragment) {
+		t.Errorf("Write() = %v, want no spelling of the secret in what the tool said", message)
+	}
+	if !strings.Contains(message, "[redacted]") {
+		t.Errorf("Write() = %v, want the secret's place marked [redacted]", message)
+	}
+	if !strings.Contains(message, "User interaction") {
+		t.Errorf("Write() = %v, want what the tool said kept — it is the part that names the fix", message)
 	}
 }
 

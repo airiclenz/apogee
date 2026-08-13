@@ -171,16 +171,20 @@ func (s Store) Write(entry, key string) error {
 	defer cancel()
 
 	outcome, err := s.run(ctx, argv, stdin)
+	// What the tool said is quoted back in both failures below, and a failing store tool can say the
+	// secret: it is fed one on stdin, and complaining about input it could not use means echoing that
+	// input. Redact before either message is built — never between them.
+	complaint := redactKey(outcome.stderr, key)
 	if err != nil {
 		return fmt.Errorf("apogee: server %q: could not be stored in %s: %w%s",
-			entry, s.Name(), err, said(outcome.stderr))
+			entry, s.Name(), err, said(complaint))
 	}
 	// A non-zero exit is the ordinary failure. The stderr test is there for `security -i`, which runs
 	// each line it reads and can report a refusal on stderr while still exiting 0 for having read the
 	// input successfully — treating that as a write would hand the caller a key the store never took.
 	if outcome.code != 0 || strings.TrimSpace(outcome.stderr) != "" {
 		return fmt.Errorf("apogee: server %q: %s refused the key%s",
-			entry, s.Name(), said(outcome.stderr))
+			entry, s.Name(), said(complaint))
 	}
 	return nil
 }
@@ -205,6 +209,33 @@ func (s Store) writeCommand(entry, key string) ([]string, string) {
 		"service", service,
 		"entry", entry,
 	}, key
+}
+
+// redactKey takes the secret back out of whatever the store tool printed, leaving the rest of the
+// tool's words intact.
+//
+// A write is the one moment apogee hands a store tool a secret, and a tool that cannot use its input
+// tends to quote it: `security -i` reports on the command LINE it read, which is the
+// `add-generic-password … -w <key>` line the secret travels in, and `secret-tool` is handed the raw
+// key on stdin, which any wrapper logging what it received would echo the same way. That text is
+// captured only to be folded into an error — and an error goes to the terminal, the session log, and
+// the bug report the user pastes it into, which is exactly the readable place the migration exists to
+// get the key out of. Redacting rather than dropping the text keeps the diagnostic: the tool's own
+// sentence is almost always the part that names the fix.
+//
+// Both spellings are replaced, because the key travels quoted: `security -i` parses the line apogee
+// wrote, so what it echoes is the escaped word, in which the secret may not appear literally.
+func redactKey(text, key string) string {
+	const mark = "[redacted]"
+
+	if key == "" {
+		return text
+	}
+	text = strings.ReplaceAll(text, key, mark)
+	if quoted := securityWord(key); quoted != key {
+		text = strings.ReplaceAll(text, quoted, mark)
+	}
+	return text
 }
 
 // ReadCmd is the `api-key-cmd:` line that reads this entry's key back out of the store — the exact
