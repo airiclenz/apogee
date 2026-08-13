@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The naming call's prompt assets now state what an edit to them costs.**
+  `internal/title/prompts/` gained the wording-drift README the probe battery's assets already
+  carry: re-word one of these files and every session named from then on is named by a different
+  instruction, there is no version constant to bump here — a title is a maintenance nicety, not a
+  comparable record — so the pin tests ARE the gate, and a `.txt` in that directory carries no
+  comments of its own, because a comment line would be sent to the model as part of the prompt. The
+  README's claim is now true as well: `user-instruction.txt` ("Reply with the title only.") and
+  `window-header.txt` ("The user's requests in this session, oldest first:") were guarded only by
+  assertions that compared against the loaded variables themselves — they passed whatever the assets
+  said — and are now pinned byte-for-byte by a new test beside the system prompt's existing phrase
+  pin, so a silent re-wording fails the suite instead of quietly re-shaping every session name.
+
 - **A transient upstream blip mid-stream no longer kills the exchange.** When a reply faults on an
   in-band error whose class the provider marked retryable — a 429, a 5xx, or an aggregator's
   `provider_unavailable`, delivered inside an HTTP 200 partway through the stream, past every retry

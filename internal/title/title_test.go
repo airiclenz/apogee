@@ -441,6 +441,39 @@ func TestSystemInstructionAsksForTheDominantThreadBiasedRecent(t *testing.T) {
 	}
 }
 
+// TestUserInstructionAndWindowHeaderPinTheirExactWording holds the two one-line prompt assets to
+// their wording. Every other assertion that reads them — the user-message checks above — compares
+// against the vars themselves, so it passes whatever the assets happen to say; only a literal pin
+// notices a re-wording. Both lines are load-bearing: the closing instruction is what keeps the
+// reply to one line, and the header is what lets the model read the last entries as the most recent
+// work. The literals are therefore deliberately duplicated rather than derived, and an intended
+// re-wording is meant to change the asset and this test in the same commit (prompts/README.md).
+func TestUserInstructionAndWindowHeaderPinTheirExactWording(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		asset string
+		got   string
+		want  string
+	}{
+		{
+			asset: "user-instruction.txt",
+			got:   userInstruction,
+			want:  "Reply with the title only.",
+		},
+		{
+			asset: "window-header.txt",
+			got:   windowHeader,
+			want:  "The user's requests in this session, oldest first:",
+		},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("prompts/%s changed:\n got  %q\n want %q\nan intended re-wording must update this pin",
+				tc.asset, tc.got, tc.want)
+		}
+	}
+}
+
 func TestSanitize(t *testing.T) {
 	t.Parallel()
 

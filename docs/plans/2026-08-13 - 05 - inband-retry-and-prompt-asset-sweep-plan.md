@@ -258,7 +258,9 @@ byte-for-byte wording, the role-rationale comment (`:205-211`) staying beside th
 
 ---
 
-## 6. `internal/title/prompts/` gets its wording-drift README and the missing text pins
+## 6. `internal/title/prompts/` gets its wording-drift README and the missing text pins — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the two literal pins are one table-driven test, `TestUserInstructionAndWindowHeaderPinTheirExactWording` (the probe pin test's shape), rather than one test per asset; the README names it and `TestSystemInstructionAsksForTheDominantThreadBiasedRecent` as the pins an asset edit must update.
 
 Depends on item 1.
 
