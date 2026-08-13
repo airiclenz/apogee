@@ -37,9 +37,11 @@ func (f *fakeBind) bind(name string) (ServerSwitchResult, error) {
 	return ServerSwitchResult{}, errors.New("unknown server " + name)
 }
 
-// fakeRecorder stands in for the `server:` splice writer behind [Options.RecordServerChoice]. saved
-// is what it reports having done: true is the binary's answer for a name the `servers:` list holds,
-// and the zero value is its silent skip for one it does not.
+// fakeRecorder stands in for the splice writer behind either recording seam —
+// [Options.RecordServerChoice] and [Options.RecordModelChoice] take the same shape because they are
+// one feature seen from the two things a session records. saved is what it reports having done: true
+// is the binary's answer for a choice the file can carry, and the zero value is its silent skip for
+// one it cannot.
 type fakeRecorder struct {
 	names []string
 	saved bool

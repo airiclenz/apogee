@@ -307,6 +307,142 @@ func TestModelCommandArgumentForm(t *testing.T) {
 	})
 }
 
+// ----------------------------------------------------------------------------
+// Recording the pick — the `model:` key (remember-model)
+// ----------------------------------------------------------------------------
+
+// seededModelRecording is seededPicker with the model-recording seam wired too — the state a human is
+// in when `remember-model:` is on and a /model pick is also the choice their server comes back on.
+func seededModelRecording(t *testing.T, rec *fakeRecorder) (Model, *fakeRebind) {
+	t.Helper()
+	opts := testOpts
+	opts.RecordModelChoice = rec.record
+	return seededPicker(t, opts)
+}
+
+// An accepted ROW is an explicit pick, so it reaches the recording seam exactly once with the id that
+// bound, and the note says the key now names it.
+func TestModelPickerAcceptRecordsTheChoice(t *testing.T) {
+	rec := &fakeRecorder{saved: true}
+	m, _ := seededModelRecording(t, rec)
+	m, _ = typeCommand(t, m, "/model")
+
+	m, _ = stepCmd(t, m, keyEnter())
+
+	if want := []string{"other-model"}; !reflect.DeepEqual(rec.names, want) {
+		t.Fatalf("recorded ids = %v, want %v — the pick is what this server starts on next", rec.names, want)
+	}
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != modelSavedNote {
+		t.Errorf("notes = %v, want %q last", got, modelSavedNote)
+	}
+}
+
+// "/model <id>" is the same explicit act down the same bind path, so it records on the same terms —
+// which is the whole reason the recording hangs off bindPickedModel and not off either caller.
+func TestModelCommandArgumentFormRecordsTheChoice(t *testing.T) {
+	rec := &fakeRecorder{saved: true}
+	m, _ := seededModelRecording(t, rec)
+
+	m, _ = typeCommand(t, m, "/model other-model")
+
+	if want := []string{"other-model"}; !reflect.DeepEqual(rec.names, want) {
+		t.Fatalf("recorded ids = %v, want %v", rec.names, want)
+	}
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != modelSavedNote {
+		t.Errorf("notes = %v, want %q last", got, modelSavedNote)
+	}
+}
+
+// The renderer cannot tell a writable pick from one the binary skips — the toggle off, an unlisted
+// server, a launcher-fronted entry — so it offers every explicit pick and believes the answer: false
+// with no error is announced as nothing at all.
+func TestModelPickRecordedFalseClaimsNothing(t *testing.T) {
+	rec := &fakeRecorder{} // the binary's silent skip: no write, no error
+	m, _ := seededModelRecording(t, rec)
+
+	m, _ = typeCommand(t, m, "/model other-model")
+
+	if want := []string{"other-model"}; !reflect.DeepEqual(rec.names, want) {
+		t.Fatalf("recorded ids = %v, want %v — the binary decides, the renderer asks", rec.names, want)
+	}
+	for _, note := range noteTexts(m) {
+		if note == modelSavedNote {
+			t.Errorf("notes = %v, want no saved line for a write that never happened", noteTexts(m))
+		}
+	}
+	if m.opts.Model != "other-model" {
+		t.Errorf("opts.Model = %q, want the pick bound whatever the recording answered", m.opts.Model)
+	}
+}
+
+// A write that could not land is a footnote and never an undo: the session is on the picked model
+// either way, and the warning follows the change it is a footnote to.
+func TestModelPickRecordingFailureWarnsAndKeepsTheBinding(t *testing.T) {
+	rec := &fakeRecorder{err: errors.New("config.yaml is a directory")}
+	m, _ := seededModelRecording(t, rec)
+
+	m, _ = typeCommand(t, m, "/model other-model")
+
+	if m.opts.Model != "other-model" {
+		t.Errorf("opts.Model = %q, want the binding kept — a failed recording undoes nothing", m.opts.Model)
+	}
+	want := "could not record the model choice: config.yaml is a directory"
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+		t.Errorf("notes = %v, want %q last", got, want)
+	}
+}
+
+// An unwired seam is the ordinary hand-built Options and the pre-remember-model behaviour: the pick
+// binds, and nothing is recorded or claimed.
+func TestModelPickWithNoRecordingSeamStillBinds(t *testing.T) {
+	m, rb := seededPicker(t, testOpts) // testOpts wires no RecordModelChoice
+
+	m, _ = typeCommand(t, m, "/model other-model")
+
+	if len(rb.calls) != 1 || m.opts.Model != "other-model" {
+		t.Fatalf("rebind calls = %v, opts.Model = %q — want the pick bound through the unwired seam",
+			rb.calls, m.opts.Model)
+	}
+	for _, note := range noteTexts(m) {
+		if note == modelSavedNote {
+			t.Errorf("notes = %v, want no saved line from a seam nobody wired", noteTexts(m))
+		}
+	}
+}
+
+// A pick that did not BIND is not a choice to remember: the rebind was refused, the session is still
+// on the old model, and writing the new id would leave the file describing a server nobody is on.
+func TestModelPickRefusedRebindRecordsNothing(t *testing.T) {
+	rec := &fakeRecorder{saved: true}
+	m, rb := seededModelRecording(t, rec)
+	rb.answer = func(string, int) (RebindResult, error) { return RebindResult{}, errors.New("engine busy") }
+
+	m, _ = typeCommand(t, m, "/model other-model")
+
+	if len(rec.names) != 0 {
+		t.Errorf("recorded ids = %v, want none — a refused rebind bound nothing to remember", rec.names)
+	}
+	if m.opts.Model != "test-model" {
+		t.Errorf("opts.Model = %q, want the session left where it was", m.opts.Model)
+	}
+}
+
+// The rule the whole feature turns on (design call 4): a rebind the HEARTBEAT observed is news about
+// the server, not a choice — the same orchestration runs, and the recording seam is never consulted.
+func TestHeartbeatObservedRebindRecordsNothing(t *testing.T) {
+	rec := &fakeRecorder{saved: true}
+	m, rb := seededModelRecording(t, rec)
+
+	m = foldBeatMsg(t, m, upBeat("other-model", 16384))
+
+	if len(rb.calls) != 1 {
+		t.Fatalf("rebind calls = %v, want the observed change applied", rb.calls)
+	}
+	if len(rec.names) != 0 {
+		t.Errorf("recorded ids = %v, want none — a passive rebind writes no config", rec.names)
+	}
+}
+
 // /model is idle-only by the commandSpecs table, so a line typed mid-run earns the standing answer
 // instead of running — the tag the dropdown shows and what ⏎ does are one rule.
 func TestModelCommandIsIdleOnly(t *testing.T) {

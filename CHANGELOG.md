@@ -10,6 +10,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **An explicit `/model` pick is now remembered by the server you made it on.** With
+  `remember-model:` on, picking a model — from the `/model` overlay or by naming it as
+  `/model <id>` — writes that id into the `model:` key of the `servers:` entry your session is on,
+  so the next session on that server comes back bound to it without being asked. Only an explicit
+  pick counts: a model change the heartbeat merely observed is news about the server rather than a
+  choice, and the `--model` / `APOGEE_MODEL` startup overrides are facts about one invocation, so
+  neither writes anything. Nothing is recorded when there is nothing the key can honestly carry
+  either — the toggle off (the default), a session on a server your config does not list, or a
+  launcher-fronted entry, whose `model:` is a deliberately empty discovery hint and which will
+  remember its choice as a `launch-profile:` instead. A pick that failed to bind records nothing, so
+  the file never describes a model you are not on, and a write that could not land is a note under
+  the change rather than an undo of it: the session stays on the model you picked either way. When
+  the choice is written, the transcript says so on a line of its own.
+
 - **The config writer can now set one key inside one `servers:` entry.** It is the plumbing the
   remember-model feature will write through: `model:` or `launch-profile:`, on the entry picked out
   of the list by its `name:`, either rewritten in place — keeping your indentation, your alignment

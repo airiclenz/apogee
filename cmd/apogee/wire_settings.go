@@ -218,6 +218,29 @@ func (s *liveSettings) serverList() []config.ServerEntry {
 	return s.servers
 }
 
+// boundEntry is the `servers:` entry this session is ON, as the list stands NOW — the name followEntry
+// latched, resolved against the live list the way setServers resolves it, so an entry edited since the
+// move comes back as the file now spells it rather than as it was at the move.
+//
+// false is the honest answer for a session the file does not list, and it is the answer the model
+// recording is skipped on: the synthesized ephemeral `--endpoint` row names no entry, and a Launch
+// profile's own server may name none either (the profile's name is what the move carried). Nothing is
+// guessed from the endpoint — two entries may share one address, and the name is what the file is
+// spliced by.
+func (s *liveSettings) boundEntry() (config.ServerEntry, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.entryName == "" {
+		return config.ServerEntry{}, false
+	}
+	for _, e := range s.servers {
+		if e.Name == s.entryName {
+			return e, true
+		}
+	}
+	return config.ServerEntry{}, false
+}
+
 // choices assembles the servers this session can be MOVED to from the list as it stands now: the same
 // upstreamChoices derivation startup made, re-run against the live list rather than the launch one, so
 // the one row it may synthesize — the ephemeral `--endpoint` startup, a fact about the invocation that

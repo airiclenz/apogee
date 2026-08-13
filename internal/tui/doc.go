@@ -422,7 +422,13 @@
 // session straight back off the config'd discovery hint. Everything the picker cannot do it SAYS: no
 // monitor, an offline server, a nil rebind seam, an empty offering — each is one honest note and no
 // overlay, and picking the row the session is already on is answered too (rebindNote's "" contract is
-// about the observations nobody asked for, not about an explicit act). /server is the SAME overlay
+// about the observations nobody asked for, not about an explicit act). An explicit pick is also a
+// CHOICE, the way a committed switch is: the id that BOUND goes to [Options.RecordModelChoice], which
+// writes it as this server's `model:` key while `remember-model:` is on and skips it silently
+// otherwise. It hangs off the accept path ([Model.bindPickedModel]) rather than off applyRebind,
+// because that orchestration is shared with the heartbeat and a rebind the beat merely OBSERVED is
+// news about the server rather than a choice — recording there would write config nobody asked for.
+// /server is the SAME overlay
 // over [Options.Servers] (one pickerKind, no callback field on the value-copied state), with the
 // current row marked by endpoint rather than by id and the accept calling SwitchServer instead of
 // applyRebind; both verbs also take their choice as an argument ("/model <id>", "/server <name>"),

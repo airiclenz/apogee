@@ -134,7 +134,13 @@ disallowed key errors; seeding path.
 
 **Commit:** `feat(config): per-server-entry setting writer for model and launch-profile`
 
-## 3. Plain servers: record the explicit /model pick
+## 3. Plain servers: record the explicit /model pick — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the recording is surfaced as a transcript line of its own (`modelSavedNote`) rather than as a clause on the change's own note the way `savedChoiceClause` rides a `/server` move. The move's line is written inside `Model.applyRebind` (`internal/tui/model.go`), which is shared with the heartbeat and out of this item's Files; appending a clause there would have meant either threading presentation state through `rebindIntent` or editing the shared passive path, both worse than a footnote. The rest of the pattern is unchanged — `choiceRecord`, its `warn` method, and a `recordModelChoice` helper that mirrors `recordServerChoice` line for line.
+NOTES (2026-08-13): `cmd/apogee/wire_settings.go` gained a `liveSettings.boundEntry()` accessor — out of the item's Files line. The seam takes only a model id, so the binary has to resolve WHICH entry the session is on; `liveSettings.entryName` is the value `followEntry` already latches at every arrival, and it had no reader. The accessor resolves that name against the live `servers:` list under the holder's own lock, the way `setServers` already does, and answers false for a session the file does not list.
+NOTES (2026-08-13): `internal/tui/doc.go` gained one sentence in the /model narrative — also outside the Files line. That paragraph already narrates `RecordServerChoice` as the twin recording; leaving the model half out would have made the package's own map stale on the day it landed.
+NOTES (2026-08-13): the seam implementation reads `w.opts.RememberModel` directly (both it and the `/settings` apply dispatcher run on the Update goroutine), which is what item 6's live-apply case can flip without any re-wiring, as its own text anticipates.
+NOTES (2026-08-13): plan claim verified — `bindPickedModel` (`internal/tui/picker.go`) is reached by BOTH forms of the verb, the picker accept (`acceptPicker`) and the `/model <id>` argument path (`pickAdvertisedModel`), so the single call site is enough and no second one was added.
 
 Depends on items 1 and 2.
 

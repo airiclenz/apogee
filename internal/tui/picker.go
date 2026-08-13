@@ -683,6 +683,13 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 // NAMING the model the session is already on is answered rather than ignored: an explicit act
 // deserves an answer, where rebindNote's "" contract is about the observations nobody asked for. No
 // picked ROW reaches it any more — that row is not offered — but "/model <id>" can still name one.
+//
+// It is also the ONE place a model pick is RECORDED (remember-model), and that is why the recording
+// hangs off this function rather than off the rebind orchestration underneath it: [Model.applyRebind]
+// is shared with the heartbeat, and a passive observation is news about the server rather than a
+// choice — recording there would write config nobody asked for. Only a pick that actually BOUND is
+// offered to the seam, so a refused rebind leaves the file describing the model the session is still
+// on.
 func (m Model) bindPickedModel(id string, window int) (tea.Model, tea.Cmd) {
 	m.picker = picker{}
 	if id == m.opts.Model {
@@ -692,8 +699,42 @@ func (m Model) bindPickedModel(id string, window int) (tea.Model, tea.Cmd) {
 	}
 	m.hb.observedModel, m.hb.observedWindow = id, window
 	next, _ := m.applyRebind(rebindIntent{model: id, window: window})
+	if next.opts.Model == id {
+		record := recordModelChoice(next.opts.RecordModelChoice, id)
+		if record.saved {
+			next.transcript.addNote(modelSavedNote)
+		}
+		record.warn(&next.transcript)
+	}
 	next.layout()
 	return next, nil
+}
+
+// modelSavedNote is what a RECORDED pick says: the entry this session is on now names this model, so
+// the next session on that server starts here without being asked. It names the key the way
+// savedChoiceClause does, because the key is what the human will find in config.yaml — but it is a
+// line of its own rather than a clause on the move's, because the line the move writes is
+// [rebindNote]'s and that wording is shared with every observation nobody asked for.
+const modelSavedNote = "model: saved — this server starts on it next time"
+
+// recordModelChoice persists the model this session just bound as the one its entry comes back on,
+// through the seam the binary backs. It is [recordServerChoice] in every respect that matters —
+// called with what the human chose, answered with whether the binary WROTE, and never consulted
+// about which entry that is or whether the file may carry the key — because the two recordings are
+// one feature seen from the two classes of server apogee talks to.
+//
+// A failed write is a warning and nothing more: the session is already bound, and the recording is
+// best-effort persistence of something that is already true. An unwired seam records nothing and says
+// nothing, which is the pre-remember-model behaviour every hand-built Options keeps.
+func recordModelChoice(record func(model string) (bool, error), id string) choiceRecord {
+	if record == nil || id == "" {
+		return choiceRecord{}
+	}
+	saved, err := record(id)
+	if err != nil {
+		return choiceRecord{warning: "could not record the model choice: " + stripEscapes(err.Error())}
+	}
+	return choiceRecord{saved: saved}
 }
 
 // pickerCount is how many rows the open kind has RIGHT NOW — the count of the FILTERED view, read

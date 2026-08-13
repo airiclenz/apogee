@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/heartbeat"
@@ -145,6 +146,41 @@ func (w *rootWiring) recordServerChoice(name string) (bool, error) {
 		return false, nil
 	}
 	if err := config.SaveConfigSetting(filepath.Join(w.roots.config, "config.yaml"), "server", name); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// recordModelChoice is the composition root's half of remembering a MODEL pick — the `model:` key on
+// the entry this session is on, so the next session there comes back on the model this one ended on
+// without being asked. It sits beside recordServerChoice because it answers the same kind of question
+// in the same place: which entry is this session on, and may apogee write this key onto it. Neither is
+// the renderer's to answer, and neither can be answered without the file.
+//
+// Three skips and no fourth, every one of them SILENT (false, nil), because none is a failure:
+//
+//   - `remember-model:` is off, which is the default. The toggle gates the write as well as the boot
+//     restore, so a session nobody asked to be remembered writes nothing at all — read here rather
+//     than captured at wiring time, so a flip in `/settings` governs the very next pick.
+//   - the session is on no configured entry (boundEntry). That is the synthesized ephemeral
+//     `--endpoint` startup, and a session a Launch profile moved onto a server the file does not list:
+//     there is no entry to splice, and inventing one would be config nobody wrote.
+//   - the entry is LAUNCHER-FRONTED. `model:` on such an entry is a deliberately empty discovery hint
+//     (sessionMover.move), because a Launch profile's name is not a wire model id; that class of
+//     server remembers its choice as `launch-profile:` instead, through its own seam.
+//
+// Past those, the write goes through the same splice writer every other key uses, so the comments and
+// every sibling entry come back exactly as the human left them.
+func (w *rootWiring) recordModelChoice(model string) (bool, error) {
+	if !w.opts.RememberModel {
+		return false, nil
+	}
+	entry, ok := w.live.boundEntry()
+	if !ok || strings.TrimSpace(entry.LlamaLauncher) != "" {
+		return false, nil
+	}
+	if err := config.SaveServerEntrySetting(
+		filepath.Join(w.roots.config, "config.yaml"), entry.Name, "model", model); err != nil {
 		return false, err
 	}
 	return true, nil

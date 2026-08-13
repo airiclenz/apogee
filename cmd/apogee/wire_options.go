@@ -78,6 +78,13 @@ func (w *rootWiring) options() tui.Options {
 		// list are skipped silently, which is what keeps an override or a profile load from becoming
 		// config nobody wrote.
 		RecordServerChoice: w.recordServerChoice,
+		// And the same persistence one rung in, for the model rather than for the server
+		// (`remember-model:`): an explicit `/model` pick becomes the `model:` key on the entry the
+		// session is on, so that server comes back on it. Always wired — the toggle is read inside,
+		// where a `/settings` flip reaches it — and skipped silently wherever there is nothing this
+		// key can honestly record: an unlisted server, or a launcher-fronted entry, whose model is
+		// chosen by loading a Launch profile instead.
+		RecordModelChoice: w.recordModelChoice,
 		// The `/model`-over-profiles, `/unload-model`, `/stop-server` half (ADR 0029): browse the
 		// launcher's profiles, activate one — following it onto another server when it lives
 		// there — and free or stop the server this session is on. All four are wired for the life of

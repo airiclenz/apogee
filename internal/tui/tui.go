@@ -678,6 +678,34 @@ type Options struct {
 	// this key was introduced to replace; every hand-built Options keeps it.
 	RecordServerChoice func(name string) (recorded bool, err error)
 
+	// RecordModelChoice persists the model this session just bound as the one its server comes back on
+	// NEXT time — the `model:` key of the `servers:` entry the session is on, written only while the
+	// `remember-model:` toggle is on. The renderer calls it with the id the human picked and knows
+	// nothing else about it: which entry the session is on, whether that entry is one apogee may write
+	// a model onto, and whether the toggle is on at all are the binary's questions, because only the
+	// binary can see the file.
+	//
+	// Only an EXPLICIT pick reaches it — the `/model` picker's accept and `/model <id>`, which share one
+	// bind path. A rebind the heartbeat merely OBSERVED records nothing: a server that loaded another
+	// model is news about the server rather than a choice this human made, and a session that followed
+	// it must not turn that observation into config nobody wrote. The `--model`/`APOGEE_MODEL` startup
+	// overrides record nothing for the same reason — they are facts about one invocation.
+	//
+	// It answers whether it WROTE, exactly as [Options.RecordServerChoice] does, which is what lets the
+	// renderer state the recording without claiming one for the picks the binary skips: the toggle off,
+	// a session on no configured entry, and a session on a LAUNCHER-FRONTED entry — whose `model:` is a
+	// deliberately empty discovery hint, that class of server remembering its choice as a Launch profile
+	// instead — are all false with no error.
+	//
+	// It is best-effort persistence of something that ALREADY happened: the session is bound before this
+	// is called and stays bound whatever it answers, so an error is a note and never an undo. Like
+	// RecordServerChoice it is synchronous — one small file, spliced and renamed — and called on the
+	// Update loop.
+	//
+	// nil ⇒ nothing is recorded and every pick is session-scoped, which is the behaviour this key was
+	// introduced to replace; every hand-built Options keeps it.
+	RecordModelChoice func(model string) (recorded bool, err error)
+
 	// LaunchProfiles lists the Launch profiles the launcher's config defines — what `/model` offers on
 	// a host with a launcher, re-read FRESH every time the picker opens (ADR 0029 D4), so a profile
 	// added in the launcher's own TUI a moment ago is offered here without restarting apogee. The
