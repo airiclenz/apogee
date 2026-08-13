@@ -4601,7 +4601,10 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 					ID: "c1", Tool: "mcp_search", Arguments: blob(58)}})
 			},
-			wantCollapsed: []string{"✦ mcp_search ▶", "  ┝ [", `  ┕   "arg0",`},
+			// The blob's own rows hang at argumentValueIndent, unlabelled argument bytes being
+			// value lines wherever they surface (prettyJSONDetails) — the branch glyphs are the
+			// block's, the two columns behind them are the blob's.
+			wantCollapsed: []string{"✦ mcp_search ▶", "  ┝   [", `  ┕     "arg0",`},
 			wantExpanded:  62,
 		},
 		{

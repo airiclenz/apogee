@@ -71,13 +71,6 @@ those items' own fixes falsified. The hostile-bytes threat model — the operato
 bytes they operate on are not, and neither is the model. Every citation was re-read against the
 working tree on 2026-08-12 and re-verified on 2026-08-13.
 
-- [ ] A non-JSON `Arguments` blob bypasses `orderedArgs` (`internal/tui/toolpresent.go:2315`, which
-  returns false for anything that is not a JSON object) and falls through to `prettyJSONDetails`
-  (`:2181`), which emits every line verbatim as an unindented body row — so a blob can still paint
-  a forged `Reason:` row on the approval pane, the very row item 6 flattened the labelled path to
-  stop. Nothing validates the blob upstream: `internal/provider/stream.go:201` carries
-  `frag.Function.Arguments` through as-is.
-
 - [ ] The approval pane title is `"Approve " + stripEscapes(req.Tool) + "?"`
   (`internal/tui/approval.go:231`) with no `flattenField`, and `popupTitleLine`
   (`internal/tui/popup.go:1245`) does not fold either — so a newline in a tool NAME paints a

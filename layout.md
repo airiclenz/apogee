@@ -314,7 +314,11 @@ fact is read, and it says nothing the labels do not. Nothing is dropped to buy t
 gets a label, so a workdir naming where a command runs is on the screen rather than summarised away,
 and arguments with no names to label — a blob that does not parse, a value that is not an object at
 all — are shown exactly as they arrived, since half a labelled body would be a claim about the call
-the bytes do not support. A single value with no flat shape (a nested object, an array) is indented
+the bytes do not support. Those unlabelled lines hang at the same two spaces a value does, because
+this pane tells its own rows from the model's by the column they start in: a line of argument bytes
+at column zero is indistinguishable from the `Reason:` the pane wrote, so no argument-derived line
+is ever painted there — the bytes are all on the screen, two columns to the right of where a label
+can live. A single value with no flat shape (a nested object, an array) is indented
 JSON under its own label, which is the one place a brace still reaches this pane. All of it is
 display: the arguments the tool receives are the ones the model sent, whatever shape they were read
 in.

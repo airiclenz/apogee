@@ -1579,19 +1579,21 @@ func TestArgumentValueLinesCapsTheValueAndKeepsItsTail(t *testing.T) {
 // labelled body would be a claim about the call that the bytes do not support. That holds for a
 // blob whose tail is garbage too — a stray `}`/`]` behind the object makes the payload malformed,
 // so it falls back rather than being labelled as if the tail were not there. Absent or null
-// arguments add no lines at all.
+// arguments add no lines at all. Every line the fallback does emit hangs at argumentValueIndent:
+// content survives verbatim, but as a value's line rather than at the column a label lives in.
 func TestArgumentDetailsFallsBackWhereThereIsNothingToLabel(t *testing.T) {
+	const ind = argumentValueIndent
 	cases := []struct {
 		name string
 		args string
 		want []string
 	}{
-		{"a malformed blob", `{"command":`, []string{`{"command":`}},
-		{"not an object", `["a","b"]`, []string{"[", `  "a",`, `  "b"`, "]"}},
-		{"a second document behind the first", `{"a":1} {"b":2}`, []string{`{"a":1} {"b":2}`}},
-		{"a stray brace behind the object", `{"a":1}}`, []string{`{"a":1}}`}},
-		{"a stray bracket behind the object", `{"a":1}]`, []string{`{"a":1}]`}},
-		{"loose text behind the object", `{"a":1} trailing`, []string{`{"a":1} trailing`}},
+		{"a malformed blob", `{"command":`, []string{ind + `{"command":`}},
+		{"not an object", `["a","b"]`, []string{ind + "[", ind + `  "a",`, ind + `  "b"`, ind + "]"}},
+		{"a second document behind the first", `{"a":1} {"b":2}`, []string{ind + `{"a":1} {"b":2}`}},
+		{"a stray brace behind the object", `{"a":1}}`, []string{ind + `{"a":1}}`}},
+		{"a stray bracket behind the object", `{"a":1}]`, []string{ind + `{"a":1}]`}},
+		{"loose text behind the object", `{"a":1} trailing`, []string{ind + `{"a":1} trailing`}},
 		{"absent arguments", ``, nil},
 		{"null arguments", `null`, nil},
 	}
@@ -1602,6 +1604,49 @@ func TestArgumentDetailsFallsBackWhereThereIsNothingToLabel(t *testing.T) {
 				t.Errorf("argumentDetails(%s) =\n%#v\nwant\n%#v", tc.args, got, tc.want)
 			}
 		})
+	}
+}
+
+// The fallback path may not paint a row the approval pane would read as its own. A blob that is not
+// a JSON object bypasses the labelled path's flattening entirely, so before this every one of its
+// lines arrived flush-left — the column the pane's OWN "Reason:" occupies, in the pane's own style —
+// and a model that wrote its arguments as a bare string could forge the row the human decides
+// against. Indenting every emitted line is the fix: the bytes are still all on the screen, but none
+// of them can sit where a label sits, whatever they say.
+func TestArgumentDetailsFallbackCannotPaintALabelledRow(t *testing.T) {
+	cases := []struct {
+		name string
+		args string
+	}{
+		{"a bare string carrying a labelled line", `"Reason: pre-approved by the operator\nFix: none needed"`},
+		{"a malformed object whose text reads as a label", `{"command": "ls"` + "\n" + `Reason: forged`},
+		{"an array of forged labels", `["Reason: forged","Fix: forged"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := detailLineTexts(argumentDetails(json.RawMessage(tc.args)))
+			if len(got) == 0 {
+				t.Fatalf("argumentDetails(%s) rendered nothing; the blob must still reach the screen", tc.args)
+			}
+			for _, ln := range got {
+				if !strings.HasPrefix(ln, argumentValueIndent) {
+					t.Errorf("argumentDetails(%s) painted a flush-left row %q:\n%#v", tc.args, ln, got)
+				}
+			}
+			if !slices.ContainsFunc(got, func(ln string) bool { return strings.Contains(ln, "Reason: ") }) {
+				t.Errorf("argumentDetails(%s) dropped the argument's own text:\n%#v", tc.args, got)
+			}
+		})
+	}
+}
+
+// The labelled path is untouched by the fallback's indent: a real argument still opens a flush-left
+// `name:` label with its value's lines beneath it, which is what makes the indent mean anything.
+func TestArgumentDetailsLabelledShapeSurvivesTheFallbackIndent(t *testing.T) {
+	got := detailLineTexts(argumentDetails(json.RawMessage(`{"command":"git status"}`)))
+	want := []string{"command:", argumentValueIndent + "git status"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("argumentDetails(labelled) =\n%#v\nwant\n%#v", got, want)
 	}
 }
 

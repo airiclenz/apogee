@@ -262,7 +262,18 @@ refusal.
 
 **Commit:** `fix(tools): read_file discloses the resolved path of a symlinked read`
 
-## 7. A non-JSON `Arguments` blob can no longer paint a labelled approval row
+## 7. A non-JSON `Arguments` blob can no longer paint a labelled approval row — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the indent landed inside `prettyJSONDetails` rather than at the
+`argumentDetails` call site — the item's conditional made the call-site placement contingent on the
+helper having callers whose rows are not argument-derived, and it has exactly one caller
+(`argumentDetails`), so every line it emits is argument bytes.
+NOTES (2026-08-13): also amended `layout.md` (not in the item's Files list) — its approval-pane
+spec stated unlabelled arguments as "shown exactly as they arrived", which this item qualifies;
+the paragraph now records the indent and the column rule that makes it load-bearing.
+NOTES (2026-08-13): `internal/tui/render_test.go` (not in the item's Files list) had one pinned
+collapsed-block rendering of an unregistered tool's array blob whose two branch rows carried the
+old flush-left text; its expected strings gained the indent (line count unchanged).
 
 **What:** a non-JSON `Arguments` blob bypasses `orderedArgs`
 (`internal/tui/toolpresent.go:2375`, which returns false for anything that is not a JSON object)

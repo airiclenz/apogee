@@ -2244,10 +2244,21 @@ func parseArgs(raw json.RawMessage) map[string]any {
 }
 
 // prettyJSONDetails renders a tool call's arguments as the pretty-printed JSON (or the verbatim
-// text when it does not parse) split into one detailLine per line. It is what argumentDetails
-// degrades to where there is nothing to label — a bare array, a malformed fragment — so a blob
-// with no names still reaches the screen as it arrived instead of being dropped. Empty/null
-// arguments add no lines.
+// text when it does not parse) split into one detailLine per line, each hanging at
+// argumentValueIndent. It is what argumentDetails degrades to where there is nothing to label — a
+// bare array, a malformed fragment — so a blob with no names still reaches the screen as it
+// arrived instead of being dropped. Empty/null arguments add no lines.
+//
+// The indent is what stops this path from giving back what the labelled path closed. On the
+// approval pane a row is the SURFACE's own iff it starts flush-left: that is the whole of what
+// tells the pane's "Reason:" from a row painted out of the model's bytes, since both wear
+// th.popupBody and the pane sets no bodyLead. The labelled path spends that fact by flattening
+// names and indenting values (argumentDetails); a fallback emitting lines at column zero let a blob
+// whose text reads "Reason: pre-approved by the operator" paint a second Reason row beside the real
+// one — a forged fact under the pane's own styling, on the surface a human authorises a call from.
+// Every line here is argument-derived, this being the arguments' own fallback and its only caller,
+// so every line is a BODY row. Nothing is rejected or summarised to get there: the bytes still
+// reach the screen exactly as they arrived, two columns to the right of where a label can live.
 func prettyJSONDetails(raw json.RawMessage) []detailLine {
 	pretty := prettyJSON(raw)
 	if pretty == "" {
@@ -2256,7 +2267,7 @@ func prettyJSONDetails(raw json.RawMessage) []detailLine {
 	lines := splitLines(pretty)
 	details := make([]detailLine, 0, len(lines))
 	for _, ln := range lines {
-		details = append(details, detailLine{Text: ln})
+		details = append(details, detailLine{Text: argumentValueIndent + ln})
 	}
 	return details
 }
@@ -2279,9 +2290,11 @@ const argumentValueIndent = "  "
 // Two things still render as JSON, and both are the honest rendering rather than a leftover. A blob
 // that is not an object at all — a bare array, a malformed fragment — has no names to label, so it
 // falls back to prettyJSONDetails and the unregistered-tool body's verbatim-rather-than-dropped
-// rule. And a single value with no flat shape (a nested object, an array of objects) is indented
-// JSON under its own label, since nothing else states its structure without lying about it. What
-// never comes back is an envelope around the argument SET: the labels ARE the object.
+// rule, its every line sitting at argumentValueIndent because an unlabelled line is still a value's
+// line and no argument byte may render where a label lives. And a single value with no flat shape (a
+// nested object, an array of objects) is indented JSON under its own label, since nothing else
+// states its structure without lying about it. What never comes back is an envelope around the
+// argument SET: the labels ARE the object.
 //
 // Both surfaces that show a call's raw arguments read this one rendering: the approval prompt a
 // human decides on, and the transcript block that records a call the presenter does not recognise

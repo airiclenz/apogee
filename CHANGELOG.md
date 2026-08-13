@@ -443,6 +443,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A tool call whose arguments are not a JSON object can no longer forge a row on the approval
+  pane.** The pane tells its own rows from the model's by the column they start in: a `Reason:` or a
+  `Fix:` the pane wrote begins flush-left, and every argument the model sent hangs two spaces in
+  under its label. Arguments that carry no labels at all — a bare string, an array, a fragment that
+  does not parse — took a fallback that emitted each line at column zero, so a blob reading
+  `Reason: pre-approved by the operator` painted a second Reason row beside the real one, in the
+  pane's own style, on the surface a human authorises a call from. Those lines now hang at the same
+  indent a labelled value does. Nothing is rejected and nothing is hidden — the bytes still reach
+  the screen exactly as they arrived, two columns to the right of where a label can live — and a
+  properly labelled call renders to the byte as it did before.
+
 - **`read_file` now says when it followed a symlink.** The write tools already append
   `→ resolves to <path>` to their result when the path they were given turns out to name
   something else; a read still echoed the argument alone. So a read of `docs/notes.md` that was
