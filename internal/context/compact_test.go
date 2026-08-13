@@ -302,3 +302,27 @@ func TestCompactAppliesTranscriptBudget(t *testing.T) {
 		t.Errorf("budgeted summary request still carries an early middle turn:\n%s", body)
 	}
 }
+
+// TestEmbeddedPromptsLoadWithoutTrailingNewline pins the loader contract behind the prompt
+// assets: every file under prompts/ carries text, and mustPrompt returns it with the single
+// trailing newline the file ends in already stripped. That is what keeps a loaded prompt
+// byte-identical to the literal it replaced, and keeps a joiner written in code (the summary
+// call's "\n\n") from being doubled by one hiding at the end of a file.
+func TestEmbeddedPromptsLoadWithoutTrailingNewline(t *testing.T) {
+	entries, err := promptFS.ReadDir("prompts")
+	if err != nil {
+		t.Fatalf("read the embedded prompts directory: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("no prompt assets are embedded — the prompts/ directory is empty")
+	}
+	for _, e := range entries {
+		got := mustPrompt(e.Name())
+		if strings.TrimSpace(got) == "" {
+			t.Errorf("prompt asset %s loads as empty text", e.Name())
+		}
+		if strings.HasSuffix(got, "\n") {
+			t.Errorf("prompt asset %s still ends in a newline after load: %q", e.Name(), got)
+		}
+	}
+}

@@ -149,7 +149,12 @@ file there.
 
 ---
 
-## 3. `internal/context`: compaction prompts become embedded files
+## 3. `internal/context`: compaction prompts become embedded files — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the embed FS, loader (`mustPrompt`) and the three prompt vars live in `compact.go` — the item's Files line names that file, and the package stays at four non-test .go files, so no `prompts.go` was added.
+NOTES (2026-08-13): `internal/context` carries no doc.go file map and no docmap test (4 non-test .go files, under the house ~10-file threshold), so the doc.go update names the three new prompt assets in the package narration instead of adding a map.
+NOTES (2026-08-13): the loader also normalises CRLF→LF before stripping the trailing newline (beyond design call 6's literal wording), matching `internal/tui/logo.go` — without it a `core.autocrlf=true` checkout would bake `\r` into every prompt and break the byte-identity the design call requires.
+NOTES (2026-08-13): `summaryMessagePrefix`'s `"\n\n"` joiner stays in code (as the plan allows for the tail fragment), so its asset holds no trailing blank line — the item's own loader test requires every asset to load without a trailing newline. The var's value is byte-identical to the old const.
 
 **What:** Create `internal/context/prompts/` with the prompt text as `.txt` assets and an
 `//go:embed prompts/*.txt` `embed.FS` in `compact.go` (or a small new `prompts.go` if cleaner

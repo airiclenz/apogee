@@ -8,7 +8,11 @@
 // prefix verbatim. The transcript the summary call carries is bounded to a character
 // budget derived from the discovered context window (keep the prefix + a budgeted tail,
 // elide the middle) so the call cannot overflow at exactly the high fill /compact exists
-// to relieve. Agent.Compact drives it on demand (the /compact command).
+// to relieve. Agent.Compact drives it on demand (the /compact command). Its prompt text is not
+// written in Go: compact.go embeds the prompts/ directory, whose plain files — summary-instruction.txt
+// (the summarizer's system prompt), summary-tail-instruction.txt (what the transcript is for) and
+// summary-message-prefix.txt (the label on the folded summary) — hold the wording as editable prose
+// inside the same single binary.
 //
 // Budget allocation and honest token accounting are implemented (Allocate, TokenEstimator):
 // Allocate splits the discovered context window across the parts of a request (response reserve,

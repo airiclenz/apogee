@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"embed"
 	"fmt"
 	"strings"
 
@@ -65,7 +66,7 @@ func Compact(ctx context.Context, c Completer, conv *domain.Conversation, maxTra
 	// rendering is budgeted so a high-fill transcript cannot overflow the summary call itself.
 	req := []domain.Message{
 		{Role: domain.RoleSystem, Content: summaryInstruction},
-		{Role: domain.RoleUser, Content: renderBudgetedTranscript(msgs, prefix, maxTranscriptChars) + "\n\nSummarize the conversation above as instructed."},
+		{Role: domain.RoleUser, Content: renderBudgetedTranscript(msgs, prefix, maxTranscriptChars) + "\n\n" + summaryTailInstruction},
 	}
 
 	text, err := c.Complete(ctx, req)
@@ -88,20 +89,45 @@ func Compact(ctx context.Context, c Completer, conv *domain.Conversation, maxTra
 // (conv is left untouched) rather than replacing the history with an empty message.
 var errEmptySummary = fmt.Errorf("apogee: compaction produced an empty summary")
 
-// summaryInstruction is the summarizer's system prompt. It asks for a self-contained,
-// resume-ready brief rather than a chat reply, and to preserve the load-bearing detail a
-// coding agent needs to continue.
-const summaryInstruction = "You are compacting a conversation between a user and a coding " +
-	"agent to free up the context window. Produce a single, self-contained summary that lets " +
-	"the agent continue seamlessly. Preserve: the user's goals and constraints; key decisions " +
-	"and their rationale; important file paths, identifiers, and commands; the current state of " +
-	"the work and any results that matter; and the next steps or open questions. Be concise but " +
-	"complete, and omit pleasantries and redundant back-and-forth. Write the summary as notes " +
-	"for the agent, not as a message to the user. Output only the summary."
+// promptFS carries this package's prompt text as plain files under prompts/. The prompts are
+// assets rather than Go string literals so the wording can be read and edited as prose
+// (ISSUES.md: hard-coded prompt literals), and go:embed compiles them into the binary — the
+// text ships inside the single binary, is never read from disk at runtime, and is never
+// user-overridable.
+//
+//go:embed prompts/*.txt
+var promptFS embed.FS
+
+// mustPrompt loads one embedded prompt asset by file name. Every asset ends with exactly one
+// trailing newline — a file without one is awkward in an editor and in a diff — and that one
+// newline is stripped here, so the string in memory is byte-identical to the literal the asset
+// replaced. CRLF endings are normalised first, the way the embedded block art is
+// (internal/tui/logo.go), so a core.autocrlf checkout cannot bake \r into a prompt. A name
+// that is not in the FS cannot happen in a built binary — go:embed fails the build first — so
+// it is a programming error rather than a runtime condition.
+func mustPrompt(name string) string {
+	b, err := promptFS.ReadFile("prompts/" + name)
+	if err != nil {
+		panic("apogee: missing embedded prompt asset " + name + ": " + err.Error())
+	}
+	return strings.TrimSuffix(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
+}
+
+// summaryInstruction is the summarizer's system prompt (prompts/summary-instruction.txt). It
+// asks for a self-contained, resume-ready brief rather than a chat reply, and to preserve the
+// load-bearing detail a coding agent needs to continue.
+var summaryInstruction = mustPrompt("summary-instruction.txt")
+
+// summaryTailInstruction closes the summary call's user message
+// (prompts/summary-tail-instruction.txt): it follows the rendered transcript and says what to
+// do with it. The blank-line joiner between the two stays in code — a trailing blank line in
+// an asset file is invisible to a reader and easily lost to an editor that trims it.
+var summaryTailInstruction = mustPrompt("summary-tail-instruction.txt")
 
 // summaryMessagePrefix labels the folded summary so it reads clearly in scrollback and
-// snapshots, and so the model sees it as prior context rather than a fresh instruction.
-const summaryMessagePrefix = "Summary of the conversation so far:\n\n"
+// snapshots, and so the model sees it as prior context rather than a fresh instruction. The
+// label is prompts/summary-message-prefix.txt; its blank-line joiner stays in code, as above.
+var summaryMessagePrefix = mustPrompt("summary-message-prefix.txt") + "\n\n"
 
 // summaryMessage wraps the generated summary as the single assistant message that replaces the
 // folded history. Assistant role keeps clean user → assistant → user alternation when the next

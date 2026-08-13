@@ -323,6 +323,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The compaction prompts are now plain files rather than Go string literals.** The summarizer's
+  system prompt, the sentence that closes the summary call's user message, and the label on the
+  folded summary were string constants in `internal/context/compact.go`, where prose that gets
+  reworded is hardest to read and hardest to diff. They now live in `internal/context/prompts/` as
+  three `.txt` assets compiled in with `//go:embed`: still one binary, still nothing read from disk
+  at runtime and nothing user-overridable — only the wording moves to where it can be edited as
+  prose. The loader strips the single trailing newline each asset ends in (normalising a CRLF
+  checkout first, as the embedded block art already does), so every string is byte-identical to the
+  constant it replaced and the summary call goes out exactly as before; a test pins that contract
+  over every embedded asset, and the existing test asserting the request's system message *is* the
+  summary instruction passes unmodified.
+
 - **`resolvedTargetNote`'s doc comment covers its reader caller too**: the comment at
   `internal/tools/workspace_scoped.go` still described the ` → resolves to <path>` tail as "the tail
   a write tool appends", which stopped being the whole truth when `read_file` began appending the
