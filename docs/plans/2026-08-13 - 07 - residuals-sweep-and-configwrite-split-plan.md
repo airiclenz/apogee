@@ -253,7 +253,12 @@ item 10 owns the final wording.
 
 **Commit:** `refactor(config): key-source writer moves to configwrite_keysource.go`
 
-## 9. configwrite split II — the scalar writer moves out
+## 9. configwrite split II — the scalar writer moves out — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's line ranges held after item 8 — the scalar section still sat at `:450-1328` post-split (commit `2bcf0f6`'s fifth section, the per-entry setting writer, follows it at `:1329-1489` and stays in `configwrite.go`), so the move ran on the stated span with no adjustment.
+NOTES (2026-08-13): `listValue` and `lineCount` are called from the moved scalar span but item 8 already homed them in `configwrite_keysource.go` per its own literal text; they were left there (same-package calls, no build impact) rather than re-moved, since the plan's Out-of-scope section names that file as their home.
+NOTES (2026-08-13): the new file's import block is the moved span's subset (`bytes`, `errors`, `fmt`, `os`, `slices`, `strconv`, `strings`, `yaml`) and `strconv` was dropped from `configwrite.go`'s block as its last user left — an import-list adjustment the move forces, not a code edit; the moved body is byte-identical to the removed span and `configwrite.go` gained zero lines.
+NOTES (2026-08-13): `doc.go`'s `configwrite.go` sentence lost "a setting, " from its enumeration and gained a `configwrite_scalar.go` sentence — the minimum needed to stay true after the move; item 10 owns the final one-line-per-file wording.
 
 Depends on item 8.
 

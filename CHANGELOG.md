@@ -804,6 +804,11 @@ point is a **minor** bump, not a breaking change.
   A pure move: no exported name changes, no logic changes, the ADR 0035 splice contract untouched,
   and `doc.go`'s file map gains the new file so the docmap test keeps the navigation aid honest.
 
+- Refactor: `internal/config/configwrite.go`'s scalar-setting writer moved verbatim into a new
+  `internal/config/configwrite_scalar.go` (ADR 0043 split-by-concern), carrying its section banner
+  as the file header and the shared splice helpers embedded in that span. Behaviour-preserving:
+  no exported name or logic changed.
+
 ### Removed
 
 - **`open_file` is gone, merged into `read_file`.** It was the read-and-locate twin of a tool that
