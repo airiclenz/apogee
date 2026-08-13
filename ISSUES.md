@@ -84,12 +84,6 @@ working tree on 2026-08-12 and re-verified on 2026-08-13.
   second, unindented row above the pane's own body. Reachable via an MCP-supplied tool name, which
   apogee does not author.
 
-- [ ] The result-string half of item 8's resolved-path disclosure reaches only four of the seven
-  workspace-scoped writers: `resolvedTargetNote` is called from `internal/tools/write_file.go:81`,
-  `file_edit.go:90` and `find_replace.go:107,229`, while `copy_file`, `move_file` and `delete_file`
-  (`internal/tools/file_ops.go`) still echo the literal argument in their success sentences for a
-  write that landed somewhere else.
-
 - [ ] `go_vet`'s package-directory scope is disclosed on the tool description
   (`internal/tools/diagnostics.go:61`) and on both vet result strings (`:192`, `:194`, via
   `vettedPackageLine` `:326`) but NOT on the approval pane — the one surface the human actually

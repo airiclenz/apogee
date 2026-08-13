@@ -144,10 +144,17 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	if refusal := checkFileOpsPathsFrom(args, sourceRoot, t.root); refusal != "" {
 		return errorResult(call.ID, refusal), nil
 	}
+	// Where this copy REALLY lands, read BEFORE it lands (resolvedTargetNote): the destination
+	// name is renamed over, so a symlink AT that name is replaced rather than followed and
+	// afterwards the name would resolve to itself — the one call worth disclosing would report
+	// nothing. The SOURCE gets no note of its own: it is a read, and this is the writers'
+	// disclosure (workspace_scoped.go).
+	resolved := resolvedTargetNote(args.Destination, t.root)
+
 	if err := security.SafeCopyFileFrom(sourceRoot, args.Source, t.root, args.Destination); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
-	return okResult(call.ID, fmt.Sprintf("copied %s to %s", args.Source, args.Destination)), nil
+	return okResult(call.ID, fmt.Sprintf("copied %s to %s%s", args.Source, args.Destination, resolved)), nil
 }
 
 // MoveFile moves or renames a workspace file. It is a write tool — the loop routes it through
@@ -188,10 +195,15 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	if refusal := checkFileOpsPaths(args, t.root); refusal != "" {
 		return errorResult(call.ID, refusal), nil
 	}
+	// Read before the move for the reason write_file reads before its write: the rename replaces
+	// the destination NAME, so once it lands that name resolves to itself and the redirection the
+	// operator needed to see would be gone from the sentence (resolvedTargetNote).
+	resolved := resolvedTargetNote(args.Destination, t.root)
+
 	if err := t.move(args); err != "" {
 		return errorResult(call.ID, err), nil
 	}
-	return okResult(call.ID, fmt.Sprintf("moved %s to %s", args.Source, args.Destination)), nil
+	return okResult(call.ID, fmt.Sprintf("moved %s to %s%s", args.Source, args.Destination, resolved)), nil
 }
 
 // move performs the rename, falling back to copy-then-remove, and returns the model-facing
@@ -338,10 +350,17 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	if refusal := checkDeletePath(args.Path, t.root); refusal != "" {
 		return errorResult(call.ID, refusal), nil
 	}
+	// Read before the removal: afterwards the name is gone and resolves to itself through its
+	// parent, so the one delete worth disclosing — a name that pointed somewhere else — would
+	// report nothing. SafeRemove unlinks THE NAME, so this discloses more than the call touches
+	// (the link's target survives), which is the direction a security surface errs in and the one
+	// the gate already took (resolvedTargetNote, ResolvedWriteTarget).
+	resolved := resolvedTargetNote(args.Path, t.root)
+
 	if err := security.SafeRemove(t.root, args.Path); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
-	return okResult(call.ID, "deleted "+args.Path), nil
+	return okResult(call.ID, "deleted "+args.Path+resolved), nil
 }
 
 // checkDeletePath validates the one path delete_file takes and returns the model-facing refusal

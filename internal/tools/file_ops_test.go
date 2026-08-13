@@ -836,3 +836,115 @@ func TestCopyFile_ExtraReadRootSourceFollowsSymlinksIntoTheWorkspace(t *testing.
 		t.Errorf("destination = (%q, %v), want the mounted source's bytes", got, err)
 	}
 }
+
+// TestCopyFile_DisclosesTheResolvedDestination is this family's half of the result-string
+// disclosure the other writers already make. A symlinked destination LEAF still reaches success —
+// the mutated-chain refusals gate parents — and the rename replaces that name rather than writing
+// through it, so the sentence the model reads and the transcript prints quoted an argument that
+// pointed somewhere else entirely. The success sentence must name what the argument resolved to,
+// while an ordinary destination keeps the bare sentence: a note that fired on every copy would
+// disclose nothing.
+func TestCopyFile_DisclosesTheResolvedDestination(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	config := symlinkedReadFixture(t, root, "docs", "notes.md")
+	writeFixture(t, filepath.Join(root, "payload.txt"), "payload\n", 0o644)
+
+	tool := NewCopyFile(root, nil)
+	redirected := runFileOp(t, tool, map[string]any{
+		"source": "payload.txt", "destination": "docs/notes.md", "overwrite": true,
+	})
+	if redirected.IsError {
+		t.Fatalf("unexpected tool error: %q", redirected.Content)
+	}
+	if want := "copied payload.txt to docs/notes.md → resolves to " + realPath(t, config); redirected.Content != want {
+		t.Errorf("Content = %q, want %q", redirected.Content, want)
+	}
+	// The copy replaced the NAME rather than going through the link, so the redirect target is
+	// still the file it was — the note is read before the copy for exactly that reason.
+	if got, err := os.ReadFile(config); err != nil || string(got) != gitConfigFixture {
+		t.Errorf("redirect target = (%q, %v), want it untouched", got, err)
+	}
+
+	ordinary := runFileOp(t, tool, map[string]any{
+		"source": "payload.txt", "destination": "copy.txt",
+	})
+	if ordinary.IsError {
+		t.Fatalf("unexpected tool error: %q", ordinary.Content)
+	}
+	if ordinary.Content != "copied payload.txt to copy.txt" {
+		t.Errorf("Content = %q, want the bare sentence for a destination that resolves to itself", ordinary.Content)
+	}
+}
+
+// TestMoveFile_DisclosesTheResolvedDestination is the move's half of the same disclosure: the
+// rename lands on the destination NAME, so a symlinked leaf is replaced and the operator is
+// otherwise told only the name the model wrote.
+func TestMoveFile_DisclosesTheResolvedDestination(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	config := symlinkedReadFixture(t, root, "docs", "notes.md")
+	writeFixture(t, filepath.Join(root, "payload.txt"), "payload\n", 0o644)
+
+	tool := NewMoveFile(root)
+	redirected := runFileOp(t, tool, map[string]any{
+		"source": "payload.txt", "destination": "docs/notes.md", "overwrite": true,
+	})
+	if redirected.IsError {
+		t.Fatalf("unexpected tool error: %q", redirected.Content)
+	}
+	if want := "moved payload.txt to docs/notes.md → resolves to " + realPath(t, config); redirected.Content != want {
+		t.Errorf("Content = %q, want %q", redirected.Content, want)
+	}
+	if got, err := os.ReadFile(config); err != nil || string(got) != gitConfigFixture {
+		t.Errorf("redirect target = (%q, %v), want it untouched", got, err)
+	}
+
+	writeFixture(t, filepath.Join(root, "payload.txt"), "payload\n", 0o644)
+	ordinary := runFileOp(t, tool, map[string]any{
+		"source": "payload.txt", "destination": "moved.txt",
+	})
+	if ordinary.IsError {
+		t.Fatalf("unexpected tool error: %q", ordinary.Content)
+	}
+	if ordinary.Content != "moved payload.txt to moved.txt" {
+		t.Errorf("Content = %q, want the bare sentence for a destination that resolves to itself", ordinary.Content)
+	}
+}
+
+// TestDeleteFile_DisclosesTheResolvedTarget covers the removal half. SafeRemove unlinks THE NAME,
+// so the note here discloses more than the call touched — the file the link pointed at survives —
+// which is the direction a security surface errs in: the operator asked to delete `docs/notes.md`
+// and is told what that name stood for.
+func TestDeleteFile_DisclosesTheResolvedTarget(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	config := symlinkedReadFixture(t, root, "docs", "notes.md")
+	writeFixture(t, filepath.Join(root, "plain.txt"), "bytes\n", 0o644)
+
+	tool := NewDeleteFile(root)
+	redirected := runFileOp(t, tool, map[string]any{"path": "docs/notes.md"})
+	if redirected.IsError {
+		t.Fatalf("unexpected tool error: %q", redirected.Content)
+	}
+	if want := "deleted docs/notes.md → resolves to " + realPath(t, config); redirected.Content != want {
+		t.Errorf("Content = %q, want %q", redirected.Content, want)
+	}
+	if got, err := os.ReadFile(config); err != nil || string(got) != gitConfigFixture {
+		t.Errorf("redirect target = (%q, %v), want the link's target untouched", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "docs", "notes.md")); !os.IsNotExist(err) {
+		t.Errorf("the named link must be gone after a delete, lstat error = %v", err)
+	}
+
+	ordinary := runFileOp(t, tool, map[string]any{"path": "plain.txt"})
+	if ordinary.IsError {
+		t.Fatalf("unexpected tool error: %q", ordinary.Content)
+	}
+	if ordinary.Content != "deleted plain.txt" {
+		t.Errorf("Content = %q, want the bare sentence for a path that resolves to itself", ordinary.Content)
+	}
+}

@@ -443,6 +443,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`copy_file`, `move_file` and `delete_file` now say where the file really was.** `write_file`
+  and the two find-and-replace tools already append `→ resolves to <path>` to their result when the
+  path they were given turns out to name something else; the three file-operation tools still
+  echoed the argument alone. So a copy onto `docs/notes.md` that was really a link to
+  `.git/config`, or a delete of that same name, reported a sentence the transcript and the model
+  both read as an ordinary in-workspace operation. All three carry the note now — on the
+  destination for a copy and a move, on the removed target for a delete — and only when the
+  resolution actually differs, so an ordinary operation reports the bare sentence it always did.
+  The note is read BEFORE the operation, because a rename replaces the destination name and a
+  removal takes it away: read afterwards, the one call worth disclosing would have had nothing
+  left to disclose. A copy's SOURCE gets no note of its own — a source is a read, and this is the
+  writers' disclosure — and with the symlinked-parent refusals in place the note now covers a
+  symlinked final name or any other resolution difference, not a redirected directory.
+
 - **`move_file`, `delete_file` and `copy_file` no longer write through a symlinked directory inside
   your workspace.** The write path already refused one — a `docs → .git` link redirects a path the
   operator approved as `docs/config` onto the repository's own config while never leaving the

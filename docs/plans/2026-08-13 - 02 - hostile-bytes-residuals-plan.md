@@ -209,7 +209,7 @@ when the source chain crosses a symlink.
 
 **Commit:** `fix(security): rename, remove and copy refuse symlinked parents on every mutated chain`
 
-## 5. `copy_file`, `move_file` and `delete_file` disclose the resolved target
+## 5. `copy_file`, `move_file` and `delete_file` disclose the resolved target — ✅ DONE (2026-08-13)
 
 Depends on item 4 (same file: `internal/tools/file_ops.go`).
 
