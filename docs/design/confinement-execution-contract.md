@@ -176,6 +176,37 @@ decides raw-syscall vs the `github.com/landlock-l/go-landlock` helper and record
 > Cobra. The box is passed inline (argv) so the helper needs no shared state with the parent — coherent
 > with statelessness (ADR 0008).
 
+**The `/dev/null` device exemption (amendment, 2026-08-13).** Both POSIX backends allow writes to the
+literal device file `/dev/null`, *in addition to* the box's writable roots. Without it the POSIX shell
+redirection idiom (`2>/dev/null`) is denied inside every confined tool call; `/dev/null` is a
+side-effect-free data sink, so exempting it from the write fence widens nothing an agent — or a
+reviewer of one — could ever observe. The obligation is backend-local:
+
+- **Linux.** `applyLandlock` adds one path-beneath rule for `/dev/null` after the writable-roots loop,
+  carrying a *file-applicable* mask (`LANDLOCK_ACCESS_FS_WRITE_FILE`, plus `..._TRUNCATE` at ABI ≥ 3 —
+  `> /dev/null` opens with `O_TRUNC`). It must not reuse the roots' mask: `landlock_add_rule` returns
+  `EINVAL` when a rule carries directory-only rights on a non-directory `parent_fd`. A missing
+  `/dev/null` (`ENOENT`) skips the rule; any other open error fails the confinement closed.
+- **macOS.** `seatbeltProfile` emits `(allow file-write* (literal "/dev/null"))` after the
+  `(deny file-write*)` line, unconditionally — including for a box with no writable roots at all. No
+  canonicalization is needed: `/dev/null` is not a symlink on macOS.
+
+Three properties of the exemption are contract, not incident:
+
+1. **It is backend-level.** It is *not* part of `ConfinementBox` — no writable-path entry is synthesised
+   for it — and it does not appear in the exec fence's writable set (`internal/security/execsafety.go`).
+   The box stays pure policy (workspace + user paths), and every box-construction site inherits the
+   exemption for free.
+2. **The exempt set is exactly `/dev/null`.** No other device is write-exempt — `/dev/tty`, `/dev/zero`,
+   `/dev/stdout` and the rest stay fenced. Extending the set is a change to *this contract*, not a
+   backend detail.
+3. **Reads are untouched.** Neither backend fences reads (landlock never handles read; the seatbelt
+   profile denies only `file-write*`), so device *reads* were never gated and the exemption changes
+   nothing for them.
+
+Windows (§9) is unaffected: its backend fences by integrity label rather than by path, and the `NUL`
+device is not label-fenced.
+
 ### 2.4 Process-tree teardown and cancellation
 
 The wrapping changes the process tree (`sandbox-exec` is the parent of the real child on macOS; the

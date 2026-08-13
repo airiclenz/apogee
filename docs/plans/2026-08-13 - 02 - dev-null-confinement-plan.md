@@ -113,7 +113,12 @@ item 1's wording).
 
 **Commit:** `fix(confine): allow /dev/null writes through the seatbelt fence`
 
-## 3. Contract amendment: record the device exemption
+## 3. Contract amendment: record the device exemption — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): no CHANGELOG entry — the amendment documents behavior items 1 and 2 already
+landed, and their two `### Fixed` entries (landlock + seatbelt) already state the exemption, its
+`/dev/null`-only set and its backend-level placement to users; a doc-only restatement would duplicate
+them.
 
 **What:** Amend `docs/design/confinement-execution-contract.md`: in the section
 stating the backends' write-fence obligations (§2.3 or the box-semantics section —
