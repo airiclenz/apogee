@@ -6,12 +6,16 @@ package agent
 // respondAndReview reports and, crucially, the ErrorEvent it does NOT emit — plus the observable
 // behaviour a caller sees, which must stay exactly what a plain fault produces until recovery is
 // wired in.
+//
+// The transient seam (at the foot of this file) is the second fault the respond phase can act on:
+// an in-band error whose CLASS the provider marked retryable, which the Turn re-streams once.
 
 import (
 	"context"
 	"iter"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -87,8 +91,9 @@ func TestRespondAndReviewSplitsOverflowFromPlainFault(t *testing.T) {
 				t.Fatalf("newAgent: %v", err)
 			}
 			req, _ := a.buildRequest(0)
+			run := &turnRun{turn: 0, req: req}
 
-			resp, outcome, carried := a.respondAndReview(context.Background(), 0, req)
+			resp, outcome, carried := a.respondAndReview(context.Background(), run)
 
 			if outcome != tc.wantOutcome {
 				t.Errorf("outcome = %v, want %v", outcome, tc.wantOutcome)
@@ -214,5 +219,190 @@ func TestOverflowGiveUpNamesTheWindowRemedy(t *testing.T) {
 					errs[0].Err, overflowFaultMsg)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The transient seam: one re-stream per Turn
+// ---------------------------------------------------------------------------
+
+// transientFaultMsg is the sanitized text the provider builds for the in-band 502 an aggregator
+// wrapped in an HTTP 200 mid-stream — the observed shape (session 20260813T100440Z-104eaf7a) that
+// used to kill the whole exchange with no retry.
+const transientFaultMsg = `apogee: upstream in-band error 502: ` +
+	`{"error":{"code":502,"message":"Provider returned error","metadata":{"raw":"upstream timed out"}},` +
+	`"error_type":"provider_unavailable"}`
+
+// retryableErrorScript is a stream that faults with a TRANSIENT in-band error — the classification
+// the provider attaches (Delta.Retryable) when the fault's class is one it would have retried at
+// the HTTP layer. errorScript is its non-retryable twin, everything else held equal.
+func retryableErrorScript(msg string) []provider.Delta {
+	return []provider.Delta{{Kind: provider.DeltaError, Err: msg, Retryable: true}}
+}
+
+// shortRestreamHoldoff shrinks the loop's re-stream hold-off for the duration of one test, so a
+// test driving the recovery does not sit through the production second, and restores it after.
+// Safe because the tests that call it are serial: none of them calls t.Parallel.
+func shortRestreamHoldoff(t *testing.T) {
+	t.Helper()
+	previous := restreamHoldoff
+	restreamHoldoff = time.Millisecond
+	t.Cleanup(func() { restreamHoldoff = previous })
+}
+
+// countEvents reports how many of events are of type T.
+func countEvents[T domain.Event](events []domain.Event) int {
+	n := 0
+	for _, e := range events {
+		if _, ok := e.(T); ok {
+			n++
+		}
+	}
+	return n
+}
+
+// lastFaultMsg returns the Err of the last fault Delta in scripts — the message the give-up path
+// must surface, which for a re-streamed Turn is the SECOND attempt's fault, not the first's.
+func lastFaultMsg(scripts [][]provider.Delta) string {
+	msg := ""
+	for _, script := range scripts {
+		for _, d := range script {
+			if d.Kind == provider.DeltaError {
+				msg = d.Err
+			}
+		}
+	}
+	return msg
+}
+
+// TestRespondAndReviewReStreamsATransientFaultOnce pins the recovery and both its edges. A fault
+// the provider classed transient re-sends the SAME request once, and a second attempt that lands
+// completes the Turn SILENTLY — one StreamResetEvent, so a streaming Driver discards the partial
+// reply, and no ErrorEvent, because nothing reached the user that they must act on (the
+// overflow-recovery precedent). The two edges keep today's behaviour byte-for-byte: a second
+// transient fault gives up, and a fault that was never transient never re-streams at all.
+func TestRespondAndReviewReStreamsATransientFaultOnce(t *testing.T) {
+	shortRestreamHoldoff(t)
+
+	tests := []struct {
+		name        string
+		scripts     [][]provider.Delta
+		wantOutcome turnOutcome
+		wantText    string
+		wantCalls   int
+		wantResets  int
+		wantErrors  int
+	}{
+		{
+			name:        "a transient fault re-streams and the recovered Turn stays quiet",
+			scripts:     [][]provider.Delta{retryableErrorScript(transientFaultMsg), contentScript("recovered")},
+			wantOutcome: turnOK,
+			wantText:    "recovered",
+			wantCalls:   2,
+			wantResets:  1,
+			wantErrors:  0,
+		},
+		{
+			name:        "a second transient fault gives up exactly as today",
+			scripts:     [][]provider.Delta{retryableErrorScript(transientFaultMsg), retryableErrorScript(transientFaultMsg)},
+			wantOutcome: turnFailed,
+			wantCalls:   2,
+			wantResets:  1,
+			wantErrors:  1,
+		},
+		{
+			name:        "a fault that is not transient fails on the spot",
+			scripts:     [][]provider.Delta{errorScript("apogee: upstream in-band error 400: bad request"), contentScript("unreached")},
+			wantOutcome: turnFailed,
+			wantCalls:   1,
+			wantResets:  0,
+			wantErrors:  1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			responder := &scriptedResponder{scripts: tc.scripts}
+			a, err := newAgent(baseConfig(sink), responder)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			req, _ := a.buildRequest(0)
+			run := &turnRun{turn: 0, req: req}
+
+			resp, outcome, carried := a.respondAndReview(context.Background(), run)
+
+			if outcome != tc.wantOutcome {
+				t.Errorf("outcome = %v, want %v", outcome, tc.wantOutcome)
+			}
+			if carried != "" {
+				t.Errorf("carried message = %q, want empty — only an overflow carries its fault out", carried)
+			}
+			if tc.wantText == "" {
+				if resp != nil {
+					t.Errorf("resp = %+v, want nil on a terminal fault", resp)
+				}
+			} else if resp == nil || resp.Text() != tc.wantText {
+				t.Errorf("resp = %+v, want the re-streamed reply %q", resp, tc.wantText)
+			}
+			if responder.calls != tc.wantCalls {
+				t.Errorf("Upstream calls = %d, want %d — the Turn re-streams at most once", responder.calls, tc.wantCalls)
+			}
+			if got := countEvents[domain.StreamResetEvent](sink.events); got != tc.wantResets {
+				t.Errorf("StreamResetEvents = %d, want %d", got, tc.wantResets)
+			}
+			errs := errorEvents(sink.events)
+			if len(errs) != tc.wantErrors {
+				t.Fatalf("ErrorEvents = %d (%v), want %d", len(errs), errs, tc.wantErrors)
+			}
+			if tc.wantErrors == 1 && (errs[0].Source != "loop" || errs[0].Err != lastFaultMsg(tc.scripts)) {
+				t.Errorf("ErrorEvent = {Source:%q Err:%q}, want {Source:%q Err:%q}",
+					errs[0].Source, errs[0].Err, "loop", lastFaultMsg(tc.scripts))
+			}
+			if wantSpent := tc.wantResets == 1; run.restreamSpent != wantSpent {
+				t.Errorf("restreamSpent = %v, want %v", run.restreamSpent, wantSpent)
+			}
+		})
+	}
+}
+
+// TestReStreamLatchIsPerTurn proves the latch is scoped to the Turn rather than the session: a
+// later Turn that hits its own blip re-streams again instead of inheriting a spent latch. Session-
+// scoping it would leave every Turn after the first recovered stutter with no recovery at all.
+func TestReStreamLatchIsPerTurn(t *testing.T) {
+	shortRestreamHoldoff(t)
+
+	sink := &recordingSink{}
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		retryableErrorScript(transientFaultMsg), contentScript("first"), // Turn 0: a blip, then the answer
+		retryableErrorScript(transientFaultMsg), contentScript("second"), // Turn 1: its own blip, its own recovery
+	}}
+	a, err := newAgent(baseConfig(sink), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	for _, text := range []string{"first question", "second question"} {
+		if err := a.Submit(domain.UserInput{Text: text}); err != nil {
+			t.Fatalf("Submit(%q): %v", text, err)
+		}
+		res, err := a.Step(context.Background())
+		if err != nil {
+			t.Fatalf("Step(%q): %v", text, err)
+		}
+		if res.Status != domain.StatusExchangeComplete || res.Faulted {
+			t.Fatalf("Step(%q) result = %+v, want a clean exchange-complete", text, res)
+		}
+	}
+
+	if got := countEvents[domain.StreamResetEvent](sink.events); got != 2 {
+		t.Errorf("StreamResetEvents = %d, want 2 — each Turn spends its own latch", got)
+	}
+	if errs := errorEvents(sink.events); len(errs) != 0 {
+		t.Errorf("ErrorEvents = %v, want none — both Turns recovered", errs)
+	}
+	if me, ok := lastMessageEvent(sink.events); !ok || me.Text != "second" {
+		t.Errorf("final MessageEvent = %+v (ok=%v), want %q", me, ok, "second")
 	}
 }

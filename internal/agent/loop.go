@@ -43,12 +43,14 @@ var errHookPanicked = errors.New("apogee: extension boundary recovered a panic")
 //
 // Every return is at a serializable boundary. A ctx cancellation rolls this Turn's work
 // back and returns StatusCancelled with resumable state; a recovered extension panic or
-// Upstream fault degrades the Turn to a clean boundary without unwinding the host. The one
-// Upstream fault that does NOT end the Turn on the spot is a context-window overflow: the
-// respond phase folds the history (emergencyFold) and re-sends the same Turn once before
-// falling back to that same clean boundary. The same fold also runs PREDICTIVELY — before the
-// request is sent, when the estimate already says it cannot fit — and the two share one fold
-// per Turn.
+// Upstream fault degrades the Turn to a clean boundary without unwinding the host. Two Upstream
+// faults do NOT end the Turn on the spot. A context-window overflow: the respond phase folds the
+// history (emergencyFold) and re-sends the same Turn once before falling back to that same clean
+// boundary — and the same fold also runs PREDICTIVELY, before the request is sent, when the
+// estimate already says it cannot fit, the two sharing one fold per Turn. And a TRANSIENT in-band
+// fault (a 429/5xx/provider_unavailable an aggregator wrapped in an HTTP 200 mid-stream): the
+// respond phase re-streams the same request once, on its own per-Turn latch, before the fault
+// surfaces exactly as it always did.
 func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	turn := a.turns.index
 	t := &turnRun{turn: turn, start: time.Now()}
@@ -136,7 +138,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// one-fold-per-Turn budget through t.foldSpent rather than each holding their own counter.
 	var resp *domain.Response
 	for {
-		reviewed, outcome, overflowMsg := a.respondAndReview(ctx, turn, t.req)
+		reviewed, outcome, overflowMsg := a.respondAndReview(ctx, t)
 		if outcome == turnOK {
 			resp = reviewed
 			break
@@ -304,6 +306,28 @@ const (
 	turnOverflowed                    // the request did not fit the model's context window — NOT surfaced; the caller owns the ErrorEvent
 )
 
+// restreamHoldoff is how long the respond phase waits before re-streaming a transient in-band
+// fault: long enough for the momentary condition behind it — an aggregator swapping out the
+// provider it routed to, a server shedding load — to pass, short enough that a human watching the
+// stream reads it as a stutter rather than a stall. One fixed wait, not a backoff: there is only
+// ever one re-stream to space out. It is a var solely so the loop's tests need not sit through it;
+// nothing outside a test writes it.
+var restreamHoldoff = time.Second
+
+// holdOffRestream waits restreamHoldoff and reports whether the wait completed — false means ctx
+// was cancelled first, and the caller must surface the fault instead of re-streaming into a
+// context that is already gone.
+func holdOffRestream(ctx context.Context) bool {
+	timer := time.NewTimer(restreamHoldoff)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 // respondAndReview streams one Upstream reply, parses its tool calls, builds the post-
 // response working value, and runs the post-response hooks — re-calling the Upstream in
 // place for an ActionRetry decision (bounded by maxPostResponseRetries). A retrying
@@ -324,8 +348,20 @@ const (
 // The caller owns that decision, so it also owns the give-up event — emitting the carried
 // message verbatim keeps a give-up indistinguishable from the plain-fault path below. Every
 // other outcome surfaces its own fault here, exactly as before, and carries "".
-func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Request) (*domain.Response, turnOutcome, string) {
-	for attempt := 0; ; attempt++ {
+//
+// One class of fault is re-streamed rather than surfaced: a TRANSIENT in-band error (the
+// provider's Retryable verdict — a 429/5xx/provider_unavailable an aggregator wrapped in an
+// HTTP 200 partway through the stream, where the client's own HTTP retries can no longer
+// reach it). The Turn re-sends the SAME request once (t.restreamSpent), and only the loop
+// does it: the provider stays a wire, and StreamResetEvent — the same signal an ActionRetry
+// emits, which a streaming Driver already reads as "discard the partial reply, it is coming
+// again" — is the loop's to emit. A recovered re-stream is SILENT, exactly as a recovered
+// overflow fold is; the second fault, of any class, surfaces as every fault always did.
+func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Response, turnOutcome, string) {
+	// The Turn's identity and its request, aliased for readability — everything below reads them
+	// unchanged, and the one write back to t is the re-stream latch.
+	turn, req := t.turn, t.req
+	for attempt := 0; ; {
 		reply := a.streamResponse(ctx, turn, req)
 		if ctx.Err() != nil {
 			return nil, turnCancelled, "" // a cancel masquerades as a stream error; ctx wins
@@ -333,6 +369,19 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 		if reply.failed {
 			if reply.overflow {
 				return nil, turnOverflowed, reply.errMsg
+			}
+			if reply.retryable && !t.restreamSpent {
+				// The Turn's one re-stream. Spend the latch first, so the second fault takes the
+				// give-up path below however this attempt ends, then tell observers the tokens
+				// streamed before the fault are superseded and hold off long enough for a routed
+				// provider to be swapped out upstream. A cancelled hold-off falls through to the
+				// fault rather than re-streaming into a dead context: the exchange did fail, and
+				// saying so is more honest than a silent abandon.
+				t.restreamSpent = true
+				a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(turn)})
+				if holdOffRestream(ctx) {
+					continue
+				}
 			}
 			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: reply.errMsg})
 			return nil, turnFailed, ""
@@ -354,6 +403,10 @@ func (a *Agent) respondAndReview(ctx context.Context, turn int, req *domain.Requ
 			return a.reviewedOutcome(turn, resp)
 		}
 		if retry && attempt < maxPostResponseRetries {
+			// The ActionRetry attempts are counted HERE rather than in the loop header because
+			// the transient-fault re-stream above loops back through that header too, and a blip
+			// must not spend a hook's retry budget: separate remedies, separate budgets.
+			attempt++
 			// The Turn re-streams: tell observers the tokens emitted this attempt are
 			// superseded, so a streaming UI discards them before the retry streams afresh.
 			a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(turn)})
@@ -499,6 +552,7 @@ type reply struct {
 	finish    domain.FinishReason
 	failed    bool   // a terminal DeltaError / DeltaContextOverflow arrived
 	overflow  bool   // that terminal fault was DeltaContextOverflow: the PROMPT did not fit, so folding the history can make the same request succeed
+	retryable bool   // that terminal fault was TRANSIENT (429 / 5xx / provider_unavailable, in-band): re-sending the same request can succeed
 	errMsg    string // the terminal fault message when failed
 }
 
@@ -567,6 +621,11 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 			out.failed = true
 			out.overflow = delta.Kind == provider.DeltaContextOverflow
 			out.errMsg = delta.Err
+			// The provider's transient-class verdict rides out with the fault (an in-band 502 is
+			// a 502), because retrying mid-stream is the LOOP's call, not the provider's: only the
+			// loop owns the Turn and the events. An overflow never carries it — a prompt too long
+			// stays too long.
+			out.retryable = delta.Retryable
 		}
 	}
 	out.content = content.String()

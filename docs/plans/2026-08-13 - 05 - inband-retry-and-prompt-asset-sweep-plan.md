@@ -142,7 +142,11 @@ existing kind selection are unchanged.
 
 ---
 
-## 3. The loop re-streams a retryable in-band fault once per Turn
+## 3. The loop re-streams a retryable in-band fault once per Turn — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): `respondAndReview` now takes the `*turnRun` instead of `(turn int, req *domain.Request)` — it must read and write the Turn's latch — and the ActionRetry counter moved out of the loop header into the retry branch, so a re-stream cannot spend a hook's retry budget (the item's "independent of `maxPostResponseRetries`"); the cap's own behaviour is unchanged (3 retries, 4 streams).
+
+NOTES (2026-08-13): the 1s hold-off is a package `var restreamHoldoff` rather than a const, solely so the new tests need not sit through it (they shrink it serially and restore it via `t.Cleanup`); the production wait is the fixed second the item specifies.
 
 Depends on item 2.
 

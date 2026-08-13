@@ -39,6 +39,16 @@ type turnRun struct {
 	// server rejects even a minimal prompt — and the Turn gives up exactly as it did before
 	// recovery existed: the same sanitized ErrorEvent, the same abandoned Exchange.
 	foldSpent bool
+
+	// restreamSpent is the one-re-stream-per-Turn latch: it flips once this Turn has re-sent its
+	// request after a TRANSIENT Upstream fault — one whose class the provider would have retried
+	// at the HTTP layer (429, 5xx, an aggregator's provider_unavailable) but which arrived in-band
+	// on a 200 mid-stream, past every retry the client could make. One re-send costs a momentary
+	// blip a stutter instead of the whole exchange; a second fault of any class is not a blip, so
+	// it surfaces exactly as it did before the re-stream existed. The latch is deliberately its own
+	// budget: maxPostResponseRetries bounds hook-driven ActionRetry and foldSpent bounds the
+	// overflow fold — different remedies for different failures, none of them spending another's.
+	restreamSpent bool
 }
 
 // turnEnd names the four ways a Turn exits. One row per exit; end() is the whole table.

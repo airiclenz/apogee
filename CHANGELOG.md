@@ -10,6 +10,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A transient upstream blip mid-stream no longer kills the exchange.** When a reply faults on an
+  in-band error whose class the provider marked retryable — a 429, a 5xx, or an aggregator's
+  `provider_unavailable`, delivered inside an HTTP 200 partway through the stream, past every retry
+  the HTTP client could still make — the Turn now re-sends the same request ONCE: it emits the same
+  `StreamResetEvent` an ActionRetry does (so a streaming Driver discards the partial reply), waits a
+  fixed second, and streams again. A re-stream that lands is silent, exactly as a recovered overflow
+  fold is — no `ErrorEvent`, no wasted Turn — and the recovery is bounded by a per-Turn latch of its
+  own, independent of the ActionRetry cap and of the one-fold-per-Turn budget: a second fault of any
+  class, a fault that was never transient, and a cancel during the wait all surface exactly as they
+  did before. The reach that matters most is delegated work: a sub-agent's Turn is the parent's tool
+  call, so a blip used to abandon the child's Exchange and hand the parent model "sub-agent faulted"
+  in place of the result — the child's own loop now recovers before `Faulted` is ever set.
+
 - **An in-band stream error now says whether its class is worth another attempt.** The wire error
   member an OpenAI-compatible aggregator delivers inside an HTTP 200 gained its `error_type` slug
   (it was parsed away before, surviving only as raw text), and the terminal `Delta` it becomes

@@ -532,6 +532,57 @@ func TestSubAgent_FaultedDelegationReportsAsError(t *testing.T) {
 	}
 }
 
+// TestSubAgent_TransientChildBlipStaysInsideTheDelegation proves the re-stream reaches a DELEGATED
+// exchange, which is where a transient fault hurts most: the child's Turn is the parent's tool
+// call, so the blip used to abandon the child's Exchange, set Faulted, and hand the parent model
+// "sub-agent faulted" in place of the work. The child's own loop now recovers before Faulted is
+// ever set (subagent.go is unchanged — it never learns a blip happened), so the parent receives
+// the delegated RESULT and nothing surfaces to the human.
+func TestSubAgent_TransientChildBlipStaysInsideTheDelegation(t *testing.T) {
+	shortRestreamHoldoff(t)
+
+	const childAnswer = "the repo is a Go TUI agent"
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+
+	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("c1", "summarise the repo"),
+		retryableErrorScript(transientFaultMsg), // the child's only Turn hits a transient blip
+		contentScript(childAnswer),              // ... and its one re-stream lands
+		contentScript("parent done"),
+	}})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Errorf("parent result = %+v, want a clean exchange-complete", res)
+	}
+
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	if sub.IsError {
+		t.Errorf("sub_agent result IsError = true after a recovered blip; content = %q", sub.Content)
+	}
+	if !strings.Contains(sub.Content, childAnswer) {
+		t.Errorf("sub_agent result = %q, want the child's recovered answer %q", sub.Content, childAnswer)
+	}
+	if errs := errorEvents(sink.events); len(errs) != 0 {
+		t.Errorf("ErrorEvents = %v, want none — a recovered blip is silent at every Depth", errs)
+	}
+	if !hasEvent[domain.StreamResetEvent](sink.events) {
+		t.Error("no StreamResetEvent emitted; the child's superseded partial stream was never retracted")
+	}
+}
+
 // TestSubAgent_FaultedDelegationBooksNoProductiveWrite proves the second half of the same defect:
 // a failed delegation must not feed self-regulation the PRODUCTIVE signal (sub_agent is not
 // read-only, so a non-error result booked noteWrite), which cleared every strike, re-opened every
