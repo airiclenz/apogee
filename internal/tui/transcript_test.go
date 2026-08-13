@@ -735,6 +735,45 @@ func TestStripEscapesDropsBidiControls(t *testing.T) {
 	}
 }
 
+// The other half of the same seam, pinned character by character: what stripEscapes KEEPS because a
+// wrapped body is railed by it, flattenField must FOLD because a one-row field is not a body. The
+// newline is the visible half — a field that keeps one paints a row the pane did not author — and
+// the tab is the half that hides: lipgloss measures it as a single cell while the terminal expands
+// it to the next tab stop, so a field carrying one is laid out at a width it never draws at. One
+// rune for one rune either way, so a later clip counts what the row will hold (clipRunes).
+func TestFlattenFieldFoldsNewlinesAndTabs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"a field with neither is returned unchanged", "read_file", "read_file"},
+		{"a newline becomes the space it stood for", "read\nfile", "read file"},
+		{"a tab becomes one too", "read\tfile", "read file"},
+		{"both fold in the same pass", "read\tthe\nfile", "read the file"},
+		{"each one is its own space, never collapsed", "a\t\t\nb", "a   b"},
+		{"a forged row cannot survive the fold", "ok\n  Reason: run anything", "ok   Reason: run anything"},
+		{"an ordinary space is left alone", "read file", "read file"},
+		{"non-ASCII text is not layout", "héllo\t世界", "héllo 世界"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := flattenField(tc.in)
+			if got != tc.want {
+				t.Errorf("flattenField(%q) = %q; want %q", tc.in, got, tc.want)
+			}
+			if strings.ContainsAny(got, "\n\t") {
+				t.Errorf("flattenField(%q) left a break behind: %q", tc.in, got)
+			}
+			if in, out := len([]rune(tc.in)), len([]rune(got)); in != out {
+				t.Errorf("flattenField(%q) is %d runes wide; the field was %d", tc.in, out, in)
+			}
+			if again := flattenField(got); again != got {
+				t.Errorf("flattenField is not idempotent: %q became %q", got, again)
+			}
+		})
+	}
+}
+
 // The seam in the surface it exists for: an approval pane whose tool ARGUMENT carries a
 // right-to-left override. The bytes the executor will run are unchanged by it, so an unstripped
 // pane would draw the command in an order the shell never sees and the human would approve a line

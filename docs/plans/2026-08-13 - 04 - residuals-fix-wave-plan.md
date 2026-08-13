@@ -255,7 +255,9 @@ behavior pinned on both paths.
 
 ---
 
-## 7. `flattenField` folds tabs
+## 7. `flattenField` folds tabs — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the substitution is a package-level `strings.NewReplacer` (`fieldBreaks`, beside `flattenField`) rather than a second chained `strings.ReplaceAll` — one pass, and byte-for-byte the same semantics as the `ReplaceAll` it replaces, including leaving an invalid UTF-8 byte alone (which `strings.Map`, the file's other folding idiom, would have normalised to U+FFFD). House precedent: `internal/security/dangerous.go:220`.
 
 Depends on item 1.
 

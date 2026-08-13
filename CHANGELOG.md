@@ -619,6 +619,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A tab in a one-row field is now folded like a newline, so the width a row is laid out at is the
+  width it draws at.** `stripEscapes` deliberately keeps `\n` and `\t`, because the wrapped bodies
+  that are its biggest callers are railed by both — but a FIELD is a name rather than a body, and
+  `flattenField` folded only the newline. Every one-row seam routes through it: the popup title, the
+  approval pane's Reason / Fix / Scope and Sub-agent lines, argument labels, the resolved-path note,
+  and the autocomplete and skill rows. A tab reaching one of those measures as a single cell to
+  lipgloss while the terminal expands it to the next tab stop, so the row is laid out at one width
+  and drawn at another: the label beside it slides, and a clip that trusted the measured width cuts
+  in the wrong place — a model's own bytes deciding where a row's structure appears, which is the
+  same family as the newline forgery the fold already prevented. `flattenField` now folds `\t` to a
+  single space alongside `\n`, one rune for one rune as before. `stripEscapes` is unchanged: body
+  text keeps its tabs.
+
 - **The plaintext-key notice now states the reason that is actually true for the run it came from.**
   The notice hard-coded "this machine has no secret store apogee can move it into" — true in the
   session, where it is printed only after a live probe came back empty, but false in a headless run,
