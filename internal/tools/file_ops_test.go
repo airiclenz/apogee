@@ -847,7 +847,7 @@ func TestCopyFile_ExtraReadRootSourceFollowsSymlinksIntoTheWorkspace(t *testing.
 func TestCopyFile_DisclosesTheResolvedDestination(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	config := symlinkedReadFixture(t, root, "docs", "notes.md")
 	writeFixture(t, filepath.Join(root, "payload.txt"), "payload\n", 0o644)
 
@@ -884,7 +884,7 @@ func TestCopyFile_DisclosesTheResolvedDestination(t *testing.T) {
 func TestMoveFile_DisclosesTheResolvedDestination(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	config := symlinkedReadFixture(t, root, "docs", "notes.md")
 	writeFixture(t, filepath.Join(root, "payload.txt"), "payload\n", 0o644)
 
@@ -921,7 +921,7 @@ func TestMoveFile_DisclosesTheResolvedDestination(t *testing.T) {
 func TestDeleteFile_DisclosesTheResolvedTarget(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	config := symlinkedReadFixture(t, root, "docs", "notes.md")
 	writeFixture(t, filepath.Join(root, "plain.txt"), "bytes\n", 0o644)
 

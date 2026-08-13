@@ -323,6 +323,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The writer-disclosure tests no longer depend on an unsymlinked temp dir**: the bare-sentence
+  assertions — the ones pinning that `write_file`, `edit_existing_file`, `find_replace`,
+  `copy_file`, `move_file`, `delete_file` and `read_file` say nothing extra when a path resolves to
+  itself — built their workspace root from a raw `t.TempDir()`. On a host whose temp dir is reached
+  through a symlink (macOS `/tmp`) every path under such a root resolves somewhere else than the
+  root the test wrote down, so the tools appended the `→ resolves to …` note those assertions exist
+  to prove absent, and the suite failed on that box alone. A new `tempRoot(t)` helper beside
+  `realPath` in `internal/tools/path_safety_test.go` resolves the root by the same rule the tools
+  resolve a path, and the affected roots take it. Test-only — no shipped behaviour changes.
+
 - **Pinned that the approval pane, the call card, and the result sentence name the SAME resolved
   path for every write key**: `TestResolvedPathRidesTheCallAndTheApproval` drove only `write_file`
   (the `path` key that is written directly), so nothing held the `destination`-keyed writers to

@@ -313,7 +313,19 @@ changes.
 
 ---
 
-## 9. Writer-disclosure test roots survive a symlinked temp dir
+## 9. Writer-disclosure test roots survive a symlinked temp dir — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's enumeration of affected roots is incomplete — proved by running the
+suite with `TMPDIR` pointed at a symlinked directory, which is also how the fix was verified. Three
+further roots in the same class (bare-sentence disclosure assertion over a raw `t.TempDir()`) failed
+and were switched too: `write_file_test.go:61` (`TestWriteFile_Execute_ReportsBytesWritten`),
+`read_file_test.go:166` (`…_ReportsTheSpanItRendered`) and `:234` (`…_LocatesASubstring`). Leaving
+them would have missed the item's own goal.
+NOTES (2026-08-13): the two `read_file_test.go` roots the item names by their bare-sentence lines
+(`:495`, `:531`) already resolved symlinks inline as `realPath(t, t.TempDir())`; they now call
+`tempRoot(t)`, which is the same expression behind the helper's name. `file_edit_test.go:298`
+(`TestEditExistingFile_ToolErrors`) carries no disclosure sentence, but the item names the line, so
+it was switched as written — behaviour-neutral.
 
 Depends on item 1.
 

@@ -123,6 +123,17 @@ func realPath(t *testing.T, path string) string {
 	return filepath.Join(parent, filepath.Base(path))
 }
 
+// tempRoot is t.TempDir() with symlinks resolved by the same rule realPath uses, for tests that
+// assert a writer's BARE success sentence. A root reached through a symlink (macOS /tmp) does not
+// equal what the tool resolves it to, so every path under it would carry a resolution note and the
+// exact-string assertion would break on that box alone. Roots whose assertions all route through
+// realPath do not need this.
+func tempRoot(t *testing.T) string {
+	t.Helper()
+
+	return realPath(t, t.TempDir())
+}
+
 // TestReadScopeResolve pins which root a path is accepted under: the workspace first
 // (relative or absolute), an extra root only for an ABSOLUTE path, and nothing else at all —
 // a path under no root is refused with the workspace's own uniform escape message, whatever

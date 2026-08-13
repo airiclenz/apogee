@@ -214,7 +214,7 @@ func TestEditExistingFile_PatchFailuresDoNotCorrupt(t *testing.T) {
 func TestEditExistingFile_NamesTheFileItRead(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	config := symlinkedReadFixture(t, root, "docs", "notes.md")
 	realConfig := realPath(t, config)
 
@@ -295,7 +295,7 @@ func symlinkedReadFixture(t *testing.T, root, dir, name string) string {
 func TestEditExistingFile_ToolErrors(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	tool := NewEditExistingFile(root)
 
 	cases := []struct {

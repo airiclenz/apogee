@@ -163,7 +163,7 @@ func TestReadFile_Execute(t *testing.T) {
 func TestReadFile_Execute_ReportsTheSpanItRendered(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("line1\nline2\nline3"), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestReadFile_Execute_LocatesASubstring(t *testing.T) {
 
 	const body = "alpha\nneedle here\ngamma\ndelta\nneedle again"
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	if err := os.WriteFile(filepath.Join(root, "hay.txt"), []byte(body), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestReadFile_Execute_DisclosesTheResolvedPath(t *testing.T) {
 
 	// The root is resolved up front so the negative case below is a fact about the ARGUMENT,
 	// not about a box whose temp dir is itself reached through a symlink (macOS /var).
-	root := realPath(t, t.TempDir())
+	root := tempRoot(t)
 	config := symlinkedReadFixture(t, root, "docs", "notes.md")
 	writeFixtureFile(t, filepath.Join(root, "real", "data.txt"), "linked bytes")
 	if err := os.Symlink("real", filepath.Join(root, "dir_link")); err != nil {
@@ -504,7 +504,7 @@ func TestReadFile_Execute_DisclosesTheResolvedPath(t *testing.T) {
 func TestReadFile_Execute_DisclosesTheResolvedPathUnderAnExtraReadRoot(t *testing.T) {
 	t.Parallel()
 
-	root, extra := realPath(t, t.TempDir()), realPath(t, t.TempDir())
+	root, extra := tempRoot(t), tempRoot(t)
 	target := filepath.Join(extra, "skill", "SKILL.md")
 	writeFixtureFile(t, target, "skill bytes")
 	if err := os.Symlink(filepath.Join("skill", "SKILL.md"), filepath.Join(extra, "linked.md")); err != nil {

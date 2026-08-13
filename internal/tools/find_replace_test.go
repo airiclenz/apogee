@@ -73,7 +73,7 @@ func TestSingleFindReplace_Execute(t *testing.T) {
 func TestFindReplace_NameTheFileTheyRead(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	config := symlinkedReadFixture(t, root, "docs", "notes.md")
 	realConfig := realPath(t, config)
 

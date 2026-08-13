@@ -58,7 +58,7 @@ func TestWriteFile_Execute_OverwritesExisting(t *testing.T) {
 func TestWriteFile_Execute_ReportsBytesWritten(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 
 	result, err := NewWriteFile(root).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "out.txt", "content": "hello"}))
@@ -94,7 +94,7 @@ func TestWriteFile_Execute_ReportsBytesWritten(t *testing.T) {
 func TestWriteFile_Execute_NamesTheResolvedTarget(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	real := filepath.Join(root, "real")
 	if err := os.MkdirAll(real, 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
