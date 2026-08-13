@@ -393,6 +393,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A long streaming reply no longer starves the TUI's event loop.** While a reply streamed,
+  expand/collapse clicks stopped responding — measured at 95% CPU and a 0.48 s click round-trip
+  after only 180 s of streaming, still climbing, against a flat 0.05–0.07 s once the same reply was
+  committed, which is why a restart-plus-resume cured it. The in-flight buffer is the one transcript
+  block the paint cache cannot serve — the cache is keyed by entry index and the live buffer is not
+  an entry — so the preview re-rendered the WHOLE buffer through the markdown renderer on every
+  repaint, and repaints fire per 30 ms token flush plus at 2 Hz while a tool call is open, for the
+  whole duration of a delegation. That is O(len(reply)) per repaint and O(N²) over a turn, with
+  clicks queued behind those renders rather than dropped — so an even number of impatient clicks
+  drained to a visible no-op. The preview now renders only the last 256 raw lines of the buffer:
+  it can contribute at most one viewport of rows at the bottom of the frame, so everything above
+  that tail was being wrapped, styled and then thrown away. A repaint now costs a screen rather
+  than a reply, at any length. The buffer itself still keeps every byte and the committed entry
+  still re-renders whole through the cache; the one visible trade is that a markdown construct
+  opened above the cut (an unclosed code fence, a list) can render unstyled in the preview's tail
+  until the reply commits and heals it.
+
 - **`diagnostics` no longer hands the Go toolchain git's environment, and it now says which
   package it vetted.** The `go vet` half ran with `safeGitEnv` — an allowlist written for a program
   steered by `GIT_*` and a pager. `GOFLAGS`, `GOWORK`, `GOTOOLCHAIN`, `CGO_ENABLED`, `GOPATH` and

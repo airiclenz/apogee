@@ -19,6 +19,8 @@ package tui
 // columns per level — the tree-branch and depth-indent primitives are built here now so the
 // P3.14 sub-agent renderer extends these seams rather than reworking them.
 
+import "strings"
+
 // userBlock is the line range a single user prompt occupies within the rendered lines: its
 // first line index and its physical-line count. The sticky-header overlay treats each as a
 // section header that freezes at the top of the viewport while its replies are on screen.
@@ -232,18 +234,18 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	if t.streaming && !insideCollapsedRun(t.entries, t.pendingRun) {
 		previewAt = t.runEnd(t.pendingRun.spawn)
 	}
-	// paintPreview appends the in-progress buffer as a block of its own run, at index at. The
-	// buffer is trimmed of its trailing blank lines for display only: the buffer keeps them (a
-	// mid-stream "\n\n" may be a paragraph break about to be continued), but the preview must not
-	// grow a wobbling gap above the footer. An empty buffer still renders its lone marker line, so
-	// the human sees that streaming has begun.
+	// paintPreview appends the in-progress buffer as a block of its own run, at index at. What it
+	// paints is previewTail(t.pending) — the buffer's trailing blank lines held back, and only its
+	// last previewTailLines raw lines kept, so a repaint costs a viewport rather than a whole reply.
+	// Both are display-only: the buffer itself keeps every byte. An empty buffer still renders its
+	// lone marker line, so the human sees that streaming has begun.
 	paintPreview := func(at int) {
 		// The live buffer is painted at the depth that FILLED it (transcript.pendingRun), like every
 		// committed block above: its own rail is what says which run is talking, and a delegate that
 		// streams before producing any entry needs nothing else to announce the level.
 		preview := renderEntryLines(th, entry{
 			kind:  entryAssistant,
-			text:  trimTrailingBlankLines(t.pending),
+			text:  previewTail(t.pending),
 			depth: t.pendingRun.depth,
 		}, width, blink)
 		appendBlock(false, t.pendingRun.depth, at, preview)
@@ -416,6 +418,59 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 // no frame (a width probe, a substring assertion) has no phase either.
 func (t *transcript) renderLines(th theme, width int) []string {
 	return t.renderView(th, width, false).lines
+}
+
+// previewTailLines is how much of the in-flight buffer the streaming preview renders: its last 256
+// raw (newline-delimited) lines, never the whole of it. The live buffer is the one block the paint
+// cache cannot serve — the cache is keyed by entry index (paintcache.go) and the buffer is not an
+// entry — so it is re-rendered on EVERY repaint, and repaints fire per 30 ms sink flush (sink.go)
+// and at 2 Hz while a tool call is open (model.go, spinner.go). Rendering the whole buffer each
+// time is therefore O(len(pending)) per repaint and O(N²) over a streaming turn: measured 95% CPU
+// and a 0.48 s click round-trip after 180 s of streaming, against a flat 0.05–0.07 s once the same
+// reply is committed and served from the cache. The preview contributes at most one viewport of
+// rows at the bottom of the frame, so everything above the tail was being wrapped, styled and then
+// thrown away.
+//
+// 256 is a bound, not a measurement — the render seam is handed a width and no height — and it is
+// deliberately at least double any realistic terminal: every raw line renders to one or more screen
+// rows, so 256 raw lines can never underfill a 256-row window, and the markdown constructs that
+// JOIN source lines (a wrapped paragraph) are covered by the same doubling.
+const previewTailLines = 256
+
+// previewTail is the text the streaming preview paints for the in-flight buffer s: its trailing
+// blank lines held back, and then only its last previewTailLines raw lines. The trim is
+// trimTrailingBlankLines' rule and holds for its reason — a mid-stream "\n\n" may be a paragraph
+// break the model is about to continue, so the buffer keeps it while the preview must not grow a
+// wobbling gap above the footer. Both cuts are display-only; s itself is never touched.
+//
+// It scans backwards for the newlines it needs instead of splitting s, because a split is itself
+// O(len(s)) in allocations on every repaint — part of the very cost this bound exists to remove.
+//
+// Accepted trade: a markdown construct opened ABOVE the cut (an unclosed code fence, a list) can
+// render unstyled in the tail. The preview is transient and mid-stream markdown is best-effort
+// already; the committed entry re-renders the full text through the cache and heals it, so no
+// fence scanning or state carry-over is warranted here.
+func previewTail(s string) string {
+	end := len(s) // one past the last byte the preview shows
+	for {
+		start := strings.LastIndexByte(s[:end], '\n') + 1
+		if !blankLine(s[start:end]) {
+			break
+		}
+		if start == 0 {
+			return "" // the whole buffer is blank lines
+		}
+		end = start - 1 // drop the blank line and the newline that opened it
+	}
+	cut := end
+	for range previewTailLines {
+		nl := strings.LastIndexByte(s[:cut], '\n')
+		if nl < 0 {
+			return s[:end] // fewer raw lines than the bound: the trimmed buffer whole
+		}
+		cut = nl
+	}
+	return s[cut+1 : end]
 }
 
 // renderEntryLines renders one committed entry into its physical lines, framed for its

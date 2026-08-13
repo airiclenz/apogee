@@ -5365,3 +5365,123 @@ func TestRenderStartupBoxStackedFallback(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The streaming preview's tail bound (previewTailLines)
+// ----------------------------------------------------------------------------
+
+// streamingPreview is a transcript holding text as its in-flight buffer and nothing else — what a
+// repaint sees mid-reply, and the one block a render can never serve from the paint cache
+// (paintcache.go keys by entry index, and the live buffer is not an entry).
+func streamingPreview(text string) *transcript {
+	tr := &transcript{}
+	tr.apply(domain.TokenEvent{Text: text})
+	return tr
+}
+
+// numberedLines is n raw lines each naming its own index, so a paint can be asked which of them it
+// kept. The index is zero-padded to a fixed width on purpose: every raw line is then exactly as
+// wide as every other, so two buffers of the same LINE count wrap to the same ROW count and a row
+// count is a statement about the bound rather than about digits.
+func numberedLines(n int) string {
+	var b strings.Builder
+	for i := range n {
+		b.WriteString("line ")
+		b.WriteString(strconv.Itoa(100000 + i)[1:])
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// A buffer far longer than the bound paints its LAST lines and none of its first: the preview is
+// the tail of the reply, which is the only part of it the viewport can show.
+func TestPreviewPaintsOnlyItsTail(t *testing.T) {
+	th := newTheme(scheme.Default())
+	const lines = previewTailLines * 4
+	tr := streamingPreview(numberedLines(lines))
+
+	painted := strip(strings.Join(tr.renderLines(th, 80), "\n"))
+	for _, want := range []string{"line 01023", "line 00768"} { // the last line, and the first kept one
+		if !strings.Contains(painted, want) {
+			t.Errorf("preview of %d raw lines dropped %q — the tail is what is on screen:\n%s", lines, want, painted)
+		}
+	}
+	for _, absent := range []string{"line 00000", "line 00767"} { // the buffer's first, and the last cut one
+		if strings.Contains(painted, absent) {
+			t.Errorf("preview of %d raw lines still paints %q — the whole buffer is being rendered:\n%s", lines, absent, painted)
+		}
+	}
+}
+
+// The bound stated as behaviour: a 10,000-line buffer costs the same paint as a buffer one line
+// over the bound. What a repaint pays is a function of the screen, not of the reply's length —
+// which is what removes the O(N²) term over a streaming turn.
+func TestPreviewRowCountIsBounded(t *testing.T) {
+	th := newTheme(scheme.Default())
+	huge := streamingPreview(numberedLines(10000)).renderLines(th, 80)
+	justOver := streamingPreview(numberedLines(previewTailLines+1)).renderLines(th, 80)
+
+	if len(huge) != len(justOver) {
+		t.Errorf("preview of 10,000 raw lines paints %d rows and of %d raw lines %d rows — the render is not bounded",
+			len(huge), previewTailLines+1, len(justOver))
+	}
+}
+
+// A buffer under the bound — every reply anyone actually reads — paints byte-identically to what
+// it painted before the bound existed: the whole buffer, trailing blank lines held back.
+func TestPreviewUnderTheBoundIsUnchanged(t *testing.T) {
+	th := newTheme(scheme.Default())
+	const text = "# Heading\n\nsome prose that is long enough to wrap once at this width, and then some.\n\n- a\n- b\n\n\n"
+
+	if got, want := previewTail(text), trimTrailingBlankLines(text); got != want {
+		t.Errorf("previewTail cut a sub-bound buffer:\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	}
+	want := renderEntryLines(th, entry{kind: entryAssistant, text: trimTrailingBlankLines(text)}, 80, false).lines
+	if got := streamingPreview(text).renderLines(th, 80); !slices.Equal(got, want) {
+		t.Errorf("preview frame changed for a sub-bound buffer:\n--- got ---\n%s\n--- want ---\n%s",
+			strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// An empty buffer still renders its lone marker line, so the human sees that streaming has begun
+// (the contract paintPreview has always carried).
+func TestPreviewOfAnEmptyBufferKeepsItsMarker(t *testing.T) {
+	th := newTheme(scheme.Default())
+	tr := &transcript{streaming: true}
+
+	got := tr.renderLines(th, 80)
+	want := renderEntryLines(th, entry{kind: entryAssistant}, 80, false).lines
+	if !slices.Equal(got, want) || len(got) != 1 {
+		t.Errorf("empty preview paints %d line(s) %q, want the lone marker %q", len(got), got, want)
+	}
+}
+
+// previewTail's own edges, which the frame tests cover only indirectly: a buffer that is nothing
+// but blank lines, one with no newline at all, and the trailing-blank trim landing exactly on the
+// bound. None may panic, and none may return more than the bound.
+func TestPreviewTailEdges(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ name, in, want string }{
+		{"empty", "", ""},
+		{"all blank", "\n\n  \n\n", ""},
+		{"no newline at all", "one long unbroken line", "one long unbroken line"},
+		{"trailing blanks only", "a\nb\n\n\n", "a\nb"},
+		{"leading blank kept", "\na", "\na"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := previewTail(c.in); got != c.want {
+				t.Errorf("previewTail(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+
+	// Over the bound, the count is the bound exactly — trailing blank lines are held back BEFORE
+	// the tail is taken, so they never spend lines the reader would otherwise see.
+	over := numberedLines(previewTailLines+50) + "\n\n\n"
+	if got := strings.Count(previewTail(over), "\n") + 1; got != previewTailLines {
+		t.Errorf("previewTail kept %d raw lines, want the bound %d", got, previewTailLines)
+	}
+}

@@ -330,7 +330,15 @@ empty-reply message that calls a 20k-token reply "empty".
 
 ---
 
-## 6. Bound the streaming preview render by the viewport
+## 6. Bound the streaming preview render by the viewport — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's literal expression is "the TAIL of `trimTrailingBlankLines(t.pending)`", but calling that function on the whole buffer is exactly the per-repaint `strings.Split` of the entire reply the item's own binding detail forbids ("never split the whole buffer into a `[]string`"). Both cuts are therefore done by one backwards byte scan in a new `previewTail` helper, whose result is by construction identical to `tailLines(trimTrailingBlankLines(s), 256)` — the trailing-blank trim is applied FIRST, so trailing blanks can never spend lines of the tail, and `TestPreviewUnderTheBoundIsUnchanged` asserts the sub-bound case equals `trimTrailingBlankLines` byte for byte.
+
+NOTES (2026-08-13): K is the named constant `previewTailLines = 256`, not "the transcript's row count plus a margin" — the render seam is the mechanical choice the item leaves open, and `renderView` is handed a width and no height, so no row count is in reach there.
+
+NOTES (2026-08-13): the bound counts RAW newline-delimited lines, as specified, so a reply that contains no newline at all (one unbroken paragraph) is still rendered whole on every repaint and keeps the O(N²) term. The item specifies a line bound and no byte bound, so none was added; a byte cap (cut to a rune boundary) would close the remaining case if it is ever seen in the wild.
+
+NOTES (2026-08-13): `ISSUES.md`'s unbounded-preview entry (written by item 1, and closing with "Owned by the plan … (item 6)") is still an open `- [ ]` — `ISSUES.md` is not in this item's Files list, so it was left untouched.
 
 **What.** Make `paintPreview`'s cost a function of the screen, not of the reply. In
 `internal/tui/render.go`, inside `paintPreview` (line 240), slice the text handed to
