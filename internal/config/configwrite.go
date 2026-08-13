@@ -1470,9 +1470,27 @@ func serverEntryAt(data []byte, name string) (fileConfig, int, error) {
 	}
 	at := slices.IndexFunc(before.Servers, func(s ServerEntry) bool { return s.Name == name })
 	if at < 0 {
-		return fileConfig{}, 0, fmt.Errorf("it has no servers: entry named %q; edit the file by hand", name)
+		return fileConfig{}, 0, fmt.Errorf(
+			"it has no servers: entry named %q — it configures %s; edit the file by hand",
+			name, configuredEntryNames(before.Servers))
 	}
 	return before, at, nil
+}
+
+// configuredEntryNames spells what the `servers:` list DOES carry, for a refusal about a name it does
+// not: the message answers "which entry, then?" without sending the reader back to the file. A list
+// with nothing in it says so — a config whose `servers:` block is still commented out (the seeded
+// template's own state) has no entry for any edit to land on, which is a different thing from a
+// misspelled name.
+func configuredEntryNames(servers []ServerEntry) string {
+	if len(servers) == 0 {
+		return "no servers at all"
+	}
+	names := make([]string, len(servers))
+	for i, s := range servers {
+		names[i] = strconv.Quote(s.Name)
+	}
+	return joinAnd(names)
 }
 
 // spliceEntryKeyCommand rewrites the entry's `api-key:` line as an `api-key-cmd:` line, keeping the
@@ -1610,6 +1628,168 @@ func serversChangedOnlyAt(before, after []ServerEntry, at int, want ServerEntry)
 		}
 	}
 	return true
+}
+
+// ----------------------------------------------------------------------------
+// The per-entry setting writer (the remembered-model-choice half)
+// ----------------------------------------------------------------------------
+//
+// Remembering a model choice is one line written into one `servers:` entry: the picked model id into
+// a plain server's `model:` key, or the committed Launch profile into a launcher-fronted entry's
+// `launch-profile:` key, so the next launch comes back where the user left off. The ADDRESSING is
+// the key-source writer's exactly — a key inside a list item, picked out of the list by its
+// `name:` — so the machinery above serves this whole: parse for positions, splice text, re-parse and
+// compare, and refuse a rewritten list that would no longer load.
+//
+// What is new is the ALLOW-LIST. Each writer above spells its own key, while this one takes the key
+// from its caller, so the caller is checked before the file is even opened: a writer that trusted its
+// caller with a key name would be one refactor away from rewriting an entry's endpoint.
+//
+// It is set-only. A recorded choice is a record of what the user picked, so forgetting it is an edit
+// of their own file rather than something apogee does on their behalf — which leaves no meaning for
+// an empty value, and it is refused instead.
+
+// The `servers:` entry keys this writer may address — the model a plain multi-model server should
+// come back on, and the Launch profile a launcher-fronted one should. Spelled as ServerEntry tags
+// them, since the writer matches them in the node tree.
+const (
+	entryModelKey         = "model"
+	entryLaunchProfileKey = "launch-profile"
+)
+
+// entrySetting is one writable per-entry key: its spelling in the file, the value an entry already
+// holds for it (what makes a re-set a no-op), and how it stands on the entry the splice is verified
+// against. Reading and writing the field are two halves of one row, so the allow-list cannot come
+// apart from the schema it addresses.
+type entrySetting struct {
+	Key string
+	get func(ServerEntry) string
+	set func(*ServerEntry, string)
+}
+
+// entrySettings is the whole of what apogee writes into a `servers:` entry on the user's behalf. It
+// is deliberately two rows: every other key on an entry describes the server rather than records a
+// choice made at the keyboard, and those stay the user's to edit.
+var entrySettings = []entrySetting{
+	{
+		Key: entryModelKey,
+		get: func(s ServerEntry) string { return s.Model },
+		set: func(s *ServerEntry, value string) { s.Model = value },
+	},
+	{
+		Key: entryLaunchProfileKey,
+		get: func(s ServerEntry) string { return s.LaunchProfile },
+		set: func(s *ServerEntry, value string) { s.LaunchProfile = value },
+	},
+}
+
+// SaveServerEntrySetting writes value as the setting key of the `servers:` entry named name, and
+// reports nothing when the entry already says exactly that (a re-set is a confirmation, not a
+// rewrite). The entry's other lines, the comments around it and every sibling entry come back
+// byte-identical; an absent config is seeded from the embedded template first, and the write is
+// atomic and mode-preserving — the writers above's contract, unchanged.
+//
+// Anything the edit cannot do surgically is refused with the "by hand" idiom rather than guessed at,
+// and the file is left exactly as it was: a key outside the allow-list, an empty value, a name the
+// list does not carry, a shape the text and the node tree would disagree about, and a result that
+// would no longer load (ValidateServers) — a `launch-profile:` on an entry with no launcher to
+// actuate it is refused there rather than written.
+func SaveServerEntrySetting(path, name, key, value string) error {
+	setting, err := writableEntrySetting(key)
+	if err != nil {
+		return err
+	}
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return fmt.Errorf(
+			"apogee: cannot write %s: on the %q server entry: there is no value to record, and this "+
+				"writer does not clear a key — remove the line by hand instead", key, name)
+	}
+	data, err := ReadConfigForWrite(path)
+	if err != nil {
+		return err
+	}
+	updated, err := setEntrySetting(data, name, setting, v)
+	if err != nil {
+		return fmt.Errorf("apogee: update config %q: %w", path, err)
+	}
+	if updated == nil {
+		return nil
+	}
+	return writeConfigAtomically(path, updated)
+}
+
+// writableEntrySetting resolves a key to the row that describes it, and refuses one this writer may
+// not touch — BEFORE the config file is opened, so "refused" and "written" can never be the same
+// outcome. The message names what apogee does write, since a caller that asked for the wrong key is
+// a defect in the binary rather than in the user's file.
+func writableEntrySetting(key string) (entrySetting, error) {
+	at := slices.IndexFunc(entrySettings, func(s entrySetting) bool { return s.Key == key })
+	if at < 0 {
+		names := make([]string, len(entrySettings))
+		for i, s := range entrySettings {
+			names[i] = s.Key + ":"
+		}
+		return entrySetting{}, fmt.Errorf(
+			"apogee: %q is not a servers: entry setting apogee writes: it writes %s, and every other key "+
+				"on an entry is the user's own", key, joinAnd(names))
+	}
+	return entrySettings[at], nil
+}
+
+// setEntrySetting returns the config bytes with the named entry's key set to value, or nil bytes when
+// the entry already reads that way. The value's text comes from the YAML marshaller, which owns the
+// quoting — so a model id or a profile name a bare scalar would misread (`off`, `1.5`, one carrying a
+// colon or a `#`) lands as a value a reader takes back out unchanged.
+func setEntrySetting(data []byte, name string, setting entrySetting, value string) ([]byte, error) {
+	before, at, err := serverEntryAt(data, name)
+	if err != nil {
+		return nil, err
+	}
+	if setting.get(before.Servers[at]) == value {
+		return nil, nil // already what the file says: a confirmation, not a rewrite
+	}
+	text, err := renderScalar(value)
+	if err != nil {
+		return nil, err
+	}
+	updated, err := spliceEntrySetting(data, name, setting.Key, text)
+	if err != nil {
+		return nil, err
+	}
+	want := before.Servers[at]
+	setting.set(&want, value)
+	return verifiedEntrySplice(data, updated, before, at, want)
+}
+
+// spliceEntrySetting writes the key into the entry's block: over the line the entry already spells it
+// on — keeping the user's own indentation, the gap they aligned the value with and any end-of-line
+// note — or, when the entry has no such line, as a new last child of the block at the indentation its
+// siblings use.
+//
+// scalarLineParts does the reading of an existing line, exactly as it does for a top-level setting, so
+// the shapes it refuses are refused here too: a value that runs past its key's line, a block scalar, a
+// text and a node tree that disagree about where the key sits. Each one would leave part of the old
+// value behind. The insertion point is the last line the entry's subtree reaches, which is where the
+// next sibling key would go; an entry whose last value the node tree cannot measure would put that
+// line inside it instead, and the verification below is what catches that.
+func spliceEntrySetting(data []byte, name, key, text string) ([]byte, error) {
+	lines, entry, err := serverEntryNode(data, name)
+	if err != nil {
+		return nil, err
+	}
+	if keyNode, valueNode := mappingEntry(entry, key); keyNode != nil {
+		t := ScalarTarget{Key: key, Kind: KindString, KeyNode: keyNode, ValueNode: valueNode}
+		head, gap, tail, err := scalarLineParts(lines, t)
+		if err != nil {
+			return nil, err
+		}
+		out := slices.Clone(lines)
+		out[keyNode.Line-1] = head + gap + text + tail
+		return joinConfigLines(out), nil
+	}
+	line := []string{indentLine(entry.Column-1, key+": "+text)}
+	return insertAt(lines, line, maxNodeLine(entry), fmt.Sprintf("its %q entry", name))
 }
 
 // listValue spells a name list the way the template's inline form spells it ("[AGENTS.md]") — the

@@ -10,6 +10,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The config writer can now set one key inside one `servers:` entry.** It is the plumbing the
+  remember-model feature will write through: `model:` or `launch-profile:`, on the entry picked out
+  of the list by its `name:`, either rewritten in place — keeping your indentation, your alignment
+  and your end-of-line note — or appended to that entry's block, with every comment, every other line
+  of the entry and every sibling entry coming back byte-identical. A re-set of what the file already
+  says writes nothing at all, not even a new timestamp. Exactly those two keys may be addressed and a
+  caller naming any other is refused before the file is even opened, so a key apogee does not write
+  cannot so much as seed a config on its way to being refused; there is no delete form, because
+  forgetting a recorded choice is an edit of your own file rather than something apogee does on your
+  behalf. Anything the edit cannot do surgically is refused with the file left exactly as it was —
+  including a rewritten list that would no longer load, so a `launch-profile:` on an entry with no
+  `llama-launcher:` key never reaches the disk. A refusal about a `servers:` entry name the file does
+  not carry now also names the entries it does carry, which the key-source writers say too. Nothing
+  calls the new writer yet.
+
 - **apogee can be told to remember which model you were on.** The schema half of it lands first: a
   top-level `remember-model:` toggle, off by default, which gates both halves of the feature — the
   write apogee makes back into this file when you pick a model explicitly, and the restore the

@@ -94,7 +94,13 @@ fine.
 
 **Commit:** `feat(config): add remember-model toggle and per-server launch-profile pointer`
 
-## 2. Per-server-entry config writer
+## 2. Per-server-entry config writer — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the unknown-name refusal names the configured entries in the SHARED `serverEntryAt`
+lookup rather than in a second lookup private to this writer — three call sites now resolve an entry by
+name, and duplicating the lookup for a message variant was the alternative. The key-source writers
+(`SaveServerKeyCommand`, `SaveServerPlaintextKeyOK`) inherit the fuller message; their tests match on
+the unchanged prefix and still pass.
 
 Depends on item 1.
 
