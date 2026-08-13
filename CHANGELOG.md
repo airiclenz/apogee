@@ -1498,6 +1498,12 @@ point is a **minor** bump, not a breaking change.
 - Exec-fence and diagnostics tests now build their roots with the `tempRoot(t)` helper, so their
   exact-path assertions hold on hosts whose `TMPDIR` is a symlink (macOS `/tmp`).
 
+- Documented the recursive-delete rules' actual precision boundary in
+  `internal/security/rules.go`: the bare `/` branch hard-refuses EVERY absolute target
+  (the project's own directory included) and only relative/`./` targets stay allowed —
+  the system-path enumeration is retained as documentation of the worst cases, not as the
+  discriminating branch. Comment only; no regex, behaviour or test change.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added

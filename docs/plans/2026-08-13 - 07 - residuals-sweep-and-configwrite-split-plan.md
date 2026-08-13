@@ -170,7 +170,11 @@ run twice — once as-is, once with `TMPDIR` set to a symlinked directory — bo
 
 **Commit:** `test(tools): exec-fence and diagnostics roots resolve symlinks like the writers do`
 
-## 6. `rm` rules' comment documents the absolute-path hard-refuse as intended
+## 6. `rm` rules' comment documents the absolute-path hard-refuse as intended — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the item's conditional reconcile of the package-level near-miss claim was
+taken — the `DefaultDangerousRules` doc comment now states that its "rm -rf ./build" /
+"rm -rf node_modules" near-misses are relative targets and that absolute ones refuse on purpose.
 
 **What:** the bare `/` branch of the two recursive-delete rules
 (`internal/security/rules.go:31-32` and `:40`, pattern alternation

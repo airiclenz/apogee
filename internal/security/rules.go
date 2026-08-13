@@ -9,7 +9,9 @@ package security
 // (precision-over-recall): every rule here would, on a real coding host, be a small
 // model's obvious mistake, not a normal step. The patterns are narrow on purpose — they
 // are written against normalized (whitespace-collapsed, lower-cased) text and must NOT
-// fire on legitimate near-misses like "rm -rf ./build" or "rm -rf node_modules".
+// fire on legitimate near-misses like "rm -rf ./build" or "rm -rf node_modules". Those
+// near-misses are RELATIVE targets: the recursive-delete rules below refuse every
+// absolute one on purpose, project paths included.
 //
 // Tiers (ADR 0012): TierHardRefuse has no per-call override; TierForceApproval forces
 // the Approver even in Auto (a legitimate-but-risky idiom — a speed-bump, not a block).
@@ -17,13 +19,20 @@ func DefaultDangerousRules() []Rule {
 	return []Rule{
 		// --- Tier 1: hard-refuse ------------------------------------------------
 
-		// `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`, and root/home/system absolute
-		// targets. The target alternation is the precision boundary: a relative or
-		// ./ target (./build, node_modules, src/) never matches, so destructive
-		// recursive deletes of project files stay allowed. The system-path list spells
-		// `users` beside `home` because the desktop persona is macOS, where a home is
-		// `/Users/<name>` — lower-case, because `normalize` (dangerous.go) lower-cases
-		// the inspected text, the same `/users/` spelling the write-* rules below carry.
+		// `rm -rf /`, `rm -rf ~`, `rm -rf $HOME` — and every other ABSOLUTE target.
+		// The precision boundary is relative-vs-absolute, not which absolute path: a
+		// relative or ./ target (./build, node_modules, src/) never matches, so
+		// destructive recursive deletes of project files stay allowed as long as they
+		// are named relatively, which is how a coding agent names them. The bare `/`
+		// branch of the alternation catches every absolute target on purpose, the
+		// project's own directory included — an absolute recursive force-delete is a
+		// small model's mistake often enough, and cheap enough to re-issue relatively,
+		// that the hard refuse is the right answer. The system-path enumeration that
+		// follows it is therefore documentation of the worst cases rather than the
+		// discriminating branch. It spells `users` beside `home` because the desktop
+		// persona is macOS, where a home is `/Users/<name>` — lower-case, because
+		// `normalize` (dangerous.go) lower-cases the inspected text, the same `/users/`
+		// spelling the write-* rules below carry.
 		{
 			ID:     "rm-rf-root-home-system",
 			Tier:   TierHardRefuse,
