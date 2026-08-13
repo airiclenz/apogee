@@ -1,9 +1,9 @@
 # ISSUES — open defects and parked work
 
+## Conventions
+
 The single register of known issues and deliberately deferred work (it absorbed `TODO.md` on
 2026-08-13). Two sections:
-
-## Conventions
 
 - **Open defects** — verified, unfixed problems, each with current file:line evidence.
 - **Parked / deferred work** — work deferred by decision, each entry recording *enough* design
@@ -36,22 +36,6 @@ only the still-open findings; the work the run completed belongs in `CHANGELOG.m
   (`docs/reviews/2026-08-10 - 00 - doc-landscape-audit.md`, Flag 1). Cross-reference: the parked
   *Configurable tool × mode security matrix* entry below sits on the same
   dispatch-gate-vs-tool-level-fence seam; whichever way this call goes constrains that design.
-
-- [ ] A transient in-band provider error mid-stream faults the whole exchange — no retry. The
-  provider client retries transport faults, 429 and 5xx *before* a reply streams
-  (`internal/provider/client.go:72`), but an error member an aggregator wraps in an HTTP 200
-  mid-stream becomes a terminal `DeltaError` (`inBandErrorDelta`,
-  `internal/provider/stream.go:96`): the loop surfaces one ErrorEvent and fails the Turn
-  (`internal/agent/loop.go:303`), and in a delegated exchange that single fault abandons the
-  sub-agent with no result (`internal/agent/subagent.go:120`). Observed 2026-08-13 (session
-  `20260813T100440Z-104eaf7a`): OpenRouter delivered
-  `{"error":{"code":502,…,"error_type":"provider_unavailable"}}` mid-generation ("Upstream error
-  from DigitalOcean: Connection closed.") and a /security-audit check-family sub-agent lost its
-  entire run to one blip. Wanted: a bounded retry (one re-stream of the Turn, same
-  retryable-class policy as the client's HTTP retries — 429 / 5xx / `provider_unavailable`)
-  before the fault; an in-band 4xx stays terminal. Distinct from the empty-reply sibling the same
-  session showed (`finish: stop` — `empty_response_recovery` already has first claim there,
-  `internal/agent/loop.go:406`).
 
 ### Sub-agent prompt-guard exemption run — residuals (2026-08-13)
 
@@ -122,26 +106,8 @@ deliberately did not reach.
 Raised while executing `docs/plans/archived/2026-08-13 - 03 - open-defects-fix-wave-plan.md`: what
 the run's items deliberately did not reach.
 
-- [ ] No sweep was run for other command-registry flag prose predating `runsBareAtAccept`
-  (`internal/tui/command.go:94`). Item 1's plan text named four doc sites; a fifth — the
-  `commandByName` comment (`internal/tui/command.go:261`) — was also stale and was corrected with
-  them, so prose written before the flag may still describe the old accept behaviour elsewhere.
-
-- [ ] `internal/title/prompts/` has no README pinning the wording-drift rule the way
-  `internal/probe/prompts/README.md` now does; the contains-phrase assertions in
-  `internal/title/title_test.go` (`:97`, `:103`, `:246`) remain the only drift guard.
-
-- [ ] Design call 3's out-of-scope sweep stands: ~9 prompt literals remain hard-coded in Go rather
-  than embedded assets — `internal/mechanisms/cot.go:69`, `:75`, `:79`;
-  `internal/mechanisms/decompose.go:38`, `:44`; `internal/mechanisms/library.go:97`, `:101`;
-  `internal/mechanisms/emptyresponse.go:56`; and `internal/agent/compact.go:212`.
-
 - [ ] `internal/context` and `internal/title` have no `doc.go` file map (both sit under the house
   ~10-file docmap threshold); their new prompt assets are named in the package narration instead.
-
-- [ ] In `ISSUES.md` the `## Conventions` heading (`:6`) sits between the "Two sections:" sentence
-  (`:3–4`) and the bullets it introduces (`:8–11`), so the intro now reads across a heading
-  (cosmetic).
 
 ### Residuals fix wave run — residuals (2026-08-13)
 

@@ -323,7 +323,15 @@ body, and the corrected `internal/tui` comments were checked clean):
 
 ---
 
-## 8. `ISSUES.md`: remove the five closed entries and seat the Conventions heading
+## 8. `ISSUES.md`: remove the five closed entries and seat the Conventions heading — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): no CHANGELOG entry — the item's own text names the run's per-item CHANGELOG
+entries as the closed trail for all five removed entries, and the precedent close-out commit
+`6477328` ("docs(issues): close the residuals-fix-wave entries") likewise touched no CHANGELOG.
+
+NOTES (2026-08-13): the `### Open-defects fix wave run — residuals (2026-08-13)` header was kept —
+three of its entries were removed but its `doc.go` file-map entry stays open (plan Out-of-scope),
+so the header was not left empty. No other residual-section header lost all its entries.
 
 Depends on items 2–7.
 
