@@ -231,7 +231,7 @@ return ≥ 2 (schema example + prose), and `git diff --stat` for the item touche
 
 ---
 
-## 6. `ScopeEnv` reuses `hostRules.isPathName`
+## 6. `ScopeEnv` reuses `hostRules.isPathName` — ✅ DONE (2026-08-13)
 
 Depends on item 1.
 

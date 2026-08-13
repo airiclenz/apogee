@@ -128,9 +128,9 @@ func (r hostRules) ScopeEnv(workspaceRoot string, keys []string, lookup func(str
 		}
 		seen[fold] = struct{}{}
 		if value, ok := lookup(key); ok {
-			// fold is the caller's spelling on POSIX and the upper-cased one on Windows, so
-			// this catches "Path" exactly where the OS would treat it as PATH and nowhere else.
-			if fold == "PATH" {
+			// isPathName is the one fold rule, shared with ScopeInheritedEnv, so this catches
+			// "Path" exactly where the OS would treat it as PATH and nowhere else.
+			if r.isPathName(key) {
 				value = r.scopePathValue(value, workspaceRoot)
 			}
 			out = append(out, key+"="+value)

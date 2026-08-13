@@ -323,6 +323,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`ScopeEnv` now asks `isPathName` whether a key is PATH**: the `add` closure in
+  `internal/platform/host.go` carried its own copy of the fold rule — `fold == "PATH"`, with `fold`
+  upper-cased on Windows — which said the same thing as `hostRules.isPathName`, the rule
+  `ScopeInheritedEnv` already routes through. Two spellings of one rule agree until one of them is
+  edited, so the allowlist path now calls `isPathName(key)` and the platform has a single place
+  where "this key is the PATH a child resolves its programs through" is decided. The `fold`
+  variable stays: the `seen` map still needs it to keep Windows from emitting `PATH` and `Path` as
+  two variables. Refactor only; no behaviour moves, and the existing suite pins both sides
+  unmodified.
+
 - README documents the three per-entry API key sources: the `servers:` schema example and
   the optional-key enumeration now name `api-key-cmd` and `api-key-env` alongside
   `api-key`, and "The upstream API key" gains a paragraph on the exactly-one-source rule,
