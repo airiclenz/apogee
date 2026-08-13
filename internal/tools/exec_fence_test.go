@@ -107,7 +107,7 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			root := t.TempDir()
+			root := tempRoot(t)
 			planted, content, isError := tt.run(t, root)
 			if isError != tt.wantError {
 				t.Fatalf("IsError = %v, want %v: %q", isError, tt.wantError, content)
@@ -128,7 +128,7 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 // The refusal must not reuse the graceful "no Python interpreter found" wording — that message
 // describes a host without Python and would send the operator installing one they already have.
 func TestPythonExecRefusesAnInRepoVirtualenvByName(t *testing.T) {
-	root := t.TempDir()
+	root := tempRoot(t)
 	venv := plantExecutable(t, root, ".venv/bin/python3")
 	withFakeInterpreter(t, true, venv)
 
@@ -151,8 +151,8 @@ func TestPythonExecRefusesAnInRepoVirtualenvByName(t *testing.T) {
 // on the call context is part of the fence: an extra writable path is as model-writable as the
 // workspace, and a program planted there is the same attack.
 func TestExecFenceCoversTheConfinementBoxNotOnlyTheRoot(t *testing.T) {
-	root := t.TempDir()
-	extra := t.TempDir()
+	root := tempRoot(t)
+	extra := tempRoot(t)
 	planted := plantExecutable(t, extra, "python3")
 	withFakeInterpreter(t, true, planted)
 

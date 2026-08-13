@@ -147,7 +147,7 @@ survive, and the folded duplicate keeps the scoping. Mirror the fixture shape of
 
 **Commit:** `test(platform): ScopeEnv pins Windows Path scoping under a real workspace root`
 
-## 5. Exec-fence and diagnostics test roots survive a symlinked TMPDIR
+## 5. Exec-fence and diagnostics test roots survive a symlinked TMPDIR — ✅ DONE (2026-08-13)
 
 **What:** four `internal/tools` tests still build roots from raw `t.TempDir()` and fail under a
 symlinked `TMPDIR`; convert each to the canonical `tempRoot(t)` helper

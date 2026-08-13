@@ -439,7 +439,7 @@ func TestDiagnostics_RunsWithoutAConfinementHandle(t *testing.T) {
 // describing one call differently is the failure the disclosure exists to prevent.
 func TestDiagnostics_ApprovalScopeNamesTheSamePackageAsTheResult(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := tempRoot(t)
 	pkg := filepath.Join(root, "pkgdir")
 	if err := os.Mkdir(pkg, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)

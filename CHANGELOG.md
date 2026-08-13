@@ -1495,6 +1495,9 @@ point is a **minor** bump, not a breaking change.
   system entry kept, the folded duplicate absent, and the platform floor following the allowlist
   untouched. Test-only; no shipped behaviour changes.
 
+- Exec-fence and diagnostics tests now build their roots with the `tempRoot(t)` helper, so their
+  exact-path assertions hold on hosts whose `TMPDIR` is a symlink (macOS `/tmp`).
+
 ## [0.13.0] — 2026-08-11
 
 ### Added
