@@ -102,7 +102,10 @@
 // menu out, accept splices over that token's own range rather than to the end of the buffer (the
 // caret re-seated after it through offsetToLineCol), and accepting a command row RUNS the command
 // — [Model.acceptAutocomplete] cuts the verb out and leaves the rest of the draft standing, which
-// is why [Model.runCommand] never touches the editor and its callers prepare it instead. The
+// is why [Model.runCommand] never touches the editor and its callers prepare it instead. A row
+// that takes arguments is the carve-out: it COMPLETES to "/verb " and waits for them rather than
+// firing unfinished, unless it also carries commandSpec.runsBareAtAccept — /model and /server,
+// whose bare form only opens a picker — which puts it back among the rows that run. The
 // whole-input form keeps ownership of arguments ("/confine off --save"), so ⏎ on a finished token
 // falls through to submit exactly there and executes at accept everywhere else. All three regions
 // stay open while the model WORKS — the namespace is most wanted exactly where it used to vanish,
@@ -116,10 +119,11 @@
 // the scheduler library through the [Scheduler] seam and are the first argument-taking verbs that
 // are ALSO live mid-run, because a Schedule fires as a separate headless run and touches this
 // session's engine at no point (schedule.go, ADR 0033); /confine reports and toggles
-// Auto's blast radius through [Engine.SetConfineToWorkspace], the one verb that takes arguments
-// ([parseConfine] owns its "status | off [--save] | on" grammar, and an argument it does not
+// Auto's blast radius through [Engine.SetConfineToWorkspace], one of the two argument-taking verbs
+// with a grammar of its own (/color-scheme is the other): [parseConfine] reads "status | off
+// [--save] | on" where every other row is handed a plain token list, and an argument it does not
 // understand is a parse error carrying the usage line — never a silent no-op on the command that
-// widens what Auto may touch); @file *resolution* stays in the agent loop (reusing the workspace
+// widens what Auto may touch; @file *resolution* stays in the agent loop (reusing the workspace
 // fence), so the TUI only parses references — it never reads files itself. The settled questions
 // behind all of it — one namespace, tokens not chips, accept-executes, caret-aware regions, the
 // while-running policy, resolve-gated accents, the sole-token guard — are recorded in ADR 0027.

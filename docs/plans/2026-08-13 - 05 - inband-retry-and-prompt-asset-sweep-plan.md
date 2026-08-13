@@ -285,7 +285,11 @@ text pins for `user-instruction.txt` ("Reply with the title only.") and `window-
 
 ---
 
-## 7. Sweep the stale pre-`runsBareAtAccept` accept prose
+## 7. Sweep the stale pre-`runsBareAtAccept` accept prose — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the `/confine` clause in `internal/tui/doc.go` says "one of the two argument-taking verbs with a grammar of its own (/color-scheme is the other)" rather than asserting a count of verbs that take arguments at all — `parseColorScheme` (`command.go:446`) is the second such grammar, so the earlier "the one argument-taking verb with a grammar of its own" was still exclusive and wrong.
+
+NOTES (2026-08-13): the `/confine` sentence in `internal/tui/doc.go` was re-wrapped across the lines that carry it (text unchanged past the edited clause) so the reworded clause did not sit ragged mid-paragraph.
 
 Depends on item 1.
 

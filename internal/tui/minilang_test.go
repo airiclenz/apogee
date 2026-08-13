@@ -762,8 +762,10 @@ func TestEnterOnMidDraftCommandRunsAndKeepsTheDraft(t *testing.T) {
 	}
 }
 
-// The one arg-taking verb never fires from the menu: accepting /confine completes to "/confine "
-// and waits, because arguments are the whole-input form's business ("/confine off --save").
+// An arg-taking verb without runsBareAtAccept never fires from the menu: accepting /confine
+// completes to "/confine " and waits, because arguments are the whole-input form's business
+// ("/confine off --save"). The picker pair /model and /server are the carve-out, pinned by
+// TestOnlyThePickerVerbsRunBareAtAccept.
 func TestAcceptConfineSplicesWithoutFiring(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)

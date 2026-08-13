@@ -359,6 +359,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Docs: swept the accept-behaviour prose that predated `runsBareAtAccept` — ADR 0028's decision 7
+  carries a dated amendment note, `internal/tui/doc.go` states the argument-taking carve-out and
+  now calls `/confine` one of the two argument-taking verbs with a grammar of its own
+  (`/color-scheme` is the other), `minilang_test.go`'s `/confine` accept comment names the
+  picker-pair exception, and the README says which commands complete instead of running.
+
 - **The emergency fold's user bridge is now a plain file rather than a Go string literal.** The
   message appended after an overflow fold — the user turn that closes the folded conversation's
   turn structure and tells the model, in-band, that the history it can see is a summary — was a

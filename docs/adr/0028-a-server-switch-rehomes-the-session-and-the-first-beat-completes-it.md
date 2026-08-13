@@ -147,7 +147,12 @@ once rather than debounced against evidence about a different machine.
 `/server` are ordinary rows in the one command table
 ([ADR 0027](0027-one-slash-namespace-with-inline-skill-tokens.md)), both `takesArgs` and neither
 `whileRunning`: the merged menu tags them `— idle only`, the dropdown **completes** them rather
-than running them, and mid-run acceptance earns the standing note. Idle-only is not incidental —
+than running them, and mid-run acceptance earns the standing note.
+*(Amended 2026-08-13: the dropdown now **runs** both verbs bare at accept — each row carries
+`runsBareAtAccept` (`internal/tui/command.go:94`), because the bare form only opens the picker and
+mutates nothing until that picker's own accept, where a `/model ` nobody meant to finish would just
+stand in the box. The idle-only tag and the mid-run standing note are unchanged.)*
+Idle-only is not incidental —
 both end in idle-only engine calls, and a user-initiated switch racing the deferred `pendingRebind`
 path would make "latest wins" ambiguous between the human and the server.
 
