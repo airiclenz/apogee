@@ -51,7 +51,7 @@ func TestToolLoopInertWithoutPreviousTurn(t *testing.T) {
 	}
 }
 
-// TestEmbeddedDirectivePromptsLoad pins the loader contract behind the directive's prompt assets:
+// TestEmbeddedDirectivePromptsLoad pins the loader contract behind this package's prompt assets:
 // every file under prompts/ carries text, mustPrompt returns it with the single trailing newline
 // the file ends in already stripped, and each asset holds exactly the number of %s verbs the
 // builder feeds it — a verb added to or dropped from an asset would otherwise surface only as a
@@ -61,6 +61,7 @@ func TestEmbeddedDirectivePromptsLoad(t *testing.T) {
 	t.Parallel()
 
 	verbs := map[string]int{
+		// tool_loop_interceptor's loop-breaking directive, assembled fragment by fragment.
 		"loop-header.txt":               1,
 		"results-above.txt":             0,
 		"task-reminder.txt":             1,
@@ -69,6 +70,16 @@ func TestEmbeddedDirectivePromptsLoad(t *testing.T) {
 		"tail-continue-work.txt":        0,
 		"tail-write-implementation.txt": 0,
 		"tail-different-action.txt":     0,
+		// The whole-text directives and notes the other Mechanisms inject verbatim.
+		"cot-tool-use-directive.txt":           0,
+		"cot-stall-directive.txt":              0,
+		"cot-list-nudge-directive.txt":         0,
+		"decompose-focus-directive.txt":        0,
+		"decompose-continuation-directive.txt": 0,
+		"library-tool-use-note.txt":            0,
+		"library-shallow-note.txt":             0,
+		"library-injection-header.txt":         0,
+		"completion-check-nudge.txt":           0,
 	}
 
 	entries, err := promptFS.ReadDir("prompts")

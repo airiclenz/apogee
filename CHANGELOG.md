@@ -347,6 +347,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Every Mechanism's prompt text is now editable prose, not a Go string literal.** The nine
+  remaining hard-coded prompt literals in `internal/mechanisms` — the three cot nudges, the two
+  decompose directives, the two library behavioural notes plus that Mechanism's injection-block
+  header, and the empty-response completion-check nudge — moved into `internal/mechanisms/prompts/`
+  as `.txt` assets, joining the tool-loop fragments that were already there and loading through the
+  same `go:embed` + `mustPrompt` path. Nothing a model sees changed: every asset is a byte-for-byte
+  move of the wording the sim's A/B measured, still compiled into the binary, still never read from
+  disk and never user-overridable, with the `@pin` provenance comments, the sentence-joining spaces
+  and the trailing newlines staying in Go. The idempotency markers also stay in Go, so the "a
+  directive contains its own marker" coupling that keeps a repeat inject a no-op now spans two files
+  — a new test pins each marker as a substring of its asset, failing a re-worded asset that would
+  otherwise make the directive inject twice.
+
 - **The `internal/domain` package map names every marker interface again**: the `tools.go`
   sentence in `doc.go` enumerated `ReadOnlyTool`, `SubprocessTool`, `ExternalEffectTool`,
   `ReadSourceTool` and `PromptTool` but omitted `ApprovalScoper`, the marker a tool implements to

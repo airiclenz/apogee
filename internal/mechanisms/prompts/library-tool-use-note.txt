@@ -1,0 +1,1 @@
+This model tends to respond with text instead of tool calls when tools are available. Always prefer tool calls over text responses when tools can accomplish the task.

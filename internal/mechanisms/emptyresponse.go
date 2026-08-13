@@ -52,8 +52,9 @@ var emptyResponseRecoveryDescriptor = domain.MechanismDescriptor{
 // them to review remaining steps produces continuation tool calls (observed with Qwen3.5-9B on
 // multi-file creation prompts, 2025-05). The sim's attempt-2 context-aware nudge ladder, system
 // directive, and per-attempt temperature escalation are recorded bench-pending divergences (R2),
-// not ported.
-const completionCheckNudge = "Your response was empty. Review the original task — there are likely remaining steps or files you haven't addressed yet. Use a tool call to continue with the next unfinished part. Do not summarize or stop until every part of the task is complete."
+// not ported. The wording itself is an embedded prompt asset (prompts/*.txt, loaded by toolloop.go's
+// mustPrompt) so it reads and edits as prose.
+var completionCheckNudge = mustPrompt("completion-check-nudge.txt")
 
 // PostResponse retries in place with the completion-check nudge when the model returned an empty
 // reply mid-task; every other response is a no-op. The trigger mirrors apogee-sim's

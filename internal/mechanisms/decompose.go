@@ -30,20 +30,20 @@ func init() {
 
 const decomposeID domain.MechanismID = "decompose"
 
-// decompose directives + their idempotency markers, ported verbatim from apogee-sim
-// internal/decompose/decompose.go @pin (behavior ground-truth, D7 — the wording the sim's A/B
-// measured). Each directive embeds its marker so AppendToSystem's marker check makes a second
-// inject on the same request a no-op.
+// decompose directives, ported verbatim from apogee-sim internal/decompose/decompose.go @pin
+// (behavior ground-truth, D7 — the wording the sim's A/B measured) and carried as embedded prompt
+// assets (prompts/*.txt, loaded by toolloop.go's mustPrompt) so the wording reads and edits as
+// prose. Each directive embeds its marker below, so AppendToSystem's marker check makes a second
+// inject on the same request a no-op — re-wording an asset must keep its marker verbatim (pinned
+// by TestPromptAssetsKeepTheirMarkers).
+var (
+	decomposeFocusDirective        = mustPrompt("decompose-focus-directive.txt")
+	decomposeContinuationDirective = mustPrompt("decompose-continuation-directive.txt")
+)
+
+// The idempotency markers stay in Go: they are the identity AppendToSystem keys its no-op re-inject
+// check on, not prompt text of their own.
 const (
-	decomposeFocusDirective = "Focus on one action at a time. When given a task, " +
-		"perform the first concrete step by calling the appropriate tool. " +
-		"Never write code or file contents as text in your response — always use " +
-		"the provided tools to create and modify files. " +
-		"Do not plan ahead or describe future steps."
-
-	decomposeContinuationDirective = "Your previous explanation or reasoning has been noted. " +
-		"That step is complete — now proceed with the next concrete action using tools."
-
 	decomposeFocusMarker        = "Focus on one action"
 	decomposeContinuationMarker = "previous explanation"
 	decomposeDecomposedMarker   = "Your next step:"

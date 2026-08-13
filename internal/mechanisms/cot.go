@@ -62,23 +62,20 @@ func init() {
 	})
 }
 
-// cot directives + their idempotency markers, ported verbatim from apogee-sim internal/cot/cot.go
-// @pin (behavior ground-truth, D7). Each directive embeds its marker so AppendToSystem's marker
-// check makes a repeat inject on the same request a no-op.
+// cot directives, ported verbatim from apogee-sim internal/cot/cot.go @pin (behavior ground-truth,
+// D7) and carried as embedded prompt assets (prompts/*.txt, loaded by toolloop.go's mustPrompt) so
+// the wording reads and edits as prose. Each directive embeds its marker below, so AppendToSystem's
+// marker check makes a repeat inject on the same request a no-op — re-wording an asset must keep
+// its marker verbatim (pinned by TestPromptAssetsKeepTheirMarkers).
+var (
+	cotToolUseDirective   = mustPrompt("cot-tool-use-directive.txt")
+	cotStallDirective     = mustPrompt("cot-stall-directive.txt")
+	cotListNudgeDirective = mustPrompt("cot-list-nudge-directive.txt")
+)
+
+// The idempotency markers stay in Go: they are the identity AppendToSystem keys its no-op re-inject
+// check on, not prompt text of their own.
 const (
-	cotToolUseDirective = "You have tools available. When the user asks you to perform an action " +
-		"(read, edit, create, run, delete files, etc.), you MUST respond with a tool call. " +
-		"Do not describe what you would do — actually do it by calling the appropriate tool. " +
-		"Do not re-read files whose content is already visible in the conversation — " +
-		"proceed directly to your next action."
-
-	cotStallDirective = "You have been exploring and reading files for several turns " +
-		"without making any changes. Now proceed with the required modifications — " +
-		"use write_file or edit_file to implement the changes."
-
-	cotListNudgeDirective = "You have listed directory contents but have not read any files yet. " +
-		"Use read_file to read the source files you found — do not list more directories."
-
 	cotToolUseMarker   = "MUST respond with a tool call"
 	cotStallMarker     = "proceed with the required modifications"
 	cotListNudgeMarker = "have not read any files yet"
