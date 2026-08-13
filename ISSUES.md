@@ -125,6 +125,20 @@ items ✅ done): what the run's items deliberately did not reach.
   (`ReadOnlyTool`…`PromptTool`) without the new `ApprovalScoper`; the sentence stays true, but the
   new marker is worth naming when that map is next touched.
 
+### /dev/null confinement run — residuals (2026-08-13)
+
+Raised while executing `docs/plans/2026-08-13 - 02 - dev-null-confinement-plan.md` (all 3 items
+✅ done): what the run's items deliberately did not reach.
+
+- [ ] Commit `70c3586` carries the message "feat(confinement): implement /dev/null device exemption
+  for landlock and seatbelt backends" but only adds the plan doc
+  (`docs/plans/2026-08-13 - 02 - dev-null-confinement-plan.md`, 132 insertions, the commit's sole
+  file) — a misleading message on an already-landed commit.
+
+- [ ] Darwin live coverage of the `/dev/null` exemption is untested —
+  `internal/platform/seatbelt_darwin_test.go` only delegates to the shared `confinetest.Probe`
+  battery, so the seatbelt exemption is pinned by the hermetic profile-string tests alone.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
