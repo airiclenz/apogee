@@ -55,6 +55,14 @@ type serverBinder struct {
 	// the resolved width seeds the Config the Agent is constructed from, so a session is capped from
 	// its first Turn rather than from its first beat.
 	caps *parallelAgentsCap
+	// build is how the Config this step assembles becomes an Agent. Every wiring leaves it nil, which
+	// says exactly that — bind substitutes buildAgent, the one construction call there has ever been.
+	//
+	// It is a field rather than a direct call because that Config is otherwise unobservable: the six
+	// fields the entry decides are written onto a copy no caller keeps, so the pins resolved below —
+	// the fan-out width, the reply cap, the context window — could each be deleted and every test in
+	// the package would still pass. A test supplies a build that records what it was handed.
+	build func(apogee.Config, *session.Record) (*apogee.Agent, error)
 }
 
 // bind constructs the engine for entry and points both holders at it. The engine is constructed
@@ -89,8 +97,12 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// 0, the honest "unknown until the first beat binds one".
 	cfg.Context.MaxContextTokens = config.ResolveContextWindow(entry.ContextWindow, cfg.Context.MaxContextTokens)
 
+	construct := buildAgent
+	if b.build != nil {
+		construct = b.build
+	}
 	if err := b.engine.Bind(func() (*apogee.Agent, error) {
-		agent, err := buildAgent(cfg, b.resumed)
+		agent, err := construct(cfg, b.resumed)
 		if err != nil {
 			return nil, friendlyConstructErr(err)
 		}

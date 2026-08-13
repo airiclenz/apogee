@@ -470,6 +470,54 @@ func TestHeadlessInstallsTheParallelAgentsCap(t *testing.T) {
 	}
 }
 
+// The two bounds the bound entry carries reach this Driver as well, on the same terms every other
+// per-entry fact does (ADR 0031's benchable-all-the-way-up): the window is the entry's own
+// `context-window:` resolved over the top-level key — config.ResolveContextWindow, the same
+// precedence a session's bind resolves — and the reply ceiling is the entry's `max-output-tokens:`
+// (ADR 0046). One configuration cannot mean two windows depending on which Driver reads it.
+//
+// The unpinned row keeps the precedence honest in the other direction: an entry pinning nothing
+// leaves the top-level key answering for the window, and leaves the cap at 0, where the engine
+// derives it from the room its Budget reserves.
+func TestHeadlessBudgetsAgainstTheBoundEntrysPins(t *testing.T) {
+	tests := []struct {
+		name       string
+		entryKeys  string
+		wantWindow int
+		wantOutput int
+	}{
+		{
+			name:       "the bound entry's own pins outrank the top-level key",
+			entryKeys:  "    context-window: 65536\n    max-output-tokens: 4096\n",
+			wantWindow: 65536,
+			wantOutput: 4096,
+		},
+		{
+			name:       "an entry pinning nothing leaves the top-level key answering",
+			wantWindow: 16384,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home := testConfigHome(t, "context-window: 16384\nservers:\n  - name: testbox\n    endpoint: "+
+				testServerEndpoint+"\n"+tc.entryKeys+"server: testbox\n")
+
+			stub := &stubRunner{}
+			if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+				t.Fatalf("headless: %v", err)
+			}
+			if got := stub.spec.Config.Context.MaxContextTokens; got != tc.wantWindow {
+				t.Errorf("Config.Context.MaxContextTokens = %d; want %d — the window this run budgets "+
+					"against", got, tc.wantWindow)
+			}
+			if got := stub.spec.Config.Context.MaxOutputTokens; got != tc.wantOutput {
+				t.Errorf("Config.Context.MaxOutputTokens = %d; want %d — the ceiling one reply of an "+
+					"unattended run may reach", got, tc.wantOutput)
+			}
+		})
+	}
+}
+
 // Persistence is on by default and --no-save is the opt-out, expressed the only way internal/run
 // reads it: a nil Store.
 func TestHeadlessNoSaveDropsTheStore(t *testing.T) {

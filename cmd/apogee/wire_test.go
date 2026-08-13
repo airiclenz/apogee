@@ -4061,3 +4061,80 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 		t.Errorf("the next rebind's pin = %d; want the bound entry's 65536 kept", pin)
 	}
 }
+
+// The two bounds the entry decides reach the engine through the Config the Agent is CONSTRUCTED
+// from — not through a push afterwards, because at a bind there is nothing yet to push at. That
+// Config is written onto a copy no caller keeps, which is what serverBinder.build exists for: the
+// bind runs exactly as the binary runs it, and the Config it handed the construction is recorded.
+//
+// The unpinned row is why these are assignments rather than agreements. The Config arriving at this
+// step already carries the STARTUP entry's reply cap and the top-level `context-window:`, so an
+// entry that pins neither must leave the cap at 0 — the engine's own derive off the Budget (ADR
+// 0046) — while the top-level key keeps answering for the window (ADR 0045 decision 3). A move onto
+// a bare server that kept the retired entry's ceiling is the same defect stated the other way round.
+func TestServerBindHandsTheEntrysBoundsToTheEngine(t *testing.T) {
+	t.Parallel()
+	// What the session arrived with: the top-level window key, and the cap of the entry it was on.
+	const topLevelWindow, retiredCap = 16384, 111
+
+	tests := []struct {
+		name       string
+		entry      config.ServerEntry
+		wantWindow int
+		wantOutput int
+	}{
+		{
+			name: "the entry's own pins outrank what the session arrived with",
+			entry: config.ServerEntry{
+				Name: "workstation", Endpoint: "http://127.0.0.1:1111", Model: "pinned-model",
+				ContextWindow: 65536, MaxOutputTokens: 4096,
+			},
+			wantWindow: 65536,
+			wantOutput: 4096,
+		},
+		{
+			name:       "an entry pinning nothing keeps the top-level window and derives the cap",
+			entry:      config.ServerEntry{Name: "laptop", Endpoint: "http://127.0.0.1:8080"},
+			wantWindow: topLevelWindow,
+			wantOutput: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			base := validCfg(t)
+			base.Context.MaxContextTokens = topLevelWindow
+			base.Context.MaxOutputTokens = retiredCap
+
+			engine := newLateEngine(apogee.ModeAskBefore, true)
+			t.Cleanup(func() { _ = engine.Close() })
+			var handed apogee.Config
+			binder := serverBinder{
+				cfg:    base,
+				engine: engine,
+				holder: newUpstreamHolder(),
+				caps:   newParallelAgentsCap(engine),
+				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+					handed = cfg
+					return buildAgent(cfg, resumed)
+				},
+			}
+			if err := binder.bind(tt.entry); err != nil {
+				t.Fatalf("bind: %v", err)
+			}
+
+			if handed.Endpoint != tt.entry.Endpoint {
+				t.Fatalf("the Agent was constructed against %q; want the entry's %q — the recorded "+
+					"Config is not this bind's", handed.Endpoint, tt.entry.Endpoint)
+			}
+			if handed.Context.MaxContextTokens != tt.wantWindow {
+				t.Errorf("Config.Context.MaxContextTokens = %d; want %d — the window this session's "+
+					"very first Turn budgets against", handed.Context.MaxContextTokens, tt.wantWindow)
+			}
+			if handed.Context.MaxOutputTokens != tt.wantOutput {
+				t.Errorf("Config.Context.MaxOutputTokens = %d; want %d — the ceiling ONE reply from "+
+					"this server may reach", handed.Context.MaxOutputTokens, tt.wantOutput)
+			}
+		})
+	}
+}
