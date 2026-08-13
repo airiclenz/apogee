@@ -168,6 +168,26 @@ what the run's items deliberately did not reach.
   layer but glosses `/schedule`, which also receives — and uses — the raw tail
   (`parsedInput.rest`, `internal/tui/command.go:128-134`); prose nit, not a defect.
 
+### Remember-model run — residuals (2026-08-13)
+
+Raised while executing `docs/plans/archived/2026-08-13 - 06 - remember-model-plan.md`: what the
+run's items deliberately did not reach.
+
+- [ ] The plan doc `docs/plans/2026-08-13 - 07 - residuals-sweep-and-configwrite-split-plan.md` sits
+  untracked in the tree unstaged; it needs its own `feat(plans)` commit, and its `configwrite.go`
+  split overlaps this plan's item 2 work.
+
+- [ ] `verifiedEntrySplice`'s refusal message still says "did not put the key source on the %q entry"
+  (`internal/config/configwrite.go:1602`), now reachable from a model / launch-profile write.
+
+- [ ] `/model <id>` naming the already-bound model returns early and records nothing
+  (`internal/tui/picker.go:695`), so a user cannot pin the model the heartbeat put them on — faithful
+  to the `/server` twin, a feature gap not a defect.
+
+- [ ] `auto-title` has no case in `applySettingFor` (`cmd/apogee/wire_settings.go:495`) — committing
+  it in `/settings` writes the file and answers that it cannot be applied to the running session
+  while `tui.Options.AutoTitle` stays launch-frozen; pre-existing.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
