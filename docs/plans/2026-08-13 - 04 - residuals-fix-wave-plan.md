@@ -351,7 +351,12 @@ tests whose assertions already route through `realPath`.
 
 ---
 
-## 10. `internal/domain/doc.go` names `ApprovalScoper`
+## 10. `internal/domain/doc.go` names `ApprovalScoper` — ✅ DONE (2026-08-13)
+
+NOTES (2026-08-13): the added clause pushed the sentence past the file's ~95-column comment width,
+so the `tools.go`/`toolsummary.go`/`confinement.go` sentences were re-wrapped across the same
+lines. Wording and order are untouched — only the line breaks moved (the pre-existing 119-column
+line 59 is gone as a side effect).
 
 Depends on item 1.
 

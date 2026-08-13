@@ -56,10 +56,12 @@
 //
 // Tools and confinement. tools.go is the open Tool extension point (ADR 0002) with ToolCall,
 // ToolResult, the ToolRegistry, and the marker interfaces the dispatch disposition reads —
-// ReadOnlyTool, SubprocessTool, ExternalEffectTool, ReadSourceTool, PromptTool. toolsummary.go is ToolSummary and its
-// seven variants, the structured half of an outcome, written for a host rather than for the
-// model. confinement.go is the Confiner interface, its capability and box value types, and
-// the per-call Confinement / SubprocessPermit context carriers (ADR 0012).
+// ReadOnlyTool, SubprocessTool, ExternalEffectTool, ReadSourceTool, PromptTool — plus
+// ApprovalScoper, read on the approval path rather than by the dispatch disposition.
+// toolsummary.go is ToolSummary and its seven variants, the structured half of an outcome,
+// written for a host rather than for the model. confinement.go is the Confiner interface, its
+// capability and box value types, and the per-call Confinement / SubprocessPermit context
+// carriers (ADR 0012).
 //
 // The remaining facts about a session. contextfile.go is the workspace context files' report
 // — one note per file and the Oversize predicate over their standing cost against the

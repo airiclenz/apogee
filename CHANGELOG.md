@@ -323,6 +323,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The `internal/domain` package map names every marker interface again**: the `tools.go`
+  sentence in `doc.go` enumerated `ReadOnlyTool`, `SubprocessTool`, `ExternalEffectTool`,
+  `ReadSourceTool` and `PromptTool` but omitted `ApprovalScoper`, the marker a tool implements to
+  disclose what a call reaches beyond what its arguments name. It is now listed with the qualifier
+  that distinguishes it from the rest — it is read on the approval path, not by the dispatch
+  disposition. Comment-only; no behaviour changes.
+
 - **The writer-disclosure tests no longer depend on an unsymlinked temp dir**: the bare-sentence
   assertions — the ones pinning that `write_file`, `edit_existing_file`, `find_replace`,
   `copy_file`, `move_file`, `delete_file` and `read_file` say nothing extra when a path resolves to
