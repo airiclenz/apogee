@@ -93,6 +93,12 @@ import (
 //     two. A pane too narrow to seat the phrase beside its name sheds the phrase's NOUN before the
 //     count (popupElisionMarkerFitting) and its own name before the number, so the count survives
 //     every width a pane can be drawn at — a short window is usually a narrow one too.
+//   - A row window that cannot seat the whole list says so in the margin as well as in the hint: with
+//     popupSpec.scrollbar set, the block gives up its LAST column and paints the transcript's own bar
+//     down it (popupRowScrollbar), so a pane's overflow is visible before a key is pressed and the
+//     length of what is off-screen is legible from the thumb. The column is reserved only WHILE the
+//     window overflows — a list that fits keeps the full inner width, and the rows are composed at the
+//     narrowed width rather than painted at it, so nothing is pushed under the bar.
 //
 // Every overlay pane — the /sessions browser, the command, file and skill dropdowns, and the ask and
 // approval prompts — now paints through this module; no boxed overlay renders its own chrome
@@ -294,6 +300,13 @@ const (
 // list with a cursor windows around that cursor, which is what keeps the cursor on the screen — and a
 // zero is the top of the list, which is exactly where a selection-less spec has always been read from.
 //
+// scrollbar asks for the overflow bar down the row block's right-hand column (popupRowScrollbar). It
+// is opt-in rather than always-on because it is a SETTING one level up — the human turns the
+// transcript's bar off with ui.show-scrollbar and means the pane's too — so the flag carries that
+// answer in rather than the module reading a Model it is not allowed to see. A spec that sets it and
+// never overflows paints no bar and gives up no column: the reservation follows the overflow, not the
+// flag.
+//
 // bodyLead is a run at the FRONT of the body's first line that is painted as a heading
 // (th.popupBodyLead) instead of as prose — the "Description:" label of the /settings pane's own
 // header. It is a lead rather than a block of its own because it is part of the sentence: the label
@@ -322,6 +335,7 @@ type popupSpec struct {
 	rowTop        int
 	hint          string
 	maxRows       int
+	scrollbar     bool
 }
 
 // rowKind is what row i of the spec is: what rowKinds says, or plain where it says nothing. Every
@@ -637,7 +651,63 @@ type popupRowBlock struct {
 // With wrapped rows that case is reachable one step earlier than a zero budget: a budget of two
 // lines and a three-line answer seats nothing either, and it is counted the same way rather than
 // shown two thirds of.
+//
+// The overflow BAR (popupSpec.scrollbar) is why the composition can run TWICE. The bar's column comes
+// out of the rows' own width, and whether it is reserved at all depends on a window that is not known
+// until the rows have been composed — so the block is composed at the full inner width first, and
+// only a window that left a row out is composed AGAIN one column narrower and painted with the bar
+// down the freed column (popupRowScrollbar). The two passes cannot disagree about the reservation:
+// narrowing a wrapping row can only cost it lines, never win them back, so a window that overflowed
+// at the full width overflows at the narrower one too. A pane too narrow to seat both the bar and a
+// row of text keeps its rows: past that floor truncateToWidth draws nothing at all, and a bar beside
+// an empty column would be the pane hiding its content to describe it.
 func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style) popupRowBlock {
+	block := popupRowLinesAt(th, spec, inner, blackFill)
+	rowInner := inner - scrollbarWidth
+	if !spec.scrollbar || rowInner <= 1 || block.end-block.start >= len(spec.rows) {
+		return block
+	}
+	return popupRowScrollbar(th, popupRowLinesAt(th, spec, rowInner, blackFill), len(spec.rows), rowInner, blackFill)
+}
+
+// popupRowScrollbar paints the overflow bar down the last column of a row block composed one column
+// short of the pane's inner width (popupRowLines), and returns the block with the bar folded into its
+// lines. Every line of the block carries a cell of it — the pad and the separators between rows as
+// much as the rows themselves — so the bar reads as one stroke down the block's right edge rather
+// than as a dashed one.
+//
+// The arithmetic is the transcript's (Model.renderScrollbar) with the two counts it conflates pulled
+// apart: there a painted line IS a row, here a row can cost several, so the thumb is sized from the
+// ROW counts — the seated window over the whole list — and drawn in the block's painted LINES. The
+// window's position maps the same way, start over the rows the list cannot show at once onto the
+// lines the thumb leaves free, which puts the thumb flush at the top with the first row seated and
+// flush at the bottom with the last one, at every height in between the pane can be drawn at.
+func popupRowScrollbar(th theme, block popupRowBlock, rows, rowInner int, blackFill lipgloss.Style) popupRowBlock {
+	h, shown := len(block.lines), block.end-block.start
+	if h == 0 || shown <= 0 || shown >= rows {
+		// No row seated at all (the count went to the title row instead), or nothing off-screen after
+		// the narrower composition: either way there is no window to describe.
+		return block
+	}
+	thumb := clampInt(h*shown/rows, 1, h)
+	pos := block.start * (h - thumb) / (rows - shown) // 0 (top) … h-thumb (bottom)
+	for i, line := range block.lines {
+		cell := th.scrollTrack.Render(glyphScrollTrack)
+		if i >= pos && i < pos+thumb {
+			cell = th.scrollThumb.Render(glyphScrollThumb)
+		}
+		// The line is squared on the pane's own black field before the cell is appended: a row shorter
+		// than the block leaves a gap between its text and the bar, and a bare pad there would show the
+		// terminal's background through it (squareOnField).
+		block.lines[i] = squareOnField(th.measure, blackFill, line, rowInner) + blackFill.Render(cell)
+	}
+	return block
+}
+
+// popupRowLinesAt is popupRowLines' composition at ONE given inner width: the whole of the windowing
+// and the styling, with no say in what the rows are drawn INTO. It is split out for the bar, which
+// changes that width and so has to be able to ask for the same composition twice.
+func popupRowLinesAt(th theme, spec popupSpec, inner int, blackFill lipgloss.Style) popupRowBlock {
 	blocks := popupRowBlocks(th, spec.rows, spec.wrapRows, inner)
 	heights := popupRowHeights(blocks)
 

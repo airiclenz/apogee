@@ -1835,3 +1835,211 @@ func TestPopupRowWindowFrom(t *testing.T) {
 		})
 	}
 }
+
+// popupBarCell is the LAST inner cell of a rendered popup line — the column the row block's overflow
+// bar paints into (popupRowScrollbar) — read off the stripped line past its right border rune and the
+// border style's own padding cell. Every row these tests hand the pane is ASCII and both bar glyphs
+// are one cell wide, so a rune index is a column index here.
+func popupBarCell(line string) string {
+	runes := []rune(strip(line))
+	if len(runes) < 3 {
+		return ""
+	}
+	return string(runes[len(runes)-3])
+}
+
+// popupBarColumn is the bar glyph of every painted line that carries one, top to bottom — the
+// rendered pane's scrollbar read as a column of cells, so an assertion about the thumb's POSITION
+// does not have to know which painted row the block began on.
+func popupBarColumn(out string) []string {
+	var column []string
+	for _, line := range popupLines(out) {
+		if cell := popupBarCell(line); cell == glyphScrollThumb || cell == glyphScrollTrack {
+			column = append(column, cell)
+		}
+	}
+	return column
+}
+
+// popupThumbSpan is where the thumb sits in a bar column: the index of its first cell and how many
+// cells it covers. It reports −1, 0 for a column with no thumb in it at all.
+func popupThumbSpan(column []string) (at, size int) {
+	at = -1
+	for i, cell := range column {
+		if cell != glyphScrollThumb {
+			continue
+		}
+		if at < 0 {
+			at = i
+		}
+		size++
+	}
+	return at, size
+}
+
+// popupScrollbarSpec is the list these scrollbar tests window: n one-line rows, a title and a hint,
+// with the caller setting the budget, the cursor and the flag.
+func popupScrollbarSpec(n, maxRows int) popupSpec {
+	labels := make([]string, n)
+	for i := range labels {
+		labels[i] = fmt.Sprintf("row %d", i)
+	}
+	return popupSpec{
+		title:     "mechanisms",
+		rows:      singleCellRows(labels),
+		selected:  0,
+		hint:      "esc close",
+		maxRows:   maxRows,
+		scrollbar: true,
+	}
+}
+
+// A row window that seats the WHOLE list paints no bar and gives up no column: the pane a scrollbar
+// spec renders at is byte-identical to the one the same spec renders without the flag, so a surface
+// that opts in pays nothing on the windows where its list fits (ratified call 6).
+func TestRenderPopupScrollbarIsAbsentWhileTheRowsFit(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	spec := popupScrollbarSpec(4, 8)
+	off := spec
+	off.scrollbar = false
+	for _, width := range []int{40, 60, 98} {
+		with, without := renderPopup(th, spec, width), renderPopup(th, off, width)
+		if column := popupBarColumn(with); len(column) != 0 {
+			t.Errorf("width %d: a fitting list painted %d bar cells, want none", width, len(column))
+		}
+		if with != without {
+			t.Errorf("width %d: the flag changed a fitting pane's paint:\n%s\nwant:\n%s",
+				width, strip(with), strip(without))
+		}
+	}
+}
+
+// An OVERFLOWING window paints the bar down the block's last column — one cell per painted row line,
+// none on the title or the hint — and the rows are composed one column narrower to pay for it: a row
+// that fills the pane's inner width exactly is elided with the bar and whole without it. The bar's
+// own cells sit on the pane's black field like every other cell (the black-fill contract).
+func TestRenderPopupScrollbarReservesOneColumnWhileOverflowing(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	const width, shown = 60, 3
+	inner := popupInnerWidth(th, width)
+	spec := popupScrollbarSpec(9, shown)
+	spec.rows[1] = popupRow{strings.Repeat("x", inner-popupRowIndent)} // exactly fills the full width
+	off := spec
+	off.scrollbar = false
+
+	out := renderPopup(th, spec, width)
+	if column := popupBarColumn(out); len(column) != shown {
+		t.Errorf("bar column is %d cells, want one per shown row (%d): %q", len(column), shown, column)
+	}
+	for i, line := range popupLines(out) {
+		if w := lipgloss.Width(line); w != width {
+			t.Errorf("line %d is %d cells, want %d: %q", i, w, width, strip(line))
+		}
+		if col, ok := firstCellWithoutBackground(line); !ok {
+			t.Errorf("line %d has a bare (no-background) cell at column %d: %q", i, col, strip(line))
+		}
+	}
+	if wide := popupLineWith(t, out, "xxx"); !strings.Contains(strip(wide), "…") {
+		t.Errorf("the full-width row was not elided into the reserved column: %q", strip(wide))
+	}
+	if wide := popupLineWith(t, renderPopup(th, off, width), "xxx"); strings.Contains(strip(wide), "…") {
+		t.Errorf("without the bar the same row should still fit whole: %q", strip(wide))
+	}
+}
+
+// The thumb says WHERE the window is: flush at the top with the first row seated, flush at the bottom
+// with the last one, and never moving backwards as the reader scrolls down — the transcript bar's
+// contract on a pane whose window is scrolled rather than walked (popupSpec.rowTop).
+func TestRenderPopupScrollbarThumbTracksTheWindow(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	const width, rows, shown = 60, 12, 4
+	spec := popupScrollbarSpec(rows, shown)
+	spec.selected = -1 // a report: the window opens where rowTop puts it
+
+	last := 0
+	for top := 0; top <= rows-shown; top++ {
+		spec.rowTop = top
+		column := popupBarColumn(renderPopup(th, spec, width))
+		if len(column) != shown {
+			t.Fatalf("top %d: bar column is %d cells, want %d", top, len(column), shown)
+		}
+		at, size := popupThumbSpan(column)
+		if size < 1 {
+			t.Fatalf("top %d: no thumb in the bar: %q", top, column)
+		}
+		if want := max(1, shown*shown/rows); size != want {
+			t.Errorf("top %d: thumb is %d cells, want %d", top, size, want)
+		}
+		switch top {
+		case 0:
+			if at != 0 {
+				t.Errorf("top 0: thumb starts at %d, want flush at the top", at)
+			}
+		case rows - shown:
+			if at+size != len(column) {
+				t.Errorf("last window: thumb ends at %d of %d, want flush at the bottom", at+size, len(column))
+			}
+		}
+		if at < last {
+			t.Errorf("top %d: thumb moved back to %d from %d", top, at, last)
+		}
+		last = at
+	}
+}
+
+// The flag is the whole of the opt-in: a spec that leaves it false paints no bar however far its list
+// overflows, which is what keeps every pane that has not adopted one rendering as it always did.
+func TestRenderPopupWithoutTheFlagNeverPaintsABar(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	spec := popupScrollbarSpec(30, 3)
+	spec.scrollbar = false
+	for _, width := range []int{40, 60, 98} {
+		if column := popupBarColumn(renderPopup(th, spec, width)); len(column) != 0 {
+			t.Errorf("width %d: %d bar cells painted with the flag off: %q", width, len(column), column)
+		}
+	}
+}
+
+// With WRAPPED rows the bar spans the block's painted LINES while its thumb is sized from the ROW
+// counts: every line of every seated row carries a cell, the continuation lines included, so the bar
+// is one unbroken stroke down a block whose rows are not one line each.
+func TestRenderPopupScrollbarSpansWrappedRowLines(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	const width, maxRows = 50, 5
+	inner := popupInnerWidth(th, width)
+	long := strings.Repeat("word ", inner/2) // several lines once wrapped to the inner budget
+	spec := popupSpec{
+		title:     "questions",
+		rows:      singleCellRows([]string{long, long, long, long}),
+		selected:  0,
+		hint:      "esc close",
+		maxRows:   maxRows,
+		wrapRows:  true,
+		scrollbar: true,
+	}
+	out, place := renderPopupPlaced(th, spec, width)
+	if place.end-place.start >= len(spec.rows) {
+		t.Fatalf("the list did not overflow: window [%d,%d) of %d rows", place.start, place.end, len(spec.rows))
+	}
+	lines := 0
+	for i := place.start; i < place.end; i++ {
+		lines += len(place.blocks[i])
+	}
+	column := popupBarColumn(out)
+	if len(column) != lines {
+		t.Errorf("bar column is %d cells, want one per painted row line (%d)", len(column), lines)
+	}
+	if at, size := popupThumbSpan(column); at != 0 || size != max(1, lines*(place.end-place.start)/len(spec.rows)) {
+		t.Errorf("thumb at %d sized %d, want a top-flush thumb sized from the row counts", at, size)
+	}
+	for i, line := range popupLines(out) {
+		if w := lipgloss.Width(line); w != width {
+			t.Errorf("line %d is %d cells, want %d: %q", i, w, width, strip(line))
+		}
+	}
+}

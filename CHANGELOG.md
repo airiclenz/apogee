@@ -45,6 +45,16 @@ point is a **minor** bump, not a breaking change.
   byte-for-byte, `move_file`'s undisclosed source keeps its unconditional in-workspace refusal,
   and no read tool ever takes a permit (ADR 0049).
 
+- The shared popup painter can now paint a **scroll bar** down a row window it cannot seat whole:
+  `popupSpec.scrollbar` opts a pane in, and while — and only while — the seated window is shorter
+  than the list, the row block gives up its last column and paints the transcript's own glyphs
+  (`glyphScrollThumb` / `glyphScrollTrack`, `th.scrollThumb` / `th.scrollTrack`) down it. The rows
+  are COMPOSED one column narrower rather than painted under the bar, so nothing is hidden by it,
+  and a window that seats the whole list keeps the full inner width and renders byte-for-byte as it
+  did before. The thumb is sized and placed from the ROW counts (the seated window over the whole
+  list) but drawn in the block's painted LINES, so a pane whose rows wrap gets one unbroken stroke
+  spanning every line of every seated row. No pane opts in yet.
+
 ### Changed
 
 - The confinement execution contract now describes the approved escape as **landed**, not as a
