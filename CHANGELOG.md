@@ -112,6 +112,20 @@ point is a **minor** bump, not a breaking change.
   moved anything but this one id is refused with the writer's "edit the file by hand" idiom. No
   surface calls it yet.
 
+- **The dangerous-action guard recognises a Windows home.** `normalize` now folds `\` to `/`
+  alongside its existing lower-casing and whitespace collapse, so `C:\Users\alice\.ssh` arrives as
+  `c:/users/alice/.ssh` and matches the `/users/<name>` anchor the home-anchored rules already
+  carried — every path rule gains separator robustness from one place instead of each pattern
+  spelling both separators. `%userprofile%`, the one home form the fold cannot produce, is spelled
+  out in the anchors. The result: writes under `C:\Users\<name>\.ssh`, `%USERPROFILE%\.npmrc` and
+  `C:\Users\<name>\.apogee`, and `rm -rf C:\Users\<name>` / `rm -rf %USERPROFILE%`, now hard-refuse
+  the same way their POSIX spellings do. The two recursive-delete rules also accept a Windows drive
+  root (`c:/…`) as an absolute target, keeping their precision boundary exactly where it was —
+  relative-vs-absolute, so `rm -rf build\out` is still an ordinary step. The guard stays a
+  footgun-guard rather than a boundary (ADR 0012): the unconditional fold makes a non-path
+  backslash escape read like a path segment, which is accepted imprecision, not obfuscation
+  resistance.
+
 ### Changed
 
 - Docs: the four positional cross-file references left stale by earlier file splits now name their

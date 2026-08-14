@@ -8,45 +8,60 @@ package security
 // floor (ADR 0012). Membership is *almost-never-legitimate* AND *catastrophic*
 // (precision-over-recall): every rule here would, on a real coding host, be a small
 // model's obvious mistake, not a normal step. The patterns are narrow on purpose — they
-// are written against normalized (whitespace-collapsed, lower-cased) text and must NOT
+// are written against normalized (whitespace-collapsed, lower-cased, `\` folded to `/`)
+// text and must NOT
 // fire on legitimate near-misses like "rm -rf ./build" or "rm -rf node_modules". Those
 // near-misses are RELATIVE targets: the recursive-delete rules below refuse every
 // absolute one on purpose, project paths included.
 //
 // Tiers (ADR 0012): TierHardRefuse has no per-call override; TierForceApproval forces
 // the Approver even in Auto (a legitimate-but-risky idiom — a speed-bump, not a block).
+
+// homeAnchor matches the start of a user's home directory in the normalized text the guard
+// inspects. The three write-* rules below share it byte-for-byte, so a home form is spelled
+// once, here. It carries the macOS `/Users/<name>` beside the Linux `/home/<name>` because
+// the desktop persona is macOS, and it is lower-case throughout because `normalize`
+// (dangerous.go) lower-cases the inspected text. Windows needs only `%userprofile%` spelled
+// out: `normalize` also folds `\` to `/`, so `C:\Users\alice` arrives as `c:/users/alice`
+// and matches the `/users/<name>` branch already.
+const homeAnchor = `(?:~|/home/[^/\s]+|/users/[^/\s]+|/root|\$home|%userprofile%)`
+
+// deleteTargetAnchor matches the targets the two recursive-delete rules below refuse: an
+// absolute path — POSIX `/…` or a Windows drive root `c:/…`, which is what `C:\…` folds to
+// — a home in any of its spellings, and the `/*` glob. The bare `/` and `[a-z]:/` branches
+// are the discriminating ones: they catch every absolute target on purpose, the project's
+// own directory included, so the system-path enumeration that follows them is documentation
+// of the worst cases rather than a filter. A relative target (./build, node_modules, src/)
+// matches nothing here — that is the precision boundary.
+const deleteTargetAnchor = `(?:/|[a-z]:/|~|\$home|%userprofile%|/\*|` +
+	`/(?:etc|usr|bin|sbin|lib|boot|dev|var|sys|proc|root|home|users|opt)\b)`
+
 func DefaultDangerousRules() []Rule {
 	return []Rule{
 		// --- Tier 1: hard-refuse ------------------------------------------------
 
-		// `rm -rf /`, `rm -rf ~`, `rm -rf $HOME` — and every other ABSOLUTE target.
-		// The precision boundary is relative-vs-absolute, not which absolute path: a
-		// relative or ./ target (./build, node_modules, src/) never matches, so
-		// destructive recursive deletes of project files stay allowed as long as they
-		// are named relatively, which is how a coding agent names them. The bare `/`
-		// branch of the alternation catches every absolute target on purpose, the
-		// project's own directory included — an absolute recursive force-delete is a
-		// small model's mistake often enough, and cheap enough to re-issue relatively,
-		// that the hard refuse is the right answer. The system-path enumeration that
-		// follows it is therefore documentation of the worst cases rather than the
-		// discriminating branch. It spells `users` beside `home` because the desktop
-		// persona is macOS, where a home is `/Users/<name>` — lower-case, because
-		// `normalize` (dangerous.go) lower-cases the inspected text, the same `/users/`
-		// spelling the write-* rules below carry.
+		// `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`, `rm -rf C:\Users\<name>` — and every
+		// other ABSOLUTE target (deleteTargetAnchor above carries the alternation and the
+		// reasoning behind its branches). The precision boundary is relative-vs-absolute,
+		// not which absolute path: a relative or ./ target (./build, node_modules, src/)
+		// never matches, so destructive recursive deletes of project files stay allowed as
+		// long as they are named relatively, which is how a coding agent names them.
+		// Refusing every absolute target, the project's own directory included, is the
+		// deliberate choice — an absolute recursive force-delete is a small model's mistake
+		// often enough, and cheap enough to re-issue relatively, that the hard refuse is
+		// the right answer.
 		{
-			ID:     "rm-rf-root-home-system",
-			Tier:   TierHardRefuse,
-			Reason: "recursive force-delete of a root, home, or system path",
-			Pattern: `\brm\s+(?:-[a-z]*\s+)*-?[a-z]*r[a-z]*f[a-z]*\s+` +
-				`(?:/|~|\$home|/\*|/(?:etc|usr|bin|sbin|lib|boot|dev|var|sys|proc|root|home|users|opt)\b)`,
+			ID:      "rm-rf-root-home-system",
+			Tier:    TierHardRefuse,
+			Reason:  "recursive force-delete of a root, home, or system path",
+			Pattern: `\brm\s+(?:-[a-z]*\s+)*-?[a-z]*r[a-z]*f[a-z]*\s+` + deleteTargetAnchor,
 		},
 		// `rm -fr` flag-order variant of the above (force then recurse).
 		{
-			ID:     "rm-fr-root-home-system",
-			Tier:   TierHardRefuse,
-			Reason: "recursive force-delete of a root, home, or system path",
-			Pattern: `\brm\s+(?:-[a-z]*\s+)*-?[a-z]*f[a-z]*r[a-z]*\s+` +
-				`(?:/|~|\$home|/\*|/(?:etc|usr|bin|sbin|lib|boot|dev|var|sys|proc|root|home|users|opt)\b)`,
+			ID:      "rm-fr-root-home-system",
+			Tier:    TierHardRefuse,
+			Reason:  "recursive force-delete of a root, home, or system path",
+			Pattern: `\brm\s+(?:-[a-z]*\s+)*-?[a-z]*f[a-z]*r[a-z]*\s+` + deleteTargetAnchor,
 		},
 		// Classic shell fork bomb `:(){ :|:& };:` (whitespace-normalized).
 		{
@@ -62,7 +77,7 @@ func DefaultDangerousRules() []Rule {
 			ID:         "write-ssh-keys",
 			Tier:       TierHardRefuse,
 			Reason:     "write or delete under the SSH key directory (~/.ssh)",
-			Pattern:    `(?:~|/home/[^/\s]+|/users/[^/\s]+|/root|\$home)/\.ssh\b`,
+			Pattern:    homeAnchor + `/\.ssh\b`,
 			WritesOnly: true,
 		},
 		// Writes targeting credential / persistence files an autonomous mistake must
@@ -72,7 +87,7 @@ func DefaultDangerousRules() []Rule {
 			ID:     "write-credential-persistence",
 			Tier:   TierHardRefuse,
 			Reason: "write to a credential or shell-persistence file",
-			Pattern: `(?:~|/home/[^/\s]+|/users/[^/\s]+|/root|\$home)/` +
+			Pattern: homeAnchor + `/` +
 				`(?:\.bashrc|\.bash_profile|\.zshrc|\.profile|\.aws/credentials|\.config/gcloud|\.netrc|\.npmrc)\b`,
 			WritesOnly: true,
 		},
@@ -101,9 +116,9 @@ func DefaultDangerousRules() []Rule {
 		// write here can dissolve this floor for every later run. The boundary is the HOME
 		// copy: a project's own `<workspace>/.apogee/skills` is workspace territory and never
 		// matches, and a home relocated by `--config` / `APOGEE_CONFIG` is out of a text
-		// pattern's reach (this is a footgun-guard, not a boundary — see doc.go). The anchor
-		// spells the macOS `/Users/<name>` home alongside `/home/<name>` because the desktop
-		// persona is macOS. WritesOnly is load-bearing here, not hygiene: the home skill
+		// pattern's reach (this is a footgun-guard, not a boundary — see doc.go). The home
+		// spellings it accepts are homeAnchor's, above. WritesOnly is load-bearing here, not
+		// hygiene: the home skill
 		// library lives under `~/.apogee/skills` and is a sanctioned extra READ root — every
 		// skill run starts by listing its own skill directory and copy_file-ing resources
 		// out of it, and without the class this rule hard-refused that first step.
@@ -111,7 +126,7 @@ func DefaultDangerousRules() []Rule {
 			ID:         "write-apogee-control-plane",
 			Tier:       TierHardRefuse,
 			Reason:     "write or delete under apogee's own control plane (~/.apogee)",
-			Pattern:    `(?:~|/home/[^/\s]+|/users/[^/\s]+|/root|\$home)/\.apogee\b`,
+			Pattern:    homeAnchor + `/\.apogee\b`,
 			WritesOnly: true,
 		},
 		// Piping a remote download straight into a privileged disk-write (dd of=/dev/…)

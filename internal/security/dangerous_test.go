@@ -260,6 +260,35 @@ func TestDangerousActionGuard_WhitespaceNormalized(t *testing.T) {
 	}
 }
 
+func TestNormalize_FoldsWindowsSeparatorsAndWhitespace(t *testing.T) {
+	t.Parallel()
+	// normalize is the guard's whole canonicalisation (ADR 0012): lower-case, collapsed
+	// whitespace, and `\` folded to `/` so one set of forward-slash patterns recognises a
+	// Windows path. The fold is unconditional, which is why a non-path backslash escape
+	// comes out looking like a path segment — accepted imprecision for a footgun-guard.
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"a Windows home path folds onto the forward-slash anchor", `C:\Users\Alice\.ssh`, "c:/users/alice/.ssh"},
+		{"a UNC path folds both separators", `\\server\share\file.txt`, "//server/share/file.txt"},
+		{"a forward-slash path is unchanged", "/Users/Alice/.ssh", "/users/alice/.ssh"},
+		{"whitespace runs still collapse", "rm    -rf\t/", "rm -rf /"},
+		{"a non-path backslash escape folds too", `printf 'a\tb'`, "printf 'a/tb'"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := normalize(tc.in); got != tc.want {
+				t.Errorf("normalize(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDangerousActionGuard_HardRefuseBeatsForceApproval(t *testing.T) {
 	t.Parallel()
 	g := DefaultDangerousActionGuard()

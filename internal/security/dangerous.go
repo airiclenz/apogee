@@ -64,8 +64,9 @@ type Rule struct {
 	// project add coexisting with the shipped rule whose tier it promoted.
 	ID string
 	// Pattern is a Go regexp matched against the normalized inspectable text. The text
-	// is whitespace-collapsed and lower-cased before matching, so a Pattern should be
-	// written against single-spaced, lower-case input.
+	// is whitespace-collapsed, lower-cased, and has `\` folded to `/` before matching, so
+	// a Pattern should be written against single-spaced, lower-case, forward-slash input
+	// (see normalize) — one forward-slash path pattern therefore covers Windows too.
 	Pattern string
 	// Tier is the severity this rule asserts when it matches.
 	Tier Tier
@@ -285,12 +286,18 @@ func collectStrings(v any, b *strings.Builder, skip func(string) bool) {
 	}
 }
 
-// normalize collapses all whitespace runs to single spaces and lower-cases the text, so
-// rule patterns are written against a single, predictable shape. This is the only
-// "normalization" the guard does — it is deliberately not an obfuscation-resistant
+// normalize collapses all whitespace runs to single spaces, folds `\` to `/`, and
+// lower-cases the text, so rule patterns are written against a single, predictable shape.
+// The separator fold is what lets one set of forward-slash patterns recognise a Windows
+// path: `C:\Users\alice\.ssh` arrives as `c:/users/alice/.ssh`, so every path rule gains
+// Windows robustness from here rather than each pattern spelling both separators. It costs
+// a little precision on non-path text that happens to carry a backslash (a `\t` inside a
+// printf string reads as `/t`), which is an acceptable trade for a footgun-guard. This is
+// the only "normalization" the guard does — it is deliberately not an obfuscation-resistant
 // canonicaliser (ADR 0012: this is not the adversary game).
 var whitespaceRun = regexp.MustCompile(`\s+`)
 
 func normalize(s string) string {
-	return strings.TrimSpace(whitespaceRun.ReplaceAllString(strings.ToLower(s), " "))
+	folded := strings.ReplaceAll(strings.ToLower(s), `\`, "/")
+	return strings.TrimSpace(whitespaceRun.ReplaceAllString(folded, " "))
 }

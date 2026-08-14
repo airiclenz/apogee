@@ -191,7 +191,22 @@ internal/config/configwrite_scalar.go, docs/design/confinement-execution-contrac
 **Acceptance:** `go build ./internal/config/`
 **Commit:** `docs(config): cross-file references name their file and function`
 
-## 5. Dangerous-rule patterns recognise the Windows home
+## 5. Dangerous-rule patterns recognise the Windows home — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the item left the shared-anchor extraction to the implementer — both anchors
+were extracted, `homeAnchor` (the three write-* rules) and `deleteTargetAnchor` (the two rm rules),
+since each was byte-identical across its users and this item edits every copy. The anchor-mechanics
+prose moved from the rule comments onto the constants; the rule comments keep their
+precision/tier rationale and now point at the constant.
+NOTES (2026-08-14): `rm -rf C:\Users\alice` folds to `rm -rf c:/users/alice`, which the rm anchor
+could not match at all — its alternation starts at the character after the flags, and `c` is not
+`/`. Recognising the Windows home there therefore needed one branch beyond `%userprofile%`: a drive
+root `[a-z]:/`, the Windows spelling of the bare `/` "any absolute target" branch. Without it the
+item's own required test case (`rm -rf C:\Users\alice` trips the rm rules) cannot pass.
+NOTES (2026-08-14): two doc comments beyond the item's list were corrected because the fold
+falsified them — `Rule.Pattern`'s authoring contract (`dangerous.go`), which told rule authors the
+text is only "whitespace-collapsed and lower-cased", and `DefaultDangerousRules`' header sentence
+naming the same normalized shape. Prose only.
 
 **What:** Two changes (ratified call 5). (a) `normalize`
 (`internal/security/dangerous.go:294-296`) additionally folds `\` → `/` (alongside the existing

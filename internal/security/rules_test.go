@@ -327,6 +327,56 @@ func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheMacOSHome(t *testing.T) 
 	}
 }
 
+func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheWindowsHome(t *testing.T) {
+	t.Parallel()
+	// The Windows home reaches the same rules by two routes: `normalize` (dangerous.go)
+	// folds `\` to `/`, so `C:\Users\alice` arrives as `c:/users/alice` and matches the
+	// `/users/<name>` branch the macOS block above pins, and `%userprofile%` — the one
+	// home form the fold cannot produce — is spelled out in the anchors. Precision holds
+	// as it does elsewhere: an ordinary Windows path that is not a home-anchored target,
+	// and ordinary text that merely carries a backslash, stay normal coding steps
+	// (wantRule "").
+	g := DefaultDangerousActionGuard()
+
+	cases := []struct {
+		name     string
+		call     domain.ToolCall
+		wantRule string
+	}{
+		{"write an SSH key on Windows", writeCall(`C:\Users\alice\.ssh\authorized_keys`), "write-ssh-keys"},
+		{"write an npmrc under the profile variable", writeCall(`%USERPROFILE%\.npmrc`), "write-credential-persistence"},
+		{"write the apogee config on Windows", writeCall(`C:\Users\alice\.apogee\config.yaml`), "write-apogee-control-plane"},
+		{"recursively delete a Windows home", terminalCall(`rm -rf C:\Users\alice`), "rm-rf-root-home-system"},
+		{"recursively delete the profile variable", terminalCall(`rm -rf %USERPROFILE%`), "rm-rf-root-home-system"},
+		{"recursively delete a Windows home, flag order", terminalCall(`rm -fr C:\Users\alice`), "rm-fr-root-home-system"},
+		{"write a project file on a Windows drive", writeCall(`C:\code\app\main.go`), ""},
+		{"write a relative path that merely contains users", writeCall(`docs\users\guide.md`), ""},
+		{"delete a project directory relatively on Windows", terminalCall(`rm -rf build\out`), ""},
+		{"an ordinary backslash escape in a command", terminalCall(`printf 'a\tb\n' > out.txt`), ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(tc.call, nil)
+
+			if tc.wantRule == "" {
+				if d.Triggered() {
+					t.Fatalf("Inspect(%q) wrongly triggered: tier=%v rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
+				}
+				return
+			}
+			if d.Tier != TierHardRefuse {
+				t.Fatalf("Inspect(%q) tier = %v, want TierHardRefuse (rule=%q)", tc.name, d.Tier, d.RuleID)
+			}
+			if d.RuleID != tc.wantRule {
+				t.Errorf("Inspect(%q) rule = %q, want %q", tc.name, d.RuleID, tc.wantRule)
+			}
+		})
+	}
+}
+
 func TestMergeDangerousRules_DefaultRulesetMergesCleanly(t *testing.T) {
 	t.Parallel()
 	// The real default ruleset round-trips through a no-op merge unchanged in count.
