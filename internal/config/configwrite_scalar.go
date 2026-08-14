@@ -16,13 +16,13 @@ import (
 // ----------------------------------------------------------------------------
 //
 // The settings surface persists one key per deliberate edit (ADR 0035) into the same file the
-// acknowledgement writer above edits, under the same contract and for the same reason: the user
-// owns this file, hand-edits it and reads it back months later, so an edit made on their behalf
-// must leave every comment, key order and formatting choice exactly as found. The machinery
-// generalises almost whole — parse for positions, splice text, re-parse and compare before
-// writing anything — and what is new is the ADDRESSING: a scalar edit names its target by
-// registry path (`ui.spinner`), so the registry's row decides what may be written, in what
-// shape, and the file's own text decides which line it lands on.
+// acknowledgement writer (configwrite.go) edits, under the same contract and for the same
+// reason: the user owns this file, hand-edits it and reads it back months later, so an edit
+// made on their behalf must leave every comment, key order and formatting choice exactly as
+// found. The machinery generalises almost whole — parse for positions, splice text, re-parse
+// and compare before writing anything — and what is new is the ADDRESSING: a scalar edit names
+// its target by registry path (`ui.spinner`), so the registry's row decides what may be
+// written, in what shape, and the file's own text decides which line it lands on.
 //
 // Placement follows ADR 0035's insert-below-example call. The seeded template documents every
 // key as a commented example, so a key the user has never set lands directly under the
@@ -44,7 +44,7 @@ const scalarPathDepth = 2
 // reports nothing when the file already says exactly that (a re-set is a confirmation, not a
 // rewrite). An absent config is seeded from the embedded template first, so an edit never leaves
 // a bare fragment where a documented file belongs, and the write is atomic and mode-preserving —
-// the acknowledgement writer's contract above, unchanged.
+// the acknowledgement writer's contract (configwrite.go), unchanged.
 func SaveConfigSetting(path, key, value string) error {
 	k, err := writableKey(key)
 	if err != nil {

@@ -261,9 +261,11 @@ func hostsAppended(before, after []UnconfinedHost, entry UnconfinedHost) bool {
 // `name:` — so the shared machinery (configsplice.go) serves this whole: parse for positions, splice
 // text, re-parse and compare, and refuse a rewritten list that would no longer load.
 //
-// What is new is the ALLOW-LIST. Each writer above spells its own key, while this one takes the key
-// from its caller, so the caller is checked before the file is even opened: a writer that trusted its
-// caller with a key name would be one refactor away from rewriting an entry's endpoint.
+// What is new is the ALLOW-LIST. Every other writer — this file's acknowledgement writer,
+// configwrite_scalar.go's scalar setting writer, configwrite_keysource.go's key-source writer —
+// spells its own key, while this one takes the key from its caller, so the caller is checked before
+// the file is even opened: a writer that trusted its caller with a key name would be one refactor
+// away from rewriting an entry's endpoint.
 //
 // It is set-only. A recorded choice is a record of what the user picked, so forgetting it is an edit
 // of their own file rather than something apogee does on their behalf — which leaves no meaning for
@@ -314,7 +316,8 @@ var entrySettings = []entrySetting{
 // reports nothing when the entry already says exactly that (a re-set is a confirmation, not a
 // rewrite). The entry's other lines, the comments around it and every sibling entry come back
 // byte-identical; an absent config is seeded from the embedded template first, and the write is
-// atomic and mode-preserving — the writers above's contract, unchanged.
+// atomic and mode-preserving — the contract this file's acknowledgement writer and the writers in
+// configwrite_scalar.go and configwrite_keysource.go all hold to, unchanged.
 //
 // Anything the edit cannot do surgically is refused with the "by hand" idiom rather than guessed at,
 // and the file is left exactly as it was: a key outside the allow-list, an empty value, a name the
@@ -399,7 +402,7 @@ func setEntrySetting(data []byte, name string, setting entrySetting, value strin
 // text and a node tree that disagree about where the key sits. Each one would leave part of the old
 // value behind. The insertion point is the last line the entry's subtree reaches, which is where the
 // next sibling key would go; an entry whose last value the node tree cannot measure would put that
-// line inside it instead, and the verification below is what catches that.
+// line inside it instead, and verifiedEntrySplice (configwrite_keysource.go) is what catches that.
 func spliceEntrySetting(data []byte, name, key, text string) ([]byte, error) {
 	lines, entry, err := serverEntryNode(data, name)
 	if err != nil {

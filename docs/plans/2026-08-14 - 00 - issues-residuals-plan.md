@@ -367,7 +367,20 @@ split run); CHANGELOG `[Unreleased]` gets one line.
 
 **Commit:** `refactor(config): shared splice plumbing lands beside its callers`
 
-## 11. The configwrite prose names files, not positions
+## 11. The configwrite prose names files, not positions — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): two positional references beyond the item's five bullets were fixed, both inside
+the item's own named files and both required by its rule or its acceptance. `configwrite_scalar.go:47`
+("the acknowledgement writer's contract above") is the same cross-file reference as bullet 5, 28 lines
+below it — leaving it would have left the rule broken in the very file the bullet repairs.
+`configwrite_keysource.go:156` ("the before-state every verification below compares against") is a
+same-file direction the cross-file rule would permit, but the item's acceptance grep
+(`"writers above\|writer above\|verification below"` → no matches) covers it, so it now names
+`verifiedEntrySplice` instead.
+NOTES (2026-08-14): `configwrite_scalar.go`'s banner paragraph and three doc comments were re-wrapped
+around the longer file-qualified phrases, keeping each block's existing column (~96 in the banner,
+~100 in the doc comments). No sentence lost or gained meaning beyond the reference swap; `gofmt -l`
+is clean.
 
 Depends on items 9 and 10.
 

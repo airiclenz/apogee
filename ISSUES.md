@@ -59,12 +59,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   `endCancelled` (`internal/agent/turn.go:60`, `:61`) — plan-ratified, narrow window, but a real
   cancel-semantics seam worth tracking. (in-band retry run)
 
-- [ ] The configwrite split left prose pointing across files: `configwrite_keysource.go:22`'s carried
-  banner still reads "the same contract the two writers above are" (a self-reference that no longer
-  resolves in its new file), and `configwrite.go:273`, `:319`, `:404` ("Each writer above", "the
-  writers above's contract", "the verification below") plus `configwrite_scalar.go:19` ("the
-  acknowledgement writer above") now name text in other files. (configwrite split run)
-
 - [ ] The input-width mirror matches the widget's sanitizer on tabs only: `expandInputTabs`
   (`internal/tui/inputaccent.go:286`) expands `\t`, while `runeutil.NewSanitizer`'s defaults also
   fold `\r`/`\n` and drop RuneError and other control runes. Unreachable by construction on every

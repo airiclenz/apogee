@@ -19,8 +19,9 @@ import (
 // Key migration (ADR 0047) offers, once and with consent, to move a plaintext `api-key:` out of the
 // config file and into the machine's own secret store — after which the entry has to say where its
 // key now comes from. That is one line of the user's file, inside one entry of the `servers:` list,
-// and it is written under the same contract the two writers above are: the file is the user's, so
-// every comment, every key order and every other entry comes back byte-identical.
+// and it is written under the same contract configwrite.go's acknowledgement writer and
+// configwrite_scalar.go's scalar setting writer are: the file is the user's, so every comment, every
+// key order and every other entry comes back byte-identical.
 //
 // What is new here is the ADDRESSING, one level deeper than the scalar writer reaches: a settings
 // path names a key in a block, while these edits name a key in a LIST ITEM, picked out of the list
@@ -153,8 +154,8 @@ func setEntryPlaintextKeyOK(data []byte, name string) ([]byte, error) {
 }
 
 // serverEntryAt parses the config the way apogee reads it and reports the whole parsed file plus the
-// index of the entry named name — the before-state every verification below compares against, and
-// the refusal for a name the list does not carry.
+// index of the entry named name — the before-state every verifiedEntrySplice call compares against,
+// and the refusal for a name the list does not carry.
 func serverEntryAt(data []byte, name string) (fileConfig, int, error) {
 	var before fileConfig
 	if err := yaml.Unmarshal(data, &before); err != nil {

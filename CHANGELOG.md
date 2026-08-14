@@ -488,6 +488,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The configwrite prose names files now, not positions.** The `internal/config` writer split left
+  comments pointing "above" and "below" at text that had moved into another file:
+  `configwrite_keysource.go`'s banner ("the same contract the two writers above are"),
+  `configwrite.go`'s "Each writer above spells its own key", "the writers above's contract" and "the
+  verification below is what catches that", and `configwrite_scalar.go`'s "the acknowledgement writer
+  above" together with "the acknowledgement writer's contract above". Each now names the file it
+  means, and the function where one is meant — `verifiedEntrySplice` in
+  `internal/config/configwrite_keysource.go`, the acknowledgement writer in
+  `internal/config/configwrite.go`, the scalar setting writer in
+  `internal/config/configwrite_scalar.go`. `serverEntryAt`'s "every verification below" names
+  `verifiedEntrySplice` as well. Comment-only: not a line of code changed.
+
 - **The configwrite split's stranded plumbing now sits beside its callers.** Three helpers the
   split left behind moved to where the code that calls them lives, verbatim: `appendBlock` — the
   end-of-file block append the acknowledgement writer, the scalar writer and the legacy fold all
