@@ -66,6 +66,36 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   records at `internal/tui/mouse.go:262` for the accent overlay's column math — and tracked nowhere
   today. (small-guards run)
 
+### Run residuals — open (2026-08-14)
+
+The still-open findings the ISSUES-residuals plan run left
+(`docs/plans/archived/2026-08-14 - 00 - issues-residuals-plan.md`), under the conventions'
+actionability bar.
+
+- [ ] `/server`'s already-on early return matches on the **endpoint**, not the entry name
+  (`internal/tui/picker.go:366`; `serverRows`' current-row mark does the same at `:1035`), so when
+  two configured entries share one endpoint, picking the entry the session is *not* on still takes
+  that branch — and now that the branch records the pin, it writes that other entry's name as the
+  startup entry without the session ever moving to it. Out of scope of the item that added the
+  recording, which mirrored the existing match rather than changing it.
+
+- [ ] `verifiedEntrySplice`'s first parameter `data []byte` is unused by the function body
+  (`internal/config/configwrite_keysource.go:291`), while all three call sites pass it
+  (`configwrite_keysource.go:134`, `:153`, `configwrite.go:392`) — pre-existing, and a vestigial
+  parameter worth dropping.
+
+- [ ] Cross-file positional doc references the earlier configwrite split run left, beyond the five
+  the prose item repaired: `internal/config/configsplice.go:232` ("the state every splice below
+  starts from"), `internal/config/configwrite_scalarsplice.go:50` ("the flow-style list refusal
+  above" → `spliceHostAcknowledgement` in `configwrite.go`), and
+  `internal/config/configwrite_scalar.go:96` ("the seeding read below" → `ReadConfigForWrite` in
+  `configsplice.go`). Same rule as that item: name the file, and the function where one is meant.
+
+- [ ] `internal/tools`' `tempRoot` (`internal/tools/path_safety_test.go:131`) is now the
+  package-wide default for a symlink-resolved temp root, while several sibling suites outside
+  `diagnostics_test.go` still hold raw `t.TempDir()` roots. No bare-sentence assertion depends on
+  those roots today, so nothing fails now — the inconsistency is what a future one would trip over.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
