@@ -488,6 +488,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The scalar setting writer's splice machinery now lives in its own file.**
+  `internal/config/configwrite_scalar.go` had grown to 803 lines, double the ~400-line guide, so
+  the machinery its drivers reach for moved to a new `internal/config/configwrite_scalarsplice.go`
+  (448 and 375 lines): targeting (`ScalarTarget`, `ScalarTargetIn`, `valueFitsOneLine`), the
+  text/block-scalar rendering (`spliceTextBlock`, `textLineParts`, `blockScalarEnd`,
+  `textBlockBody`, `blockScalarHeader`) and the insertion placement with its commented-example scan
+  (`scalarInsertion`, `settingLines`, `indentLines`, `CommentedExampleLine`,
+  `commentedExampleBlockEnd`, `commentedKey`, `isCommentLine`, `deleteLines`). The writer core keeps
+  the entry points, the key admission, the value rendering, the splice drivers and the verification.
+  A pure move: not one signature, line of logic or doc comment changed, and the package's
+  golden-file scalar suite is the proof.
+
 - **The diagnostics tests take their temp roots symlink-resolved, like the rest of the package.**
   `internal/tools/diagnostics_test.go` held the package's last 15 raw `t.TempDir()` roots while
   every sibling suite — `exec_fence_test.go`, `read_file_test.go`, `file_ops_test.go`,

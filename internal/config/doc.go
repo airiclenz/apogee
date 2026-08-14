@@ -33,7 +33,10 @@
 // keeps ONE key writable without moving a comment (ADR 0035). configwrite.go is the
 // acknowledgement writer that records a host `/confine off --save` names, and the per-entry writer
 // that remembers a choice on a single `servers:` entry. configwrite_scalar.go sets or resets one
-// /settings key, addressed by its registry path. configwrite_keysource.go points one `servers:`
+// /settings key, addressed by its registry path, and configwrite_scalarsplice.go is that writer's
+// splice machinery — where the key stands in the parsed document, how a text key's block is
+// rendered, and where a key the file does not set yet is inserted.
+// configwrite_keysource.go points one `servers:`
 // entry at a key command, or marks the entry as keeping the plaintext key it already carries
 // (ADR 0047).
 // keyresolve.go turns a `servers:` entry's KEY SOURCE — a

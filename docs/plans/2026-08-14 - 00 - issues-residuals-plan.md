@@ -275,7 +275,15 @@ the returned error carries the caller's noun — one case with `"the key source"
 
 **Commit:** `fix(config): the entry-splice refusal names what the edit failed to place`
 
-## 9. The scalar writer's splice machinery moves to its own file
+## 9. The scalar writer's splice machinery moves to its own file — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the item's Files list omits `internal/config/doc.go`, but the package carries a
+doc.go file map guarded by `TestDocMapNamesEveryFile` (`internal/docmap`), so a new file that the map
+does not name fails the item's own `go test ./internal/config/` acceptance — the map gained a
+half-line for `configwrite_scalarsplice.go` beside the scalar writer's.
+NOTES (2026-08-14): purity was checked mechanically, not by eye — the split file's non-blank lines
+plus the new file's (minus its package/import/banner header) sort-compare byte-identical to the
+pre-split file.
 
 **What:** `internal/config/configwrite_scalar.go` is 803 lines, double the coding-standards
 ~400-line guide. Ratified: two files, **pure move** — no signature, logic, or doc-comment

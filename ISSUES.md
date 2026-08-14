@@ -59,10 +59,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   `endCancelled` (`internal/agent/turn.go:60`, `:61`) — plan-ratified, narrow window, but a real
   cancel-semantics seam worth tracking. (in-band retry run)
 
-- [ ] `internal/config/configwrite_scalar.go` lands at 803 lines, still double the coding-standards
-  ~400-line guide the now-removed ISSUES entry cited; the pure-move split relocated that debt rather
-  than closing it, and nothing tracks it now. (configwrite split run)
-
 - [ ] The configwrite split left shared plumbing outside `configsplice.go`: `appendBlock` stays in
   `internal/config/configwrite.go:241` though `configwrite_scalar.go:397` and `configmigrate.go:344`
   call it, and `listValue` / `lineCount` sit in `configwrite_keysource.go:328`, `:330` while their
