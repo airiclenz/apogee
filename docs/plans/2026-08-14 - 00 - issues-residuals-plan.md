@@ -89,7 +89,7 @@ CHANGELOG `[Unreleased]` gets one line.
 
 **Commit:** `docs(tui): the pop-up-fold comment stops citing a nonexistent ISSUES entry`
 
-## 3. Retract the stale auto-title ISSUES entry
+## 3. Retract the stale auto-title ISSUES entry — ✅ DONE (2026-08-14)
 
 **What:** the ISSUES bullet "`auto-title` has no case in `applySettingFor`
 (`cmd/apogee/wire_settings.go:495`)…" (remember-model run) is factually stale: `auto-title` is

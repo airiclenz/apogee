@@ -865,6 +865,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The register's `auto-title` entry is retracted as stale.** `ISSUES.md` held that committing
+  `auto-title` in `/settings` writes the file but cannot reach the running session, because the key
+  has no case in the binary's `applySettingFor` dispatcher (`cmd/apogee/wire_settings.go`). It is a
+  renderer-owned key: `settingsApplyLive` (`internal/tui/settings.go`) tries `settingsApplyLocal`
+  first, whose `settingKeyAutoTitle` case sets `Options.AutoTitle` on the Model itself, and the
+  automatic-naming gate reads that field per prompt (`internal/tui/autotitle.go`) — so the binary
+  dispatcher is never consulted for this key and the missing case is by design, exactly as for the
+  other renderer-owned keys. Live apply shipped 2026-08-06 with the live-apply dispatcher
+  (`056583d`) and is covered by `TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam`. Nothing in
+  the code changed; the entry is simply gone from the register.
+
 - **The pop-up-fold comment stops citing an ISSUES entry that is not there.** The block above
   `TestWrappedSurfacesBreakInThePaintersMeasure` (`internal/tui/render_test.go`) ended by sending
   the reader to "ISSUES.md with the rest of the ADR 0030 residue" for the pop-up pane's fold, but

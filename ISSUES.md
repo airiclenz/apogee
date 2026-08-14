@@ -67,10 +67,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   (`internal/tui/picker.go:695`), so a user cannot pin the model the heartbeat put them on — faithful
   to the `/server` twin, a feature gap not a defect. (remember-model run)
 
-- [ ] `auto-title` has no case in `applySettingFor` (`cmd/apogee/wire_settings.go:495`) — committing
-  it in `/settings` writes the file and answers that it cannot be applied to the running session
-  while `tui.Options.AutoTitle` stays launch-frozen; pre-existing. (remember-model run)
-
 - [ ] `flattenLine`'s widened `\t` / `\r` branches are unreachable through any door today — the
   bubbles runeutil sanitizer maps both before the fold sees them (`internal/tui/lineeditor.go:171`,
   `:184`) — so no test exercises the fold itself, only its end state; a direct `lineBreaks.Replace`
