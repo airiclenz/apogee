@@ -141,7 +141,7 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return fail, nil
 	}
 	sourceRoot := t.scope.readRoot(args.Source)
-	if refusal := checkFileOpsPathsFrom(args, sourceRoot, t.root); refusal != "" {
+	if refusal := checkFileOpsPathsFrom(ctx, args, sourceRoot, t.root); refusal != "" {
 		return errorResult(call.ID, refusal), nil
 	}
 	// Where this copy REALLY lands, read BEFORE it lands (resolvedTargetNote): the destination
@@ -151,7 +151,7 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// disclosure (workspace_scoped.go).
 	resolved := resolvedTargetNote(args.Destination, t.root)
 
-	if err := security.SafeCopyFileFrom(sourceRoot, args.Source, t.root, args.Destination, ""); err != nil {
+	if err := security.SafeCopyFileFrom(sourceRoot, args.Source, t.root, args.Destination, writeEscapeTarget(ctx)); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 	return okResult(call.ID, fmt.Sprintf("copied %s to %s%s", args.Source, args.Destination, resolved)), nil
@@ -192,7 +192,7 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	if !ok {
 		return fail, nil
 	}
-	if refusal := checkFileOpsPaths(args, t.root); refusal != "" {
+	if refusal := checkFileOpsPaths(ctx, args, t.root); refusal != "" {
 		return errorResult(call.ID, refusal), nil
 	}
 	// Read before the move for the reason write_file reads before its write: the rename replaces
@@ -200,15 +200,15 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// operator needed to see would be gone from the sentence (resolvedTargetNote).
 	resolved := resolvedTargetNote(args.Destination, t.root)
 
-	if err := t.move(args); err != "" {
+	if err := t.move(ctx, args); err != "" {
 		return errorResult(call.ID, err), nil
 	}
 	return okResult(call.ID, fmt.Sprintf("moved %s to %s%s", args.Source, args.Destination, resolved)), nil
 }
 
 // move performs the rename, falling back to copy-then-remove, and returns the model-facing
-// failure (empty on success). A fence refusal is NEVER retried: the fallback would refuse it
-// again, and reporting the escape once is what tells the model the truth about why.
+// failure (empty on success). An UNPERMITTED fence refusal is NEVER retried: the fallback would
+// refuse it again, and reporting the escape once is what tells the model the truth about why.
 //
 // A symlinked-parent refusal is terminal for the same reason and one more. SafeRename validates
 // BOTH chains — the source's and the destination's — before it renames anything, so this error
@@ -216,15 +216,27 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 // same chain in different words, or worse, refuse only ONE half and leave the move split (the
 // copy landing while the removal is refused, duplicating the file). Passing it straight through
 // also means the fallback below runs only when both chains already cleared that gate.
-func (t *MoveFile) move(args fileOpsArgs) string {
+//
+// An APPROVED escape (ADR 0049) is the one case where a fence refusal from the rename is
+// EXPECTED and the fallback is the real route: one rename is one syscall through one pinned root,
+// so it can never span the workspace fence and a permitted target outside it (SafeRename takes no
+// permit for exactly that reason). The pair does span it — SafeCopyFileFrom carries the permit to
+// the DESTINATION, SafeRemove unlinks the source under the workspace fence with no permit at all —
+// which is also what keeps move_file's undisclosed source unconditionally in-workspace: the Gate
+// showed the operator a destination, never a source, so nothing may leave through that half.
+func (t *MoveFile) move(ctx context.Context, args fileOpsArgs) string {
+	permitted := writeEscapeTarget(ctx)
 	err := security.SafeRename(t.root, args.Source, args.Destination)
 	if err == nil {
 		return ""
 	}
-	if errors.Is(err, ErrPathEscape) || errors.Is(err, security.ErrSymlinkedParent) {
+	if errors.Is(err, security.ErrSymlinkedParent) {
 		return err.Error()
 	}
-	if copyErr := security.SafeCopyFile(t.root, args.Source, args.Destination, ""); copyErr != nil {
+	if errors.Is(err, ErrPathEscape) && permitted == "" {
+		return err.Error()
+	}
+	if copyErr := security.SafeCopyFile(t.root, args.Source, args.Destination, permitted); copyErr != nil {
 		return copyErr.Error()
 	}
 	if removeErr := security.SafeRemove(t.root, args.Source, ""); removeErr != nil {
@@ -239,8 +251,8 @@ func (t *MoveFile) move(args fileOpsArgs) string {
 // checkFileOpsPaths is checkFileOpsPathsFrom's EQUAL-ROOTS case: one root fences both ends, which
 // is what move_file needs — its removal of the source is itself a write, so the source may never
 // come from anywhere the destination fence does not already cover.
-func checkFileOpsPaths(args fileOpsArgs, root string) string {
-	return checkFileOpsPathsFrom(args, root, root)
+func checkFileOpsPaths(ctx context.Context, args fileOpsArgs, root string) string {
+	return checkFileOpsPathsFrom(ctx, args, root, root)
 }
 
 // checkFileOpsPathsFrom validates the pair the file-operation tools need before either touches the
@@ -259,7 +271,13 @@ func checkFileOpsPaths(args fileOpsArgs, root string) string {
 // for the MESSAGE, never for the safety: the fenced primitives that follow re-decide containment at
 // operation time, so a name swapped after this returns cannot widen anything — it can only turn
 // a friendly refusal into a blunter one.
-func checkFileOpsPathsFrom(args fileOpsArgs, sourceRoot, destinationRoot string) string {
+//
+// The two halves read ctx differently, which is the ADR 0049 asymmetry in one place: the
+// DESTINATION is stat'd through statWriteTarget, so an approved escape's pre-flight looks where the
+// copy or move will actually land, while the SOURCE keeps the plain workspace-rooted stat and no
+// permit ever reaches it — copy_file's source is already fenced by its read scope, and move_file's
+// source is the one path the Gate never disclosed.
+func checkFileOpsPathsFrom(ctx context.Context, args fileOpsArgs, sourceRoot, destinationRoot string) string {
 	if args.Source == "" {
 		return "source is required"
 	}
@@ -275,7 +293,7 @@ func checkFileOpsPathsFrom(args fileOpsArgs, sourceRoot, destinationRoot string)
 		return "not a file: " + args.Source + " (directories are not supported)"
 	}
 
-	destination, err := statInRoot(args.Destination, destinationRoot)
+	destination, err := statWriteTarget(ctx, args.Destination, destinationRoot)
 	switch {
 	case errors.Is(err, ErrPathEscape):
 		return err.Error()
@@ -347,7 +365,7 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	if !ok {
 		return fail, nil
 	}
-	if refusal := checkDeletePath(args.Path, t.root); refusal != "" {
+	if refusal := checkDeletePath(ctx, args.Path, t.root); refusal != "" {
 		return errorResult(call.ID, refusal), nil
 	}
 	// Read before the removal: afterwards the name is gone and resolves to itself through its
@@ -357,7 +375,7 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	// the gate already took (resolvedTargetNote, ResolvedWriteTarget).
 	resolved := resolvedTargetNote(args.Path, t.root)
 
-	if err := security.SafeRemove(t.root, args.Path, ""); err != nil {
+	if err := security.SafeRemove(t.root, args.Path, writeEscapeTarget(ctx)); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 	return okResult(call.ID, "deleted "+args.Path+resolved), nil
@@ -374,12 +392,12 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 // A name swapped between the two steps can therefore cost at most one empty directory inside the
 // workspace: still within the blast radius the call already declared, and not worth a second
 // fenced primitive to close.
-func checkDeletePath(path, root string) string {
+func checkDeletePath(ctx context.Context, path, root string) string {
 	if path == "" {
 		return "path is required"
 	}
 
-	info, err := statInRoot(path, root)
+	info, err := statWriteTarget(ctx, path, root)
 	if err != nil {
 		return escapeOrMessage(err, "file not found: "+path)
 	}

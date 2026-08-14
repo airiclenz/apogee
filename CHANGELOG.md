@@ -37,6 +37,14 @@ point is a **minor** bump, not a breaking change.
   declared writable. A refused or denied call never reaches a permit, and a call that needs none
   runs on a context byte-for-byte identical to today's.
 
+- An approved out-of-workspace write now executes across the whole WS-write family: `write_file`,
+  `edit_existing_file` (patch and full), `single_find_and_replace`, `multi_find_and_replace`, and
+  `file_ops`' copy/move destination and delete all carry the execution context's write-escape
+  permit into the shared TOCTOU-safe core, so the Gate's "Allow" lands on exactly the resolved
+  path the approval pane disclosed. A call with no permit keeps today's workspace fence
+  byte-for-byte, `move_file`'s undisclosed source keeps its unconditional in-workspace refusal,
+  and no read tool ever takes a permit (ADR 0049).
+
 ## [0.14.0] — 2026-08-14
 
 ### Added

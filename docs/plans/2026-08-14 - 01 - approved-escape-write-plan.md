@@ -131,7 +131,15 @@ refuses the gate (existing behaviour pinned).
 
 **Commit:** `feat(agent): approved and confine=false escape writes carry the permit`
 
-## 4. `tools`: the WS-write family honours the permit uniformly
+## 4. `tools`: the WS-write family honours the permit uniformly — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the read-modify-write half of the family reads its target through the permit too — a new `readWriteTarget(ctx, …)` pins the read at the permitted target's own parent directory (where the write's own `os.Root` is pinned), replacing `safeReadFile` in `file_edit` and both `find_replace` verbs. Without it the item's required "permitted patch/find-replace succeeds" is unreachable: those verbs must see the bytes they rewrite, and the workspace-fenced read refuses an approved target. This is not the read widening ADR 0049 forbids — `security.SafeReadFile` still takes no permit, the READ tools still call `safeReadFile` and are handed none (pinned by `TestPermitWidensNoRead`), and the write re-resolves the argument against the same permitted path, so bytes and write can never part company.
+
+NOTES (2026-08-14): the file-operation tools' pre-flight stats needed the same pin (`statWriteTarget`), or an approved copy/move/delete would die on a friendly-message check before reaching the permitted primitive. The DESTINATION half reads the permit; the SOURCE half deliberately does not (`checkFileOpsPathsFrom` keeps the plain workspace-rooted stat there) — that is what keeps `move_file`'s undisclosed source in-workspace. A permitted target whose parent does not exist yet reports ordinary absence rather than a fence refusal, so a copy to a missing directory still lands (`TestApprovedEscapeCreatesMissingParents`).
+
+NOTES (2026-08-14): `MoveFile.move` now takes `ctx` and, under a permit, does NOT treat the rename's escape refusal as terminal — it falls through to the copy-then-remove pair item 2's `SafeRename` note prescribes (permit on the copy's destination, none on the source's removal). Unpermitted behaviour is unchanged: an escape refusal is still terminal, and a symlinked-parent refusal is terminal in both cases.
+
+NOTES (2026-08-14): tests live in one new `internal/tools/write_permit_test.go` rather than scattered across the five tools' own suites — one table drives all eight verbs three ways (permit lands / mismatched permit refuses / no permit refuses as today), which is the uniformity the item is about; `doc.go`'s `path_safety.go` map line gained the permit clause (repo package-map convention).
 
 **What:** thread the execution context's permit into the shared funnel — `safeWriteFile` (and
 siblings) take `ctx` and pass the permit's `Real` to the security core — so `write_file`,

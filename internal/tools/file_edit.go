@@ -79,7 +79,7 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 	// and REFUSED on the write's parent chain (security's symlink policy), so the one path
 	// this edit can still take through a link is a symlinked final NAME — which the read
 	// followed and the write is about to replace.
-	original, err := safeReadFile(args.Path, t.root)
+	original, err := readWriteTarget(ctx, args.Path, t.root)
 	if err != nil {
 		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
 	}
@@ -98,7 +98,7 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 		if !ok {
 			return errorResult(call.ID, "patch hunk did not match file content"), nil
 		}
-		if err := safeWriteFile(args.Path, t.root, []byte(patched), 0o644); err != nil {
+		if err := safeWriteFile(ctx, args.Path, t.root, []byte(patched), 0o644); err != nil {
 			return errorResult(call.ID, err.Error()), nil
 		}
 		suffix := ""
@@ -108,7 +108,7 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 		return okResult(call.ID, fmt.Sprintf("applied patch to %s (%d hunk%s)%s", args.Path, len(hunks), suffix, resolved)), nil
 	}
 
-	if err := safeWriteFile(args.Path, t.root, []byte(args.Content), 0o644); err != nil {
+	if err := safeWriteFile(ctx, args.Path, t.root, []byte(args.Content), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 	return okResult(call.ID, "updated "+args.Path+resolved), nil

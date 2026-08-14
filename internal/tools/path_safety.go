@@ -55,10 +55,12 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 // subprocess — is refused rather than followed (security review H1). It replaces the
 // former resolveInRoot+os.WriteFile pair, which re-walked the path with a check/use gap.
 //
-// The empty final argument is security's approved-escape permit (ADR 0049): no permitted target,
-// so the workspace root alone bounds the write.
-func safeWriteFile(input, root string, data []byte, perm os.FileMode) error {
-	return security.SafeWriteFile(root, input, data, perm, "")
+// The final argument is security's approved-escape permit (ADR 0049), read off ctx: empty for
+// every ordinary call, so the workspace root alone bounds the write exactly as it always did,
+// and otherwise the ONE resolved path the operator was shown and approved — which security
+// re-resolves the argument against before anything lands.
+func safeWriteFile(ctx context.Context, input, root string, data []byte, perm os.FileMode) error {
+	return security.SafeWriteFile(root, input, data, perm, writeEscapeTarget(ctx))
 }
 
 // safeReadFile reads input within root through the shared TOCTOU-safe guard, with the
@@ -91,6 +93,101 @@ func statInRoot(path, root string) (os.FileInfo, error) {
 	}
 	defer f.Close()
 	return f.Stat()
+}
+
+// ----------------------------------------------------------------------------
+// The approved escape (ADR 0049)
+// ----------------------------------------------------------------------------
+//
+// A workspace-scoped write whose target lies OUTSIDE the workspace is GATED, and the approval
+// pane shows the operator the resolved path before they answer (confinement-execution-contract
+// §4). When the answer is yes — or the mode is the one whose contract is that the VM is the box —
+// dispatch stamps the execution context with a domain.WriteEscapePermit naming exactly that
+// resolved path. The three helpers below are all this package does with it: read the permitted
+// target, and pin the write family's OWN read-back and pre-flight stat to it. There is no
+// per-tool logic and no per-tool decision — the permit either governs this call's target or it
+// does not, and every verb asks the same question in the same place.
+//
+// The floor is unconditional: a call with no permit passes "" and behaves byte-for-byte as it did
+// before ADR 0049, and no READ tool takes a permit at all.
+
+// writeEscapeTarget answers the ONE resolved absolute path this execution may write outside the
+// workspace fence, or "" when there is none — the string internal/security's mutating primitives
+// take as their permitted target. It sits beside confinementBox because it answers the same shape
+// of question: what did the engine authorise for THIS execution, read at the site that needs it
+// rather than threaded through every tool.
+func writeEscapeTarget(ctx context.Context) string {
+	permit, ok := domain.WriteEscapePermitFrom(ctx)
+	if !ok {
+		return ""
+	}
+	return permit.Real
+}
+
+// readWriteTarget reads the file a write tool is about to replace, through the fence THAT CALL is
+// entitled to: the workspace root for an ordinary edit, and — for an approved escape — an os.Root
+// pinned at the permitted target's own parent directory, which is where the write's own root is
+// pinned (security's permitted branch). The read-modify-write verbs need this half: a patch or a
+// find-and-replace has to see the bytes it is about to rewrite, so refusing the read would make
+// "an approved gate executes" false for exactly the verbs a model edits with.
+//
+// It widens nothing else. The permit names one fully-resolved path and this pins to that path
+// alone; the READ tools keep calling safeReadFile and are handed no permit ever, which is ADR
+// 0049's write-side-only rule where it is enforceable. And the bytes cannot part company with the
+// write: the write re-resolves the argument against the same permitted target, so an argument that
+// has come to mean something else is refused and nothing lands.
+func readWriteTarget(ctx context.Context, input, root string) ([]byte, error) {
+	pinInput, pinRoot, absent := escapeTargetPin(ctx, input, root)
+	if absent {
+		return nil, os.ErrNotExist
+	}
+	return safeReadFile(pinInput, pinRoot)
+}
+
+// statWriteTarget stats the file a write tool is about to create, replace or remove, through the
+// same fence readWriteTarget reads it through. It serves the file-operation tools' friendly
+// pre-flight refusals (checkFileOpsPathsFrom, checkDeletePath), which have to look where the
+// operation itself will look or they would describe a different file than the one that gets
+// touched. The safety is still the fenced primitive's: it re-decides containment at operation
+// time, so a name swapped after this returns can only turn a friendly refusal into a blunt one.
+func statWriteTarget(ctx context.Context, path, root string) (os.FileInfo, error) {
+	pinPath, pinRoot, absent := escapeTargetPin(ctx, path, root)
+	if absent {
+		return nil, os.ErrNotExist
+	}
+	return statInRoot(pinPath, pinRoot)
+}
+
+// escapeTargetPin answers the (input, root) pair a fenced read or stat of THIS CALL'S OWN write
+// target must use, and whether that target is knowably absent.
+//
+// The workspace branch is checked FIRST and is unconditional, exactly as security's mutation root
+// checks it: a permit never moves an in-workspace read, so a call carrying one behaves identically
+// to one that does not for every path inside the fence. Outside it the pair is repointed only when
+// the argument re-resolves to EXACTLY the permitted target — the same equality the write itself
+// insists on — and then only to that target's own parent directory, so the one name reachable
+// through the returned root is the approved one.
+//
+// absent is true when that parent is not an openable directory. The target cannot exist then, and
+// the caller reports ordinary absence: pinning a root that cannot be opened would surface a fence
+// refusal instead, which for a not-yet-created destination is both wrong and unexplainable.
+func escapeTargetPin(ctx context.Context, input, root string) (pinInput, pinRoot string, absent bool) {
+	permitted := writeEscapeTarget(ctx)
+	if permitted == "" {
+		return input, root, false
+	}
+	if _, err := resolveInRoot(input, root); err == nil {
+		return input, root, false
+	}
+	target, ok := resolveTargetUnbounded(input, root)
+	if !ok || target.Real != filepath.Clean(permitted) {
+		return input, root, false
+	}
+	parent := filepath.Dir(target.Real)
+	if !rootUsable(parent) {
+		return "", "", true
+	}
+	return filepath.Base(target.Real), parent, false
 }
 
 // workspaceRelative renders an already-resolved absolute path in its workspace-relative

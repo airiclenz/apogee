@@ -209,7 +209,10 @@
 // one symlink-aware boundary (ResolveInRoot, ErrPathEscape), so every tool and test here keeps
 // calling the same names while the rule lives in one place — plus readScope, the READ-only
 // multi-root resolver that tries the workspace first and then any extra read-only roots the
-// host mounts, returning the matched root so a caller pins every later fenced operation to it.
+// host mounts, returning the matched root so a caller pins every later fenced operation to it,
+// and the approved escape's tools-side read (ADR 0049), which hands the security core the one
+// permitted out-of-workspace target and pins the write family's own read-back and pre-flight
+// stat to it.
 // workspace_scoped.go is the
 // unexported workspaceScopedWriter marker and the write-target resolvers that say WHICH
 // argument a given writer lands on.

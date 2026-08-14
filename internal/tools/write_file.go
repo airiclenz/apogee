@@ -85,7 +85,7 @@ func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	// symlink — including a concurrent swap by a confined subprocess — is refused
 	// rather than followed (security review H1). Parent directories are created within
 	// the same fence.
-	if err := safeWriteFile(args.Path, t.root, []byte(args.Content), 0o644); err != nil {
+	if err := safeWriteFile(ctx, args.Path, t.root, []byte(args.Content), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 

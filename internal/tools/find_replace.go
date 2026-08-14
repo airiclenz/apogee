@@ -95,7 +95,7 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 	// TOCTOU-safe read+write: both operations resolve through an os.Root pinned at
 	// t.root, so an escaping-symlink component (including one swapped in between the read
 	// and the write by a confined subprocess) is refused rather than followed (H1).
-	content, err := safeReadFile(args.Path, t.root)
+	content, err := readWriteTarget(ctx, args.Path, t.root)
 	if err != nil {
 		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
 	}
@@ -115,7 +115,7 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 	}
 
 	updated := strings.Replace(string(content), args.OldText, args.NewText, 1)
-	if err := safeWriteFile(args.Path, t.root, []byte(updated), 0o644); err != nil {
+	if err := safeWriteFile(ctx, args.Path, t.root, []byte(updated), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 
@@ -217,7 +217,7 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 	}
 
 	// TOCTOU-safe read+write through an os.Root pinned at t.root (H1).
-	raw, err := safeReadFile(args.Path, t.root)
+	raw, err := readWriteTarget(ctx, args.Path, t.root)
 	if err != nil {
 		return errorResult(call.ID, readFileErrorMessage(err, args.Path)), nil
 	}
@@ -245,7 +245,7 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 		}
 	}
 
-	if err := safeWriteFile(args.Path, t.root, []byte(content), 0o644); err != nil {
+	if err := safeWriteFile(ctx, args.Path, t.root, []byte(content), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 
