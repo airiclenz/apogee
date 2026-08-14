@@ -168,7 +168,15 @@ trigger.
 
 **Commit:** `feat(tools): git tools refuse repo-local filter drivers`
 
-## 4. Approval pane discloses the MCP server-grain session grant
+## 4. Approval pane discloses the MCP server-grain session grant — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): a FORCED gate discloses no grant even for an aliased MCP tool — `approve` blanks
+the session key there, so an "allow for session" authorises that one call, and claiming the server
+grain would over-state the yes. The item's text names only the non-`serverAliaser` degradation; this
+adds the unrememberable-answer one, pinned by a `dispatch_test.go` sub-test.
+NOTES (2026-08-14): `layout.md` is edited outside the item's Files list — it is the prose spec for
+this pane and already documents each of its body lines (`Scope:`, `→ resolves to`, `Sub-agent:`), so
+the new Note line lands with the behaviour rather than a wave later.
 
 **What:** for MCP-class tools the allow-for-session grant is keyed at server grain
 (`gateCacheKey`, `internal/agent/resolution.go` — `mcpServerCacheKeyPrefix +

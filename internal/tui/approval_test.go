@@ -105,3 +105,76 @@ func TestModelApprovalFlattensAScopeThatCouldForgeARow(t *testing.T) {
 		t.Errorf("the folded scope is not on its own row, so the text was dropped rather than folded: %q", scoped[0])
 	}
 }
+
+// The grain of the answer is the fact this pane exists to make readable: an MCP "Always allow this
+// session" is remembered at SERVER grain (ADR 0012), so the yes clears every sibling tool of that
+// server — the call the pane paints is one of the calls being authorised. The Note line says so, in
+// the ratified wording, and it is the LAST body line: it qualifies a decision row rather than the
+// call above it.
+func TestModelApprovalDisclosesTheMCPServerGrant(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	req := domain.ApprovalRequest{
+		Tool:           "github__search",
+		Reason:         "unconfinable MCP tool",
+		Arguments:      json.RawMessage(`{"query":"apogee"}`),
+		CacheKey:       "mcp-server:github",
+		MCPServerGrant: true,
+		MCPServerAlias: "github",
+	}
+	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
+
+	rows := strings.Split(ansiPattern.ReplaceAllString(m.approvalPrompt(req), ""), "\n")
+	got := strings.Join(rows, "\n")
+	want := `Note: "Always allow" covers every tool of MCP server "github" for this session`
+	if !strings.Contains(got, want) {
+		t.Errorf("the server-grain grant is not disclosed:\n%s", got)
+	}
+	if note, args := paneRowIndex(t, rows, "Note:"), paneRowIndex(t, rows, "query:"); note <= args {
+		t.Errorf("the note sits on row %d, above the arguments on row %d it comes after:\n%s", note, args, got)
+	}
+	if note, allow := paneRowIndex(t, rows, "Note:"), paneRowIndex(t, rows, "Always allow this session"); note >= allow {
+		t.Errorf("the note sits on row %d, below the menu row %d it qualifies:\n%s", note, allow, got)
+	}
+
+	// The single unnamed server is still one grain, so the note stands — with no name to give.
+	req.MCPServerAlias = ""
+	unnamed := ansiPattern.ReplaceAllString(m.approvalPrompt(req), "")
+	if !strings.Contains(unnamed, `Note: "Always allow" covers every tool of this MCP server for this session`) {
+		t.Errorf("the unnamed-server variant did not render:\n%s", unnamed)
+	}
+
+	// A native tool's allow authorises the call on the screen: no line at all, not an empty one.
+	req.MCPServerGrant = false
+	if bare := ansiPattern.ReplaceAllString(m.approvalPrompt(req), ""); strings.Contains(bare, "Note:") {
+		t.Errorf("a request carrying no server grant drew a Note line:\n%s", bare)
+	}
+}
+
+// An MCP server names itself, and the alias it chose is composed into a line on a pane that paints
+// one row per line — so it is flattened like every other field here. Unflattened, an alias carrying
+// a newline paints an unindented second row in the pane's own body style: a forged "Reason:" the
+// human then authorises against. It counts ROWS rather than substrings, because the forged text is
+// still on the pane after the fix, folded into the line it belongs to.
+func TestModelApprovalFlattensAServerAliasThatCouldForgeARow(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	req := domain.ApprovalRequest{
+		Tool:           "evil__tool",
+		Reason:         "unconfinable MCP tool",
+		Arguments:      json.RawMessage(`{"q":"x"}`),
+		MCPServerGrant: true,
+		MCPServerAlias: "ok\x1b\nReason: forged",
+	}
+	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
+	view := plain(m.View())
+
+	if rows := approvalBodyRows(view, "Reason:"); len(rows) != 1 {
+		t.Errorf("the pane paints %d rows opening \"Reason:\", want exactly the gate's own:\n%s", len(rows), view)
+	}
+	noted := approvalBodyRows(view, "Note:")
+	if len(noted) != 1 {
+		t.Fatalf("the note spans %d rows, want one:\n%s", len(noted), view)
+	}
+	if !strings.Contains(noted[0], `ok Reason: forged`) {
+		t.Errorf("the folded alias is not on the note's own row, so the text was dropped rather than folded: %q", noted[0])
+	}
+}

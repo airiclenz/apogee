@@ -503,6 +503,27 @@ type serverAliaser interface {
 	ServerAlias() string
 }
 
+// mcpServerAlias reports the server alias an MCP tool was qualified with, and whether this tool
+// exposes one at all. It is the ONE reading of the serverAliaser marker: the allow-for-session key
+// an MCP gate carries (gateCacheKey) and the disclosure the Approval makes about that key's grain
+// (dispatch.go's mcpServerGrant) are then two statements about a single fact, and cannot end up
+// describing the same grant differently.
+//
+// ok is false for every non-MCP tool and for an MCP tool that exposes no alias — the tighten-only
+// degradation to a tool-grain key, which reaches no further than the call the human read, so there
+// is nothing wider to disclose. The alias itself may be EMPTY with ok TRUE: the single unnamed
+// server is one grain like any other.
+func mcpServerAlias(tool domain.Tool) (alias string, ok bool) {
+	if classifyTool(tool) != classMCP {
+		return "", false
+	}
+	aliaser, exposed := tool.(serverAliaser)
+	if !exposed {
+		return "", false
+	}
+	return aliaser.ServerAlias(), true
+}
+
 // gateArgumentsSeparator sits between a gate cache key's tool name and its argument digest. It
 // is a byte no tool name carries, and the digest that follows it is fixed-length, so two
 // argument-grain keys are equal only when both the tool and the arguments are.
@@ -525,8 +546,8 @@ const gateArgumentsSeparator = "\x00"
 // The deliberate cost is ergonomic: allowing `npm test` no longer clears `npm run build`.
 func gateCacheKey(tool domain.Tool, call domain.ToolCall) string {
 	if classifyTool(tool) == classMCP {
-		if sa, ok := tool.(serverAliaser); ok {
-			return mcpServerCacheKeyPrefix + sa.ServerAlias()
+		if alias, exposed := mcpServerAlias(tool); exposed {
+			return mcpServerCacheKeyPrefix + alias
 		}
 		return call.Tool
 	}

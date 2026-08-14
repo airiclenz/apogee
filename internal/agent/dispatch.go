@@ -665,6 +665,16 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		sessionKey = ""
 	}
 
+	// How far the "allow for this session" answer reaches beyond the call this request paints: an
+	// MCP gate's memory is keyed at SERVER grain, so one yes clears every sibling tool of that
+	// server (ADR 0012). A gate whose answer is remembered NOWHERE discloses no grant, and the
+	// sessionKey emptied above is exactly that condition — a forced allow-for-session behaves as a
+	// plain allow, so claiming the server grain on that pane would over-state what the yes does.
+	grantAlias, serverGrant := a.mcpServerGrant(call)
+	if sessionKey == "" {
+		grantAlias, serverGrant = "", false
+	}
+
 	areq := domain.ApprovalRequest{
 		Tool:         call.Tool,
 		Arguments:    call.Arguments,
@@ -673,6 +683,11 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		SubAgentTask: a.task,
 		SubAgentName: a.name,
 		CacheKey:     sessionKey,
+		// What that CacheKey's grain means for the human's answer: false on every request whose
+		// allow authorises no more than the call above, which is all but an MCP server's
+		// (domain.ApprovalRequest.MCPServerGrant).
+		MCPServerGrant: serverGrant,
+		MCPServerAlias: grantAlias,
 		// Where the write really lands, when that is not where the argument says: the one fact
 		// this request carries that the model did not write, and the reason the pane can no
 		// longer be shown a path the executor will not use (domain.ApprovalRequest.ResolvedPath).
@@ -872,6 +887,25 @@ func (a *Agent) approvalScope(call domain.ToolCall) string {
 		return ""
 	}
 	return domain.ApprovalScopeOf(tool, call)
+}
+
+// mcpServerGrant is the ApprovalRequest's third tool-derived fact: whether an allow-for-session on
+// this call would be remembered at MCP SERVER grain, and the alias of the server such an answer
+// would clear (domain.ApprovalRequest.MCPServerGrant / .MCPServerAlias). It reads the very marker
+// the cache key is minted from (mcpServerAlias, resolution.go), so what the pane discloses and what
+// the memory keys on are one fact rather than two readings of it.
+//
+// The alias is deliberately NOT recovered from the key by stripping its prefix: a forced gate
+// travels with an EMPTY CacheKey (approve), so a key-derived alias would read as the unnamed server
+// exactly where nothing is remembered at all. It looks the tool up itself for the same reason
+// resolvedPath and approvalScope do, and an unknown tool discloses nothing, exactly as it
+// classifies as nothing.
+func (a *Agent) mcpServerGrant(call domain.ToolCall) (alias string, serverGrant bool) {
+	tool, ok := a.lookupTool(call.Tool)
+	if !ok {
+		return "", false
+	}
+	return mcpServerAlias(tool)
 }
 
 // fsConfinementAvailable reports whether the injected Confiner can enforce filesystem

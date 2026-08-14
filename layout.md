@@ -349,6 +349,20 @@ arguments name their own reach — all but one of them today — declare nothing
 rather than blank and their prompts read exactly as they always have. The label is this pane's, like
 `Reason:` and `Fix:`: the engine carries the bare sentence.
 
+**An MCP prompt says how far `Always allow` reaches.** The session grant an MCP approval writes is
+the SERVER's rather than the call's: allow `github__search` for the session and every other tool of
+that `github` server runs unasked for the rest of it (ADR 0012). Nothing in the tool name or the
+arguments says so — the call on the screen is one of the calls the yes authorises — so the pane says
+it, on the body's last line, directly above the menu it is about: `Note: "Always allow" covers every
+tool of MCP server "github" for this session`. A single server configured without an alias is still
+one grant and reads `… covers every tool of this MCP server for this session`. It never shares a
+pane with the `→ resolves to` line above: that one is an Apogee write tool's fact and this one is an
+MCP server's. Every other prompt carries no note at all and is unchanged — a native tool's
+allow-for-session is remembered against the call's own arguments, an MCP tool whose server cannot be
+named degrades to the tool alone, and a dangerous-action speed-bump is remembered nowhere, so on all
+three the yes authorises what the body already shows. Like `Reason:` and `Scope:` it is disclosure:
+the grain was the engine's decision long before this pane started saying it out loud.
+
 **When a sub-agent raised the call, the body says so first.** A request from a child leads with
 `Sub-agent: <its delegated task>`, above the reason, because that is the one fact the rest of the
 pane cannot supply: with several children running at once their prompts QUEUE — one on the screen at

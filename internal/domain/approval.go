@@ -74,6 +74,31 @@ type ApprovalRequest struct {
 	// that would not be honoured, say — but is free to ignore it, because it is the engine and not
 	// the host that keeps the memory.
 	CacheKey string
+	// MCPServerGrant reports that an allow-for-session verdict on this request is remembered at
+	// MCP SERVER grain: the CacheKey above identifies one server rather than this call, so a yes
+	// here clears every OTHER tool of that same server for the rest of the Session (ADR 0012's
+	// server-grain promise). It is a fact no pane built from Tool and Arguments can show — the
+	// call painted there is ONE of the calls that answer authorises, and the human is otherwise
+	// never told about the rest.
+	//
+	// It is FALSE on every other request, which is nearly all of them: a native tool's key carries
+	// the call's own arguments, an MCP tool that does not expose its server keys on the tool name,
+	// and a request carrying no key at all is remembered nowhere — in each of those an
+	// allow-for-session authorises no more than the pane already shows. So a Driver that renders
+	// this unconditionally leaves the ordinary prompt exactly as it was.
+	//
+	// It is DISCLOSURE, not permission (like Scope): nothing about the grain is decided here — the
+	// engine keys the memory the same way whether or not a host reads this field.
+	MCPServerGrant bool
+	// MCPServerAlias names the server MCPServerGrant is about — the alias the operator configured
+	// that server under — so the disclosure can say WHICH server the answer widens to. It is
+	// meaningful only while MCPServerGrant is true, and it is EMPTY for the single unnamed server,
+	// which is still one grain: the bool is what says a server grant exists, never this string.
+	//
+	// The alias is operator-configured rather than model-authored, but it reaches a Driver on the
+	// same request every model-written field does, so a surface painting one row per line treats it
+	// like the rest — stripped and flattened before it is composed into a line.
+	MCPServerAlias string
 	// ResolvedPath is where this call's path argument REALLY points — the absolute path with
 	// every symlink resolved — and it is populated ONLY when that differs from the path the
 	// argument names. Empty is therefore the ordinary case and means "the argument names its

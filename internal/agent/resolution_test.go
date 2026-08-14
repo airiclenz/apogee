@@ -823,3 +823,43 @@ func TestGateCacheKey_ArgumentGrain(t *testing.T) {
 		}
 	})
 }
+
+// TestMCPServerAlias pins the ONE reading of the serverAliaser marker: the grain the gate's cache
+// key is minted at and the grain the Approval discloses (dispatch's mcpServerGrant) are the same
+// fact read once, so the pane can never name a server the memory does not key on. ok is the whole
+// signal — an empty alias with ok true is the single unnamed server, still one grain, while every
+// tool that exposes no alias reaches no further than the call the human read.
+func TestMCPServerAlias(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		tool      domain.Tool
+		wantAlias string
+		wantOK    bool
+	}{
+		{"a named MCP server", mcpServerTool{name: "github__search", alias: "github"}, "github", true},
+		{"the unnamed MCP server is still a grain", mcpServerTool{name: "thing", alias: ""}, "", true},
+		{"an MCP tool exposing no alias", externalTool{name: "legacy_mcp", kind: domain.EffectMCP}, "", false},
+		{"a native write tool", fakeTool{name: "write_file"}, "", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			alias, ok := mcpServerAlias(tc.tool)
+			if ok != tc.wantOK || alias != tc.wantAlias {
+				t.Fatalf("mcpServerAlias = (%q, %t), want (%q, %t)", alias, ok, tc.wantAlias, tc.wantOK)
+			}
+			// The key the same tool mints agrees with what was just read off it: server grain
+			// exactly when an alias was exposed, the tool-grain fallback otherwise.
+			key := gateCacheKey(tc.tool, domain.ToolCall{ID: "c1", Tool: tc.tool.Name(), Arguments: json.RawMessage(`{}`)})
+			if ok && key != mcpServerCacheKeyPrefix+alias {
+				t.Errorf("cacheKey = %q, want the server grain %q the alias just disclosed", key, mcpServerCacheKeyPrefix+alias)
+			}
+			if !ok && strings.HasPrefix(key, mcpServerCacheKeyPrefix) {
+				t.Errorf("cacheKey = %q is a server grain for a tool that exposed no alias", key)
+			}
+		})
+	}
+}

@@ -46,6 +46,12 @@ point is a **minor** bump, not a breaking change.
   REPOSITORY's scopes refuse — a filter driver in the operator's own global/system config is
   theirs and still applies, the same trust boundary `HOME` sits on in the git env allowlist.
 
+- Approval prompts now disclose the MCP server-grain session grant: an MCP tool's pane states that
+  "Always allow" covers every tool of that server for the session, so approving one tool no longer
+  silently authorises its siblings unannounced. Native tools, MCP tools whose server cannot be
+  named, and forced dangerous-action gates carry no note — their allow authorises only the call on
+  the screen. `domain.ApprovalRequest` gained `MCPServerGrant` / `MCPServerAlias` for Drivers.
+
 - **`/settings` switches individual Mechanisms in a sub-list of its own.** `⏎` on the `mechanisms`
   row no longer opens `$EDITOR` — it opens the catalogue, every id this build carries in canonical
   order with `on`/`off` beside it, read from the config FILE's own block on every frame (an id the

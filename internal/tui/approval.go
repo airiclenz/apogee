@@ -214,6 +214,15 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	if note := resolvedPathNote(req.ResolvedPath); note != "" {
 		parts = append(parts, note)
 	}
+	// What the "Always allow this session" row would really authorise, when that is more than the
+	// call above it: an MCP gate's memory is the SERVER's, so one yes clears every sibling tool of
+	// that server for the rest of the Session (domain.ApprovalRequest.MCPServerGrant). It is
+	// APPENDED last, directly above the menu, because it qualifies a decision row rather than the
+	// call — every other line of the body says what is about to run, and this one says what the
+	// answer covers. Every non-MCP prompt carries no grant and is unchanged to the byte.
+	if note := mcpServerGrantNote(req.MCPServerGrant, req.MCPServerAlias); note != "" {
+		parts = append(parts, note)
+	}
 
 	rows := make([]popupRow, len(approvalMenu))
 	for i, opt := range approvalMenu {
@@ -298,6 +307,31 @@ func subAgentPromptLine(name, task string) string {
 		who = clean + " — " + who
 	}
 	return "Sub-agent: " + clipRunes(who, approvalTaskClipRunes)
+}
+
+// mcpServerGrantNote is this pane's disclosure of the MCP server-grain session grant: the one
+// sentence saying that an "Always allow" here covers every tool of a whole server rather than the
+// call on the screen. Without it a human approving one `github` tool silently authorised its
+// siblings for the Session — the grain has always been the engine's (ADR 0012), and the pane was
+// the only surface where it was never said.
+//
+// It is drawn from the request's own MCPServerGrant flag rather than from the shape of its
+// CacheKey, so the note appears exactly where the answer really is remembered at server grain and
+// nowhere else. An empty alias is the single unnamed server, which is one grain like any other and
+// so still gets the note — worded without a name, because there is no name to give.
+//
+// The alias is composed into a line on a pane that paints one row per line, so it is stripped and
+// flattened like every other field here: it is operator-configured text, but an MCP server that
+// named itself must not be able to paint a second "Reason:" row of its own above the real one.
+func mcpServerGrantNote(serverGrant bool, alias string) string {
+	if !serverGrant {
+		return ""
+	}
+	server := "this MCP server"
+	if named := flattenField(stripEscapes(alias)); named != "" {
+		server = `MCP server "` + named + `"`
+	}
+	return `Note: "Always allow" covers every tool of ` + server + " for this session"
 }
 
 // approvalArgsBlock renders req's arguments for the approval body, escape-stripped: one `name:`

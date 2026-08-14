@@ -1035,6 +1035,100 @@ func scopeOnApproval(t *testing.T, events []domain.Event) string {
 }
 
 // ----------------------------------------------------------------------------
+// The MCP server-grain grant a request discloses
+// ----------------------------------------------------------------------------
+
+// An MCP gate's allow-for-session is remembered at SERVER grain (ADR 0012), so one yes clears every
+// sibling tool of that server — a fact the request's tool and arguments cannot show, and which the
+// human was therefore never told. Dispatch carries it on the request itself
+// (domain.ApprovalRequest.MCPServerGrant / .MCPServerAlias), read off the same marker the cache key
+// is minted from, so the disclosure and the memory can never describe two different grains.
+func TestMCPServerGrantRidesTheRequest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an MCP tool discloses the server it clears", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		cfg := configWithTools(sink, mcpServerTool{name: "github__search", alias: "github"})
+		cfg.Mode = domain.ModeAskBefore
+		cfg.Approver = &fakeApprover{decision: domain.ApprovalAllow}
+
+		driveToolCall(t, cfg, sink, "c1", "github__search", `{}`)
+
+		req := requestOnApproval(t, sink.events)
+		if !req.MCPServerGrant || req.MCPServerAlias != "github" {
+			t.Errorf("grant = %t alias = %q, want true / %q — the answer clears every github tool", req.MCPServerGrant, req.MCPServerAlias, "github")
+		}
+		if req.CacheKey != mcpServerCacheKeyPrefix+"github" {
+			t.Errorf("CacheKey = %q, want the server grain the disclosure just claimed", req.CacheKey)
+		}
+	})
+
+	t.Run("a native tool discloses no grant", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		cfg := configWithTools(sink, fakeTool{name: "write_file", result: "written"})
+		cfg.Mode = domain.ModeAskBefore
+		cfg.Approver = &fakeApprover{decision: domain.ApprovalAllow}
+
+		driveToolCall(t, cfg, sink, "c1", "write_file", `{"path":"notes.md"}`)
+
+		req := requestOnApproval(t, sink.events)
+		if req.MCPServerGrant || req.MCPServerAlias != "" {
+			t.Errorf("grant = %t alias = %q, want false / empty — an argument-grain allow authorises this call only", req.MCPServerGrant, req.MCPServerAlias)
+		}
+	})
+
+	t.Run("an MCP tool exposing no alias discloses no grant", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		cfg := configWithTools(sink, externalTool{name: "legacy_mcp", kind: domain.EffectMCP})
+		cfg.Mode = domain.ModeAskBefore
+		cfg.Approver = &fakeApprover{decision: domain.ApprovalAllow}
+
+		driveToolCall(t, cfg, sink, "c1", "legacy_mcp", `{}`)
+
+		req := requestOnApproval(t, sink.events)
+		if req.MCPServerGrant {
+			t.Errorf("grant = true for a tool-grain key %q; the degraded key clears no siblings", req.CacheKey)
+		}
+	})
+
+	t.Run("a forced gate discloses no grant", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		cfg := configWithTools(sink, mcpServerTool{name: "github__admin", alias: "github"})
+		cfg.Mode = domain.ModeAskBefore
+		cfg.Approver = &fakeApprover{decision: domain.ApprovalAllow}
+
+		// A Tier-2 dangerous action forces the gate, and a forced allow-for-session is remembered
+		// nowhere (the empty CacheKey): claiming the server grain there would over-state the yes.
+		driveToolCall(t, cfg, sink, "c1", "github__admin", `{"cmd":"sudo rm"}`)
+
+		req := requestOnApproval(t, sink.events)
+		if req.CacheKey != "" {
+			t.Fatalf("CacheKey = %q, want empty — this gate was not forced, so the case is not exercised", req.CacheKey)
+		}
+		if req.MCPServerGrant || req.MCPServerAlias != "" {
+			t.Errorf("grant = %t alias = %q, want false / empty — an unrememberable answer clears nothing", req.MCPServerGrant, req.MCPServerAlias)
+		}
+	})
+}
+
+// requestOnApproval returns the first ApprovalEvent's request — the value dispatch handed the
+// Approver itself, since it emits the very request it sent.
+func requestOnApproval(t *testing.T, events []domain.Event) domain.ApprovalRequest {
+	t.Helper()
+	for _, e := range events {
+		if approval, ok := e.(domain.ApprovalEvent); ok {
+			return approval.Request
+		}
+	}
+	t.Fatal("no ApprovalEvent was emitted; the call did not gate")
+	return domain.ApprovalRequest{}
+}
+
+// ----------------------------------------------------------------------------
 // helpers
 // ----------------------------------------------------------------------------
 
