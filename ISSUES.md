@@ -61,7 +61,7 @@ conventions' actionability bar (the closed and accepted remainder of every run i
 
 - [ ] `verifiedEntrySplice`'s refusal message still says "did not put the key source on the %q entry"
   (`internal/config/configwrite_keysource.go:280`), now reachable from a model / launch-profile write.
-  (remember-model run; the fix waits for plan `2026-08-13 - 07`'s configwrite split)
+  (remember-model run)
 
 - [ ] `/model <id>` naming the already-bound model returns early and records nothing
   (`internal/tui/picker.go:695`), so a user cannot pin the model the heartbeat put them on — faithful
@@ -70,6 +70,34 @@ conventions' actionability bar (the closed and accepted remainder of every run i
 - [ ] `auto-title` has no case in `applySettingFor` (`cmd/apogee/wire_settings.go:495`) — committing
   it in `/settings` writes the file and answers that it cannot be applied to the running session
   while `tui.Options.AutoTitle` stays launch-frozen; pre-existing. (remember-model run)
+
+- [ ] `flattenLine`'s widened `\t` / `\r` branches are unreachable through any door today — the
+  bubbles runeutil sanitizer maps both before the fold sees them (`internal/tui/lineeditor.go:171`,
+  `:184`) — so no test exercises the fold itself, only its end state; a direct `lineBreaks.Replace`
+  unit test would pin it. (residuals sweep run)
+
+- [ ] `flattenField` folds `\n` and `\t` but not `\r` (`internal/tui/transcript.go:1522`, `:1532`);
+  the display seam it guards takes model bytes no sanitizer touches. (residuals sweep run)
+
+- [ ] `internal/tools/diagnostics_test.go` keeps 15 further raw `t.TempDir()` roots (e.g. `:318`,
+  `:382`, `:473`) — green today, the same symlinked-TMPDIR hazard if any gains a bare-sentence
+  assertion. (residuals sweep run)
+
+- [ ] `internal/config/configwrite_scalar.go` lands at 803 lines, still double the coding-standards
+  ~400-line guide the now-removed ISSUES entry cited; the pure-move split relocated that debt rather
+  than closing it, and nothing tracks it now. (configwrite split run)
+
+- [ ] The configwrite split left shared plumbing outside `configsplice.go`: `appendBlock` stays in
+  `internal/config/configwrite.go:241` though `configwrite_scalar.go:397` and `configmigrate.go:344`
+  call it, and `listValue` / `lineCount` sit in `configwrite_keysource.go:328`, `:330` while their
+  only callers are the scalar writer's (`configwrite_scalar.go:219`, `:485`, `:800`).
+  (configwrite split run)
+
+- [ ] The configwrite split left prose pointing across files: `configwrite_keysource.go:22`'s carried
+  banner still reads "the same contract the two writers above are" (a self-reference that no longer
+  resolves in its new file), and `configwrite.go:273`, `:319`, `:404` ("Each writer above", "the
+  writers above's contract", "the verification below") plus `configwrite_scalar.go:19` ("the
+  acknowledgement writer above") now name text in other files. (configwrite split run)
 
 ## Parked / deferred work
 
