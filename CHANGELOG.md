@@ -25,6 +25,18 @@ point is a **minor** bump, not a breaking change.
   refused with nothing touched. The read primitives take no permit and none can be given to them
   (ADR 0049).
 
+- Dispatch now **mints** the write-escape permit ADR 0049 defined: a workspace-scoped write whose
+  target resolves outside the workspace root carries that resolved path on its Resolution, and the
+  one execution tail every unconfined call passes through installs it as a
+  `domain.WriteEscapePermit` for exactly that tool execution. Three cells authorise one — an
+  approved Gate (the ladder's out-of-workspace row, a dangerous-action forced look, and a
+  remembered allow-for-session alike, since approval is final), the Auto · `confine-to-workspace:
+  false` run, and a target inside the confinement box's declared writable paths. Classification
+  learned the union at the same time: `WorkspaceRoot ∪ box.WritablePaths` is in-fence, so a session
+  that declared a writable path outside the workspace is no longer gated on the very path it
+  declared writable. A refused or denied call never reaches a permit, and a call that needs none
+  runs on a context byte-for-byte identical to today's.
+
 ## [0.14.0] — 2026-08-14
 
 ### Added

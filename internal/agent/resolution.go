@@ -129,6 +129,23 @@ type resolution struct {
 	// unrememberable decision. Gate only.
 	cacheKey string
 
+	// writeEscapeTarget is the ONE resolved absolute path this verdict authorises a write to
+	// OUTSIDE the workspace fence, which the executor mints onto the execution context as a
+	// domain.WriteEscapePermit before the tool runs (ADR 0049). It is set only for a
+	// workspace-scoped writer whose target resolves out of the workspace root, and only on the
+	// two kinds that actually execute one:
+	//
+	//   - a GATE, whose allow IS the authorisation — the ladder's out-of-workspace row and a
+	//     dangerous-action forced look alike, because approval is final (ADR 0049 Q4): what the
+	//     human was shown is what the yes runs;
+	//   - a RUN, which is how the Auto · confine-to-workspace:false cell and a target inside the
+	//     box's declared writable paths land — both already answered for by the ladder, so
+	//     nothing further is asked of the human.
+	//
+	// Empty everywhere else, and a Refuse never carries one: a call the ladder refused, and a
+	// gate the human denied, never reach a permit. Run / Gate only.
+	writeEscapeTarget string
+
 	// box is the confinement box a Confine subprocess runs inside. Confine only.
 	box domain.ConfinementBox
 
@@ -166,8 +183,20 @@ type resolutionInput struct {
 	// this host (Capabilities().FSWrite) — the caps gate before choosing to confine.
 	fsConfineAvailable bool
 	// writeTargetInWorkspace is precomputed by dispatch (EvalRealPath is I/O): whether a
-	// workspace-scoped writer's target resolves inside the workspace root.
+	// workspace-scoped writer's target resolves IN-FENCE — inside the workspace root OR inside
+	// one of the confinement box's declared writable paths. The UNION is the fence at
+	// classification time (ADR 0049): a session that declared a writable path outside the
+	// workspace is not made to gate the very path it declared writable. A target that is in the
+	// union but outside the root is in-fence here and still needs the escape below to land.
 	writeTargetInWorkspace bool
+	// writeEscapeTarget is the resolved absolute path a workspace-scoped writer's call would
+	// land on when that path lies OUTSIDE the workspace root — in the union or not — and "" for
+	// every other call (an in-workspace write, a writer whose call has no inspectable target, a
+	// tool that is not one of Apogee's own writers). It is the classified writeTarget.Real, taken
+	// from the SAME single resolution writeTargetInWorkspace is derived from, so the fence, the
+	// disclosure the pane rendered and the permit the executor mints can never name three
+	// different paths.
+	writeEscapeTarget string
 	// atDepthBound is true when spawning a sub-agent here would reach maxSubAgentDepth.
 	atDepthBound bool
 	// approverPresent reports whether an Approver is configured (a gate with none refuses).
@@ -397,9 +426,10 @@ func resolveLadderAuto(in resolutionInput, class toolClass) resolution {
 
 // applyOverlays folds the leaf-verdict overlays onto the bare ladder verdict, in order (D5):
 // a Tier-2 force-approval upgrades any non-Refuse leaf to a forced Gate; a Gate is finished
-// (nil-Approver ⇒ Refuse, else its class reason + cache key); a Confine is finished (box +
-// runtime-demote fallback); a Run / Refuse carries the guard's audit metadata where today's
-// trail records it.
+// (nil-Approver ⇒ Refuse, else its class reason + cache key, plus the write-escape target its
+// allow would authorise); a Confine is finished (box + runtime-demote fallback); a Run / Refuse
+// carries the guard's audit metadata where today's trail records it, and a Run also carries the
+// write-escape target the ladder already answered for.
 func applyOverlays(in resolutionInput, leaf resolution) resolution {
 	// A Tier-2 dangerous action forces the Approver even where the ladder would not (the
 	// guardrail can only tighten — ADR 0012). A Refuse leaf stays refused.
@@ -419,6 +449,11 @@ func applyOverlays(in resolutionInput, leaf resolution) resolution {
 	default: // resolveRun
 		leaf.auditDecision = in.guard.Audit
 		leaf.auditReason = in.guard.Reason
+		// A Run the ladder produced for an out-of-workspace target is one the ladder itself
+		// authorised — the "I am the sandbox" cell, or a target inside the box's declared
+		// writable paths. It executes with the permit, which is the only way those two cells
+		// stop being nullified by a fence pinned to the workspace root (ADR 0049 Q3/Q7).
+		leaf.writeEscapeTarget = in.writeEscapeTarget
 		return leaf
 	}
 }
@@ -440,6 +475,13 @@ func finishGate(in resolutionInput, gate resolution) resolution {
 		}
 	}
 	gate.cacheKey = gateCacheKey(in.tool, in.call)
+	// What this gate's allow would authorise beyond the fence — empty for every gate but an
+	// out-of-workspace write. It is attached AFTER the Tier-2 upgrade above deliberately: a
+	// forced look is still a look, and the human's yes to the path the pane disclosed runs
+	// (ADR 0049 Q4). It rides an allow the session REMEMBERED too — the cache key carries the
+	// call's canonical arguments, so a remembered yes answers the same call, and the target
+	// stamped is always this call's own fresh resolution rather than the one that was cached.
+	gate.writeEscapeTarget = in.writeEscapeTarget
 	if gate.reason == "" {
 		gate.reason, gate.remedy = gateReason(in)
 	}

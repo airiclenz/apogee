@@ -402,6 +402,7 @@ func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.Too
 // a Confine verdict would run inside. It is dispatch's fact-gathering; the verdict logic lives
 // entirely in resolve().
 func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard security.PreCheck) resolutionInput {
+	inFence, escape := a.classifyWriteTarget(tool, call)
 	return resolutionInput{
 		mode:                   a.effectiveMode(),
 		call:                   call,
@@ -409,7 +410,8 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 		guard:                  guard,
 		confineToWorkspace:     a.ConfineToWorkspace(),
 		fsConfineAvailable:     a.fsConfinementAvailable(),
-		writeTargetInWorkspace: a.writeTargetInWorkspace(tool, call),
+		writeTargetInWorkspace: inFence,
+		writeEscapeTarget:      escape,
 		atDepthBound:           a.depth >= maxSubAgentDepth,
 		approverPresent:        a.cfg.Approver != nil,
 		box: domain.ConfinementBox{
@@ -461,11 +463,34 @@ func (a *Agent) hookExecutionCtx(ctx context.Context) context.Context {
 	})
 }
 
+// writeEscapeCtx returns ctx carrying the domain.WriteEscapePermit this verdict authorises, or ctx
+// unchanged when it authorises none (ADR 0049). It is the write-time analogue of hookExecutionCtx:
+// the ladder's answer for a write that lands outside the workspace reaches the shared write funnel
+// as a context token, because the funnel is one os.Root-pinned rule that cannot otherwise tell an
+// approved escape from an unapproved one.
+//
+// The permit names ONE resolved absolute path — the writeTarget.Real this call classified as, which
+// is the same path the approval pane disclosed — for the duration of this one execution. Dispatch
+// invents nothing here: the target rides the verdict, resolve() sets it only on the Run and Gate
+// kinds ADR 0049 names, and an empty target installs nothing at all, leaving today's
+// workspace-pinned fence governing byte-for-byte.
+func writeEscapeCtx(ctx context.Context, verdict resolution) context.Context {
+	if verdict.writeEscapeTarget == "" {
+		return ctx
+	}
+	return domain.WithWriteEscapePermit(ctx, domain.WriteEscapePermit{Real: verdict.writeEscapeTarget})
+}
+
 // executeRun runs a Run verdict directly — no Approval, no Confine — and records it. It is also
 // the shared "run it now" tail for an approved Gate and an approved runtime-demote re-run, both
 // of which run unconfined once the human has authorised the call.
+//
+// Being that one tail is what makes it the single minting point for the write-escape permit
+// (writeEscapeCtx): every in-process write that may land outside the workspace — the approved
+// gate, the "I am the sandbox" cell, the declared writable path — passes through here, and
+// nothing that was refused or denied ever does.
 func (a *Agent) executeRun(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
-	result, outcome := a.executeTool(ctx, turn, tool, call, nil /* no confinement box */)
+	result, outcome := a.executeTool(writeEscapeCtx(ctx, verdict), turn, tool, call, nil /* no confinement box */)
 	if outcome == dispatchCancelled {
 		return result, dispatchCancelled
 	}
@@ -785,20 +810,38 @@ func (a *Agent) effectiveMode() domain.Mode {
 	return domain.TighterMode(own, a.liveMode())
 }
 
-// writeTargetInWorkspace reports whether a workspace-scoped writer's call targets a path inside
-// the workspace root. A call with no inspectable target (ok==false) is treated as in-bounds (the
-// Resolution then runs it, path-safety bounding it at Execute). A tool that is not a
-// workspace-scoped writer is never in-workspace by this seam. This is the one I/O-tainted fact
-// dispatch precomputes for resolve() (EvalRealPath touches disk).
-func (a *Agent) writeTargetInWorkspace(tool domain.Tool, call domain.ToolCall) bool {
+// classifyWriteTarget answers BOTH facts a workspace-scoped writer's target decides, from the ONE
+// resolution that discovers them (EvalRealPath touches disk — this is the single I/O-tainted fact
+// dispatch precomputes for the hermetically pure resolve(), and resolving twice to answer twice
+// would invite the two answers to describe different paths):
+//
+//   - inFence — whether the target lands inside the FENCE the ladder classifies against, which is
+//     the workspace root UNION the box's declared writable paths (ADR 0049 Q3). A call with no
+//     inspectable target (ok==false) is in-bounds, exactly as before: the Resolution runs it and
+//     path-safety bounds it at Execute. A tool that is not a workspace-scoped writer is never
+//     in-workspace by this seam.
+//   - escapeTarget — the resolved path a permit must name for the write to LAND, set whenever the
+//     target is outside the workspace ROOT. That is deliberately wider than !inFence: a writable
+//     path outside the workspace is in-fence for the ladder (it gates nothing) and still needs the
+//     permit at Execute, because the fence itself keeps one rule — the workspace root, plus
+//     whatever single target the context's permit names.
+func (a *Agent) classifyWriteTarget(tool domain.Tool, call domain.ToolCall) (inFence bool, escapeTarget string) {
 	abs, ok := tools.WorkspaceWriteTarget(tool, call)
 	if !ok {
-		return true // nothing inspectable to classify ⇒ treat as in-bounds (Execute path-bounds it)
+		return true, "" // nothing inspectable to classify ⇒ in-bounds (Execute path-bounds it)
 	}
-	return pathWithin(abs, a.cfg.WorkspaceDir)
+	if pathWithin(abs, a.cfg.WorkspaceDir) {
+		return true, ""
+	}
+	for _, writable := range a.cfg.ConfineWritablePaths {
+		if pathWithin(abs, writable) {
+			return true, abs
+		}
+	}
+	return false, abs
 }
 
-// resolvedPath is the DISCLOSURE twin of writeTargetInWorkspace: the same resolved target,
+// resolvedPath is the DISCLOSURE twin of classifyWriteTarget: the same resolved target,
 // surfaced as a path instead of consumed as a bool, and only when it differs from the path the
 // model's argument names (tools.ResolvedWriteTarget). It rides the ToolCallEvent and the
 // ApprovalRequest so a Driver can say where a write really goes; it is "" for every ordinary

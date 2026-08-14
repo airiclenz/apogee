@@ -102,7 +102,13 @@ refuses; symlinked final component refuses; workspace-internal writes bit-identi
 
 **Commit:** `feat(security): the safe-write fence honours one permitted resolved target`
 
-## 3. `agent`: dispatch mints the permit at its three seams
+## 3. `agent`: dispatch mints the permit at its three seams — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the dispatch method `writeTargetInWorkspace` became `classifyWriteTarget`, returning BOTH facts (in-fence bool, escape target) from ONE `tools.WorkspaceWriteTarget` resolution. The item's "`writeTargetInWorkspace` learns the union" is honoured on the `resolutionInput` FIELD, which keeps its name and its meaning-by-union; the method was renamed rather than joined by a sibling because a second accessor would resolve the same path a second time (EvalRealPath is the one I/O in this seam) and could hand resolve() two different answers about one call.
+
+NOTES (2026-08-14): the escape target rides a Gate that the Tier-2 dangerous-action force produced, not only one the WS-write-out ladder row asked for — a forced look on that row is still that row's gate, and ADR 0049 Q4 ("approval is final … the yes runs") makes the human's yes to the disclosed path executable in both cases. Pinned by a table case.
+
+NOTES (2026-08-14): tests beyond the item's six — the remembered allow-for-session case (the item's parenthetical "including a cache-cleared allow": the Approver is consulted once and the second, unprompted execution still carries the same target), a read-only negative control (a permit widens no read), and a pure-resolver table over the minting rule beside the dispatch-level end-to-end ones.
 
 **What:** the resolution carries the classified `writeTarget.Real` for WS-write targets; the
 execution tails stamp `WithWriteEscapePermit` before `executeTool` in exactly three cases: (1) an
