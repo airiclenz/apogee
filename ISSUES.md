@@ -72,9 +72,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   `:184`) — so no test exercises the fold itself, only its end state; a direct `lineBreaks.Replace`
   unit test would pin it. (residuals sweep run)
 
-- [ ] `flattenField` folds `\n` and `\t` but not `\r` (`internal/tui/transcript.go:1522`, `:1532`);
-  the display seam it guards takes model bytes no sanitizer touches. (residuals sweep run)
-
 - [ ] `internal/tools/diagnostics_test.go` keeps 15 further raw `t.TempDir()` roots (e.g. `:318`,
   `:382`, `:473`) — green today, the same symlinked-TMPDIR hazard if any gains a bare-sentence
   assertion. (residuals sweep run)

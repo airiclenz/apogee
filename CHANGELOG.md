@@ -865,6 +865,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A carriage return in a displayed FIELD is folded like a newline.** `flattenField` — the
+  display seam that folds an argument key, a skill name or summary, a pop-up title or a gate's
+  reason onto the one row the pane drew for it — guarded on `\n` and `\t` only, while its input-side
+  sibling `flattenLine` has folded `\r` all along. `stripEscapes` drops the carriage return, but the
+  callers that hand the seam a model's own bytes unstripped (`skills.go`, the pop-up title,
+  `toolpresent.go`'s argument label) do not, and a terminal reading one returns the cursor to
+  column 0 so the rest of the field overwrites the row already drawn. The fold now covers all three,
+  one rune for one space — a `\r\n` becomes two spaces — so the rune count a later clip counts
+  (`clipRunes`) is still what the row will hold.
+
 - **The register's `auto-title` entry is retracted as stale.** `ISSUES.md` held that committing
   `auto-title` in `/settings` writes the file but cannot reach the running session, because the key
   has no case in the binary's `applySettingFor` dispatcher (`cmd/apogee/wire_settings.go`). It is a

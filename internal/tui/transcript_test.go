@@ -739,18 +739,24 @@ func TestStripEscapesDropsBidiControls(t *testing.T) {
 // wrapped body is railed by it, flattenField must FOLD because a one-row field is not a body. The
 // newline is the visible half — a field that keeps one paints a row the pane did not author — and
 // the tab is the half that hides: lipgloss measures it as a single cell while the terminal expands
-// it to the next tab stop, so a field carrying one is laid out at a width it never draws at. One
-// rune for one rune either way, so a later clip counts what the row will hold (clipRunes).
+// it to the next tab stop, so a field carrying one is laid out at a width it never draws at. The
+// carriage return is the third: stripEscapes drops it, but the callers that hand this a model's own
+// bytes unstripped do not, and a terminal reading one returns the cursor to column 0 and overwrites
+// the row. One rune for one rune every time, so a later clip counts what the row will hold
+// (clipRunes) — a "\r\n" is therefore two spaces, never one.
 func TestFlattenFieldFoldsNewlinesAndTabs(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		in   string
 		want string
 	}{
-		{"a field with neither is returned unchanged", "read_file", "read_file"},
+		{"a field with none of the three is returned unchanged", "read_file", "read_file"},
 		{"a newline becomes the space it stood for", "read\nfile", "read file"},
 		{"a tab becomes one too", "read\tfile", "read file"},
+		{"a carriage return no sanitizer dropped becomes one as well", "read\rfile", "read file"},
+		{"a CRLF is two runes, so it is two spaces", "read\r\nfile", "read  file"},
 		{"both fold in the same pass", "read\tthe\nfile", "read the file"},
+		{"all three fold in the same pass", "read\tthe\r\nfile", "read the  file"},
 		{"each one is its own space, never collapsed", "a\t\t\nb", "a   b"},
 		{"a forged row cannot survive the fold", "ok\n  Reason: run anything", "ok   Reason: run anything"},
 		{"an ordinary space is left alone", "read file", "read file"},
@@ -761,7 +767,7 @@ func TestFlattenFieldFoldsNewlinesAndTabs(t *testing.T) {
 			if got != tc.want {
 				t.Errorf("flattenField(%q) = %q; want %q", tc.in, got, tc.want)
 			}
-			if strings.ContainsAny(got, "\n\t") {
+			if strings.ContainsAny(got, "\n\t\r") {
 				t.Errorf("flattenField(%q) left a break behind: %q", tc.in, got)
 			}
 			if in, out := len([]rune(tc.in)), len([]rune(got)); in != out {

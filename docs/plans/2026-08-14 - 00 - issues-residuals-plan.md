@@ -114,7 +114,14 @@ under CHANGELOG `[Unreleased]` (one line stating the entry was stale — live-ap
 
 **Commit:** `docs(issues): retract the stale auto-title entry — live-apply already ships`
 
-## 4. `flattenField` folds `\r` like the line fold does
+## 4. `flattenField` folds `\r` like the line fold does — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): beyond the item's literal guard/replacer edit, `flattenField`'s doc comment and
+`fieldBreaks`' were reworded (they read "each newline and each tab" / "both characters" and named the
+tab a widening over the input fold — all made false by the third character), and the extended test's
+header comment plus the first table case's name ("a field with neither" → "none of the three") were
+updated for the same reason. No behavior beyond the `\r` fold changed; the pre-existing table cases,
+the rune-count and the idempotence assertions are untouched.
 
 **What:** `flattenField` (`internal/tui/transcript.go:1522–1527`) guards on
 `strings.ContainsAny(s, "\n\t")` and `fieldBreaks` (`:1532`) replaces only `\n` and `\t`,

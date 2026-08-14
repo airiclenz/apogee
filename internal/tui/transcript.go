@@ -1499,15 +1499,19 @@ func stripEscapesAll(xs []string) []string {
 	return out
 }
 
-// flattenField folds a FIELD onto one line, each newline and each tab becoming the space that
-// stands where the break was. It is [lineEditor.flattenLine]'s rule at a DISPLAY seam rather than
-// an input one — widened by the tab, which an input line cannot receive but a model's bytes can —
-// and it exists because stripEscapes deliberately keeps both of them: on a surface that paints one
-// row per line (popupBodyWrapped), a string that keeps its newlines paints as many rows as it
-// likes, and a tab is the same forgery sideways. Nothing measures a tab: lipgloss counts it as one
-// cell while the terminal expands it to the next tab stop, so a field carrying one is laid out at
-// one width and drawn at another — the label beside it slides, and a clip that believed the first
-// number cuts in the wrong place.
+// flattenField folds a FIELD onto one line, each newline, each tab and each carriage return
+// becoming the space that stands where the break was. It is [lineEditor.flattenLine]'s rule at a
+// DISPLAY seam rather than an input one, over the same three characters, and it exists because all
+// three reach it: stripEscapes deliberately KEEPS the newline and the tab, and the callers that
+// hand this a model's own bytes unstripped — a skill's display name and summary (skills.go), a
+// pop-up title, a tool-argument label (toolpresent.go) — let the carriage return through as well.
+// On a surface that paints one row per line (popupBodyWrapped), a string that keeps its newlines
+// paints as many rows as it likes, and a tab is the same forgery sideways. Nothing measures a tab:
+// lipgloss counts it as one cell while the terminal expands it to the next tab stop, so a field
+// carrying one is laid out at one width and drawn at another — the label beside it slides, and a
+// clip that believed the first number cuts in the wrong place. A carriage return is the forgery
+// backwards: the terminal returns the cursor to column 0, so what follows it overwrites the row
+// already drawn instead of continuing it.
 //
 // That is the right answer for a VALUE and the wrong one for a field. A value's line breaks are the
 // thing the human is reading — a command, a patch, a commit message — and the approval pane hangs
@@ -1520,16 +1524,16 @@ func stripEscapesAll(xs []string) []string {
 // One rune for one rune, so what a later clip counts is what the row will hold (clipRunes on the
 // Sub-agent line): a field flattened here is one row wide, and the clip bounds that row.
 func flattenField(s string) string {
-	if !strings.ContainsAny(s, "\n\t") {
+	if !strings.ContainsAny(s, "\n\t\r") {
 		return s // the ordinary case, unallocated
 	}
 	return fieldBreaks.Replace(s)
 }
 
-// fieldBreaks is flattenField's substitution, built once: both characters are single bytes in and
-// out, so the replacer walks the field in one pass and leaves every other byte — an invalid one
-// included — exactly as it found it.
-var fieldBreaks = strings.NewReplacer("\n", " ", "\t", " ")
+// fieldBreaks is flattenField's substitution, built once: each character it folds is a single byte
+// in and a single byte out, so the replacer walks the field in one pass and leaves every other byte
+// — an invalid one included — exactly as it found it.
+var fieldBreaks = strings.NewReplacer("\n", " ", "\t", " ", "\r", " ")
 
 // blankLine reports whether ln carries nothing visible — it is empty or whitespace only. It is
 // the single definition of "blank" the layout's blank-line hygiene rests on: the commit-time
