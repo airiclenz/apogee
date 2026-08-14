@@ -60,8 +60,9 @@
 // ApprovalScoper, read on the approval path rather than by the dispatch disposition.
 // toolsummary.go is ToolSummary and its seven variants, the structured half of an outcome,
 // written for a host rather than for the model. confinement.go is the Confiner interface, its
-// capability and box value types, and the per-call Confinement / SubprocessPermit context
-// carriers (ADR 0012).
+// capability and box value types, the per-call Confinement / SubprocessPermit context
+// carriers (ADR 0012), and the WriteEscapePermit that carries one approved out-of-workspace
+// write target (ADR 0049).
 //
 // The remaining facts about a session. contextfile.go is the workspace context files' report
 // — one note per file and the Oversize predicate over their standing cost against the

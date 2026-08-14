@@ -1,9 +1,11 @@
 package domain
 
-// Tests for the hook-time SubprocessPermit context seam
-// (docs/design/confinement-execution-contract.md §10). They pin the three-state contract the
-// engine and the Mechanisms both key on: absent = "may not spawn", present+nil = "unfenced",
-// present+box = "confine first".
+// Tests for the two permit context seams. The hook-time SubprocessPermit
+// (docs/design/confinement-execution-contract.md §10) pins the three-state contract the engine and
+// the Mechanisms both key on: absent = "may not spawn", present+nil = "unfenced", present+box =
+// "confine first". The write-time WriteEscapePermit (ADR 0049) pins the two-state one the shared
+// write funnel keys on: absent = "the workspace fence alone governs", present = "this one resolved
+// target, and only it".
 
 import (
 	"context"
@@ -83,5 +85,71 @@ func TestSubprocessPermitAndConfinementAreDistinctKeys(t *testing.T) {
 	}
 	if _, ok := ConfinementFromContext(withPermit); ok {
 		t.Error("a SubprocessPermit surfaced as a Confinement handle; the keys must be distinct")
+	}
+}
+
+// TestWriteEscapePermitFrom walks the write-escape seam's whole contract: a granted target rides a
+// context intact, a bare context reports absent, and a permit with no target is never present —
+// including when it shadows a granted one, so an inner scope cannot inherit an escape.
+func TestWriteEscapePermitFrom(t *testing.T) {
+	t.Parallel()
+
+	granted := WithWriteEscapePermit(context.Background(), WriteEscapePermit{Real: "/out/side/notes.md"})
+
+	tests := []struct {
+		name     string
+		ctx      context.Context
+		wantOK   bool
+		wantReal string
+	}{
+		{name: "granted target round-trips", ctx: granted, wantOK: true, wantReal: "/out/side/notes.md"},
+		{name: "bare context is absent", ctx: context.Background(), wantOK: false},
+		{
+			name:   "empty Real is never present",
+			ctx:    WithWriteEscapePermit(context.Background(), WriteEscapePermit{}),
+			wantOK: false,
+		},
+		{
+			name:   "empty Real revokes an outer grant",
+			ctx:    WithWriteEscapePermit(granted, WriteEscapePermit{}),
+			wantOK: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			permit, ok := WriteEscapePermitFrom(tc.ctx)
+
+			if ok != tc.wantOK {
+				t.Fatalf("WriteEscapePermitFrom ok = %v, want %v", ok, tc.wantOK)
+			}
+			if permit.Real != tc.wantReal {
+				t.Errorf("Real = %q, want %q", permit.Real, tc.wantReal)
+			}
+		})
+	}
+}
+
+// TestWriteEscapePermitIsADistinctKey proves the write-escape seam does not alias the two
+// confinement seams: neither a hook-time SubprocessPermit nor a tool-time Confinement handle
+// grants an out-of-workspace write, and a write-escape permit grants neither of them.
+func TestWriteEscapePermitIsADistinctKey(t *testing.T) {
+	t.Parallel()
+
+	withEscape := WithWriteEscapePermit(context.Background(), WriteEscapePermit{Real: "/out/side"})
+
+	if _, ok := WriteEscapePermitFrom(WithSubprocessPermit(context.Background(), SubprocessPermit{})); ok {
+		t.Error("a SubprocessPermit granted a write escape; the keys must be distinct")
+	}
+	if _, ok := WriteEscapePermitFrom(WithConfinement(context.Background(), Confinement{})); ok {
+		t.Error("a Confinement handle granted a write escape; the keys must be distinct")
+	}
+	if _, ok := SubprocessPermitFromContext(withEscape); ok {
+		t.Error("a write-escape permit surfaced as a SubprocessPermit; the keys must be distinct")
+	}
+	if _, ok := ConfinementFromContext(withEscape); ok {
+		t.Error("a write-escape permit surfaced as a Confinement handle; the keys must be distinct")
 	}
 }

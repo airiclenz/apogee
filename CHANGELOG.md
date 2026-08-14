@@ -8,6 +8,13 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- Added `domain.WriteEscapePermit` with `WithWriteEscapePermit` / `WriteEscapePermitFrom` — the
+  context carrier that will authorise one approved out-of-workspace write target for the duration
+  of one tool execution (ADR 0049). No consumer yet; absence keeps the workspace fence as the sole
+  rule.
+
 ## [0.14.0] — 2026-08-14
 
 ### Added

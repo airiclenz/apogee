@@ -149,3 +149,49 @@ func SubprocessPermitFromContext(ctx context.Context) (SubprocessPermit, bool) {
 	p, ok := ctx.Value(subprocessPermitCtxKey{}).(SubprocessPermit)
 	return p, ok
 }
+
+// WriteEscapePermit is the write-time counterpart of SubprocessPermit (ADR 0049): the token the
+// shared write funnel must find on its context before an in-process write may land OUTSIDE the
+// workspace fence. It authorises exactly ONE resolved absolute path — the `writeTarget.Real` the
+// approval pane disclosed — for the duration of ONE tool execution, and nothing else:
+//
+//   - ABSENT (the default, and what a bare context yields): the workspace fence ALONE governs the
+//     write — today's behaviour, byte-for-byte, for every call nobody granted an escape to.
+//   - PRESENT: the write argument re-resolves and may land only on an exact match with Real,
+//     written through an os.Root pinned at that target's parent with the final component
+//     non-following. Any divergence is an error, never a write.
+//
+// Only the engine mints it, and only where the ladder has already answered for this call: an
+// approved WS-write-out Gate, the Auto + confine-to-workspace:false run verdict, and a target
+// inside the box's declared writable paths (docs/design/confinement-execution-contract.md §4). A
+// denied or refused call never carries one. The permit is a bound, not a widening: it names a
+// single target rather than opening a directory, and it grants no read that the fence refuses.
+type WriteEscapePermit struct {
+	// Real is the resolved absolute path this permit authorises — the one the human was shown.
+	// Empty means the permit authorises nothing: WriteEscapePermitFrom reports it absent.
+	Real string
+}
+
+// writeEscapePermitCtxKey is the unexported context key under which a WriteEscapePermit rides.
+type writeEscapePermitCtxKey struct{}
+
+// WithWriteEscapePermit returns a context carrying p, authorising the tool execution that runs
+// under it to write to p.Real outside the workspace fence. Installing a permit whose Real is empty
+// REVOKES any permit an outer context granted — the value still rides, so an inner scope can never
+// inherit an escape it was not itself granted.
+func WithWriteEscapePermit(ctx context.Context, p WriteEscapePermit) context.Context {
+	return context.WithValue(ctx, writeEscapePermitCtxKey{}, p)
+}
+
+// WriteEscapePermitFrom returns the WriteEscapePermit installed by WithWriteEscapePermit and
+// whether one authorises anything. ok is false on any context nobody granted a permit on —
+// including a bare context.Background() — and false too for a permit with an empty Real, so an
+// unset target can never read as an escape. A caller that reads false applies the workspace fence
+// alone.
+func WriteEscapePermitFrom(ctx context.Context) (WriteEscapePermit, bool) {
+	p, ok := ctx.Value(writeEscapePermitCtxKey{}).(WriteEscapePermit)
+	if !ok || p.Real == "" {
+		return WriteEscapePermit{}, false
+	}
+	return p, true
+}

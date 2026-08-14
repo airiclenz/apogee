@@ -47,7 +47,13 @@ hostile-bytes batch).
 
 ---
 
-## 1. `domain`: the write-escape permit
+## 1. `domain`: the write-escape permit — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): getter named `WriteEscapePermitFrom` exactly as the item text specifies, not `...FromContext` as the two neighbouring seams (`SubprocessPermitFromContext`, `ConfinementFromContext`) are named — plan text taken as binding over local naming symmetry.
+
+NOTES (2026-08-14): added beyond the item's three named tests — a key-distinctness test (write-escape vs SubprocessPermit vs Confinement, mirroring the existing `TestSubprocessPermitAndConfinementAreDistinctKeys`) and a revocation case pinning that an empty-`Real` permit installed over a granted one reads absent rather than inheriting the outer grant.
+
+NOTES (2026-08-14): `internal/domain/doc.go`'s `confinement.go` map line gained the new carrier (repo convention: doc.go maps every non-test file's role; no new file was added, so the file count stands).
 
 **What:** add `WriteEscapePermit{Real string}` beside `SubprocessPermit`, with
 `WithWriteEscapePermit(ctx, p)` / `WriteEscapePermitFrom(ctx) (WriteEscapePermit, bool)`
