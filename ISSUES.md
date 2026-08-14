@@ -79,6 +79,27 @@ actionability bar.
   `diagnostics_test.go` still hold raw `t.TempDir()` roots. No bare-sentence assertion depends on
   those roots today, so nothing fails now — the inconsistency is what a future one would trip over.
 
+### Run residuals — open (2026-08-14, approved-escape write)
+
+The still-open findings the approved-escape-write plan run left, under the conventions'
+actionability bar.
+
+- [ ] A workspace-internal symlink whose target lies outside the workspace is classified and
+  disclosed as an escape at the Gate, but its approved write is still refused: `openMutationRoot`'s
+  in-workspace branch is lexical and unconditional (`internal/security/writepermit.go:62`), so the
+  write lands through the workspace root and `os.Root` refuses the final link — the permitted branch
+  (`openPermittedRoot`, `internal/security/writepermit.go:89`) is never reached. Consistent with
+  ADR 0049's never-write-through-a-link rule, but that gate's "Allow" is unreachable for this shape.
+
+- [ ] `docs/design/confinement-execution-contract.md:622` states "Reads are not widened:
+  `security.SafeReadFile` takes no permit" without naming the read the read-modify-write verbs do
+  perform through the permitted parent (`readWriteTarget` / `statWriteTarget`,
+  `internal/tools/path_safety.go:139`, `:153`), so a reader can infer that an approved `file_edit`
+  cannot read its own target.
+
+- [ ] `internal/tools/path_safety.go` (407 lines) and `internal/tools/file_ops.go` (418) now sit
+  just over the ~400-line house limit — split candidates.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
