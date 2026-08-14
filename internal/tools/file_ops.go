@@ -151,7 +151,7 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// disclosure (workspace_scoped.go).
 	resolved := resolvedTargetNote(args.Destination, t.root)
 
-	if err := security.SafeCopyFileFrom(sourceRoot, args.Source, t.root, args.Destination); err != nil {
+	if err := security.SafeCopyFileFrom(sourceRoot, args.Source, t.root, args.Destination, ""); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 	return okResult(call.ID, fmt.Sprintf("copied %s to %s%s", args.Source, args.Destination, resolved)), nil
@@ -224,10 +224,10 @@ func (t *MoveFile) move(args fileOpsArgs) string {
 	if errors.Is(err, ErrPathEscape) || errors.Is(err, security.ErrSymlinkedParent) {
 		return err.Error()
 	}
-	if copyErr := security.SafeCopyFile(t.root, args.Source, args.Destination); copyErr != nil {
+	if copyErr := security.SafeCopyFile(t.root, args.Source, args.Destination, ""); copyErr != nil {
 		return copyErr.Error()
 	}
-	if removeErr := security.SafeRemove(t.root, args.Source); removeErr != nil {
+	if removeErr := security.SafeRemove(t.root, args.Source, ""); removeErr != nil {
 		// The destination now holds the file and the source still does. Say so: a bare error
 		// would leave the model guessing which half of the move happened.
 		return fmt.Sprintf("copied %s to %s but could not remove the source: %v",
@@ -357,7 +357,7 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	// the gate already took (resolvedTargetNote, ResolvedWriteTarget).
 	resolved := resolvedTargetNote(args.Path, t.root)
 
-	if err := security.SafeRemove(t.root, args.Path); err != nil {
+	if err := security.SafeRemove(t.root, args.Path, ""); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 	return okResult(call.ID, "deleted "+args.Path+resolved), nil

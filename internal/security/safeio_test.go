@@ -28,7 +28,7 @@ func TestSafeWriteFile_RefusesSwappedSymlinkComponent(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	err := SafeWriteFile(root, "build/authorized_keys", []byte("pwned"), 0o644)
+	err := SafeWriteFile(root, "build/authorized_keys", []byte("pwned"), 0o644, "")
 	if !errors.Is(err, ErrPathEscape) {
 		t.Fatalf("SafeWriteFile through escaping symlink err = %v, want ErrPathEscape", err)
 	}
@@ -76,7 +76,7 @@ func TestSafeWriteFile_RefusesFinalSymlinkToOutside(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	err := SafeWriteFile(root, "leak", []byte("data"), 0o644)
+	err := SafeWriteFile(root, "leak", []byte("data"), 0o644, "")
 	if !errors.Is(err, ErrPathEscape) {
 		t.Fatalf("SafeWriteFile through final-component symlink err = %v, want ErrPathEscape", err)
 	}
@@ -92,7 +92,7 @@ func TestSafeWriteFile_WritesWithinRoot(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	if err := SafeWriteFile(root, "sub/dir/new.txt", []byte("hello"), 0o644); err != nil {
+	if err := SafeWriteFile(root, "sub/dir/new.txt", []byte("hello"), 0o644, ""); err != nil {
 		t.Fatalf("SafeWriteFile within root: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(root, "sub", "dir", "new.txt"))
@@ -110,7 +110,7 @@ func TestSafeWriteFile_RejectsTraversal(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	if err := SafeWriteFile(root, "../escape.txt", []byte("x"), 0o644); !errors.Is(err, ErrPathEscape) {
+	if err := SafeWriteFile(root, "../escape.txt", []byte("x"), 0o644, ""); !errors.Is(err, ErrPathEscape) {
 		t.Fatalf("traversal write err = %v, want ErrPathEscape", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(filepath.Dir(root), "escape.txt")); !errors.Is(statErr, os.ErrNotExist) {
@@ -153,7 +153,7 @@ func TestSafeWriteFile_OverwritePreservesMode(t *testing.T) {
 		t.Fatalf("setup chmod: %v", err)
 	}
 
-	if err := SafeWriteFile(root, "run.sh", []byte("#!/bin/sh\necho new\n"), 0o600); err != nil {
+	if err := SafeWriteFile(root, "run.sh", []byte("#!/bin/sh\necho new\n"), 0o600, ""); err != nil {
 		t.Fatalf("SafeWriteFile overwrite: %v", err)
 	}
 
@@ -183,7 +183,7 @@ func TestSafeWriteFile_NewFileTakesPermArgument(t *testing.T) {
 		t.Fatalf("stat reference: %v", err)
 	}
 
-	if err := SafeWriteFile(root, "fresh.txt", []byte("x"), 0o640); err != nil {
+	if err := SafeWriteFile(root, "fresh.txt", []byte("x"), 0o640, ""); err != nil {
 		t.Fatalf("SafeWriteFile new file: %v", err)
 	}
 	info, err := os.Stat(filepath.Join(root, "fresh.txt"))
@@ -203,10 +203,10 @@ func TestSafeWriteFile_ReplacesContentWholesale(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	if err := SafeWriteFile(root, "notes.txt", []byte(strings.Repeat("long original content\n", 50)), 0o644); err != nil {
+	if err := SafeWriteFile(root, "notes.txt", []byte(strings.Repeat("long original content\n", 50)), 0o644, ""); err != nil {
 		t.Fatalf("SafeWriteFile first: %v", err)
 	}
-	if err := SafeWriteFile(root, "notes.txt", []byte("short"), 0o644); err != nil {
+	if err := SafeWriteFile(root, "notes.txt", []byte("short"), 0o644, ""); err != nil {
 		t.Fatalf("SafeWriteFile second: %v", err)
 	}
 
@@ -231,7 +231,7 @@ func TestSafeWriteFile_FailedRenameRemovesStagingFile(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	if err := SafeWriteFile(root, "occupied", []byte("data"), 0o644); err == nil {
+	if err := SafeWriteFile(root, "occupied", []byte("data"), 0o644, ""); err == nil {
 		t.Fatal("SafeWriteFile over an existing directory succeeded, want an error")
 	}
 	assertNoStagingLeftovers(t, root)
@@ -247,7 +247,7 @@ func TestSafeWriteFile_EscapeStagesNothingOutsideRoot(t *testing.T) {
 		t.Parallel()
 
 		root := t.TempDir()
-		if err := SafeWriteFile(root, "../escape.txt", []byte("x"), 0o644); !errors.Is(err, ErrPathEscape) {
+		if err := SafeWriteFile(root, "../escape.txt", []byte("x"), 0o644, ""); !errors.Is(err, ErrPathEscape) {
 			t.Fatalf("traversal write err = %v, want ErrPathEscape", err)
 		}
 		assertNoStagingLeftovers(t, filepath.Dir(root))
@@ -262,7 +262,7 @@ func TestSafeWriteFile_EscapeStagesNothingOutsideRoot(t *testing.T) {
 			t.Skipf("symlinks unsupported: %v", err)
 		}
 
-		if err := SafeWriteFile(root, "build/artifact.txt", []byte("x"), 0o644); !errors.Is(err, ErrPathEscape) {
+		if err := SafeWriteFile(root, "build/artifact.txt", []byte("x"), 0o644, ""); !errors.Is(err, ErrPathEscape) {
 			t.Fatalf("write through escaping symlink err = %v, want ErrPathEscape", err)
 		}
 		if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
@@ -288,7 +288,7 @@ func TestSafeWriteFile_ReplacesInRootSymlinkName(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	if err := SafeWriteFile(root, "link.txt", []byte("replacement"), 0o644); err != nil {
+	if err := SafeWriteFile(root, "link.txt", []byte("replacement"), 0o644, ""); err != nil {
 		t.Fatalf("SafeWriteFile over in-root symlink: %v", err)
 	}
 
@@ -337,7 +337,7 @@ func TestSafeWriteFile_RefusesSymlinkedParentDirectory(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	err := SafeWriteFile(root, "docs/config", []byte("[core]\n\tfsmonitor = pwned\n"), 0o644)
+	err := SafeWriteFile(root, "docs/config", []byte("[core]\n\tfsmonitor = pwned\n"), 0o644, "")
 	if !errors.Is(err, ErrSymlinkedParent) {
 		t.Fatalf("SafeWriteFile through in-root symlinked parent err = %v, want ErrSymlinkedParent", err)
 	}
@@ -373,7 +373,7 @@ func TestSafeWriteFile_SymlinkedParentCreatesNothing(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	if err := SafeWriteFile(root, "docs/hooks/pre-commit", []byte("#!/bin/sh\n"), 0o755); !errors.Is(err, ErrSymlinkedParent) {
+	if err := SafeWriteFile(root, "docs/hooks/pre-commit", []byte("#!/bin/sh\n"), 0o755, ""); !errors.Is(err, ErrSymlinkedParent) {
 		t.Fatalf("nested write under symlinked parent err = %v, want ErrSymlinkedParent", err)
 	}
 	if _, err := os.Stat(filepath.Join(gitDir, "hooks")); !errors.Is(err, os.ErrNotExist) {
@@ -395,7 +395,7 @@ func TestSafeWriteFile_SymlinkedParentOutsideRootStaysAnEscape(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	err := SafeWriteFile(root, "docs/config", []byte("pwned"), 0o644)
+	err := SafeWriteFile(root, "docs/config", []byte("pwned"), 0o644, "")
 	if !errors.Is(err, ErrPathEscape) {
 		t.Fatalf("SafeWriteFile through outside-pointing parent err = %v, want ErrPathEscape", err)
 	}
@@ -413,7 +413,7 @@ func TestSafeWriteFile_RealParentsStillWrite(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	if err := SafeWriteFile(root, "docs/deep/notes.md", []byte("hello"), 0o644); err != nil {
+	if err := SafeWriteFile(root, "docs/deep/notes.md", []byte("hello"), 0o644, ""); err != nil {
 		t.Fatalf("SafeWriteFile through real parents: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(root, "docs", "deep", "notes.md"))
@@ -588,7 +588,7 @@ func TestSafeCopyFile_CopiesContentAndSourceMode(t *testing.T) {
 		t.Fatalf("setup chmod: %v", err)
 	}
 
-	if err := SafeCopyFile(root, "run.sh", "bin/run.sh"); err != nil {
+	if err := SafeCopyFile(root, "run.sh", "bin/run.sh", ""); err != nil {
 		t.Fatalf("SafeCopyFile: %v", err)
 	}
 
@@ -628,10 +628,10 @@ func TestSafeCopyFile_RefusesEscapes(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	if err := SafeCopyFile(root, "../secret.txt", "stolen.txt"); !errors.Is(err, ErrPathEscape) {
+	if err := SafeCopyFile(root, "../secret.txt", "stolen.txt", ""); !errors.Is(err, ErrPathEscape) {
 		t.Errorf("escaping source error = %v, want ErrPathEscape", err)
 	}
-	if err := SafeCopyFile(root, "inside.txt", "../leaked.txt"); !errors.Is(err, ErrPathEscape) {
+	if err := SafeCopyFile(root, "inside.txt", "../leaked.txt", ""); !errors.Is(err, ErrPathEscape) {
 		t.Errorf("escaping destination error = %v, want ErrPathEscape", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "stolen.txt")); err == nil {
@@ -654,7 +654,7 @@ func TestSafeCopyFile_RefusesNonRegularSource(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	err := SafeCopyFile(root, "dir", "copy")
+	err := SafeCopyFile(root, "dir", "copy", "")
 	if err == nil {
 		t.Fatal("copying a directory must fail")
 	}
@@ -682,7 +682,7 @@ func TestSafeCopyFileFrom_CopiesAcrossRootsWithSourceMode(t *testing.T) {
 		t.Fatalf("setup chmod: %v", err)
 	}
 
-	if err := SafeCopyFileFrom(srcRoot, src, dstRoot, "docs/methodology.md"); err != nil {
+	if err := SafeCopyFileFrom(srcRoot, src, dstRoot, "docs/methodology.md", ""); err != nil {
 		t.Fatalf("SafeCopyFileFrom: %v", err)
 	}
 
@@ -732,12 +732,12 @@ func TestSafeCopyFileFrom_RefusesSourceEscapingItsOwnRoot(t *testing.T) {
 	}
 
 	t.Run("traversal", func(t *testing.T) {
-		if err := SafeCopyFileFrom(srcRoot, "../secret.txt", dstRoot, "stolen.txt"); !errors.Is(err, ErrPathEscape) {
+		if err := SafeCopyFileFrom(srcRoot, "../secret.txt", dstRoot, "stolen.txt", ""); !errors.Is(err, ErrPathEscape) {
 			t.Errorf("escaping source error = %v, want ErrPathEscape", err)
 		}
 	})
 	t.Run("symlinked component", func(t *testing.T) {
-		if err := SafeCopyFileFrom(srcRoot, "hop/secret.txt", dstRoot, "stolen.txt"); !errors.Is(err, ErrPathEscape) {
+		if err := SafeCopyFileFrom(srcRoot, "hop/secret.txt", dstRoot, "stolen.txt", ""); !errors.Is(err, ErrPathEscape) {
 			t.Errorf("symlinked-component source error = %v, want ErrPathEscape", err)
 		}
 	})
@@ -773,12 +773,12 @@ func TestSafeCopyFileFrom_RefusesDestinationEscapingItsOwnRoot(t *testing.T) {
 	}
 
 	t.Run("traversal", func(t *testing.T) {
-		if err := SafeCopyFileFrom(srcRoot, "payload.txt", dstRoot, "../leaked.txt"); !errors.Is(err, ErrPathEscape) {
+		if err := SafeCopyFileFrom(srcRoot, "payload.txt", dstRoot, "../leaked.txt", ""); !errors.Is(err, ErrPathEscape) {
 			t.Errorf("escaping destination error = %v, want ErrPathEscape", err)
 		}
 	})
 	t.Run("symlinked component", func(t *testing.T) {
-		if err := SafeCopyFileFrom(srcRoot, "payload.txt", dstRoot, "out/leaked.txt"); !errors.Is(err, ErrPathEscape) {
+		if err := SafeCopyFileFrom(srcRoot, "payload.txt", dstRoot, "out/leaked.txt", ""); !errors.Is(err, ErrPathEscape) {
 			t.Errorf("symlinked-component destination error = %v, want ErrPathEscape", err)
 		}
 	})
@@ -803,7 +803,7 @@ func TestSafeCopyFileFrom_RefusesNonRegularSource(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	err := SafeCopyFileFrom(srcRoot, "bundle", dstRoot, "copy")
+	err := SafeCopyFileFrom(srcRoot, "bundle", dstRoot, "copy", "")
 	if err == nil {
 		t.Fatal("copying a directory must fail")
 	}
@@ -831,10 +831,10 @@ func TestSafeCopyFile_DelegatesWithEqualRoots(t *testing.T) {
 		t.Fatalf("setup chmod: %v", err)
 	}
 
-	if err := SafeCopyFile(root, "a.txt", "one/b.txt"); err != nil {
+	if err := SafeCopyFile(root, "a.txt", "one/b.txt", ""); err != nil {
 		t.Fatalf("SafeCopyFile: %v", err)
 	}
-	if err := SafeCopyFileFrom(root, "a.txt", root, "two/b.txt"); err != nil {
+	if err := SafeCopyFileFrom(root, "a.txt", root, "two/b.txt", ""); err != nil {
 		t.Fatalf("SafeCopyFileFrom: %v", err)
 	}
 
@@ -857,8 +857,8 @@ func TestSafeCopyFile_DelegatesWithEqualRoots(t *testing.T) {
 		t.Fatalf("two-root destination = (%q, %v), want the source's payload", got, err)
 	}
 
-	oneRootErr := SafeCopyFile(root, "../nothing.txt", "pulled.txt")
-	twoRootErr := SafeCopyFileFrom(root, "../nothing.txt", root, "pulled.txt")
+	oneRootErr := SafeCopyFile(root, "../nothing.txt", "pulled.txt", "")
+	twoRootErr := SafeCopyFileFrom(root, "../nothing.txt", root, "pulled.txt", "")
 	if !errors.Is(oneRootErr, ErrPathEscape) || !errors.Is(twoRootErr, ErrPathEscape) {
 		t.Errorf("escape errors = (%v, %v), want both ErrPathEscape", oneRootErr, twoRootErr)
 	}
@@ -919,21 +919,21 @@ func TestSafeRemove_RemovesWithinRootAndRefusesEscapes(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	if err := SafeRemove(root, "gone.txt"); err != nil {
+	if err := SafeRemove(root, "gone.txt", ""); err != nil {
 		t.Fatalf("SafeRemove: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "gone.txt")); !os.IsNotExist(err) {
 		t.Errorf("file survived removal, stat error = %v", err)
 	}
 
-	if err := SafeRemove(root, "../kept.txt"); !errors.Is(err, ErrPathEscape) {
+	if err := SafeRemove(root, "../kept.txt", ""); !errors.Is(err, ErrPathEscape) {
 		t.Errorf("escaping removal error = %v, want ErrPathEscape", err)
 	}
 	if _, err := os.Stat(filepath.Join(outside, "kept.txt")); err != nil {
 		t.Errorf("a refused removal deleted a file outside the workspace: %v", err)
 	}
 
-	if err := SafeRemove(root, "never-existed.txt"); !errors.Is(err, os.ErrNotExist) {
+	if err := SafeRemove(root, "never-existed.txt", ""); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("removing a missing name = %v, want an os.ErrNotExist error", err)
 	}
 }
@@ -1026,7 +1026,7 @@ func TestSafeRemove_RefusesSymlinkedParent(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	err := SafeRemove(root, "docs/config")
+	err := SafeRemove(root, "docs/config", "")
 	if !errors.Is(err, ErrSymlinkedParent) {
 		t.Fatalf("SafeRemove through a symlinked parent err = %v, want ErrSymlinkedParent", err)
 	}
@@ -1037,7 +1037,7 @@ func TestSafeRemove_RefusesSymlinkedParent(t *testing.T) {
 		t.Errorf("the refused removal deleted the redirect target: %v", statErr)
 	}
 
-	if err := SafeRemove(root, "gone.txt"); err != nil {
+	if err := SafeRemove(root, "gone.txt", ""); err != nil {
 		t.Fatalf("removing through real directories: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "gone.txt")); !errors.Is(err, os.ErrNotExist) {
@@ -1059,7 +1059,7 @@ func TestSafeCopyFileFrom_RefusesSymlinkedDestinationParentButFollowsTheSource(t
 		t.Fatalf("setup: %v", err)
 	}
 
-	err := SafeCopyFileFrom(root, "payload.txt", root, "docs/config")
+	err := SafeCopyFileFrom(root, "payload.txt", root, "docs/config", "")
 	if !errors.Is(err, ErrSymlinkedParent) {
 		t.Fatalf("copy INTO a symlinked parent err = %v, want ErrSymlinkedParent", err)
 	}
@@ -1072,7 +1072,7 @@ func TestSafeCopyFileFrom_RefusesSymlinkedDestinationParentButFollowsTheSource(t
 	}
 	assertNoStagingLeftovers(t, root)
 
-	if err := SafeCopyFileFrom(root, "docs/config", root, "copied.txt"); err != nil {
+	if err := SafeCopyFileFrom(root, "docs/config", root, "copied.txt", ""); err != nil {
 		t.Fatalf("copy FROM a symlinked parent: %v — the read side must follow", err)
 	}
 	if got, err := os.ReadFile(filepath.Join(root, "copied.txt")); err != nil || string(got) != "[core]\n" {

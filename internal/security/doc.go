@@ -24,6 +24,10 @@
 //     reads FOLLOW it and the reading tool discloses where the name resolved. Neither half
 //     is a boundary: a component swapped after the check can still redirect within the
 //     root, which is the Confiner's business, not this layer's.
+//     The fence makes exactly ONE exception, and only when the operator made it: a write
+//     the ladder GATED and the human approved carries a permitted target — the resolved path
+//     the approval pane disclosed — and lands there, one path wide, re-resolved at write time
+//     (writepermit.go, ADR 0049). Without a permit nothing about the fence changes.
 //   - URL-safety (URLGuard): scheme/host allow-deny for the network tools
 //     (web-fetch / http-request, P3.11), deny-first precedence.
 //   - The dangerous-action guard (DangerousActionGuard): the default-on footgun
@@ -92,6 +96,12 @@
 // (workspace) root; SafeCopyFileFrom is the exception that pins a root at each end, because a
 // copy's source is a read and may come from a read-only root the destination fence knows nothing
 // about — its write half is bounded by the destination root exactly as the others are.
+// writepermit.go is the fence's one exception and the whole of it: the approved escape target
+// (ADR 0049). openMutationRoot — the single place every mutating primitive above decides which
+// root bounds it — plus the re-resolution that reproduces dispatch's classification rather than
+// trusting it, the deepest-existing-ancestor anchor the approved write is pinned to, and the
+// symlinked-target refusal. With no permit, or an in-workspace target, it answers with today's
+// workspace root, byte-for-byte.
 // execsafety.go measures that same boundary in the other direction: RefuseExecFromWritablePath
 // keeps an argv[0] that resolves inside the writable box from ever being executed, so bytes a
 // confined call was allowed to WRITE cannot become the program a later unconfined call RUNS.

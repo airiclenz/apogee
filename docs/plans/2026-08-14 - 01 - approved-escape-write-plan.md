@@ -72,7 +72,15 @@ is never returned as present.
 
 **Commit:** `feat(domain): a write-escape permit carries one approved resolved target`
 
-## 2. `security`: the fence honours a permitted target
+## 2. `security`: the fence honours a permitted target — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the permitted target is a trailing `permitted string` parameter on the four mutating primitives rather than a set of sibling functions — one entry point per verb keeps the ADR's "the fence becomes one rule" shape and makes every call site answer the question at compile time, where a sibling would let a caller that needs a permit silently keep the failing behaviour ADR 0049 exists to fix. The single decision point is `openMutationRoot`, which every primitive pins its root through.
+
+NOTES (2026-08-14): `SafeRename` deliberately takes NO permit, against the item's "the delete/copy helpers" reading of the family: one rename is one syscall through one pinned root, so it cannot span the workspace fence and an approved target outside it (the kernel refuses the cross-device move regardless). An approved escape MOVE is the copy-then-remove pair — `SafeCopyFileFrom` carries the permit to the destination, `SafeRemove` unlinks the in-workspace source — which is stated on `SafeRename`'s doc comment for item 4.
+
+NOTES (2026-08-14): the new rule lives in `internal/security/writepermit.go` rather than growing `safeio.go` (677 lines, already past the ~400-line house limit), with `doc.go`'s file map extended for it — the package-map convention `docmap_test.go` enforces.
+
+NOTES (2026-08-14): two of item 4's files were touched minimally so the tree keeps building under the new signatures — `internal/tools/path_safety.go` and `internal/tools/file_ops.go` pass `""` (no permit) at their five call sites, which is today's behaviour exactly; item 4 replaces those with the execution context's permit.
 
 **What:** extend the shared TOCTOU-safe write core (`security.SafeWriteFile` and the delete/copy
 helpers the family funnels through) with the permitted-target path: callers pass the permit's

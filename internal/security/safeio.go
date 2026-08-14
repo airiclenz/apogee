@@ -104,14 +104,16 @@ import (
 // somewhere the argument never named (the SYMLINK POLICY note in the package header). So the
 // guarantee is: the write touches EXACTLY the name the caller passed, resolved through real
 // directories, or it touches nothing.
-func SafeWriteFile(root, input string, data []byte, perm os.FileMode) error {
-	rel, err := rootRelative(input, root)
+//
+// permitted is the one out-of-workspace path an approval authorised — the resolved target the
+// approval pane disclosed (ADR 0049) — or empty for the ordinary call, which is every call that
+// never met a Gate. A permit changes nothing for a target inside root; for an input that
+// re-resolves to exactly that path it pins the write to the target's own deepest existing
+// ancestor instead of refusing it. The rule is stated once, in writepermit.go.
+func SafeWriteFile(root, input string, data []byte, perm os.FileMode, permitted string) error {
+	r, rel, err := openMutationRoot(root, input, permitted)
 	if err != nil {
 		return err
-	}
-	r, err := os.OpenRoot(root)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrPathEscape, err)
 	}
 	defer r.Close()
 
@@ -410,25 +412,25 @@ func SafeOpen(root, input string) (*os.File, error) {
 //
 // The content is streamed, so a copy costs no more memory than its buffer however large the
 // file is; there is no fsync, for the same reason SafeWriteFile has none.
-func SafeCopyFileFrom(srcRoot, srcInput, dstRoot, dstInput string) error {
+//
+// permitted is SafeWriteFile's approved escape target (ADR 0049), and it bounds the DESTINATION
+// alone: the source half is a read, and a read is never widened by an approval to write. Empty
+// means no permit, which is every call that never met a Gate.
+func SafeCopyFileFrom(srcRoot, srcInput, dstRoot, dstInput, permitted string) error {
 	srcRel, err := rootRelative(srcInput, srcRoot)
 	if err != nil {
 		return err
 	}
-	dstRel, err := rootRelative(dstInput, dstRoot)
+	dr, dstRel, err := openMutationRoot(dstRoot, dstInput, permitted)
 	if err != nil {
 		return err
 	}
+	defer dr.Close()
 	sr, err := os.OpenRoot(srcRoot)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrPathEscape, err)
 	}
 	defer sr.Close()
-	dr, err := os.OpenRoot(dstRoot)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrPathEscape, err)
-	}
-	defer dr.Close()
 
 	// Before ANY mutation, and before the source is even opened: a symlinked parent on the
 	// DESTINATION chain would land the copy somewhere the argument never named, exactly as it
@@ -453,8 +455,8 @@ func SafeCopyFileFrom(srcRoot, srcInput, dstRoot, dstInput string) error {
 // caller whose source and destination are both workspace paths wants. Every guarantee documented
 // on SafeCopyFileFrom — staged-and-renamed destination, the source's mode, a non-regular source
 // refused, ErrPathEscape at either end with nothing written — holds here unchanged.
-func SafeCopyFile(root, srcInput, dstInput string) error {
-	return SafeCopyFileFrom(root, srcInput, root, dstInput)
+func SafeCopyFile(root, srcInput, dstInput, permitted string) error {
+	return SafeCopyFileFrom(root, srcInput, root, dstInput, permitted)
 }
 
 // openCopySource opens the copy's source through the root pinned at the SOURCE's end and reports
@@ -539,6 +541,12 @@ func copyAndClose(dst *os.File, src io.Reader, mode os.FileMode) error {
 // nothing moved. The check runs before the destination's parents are created, which also means a
 // caller that retries a FAILED rename as copy-then-remove (move_file does) knows any error other
 // than this one came from two chains that already passed the gate.
+//
+// It takes NO approved-escape permit (ADR 0049), and that is not an omission. A rename is one
+// syscall through one pinned root, so it cannot span the workspace fence and an approved target
+// outside it — the kernel would refuse the cross-device move even if a root could express it.
+// An approved escape MOVE is therefore the copy-then-remove pair: SafeCopyFileFrom carries the
+// permit to the destination, SafeRemove unlinks the in-workspace source under the fence.
 func SafeRename(root, oldInput, newInput string) error {
 	oldRel, err := rootRelative(oldInput, root)
 	if err != nil {
@@ -587,14 +595,15 @@ func SafeRename(root, oldInput, newInput string) error {
 //
 // It is os.Remove's contract otherwise — a non-empty directory is refused by the filesystem —
 // and a missing name returns an error satisfying errors.Is(err, os.ErrNotExist).
-func SafeRemove(root, input string) error {
-	rel, err := rootRelative(input, root)
+//
+// permitted is SafeWriteFile's approved escape target (ADR 0049), empty for the ordinary call.
+// A deletion is the most destructive member of the approved family and is deliberately included:
+// its Gate disclosed the same resolved path a write's would, so the same permit — and only the
+// exact path it names — reaches the same primitive.
+func SafeRemove(root, input, permitted string) error {
+	r, rel, err := openMutationRoot(root, input, permitted)
 	if err != nil {
 		return err
-	}
-	r, err := os.OpenRoot(root)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrPathEscape, err)
 	}
 	defer r.Close()
 

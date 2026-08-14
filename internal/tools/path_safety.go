@@ -54,8 +54,11 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 // component swapped to point outside the root — including a concurrent swap by a confined
 // subprocess — is refused rather than followed (security review H1). It replaces the
 // former resolveInRoot+os.WriteFile pair, which re-walked the path with a check/use gap.
+//
+// The empty final argument is security's approved-escape permit (ADR 0049): no permitted target,
+// so the workspace root alone bounds the write.
 func safeWriteFile(input, root string, data []byte, perm os.FileMode) error {
-	return security.SafeWriteFile(root, input, data, perm)
+	return security.SafeWriteFile(root, input, data, perm, "")
 }
 
 // safeReadFile reads input within root through the shared TOCTOU-safe guard, with the

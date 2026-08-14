@@ -15,6 +15,16 @@ point is a **minor** bump, not a breaking change.
   of one tool execution (ADR 0049). No consumer yet; absence keeps the workspace fence as the sole
   rule.
 
+- The workspace write fence now honours one **approved escape target**: `security.SafeWriteFile`,
+  `SafeRemove`, `SafeCopyFile` and `SafeCopyFileFrom` take the resolved path an approval disclosed
+  (empty = no permit, which is every call today). With no permit, or for a target inside the
+  workspace root, the fence is byte-for-byte what it was; with one, an argument that re-resolves to
+  exactly that path is written through an `os.Root` pinned at the target's deepest existing
+  ancestor — missing parents created inside it, the final name acted on rather than followed — and
+  any divergence (a re-resolution mismatch, a symlinked target, a non-directory in the chain) is
+  refused with nothing touched. The read primitives take no permit and none can be given to them
+  (ADR 0049).
+
 ## [0.14.0] — 2026-08-14
 
 ### Added
