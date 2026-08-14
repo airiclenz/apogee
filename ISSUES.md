@@ -85,6 +85,26 @@ The still-open findings the ISSUES-sweep plan run left, under the conventions' a
   `delete_file.go`, and `internal/tools/path_safety_test.go` (425) still holds the read-half tests that
   belong beside `path_read.go`. Both are over the coding-standards ~400-line threshold.
 
+### Run residuals — open (2026-08-14, security-audit fixes)
+
+The still-open findings the security-audit-fixes plan run left, under the conventions'
+actionability bar.
+
+- [ ] The 2026-08-12 batch closeout below still narrates the configured-filter residual as open —
+  "git offers no switch that refuses configured filters, so only the read-path textconv/ext-diff
+  half is closed" (`ISSUES.md:552-555`) — which is now stale for repo-local scopes, since `runGit`
+  refuses a repo-local `filter.*.clean/smudge/process` driver before running. The residual survives
+  only for global config, which is the operator's.
+
+- [ ] `runSubprocess`'s overview bullet still states absolutely that a cancelled or timed-out command
+  "never orphans its children" (`internal/tools/exec_common.go:184`), where the teardown docs that
+  bullet summarises now state the setsid escape (`internal/tools/exec_teardown.go:37`,
+  `internal/tools/doc.go:183`, `internal/tools/exec_pgroup_unix.go:63`).
+
+- [ ] The setsid-escape residual is documented but untested — no test asserts what a descendant that
+  called `setsid`/`setpgid(0,0)` does across teardown (nothing in `internal/tools/*_test.go` or
+  `internal/platform/confinetest/` exercises it), so the residual the docs now state is unpinned.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
