@@ -292,11 +292,13 @@ const inputTabCells = 4
 // run of cells — and a utf8.RuneError, one cell wide to the ruler and absent from the widget, moves
 // the wrap itself.
 //
-// '\r' and '\n' are the sanitizer's remaining case (both become '\n') and are deliberately not
+// '\r' and '\n' are the sanitizer's remaining case (each becomes one '\n') and are deliberately not
 // handled here, because neither can reach a LINE: the widget sanitises BEFORE it splits its input
 // into logical rows (bubbles/v2@v2.1.0/textarea/textarea.go:504, :519-529), so a '\r' has already
-// become a row boundary rather than a rune inside a row, and the callers split on '\n' for the same
-// reason ([inputCellSpans], inputContentRows in chromelayout.go). That the widget's value is
+// become a row boundary rather than a rune inside a row, and the callers split the value on that
+// boundary before they get here — [inputCellSpans] on '\n', which is all the widget's own value can
+// carry, and inputContentRows (chromelayout.go) on either, since a value handed to it need not have
+// come from the widget at all. That the widget's value is
 // sanitised on every write path at all is argued once, from the caret's side, at [cellToRuneOffset]
 // (mouse.go).
 //

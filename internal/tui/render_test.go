@@ -5064,6 +5064,11 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 // width takes one extra visual row (the widget reserves a trailing row for the caret past a full
 // line). Under-counting it left the box a row short at the wrap boundary, stranding the scroll the
 // layout re-seat then could not clamp (ISSUES #2).
+//
+// The CR cases carry the numbers the widget itself answers, spelled out rather than compared: the
+// sanitizer rewrites each '\r' AND each '\n' as one newline before the split, so a bare CR opens a
+// row and a CRLF opens two. Reading them as one boundary — the intuitive line ending — would put
+// this table one row under the widget for every CRLF, which is the failure the count already had.
 func TestInputContentRows(t *testing.T) {
 	const w = 10
 	cases := []struct {
@@ -5080,6 +5085,9 @@ func TestInputContentRows(t *testing.T) {
 		{"two full widths plus one", strings.Repeat("a", 21), 3},
 		{"trailing newline adds a row", "abc\n", 2},
 		{"two logical lines", "abc\ndef", 2},
+		{"a bare CR is a row boundary too", "abc\rdef", 2},
+		{"trailing CR adds a row", "abc\r", 2},
+		{"CRLF is two boundaries, one per rune", "abc\r\ndef", 3},
 		{"each full logical line gets its trailing row", strings.Repeat("a", 10) + "\n" + strings.Repeat("b", 10), 4},
 		{"wide glyphs count by display cells", strings.Repeat("あ", 5), 2}, // 5×2 = 10 cells = exact width
 	}
@@ -5133,6 +5141,11 @@ func widgetContentRows(t *testing.T, value string, width int) (rows, effWidth in
 // The runes that sanitizer DROPS — utf8.RuneError and the other control runes — are in the table for
 // the mirror image of that reason: the textarea keeps none of them, so a mirror that measured one
 // would come up long.
+//
+// The CR cases are the third face of the same sanitizer: '\r' is neither kept nor dropped but
+// rewritten as a newline, one per rune, so the widget opens a row on a bare CR and two on a CRLF.
+// The mirror split on '\n' alone until 2026-08-14 and came up a row short for either; asking the
+// real widget is what settles that CRLF is two rows here and not the one a line ending suggests.
 func TestInputContentRowsMirrorsTheWidget(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -5154,6 +5167,12 @@ func TestInputContentRowsMirrorsTheWidget(t *testing.T) {
 		{"two logical lines", "abc\ndef", 10},
 		{"two full logical lines", strings.Repeat("a", 10) + "\n" + strings.Repeat("b", 10), 10},
 		{"a blank line between two", "abc\n\ndef", 10},
+		{"a bare CR", "abc\rdef", 10},
+		{"a trailing CR", "abc\r", 10},
+		{"a leading CR", "\rabc", 10},
+		{"a CRLF pair", "abc\r\ndef", 10},
+		{"CR between two width-filling lines", strings.Repeat("a", 10) + "\r" + strings.Repeat("b", 10), 10},
+		{"a CR inside a wrapped word", "averyvery\rlongwordindeed", 6},
 		{"a line of nothing but spaces", "     ", 3},
 		{"trailing space at a row boundary", "aaa aaa aaa aaax ", 8},
 		{"a word longer than the row", "averyveryverylongwordindeed", 6},

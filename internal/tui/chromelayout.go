@@ -31,6 +31,16 @@ import (
 // and the other control runes with the same authority), so this count inherits that with the rest of
 // the wrap.
 //
+// A bare '\r' is a row boundary here for the same reason: the widget's sanitizer rewrites EVERY '\r'
+// AND every '\n' as one newline before it splits into logical rows
+// (bubbles/v2@v2.1.0/internal/runeutil/runeutil.go:68-76, textarea.go:504, :519-529), so a CR the
+// widget received is a boundary it drew, and splitting on '\n' alone sized the box a row short for
+// such a value. That per-rune rewrite is also why "\r\n" is mirrored as TWO boundaries rather than
+// one: the widget's own answer for "a\r\nb" is three rows, and a mirror answers to the widget rather
+// than to what a line ending ought to mean (ADR 0030 §6). No draft reaches this with a CR today —
+// every caller hands over the widget's already-sanitised value — so the fold is fidelity for a value
+// arriving from anywhere else, not a live fix.
+//
 // WIDGET MIRROR — deliberately NOT the width authority. This is one of the package's mirrors of a
 // third-party widget's internal math, and a mirror's oracle is the widget, never apogee's
 // painter-facing measure (width.go): the textarea wraps with uniseg.StringWidth
@@ -43,7 +53,8 @@ func inputContentRows(value string, innerWidth int) int {
 		innerWidth = 1
 	}
 	total := 0
-	for _, line := range strings.Split(value, "\n") {
+	// ReplaceAll returns value untouched when it holds no CR, so the frame path pays nothing.
+	for _, line := range strings.Split(strings.ReplaceAll(value, "\r", "\n"), "\n") {
 		total += len(wrapRowStarts([]rune(line), innerWidth))
 	}
 	return total

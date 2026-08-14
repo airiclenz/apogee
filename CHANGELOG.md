@@ -268,6 +268,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The prompt box sizes a value carrying a bare CR the way the widget draws it.**
+  `inputContentRows` — the mirror of the textarea's own wrap that gives the input box its height —
+  split the value on `"\n"` alone, while the widget's sanitizer rewrites every `'\r'` AND every
+  `'\n'` as one newline before it splits into logical rows
+  (`bubbles/v2@v2.1.0/internal/runeutil/runeutil.go`, `textarea.go:504`), so a CR the widget turned
+  into a row boundary was measured as a rune inside a row and the box came out a row short. The
+  split now folds a bare `'\r'` too, and folds `"\r\n"` as TWO boundaries rather than one, because
+  that per-rune rewrite is what the widget actually does: its own answer for `"a\r\nb"` is three
+  rows. No draft reaches this today — every caller hands over the widget's already-sanitised value
+  — so this is width-mirror fidelity of the kind ADR 0030 §6 governs, pinned by new cases in both
+  `inputContentRows` suites (the deterministic table and the one that asks a real textarea).
+
 - **A hostile upstream's error body can no longer exhaust memory.** Both non-2xx paths —
   `(*Client).statusError` on the unary round-trip and `(*Client).statusDelta` on the stream — read
   the upstream body with `io.ReadAll` before anything caps it, and the request timeouts default to

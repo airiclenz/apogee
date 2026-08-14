@@ -153,7 +153,13 @@ corresponding ISSUES bullet (the 2026-08-13 section's `/server` bullet). No code
 
 **Commit:** `docs(adr): 0047 notes the key overlay drops on switch-back by design`
 
-## 6. inputContentRows folds a bare CR as a row boundary
+## 6. inputContentRows folds a bare CR as a row boundary — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the item's parenthetical "(and `\r\n` as one boundary, matching the widget)" is contradicted by the widget it names, so the item's own "verify the widget's exact behavior in the bubbles textarea before writing" instruction governed: the sanitizer rewrites EACH `'\r'` and EACH `'\n'` as one newline independently (`runeutil.go:68-76`), so `"a\r\nb"` is THREE widget rows, not two — confirmed empirically against a real `textarea` via the suite's own `widgetContentRows` oracle before writing. `"\r\n"` is therefore mirrored as two boundaries, and the new mirror-test cases (`a CRLF pair`) pin that against the widget rather than against the assumption.
+
+NOTES (2026-08-14): the tests landed in `internal/tui/render_test.go`, not the `internal/tui/chromelayout_test.go` the item's Files line names — that file does not exist, and the "existing `inputContentRows` suite" the item's Tests line points at (`TestInputContentRows` plus the widget-oracle `TestInputContentRowsMirrorsTheWidget`) lives in `render_test.go`. Adding the cases beside their suite, and to both halves of it, was preferred over splitting two cases into a new file away from the oracle helper they need.
+
+NOTES (2026-08-14): one clause of `sanitizeInputLine`'s doc comment (`internal/tui/inputaccent.go:296-301`) — "the callers split on `'\n'` for the same reason ([inputCellSpans], inputContentRows in chromelayout.go)" — is falsified by this change, so it was corrected in place to state each caller's actual split. `inputCellSpans` itself was NOT touched: it measures the widget's own value, which cannot carry a CR.
 
 **What:** `inputContentRows` (`internal/tui/chromelayout.go:44`, the split at `:48`) splits
 the value on `"\n"` only, while the widget it mirrors also folds a bare `"\r"` into a row

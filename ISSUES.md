@@ -57,12 +57,6 @@ The still-open findings the ISSUES-sweep plan run left, under the conventions' a
   a raw `--endpoint`/`APOGEE_ENDPOINT` override can still equal a configured entry's `name`, and the
   picker then marks two rows `· current`.
 
-- [ ] `inputContentRows` (`internal/tui/chromelayout.go:44`, the split at `:48`) splits the value on
-  `"\n"` only, while the widget it mirrors also folds a bare `"\r"` into a row boundary — a value
-  carrying one would size the prompt box a row short. Unreachable from a draft today (nothing puts a
-  bare `\r` into the widget's value) and pre-existing; it is a width-mirror fidelity gap of the kind
-  ADR 0030 tracks.
-
 - [ ] The companion test suites were not split when their sources were:
   `internal/tools/file_ops_test.go` (950 lines) still holds the `delete_file` tests that belong beside
   `delete_file.go`, and `internal/tools/path_safety_test.go` (425) still holds the read-half tests that
