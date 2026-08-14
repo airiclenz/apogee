@@ -424,7 +424,7 @@ system-prompt-text: |
 # fails the title apogee derived from your prompt stays. Turning it off stops only the AUTOMATIC
 # naming — /rename still sets a title by hand, and bare /rename still asks the model for one.
 # Config-file only (no flag or env). Default: true.
-# auto-title: false
+# auto-title: true
 
 # =============================================================================
 # Come back on the model you were using. With this on, picking a model with /model is remembered:
