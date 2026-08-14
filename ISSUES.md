@@ -56,6 +56,35 @@ conventions' actionability bar.
   `:1517`). Nothing in `cmd/apogee` pins the seam either — the package has no `wire_options_test.go`,
   so the chain is exercised only through the TUI's fakes (pre-existing for every seam in that file).
 
+### Run residuals — open (2026-08-14, ISSUES sweep)
+
+The still-open findings the ISSUES-sweep plan run left, under the conventions' actionability bar.
+
+- [ ] The ephemeral-entry doc claim that "a synthesized label can no longer collide with a configured
+  `name`" (`cmd/apogee/upstream.go:288-290`) is asserted, not enforced: `hostFromEndpoint`'s label for
+  a raw `--endpoint`/`APOGEE_ENDPOINT` override can still equal a configured entry's `name`, and the
+  picker then marks two rows `· current`.
+
+- [ ] `internal/security/doc.go:103-104` reads imprecisely now that the lexical and resolved readings
+  were split apart: the sentence on `openMutationRoot` answering "with today's workspace root,
+  byte-for-byte" no longer describes the permit-plus-workspace-internal-target case the fix
+  introduced. Doc-only, same package.
+
+- [ ] `ReadConfigForWrite`'s doc comment (`internal/config/configsplice.go:231-235`) enumerates its
+  splicing callers but omits the non-splicing one, `cmd/apogee/settingsedit.go:164`, so the list reads
+  as exhaustive when it is not.
+
+- [ ] `inputContentRows` (`internal/tui/chromelayout.go:44`, the split at `:48`) splits the value on
+  `"\n"` only, while the widget it mirrors also folds a bare `"\r"` into a row boundary — a value
+  carrying one would size the prompt box a row short. Unreachable from a draft today (nothing puts a
+  bare `\r` into the widget's value) and pre-existing; it is a width-mirror fidelity gap of the kind
+  ADR 0030 tracks.
+
+- [ ] The companion test suites were not split when their sources were:
+  `internal/tools/file_ops_test.go` (950 lines) still holds the `delete_file` tests that belong beside
+  `delete_file.go`, and `internal/tools/path_safety_test.go` (425) still holds the read-half tests that
+  belong beside `path_read.go`. Both are over the coding-standards ~400-line threshold.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
