@@ -54,7 +54,15 @@ closed trail).
 
 ---
 
-## 1. /server identifies the session's entry by name, not endpoint
+## 1. /server identifies the session's entry by name, not endpoint — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the item lists five comparison sites by pre-item line number; located by
+function, they are picker.go `currentServerRow`/`switchToServer`/`serverRows` and settings.go
+`settingsSwitchServer`/`settingsCurrentValue` — the same five, at picker.go:325/366/1036 and
+settings.go:700/1697 in the current tree.
+NOTES (2026-08-14): beyond the four doc sites the item names, one paragraph of `switchToServer`'s
+own doc comment gained the sibling-entry rule, since that function is where the already-on branch
+now means "the same ENTRY" rather than "the same URL".
 
 **What:** Replace endpoint equality with entry-name equality at the five sites that decide
 "which configured entry is the session on": `switchToServer`'s already-on branch

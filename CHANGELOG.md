@@ -126,6 +126,18 @@ point is a **minor** bump, not a breaking change.
   With the work landed, the `ISSUES.md` defect *an approved out-of-workspace write still errors at
   Execute* is removed from the register (ADR 0049).
 
+### Fixed
+
+- **`/server` identifies the session's entry by NAME, not by endpoint.** The five sites that decide
+  "which configured entry is this session on" — the picker's already-on branch, the row it opens on,
+  the `· current` mark, and `/settings`' server-row twin of the first and its `(current)` mark — now
+  compare the entry's name against the bound alias (`Options.HostAlias`, which is exactly the bound
+  entry's name on every start shape) instead of comparing URLs. Two `servers:` entries pointing at
+  one endpoint are therefore told apart: the mark sits on the bound entry alone, and picking its
+  sibling performs a real switch, so that entry's key source rebinds and the recorded `server:` pin
+  names the entry the human actually chose (ADR 0036 decision 1). Sessions with one entry per
+  endpoint — every ordinary config — see no change.
+
 ## [0.14.0] — 2026-08-14
 
 ### Added

@@ -928,21 +928,24 @@ type RebindResult struct {
 	Notices       []string // per-rebind lines to surface as transcript notes, in order
 }
 
-// ServerChoice is one upstream server the `/server` picker offers. Name does three jobs with one
-// value — it labels the row, it is the name SwitchServer is called with, and it becomes the
-// footer's host alias once the session is on that server — because the name IS the entry's identity
-// in the binary's `servers:` list, the single definition of what servers exist: the alias of the
-// server you are on is the name you call it (ADR 0036 decision 1). Endpoint is shown beside it and
-// is the identity the picker marks the CURRENT row by (string-equal to [Options.Endpoint]); the
-// comparison is the picker's own, since the binary builds the list from `servers:` verbatim and
-// prepends a row only for an ephemeral override start (ADR 0036 decision 6).
+// ServerChoice is one upstream server the `/server` picker offers. Name does four jobs with one
+// value — it labels the row, it is the name SwitchServer is called with, it becomes the footer's
+// host alias once the session is on that server, and it is the identity the picker marks the
+// CURRENT row by — because the name IS the entry's identity in the binary's `servers:` list, the
+// single definition of what servers exist: the alias of the server you are on is the name you call
+// it (ADR 0036 decision 1). That last job is a string-equality against [Options.HostAlias], which is
+// exactly the bound entry's name on every start shape: the launch resolution sets it, a committed
+// switch re-adopts it, and an ephemeral override start synthesizes its own row under it (ADR 0036
+// decision 6). Endpoint is shown beside it and is display only — two entries may point at one URL
+// and still be different entries, with their own key source and their own recorded pin, so moving
+// between them is a real switch rather than the already-on answer.
 //
 // It carries display and identity and nothing else: the per-server api key and discovery hint are
 // what the switch needs, and the switch is the binary's half of the seam, so the renderer never
 // holds a credential it has no use for.
 type ServerChoice struct {
-	Name     string // the row's label, the switch argument, and the footer alias afterwards
-	Endpoint string // the server's base URL; also the identity of the row the session is on
+	Name     string // the row's label, the switch argument, the footer alias, and the row's identity
+	Endpoint string // the server's base URL, shown beside the name; display only, never identity
 }
 
 // ServerSwitchResult is what the display adopts once a switch has committed: the endpoint now on

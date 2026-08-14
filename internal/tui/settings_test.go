@@ -934,6 +934,31 @@ func TestSettingsServerRowSaysWhenItIsAlreadyOnTheChosenServer(t *testing.T) {
 	}
 }
 
+// The pane asks the picker's question — which ENTRY is this session on — and answers it by name, so
+// two entries sharing one endpoint are two rows here as well: "(current)" stays on the bound one, and
+// choosing its sibling is a move the seam is asked to make and the row journals (ADR 0036 decision 1).
+func TestSettingsServerRowTellsSiblingEntriesApartByName(t *testing.T) {
+	sw, log := siblingSwitch(), &settingsWriteLog{}
+	m := settingsServerModel(t, staticServers(siblingServers), sw, log)
+
+	row := settingsServerRow()
+	if got := m.settingsCurrentValue(row); got != "test-host" {
+		t.Errorf("current value = %q, want the bound entry rather than its same-endpoint sibling", got)
+	}
+
+	m = step(t, step(t, step(t, m, keyEnter()), keyDown()), keyEnter()) // the sub-list, down onto twin, ⏎
+
+	if want := []string{"twin"}; !reflect.DeepEqual(sw.calls, want) {
+		t.Fatalf("SwitchServer calls = %v, want %v — a different entry is a move, whatever URL it names", sw.calls, want)
+	}
+	if want := []settingEdit{{path: row.Path, value: "twin"}}; !reflect.DeepEqual(m.settingEdits, want) {
+		t.Errorf("edits = %+v, want %+v — the move landed, so the row says this session chose it", m.settingEdits, want)
+	}
+	if got := m.settingsNote(row); strings.Contains(got, settingsAlreadyOnNote) {
+		t.Errorf("note = %q, want no already-on answer for a switch that happened", got)
+	}
+}
+
 // An edit APPLIES as well as persists (ADR 0037 decision 1), and every key that is not the renderer's
 // own goes out through the binary's dispatcher: the pane hands it the same path and the same value it
 // handed the writer, and knows nothing about the seam behind it. `mode` is the one key the pane also

@@ -318,11 +318,13 @@ func serverNamed(servers []ServerChoice, name string) (ServerChoice, bool) {
 }
 
 // currentServerRow is the row the server picker opens on: the one this session is on, identified by
-// endpoint — the same comparison the "· current" mark is drawn by, and the same one the binary used
-// when it decided whether the startup endpoint still needed a row of its own.
+// NAME — the same comparison the "· current" mark is drawn by. The name IS the entry's identity in
+// the binary's `servers:` list (ADR 0036 decision 1), and [Options.HostAlias] is exactly the bound
+// entry's name on every start shape, so two entries that share one endpoint are told apart here
+// rather than conflated onto whichever of them the list happens to hold first.
 func (m Model) currentServerRow() int {
 	for i, choice := range m.servers() {
-		if choice.Endpoint == m.opts.Endpoint {
+		if choice.Name == m.opts.HostAlias {
 			return i
 		}
 	}
@@ -353,6 +355,9 @@ func serverNameList(servers []ServerChoice) string {
 // arrive back where it started. It is still a CHOICE, though, so it is offered to the recording seam
 // on the same terms a move is: naming where you already are is the only way to pin the server
 // start-up put you on, and refusing to record it would leave that human no route to the key at all.
+// "Already on" is a question about the ENTRY, not about the URL: a sibling entry pointing at the
+// same endpoint is a different entry — its own key source and its own recorded pin — so picking it
+// is a real switch, and the rebinding it costs is the whole point of having asked for it.
 //
 // A PRE-BOUND session takes the same accept one step lower down (ADR 0036 decision 3): there is no
 // engine to move, so the choice CONSTRUCTS one ([Model.bindToServer], prebound.go). The branch is
@@ -363,7 +368,7 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 	if m.prebound() {
 		return m.bindToServer(choice)
 	}
-	if choice.Endpoint == m.opts.Endpoint {
+	if choice.Name == m.opts.HostAlias {
 		m.transcript.addNote("already on " + choice.Name + " (" + choice.Endpoint + ")")
 		// The recording is stated on a line of its own here, where the move's own note (which carries
 		// it as savedChoiceClause) is not there to hang it on.
@@ -1023,8 +1028,10 @@ func (m Model) modelRows() []popupRow {
 
 // serverRows is one row per configured server: the name the human gave it (which is also the switch
 // argument and the footer alias afterwards) with the endpoint it stands for spelled out beside it,
-// and the "· current" mark on the server this session is on. The endpoint is shown rather than
-// hidden behind the alias because a switch is exactly the moment a name is worth resolving to a URL.
+// and the "· current" mark on the entry this session is BOUND to (by name, [Model.currentServerRow]'s
+// comparison). The endpoint is shown rather than hidden behind the alias because a switch is exactly
+// the moment a name is worth resolving to a URL — but it is display here and never identity, so a
+// sibling entry sharing that URL is drawn unmarked and can be switched onto.
 // Three cells — ["name", "— endpoint", "· current"] — so the endpoints start at one column whatever
 // the aliases measure; the mark is an empty cell on every server but one, and when the session is on
 // none of them that third column collapses away.
@@ -1033,7 +1040,7 @@ func (m Model) serverRows() []popupRow {
 	rows := make([]popupRow, 0, len(servers))
 	for _, choice := range servers {
 		current := ""
-		if choice.Endpoint == m.opts.Endpoint {
+		if choice.Name == m.opts.HostAlias {
 			current = currentRowCell
 		}
 		rows = append(rows, popupRow{

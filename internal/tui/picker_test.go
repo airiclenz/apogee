@@ -580,6 +580,26 @@ var twoServers = []ServerChoice{
 	{Name: "remote", Endpoint: "http://remote:8080"},
 }
 
+// siblingServers are two entries pointing at ONE endpoint, the shape that separates an identity by
+// name from an identity by URL. The session is on the first of them (testOpts.HostAlias).
+var siblingServers = []ServerChoice{
+	{Name: "test-host", Endpoint: "http://localhost:1234"},
+	{Name: "twin", Endpoint: "http://localhost:1234"},
+}
+
+// siblingSwitch answers for that list the way the binary would: whichever entry was named is now the
+// session's, on the endpoint they share. The default fakeSwitch answer only knows twoServers, and an
+// unknown-name error would hide the very move these tests are about.
+func siblingSwitch() *fakeSwitch {
+	return &fakeSwitch{answer: func(name string) (ServerSwitchResult, error) {
+		return ServerSwitchResult{
+			Endpoint:      siblingServers[0].Endpoint,
+			HostAlias:     name,
+			ContextWindow: remoteWindow,
+		}, nil
+	}}
+}
+
 // staticServers is the [Options.Servers] provider a test that never changes its list wires: the same
 // choices every time it is asked, which is what a session whose `servers:` block nobody edits has.
 func staticServers(servers []ServerChoice) func() []ServerChoice {
@@ -630,7 +650,7 @@ func seededServers(t *testing.T, sw *fakeSwitch) (Model, *fakeRebind) {
 // The server picker
 // ----------------------------------------------------------------------------
 
-// /server lists the configured servers, marks the one this session is on (by endpoint, the identity
+// /server lists the configured servers, marks the one this session is on (by entry name, the identity
 // the binary assembled the list by) and opens on it.
 func TestServerPickerListsTheConfiguredServers(t *testing.T) {
 	m, _ := seededServers(t, &fakeSwitch{})
@@ -663,6 +683,78 @@ func TestServerPickerListsTheConfiguredServers(t *testing.T) {
 	if got := rows[1][markCell]; got != "" {
 		t.Errorf("rows[1] mark cell = %q, want an empty cell on a server the session is not on", got)
 	}
+}
+
+// Two configured entries may point at ONE endpoint — the same box reached under two names, each with
+// its own key source — and what tells them apart is the NAME (ADR 0036 decision 1), which is what
+// [Options.HostAlias] holds. So the mark sits on the bound entry alone, picking its sibling is a real
+// switch (the key source rebinds, and the pin records the entry the human named), and re-picking the
+// bound entry is still the already-on answer.
+func TestServerEntriesSharingAnEndpointAreToldApartByName(t *testing.T) {
+	t.Run("only the bound entry is marked", func(t *testing.T) {
+		m, _ := seededSiblings(t, &fakeSwitch{}, &fakeRecorder{saved: true})
+
+		m, _ = typeCommand(t, m, "/server")
+
+		if m.picker.selected != 0 {
+			t.Errorf("selected = %d, want the bound entry's row, not its same-endpoint sibling", m.picker.selected)
+		}
+		rows := m.pickerRows()
+		if len(rows) != 2 {
+			t.Fatalf("rows = %v, want one per configured entry", rows)
+		}
+		const markCell = 2 // ["name", "— endpoint", "· current"]
+		if got := rows[0][markCell]; got != currentRowCell {
+			t.Errorf("rows[0] mark cell = %q, want the bound entry marked %q", got, currentRowCell)
+		}
+		if got := rows[1][markCell]; got != "" {
+			t.Errorf("rows[1] mark cell = %q, want no mark on a sibling that only shares the endpoint", got)
+		}
+	})
+
+	t.Run("picking the sibling switches", func(t *testing.T) {
+		sw, rec := siblingSwitch(), &fakeRecorder{saved: true}
+		m, _ := seededSiblings(t, sw, rec)
+
+		m, _ = typeCommand(t, m, "/server")
+		m = step(t, m, keyDown())
+		m, _ = stepCmd(t, m, keyEnter())
+
+		if want := []string{"twin"}; !reflect.DeepEqual(sw.calls, want) {
+			t.Fatalf("switch calls = %v, want %v — a different entry is a move, whatever URL it names", sw.calls, want)
+		}
+		if want := []string{"twin"}; !reflect.DeepEqual(rec.names, want) {
+			t.Errorf("recorded names = %v, want %v — the pin names the entry, so it is truthful", rec.names, want)
+		}
+		if m.opts.HostAlias != "twin" {
+			t.Errorf("HostAlias = %q, want the sibling adopted as the session's entry", m.opts.HostAlias)
+		}
+		for _, note := range noteTexts(m) {
+			if strings.Contains(note, "already on") {
+				t.Errorf("notes = %v, want no already-on answer for a real switch", noteTexts(m))
+				break
+			}
+		}
+	})
+
+	t.Run("re-picking the bound entry answers and records", func(t *testing.T) {
+		sw, rec := siblingSwitch(), &fakeRecorder{saved: true}
+		m, _ := seededSiblings(t, sw, rec)
+
+		m, _ = typeCommand(t, m, "/server")
+		m, _ = stepCmd(t, m, keyEnter())
+
+		if len(sw.calls) != 0 {
+			t.Fatalf("switch calls = %v, want none — the session is already on that entry", sw.calls)
+		}
+		if want := []string{"test-host"}; !reflect.DeepEqual(rec.names, want) {
+			t.Errorf("recorded names = %v, want %v", rec.names, want)
+		}
+		want := "already on test-host (http://localhost:1234)"
+		if got := noteTexts(m); len(got) < 2 || got[len(got)-2] != want {
+			t.Errorf("notes = %v, want %q with the saved line under it", got, want)
+		}
+	})
 }
 
 // The happy path, end to end: the seam is called with the picked name, the display adopts what came
@@ -739,6 +831,17 @@ func seededServersRecording(t *testing.T, sw *fakeSwitch, rec *fakeRecorder) (Mo
 	t.Helper()
 	opts := testOpts
 	opts.Servers = staticServers(twoServers)
+	opts.SwitchServer = sw.switchTo
+	opts.RecordServerChoice = rec.record
+	return seededPicker(t, opts)
+}
+
+// seededSiblings is that same ready session over siblingServers — both seams wired, so a test can
+// tell a move onto the same URL from the already-on answer.
+func seededSiblings(t *testing.T, sw *fakeSwitch, rec *fakeRecorder) (Model, *fakeRebind) {
+	t.Helper()
+	opts := testOpts
+	opts.Servers = staticServers(siblingServers)
 	opts.SwitchServer = sw.switchTo
 	opts.RecordServerChoice = rec.record
 	return seededPicker(t, opts)

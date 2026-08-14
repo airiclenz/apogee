@@ -432,7 +432,9 @@
 // news about the server rather than a choice — recording there would write config nobody asked for.
 // /server is the SAME overlay
 // over [Options.Servers] (one pickerKind, no callback field on the value-copied state), with the
-// current row marked by endpoint rather than by id and the accept calling SwitchServer instead of
+// current row marked by entry NAME rather than by id (the name is the entry's identity, ADR 0036
+// decision 1, so a sibling entry sharing an endpoint is a switchable row of its own) and the accept
+// calling SwitchServer instead of
 // applyRebind; both verbs also take their choice as an argument ("/model <id>", "/server <name>"),
 // both are idle-only by the commandSpecs table, and /server's whole degrade ladder is one line —
 // an unwired seam and an empty list are the same situation for the human. A committed switch is also

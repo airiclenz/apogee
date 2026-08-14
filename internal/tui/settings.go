@@ -697,7 +697,7 @@ func (m Model) settingsSwitchServer(row SettingRow, name string) (tea.Model, tea
 	if m.prebound() {
 		return m.switchToServer(choice)
 	}
-	if choice.Endpoint == m.opts.Endpoint {
+	if choice.Name == m.opts.HostAlias {
 		// The delegate's answer is a transcript note, and this pane is drawn over the transcript — so
 		// from in here the ⏎ that confirmed the current server would look like a keypress that did
 		// nothing. The same sentence lands on the row (settingAnswer), where the human who pressed it is
@@ -1687,14 +1687,15 @@ func (m Model) settingsMechanisms(rows []SettingRow) []MechanismToggle {
 // settingsCurrentValue is the value a sub-list opens on and marks "(current)": what the pane believes
 // the file holds (settingsPersistedValue) for every key but one.
 //
-// The `server` row is that one, and its honest answer is the server the session is ON — identified by
-// endpoint, the picker's own comparison — rather than the entry the key names: `/server` moves a
-// session and rewrites the key without this pane ever hearing about it, so a value read off the
-// launch resolution would mark the server the session has left.
+// The `server` row is that one, and its honest answer is the entry the session is ON — identified by
+// name, the picker's own comparison ([Model.currentServerRow]) — rather than the entry the key names:
+// `/server` moves a session and rewrites the key without this pane ever hearing about it, so a value
+// read off the launch resolution would mark the server the session has left. Name and not endpoint,
+// so that a sibling entry sharing the bound one's URL is not marked as the one you are on.
 func (m Model) settingsCurrentValue(row SettingRow) string {
 	if row.Kind == SettingServer {
 		for _, choice := range m.servers() {
-			if choice.Endpoint == m.opts.Endpoint {
+			if choice.Name == m.opts.HostAlias {
 				return choice.Name
 			}
 		}
