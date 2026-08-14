@@ -23,18 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Run residuals — open (2026-08-13)
-
-The still-open findings the 2026-08-13 plan runs left, merged into one section under the
-conventions' actionability bar (the closed and accepted remainder of every run is in
-`CHANGELOG.md`); each bullet names its origin run.
-
-- [ ] A cancel landing inside the 1s hold-off (`restreamHoldoff` / `holdOffRestream`,
-  `internal/agent/loop.go:315`, `:320`, taken at `:382`) now ends the Turn `endAbandoned`
-  (ErrorEvent, deferred queue cleared) where a cancel 100ms earlier gives the resumable
-  `endCancelled` (`internal/agent/turn.go:60`, `:61`) — plan-ratified, narrow window, but a real
-  cancel-semantics seam worth tracking. (in-band retry run)
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive

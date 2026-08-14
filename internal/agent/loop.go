@@ -301,7 +301,7 @@ type turnOutcome int
 
 const (
 	turnOK         turnOutcome = iota // a usable response (a nil-safe *Response is returned)
-	turnCancelled                     // ctx was cancelled mid-stream
+	turnCancelled                     // ctx was cancelled mid-stream or inside the re-stream hold-off
 	turnFailed                        // an Upstream fault (already surfaced as an ErrorEvent)
 	turnOverflowed                    // the request did not fit the model's context window — NOT surfaced; the caller owns the ErrorEvent
 )
@@ -315,8 +315,8 @@ const (
 var restreamHoldoff = time.Second
 
 // holdOffRestream waits restreamHoldoff and reports whether the wait completed — false means ctx
-// was cancelled first, and the caller must surface the fault instead of re-streaming into a
-// context that is already gone.
+// was cancelled first, and the caller must route the cancel rather than re-stream into a context
+// that is already gone.
 func holdOffRestream(ctx context.Context) bool {
 	timer := time.NewTimer(restreamHoldoff)
 	defer timer.Stop()
@@ -374,13 +374,22 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 				// The Turn's one re-stream. Spend the latch first, so the second fault takes the
 				// give-up path below however this attempt ends, then tell observers the tokens
 				// streamed before the fault are superseded and hold off long enough for a routed
-				// provider to be swapped out upstream. A cancelled hold-off falls through to the
-				// fault rather than re-streaming into a dead context: the exchange did fail, and
-				// saying so is more honest than a silent abandon.
+				// provider to be swapped out upstream. A cancel arriving during that wait is a
+				// cancel like any other — routed just below, never fallen through to the fault.
 				t.restreamSpent = true
 				a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(turn)})
 				if holdOffRestream(ctx) {
 					continue
+				}
+				if ctx.Err() != nil {
+					// The wait ended because the ctx was cancelled, not because it elapsed. Cancel
+					// semantics are uniform wherever the cancel lands (the guard above is the same
+					// call): the Turn rolls back to a serializable boundary and RESUMES, so it must
+					// not degrade to an abandoned Turn — and no ErrorEvent, because a cancel is the
+					// user's own act, not a fault they must act on. The StreamResetEvent already
+					// emitted is consistent with that rolled-back Turn: the partial reply it told
+					// observers to discard is exactly what the rollback drops.
+					return nil, turnCancelled, ""
 				}
 			}
 			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: reply.errMsg})

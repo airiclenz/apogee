@@ -306,6 +306,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A cancel inside the re-stream hold-off now leaves a resumable Turn.** A transient in-band fault
+  makes the Turn wait `restreamHoldoff` (1s) before re-sending the same request, and a cancel
+  arriving inside that window fell through to the give-up path: an Esc a moment too late ended the
+  Turn `endAbandoned` — Exchange closed, deferred queue cleared, and an `ErrorEvent` blaming the
+  upstream for the user's own cancel — where the same Esc 100ms earlier gave the resumable
+  `endCancelled`. `respondAndReview` now re-checks `ctx.Err()` when the hold-off returns early and
+  routes it as `turnCancelled` with no `ErrorEvent`, so cancel semantics are uniform wherever the
+  cancel lands: the Turn rolls back to its pre-request boundary, the drained corrections go back on
+  the deferred queue, the Exchange stays open, and a re-`Step` re-attempts it. The
+  `StreamResetEvent` already emitted stays consistent with that rollback — the partial reply it
+  tells observers to discard is exactly what the rollback drops. Both halves of the branch are
+  pinned in the new `internal/agent/loop_test.go`: the cancelled hold-off, and the hold-off that
+  merely elapses and still re-streams.
+
 - **The prompt box sizes a value carrying a bare CR the way the widget draws it.**
   `inputContentRows` — the mirror of the textarea's own wrap that gives the input box its height —
   split the value on `"\n"` alone, while the widget's sanitizer rewrites every `'\r'` AND every

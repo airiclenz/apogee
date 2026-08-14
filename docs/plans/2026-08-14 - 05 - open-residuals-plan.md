@@ -295,7 +295,10 @@ yields the suffixed alias; a non-colliding host stays bare.
 
 **Commit:** `fix(config): ephemeral endpoint alias avoids configured-name collision`
 
-## 11. A cancel inside the restream hold-off stays resumable
+## 11. A cancel inside the restream hold-off stays resumable — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): beyond the fall-through comment the item names (`loop.go:376-379`), two neighbouring doc comments in the same file were falsified by the change and corrected in place — `holdOffRestream`'s "the caller must surface the fault instead of re-streaming" (now "must route the cancel"), and the `turnCancelled` constant's "ctx was cancelled mid-stream" (now "mid-stream or inside the re-stream hold-off"). No other code was touched.
+NOTES (2026-08-14): the new test was verified non-vacuous by a negative control — neutering the added `ctx.Err()` guard makes `TestCancelInsideRestreamHoldOffStaysResumable` fail with `Step status = "exchange-complete"` (the `endAbandoned` degrade) instead of `"cancelled"`. The sibling re-stream suite lives in `overflow_test.go`; the item's Files line names `loop_test.go`, which did not exist, so it was created and reuses that suite's package-level helpers (`retryableErrorScript`, `transientFaultMsg`, `shortRestreamHoldoff`, `countEvents`, `errorEvents`).
 
 **What:** Realise ratified call 2. In `respondAndReview` (`internal/agent/loop.go:361-388`),
 the retryable-fault branch latches the restream and waits out the 1s hold-off
