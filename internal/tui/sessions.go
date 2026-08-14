@@ -540,6 +540,7 @@ func (m Model) renderSessionBrowser() string {
 		bodyPadBelow: filter != "",
 		hint:         sessionBrowserHint,
 		selected:     -1, // no rows ⇒ no highlight (the popup module's own convention)
+		scrollbar:    m.popupScrollbarOn(),
 	}
 	if len(b.visible(m.opts.Workspace)) == 0 {
 		// An empty WORKSPACE view is a fact about the store, and a row of prose is how the pane states

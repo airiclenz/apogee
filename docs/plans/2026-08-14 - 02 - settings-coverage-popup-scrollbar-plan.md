@@ -39,7 +39,11 @@ NOTES (2026-08-14): the bar is not reserved when the pane is so narrow that the 
 
 commit: `feat(tui): popup row windows can paint a scrollbar`
 
-## 2. Callers adopt the popup scrollbar
+## 2. Callers adopt the popup scrollbar — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the overflow bar is described in `layout.md`'s "The scroll bar and the column it hangs in" section rather than in a popup section — the document has no general popup section, and its one pane section (`## The /usage popup`) is about that pane's own content.
+NOTES (2026-08-14): the item's Files list names no test file, so the required caller test (`TestPopupCallersPaintTheOverflowBar`) landed in `internal/tui/popup_test.go`, beside the item-1 bar tests whose helpers it reuses.
+NOTES (2026-08-14): the mechanical check the item asked for came out yes — the `/settings` text-field spec does window rows (`maxRows` + a caret-line selection), so it is stamped like the rest.
 
 Depends on item 1.
 

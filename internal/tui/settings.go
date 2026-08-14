@@ -2079,6 +2079,7 @@ func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDispla
 		selected:    display.selected,
 		hint:        m.settingsPaneHint(rows),
 		maxRows:     maxRows,
+		scrollbar:   m.popupScrollbarOn(),
 	}, display, true
 }
 
@@ -2160,6 +2161,7 @@ func (m Model) settingsTextSpec(rows []SettingRow) (popupSpec, bool) {
 		selected:    clampInt(m.settings.editor.caretLine(), 0, len(text)-1),
 		hint:        m.settingsPaneHint(rows),
 		maxRows:     maxRows,
+		scrollbar:   m.popupScrollbarOn(),
 	}, true
 }
 
@@ -2203,6 +2205,7 @@ func (m Model) renderSettingsEnum(row SettingRow) string {
 		selected:    clampInt(m.settings.sub, 0, len(values)-1),
 		hint:        settingsEnumHint,
 		maxRows:     maxRows,
+		scrollbar:   m.popupScrollbarOn(),
 	}, m.width)
 }
 

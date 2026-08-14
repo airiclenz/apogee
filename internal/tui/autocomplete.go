@@ -897,11 +897,12 @@ func (m Model) renderAutocomplete() string {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
 	spec := popupSpec{
-		title:    autocompleteTitle(ac.kind),
-		rows:     rows,
-		selected: ac.selected,
-		hint:     autocompleteHint,
-		maxRows:  shown,
+		title:     autocompleteTitle(ac.kind),
+		rows:      rows,
+		selected:  ac.selected,
+		hint:      autocompleteHint,
+		maxRows:   shown,
+		scrollbar: m.popupScrollbarOn(),
 	}
 	return renderPopup(m.th, spec, m.width)
 }

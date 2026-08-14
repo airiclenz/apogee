@@ -2043,3 +2043,64 @@ func TestRenderPopupScrollbarSpansWrappedRowLines(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The bar's CALLERS — every pane that windows rows opts in (Model.popupScrollbarOn)
+// ----------------------------------------------------------------------------
+
+// The bar is a property of the POPUP surface rather than of one pane that grew one, so the test
+// drives real panes rather than a hand-built spec: an overflowing /usage report carries the thumb,
+// a picker whose whole offering is seated carries no bar at all, and `ui.show-scrollbar: false`
+// (Options.HideScrollbar, the inverted form the composition root passes) takes the bar off the
+// overflowing pane exactly as it takes the transcript's away.
+func TestPopupCallersPaintTheOverflowBar(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an overflowing /usage paints the thumb", func(t *testing.T) {
+		m := usageModel(t, mainTotals, 8192)
+		for i := range maxUsageRows {
+			m = delegate(t, m, fmt.Sprintf("s%d", i), fmt.Sprintf("delegate %d", i), childTotals, 4096)
+		}
+		rows := m.usageRows()
+		spec, seated := m.usageSpec(rows)
+		if !seated || spec.maxRows >= len(rows) {
+			t.Fatalf("the report did not overflow: %d of %d rows seated (seated=%v)", spec.maxRows, len(rows), seated)
+		}
+		column := popupBarColumn(m.renderUsage())
+		if at, size := popupThumbSpan(column); at < 0 || size == 0 {
+			t.Errorf("the overflowing report painted no thumb; its bar column is %q:\n%s",
+				column, strip(m.renderUsage()))
+		}
+	})
+
+	t.Run("a picker whose offering fits paints no bar", func(t *testing.T) {
+		m := newTestModel(t)
+		m.picker = picker{open: true, kind: pickerCycle}
+		m.layout()
+		pane := m.renderPicker()
+		// The premise the assertion rests on: every row of the offering is on the screen, so there is
+		// nothing for a bar to describe.
+		for _, row := range m.pickerRows() {
+			if !strings.Contains(strip(pane), row[0]) {
+				t.Fatalf("the offering did not fit — %q is windowed out:\n%s", row[0], strip(pane))
+			}
+		}
+		if column := popupBarColumn(pane); len(column) != 0 {
+			t.Errorf("a fitting picker painted %d bar cells, want none:\n%s", len(column), strip(pane))
+		}
+	})
+
+	t.Run("ui.show-scrollbar off takes the popup's bar with it", func(t *testing.T) {
+		m := usageModel(t, mainTotals, 8192)
+		for i := range maxUsageRows {
+			m = delegate(t, m, fmt.Sprintf("s%d", i), fmt.Sprintf("delegate %d", i), childTotals, 4096)
+		}
+		m.opts.HideScrollbar = true
+		if spec, _ := m.usageSpec(m.usageRows()); spec.scrollbar {
+			t.Errorf("the spec still asks for a bar with the switch off")
+		}
+		if column := popupBarColumn(m.renderUsage()); len(column) != 0 {
+			t.Errorf("the switch off still painted %d bar cells:\n%s", len(column), strip(m.renderUsage()))
+		}
+	})
+}

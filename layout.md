@@ -520,6 +520,19 @@ a hairline. The two tones do the rest of the work: the thumb takes the dim foreg
 the chrome uses, the track the recessive one. Both glyphs are one cell wide, which is what lets the
 column stay a single column.
 
+**Every overflowing popup carries the same bar.** A bordered pane whose list is longer than the
+window it was granted paints those same two weights down the last column *inside* its border —
+the picker, the session browser, `/settings` and its sub-lists, `/usage`, the dropdown, the
+approval and ask prompts alike, because a windowed list that gives no sign of what it is holding
+back is the same omission wherever it is drawn. The column is reserved **only while the list
+overflows**: a pane whose rows all fit keeps its full inner width, so the bar appearing is itself
+the statement that there is more, and nothing narrows for a list with nothing to scroll. The thumb
+is sized and placed from the **rows** — the seated window over the whole list — and drawn in the
+**lines** the row block was painted in, which is what keeps it flush at the top on the first row
+and flush at the bottom on the last even where a row wraps to several lines. `ui.show-scrollbar`
+governs both bars: switching the transcript's off takes the popups' with it, each pane giving the
+column back to its rows exactly as the transcript gives it back to its body.
+
 **It re-wraps once, and only on a deliberate change.** The key is read from `config.yaml` at
 start-up like the rest of the `ui:` block, and `/settings` applies an edit to the *running* session
 (ADR 0037): the bar's column is transcript width, so flipping the key lays the frame out again and

@@ -3663,6 +3663,21 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int, floor popupFlo
 	return maxBody, maxRows, true
 }
 
+// popupScrollbarOn is the answer every popup spec carries in popupSpec.scrollbar: the human's
+// `ui.show-scrollbar` (Options.HideScrollbar, the inverted form the composition root passes),
+// read HERE rather than inside the popup module, which is not given a Model to read it from.
+//
+// One switch covers both bars because it is one preference. The key is about whether apogee draws
+// an indicator down a right-hand column at all — a reader who took the transcript's away did not
+// ask to keep the same stroke beside a list — so a pane asks the same question of the same field
+// and gets the same answer, and no popup has a switch of its own to fall out of step with.
+//
+// It says nothing about OVERFLOW: a spec that sets the flag and fits paints no bar and gives up no
+// column (popupRowLines). What this decides is only whether the bar is available to the pane, and
+// stamping it at every construction site is what makes "every overflowing popup" true by
+// construction rather than by a list of panes someone has to remember to extend.
+func (m Model) popupScrollbarOn() bool { return !m.opts.HideScrollbar }
+
 // maxAskChoiceRows caps how many ask_user choice rows the popup shows at once (the
 // maxAutocompleteItems convention); a longer set scrolls its window around the selection. The
 // window itself is now budgeted in LINES rather than rows (popupRowWindow), so what the pane hands
@@ -3858,6 +3873,7 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 		selected:      selected,
 		hint:          hint,
 		maxRows:       rowLines,
+		scrollbar:     m.popupScrollbarOn(),
 	}
 	return renderPopup(m.th, spec, m.width)
 }

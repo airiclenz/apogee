@@ -940,6 +940,7 @@ func (m Model) renderPicker() string {
 		selected:     selected,
 		hint:         pickerHintFor(m.picker.kind),
 		maxRows:      shown,
+		scrollbar:    m.popupScrollbarOn(),
 	}, m.width)
 }
 

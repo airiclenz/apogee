@@ -253,6 +253,7 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 		rowPadAbove:   true, // the one blank line between the body and the menu; the mockup closes on the border
 		selected:      clampInt(m.approvalSel, 0, len(rows)-1),
 		maxRows:       rowsShown,
+		scrollbar:     m.popupScrollbarOn(),
 	}
 	return renderPopup(m.th, spec, m.width)
 }

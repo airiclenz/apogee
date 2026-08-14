@@ -295,7 +295,7 @@ var KeyRegistry = []Key{
 	{
 		Path: "ui.show-scrollbar", Kind: KindBool, Default: "true",
 		Editable: true,
-		Desc:     "Paint the transcript's scroll bar and reserve the column it hangs in.",
+		Desc:     "Paint the scroll bar on the transcript and on any overflowing popup, and reserve its column.",
 	},
 	{
 		// A dynamic vocabulary (KindScheme), so EnumValues is empty and the surface asks the session

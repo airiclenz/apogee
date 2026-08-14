@@ -55,6 +55,16 @@ point is a **minor** bump, not a breaking change.
   list) but drawn in the block's painted LINES, so a pane whose rows wrap gets one unbroken stroke
   spanning every line of every seated row. No pane opts in yet.
 
+- **Every overflowing popup now paints the scroll bar.** The `/settings` key list, its text field
+  and its enum sub-list, `/usage`, the `/sessions` browser, the `/model` · `/server` pickers, the
+  `/` dropdown and the approval and ask prompts all stamp the human's `ui.show-scrollbar` into
+  their popup spec (`Model.popupScrollbarOn`, the one place `Options.HideScrollbar` is read for a
+  pane), so a pane whose list is longer than the window it was granted shows the same two weights
+  down the column inside its border that the transcript has always used. The column is reserved
+  only while the list overflows — a pane whose rows all fit keeps its full inner width and renders
+  exactly as it did before — and switching `ui.show-scrollbar` off takes every popup's bar away
+  with the transcript's, which is what the key's `/settings` description now says.
+
 ### Changed
 
 - The confinement execution contract now describes the approved escape as **landed**, not as a

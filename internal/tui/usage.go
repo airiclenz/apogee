@@ -152,9 +152,10 @@ func (m Model) usageSpec(rows []popupRow) (popupSpec, bool) {
 		// The scroll is clamped to the LAST full window rather than to the last row: a report scrolled
 		// to its end shows a full pane of rows, and a stale offset — the grant shrank with the window,
 		// or a delegate row arrived — is corrected here rather than painting one row over an empty pane.
-		rowTop:  clampInt(m.usagePane.top, 0, max(0, len(rows)-shown)),
-		hint:    usageHint,
-		maxRows: shown,
+		rowTop:    clampInt(m.usagePane.top, 0, max(0, len(rows)-shown)),
+		hint:      usageHint,
+		maxRows:   shown,
+		scrollbar: m.popupScrollbarOn(),
 	}, true
 }
 
