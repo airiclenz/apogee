@@ -306,7 +306,11 @@ nothing; each moved test name appears exactly once under `internal/tui/`.
 
 ---
 
-## 9. Carve toolbranch_test.go and toolshape_test.go out of render_test.go
+## 9. Carve toolbranch_test.go and toolshape_test.go out of render_test.go — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): banner disposition, same rule items 6–8 recorded — the `// ----` banner "The answered Ask User block: an ordinary body-bearing block (layout.md, …)" heads a section whose entire contents (`askUserCall` and its three tests) this item moves, so it travelled and now opens the ask-user half of `toolbranch_test.go`. The detail/diff and tool-shape suites had no banner of their own: they sat under "Grouped same-label tool calls (tool-call layout item 4)" and "The firing block" respectively, both of which stay in `render_test.go` with the helpers and tests still filed under them, so those suites arrive bannerless under their own doc comments. No banner text was invented or duplicated.
+
+NOTES (2026-08-14): `render_test.go`'s import block is unchanged — every import still has callers in the residual file (item 10 owns the trim). The moved bodies are byte-identical to their `HEAD` originals and the residual is `HEAD` minus exactly the moved ranges (verified by reconstructing `HEAD`'s `render_test.go` from residual + moved chunks: exact match).
 
 **What:** Create `internal/tui/toolbranch_test.go` (~715 lines) and
 `internal/tui/toolshape_test.go` (~485 lines); move verbatim from `render_test.go`:

@@ -196,6 +196,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The tool detail/diff, ask-user and tool-shape suites move to
+  `internal/tui/toolbranch_test.go` and `internal/tui/toolshape_test.go`.** The fourth carve of the
+  `render_test.go` split lifts the detail/diff suite (the in-flight member, the lone call sharing
+  the group shape, the multi-detail and diff standalones, the layout sketch, the diffstat surviving
+  the body cap, the collapsed truncation and expanded whole-body paints, the detail tone step, diff
+  colour in both block states, the two-row collapsed cap and the clipped target that is no toggle
+  target) plus the answered Ask User suite with its `askUserCall` fixture into
+  `toolbranch_test.go`, and the tool-shape suite (one-line output on the branch and its grouping,
+  the in-flight and targetless standalones, the targetless row budget, the cross-cutting
+  every-shape collapse budget, unregistered-call argument labelling and the group breakers) into
+  `toolshape_test.go`. The helpers these suites call — `readCall`, the golden-row builders,
+  `blockMarks`, `firingBlock` — stay where they are, their cross-file callers reaching them in the
+  same package. Pure moves: no test renamed, reordered or edited, each new file carrying only the
+  imports it needs; `render_test.go` drops from 2715 to 1527 lines. Tests only — no behavior
+  change.
+
 - **The tool leader-row and tool-block grouping suites move to `internal/tui/toolleader_test.go`
   and `internal/tui/toolblock_test.go`.** The third carve of the `render_test.go` split lifts the
   header-label styling test and the leader-row arithmetic suite (the outcome slot reserved first,
