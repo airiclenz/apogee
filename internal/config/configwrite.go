@@ -236,15 +236,6 @@ func renderHostBlock(entry UnconfinedHost) ([]string, error) {
 	return append(block, item...), nil
 }
 
-// appendBlock puts a new top-level block at the end of the file, separated from whatever is
-// already there by one blank line.
-func appendBlock(lines, block []string) []string {
-	if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
-		block = append([]string{""}, block...)
-	}
-	return append(lines, block...)
-}
-
 // hostsAppended reports whether after is exactly before plus entry, appended last — the shape a
 // splice must produce. Anything else (a reordered, dropped, or altered neighbour) is a mis-read.
 func hostsAppended(before, after []UnconfinedHost, entry UnconfinedHost) bool {

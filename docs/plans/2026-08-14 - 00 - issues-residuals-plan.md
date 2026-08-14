@@ -316,7 +316,21 @@ it; CHANGELOG `[Unreleased]` gets one line.
 
 **Commit:** `refactor(config): the scalar writer's splice machinery moves to its own file`
 
-## 10. Shared splice plumbing lands beside its callers
+## 10. Shared splice plumbing lands beside its callers — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): placement inside each destination file is the item's one open choice and was made
+for cohesion — `appendBlock` next to `insertAt` (the other insertion helper in the shared machinery),
+`listValue` at the end of the scalar writer's value-rendering run (after `renderScalar`), `lineCount`
+at the end of the splice file's text/block-scalar run (after `blockScalarHeader`). No existing
+declaration was reordered.
+NOTES (2026-08-14): purity was checked mechanically, not by eye — every non-comment line the diff adds
+has an exactly matching removed line (`git diff -U0 | grep -v '^[+-]\s*//' | sort | uniq -c` pairs them
+all). The only prose change is the authorized split of the `listValue`/`lineCount` shared comment:
+"Both are … They are three lines" became per-helper singulars ("It is one line" / "It is three lines",
+"the same value" / "the same lines"); the duplication rationale and the ADR 0011 / ADR 0043 citation
+are unchanged in both halves.
+NOTES (2026-08-14): `internal/config/doc.go` needed no edit — its file map names files, and this item
+adds none.
 
 Depends on item 9.
 

@@ -325,21 +325,3 @@ func serversChangedOnlyAt(before, after []ServerEntry, at int, want ServerEntry)
 	}
 	return true
 }
-
-// listValue spells a name list the way the template's inline form spells it ("[AGENTS.md]") — the
-// CANONICAL spelling a written list is verified against, so the value a reader takes back out of
-// the file is the same string that was typed. lineCount counts the lines of a multi-line value.
-//
-// Both are deliberately duplicated from the /settings row renderer (cmd/apogee/settingsrows.go),
-// which spells the same two values for the human. They are three lines of string handling with no
-// state behind them, and the binary's display projection stays in the binary (ADR 0011, ADR 0043) —
-// so the alternative to two copies is an exported string-formatting surface on this package that
-// exists only so the renderer can borrow it.
-func listValue(names []string) string { return "[" + strings.Join(names, ", ") + "]" }
-
-func lineCount(text string) int {
-	if text == "" {
-		return 0
-	}
-	return len(strings.Split(strings.TrimSuffix(text, "\n"), "\n"))
-}

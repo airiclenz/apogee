@@ -103,6 +103,15 @@ func insertAt(lines, insert []string, at int, subject string) ([]byte, error) {
 	return joinConfigLines(out), nil
 }
 
+// appendBlock puts a new top-level block at the end of the file, separated from whatever is
+// already there by one blank line.
+func appendBlock(lines, block []string) []string {
+	if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
+		block = append([]string{""}, block...)
+	}
+	return append(lines, block...)
+}
+
 // SplitConfigLines splits the file into lines without a trailing empty element, so a rejoin plus
 // one closing newline reproduces the file exactly. A blank file has no lines at all.
 func SplitConfigLines(data []byte) []string {

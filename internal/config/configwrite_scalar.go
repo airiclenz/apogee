@@ -302,6 +302,17 @@ func renderScalar(v any) (string, error) {
 	return text, nil
 }
 
+// listValue spells a name list the way the template's inline form spells it ("[AGENTS.md]") — the
+// CANONICAL spelling a written list is verified against, so the value a reader takes back out of
+// the file is the same string that was typed.
+//
+// It is deliberately duplicated from the /settings row renderer (cmd/apogee/settingsrows.go), which
+// spells the same value for the human. It is one line of string handling with no state behind it,
+// and the binary's display projection stays in the binary (ADR 0011, ADR 0043) — so the alternative
+// to two copies is an exported string-formatting surface on this package that exists only so the
+// renderer can borrow it.
+func listValue(names []string) string { return "[" + strings.Join(names, ", ") + "]" }
+
 // spliceScalarSet rewrites the key's active line, or inserts one where the key has none. A text key
 // is the one that occupies more than a line: its block replaces the block already there
 // (spliceTextBlock), and an insert puts the whole block where a scalar's single line would have gone.

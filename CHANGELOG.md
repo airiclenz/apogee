@@ -488,6 +488,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The configwrite split's stranded plumbing now sits beside its callers.** Three helpers the
+  split left behind moved to where the code that calls them lives, verbatim: `appendBlock` — the
+  end-of-file block append the acknowledgement writer, the scalar writer and the legacy fold all
+  reach for — out of `internal/config/configwrite.go` into `internal/config/configsplice.go`, the
+  machinery every config writer shares; `listValue`, whose only callers are `renderSettingValue`
+  and `scalarAtPath`, into `internal/config/configwrite_scalar.go`; and `lineCount`, whose only
+  caller is `spliceTextBlock`, into `internal/config/configwrite_scalarsplice.go`. The pair's
+  shared doc comment split with them, each half keeping the deliberate-duplication note about
+  `cmd/apogee/settingsrows.go` that applies to it. A pure move: every line of code is
+  byte-identical to the line it replaced, and the package suite is the proof.
+
 - **The scalar setting writer's splice machinery now lives in its own file.**
   `internal/config/configwrite_scalar.go` had grown to 803 lines, double the ~400-line guide, so
   the machinery its drivers reach for moved to a new `internal/config/configwrite_scalarsplice.go`

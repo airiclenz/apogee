@@ -236,6 +236,20 @@ func blockScalarHeader(value string, indent int) string {
 	return "|"
 }
 
+// lineCount counts the lines of a multi-line value.
+//
+// It is deliberately duplicated from the /settings row renderer (cmd/apogee/settingsrows.go), which
+// counts the same lines for the human. It is three lines of string handling with no state behind
+// it, and the binary's display projection stays in the binary (ADR 0011, ADR 0043) — so the
+// alternative to two copies is an exported string-formatting surface on this package that exists
+// only so the renderer can borrow it.
+func lineCount(text string) int {
+	if text == "" {
+		return 0
+	}
+	return len(strings.Split(strings.TrimSuffix(text, "\n"), "\n"))
+}
+
 // scalarInsertion is the lines to insert for a key the file does not set, and the 1-based line to
 // insert them after — 0 for "append at the end", the fallback when the file documents the key
 // nowhere. The four cases, in the order they are common:

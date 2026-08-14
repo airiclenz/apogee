@@ -59,12 +59,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   `endCancelled` (`internal/agent/turn.go:60`, `:61`) — plan-ratified, narrow window, but a real
   cancel-semantics seam worth tracking. (in-band retry run)
 
-- [ ] The configwrite split left shared plumbing outside `configsplice.go`: `appendBlock` stays in
-  `internal/config/configwrite.go:241` though `configwrite_scalar.go:397` and `configmigrate.go:344`
-  call it, and `listValue` / `lineCount` sit in `configwrite_keysource.go:328`, `:330` while their
-  only callers are the scalar writer's (`configwrite_scalar.go:219`, `:485`, `:800`).
-  (configwrite split run)
-
 - [ ] The configwrite split left prose pointing across files: `configwrite_keysource.go:22`'s carried
   banner still reads "the same contract the two writers above are" (a self-reference that no longer
   resolves in its new file), and `configwrite.go:273`, `:319`, `:404` ("Each writer above", "the
