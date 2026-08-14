@@ -257,8 +257,8 @@ func TestUnpermittedEscapeStillRefused(t *testing.T) {
 func TestEscapeMismatchNamesTheApprovedTarget(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	outside := t.TempDir()
+	root := tempRoot(t)
+	outside := tempRoot(t)
 	approved := filepath.Join(outside, "approved.txt")
 	other := filepath.Join(outside, "other.txt")
 
@@ -280,8 +280,8 @@ func TestEscapeMismatchNamesTheApprovedTarget(t *testing.T) {
 func TestApprovedEscapeCreatesMissingParents(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	target := filepath.Join(t.TempDir(), "nested", "deeper", "landed.txt")
+	root := tempRoot(t)
+	target := filepath.Join(tempRoot(t), "nested", "deeper", "landed.txt")
 	writeFixture(t, filepath.Join(root, "src.txt"), "copied\n", 0o644)
 
 	result := runWrite(t, escapePermit(target), NewCopyFile(root, nil), map[string]any{
@@ -299,8 +299,8 @@ func TestApprovedEscapeCreatesMissingParents(t *testing.T) {
 func TestPermitLeavesInWorkspaceWritesAlone(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	outside := filepath.Join(t.TempDir(), "approved.txt")
+	root := tempRoot(t)
+	outside := filepath.Join(tempRoot(t), "approved.txt")
 
 	result := runWrite(t, escapePermit(outside), NewWriteFile(root), map[string]any{
 		"path": "notes.md", "content": "inside\n",
@@ -319,8 +319,8 @@ func TestPermitLeavesInWorkspaceWritesAlone(t *testing.T) {
 func TestMoveSourceStaysInWorkspaceUnderAPermit(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	outside := t.TempDir()
+	root := tempRoot(t)
+	outside := tempRoot(t)
 	source := filepath.Join(outside, "secret.txt")
 	destination := filepath.Join(outside, "landed.txt")
 	writeFixture(t, source, "private\n", 0o644)
@@ -339,8 +339,8 @@ func TestMoveSourceStaysInWorkspaceUnderAPermit(t *testing.T) {
 func TestPermitWidensNoRead(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	target := filepath.Join(t.TempDir(), "approved.txt")
+	root := tempRoot(t)
+	target := filepath.Join(tempRoot(t), "approved.txt")
 	writeFixture(t, target, "outside bytes\n", 0o644)
 
 	result := runWrite(t, escapePermit(target), NewReadFile(root, nil), map[string]any{"path": target})
@@ -358,8 +358,8 @@ func TestPermitWidensNoRead(t *testing.T) {
 func escapeFixtures(t *testing.T, tc escapeCase) (root, target string) {
 	t.Helper()
 
-	root = t.TempDir()
-	target = filepath.Join(t.TempDir(), "landed.txt")
+	root = tempRoot(t)
+	target = filepath.Join(tempRoot(t), "landed.txt")
 	tc.setup(t, root, target)
 	return root, target
 }

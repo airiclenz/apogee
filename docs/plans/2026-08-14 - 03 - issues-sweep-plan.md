@@ -263,7 +263,15 @@ carrying `utf8.RuneError` and a non-tab control rune (e.g. `\x07`); extend the
 **Acceptance:** `go build ./internal/tui/ && go test ./internal/tui/ -run 'WrapRowStarts|InputContentRows|InputCellSpans|CellToRuneOffset'`
 **Commit:** `fix(tui): the input-width mirror matches the widget sanitizer in full`
 
-## 7. Write-family test suites adopt the symlink-resolved temp root
+## 7. Write-family test suites adopt the symlink-resolved temp root — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the item's line numbers are pre-item-2 evidence, so the sites were located by
+grep over each named file rather than by offset; the converted set is exactly the item's — 12 in
+`path_safety_test.go` (`:61`, `:90-91`, and the ten between `:145` and `:381`; `tempRoot`'s own body
+keeps `t.TempDir()`, being what it wraps), 12 in `write_permit_test.go` (verified against
+`41cfb1d^` to be the same 12 that stood inside the pre-item-2 `:233-335` `escapeFixtures` group —
+item 2 added no new root), 4 / 5 / 9 / 19 / 12 in the remaining five, matching the item's counts
+exactly. 73 roots in total, against the ratified call's "~60" estimate.
 
 **What:** (Ratified call 4.) Convert the raw `t.TempDir()` roots in the write-family suites —
 where a future exact-string assertion on a tool's success sentence is plausible — to `tempRoot`

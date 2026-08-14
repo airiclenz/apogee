@@ -58,7 +58,7 @@ func TestReadAllBounded(t *testing.T) {
 func TestReadWorkspaceFileBounded_RefusesOversizeFile(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	f, err := os.Create(filepath.Join(root, "big.bin"))
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -87,8 +87,8 @@ func TestReadWorkspaceFileBounded_RefusesOversizeFile(t *testing.T) {
 func scopeFixture(t *testing.T) (workspace, extra string, scope readScope) {
 	t.Helper()
 
-	workspace = t.TempDir()
-	extra = t.TempDir()
+	workspace = tempRoot(t)
+	extra = tempRoot(t)
 	writeFixtureFile(t, filepath.Join(workspace, "in-workspace.txt"), "workspace bytes")
 	writeFixtureFile(t, filepath.Join(extra, "skill.md"), "skill bytes")
 
@@ -123,11 +123,18 @@ func realPath(t *testing.T, path string) string {
 	return filepath.Join(parent, filepath.Base(path))
 }
 
-// tempRoot is t.TempDir() with symlinks resolved by the same rule realPath uses, for tests that
-// assert a writer's BARE success sentence. A root reached through a symlink (macOS /tmp) does not
-// equal what the tool resolves it to, so every path under it would carry a resolution note and the
-// exact-string assertion would break on that box alone. Roots whose assertions all route through
-// realPath do not need this.
+// tempRoot is t.TempDir() with symlinks resolved by the same rule realPath uses. A root reached
+// through a symlink (macOS /tmp) does not equal what a tool resolves it to, so every path under it
+// carries a resolution note and every path comparison inside the safety fence is made against a
+// name the fence never produces — both break on that box alone.
+//
+// The package rule: a suite whose paths can reach a tool's BARE success sentence or the safety
+// fence takes its workspace from tempRoot — that is the whole write family (write_file, file_edit,
+// find_replace, the file operations, read_file, the approved-escape permits) plus this file's own
+// fixtures. Every other suite here holds its workspace incidentally — registry, terminal, git,
+// python, grep, find_files, list_dir, diff, network, exec, present_document, workspace-scoped and
+// sub-agent among them — and needs no resolution: its assertions never depend on the root's
+// spelling, so raw t.TempDir() stays correct there.
 func tempRoot(t *testing.T) string {
 	t.Helper()
 
@@ -142,7 +149,7 @@ func TestReadScopeResolve(t *testing.T) {
 	t.Parallel()
 
 	workspace, extra, scope := scopeFixture(t)
-	outside := t.TempDir()
+	outside := tempRoot(t)
 	writeFixtureFile(t, filepath.Join(outside, "secret.txt"), "not yours")
 
 	cases := []struct {
@@ -205,8 +212,8 @@ func TestReadScopeResolve(t *testing.T) {
 func TestReadScopeWorkspaceOnlyUnchanged(t *testing.T) {
 	t.Parallel()
 
-	workspace := t.TempDir()
-	extra := t.TempDir()
+	workspace := tempRoot(t)
+	extra := tempRoot(t)
 	writeFixtureFile(t, filepath.Join(workspace, "in-workspace.txt"), "workspace bytes")
 	writeFixtureFile(t, filepath.Join(extra, "skill.md"), "skill bytes")
 
@@ -245,8 +252,8 @@ func TestReadScopeWorkspaceOnlyUnchanged(t *testing.T) {
 func TestReadScopeExtraRootsAreLive(t *testing.T) {
 	t.Parallel()
 
-	workspace := t.TempDir()
-	extra := t.TempDir()
+	workspace := tempRoot(t)
+	extra := tempRoot(t)
 	writeFixtureFile(t, filepath.Join(extra, "skill.md"), "skill bytes")
 
 	var mounted bool
@@ -286,8 +293,8 @@ func TestReadScopeSkipsUnusableExtraRoot(t *testing.T) {
 	t.Parallel()
 
 	workspace, extra, _ := scopeFixture(t)
-	missing := filepath.Join(t.TempDir(), "never-created")
-	notADir := filepath.Join(t.TempDir(), "a-file")
+	missing := filepath.Join(tempRoot(t), "never-created")
+	notADir := filepath.Join(tempRoot(t), "a-file")
 	writeFixtureFile(t, notADir, "not a directory")
 
 	scope := readScope{root: workspace, extra: func() []string { return []string{missing, notADir, extra} }}
@@ -318,7 +325,7 @@ func TestReadScopeRefusesSymlinkEscapingExtraRoot(t *testing.T) {
 	t.Parallel()
 
 	_, extra, scope := scopeFixture(t)
-	outside := t.TempDir()
+	outside := tempRoot(t)
 	writeFixtureFile(t, filepath.Join(outside, "secret.txt"), "not yours")
 
 	escape := filepath.Join(extra, "escape.txt")
@@ -378,7 +385,7 @@ func TestReadScopeReadBounded(t *testing.T) {
 	t.Parallel()
 
 	_, extra, scope := scopeFixture(t)
-	outside := t.TempDir()
+	outside := tempRoot(t)
 	writeFixtureFile(t, filepath.Join(outside, "secret.txt"), "not yours")
 
 	cases := []struct {

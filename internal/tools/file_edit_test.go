@@ -23,7 +23,7 @@ function main() {
 func TestEditExistingFile_FullReplacement(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	path := writeTempFile(t, root, "replace.txt", "original content\n")
 
 	result, err := NewEditExistingFile(root).Execute(context.Background(),
@@ -47,7 +47,7 @@ func TestEditExistingFile_FullReplacement(t *testing.T) {
 func TestEditExistingFile_SingleHunkPatch(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	path := writeTempFile(t, root, "patch.ts", patchTestFile)
 
 	patch := strings.Join([]string{
@@ -87,7 +87,7 @@ func TestEditExistingFile_SingleHunkPatch(t *testing.T) {
 func TestEditExistingFile_MultiHunkPatch(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	path := writeTempFile(t, root, "patch.ts", patchTestFile)
 
 	patch := strings.Join([]string{
@@ -126,7 +126,7 @@ func TestEditExistingFile_MultiHunkPatch(t *testing.T) {
 func TestEditExistingFile_PreservesContextLines(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	path := writeTempFile(t, root, "patch.ts", patchTestFile)
 
 	patch := strings.Join([]string{
@@ -160,7 +160,7 @@ func TestEditExistingFile_PreservesContextLines(t *testing.T) {
 func TestEditExistingFile_PatchFailuresDoNotCorrupt(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	tool := NewEditExistingFile(root)
 
 	cases := []struct {

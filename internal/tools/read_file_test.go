@@ -37,7 +37,7 @@ const outsideMarker = "PRIVATE KEY"
 func escapesUnderComponentSwap(t *testing.T, tool domain.Tool, root string, n int) int {
 	t.Helper()
 
-	outside := t.TempDir()
+	outside := tempRoot(t)
 	if err := os.WriteFile(filepath.Join(outside, "id_rsa"), []byte(outsideMarker), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -93,7 +93,7 @@ func escapesUnderComponentSwap(t *testing.T, tool domain.Tool, root string, n in
 func TestReadFile_Execute(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("line1\nline2\nline3"), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestReadFile_Execute_LocatesASubstring(t *testing.T) {
 func TestReadFile_Execute_ErrorCarriesNoSummary(t *testing.T) {
 	t.Parallel()
 
-	result, err := NewReadFile(t.TempDir(), nil).Execute(context.Background(),
+	result, err := NewReadFile(tempRoot(t), nil).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "absent.txt"}))
 
 	if err != nil {
@@ -326,8 +326,8 @@ func TestReadFile_Execute_ErrorCarriesNoSummary(t *testing.T) {
 func TestReadFile_Execute_RefusesEscapingSymlink(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	outside := t.TempDir()
+	root := tempRoot(t)
+	outside := tempRoot(t)
 	if err := os.WriteFile(filepath.Join(outside, "id_rsa"), []byte(outsideMarker), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestReadFile_Execute_RefusesEscapingSymlink(t *testing.T) {
 func TestReadFile_Execute_RefusesComponentSwappedMidRead(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 
 	escapes := escapesUnderComponentSwap(t, NewReadFile(root, nil), root, 2000)
 
@@ -378,7 +378,7 @@ func TestReadFile_Execute_RefusesComponentSwappedMidRead(t *testing.T) {
 func TestReadFile_Execute_RefusesAbsoluteInRootSymlink(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	target := filepath.Join(root, "real.txt")
 	if err := os.WriteFile(target, []byte("inside the workspace"), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -406,7 +406,7 @@ func TestReadFile_Execute_RefusesAbsoluteInRootSymlink(t *testing.T) {
 func TestReadFile_Execute_ReadsRelativeInRootSymlink(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestReadFile_Execute_DisclosesTheResolvedPathUnderAnExtraReadRoot(t *testin
 func TestReadFile_Execute_RejectsRangeOnLineTwo(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("a\nb\nc\nd"), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -562,7 +562,7 @@ func TestReadFile_Execute_RejectsRangeOnLineTwo(t *testing.T) {
 func TestReadFile_Execute_ReadsUnderAnExtraReadRoot(t *testing.T) {
 	t.Parallel()
 
-	root, extra, outside := t.TempDir(), t.TempDir(), t.TempDir()
+	root, extra, outside := tempRoot(t), tempRoot(t), tempRoot(t)
 	writeFixtureFile(t, filepath.Join(root, "in-workspace.txt"), "workspace bytes")
 	writeFixtureFile(t, filepath.Join(extra, "skill", "SKILL.md"), "skill bytes")
 	writeFixtureFile(t, filepath.Join(outside, "id_rsa"), outsideMarker)
@@ -610,7 +610,7 @@ func TestReadFile_Execute_ReadsUnderAnExtraReadRoot(t *testing.T) {
 func TestReadFile_Execute_ExtraRootIsReadableNotWritable(t *testing.T) {
 	t.Parallel()
 
-	root, extra := t.TempDir(), t.TempDir()
+	root, extra := tempRoot(t), tempRoot(t)
 	target := filepath.Join(extra, "SKILL.md")
 	writeFixtureFile(t, target, "skill bytes")
 
@@ -656,7 +656,7 @@ func TestReadFile_Execute_HonoursCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := NewReadFile(t.TempDir(), nil).Execute(ctx, callWith(t, "c1", map[string]any{"path": "x"}))
+	_, err := NewReadFile(tempRoot(t), nil).Execute(ctx, callWith(t, "c1", map[string]any{"path": "x"}))
 
 	if err == nil {
 		t.Fatalf("Execute on a cancelled ctx returned nil error, want ctx error")

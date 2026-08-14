@@ -44,7 +44,7 @@ func TestCountOccurrences(t *testing.T) {
 func TestSingleFindReplace_Execute(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	path := writeTempFile(t, root, "test.txt", "line one\nline two\nline three\n")
 
 	result, err := NewSingleFindReplace(root).Execute(context.Background(),
@@ -126,7 +126,7 @@ func TestFindReplace_NameTheFileTheyRead(t *testing.T) {
 func TestSingleFindReplace_ToolErrors(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	writeTempFile(t, root, "dup.txt", "aaa bbb aaa")
 	writeTempFile(t, root, "ok.txt", "hello world")
 	tool := NewSingleFindReplace(root)
@@ -175,7 +175,7 @@ func TestSingleFindReplace_ToolErrors(t *testing.T) {
 func TestMultiFindReplace_AppliesSequentially(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	path := writeTempFile(t, root, "test.txt", "line one\nline two\nline three\n")
 
 	result, err := NewMultiFindReplace(root).Execute(context.Background(),
@@ -206,7 +206,7 @@ func TestMultiFindReplace_AppliesSequentially(t *testing.T) {
 func TestMultiFindReplace_SequentialDependentEdit(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	path := writeTempFile(t, root, "test.txt", "hello world")
 
 	// Edit #1 introduces "MARKER world" that edit #2 then targets (oracle vector).
@@ -231,7 +231,7 @@ func TestMultiFindReplace_SequentialDependentEdit(t *testing.T) {
 func TestMultiFindReplace_FailsAtomically(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	original := "line one\nline two\nline three\n"
 	path := writeTempFile(t, root, "test.txt", original)
 
@@ -263,7 +263,7 @@ func TestMultiFindReplace_FailsAtomically(t *testing.T) {
 func TestMultiFindReplace_DuplicateCreatedBySequentialEdit(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	original := "alpha beta"
 	path := writeTempFile(t, root, "test.txt", original)
 
@@ -295,7 +295,7 @@ func TestMultiFindReplace_DuplicateCreatedBySequentialEdit(t *testing.T) {
 func TestMultiFindReplace_DeletionWithEmptyNewText(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	path := writeTempFile(t, root, "test.txt", "line one\nline two\nline three\n")
 
 	result, err := NewMultiFindReplace(root).Execute(context.Background(),
@@ -319,7 +319,7 @@ func TestMultiFindReplace_DeletionWithEmptyNewText(t *testing.T) {
 func TestMultiFindReplace_ValidationErrors(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	writeTempFile(t, root, "f.txt", "x")
 	tool := NewMultiFindReplace(root)
 
@@ -356,7 +356,7 @@ func TestMultiFindReplace_ValidationErrors(t *testing.T) {
 func TestFindReplace_CarryTheMarker(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	writers := []domain.Tool{NewSingleFindReplace(root), NewMultiFindReplace(root)}
 	for _, w := range writers {
 		if !IsWorkspaceScopedWriter(w) {

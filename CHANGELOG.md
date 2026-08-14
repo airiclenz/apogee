@@ -128,6 +128,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Tests: the write-family suites in `internal/tools` now take their workspace from `tempRoot`
+  instead of raw `t.TempDir()` — `path_safety_test.go`, `write_permit_test.go`,
+  `write_file_test.go`, `file_edit_test.go`, `find_replace_test.go`, `file_ops_test.go` and
+  `read_file_test.go`, 73 roots in all. These are the suites whose paths can reach a tool's bare
+  success sentence or the safety fence, and a root reached through a symlink (macOS `/tmp`) breaks
+  both there: every path under it carries a resolution note, and every fence comparison is made
+  against a name the fence never produces. `tempRoot`'s doc comment now states that as the package
+  rule — the write family resolves; suites whose workspace is incidental (registry, terminal, git,
+  python, grep, find_files, list_dir, diff, network, exec, present_document, workspace-scoped,
+  sub-agent) stay raw, because their assertions never depend on the root's spelling.
+  Behaviour-neutral: the suites assert exactly what they asserted before.
+
 - Docs: the four positional cross-file references left stale by earlier file splits now name their
   file and function — `ReadConfigForWrite`'s "every splice below" names the setting writers that
   actually start from it (and the server-entry exception that does not), `ScalarTargetIn`'s

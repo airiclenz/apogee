@@ -13,7 +13,7 @@ import (
 func TestWriteFile_Execute_CreatesFileAndParents(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 
 	result, err := NewWriteFile(root).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "nested/dir/out.txt", "content": "hello"}))
@@ -37,7 +37,7 @@ func TestWriteFile_Execute_CreatesFileAndParents(t *testing.T) {
 func TestWriteFile_Execute_OverwritesExisting(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	path := filepath.Join(root, "f.txt")
 	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -143,7 +143,7 @@ func TestWriteFile_Execute_NamesTheResolvedTarget(t *testing.T) {
 func TestWriteFile_Execute_RefusesSymlinkedParent(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	gitDir := filepath.Join(root, ".git")
 	if err := os.MkdirAll(gitDir, 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -179,7 +179,7 @@ func TestWriteFile_Execute_RefusesSymlinkedParent(t *testing.T) {
 func TestWriteFile_Execute_ToolErrors(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	tool := NewWriteFile(root)
 
 	cases := []struct {

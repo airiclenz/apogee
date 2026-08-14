@@ -44,7 +44,7 @@ func runFileOp(t *testing.T, tool domain.Tool, args map[string]any) domain.ToolR
 func TestCopyFile_CopiesContentAndModeCreatingParents(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	writeFixture(t, filepath.Join(root, "run.sh"), "#!/bin/sh\necho hi\n", 0o755)
 
 	result := runFileOp(t, NewCopyFile(root, nil), map[string]any{
@@ -80,7 +80,7 @@ func TestCopyFile_CopiesContentAndModeCreatingParents(t *testing.T) {
 func TestCopyFile_LeavesNoStagingFile(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	writeFixture(t, filepath.Join(root, "a.txt"), "one", 0o644)
 
 	if result := runFileOp(t, NewCopyFile(root, nil), map[string]any{
@@ -107,7 +107,7 @@ func TestCopyFile_LeavesNoStagingFile(t *testing.T) {
 func TestCopyFile_RefusesOccupiedDestinationUnlessOverwrite(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	writeFixture(t, filepath.Join(root, "src.txt"), "fresh", 0o644)
 	writeFixture(t, filepath.Join(root, "dst.txt"), "existing", 0o644)
 
@@ -140,7 +140,7 @@ func TestCopyFile_RefusesOccupiedDestinationUnlessOverwrite(t *testing.T) {
 func TestCopyFile_RefusesDirectories(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	if err := os.MkdirAll(filepath.Join(root, "dir"), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestCopyFile_RefusesDirectories(t *testing.T) {
 func TestCopyFile_MissingSourceIsAnErrorResult(t *testing.T) {
 	t.Parallel()
 
-	result := runFileOp(t, NewCopyFile(t.TempDir(), nil), map[string]any{
+	result := runFileOp(t, NewCopyFile(tempRoot(t), nil), map[string]any{
 		"source": "nope.txt", "destination": "b.txt",
 	})
 	if !result.IsError {
@@ -202,7 +202,7 @@ func TestCopyFile_MissingSourceIsAnErrorResult(t *testing.T) {
 func TestCopyFile_RefusesEscapes(t *testing.T) {
 	t.Parallel()
 
-	outside := t.TempDir()
+	outside := tempRoot(t)
 	root := filepath.Join(outside, "workspace")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -244,7 +244,7 @@ func TestCopyFile_RefusesEscapes(t *testing.T) {
 func extraRootFixture(t *testing.T) (root, extra, outside, mounted string) {
 	t.Helper()
 
-	root, extra, outside = t.TempDir(), t.TempDir(), t.TempDir()
+	root, extra, outside = tempRoot(t), tempRoot(t), tempRoot(t)
 	mounted = filepath.Join(extra, "skill", "run.sh")
 	if err := os.MkdirAll(filepath.Dir(mounted), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -399,7 +399,7 @@ func TestMoveFile_RefusesAMountedSource(t *testing.T) {
 func TestMoveFile_MovesFileAndRemovesSource(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	writeFixture(t, filepath.Join(root, "old.sh"), "#!/bin/sh\n", 0o755)
 
 	result := runFileOp(t, NewMoveFile(root), map[string]any{
@@ -435,7 +435,7 @@ func TestMoveFile_MovesFileAndRemovesSource(t *testing.T) {
 func TestMoveFile_RefusesOccupiedDestinationUnlessOverwrite(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	writeFixture(t, filepath.Join(root, "src.txt"), "fresh", 0o644)
 	writeFixture(t, filepath.Join(root, "dst.txt"), "existing", 0o644)
 
@@ -468,7 +468,7 @@ func TestMoveFile_RefusesOccupiedDestinationUnlessOverwrite(t *testing.T) {
 func TestMoveFile_RefusesEscapes(t *testing.T) {
 	t.Parallel()
 
-	outside := t.TempDir()
+	outside := tempRoot(t)
 	root := filepath.Join(outside, "workspace")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -513,7 +513,7 @@ func TestMoveFile_RefusesEscapes(t *testing.T) {
 func TestDeleteFile_RemovesTheNamedFile(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -541,7 +541,7 @@ func TestDeleteFile_RemovesTheNamedFile(t *testing.T) {
 func TestDeleteFile_RefusesADirectory(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	if err := os.MkdirAll(filepath.Join(root, "empty"), 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -564,7 +564,7 @@ func TestDeleteFile_RefusesADirectory(t *testing.T) {
 func TestDeleteFile_MissingFileIsAnErrorResult(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	for _, tc := range []struct {
 		name string
 		args map[string]any
@@ -593,7 +593,7 @@ func TestDeleteFile_MissingFileIsAnErrorResult(t *testing.T) {
 func TestDeleteFile_RefusesEscape(t *testing.T) {
 	t.Parallel()
 
-	outside := t.TempDir()
+	outside := tempRoot(t)
 	root := filepath.Join(outside, "workspace")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -629,7 +629,7 @@ func TestDeleteFile_DangerousActionClassification(t *testing.T) {
 	t.Parallel()
 
 	guard := security.DefaultDangerousActionGuard()
-	tool := NewDeleteFile(t.TempDir())
+	tool := NewDeleteFile(tempRoot(t))
 	for _, tc := range []struct {
 		name string
 		path string
@@ -664,7 +664,7 @@ func TestDeleteFile_DangerousActionClassification(t *testing.T) {
 func TestDeleteFile_IsRegistered(t *testing.T) {
 	t.Parallel()
 
-	tool, ok := NewDefaultRegistry(t.TempDir()).Lookup("delete_file")
+	tool, ok := NewDefaultRegistry(tempRoot(t)).Lookup("delete_file")
 	if !ok {
 		t.Fatal("default registry is missing \"delete_file\"")
 	}
@@ -683,7 +683,7 @@ func TestDeleteFile_IsRegistered(t *testing.T) {
 func TestCopyFileAndMoveFile_AreRegistered(t *testing.T) {
 	t.Parallel()
 
-	registry := NewDefaultRegistry(t.TempDir())
+	registry := NewDefaultRegistry(tempRoot(t))
 	for _, name := range []string{"copy_file", "move_file"} {
 		tool, ok := registry.Lookup(name)
 		if !ok {
@@ -711,7 +711,7 @@ func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
 	t.Parallel()
 
 	guard := security.DefaultDangerousActionGuard()
-	root := t.TempDir()
+	root := tempRoot(t)
 	copier := NewCopyFile(root, nil)
 	mover := NewMoveFile(root)
 
@@ -757,7 +757,7 @@ func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
 func TestMoveFile_RefusesASymlinkedDestinationParent(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	gitDir := filepath.Join(root, ".git")
 	if err := os.Mkdir(gitDir, 0o755); err != nil {
 		t.Fatalf("setup: %v", err)
