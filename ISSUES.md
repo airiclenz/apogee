@@ -23,6 +23,43 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+### Run residuals — open (2026-08-14, open-residuals sweep)
+
+The still-open findings the open-residuals plan run left, under the conventions' actionability bar.
+
+- [ ] The `ui:` block intro (`internal/config/defaults/config.yaml:510`, and the defaults line at
+  `:516`) still summarises `show-scrollbar` as the transcript's alone, while the key's own prose now
+  names every popup pane too (`:539`, `:568`) — the summary was not brought along with it.
+
+- [ ] Transcript-only scrollbar framing also survives in two doc comments: `internal/config/config.go:1533`
+  ("gates the transcript's scroll bar and the column it hangs in") and `internal/tui/tui.go:242`
+  ("takes the transcript's scroll bar away"). The key covers every popup pane as well.
+
+- [ ] [ADR 0049](docs/adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)
+  never describes the resolved-first routing its fix introduced — the permit match is resolved-based
+  while the fallback branch stays lexical (`internal/security/safeio.go:629`) — nor the
+  permit-plus-workspace-internal-symlink case. `internal/security/doc.go:103-104` states both; the
+  ADR that records the decision does not.
+
+- [ ] `setProcessGroupTeardown`'s overview bullet still carries the absolute "never orphans its
+  children" phrase (`internal/tools/exec_pgroup_unix.go:19`), which the setsid escape documented in
+  the same file's tail (`:63`) contradicts.
+
+- [ ] The Windows counterpart to that setsid escape is prose-only and untested: the job object
+  "does not permit breakaway" (`internal/tools/exec_pgroup_other.go:24`), and nothing asserts that a
+  descendant cannot leave the job, so the POSIX side's pinned residual has no Windows twin. Needs a
+  Windows host.
+
+- [ ] `internal/tui/render_test.go` is 5520 lines, far past the coding-standards ~400-line threshold
+  — a split candidate beside the sources it exercises.
+
+- [ ] `tempRoot`'s package-rule comment (`internal/tools/path_safety_test.go:44-45`) still ends
+  "plus this file's own fixtures", but the file now holds the shared path fixtures and no `Test`
+  function of its own, so the trailing clause names a suite that is not there.
+
+- [ ] `cmd/apogee/upstream.go:283` still credits `hostFromEndpoint` for the synthesized ephemeral
+  row's label, which `config.aliasFromEndpoint` (`:292`) now produces.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
