@@ -865,6 +865,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The pop-up-fold comment stops citing an ISSUES entry that is not there.** The block above
+  `TestWrappedSurfacesBreakInThePaintersMeasure` (`internal/tui/render_test.go`) ended by sending
+  the reader to "ISSUES.md with the rest of the ADR 0030 residue" for the pop-up pane's fold, but
+  that register entry holds only `hangingPrefixes` and never covered the pop-up. The sentence now
+  states the fact on its own — the fold is the lipgloss pane's own deliberate behaviour, not a
+  residue tracked anywhere — so the comment stops pointing at a page that would not answer it.
+  Everything the block says about why the pop-up body is deliberately absent from the test is
+  unchanged.
+
 - **The prefix-once comments stop counting `MechanismRegistry.Add`'s rejection gates.**
   `internal/agent/construct.go` and `internal/agent/enable_mechanisms_test.go` both said "Add's
   three rejections already carry the `apogee: ` prefix" while `Add` now has four gates (empty ID,

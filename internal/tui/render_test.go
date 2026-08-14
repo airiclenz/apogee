@@ -386,7 +386,7 @@ func TestClipWrapSurvivesNarrowWidths(t *testing.T) {
 // past its width WRAPS, in GraphemeWidth whatever the painter is doing — so a VS16 line the
 // authority calls short enough is folded back into two pane rows. That fold is the pane's, not the
 // wrap's: it is reachable today through pop-up ROWS, which never touch wrapText at all, and it is
-// tracked in ISSUES.md with the rest of the ADR 0030 residue.
+// the lipgloss pane's own deliberate behaviour rather than a residue tracked anywhere.
 func TestWrappedSurfacesBreakInThePaintersMeasure(t *testing.T) {
 	t.Parallel()
 

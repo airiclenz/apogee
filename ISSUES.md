@@ -106,11 +106,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   records at `internal/tui/mouse.go:262` for the accent overlay's column math — and tracked nowhere
   today. (small-guards run)
 
-- [ ] `internal/tui/render_test.go:389` says the pop-up pane fold "is tracked in ISSUES.md with the
-  rest of the ADR 0030 residue", but the register carries no pop-up entry: *The TUI width authority —
-  what it did not convert* below holds only `hangingPrefixes`. Pre-existing stale citation.
-  (small-guards run)
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive

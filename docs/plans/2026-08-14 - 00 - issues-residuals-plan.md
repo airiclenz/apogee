@@ -65,7 +65,11 @@ one line for the comment fix.
 
 **Commit:** `docs(agent): the prefix-once comments stop counting Add's rejection gates`
 
-## 2. The pop-up-fold comment stops citing an ISSUES entry that is not there
+## 2. The pop-up-fold comment stops citing an ISSUES entry that is not there — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): retry dispatch — the `render_test.go` reword was already in the working tree
+from the prior attempt at this item, matched the item's text, and was kept; the `ISSUES.md` bullet
+removal had been undone when item 1 restored that file, so it was reapplied here.
 
 **What:** the comment block at `internal/tui/render_test.go:383–389` (above
 `TestWrappedSurfacesBreakInThePaintersMeasure`) ends "…it is tracked in ISSUES.md with the
