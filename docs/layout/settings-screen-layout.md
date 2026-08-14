@@ -120,6 +120,41 @@ The `server` row is also the one row **`⌫` does nothing on**, and its hint lin
 (ADR 0037 decision 5): deleting the line would leave the session running against a server the file no
 longer names. Choosing a different server is how this key changes.
 
+### The Mechanism list (`mechanisms`)
+
+```
+╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Settings                                                                                     │
+│ mechanisms — Catalogued small-model Mechanisms to enable by canonical ID; every one defau…   │
+│ ❯ codeinfo                on                                                                ▐│
+│ · guided_decomposition    off                                                               ░│
+│ · tool_result_cap         off                                                               ░│
+│ ⏎/space toggle · esc back                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+The `mechanisms:` block is the one structured key the pane opens **itself**: its children are
+switches, and a list of switches is a shape a row list holds. `⏎` on the row opens the catalogue —
+every Mechanism this build carries, in canonical id order, each showing `on` or `off` as the config
+*file* has it (an id the block does not name is off).
+
+`⏎` **and** `space` flip the highlighted one. The flip is persisted and applied on that keypress, like
+every other edit here (ADR 0035, ADR 0037 decision 1), and **the list stays open**: setting a posture
+is usually several switches, so the pane does not make you re-open and re-walk the list between them.
+`esc` returns to the key list, and nothing is pending when it does. A flip that was refused lands on
+the `mechanisms` row itself, which is where this pane's failures are read.
+
+Switching one **off** writes `<id>: false` rather than removing the line — the file records what you
+decided. The block's own consequence is unchanged and worth knowing: a non-empty `mechanisms:` block
+means manual control, so the Validated set measured for the bound model is no longer auto-applied
+(ADR 0016). Raw edits to the block — comments, reordering, wholesale deletion — are still made in
+`config.yaml` by hand.
+
+The rows carry no descriptions, deliberately: the id is what the file names a Mechanism by and what
+the documentation indexes it under, and a sentence per row would make a manual of a switch panel.
+This is also the pane's longest list, so it is the one that reliably overflows — the window follows
+the highlight and the overflow earns the scroll bar every popup gets.
+
 ### The single-line field (string and int keys)
 
 ```
@@ -160,9 +195,10 @@ A paste lands here with its lines intact, which is what this field is for.
 ### The external edit (`· ⏎ opens $EDITOR`)
 
 The sixth key class has no field at all: the blocks no row can hold — `servers`, `mcp-servers`,
-`mechanisms`, `validated-sets.alias`, `system-prompt-models`, `model-profile` — carry the
+`validated-sets.alias`, `system-prompt-models`, `model-profile` — carry the
 `· ⏎ opens $EDITOR` pointer in their last cell, and `⏎` opens the file itself on that key's line
-where the editor takes a line argument.
+where the editor takes a line argument. `mechanisms` is the one structured key that is **not** among
+them: its own list is above, and its pointer reads `· ⏎ opens toggle list`.
 
 Which editor is a **four-rung ladder** (ADR 0041): the `editor` config key, then `$VISUAL`, then
 `$EDITOR`, then the platform's default opener (`open`, `xdg-open`, `cmd /c start`). The pointer's

@@ -338,7 +338,7 @@ writing today's default into it — so the key goes back to following the built-
 instead of being pinned to a copy of it. The default is applied on the same keypress, and the
 row reports it with the same marker: `default *`.
 
-**The blocks no row can hold open your editor.** `servers:`, `mcp-servers:`, `mechanisms:`,
+**The blocks no row can hold open your editor.** `servers:`, `mcp-servers:`,
 `validated-sets: alias:`, `system-prompt-models:` and the model profile render as a summary with an
 `· ⏎ opens $EDITOR` pointer, and that is what `⏎` does — in the editor the
 [four-rung ladder](#configuration) `editor:` heads, with the cursor on that key's line where the
@@ -357,6 +357,13 @@ goes nowhere near it: they carry `· use /confine`, because switching Auto's fen
 acknowledgement that belongs with [that verb](#auto-modes-blast-radius). And the `server:` row
 **moves the session** — the same switch `/server` performs, chosen from the same list, recorded
 the same way.
+
+**`mechanisms:` is the one block the pane opens itself.** `⏎` on that row opens a list of every
+catalogued mechanism with `on`/`off` beside each; `⏎` or `space` flips the highlighted one, writing
+and applying it on that keypress, and the list **stays open** so a posture is set in one visit. `esc`
+goes back. Switching one off writes `<id>: false` rather than deleting the line, and — as ever — a
+non-empty `mechanisms:` block means manual control, so the Validated set measured for the bound model
+is no longer applied on top.
 
 ## Sessions
 

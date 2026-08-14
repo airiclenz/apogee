@@ -2887,3 +2887,272 @@ func TestSettingsPaneSaysASchemeSwitchNeedsAResolver(t *testing.T) {
 		t.Errorf("note = %q, want the saved-but-not-applied sentence", got)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The mechanisms sub-list: one switch per catalogued Mechanism (ADR 0035, ADR 0016)
+// ----------------------------------------------------------------------------
+
+// mechanismLog is the binary's Mechanism half, faked: the block a config FILE would carry, and every
+// flip asked of it. It answers the list from that same block, which is what makes it a round trip
+// rather than a spy — a flip the log accepted is what the next frame reads back, exactly as the real
+// seam re-reads the file it just spliced.
+type mechanismLog struct {
+	ids     []string
+	enabled map[string]bool
+	writes  []MechanismToggle
+	err     error
+}
+
+func newMechanismLog(ids ...string) *mechanismLog {
+	return &mechanismLog{ids: ids, enabled: map[string]bool{}}
+}
+
+// list is [Options.ListMechanisms]: every catalogued id in catalogue order, each carrying what the
+// block says about it — and an id the block never names is off, the absent-key rule.
+func (l *mechanismLog) list() []MechanismToggle {
+	out := make([]MechanismToggle, 0, len(l.ids))
+	for _, id := range l.ids {
+		out = append(out, MechanismToggle{ID: id, Enabled: l.enabled[id]})
+	}
+	return out
+}
+
+// write is [Options.WriteMechanism]. A refusal records nothing and changes nothing, exactly as a
+// refused splice leaves the file: "the block is unchanged" is then the log's own emptiness.
+func (l *mechanismLog) write(id string, enabled bool) error {
+	if l.err != nil {
+		return l.err
+	}
+	l.writes = append(l.writes, MechanismToggle{ID: id, Enabled: enabled})
+	l.enabled[id] = enabled
+	return nil
+}
+
+// mechanismStateLine is the painted line one id sits on, so a state assertion reads the row the human
+// reads: the id column is padded to the longest id the list holds, which no fixed substring can spell.
+func mechanismStateLine(t *testing.T, pane, id string) string {
+	t.Helper()
+	for _, line := range strings.Split(pane, "\n") {
+		if strings.Contains(line, id) {
+			return line
+		}
+	}
+	t.Fatalf("the list has no row for %q:\n%s", id, pane)
+	return ""
+}
+
+// settingsMechanismRow is the `mechanisms:` row as the binary projects it (cmd/apogee/settingsrows.go):
+// structured and unwritable by the pane's own writer, pointed at the list this pane opens rather than
+// at the human's editor.
+func settingsMechanismRow() SettingRow {
+	return SettingRow{
+		Path: settingKeyMechanisms, Section: "Mechanisms", Kind: SettingStructured, Value: "1 mechanism",
+		EditPointer: "⏎ opens toggle list",
+		Desc:        "Catalogued small-model Mechanisms to enable by canonical ID; every one defaults off.",
+	}
+}
+
+// settingsMechanismModel is the pane OPEN over rows with the two Mechanism seams wired to log and the
+// external editor wired to edit — the second so every flow below can assert what ⏎ did NOT do. A nil
+// log leaves both seams unwired, which is the degrade one of them tests.
+func settingsMechanismModel(t *testing.T, rows []SettingRow, log *mechanismLog, edit *externalEditLog) Model {
+	t.Helper()
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	if log != nil {
+		opts.ListMechanisms = log.list
+		opts.WriteMechanism = log.write
+	}
+	opts.ExternalEditSpec = edit.spec
+	return openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+}
+
+// ⏎ on the `mechanisms` row opens the catalogue in a list of switches — NOT the human's editor, which
+// is what every other structured row's ⏎ does. Each row is a bare id and its state, and the legend
+// names the two keys that flip one and the one that leaves.
+func TestSettingsMechanismsRowOpensTheToggleList(t *testing.T) {
+	rows := []SettingRow{settingsMechanismRow()}
+	log := newMechanismLog("codeinfo", "tool_result_cap")
+	log.enabled["codeinfo"] = true
+	edit := &externalEditLog{argv: []string{"vi", "/tmp/config.yaml"}}
+	m := settingsMechanismModel(t, rows, log, edit)
+
+	opened, cmd := stepCmd(t, m, keyEnter())
+
+	if opened.settings.kind != settingsMechanismList || opened.settings.sub != 0 {
+		t.Fatalf("pane = %+v, want the Mechanism list open at its first row", opened.settings)
+	}
+	if cmd != nil || len(edit.asked) != 0 {
+		t.Errorf("⏎ launched an editor (cmd=%v, asked=%v); this row opens its own list", cmd != nil, edit.asked)
+	}
+	pane := strip(opened.renderSettings())
+	for _, want := range []string{settingKeyMechanisms, "codeinfo", "tool_result_cap", settingsMechanismHint} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("the Mechanism list does not show %q:\n%s", want, pane)
+		}
+	}
+	if !strings.Contains(pane, settingsMechanismOn) || !strings.Contains(pane, settingsMechanismOff) {
+		t.Errorf("the list does not carry both switch states:\n%s", pane)
+	}
+}
+
+// ⏎ and space each flip the HIGHLIGHTED Mechanism to the opposite of what it holds, and the list stays
+// open with the new state showing: setting a posture is several switches, so the pane does not make
+// the human re-open the list between them. Every flip is still its own persisted edit (ADR 0035).
+func TestSettingsMechanismListTogglesAndStaysOpen(t *testing.T) {
+	rows := []SettingRow{settingsMechanismRow()}
+	log := newMechanismLog("codeinfo", "tool_result_cap")
+	log.enabled["codeinfo"] = true
+	m := settingsMechanismModel(t, rows, log, &externalEditLog{})
+
+	opened := step(t, m, keyEnter())
+	flipped := step(t, opened, keyEnter())
+
+	if want := []MechanismToggle{{ID: "codeinfo"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v — the highlighted id, flipped off", log.writes, want)
+	}
+	if flipped.settings.kind != settingsMechanismList {
+		t.Fatalf("pane = %+v after a flip, want the list still open", flipped.settings)
+	}
+	pane := strip(flipped.renderSettings())
+	if line := mechanismStateLine(t, pane, "codeinfo"); !strings.Contains(line, settingsMechanismOff) {
+		t.Errorf("the flipped row reads %q, want it off:\n%s", line, pane)
+	}
+
+	// Space is the same act one row down, and it flips from what the FILE now holds.
+	toggled := step(t, step(t, flipped, keyDown()), keySpace())
+
+	want := []MechanismToggle{{ID: "codeinfo"}, {ID: "tool_result_cap", Enabled: true}}
+	if !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v — space flips the row the highlight moved to", log.writes, want)
+	}
+	if toggled.settings.kind != settingsMechanismList || toggled.settings.sub != 1 {
+		t.Errorf("pane = %+v, want the list open with the highlight where it was left", toggled.settings)
+	}
+}
+
+// esc backs out of the LIST and not out of the pane, the value sub-list's own posture — and writes
+// nothing on the way, because nothing in this list is pending: every flip was persisted when it was
+// made.
+func TestSettingsMechanismListEscReturnsToTheKeyList(t *testing.T) {
+	rows := []SettingRow{settingsMechanismRow()}
+	log := newMechanismLog("codeinfo", "tool_result_cap")
+	m := settingsMechanismModel(t, rows, log, &externalEditLog{})
+
+	backed := step(t, step(t, m, keyEnter()), keyEsc())
+
+	if !backed.settings.open || backed.settings.kind != settingsKeyList || backed.settings.sub != 0 {
+		t.Errorf("pane = %+v after esc, want it open again on its key list", backed.settings)
+	}
+	if len(log.writes) != 0 {
+		t.Errorf("esc wrote %+v; backing out of the list writes nothing", log.writes)
+	}
+	if list := strip(backed.renderSettings()); !strings.Contains(list, settingKeyMechanisms) {
+		t.Errorf("the key list did not come back:\n%s", list)
+	}
+}
+
+// The nil-seam degrades, both of them. With no catalogue wired the row opens NOTHING — and does not
+// fall through to the editor either, since this row's ⏎ is no longer the editor's. With the list
+// wired but no writer, a flip is refused on the row the list belongs to and the block is untouched.
+func TestSettingsMechanismSeamsDegradeWhenUnwired(t *testing.T) {
+	rows := []SettingRow{settingsMechanismRow()}
+	edit := &externalEditLog{argv: []string{"vi", "/tmp/config.yaml"}}
+	unwired := settingsMechanismModel(t, rows, nil, edit)
+
+	opened, cmd := stepCmd(t, unwired, keyEnter())
+
+	if opened.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v, want the key list: an unwired catalogue opens nothing", opened.settings)
+	}
+	if cmd != nil || len(edit.asked) != 0 {
+		t.Errorf("⏎ launched an editor (cmd=%v, asked=%v); the row's editor affordance is gone", cmd != nil, edit.asked)
+	}
+
+	log := newMechanismLog("codeinfo")
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.ListMechanisms = log.list
+	readOnly := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+
+	refused := step(t, step(t, readOnly, keyEnter()), keyEnter())
+
+	if refused.settings.kind != settingsMechanismList {
+		t.Errorf("pane = %+v, want the list still open on a refused flip", refused.settings)
+	}
+	if got := refused.settings.failure; got.path != settingKeyMechanisms || got.msg != noSettingsWriterNote {
+		t.Errorf("failure = %+v, want the no-writer sentence on the mechanisms row", got)
+	}
+	if len(log.writes) != 0 {
+		t.Errorf("an unwired writer still wrote %+v", log.writes)
+	}
+}
+
+// A refusal from the writer lands the same way, and the block is left exactly as it was: the row
+// carries what the seam said, the list stays up so the human can try again, and the state it paints
+// is still the one the file holds.
+func TestSettingsMechanismListRefusalLandsOnTheRow(t *testing.T) {
+	rows := []SettingRow{settingsMechanismRow()}
+	log := newMechanismLog("codeinfo")
+	log.err = errors.New("config home is read-only")
+	m := settingsMechanismModel(t, rows, log, &externalEditLog{})
+
+	refused := step(t, step(t, m, keyEnter()), keyEnter())
+
+	if got := refused.settings.failure; got.path != settingKeyMechanisms || got.msg != "config home is read-only" {
+		t.Errorf("failure = %+v, want the seam's own sentence on the row", got)
+	}
+	pane := strip(refused.renderSettings())
+	if line := mechanismStateLine(t, pane, "codeinfo"); !strings.Contains(line, settingsMechanismOff) {
+		t.Errorf("a refused flip changed what the list paints — row %q:\n%s", line, pane)
+	}
+	// And the row says it once the list is closed, which is where this pane's failures are read.
+	if got := refused.settingsNote(rows[0]); !strings.Contains(got, "config home is read-only") {
+		t.Errorf("note = %q, want the refusal on the mechanisms row", got)
+	}
+}
+
+// The catalogue is twenty-one Mechanisms and counting, so this list is the one that reliably
+// overflows: the window follows the highlight down the list — the last id is off-screen at the top and
+// on it at the bottom — and the overflow earns the popup module's scrollbar (item 1) without this
+// renderer asking for anything the others do not.
+func TestSettingsMechanismListWindowsTheWholeCatalogue(t *testing.T) {
+	ids := make([]string, 0, 21)
+	for i := range 21 {
+		ids = append(ids, fmt.Sprintf("mechanism-%02d", i))
+	}
+	rows := []SettingRow{settingsMechanismRow()}
+	log := newMechanismLog(ids...)
+	opts := testOpts
+	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.ListMechanisms, opts.WriteMechanism = log.list, log.write
+	m := modelWithOverlayRoomAt(t, 80, 20, opts)
+	m.settings = settingsPane{open: true}
+	m.layout()
+
+	opened := step(t, m, keyEnter())
+
+	top := strip(opened.renderSettings())
+	if !strings.Contains(top, ids[0]) {
+		t.Fatalf("the list does not show its first row:\n%s", top)
+	}
+	if strings.Contains(top, ids[len(ids)-1]) {
+		t.Fatalf("a 21-row catalogue fits a 20-row frame; the window is not windowing:\n%s", top)
+	}
+	if !strings.Contains(top, glyphScrollThumb) {
+		t.Errorf("the overflowing list paints no scrollbar:\n%s", top)
+	}
+
+	walked := opened
+	for range len(ids) - 1 {
+		walked = step(t, walked, keyDown())
+	}
+
+	bottom := strip(walked.renderSettings())
+	if !strings.Contains(bottom, ids[len(ids)-1]) {
+		t.Errorf("the window did not follow the highlight to the last row:\n%s", bottom)
+	}
+	if strings.Contains(bottom, ids[0]+" ") {
+		t.Errorf("the window still shows the first row after walking to the last:\n%s", bottom)
+	}
+}

@@ -9,10 +9,12 @@ package main
 // every field it names is filled.
 
 import (
+	"os"
 	"path/filepath"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/scheme"
@@ -25,6 +27,29 @@ func (w *rootWiring) options() tui.Options {
 	// error here cannot fire; ignoring it keeps the parse a single expression, and ParseCursorShape
 	// answers an unknown name with the default anyway — a caret is drawn either way.
 	cursorShape, _ := tui.ParseCursorShape(w.opts.CursorShape)
+
+	// The config file this session resolved, named once: the `/settings` write half splices it, the
+	// apply half re-reads it, and the Mechanism sub-list below does both.
+	configPath := filepath.Join(w.roots.config, "config.yaml")
+
+	// The apply dispatcher, built ahead of the literal rather than inside it, because TWO seams reach
+	// it now: the pane's own ⏎ (ApplySetting) and the Mechanism toggle, whose write is addressed by
+	// catalogue id and therefore cannot be handed to the pane's path-keyed pair — it persists and
+	// applies behind one call, through this same dispatcher's `mechanisms` arm (ADR 0037 decision 1).
+	applySetting := applySettingFor(settingsApplier{
+		engine:     w.engine,
+		live:       w.live,
+		binding:    w.holder.Binding,
+		rebind:     w.rebind,
+		configPath: configPath,
+		skills:     w.skillProvider,
+		tools:      w.toolSet,
+		mcp:        w.mcpSet,
+		roots:      w.roots,
+		present:    w.presentation,
+		caps:       w.caps,
+		delegation: w.delegation,
+	})
 
 	return tui.Options{
 		// Both upstream facts are now honestly launch-time-only: Model is the configured pin ("" on
@@ -188,7 +213,7 @@ func (w *rootWiring) options() tui.Options {
 		// as somebody's edit and applies twice — which for `mcp-servers:` is a second dial of every
 		// server. A write that FAILED changed no file and refreshes nothing.
 		WriteSetting: func(key, value string) error {
-			if err := config.SaveConfigSetting(filepath.Join(w.roots.config, "config.yaml"), key, value); err != nil {
+			if err := config.SaveConfigSetting(configPath, key, value); err != nil {
 				return err
 			}
 			w.externalEdits.refresh()
@@ -198,7 +223,7 @@ func (w *rootWiring) options() tui.Options {
 		// back to the binary's default rather than being pinned to today's spelling of it. It refreshes
 		// the same baseline for the same reason — a removed line is a change to the file like any other.
 		ResetSetting: func(key string) error {
-			if err := config.ResetConfigSetting(filepath.Join(w.roots.config, "config.yaml"), key); err != nil {
+			if err := config.ResetConfigSetting(configPath, key); err != nil {
 				return err
 			}
 			w.externalEdits.refresh()
@@ -207,20 +232,38 @@ func (w *rootWiring) options() tui.Options {
 		// And the apply half of the same keypress (ADR 0037): what the file now says, the session
 		// now runs. The dispatcher owns the resolution from a registry path and a file-spelled value
 		// onto a live engine seam — the renderer holds neither schema nor engine mutator.
-		ApplySetting: applySettingFor(settingsApplier{
-			engine:     w.engine,
-			live:       w.live,
-			binding:    w.holder.Binding,
-			rebind:     w.rebind,
-			configPath: filepath.Join(w.roots.config, "config.yaml"),
-			skills:     w.skillProvider,
-			tools:      w.toolSet,
-			mcp:        w.mcpSet,
-			roots:      w.roots,
-			present:    w.presentation,
-			caps:       w.caps,
-			delegation: w.delegation,
-		}),
+		ApplySetting: applySetting,
+		// The `mechanisms:` block's own two seams — the one row of the pane whose children are edited
+		// in a list rather than in the file. What the list OFFERS is the catalogue this build carries,
+		// sorted canonically, each id answered from the FILE's manual block (absent ⇒ off) rather than
+		// from the resolution this run started on: the block is one a human also edits by hand, and it
+		// is re-read per ask so an edit made in another window shows in an open list.
+		//
+		// A file that cannot be read answers with the catalogue all-off rather than with nothing,
+		// which is the same degrade the resolution itself takes: the ids exist whatever the file says,
+		// and a list that vanished on an unreadable config would look like a build with no Mechanisms.
+		ListMechanisms: func() []tui.MechanismToggle {
+			enabled := mechanismBlock(configPath)
+			known := mechanisms.KnownIDs()
+			toggles := make([]tui.MechanismToggle, 0, len(known))
+			for _, id := range known {
+				toggles = append(toggles, tui.MechanismToggle{ID: string(id), Enabled: enabled[string(id)]})
+			}
+			return toggles
+		},
+		// And the write half: one line spliced into that block and put in force on the same call. It
+		// is WriteSetting's shape one level in — the splice, the baseline re-take and the live apply in
+		// the order they are there — with the apply reaching the dispatcher's `mechanisms` arm, which
+		// re-reads the whole block exactly as it does after an edit made in $EDITOR. The value handed
+		// to it is empty because that arm reads none: the block is a shape no single string spells.
+		WriteMechanism: func(id string, enabled bool) error {
+			if err := config.SaveMechanismSetting(configPath, id, enabled); err != nil {
+				return err
+			}
+			w.externalEdits.refresh()
+			_, err := applySetting(settingKeyMechanisms, "")
+			return err
+		},
 		// The `$EDITOR` round trip for the keys no row can hold (ADR 0037 decision 5): out through a
 		// command line this binary resolves — the file, the key's own line, the editor this environment
 		// names — and back through a re-read that says which keys changed. The pane applies them
@@ -274,4 +317,20 @@ func (w *rootWiring) options() tui.Options {
 		// no Agent to ask, and answers false: nothing is open until something is bound.
 		Resumed: resumedSession(w.resumed, w.engine.InExchange()),
 	}
+}
+
+// mechanismBlock is the config file's own `mechanisms:` map — which Mechanisms the human has switched
+// on and off BY HAND — read fresh from the file rather than taken from the resolution this run
+// started on, exactly as the apply dispatcher re-reads it (settingsApplier.reloadMechanisms) and for
+// the same reason: the block is one an editor in another window can change under a running session.
+//
+// A file that cannot be read or parsed answers with an empty block rather than with an error,
+// because the only reader is a LIST and an absent block already means the same thing: nothing is
+// switched on. The write half is where an unusable config has to be reported, and it reports it.
+func mechanismBlock(path string) map[string]bool {
+	layer, err := config.LoadFileConfig(path, os.ReadFile, func(string) {})
+	if err != nil {
+		return nil
+	}
+	return layer.Mechanisms
 }

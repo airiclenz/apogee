@@ -134,7 +134,27 @@ copy of that switch; same four shapes, no duplication, and the registry stays un
 
 commit: `feat(config): a per-mechanism writer splices one id into the mechanisms block`
 
-## 6. Mechanisms toggle sub-list on /settings
+## 6. Mechanisms toggle sub-list on /settings — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the item names only the `mechanisms` row's `EditPointer`, but its `ExternalEdit`
+flag had to go false with it. `externallyEdited` is the single predicate behind both the flag and the
+wording — "so the row's flag and its wording cannot come to describe different sets of keys" — and
+`TestSettingsRowsPointReadOnlyKeysAtTheirEditor` asserts exactly `ExternalEdit == (EditPointer ==
+pointerExternalEdit)`. A row still claiming the $EDITOR affordance while its ⏎ opens a list would
+also be a lie to the pane, which branches on that flag.
+NOTES (2026-08-14): `internal/tui/mouse.go` is not in the item's Files list but had to gain the guard
+its enum sibling already has: `settingsPaint` composes the KEY LIST to map a click, so with the
+Mechanism list painted over it every click would have named a key-list row and acted on it. Three
+lines, the same shape and the same reason as the `settingsEnumTarget` guard beside it.
+NOTES (2026-08-14): `README.md` is not in the item's Files list either, but it listed `mechanisms:`
+among the blocks whose ⏎ opens the editor — false after this item — so it names the toggle list
+instead. User-facing behaviour changed, which is the docs step the procedure requires (item 4's own
+precedent for the same file).
+NOTES (2026-08-14): in `cmd/apogee/wire_options.go` the apply dispatcher is built into a local
+(`applySetting`) ahead of the `tui.Options` literal rather than inside it, because two seams reach it
+now: `ApplySetting` passes it through unchanged, and `WriteMechanism` drives its existing
+`"mechanisms"` arm after the splice. The config path it and the three write seams share was hoisted
+the same way.
 
 Depends on item 5 (and item 1 for the sub-list's scrollbar, which arrives for free).
 

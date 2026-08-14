@@ -82,23 +82,25 @@ import (
 // APPLIED exactly as a written value is, so a reset cannot mean less to the session than a write.
 
 // settingsKind is what the open pane is DOING: reading its key list, asking which value one enum key
-// should take, holding the buffer a string or an int is being typed into, waiting for a reset to be
-// confirmed, or holding the multi-line field a text key's prose is written in. It is the picker's own
+// should take, switching individual Mechanisms in the `mechanisms` row's own list, holding the buffer
+// a string or an int is being typed into, waiting for a reset to be confirmed, or holding the
+// multi-line field a text key's prose is written in. It is the picker's own
 // two-step idiom (pickerKind, /schedule's cycle-then-mode pair): one pane, one selection per step, and
 // the step is a field rather than a second overlay — so there is no state in which two settings
 // surfaces are open and no second give-way rule to write.
 //
-// One field for all five is also what makes them mutually exclusive by construction: a pane cannot be
+// One field for all six is also what makes them mutually exclusive by construction: a pane cannot be
 // buffering a value and awaiting a reset confirmation at once, so no keypress has two meanings and no
 // state pair has to be reasoned about.
 type settingsKind int
 
 const (
-	settingsKeyList     settingsKind = iota // the key list — the pane's own screen
-	settingsEnumList                        // the selected enum key's closed vocabulary, one value per row
-	settingsValueBuffer                     // the selected string/int key's edit buffer, on its own row
-	settingsResetArmed                      // backspace armed the selected row's reset; ⏎ confirms it
-	settingsTextEditor                      // the selected text key's prose, in a multi-line field filling the pane
+	settingsKeyList       settingsKind = iota // the key list — the pane's own screen
+	settingsEnumList                          // the selected enum key's closed vocabulary, one value per row
+	settingsMechanismList                     // the `mechanisms` row's catalogue, one Mechanism per row, switched in place
+	settingsValueBuffer                       // the selected string/int key's edit buffer, on its own row
+	settingsResetArmed                        // backspace armed the selected row's reset; ⏎ confirms it
+	settingsTextEditor                        // the selected text key's prose, in a multi-line field filling the pane
 )
 
 // settingsPane is the overlay's inline state on the Model. Its zero value is "closed", so it lives
@@ -112,9 +114,10 @@ const (
 // is the pane's memory of the last write it was REFUSED, and it is display-only: it says what a refusal
 // said, never what the config now holds (the provider answers that, from the resolution this run made).
 // The journal of what this surface has CHANGED is not here — it outlives the overlay and so lives a
-// level up, on the Model ([Model.settingEdits]). sub is the value sub-list's highlight, meaningful only
-// while kind is [settingsEnumList]; editor is the field a string or an int is typed into, meaningful
-// only while kind is [settingsValueBuffer].
+// level up, on the Model ([Model.settingEdits]). sub is a sub-list's highlight, meaningful only while
+// kind is [settingsEnumList] or [settingsMechanismList] — the two steps that replace the key list with
+// a list of their own; editor is the field a string or an int is typed into, meaningful only while
+// kind is [settingsValueBuffer].
 //
 // The editor is a [lineEditor] held BY VALUE, as the Model holds the prompt's own (ADR 0011): the
 // widget is copy-safe and carries no self-referential no-copy type, which is what lets the pane stay
@@ -219,14 +222,19 @@ const settingsAlreadyOnNote = "already on "
 // does — and it has to be read, because they are not the keys every other step of this pane ends on:
 // ⏎ belongs to the VALUE there (it inserts a newline in prose that has lines), so the commit moves to
 // ctrl+s and the abandon stays on esc (ADR 0037 decision 10).
+// The Mechanism list's legend names a SECOND key on the same act and no commit at all, because that
+// list is switches rather than a question: ⏎ and space both flip the highlighted row, each flip is
+// its own persisted edit (ADR 0035), and esc only ends a list nothing is pending in — where the enum
+// sub-list's ⏎ is the one press that answers it.
 const (
-	settingsTitle       = "Settings"
-	settingsHint        = "↑/↓ select · ⏎ edit · ⌫ reset · esc close"
-	settingsNoResetHint = "↑/↓ select · ⏎ edit · esc close"
-	settingsEnumHint    = "↑/↓ select · ⏎ set · esc back"
-	settingsBufferHint  = "⏎ save · esc cancel"
-	settingsResetHint   = "⏎ confirm reset · esc cancel"
-	settingsTextHint    = "ctrl+s save · esc discard"
+	settingsTitle         = "Settings"
+	settingsHint          = "↑/↓ select · ⏎ edit · ⌫ reset · esc close"
+	settingsNoResetHint   = "↑/↓ select · ⏎ edit · esc close"
+	settingsEnumHint      = "↑/↓ select · ⏎ set · esc back"
+	settingsMechanismHint = "⏎/space toggle · esc back"
+	settingsBufferHint    = "⏎ save · esc cancel"
+	settingsResetHint     = "⏎ confirm reset · esc cancel"
+	settingsTextHint      = "ctrl+s save · esc discard"
 )
 
 // The pane's description header: the label its first line opens with, and the number of lines the
@@ -376,6 +384,17 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 	}
+	if m.settings.kind == settingsMechanismList {
+		if _, toggles, ok := m.settingsMechanismTarget(rows); ok {
+			return m.settingsMechanismKey(msg, toggles)
+		}
+		// The catalogue went away under the list — an unwired seam, or a row that is no longer the
+		// `mechanisms` row. Same fallback and the same swallow as the sub-list above: a ⏎ aimed at a
+		// switch must not land on whatever the key list now highlights.
+		m.settings.kind, m.settings.sub = settingsKeyList, 0
+		m.layout()
+		return m, nil
+	}
 	if m.settings.kind == settingsValueBuffer {
 		if row, ok := m.settingsBufferTarget(rows); ok {
 			return m.settingsBufferKey(msg, row)
@@ -500,6 +519,19 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	row := rows[sel]
+	if row.Path == settingKeyMechanisms {
+		// The one structured row this pane DOES open: its children are switches, and a list of switches
+		// is a shape a row list holds perfectly well. Matched on its path for settingsVocabulary's
+		// reason one row over — what makes it special is where its vocabulary comes from (the Mechanism
+		// catalogue, [Options.ListMechanisms]) and not a kind of its own. An unwired seam offers
+		// nothing, so ⏎ opens nothing, exactly as an enum with no vocabulary does below.
+		if len(m.settingsMechanisms(rows)) == 0 {
+			return m, nil
+		}
+		m.settings.kind, m.settings.sub = settingsMechanismList, 0
+		m.layout()
+		return m, nil
+	}
 	if !row.Editable {
 		// A block this pane cannot hold on a row is edited where it CAN be edited: the human's own
 		// editor, opened on the key's line (ADR 0037 decision 5). Every other read-only row still does
@@ -576,6 +608,65 @@ func (m Model) settingsEnumKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, 
 		return m.settingsWrite(row, value)
 	}
 	return m, nil // swallowed, like every key the pane does not act on
+}
+
+// settingsMechanismKey routes a keypress in the Mechanism list: ↑/↓ walk the catalogue with the wrap
+// the key list and the value sub-list both use, ⏎ and space each flip the highlighted Mechanism, and
+// esc returns to the key list. Every other key is swallowed, the pane's modality wherever it stands.
+//
+// The list STAYS OPEN across a flip, which is what makes it a switch panel rather than a question:
+// setting a posture is usually several switches, and a list that closed on each would have to be
+// re-opened and re-walked between them. That changes what the human presses NEXT and not what a press
+// means — each flip is still one deliberate edit, persisted on its own (ADR 0035).
+//
+// Two keys for the one act because both are already true of it: ⏎ is what every other row of this
+// pane acts on, and space is what a list of switches is ticked with (the ask prompt's multi-select).
+func (m Model) settingsMechanismKey(msg tea.KeyPressMsg, toggles []MechanismToggle) (tea.Model, tea.Cmd) {
+	n := len(toggles)
+	switch msg.String() {
+	case "esc":
+		m.settings.kind, m.settings.sub = settingsKeyList, 0
+		m.layout()
+		return m, nil
+	case "up", "ctrl+p":
+		m.settings.sub = (m.settings.sub - 1 + n) % n
+		return m, nil
+	case "down", "ctrl+n":
+		m.settings.sub = (m.settings.sub + 1) % n
+		return m, nil
+	case "enter", "space":
+		return m.settingsToggleMechanism(toggles[clampInt(m.settings.sub, 0, n-1)])
+	}
+	return m, nil // swallowed, like every key the pane does not act on
+}
+
+// settingsToggleMechanism flips one Mechanism through [Options.WriteMechanism] — persisted AND put in
+// force behind that single seam, rather than through the pane's own write-then-apply pair: a
+// Mechanism id is not a registry key, so there is no path for [Options.ApplySetting] to be handed and
+// no second door to keep in step with this one.
+//
+// The outcomes are settingsPersist's, minus the one this act does not have. No seam wired, or a
+// refusal, leaves the block exactly as it was and says so on the `mechanisms` row the list belongs to
+// — where the human reads it when the list closes, since the list itself is switches and has no note
+// column. A flip that LANDED records nothing at all: the list is re-read from the file on the very
+// next frame ([Model.settingsMechanisms]), so what it paints is what the file now carries rather than
+// what this keypress hoped for, and that is a truer marker than a journal entry could be.
+func (m Model) settingsToggleMechanism(toggle MechanismToggle) (tea.Model, tea.Cmd) {
+	if m.opts.WriteMechanism == nil {
+		m.settings.failure = settingFailure{path: settingKeyMechanisms, msg: noSettingsWriterNote}
+		m.layout()
+		return m, nil
+	}
+	if err := m.opts.WriteMechanism(toggle.ID, !toggle.Enabled); err != nil {
+		m.settings.failure = settingFailure{path: settingKeyMechanisms, msg: err.Error()}
+		m.layout()
+		return m, nil
+	}
+	// The refusal a previous flip left is gone with the flip that landed, exactly as recordSettingEdit
+	// clears it for every other row: the slot describes the LAST attempt, and this attempt worked.
+	m.settings.failure = settingFailure{}
+	m.layout()
+	return m, nil
 }
 
 // settingsSwitchServer answers the `server` row's popup, and what it does is the whole of `/server`
@@ -1406,6 +1497,9 @@ func colorSchemeWarningNote(n int) string {
 // seam applied it (the footer's own copy); the rest are the renderer-owned keys settingsApplyLocal
 // puts into effect itself. Every other key is a path this package never spells — the binary's
 // dispatcher routes them by name, which is exactly the coupling ADR 0037 decision 2 keeps out here.
+// settingKeyMechanisms is the one exception to that last sentence and is not applied here at all: it
+// is the row whose ⏎ opens a list of its own instead of an editor, and a row can only be recognised
+// by its path (settingsEnter, the settingKeyColorScheme precedent in settingsVocabulary).
 const (
 	settingKeyMode          = "mode"
 	settingKeyAutoTitle     = "auto-title"
@@ -1414,6 +1508,7 @@ const (
 	settingKeySpinnerColor  = "ui.spinner-color"
 	settingKeyColorScheme   = "ui.color-scheme"
 	settingKeyCursorShape   = "cursor-shape"
+	settingKeyMechanisms    = "mechanisms"
 )
 
 // settingsApplyFailedNote opens the row's failure when the WRITE landed and the apply did not: the
@@ -1509,6 +1604,25 @@ func (m Model) settingsEnumTarget(rows []SettingRow) (SettingRow, bool) {
 	return row, true
 }
 
+// settingsMechanismTarget is the row an open Mechanism list belongs to and the catalogue it is
+// showing, and whether there still IS one — settingsEnumTarget's contract for the pane's third
+// list-shaped step, and the single predicate the key router, the renderer and the pointer all branch
+// on so none of them can think a different list is up.
+func (m Model) settingsMechanismTarget(rows []SettingRow) (SettingRow, []MechanismToggle, bool) {
+	if m.settings.kind != settingsMechanismList {
+		return SettingRow{}, nil, false
+	}
+	row, ok := m.settingsSelectedRow(rows)
+	if !ok {
+		return SettingRow{}, nil, false
+	}
+	toggles := m.settingsMechanisms(rows)
+	if len(toggles) == 0 {
+		return SettingRow{}, nil, false
+	}
+	return row, toggles, true
+}
+
 // settingsPickable reports whether a row is edited in the value SUB-LIST: the two kinds that answer a
 // ⏎ with a closed list of values, and only where the registry lets this surface act on the key at all.
 func settingsPickable(row SettingRow) bool {
@@ -1545,6 +1659,29 @@ func (m Model) settingsVocabulary(row SettingRow) []string {
 		names = append(names, choice.Name)
 	}
 	return names
+}
+
+// settingsMechanisms is the catalogue the `mechanisms` row's list offers — every Mechanism this build
+// knows, with the file's own on/off for each ([Options.ListMechanisms]) — and nothing at all wherever
+// there is no such list to draw: an unwired seam, or a selection that is not that row.
+//
+// It is settingsVocabulary's counterpart for the one row whose vocabulary is neither a registry
+// vocabulary nor a config block, and it is asked at every step for the same reason — the open, the
+// walk, the flip, the paint — so a catalogue re-read under an open list is one list wherever it is
+// read, and a flip can only ever act on a Mechanism the frame the human pressed was showing.
+//
+// Re-reading it per ask is also what makes an edit made in the FILE show here: the seam loads the
+// block fresh, so a `mechanisms:` line changed in another window is on the next frame of an open list
+// rather than at the next start.
+func (m Model) settingsMechanisms(rows []SettingRow) []MechanismToggle {
+	if m.opts.ListMechanisms == nil {
+		return nil
+	}
+	row, ok := m.settingsSelectedRow(rows)
+	if !ok || row.Path != settingKeyMechanisms {
+		return nil
+	}
+	return m.opts.ListMechanisms()
 }
 
 // settingsCurrentValue is the value a sub-list opens on and marks "(current)": what the pane believes
@@ -2033,6 +2170,9 @@ func (m Model) renderSettings() string {
 	if row, ok := m.settingsEnumTarget(rows); ok {
 		return m.renderSettingsEnum(row)
 	}
+	if row, toggles, ok := m.settingsMechanismTarget(rows); ok {
+		return m.renderSettingsMechanisms(row, toggles)
+	}
 	if _, ok := m.settingsTextTarget(rows); ok {
 		return m.renderSettingsText(rows)
 	}
@@ -2204,6 +2344,56 @@ func (m Model) renderSettingsEnum(row SettingRow) string {
 		menuRows:    true,
 		selected:    clampInt(m.settings.sub, 0, len(values)-1),
 		hint:        settingsEnumHint,
+		maxRows:     maxRows,
+		scrollbar:   m.popupScrollbarOn(),
+	}, m.width)
+}
+
+// settingsMechanismState is what a Mechanism's row says about itself: the whole cell, because a
+// switch has exactly two positions and a blank one would read as a row that failed to render.
+const (
+	settingsMechanismOn  = "on"
+	settingsMechanismOff = "off"
+)
+
+// renderSettingsMechanisms paints the `mechanisms` row's own list — the pane's fourth renderer, and
+// the second that replaces the key list with a list of its own. It is the value sub-list's shape
+// (renderSettingsEnum: a MENU in the same pane, the same frame around it, the body naming the key
+// because the list where the human read that name is what this replaced) with the one difference the
+// content forces: the rows are SWITCHES, so every one carries its own state cell rather than one of
+// them carrying "(current)", and the legend says what flips them (settingsMechanismHint).
+//
+// It is also the one list of this pane that reliably overflows — the catalogue is twenty-one
+// Mechanisms and counting — so the window is left to the row plan exactly as the key list's is
+// (popupBudget answers with the frame's grant) and the bar the overflow earns comes from the same
+// place every other popup's does (popupSpec.scrollbar).
+//
+// Nothing here says what a Mechanism DOES: the id is what the config file names it by and what the
+// documentation indexes it under, and a sentence per row would make a manual of a switch panel
+// (ADR 0035's one-deliberate-edit surface is not a place to learn what to edit).
+func (m Model) renderSettingsMechanisms(row SettingRow, toggles []MechanismToggle) string {
+	values := make([]popupRow, 0, len(toggles))
+	for _, toggle := range toggles {
+		state := settingsMechanismOff
+		if toggle.Enabled {
+			state = settingsMechanismOn
+		}
+		values = append(values, popupRow{stripEscapes(toggle.ID), state})
+	}
+	body := truncateToWidth(m.th, stripEscapes(settingsEnumPrompt(row)), popupInnerWidth(m.th, m.width))
+	maxBody, maxRows, seated := m.popupBudget(paneSettings, len(values), len(values),
+		popupChrome, popupFloor{body: popupBodyLineCount(m.th, body, m.width)})
+	if !seated {
+		return "" // the frame cannot seat this pane (settingsGiveWayNote says so on the status line)
+	}
+	return renderPopup(m.th, popupSpec{
+		title:       settingsTitle,
+		body:        body,
+		maxBodyRows: maxBody,
+		rows:        values,
+		menuRows:    true,
+		selected:    clampInt(m.settings.sub, 0, len(values)-1),
+		hint:        settingsMechanismHint,
 		maxRows:     maxRows,
 		scrollbar:   m.popupScrollbarOn(),
 	}, m.width)

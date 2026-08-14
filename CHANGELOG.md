@@ -10,6 +10,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`/settings` switches individual Mechanisms in a sub-list of its own.** `⏎` on the `mechanisms`
+  row no longer opens `$EDITOR` — it opens the catalogue, every id this build carries in canonical
+  order with `on`/`off` beside it, read from the config FILE's own block on every frame (an id the
+  block does not name is off, and an edit made in another window shows up in an open list). `⏎` and
+  `space` each flip the highlighted one: the line is spliced, the baseline re-taken and the block
+  re-read into the running session on that same keypress (ADR 0035, ADR 0037 decision 1), and the
+  list STAYS OPEN with the new state showing, because setting a posture is usually several switches.
+  `esc` returns to the key list; a refusal lands on the `mechanisms` row and the block is untouched.
+  Switching one off writes `<id>: false` rather than removing the line, so the file records the
+  decision — with the pre-existing ADR 0016 consequence that a non-empty `mechanisms:` block means
+  manual control and the Validated set measured for the bound model is no longer applied on top. The
+  row's pointer now reads `· ⏎ opens toggle list`, and the renderer gained two seams for it
+  (`Options.ListMechanisms` / `Options.WriteMechanism`, both nil-degrading to "the row opens
+  nothing" / "the pane says so"). Raw block edits — comments, ordering, deletion — are still made in
+  `config.yaml` by hand.
+
 - Added `domain.WriteEscapePermit` with `WithWriteEscapePermit` / `WriteEscapePermitFrom` — the
   context carrier that will authorise one approved out-of-workspace write target for the duration
   of one tool execution (ADR 0049). No consumer yet; absence keeps the workspace fence as the sole

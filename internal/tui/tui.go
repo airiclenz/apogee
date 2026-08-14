@@ -413,6 +413,36 @@ type Options struct {
 	// degrade a bench or headless Driver composes deliberately (ADR 0031).
 	ApplySetting func(path, value string) (note string, err error)
 
+	// ListMechanisms names every catalogued Mechanism and says which of them the config file has
+	// switched ON — the vocabulary the `mechanisms` row's toggle sub-list is drawn from. It is a
+	// closure rather than a slice for [ListSchemes]' reason: the block it reports is one the human
+	// also edits by hand, so it is re-read on every ask and an edit made in the file shows up in an
+	// open sub-list rather than at the next start.
+	//
+	// WHICH ids exist is the binary's knowledge, exactly as the key registry behind [SettingsRows] is:
+	// the catalogue names them, an id the file's block does not carry is simply off, and the renderer
+	// parses no `mechanisms:` block to work either out.
+	//
+	// nil ⇒ the row has no vocabulary and ⏎ on it opens nothing, the nil-seam degrade every provider
+	// here takes.
+	ListMechanisms func() []MechanismToggle
+
+	// WriteMechanism persists one Mechanism's on/off line and puts it in force — the sub-list's whole
+	// write half, and [WriteSetting] one level in: the `mechanisms:` block's children are the
+	// catalogue's ids rather than registry keys, so the target is named by (id, enabled) while the
+	// splice, the verification and the atomic write stay behind the seam exactly as they do there.
+	//
+	// Toggling OFF writes `<id>: false` rather than removing the line, because the file records what
+	// the human DECIDED and a block that emptied itself would hand a matching model's Validated set
+	// back without being asked to (ADR 0016). The live apply is the binary's too and happens on this
+	// same call (ADR 0037 decision 1), so the seam returns with the session running what the file now
+	// says.
+	//
+	// An error is REPORTED, never swallowed — the pane shows it and treats the Mechanism as
+	// unchanged. nil ⇒ toggling is unavailable and the pane says so, the same degrade [WriteSetting]
+	// takes.
+	WriteMechanism func(id string, enabled bool) error
+
 	// ExternalEditSpec is the command line that opens the config file at path's own line — the
 	// nested structures' whole edit idiom (ADR 0037 decision 5): a `servers:` list or a
 	// `model-profiles:` map is a shape no row can hold, so ⏎ on such a row hands the human the file
@@ -1194,6 +1224,19 @@ type SettingRow struct {
 	// not a shape the renderer can read off a row. False for every editable row — those are written
 	// here — and false for the confinement pair, whose own pointer says where they go instead.
 	ExternalEdit bool
+}
+
+// MechanismToggle is one catalogued Mechanism as the `mechanisms` row's sub-list shows it: the
+// canonical id, and whether the config file's own block switches it on. Plain data, the [SettingRow]
+// posture — the catalogue, the file and the resolution behind that bool are all the binary's
+// ([Options.ListMechanisms]), and the renderer paints a row and asks for a flip.
+//
+// It carries no description, deliberately: what a Mechanism DOES is documented where Mechanisms are
+// documented, and a list whose rows each carried a sentence would be a manual rather than the switch
+// panel this row opens.
+type MechanismToggle struct {
+	ID      string
+	Enabled bool
 }
 
 // EditorCommand is one resolved external edit — the OUT half of the round trip

@@ -349,9 +349,19 @@ func TestSettingsRowsPointReadOnlyKeysAtTheirEditor(t *testing.T) {
 			t.Errorf("row %q opens $EDITOR; the confinement interlock is single-homed in /confine", path)
 		}
 	}
+	// mechanisms is the one structured block the pane opens ITSELF, in a list of switches, so its
+	// pointer names that list and its $EDITOR affordance is off — the two facts the predicate above
+	// already requires of each other, pinned here as the wording a human reads on the row.
+	if got := byPath["mechanisms"].EditPointer; got != pointerMechanismList {
+		t.Errorf("row %q pointer = %q; want %q — its children are switches the pane holds",
+			"mechanisms", got, pointerMechanismList)
+	}
+	if byPath["mechanisms"].ExternalEdit {
+		t.Errorf("row %q opens $EDITOR; ⏎ opens the Mechanism list instead", "mechanisms")
+	}
 	// system-prompt-text is NOT among them since it became editable in its own multi-line field: the
 	// prose the file carries as a block is written in the pane now (tui.SettingText).
-	for _, path := range []string{"servers", "mcp-servers", "mechanisms", "system-prompt-models", "model-profiles"} {
+	for _, path := range []string{"servers", "mcp-servers", "system-prompt-models", "model-profiles"} {
 		if got := byPath[path].EditPointer; got != pointerExternalEdit {
 			t.Errorf("row %q pointer = %q; want %q", path, got, pointerExternalEdit)
 		}

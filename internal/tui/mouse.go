@@ -779,6 +779,9 @@ func (m Model) settingsPaint() (settingsPaint, bool) {
 	if _, sub := m.settingsEnumTarget(rows); sub {
 		return settingsPaint{}, false // the value sub-list is a menu of its own; no pointer names it
 	}
+	if _, _, list := m.settingsMechanismTarget(rows); list {
+		return settingsPaint{}, false // and so is the Mechanism list, for the same reason
+	}
 	if _, text := m.settingsTextTarget(rows); text {
 		return settingsPaint{}, false // the multi-line field replaced the list: settingsTextPaint answers there
 	}

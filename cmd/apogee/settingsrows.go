@@ -37,7 +37,7 @@ const maskedSettingValue = "••••"
 // row failed to render"; "none" is the answer to the question the row asks.
 const noneSettingValue = "none"
 
-// The two pointers a non-editable row carries — where the key IS edited. A structured block is
+// The three pointers a non-editable row carries — where the key IS edited. A structured block is
 // edited in the human's own editor, which the row's ⏎ opens for them on that key's line (ADR 0037
 // decision 5): the pane cannot hold a list of servers or a profile block on a row, but it can put
 // the cursor on the line that holds one, which is a good deal more than telling somebody the name of
@@ -45,10 +45,20 @@ const noneSettingValue = "none"
 // acknowledgement interlock (a distinct affirmative act, never a default-yes) stays single-homed in
 // /confine (ADR 0012), so the pane sends the human there rather than growing a second way to loosen
 // a blast radius.
+//
+// mechanisms is the third, and the one row that is neither: its block's children are SWITCHES
+// — one bool per catalogued Mechanism — and a list of switches is a shape the pane holds perfectly
+// well, so ⏎ opens a sub-list of them rather than the file (tui.Options.ListMechanisms). Raw block
+// edits are still made in config.yaml by hand; what this row's ⏎ no longer does is open it there.
 const (
-	pointerExternalEdit = "⏎ opens $EDITOR"
-	pointerConfine      = "use /confine"
+	pointerExternalEdit  = "⏎ opens $EDITOR"
+	pointerConfine       = "use /confine"
+	pointerMechanismList = "⏎ opens toggle list"
 )
+
+// settingKeyMechanisms is the registry path of that row. It is spelled here because the pointer and
+// the affordance below both have to recognise the one key whose read-only-ness means something else.
+const settingKeyMechanisms = "mechanisms"
 
 // settingSection is one header the pane groups rows under: a NAME and the registry path that opens
 // it. Sections are runs over the registry's own order rather than a per-key label, because that
@@ -262,6 +272,8 @@ func editPointer(k config.Key) string {
 	switch {
 	case k.Editable:
 		return ""
+	case k.Path == settingKeyMechanisms:
+		return pointerMechanismList
 	case externallyEdited(k):
 		return pointerExternalEdit
 	default:
@@ -273,10 +285,13 @@ func editPointer(k config.Key) string {
 // affordance the pointer above advertises, stated as a predicate so the row's flag and its wording
 // cannot come to describe different sets of keys.
 //
-// It is every key the pane will not write except the confinement pair, rather than "every structured
-// key": what makes a key unopenable is its interlock (ADR 0012), not its shape, and a key that
+// It is every key the pane will not write except the confinement pair — whose interlock (ADR 0012)
+// is what makes them unopenable, not their shape — and `mechanisms`, which the pane now edits in a
+// list of its own. Both exceptions are subtractions from "read-only", not a shape test: a key that
 // became read-only for some other reason tomorrow should reach the editor like the rest.
-func externallyEdited(k config.Key) bool { return !k.Editable && !k.GlobalOnly }
+func externallyEdited(k config.Key) bool {
+	return !k.Editable && !k.GlobalOnly && k.Path != settingKeyMechanisms
+}
 
 // boolValue spells a bool the way the config file spells it.
 func boolValue(v bool) string { return strconv.FormatBool(v) }
