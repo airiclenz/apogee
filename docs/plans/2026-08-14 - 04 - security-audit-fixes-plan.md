@@ -126,7 +126,17 @@ in the registry's `HostTools`.
 
 **Commit:** `feat(config): configured api-key-env names reach the exec scrub`
 
-## 3. runGit refuses repo-local filter drivers
+## 3. runGit refuses repo-local filter drivers — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the refusal is signalled in-band — `runGit` returns a synthesized failed
+`subprocessResult` (exit 1, the refusal sentence as its output) — so all eight existing call
+sites surface it through their present "git … failed" branch with no signature change and nothing
+for a future git tool to forget; `runGitUnchecked` is the unprobed inner call, used only by
+`runGit` and by the probe itself.
+NOTES (2026-08-14): the probe costs two extra `git config` subprocesses per `runGit` call (the
+`--local` and `--worktree` scopes), so the existing `TestGitBranch_RunsUnderConfine` assertion —
+an existing test the item's Files list covers — moved from `want 1` to `want 3` Confine calls,
+matching how `python_exec`'s version probe is already counted.
 
 **What:** a checkout delivered with its own `.git/config` naming a
 `filter.<driver>.clean/smudge/process` command executes that command as the calling user

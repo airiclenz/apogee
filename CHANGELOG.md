@@ -31,6 +31,21 @@ point is a **minor** bump, not a breaking change.
   every child until the switch happened. The MCP registry hand-assembly (`registryWithMCP`) carries
   the same field, so connecting an MCP server cannot re-open what a session without one closes.
 
+- **The git tools refuse a repository that configures its own filter driver.** A checkout
+  delivered with its own `.git/config` naming `filter.<driver>.clean`, `.smudge` or `.process`
+  hands git a command to execute as the operator on ordinary operations — `git add` runs clean,
+  `git checkout` runs smudge, and a plain `git diff`/`git status` runs clean too — and git offers
+  no switch that refuses configured filters, so the emptied `core.hooksPath` and the
+  `--no-textconv --no-ext-diff` read-path refusals left that half open. `runGit` now asks git
+  itself for the repo-local filter config (`git config --local|--worktree --name-only
+  --get-regexp`, a listing that executes no driver and, with `--name-only`, never echoes an
+  attacker-chosen value) before every invocation, and refuses the call when anything matches: the
+  model gets a refusal naming the offending key(s) instead of a git run. Because the probe sits at
+  the one choke point every git tool already goes through, the read tools are covered as
+  completely as the write ones, and a future git tool inherits it by construction. Only the
+  REPOSITORY's scopes refuse — a filter driver in the operator's own global/system config is
+  theirs and still applies, the same trust boundary `HOME` sits on in the git env allowlist.
+
 - **`/settings` switches individual Mechanisms in a sub-list of its own.** `⏎` on the `mechanisms`
   row no longer opens `$EDITOR` — it opens the catalogue, every id this build carries in canonical
   order with `on`/`off` beside it, read from the config FILE's own block on every frame (an id the

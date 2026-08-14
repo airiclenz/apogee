@@ -36,7 +36,9 @@ import (
 // The environment is only half of that: git also runs programs the REPOSITORY names — hooks,
 // filter and diff drivers — which on an attacker-authored checkout are attacker-authored
 // scripts. gitHardeningOptions, gitHardeningEnv and gitDiffHardeningArgs below refuse those,
-// and runGit applies the first two to every invocation.
+// and runGit applies the first two to every invocation. Filter drivers are the one class git
+// has no switch for, so runGit refuses the CALL instead when the repository's own config
+// defines one (repoLocalFilterDrivers).
 
 // gitTimeout bounds a single git invocation. git operations are local (no network
 // op is exposed by these tools), so a short ceiling is ample and a hung git never
@@ -103,13 +105,15 @@ var gitHardeningOptions = []string{"-c", "core.hooksPath="}
 // equivalent) from the files git merges, shrinking the set of places a configured hook path,
 // pager, credential helper or diff driver can come from.
 //
-// Two residuals are deliberate, not oversights. HOME stays on safeEnvKeys, so the OPERATOR's
+// One residual is deliberate, not an oversight: HOME stays on safeEnvKeys, so the OPERATOR's
 // own ~/.gitconfig still applies — that config is theirs, and the threat model here trusts the
-// operator and distrusts the bytes in the workspace. And a .gitattributes filter driver
-// (clean/smudge) names a driver whose COMMAND lives in config; git offers no global switch to
-// refuse configured filters, so a repository delivered with its own .git/config keeps that
-// half. gitDiffHardeningArgs closes the read-path drivers, which are the ones a mere inspection
-// would otherwise execute.
+// operator and distrusts the bytes in the workspace. A .gitattributes filter driver
+// (clean/smudge/process) names a driver whose COMMAND lives in config, and git offers no global
+// switch to refuse configured filters; since 2026-08-14 that half is closed one level up
+// instead — runGit REFUSES the call outright when the repository's own config defines a filter
+// driver (repoLocalFilterDrivers), which is exactly why the operator's global drivers keep
+// working. gitDiffHardeningArgs closes the read-path diff drivers, which are the ones a mere
+// inspection would otherwise execute.
 var gitHardeningEnv = []string{"GIT_CONFIG_NOSYSTEM=1"}
 
 // gitDiffHardeningArgs are the diff-level refusals the read paths carry. A textconv driver and
@@ -152,7 +156,28 @@ func gitProgram(ctx context.Context, root string) (gitPath, refusal string, ok b
 // them by construction. It returns the captured outcome; a missing git is signalled by
 // ok=false on the caller's lookGit, not here. The Go error is non-nil only for ctx
 // cancellation or a confinement-unavailable demotion (the runSubprocess contract).
+//
+// It is also the choke point for the repo-local filter-driver refusal: a repository whose own
+// config defines a filter command gets no git call at all, on the read paths as much as the
+// write ones (a clean filter runs on a plain diff or status). The refusal is returned as an
+// ordinary failed outcome — non-zero exit, the model-facing sentence as its output — so every
+// caller's existing "git ... failed" branch surfaces it verbatim, with no signature for a
+// future git tool to forget to handle.
 func runGit(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocessResult, error) {
+	drivers, err := repoLocalFilterDrivers(ctx, gitPath, root)
+	if err != nil {
+		return subprocessResult{}, err
+	}
+	if len(drivers) > 0 {
+		return subprocessResult{combinedOutput: gitFilterRefusal(drivers), exitCode: 1}, nil
+	}
+	return runGitUnchecked(ctx, gitPath, root, timeout, gitArgs...)
+}
+
+// runGitUnchecked is runGit without the filter-driver probe. Only two callers may use it: runGit
+// itself, and the probe — which must reach git to ASK about the config, and whose own invocation
+// (`git config --get-regexp`) executes no driver. Everything else goes through runGit.
+func runGitUnchecked(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocessResult, error) {
 	argv := make([]string, 0, 1+len(gitHardeningOptions)+len(gitArgs))
 	argv = append(argv, gitPath)
 	argv = append(argv, gitHardeningOptions...)
@@ -168,6 +193,79 @@ func runGit(ctx context.Context, gitPath, root string, timeout time.Duration, gi
 		env:     env,
 	}
 	return runSubprocess(ctx, spec)
+}
+
+// gitFilterConfigName matches the config names that give a filter driver its COMMAND:
+// filter.<driver>.clean, .smudge and .process (a .required or a .gitattributes selection names
+// no program and runs nothing on its own). The same source string is handed to git, whose own
+// matcher does the selecting, and kept here to re-check what came back — git's combined output
+// can carry a warning line the listing never intended as a name.
+var gitFilterConfigName = regexp.MustCompile(`^filter\..*\.(clean|smudge|process)$`)
+
+// gitFilterConfigScopes are the config scopes a filter driver is refused from — the
+// REPOSITORY's own files, which is what the workspace bytes can carry. --local is .git/config
+// (with whatever it include.path-s, since git resolves the includes for us); --worktree is the
+// per-worktree file, read only where the worktreeConfig extension is on and otherwise either a
+// duplicate of --local or an outright error. The operator's --global and --system scopes are
+// deliberately absent: that config is theirs, on the same trust boundary the gitHardeningEnv
+// comment draws.
+var gitFilterConfigScopes = []string{"--local", "--worktree"}
+
+// maxNamedFilterDrivers caps how many config keys a refusal names, so a repository that defines
+// a thousand drivers cannot turn the refusal sentence into the whole result.
+const maxNamedFilterDrivers = 5
+
+// repoLocalFilterDrivers lists the repo-local config names defining a filter-driver command for
+// the repository at root, by asking git itself rather than parsing .git/config — git is the only
+// thing that agrees with git about includes, casing and quoting. Listing config runs no driver:
+// a filter fires on add/checkout/diff, never on `git config`, and --name-only keeps an
+// attacker-chosen VALUE out of the output entirely.
+//
+// A non-zero exit is the pass case, not an error: git exits 1 when nothing matched and 128 when
+// the scope does not apply at all (root is no repository; --worktree on a git that refuses the
+// option). The error return is the runSubprocess contract's — ctx cancellation or a
+// confinement-unavailable demotion — and it stops the caller, so a probe that could not run
+// never lets the real command run un-probed.
+func repoLocalFilterDrivers(ctx context.Context, gitPath, root string) ([]string, error) {
+	var names []string
+	seen := make(map[string]struct{})
+	for _, scope := range gitFilterConfigScopes {
+		res, err := runGitUnchecked(ctx, gitPath, root, gitTimeout,
+			"config", scope, "--name-only", "--get-regexp", gitFilterConfigName.String())
+		if err != nil {
+			return nil, err
+		}
+		if res.exitCode != 0 {
+			continue
+		}
+		for _, line := range strings.Split(res.combinedOutput, "\n") {
+			name := strings.TrimSpace(line)
+			if !gitFilterConfigName.MatchString(name) {
+				continue
+			}
+			if _, dup := seen[name]; dup {
+				continue
+			}
+			seen[name] = struct{}{}
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
+// gitFilterRefusal is the model-facing sentence for a repository whose own config defines a
+// filter driver. Like the exec fence's refusal it NAMES what it refused — a message that only
+// said "refused" would send the model retrying the same call — and states the rule, including
+// the half that still works, so the operator's own global drivers are not read as broken.
+func gitFilterRefusal(names []string) string {
+	shown, extra := names, ""
+	if len(names) > maxNamedFilterDrivers {
+		shown = names[:maxNamedFilterDrivers]
+		extra = fmt.Sprintf(" (+%d more)", len(names)-maxNamedFilterDrivers)
+	}
+	return fmt.Sprintf("git refused: this repository's own config defines a filter driver git would execute as a command (%s%s). "+
+		"Repo-local filter drivers are refused for every git tool; a filter driver in the operator's global git config is untouched and still applies.",
+		strings.Join(shown, ", "), extra)
 }
 
 // gitResultText renders a captured git outcome as text the model reads: the

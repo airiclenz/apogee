@@ -557,8 +557,8 @@ func TestGitBranch_RunsUnderConfine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute err = %v", err)
 	}
-	if conf.confineCount() != 1 {
-		t.Errorf("Confine called %d times, want 1 (the tool must confine the cmd it builds)", conf.confineCount())
+	if conf.confineCount() != 3 {
+		t.Errorf("Confine called %d times, want 3 (the two filter-driver config probes and the branch list — every git subprocess the tool builds is confined)", conf.confineCount())
 	}
 	if res.IsError {
 		t.Errorf("confined list errored: %q", res.Content)
@@ -1210,6 +1210,128 @@ func TestGitDiffRange_DoesNotRunRepoSuppliedDiffDriver(t *testing.T) {
 			requireNotRan(t, marker, "the repository's "+tc.name)
 			if !strings.Contains(res.Content, "after") {
 				t.Errorf("diff = %q, want the stored bytes rather than a driver's rendering", res.Content)
+			}
+		})
+	}
+}
+
+// TestGit_RefusesRepoLocalFilterDriver pins the SP-2 refusal at the runGit choke point: a
+// repository delivered with its own .git/config naming a filter command gets no git call at
+// all, whichever tool asked — the write paths (add/commit run clean) and the read paths (a
+// plain log or status runs it too) alike. Each of the three driver hooks is a command git
+// would execute, so each must trigger, and the refusal must NAME the key it found.
+func TestGit_RefusesRepoLocalFilterDriver(t *testing.T) {
+	tools := []struct {
+		name string
+		run  func(root string) (domain.ToolResult, error)
+	}{
+		{"git_commit", func(root string) (domain.ToolResult, error) {
+			return NewGitCommit(root).Execute(context.Background(), commitCall("c1", `{"message":"refused"}`))
+		}},
+		{"git_branch", func(root string) (domain.ToolResult, error) {
+			return NewGitBranch(root).Execute(context.Background(), branchCall("c1", `{"action":"list"}`))
+		}},
+		{"git_log", func(root string) (domain.ToolResult, error) {
+			return NewGitLog(root).Execute(context.Background(), logCall("c1", `{}`))
+		}},
+	}
+
+	for _, key := range []string{"filter.hostile.clean", "filter.hostile.smudge", "filter.hostile.process"} {
+		t.Run(key, func(t *testing.T) {
+			root := gitRepo(t)
+			runInRepo(t, root, "config", "--local", key, "cat")
+
+			for _, tool := range tools {
+				t.Run(tool.name, func(t *testing.T) {
+					res, err := tool.run(root)
+					if err != nil {
+						t.Fatalf("%s err = %v", tool.name, err)
+					}
+					if !res.IsError {
+						t.Fatalf("%s succeeded on a repo configuring %s: %q", tool.name, key, res.Content)
+					}
+					if !strings.Contains(res.Content, key) {
+						t.Errorf("%s refusal = %q, want it to name %s", tool.name, res.Content, key)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestGitCommit_RefusesRepoSuppliedFilterDriver is the same refusal against the live exploit
+// rather than the config key: a .gitattributes selecting a clean filter whose command is a
+// marker script, which staging would otherwise execute as the operator.
+func TestGitCommit_RefusesRepoSuppliedFilterDriver(t *testing.T) {
+	posixScriptHost(t)
+	root := gitRepo(t)
+	marker := filepath.Join(t.TempDir(), "filter.ran")
+	driver := filepath.Join(t.TempDir(), "filter.sh")
+	writeMarkerScript(t, driver, marker, "cat")
+
+	if err := writeFileForTest(root, ".gitattributes", "*.data filter=hostile\n"); err != nil {
+		t.Fatalf("write .gitattributes: %v", err)
+	}
+	if err := writeFileForTest(root, "a.data", "before\n"); err != nil {
+		t.Fatalf("write data file: %v", err)
+	}
+	runInRepo(t, root, "config", "--local", "filter.hostile.clean", driver)
+
+	res, err := NewGitCommit(root).Execute(context.Background(),
+		commitCall("c1", `{"message":"stage the data file","files":["a.data",".gitattributes"]}`))
+	if err != nil {
+		t.Fatalf("commit err = %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("commit ran with a repo-supplied clean filter configured: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "filter.hostile.clean") {
+		t.Errorf("refusal = %q, want it to name filter.hostile.clean", res.Content)
+	}
+	requireNotRan(t, marker, "the repository's clean filter")
+}
+
+// TestGit_FilterRefusalStaysRepoLocal pins the other half of the rule: the probe costs a clean
+// repository nothing, and a driver in the OPERATOR's own global config — the config the threat
+// model trusts, on the same boundary HOME sits on in safeEnvKeys — never refuses.
+func TestGit_FilterRefusalStaysRepoLocal(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		globalOnly bool
+	}{
+		{name: "no filter driver configured"},
+		{name: "driver in the operator's global config", globalOnly: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gitPath, err := exec.LookPath("git")
+			if err != nil {
+				t.Skip("no git on PATH; skipping the live git-tool run")
+			}
+			if tc.globalOnly {
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				global := "[filter \"hostile\"]\n\tclean = cat\n"
+				if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(global), 0o644); err != nil {
+					t.Fatalf("write global config: %v", err)
+				}
+			}
+			root := gitRepo(t)
+			if tc.globalOnly {
+				// Guard against a vacuous pass: without git reading the injected HOME there is
+				// no global driver to leave alone.
+				seen, err := runGitUnchecked(context.Background(), gitPath, root, gitTimeout,
+					"config", "--global", "--name-only", "--get-regexp", gitFilterConfigName.String())
+				if err != nil || seen.exitCode != 0 {
+					t.Skip("this git did not read the injected HOME config; nothing to assert")
+				}
+			}
+
+			res, err := NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+			if err != nil {
+				t.Fatalf("status err = %v", err)
+			}
+			if res.IsError {
+				t.Fatalf("status refused: %q", res.Content)
 			}
 		})
 	}
