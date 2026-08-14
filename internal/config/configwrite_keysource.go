@@ -131,7 +131,7 @@ func setEntryKeyCommand(data []byte, name, command string) ([]byte, error) {
 	}
 	want := before.Servers[at]
 	want.APIKey, want.APIKeyCmd = "", command
-	return verifiedEntrySplice(data, updated, before, at, want, keySourceNoun)
+	return verifiedEntrySplice(updated, before, at, want, keySourceNoun)
 }
 
 // setEntryPlaintextKeyOK returns the config bytes with the named entry marked `plaintext-key-ok:
@@ -150,12 +150,12 @@ func setEntryPlaintextKeyOK(data []byte, name string) ([]byte, error) {
 	}
 	want := before.Servers[at]
 	want.PlaintextKeyOK = true
-	return verifiedEntrySplice(data, updated, before, at, want, keySourceNoun)
+	return verifiedEntrySplice(updated, before, at, want, keySourceNoun)
 }
 
 // serverEntryAt parses the config the way apogee reads it and reports the whole parsed file plus the
-// index of the entry named name — the before-state every verifiedEntrySplice call compares against,
-// and the refusal for a name the list does not carry.
+// index of the entry named name — the sole before-state every verifiedEntrySplice call compares
+// against, and the refusal for a name the list does not carry.
 func serverEntryAt(data []byte, name string) (fileConfig, int, error) {
 	var before fileConfig
 	if err := yaml.Unmarshal(data, &before); err != nil {
@@ -280,15 +280,17 @@ func serverEntryNode(data []byte, name string) ([]string, *yaml.Node, error) {
 }
 
 // verifiedEntrySplice is the gate an entry splice passes before it reaches the disk: the result must
-// parse, must hold the old `servers:` list with the entry at `at` changed to exactly want and every
-// other entry untouched, must agree with the original on every setting outside the list, and must
-// still LOAD — the exactly-one key-source rule is what an edit that swaps sources has to leave
-// satisfied, and asking ValidateServers is how this writer knows it did.
+// parse, must hold before's `servers:` list with the entry at `at` changed to exactly want and every
+// other entry untouched, must agree with before on every setting outside the list, and must still
+// LOAD — the exactly-one key-source rule is what an edit that swaps sources has to leave satisfied,
+// and asking ValidateServers is how this writer knows it did. Every comparison is between PARSED
+// states — the caller's before and the re-parse of updated — so the config's original bytes stay
+// the caller's business and never reach the gate.
 //
 // what names the thing the edit was supposed to place, in the caller's own words ("the key source",
 // "the model"), because the gate serves every entry writer: the refusal has to say what did not land
 // where the reader would look, and only the caller knows which line that was.
-func verifiedEntrySplice(data, updated []byte, before fileConfig, at int, want ServerEntry, what string) ([]byte, error) {
+func verifiedEntrySplice(updated []byte, before fileConfig, at int, want ServerEntry, what string) ([]byte, error) {
 	var after fileConfig
 	if err := yaml.Unmarshal(updated, &after); err != nil {
 		return nil, fmt.Errorf("the edited file would not parse: %w", err)

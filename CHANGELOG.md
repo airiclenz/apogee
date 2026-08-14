@@ -114,6 +114,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`verifiedEntrySplice` no longer takes the config's original bytes.** The entry-splice gate's
+  first parameter `data []byte` was vestigial: the body compares the re-parse of `updated` against
+  the parsed `before` its caller already hands it, and never read those bytes. The parameter is gone
+  from the signature, from its three call sites (`setEntryKeyCommand`, `setEntryPlaintextKeyOK`,
+  `setEntrySetting`) and from the direct test call, leaving the gate the same shape as
+  `verifiedMechanismSplice`. Its doc comment now says both sides of every comparison are PARSED
+  states, so the original bytes stay the caller's business. No behaviour change.
+
 - The confinement execution contract now describes the approved escape as **landed**, not as a
   realisation gap: §4's note states the whole mechanism — the write-escape permit pinned to the
   disclosed `writeTarget.Real`, `openMutationRoot` as the single place the fence picks a root,

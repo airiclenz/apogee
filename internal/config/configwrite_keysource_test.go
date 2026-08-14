@@ -318,7 +318,7 @@ func TestVerifiedEntrySpliceNamesWhatTheEditFailedToPlace(t *testing.T) {
 
 	for _, noun := range []string{"the key source", "the model"} {
 		t.Run(noun, func(t *testing.T) {
-			out, err := verifiedEntrySplice([]byte(config), []byte(config), before, 0, want, noun)
+			out, err := verifiedEntrySplice([]byte(config), before, 0, want, noun)
 
 			if out != nil {
 				t.Errorf("a refused splice returned bytes to write:\n%s", out)

@@ -130,7 +130,16 @@ existing `escapeCases()` table (`:58`).
 **Acceptance:** `go build ./internal/security/ ./internal/tools/ && go test ./internal/security/ -run 'Permit|SafeWrite|SafeRemove|SafeCopy' && go test ./internal/tools/ -run 'Escape|Permit'`
 **Commit:** `fix(security): a permitted escape through a workspace-internal link reaches its target`
 
-## 3. Drop verifiedEntrySplice's vestigial data parameter
+## 3. Drop verifiedEntrySplice's vestigial data parameter — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the item's doc sweep named three neighbouring comments; two of them —
+`keySourceNoun` (`configwrite_keysource.go:42`) and `spliceEntrySetting`'s closing sentence
+(`configwrite.go:405`) — narrate only the noun the caller passes and the shape the gate catches,
+both unaffected by the signature, so they were read and left byte-identical. The third
+(`serverEntryAt`, `:157-158`) was sharpened to "the sole before-state", and the comment that DID
+narrate the old shape — `verifiedEntrySplice`'s own, which said the result "must agree with the
+original" while the function also received the original bytes — was rewritten to name `before` and
+to state that every comparison is between parsed states.
 
 **What:** Remove the unused first parameter `data []byte` from `verifiedEntrySplice`
 (`internal/config/configwrite_keysource.go:291`) — the body reads only `updated`/`before`/

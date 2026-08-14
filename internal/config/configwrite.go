@@ -389,7 +389,7 @@ func setEntrySetting(data []byte, name string, setting entrySetting, value strin
 	}
 	want := before.Servers[at]
 	setting.set(&want, value)
-	return verifiedEntrySplice(data, updated, before, at, want, setting.Noun)
+	return verifiedEntrySplice(updated, before, at, want, setting.Noun)
 }
 
 // spliceEntrySetting writes the key into the entry's block: over the line the entry already spells it
