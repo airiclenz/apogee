@@ -167,7 +167,7 @@ directly (same package, no `lineEditor` construction needed).
 
 **Commit:** `test(tui): a direct lineBreaks.Replace test pins the input fold`
 
-## 6. Diagnostics tests take symlink-resolved temp roots
+## 6. Diagnostics tests take symlink-resolved temp roots — ✅ DONE (2026-08-14)
 
 **What:** `internal/tools/diagnostics_test.go` keeps 15 raw `t.TempDir()` roots — lines 64,
 85, 97, 119, 120, 171, 193, 212, 237, 255, 276, 318, 382, 422, 473 — the same

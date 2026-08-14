@@ -476,6 +476,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The diagnostics tests take their temp roots symlink-resolved, like the rest of the package.**
+  `internal/tools/diagnostics_test.go` held the package's last 15 raw `t.TempDir()` roots while
+  every sibling suite — `exec_fence_test.go`, `read_file_test.go`, `file_ops_test.go`,
+  `write_file_test.go`, `file_edit_test.go`, `find_replace_test.go`, and one call in this file
+  already — routes through `tempRoot(t)`, which resolves the root's symlinks by the same rule
+  `realPath` uses. On a box whose `TMPDIR` is reached through a symlink (macOS `/tmp`) a raw root
+  is not what the tool resolves a path under it to, so any assertion on a writer's bare sentence
+  breaks there and nowhere else — the hazard that already bit bare-sentence assertions elsewhere in
+  this package. All 15 now take `tempRoot(t)`; the suite is unchanged in what it asserts, and the
+  next bare-sentence assertion added here starts out portable.
+
 - **The issues register records only actionable findings, in one run-residuals section.**
   `ISSUES.md`'s conventions now carry the bar a run residual must clear to be recorded — a defect,
   or a concrete missing test or doc with `file:line` evidence to act on; narration of how an item's

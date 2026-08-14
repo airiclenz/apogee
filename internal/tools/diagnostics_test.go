@@ -61,7 +61,7 @@ func writeGoModule(t *testing.T, dir string) {
 
 func TestDiagnostics_Markers(t *testing.T) {
 	t.Parallel()
-	d := NewDiagnostics(t.TempDir())
+	d := NewDiagnostics(tempRoot(t))
 	if d.Name() != "diagnostics" {
 		t.Errorf("Name() = %q, want diagnostics", d.Name())
 	}
@@ -82,7 +82,7 @@ func TestDiagnostics_Markers(t *testing.T) {
 
 func TestDiagnostics_PathRequired(t *testing.T) {
 	t.Parallel()
-	d := NewDiagnostics(t.TempDir())
+	d := NewDiagnostics(tempRoot(t))
 	res, err := d.Execute(context.Background(), diagnosticsCall("c1", "   "))
 	if err != nil {
 		t.Fatalf("Execute err = %v", err)
@@ -94,7 +94,7 @@ func TestDiagnostics_PathRequired(t *testing.T) {
 
 func TestDiagnostics_PathEscapeRejected(t *testing.T) {
 	t.Parallel()
-	d := NewDiagnostics(t.TempDir())
+	d := NewDiagnostics(tempRoot(t))
 	res, err := d.Execute(context.Background(), diagnosticsCall("c1", "../../etc/passwd"))
 	if err != nil {
 		t.Fatalf("Execute err = %v", err)
@@ -116,8 +116,8 @@ func TestDiagnostics_PathEscapeRejected(t *testing.T) {
 func TestDiagnostics_RefusesEscapingSymlink(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	outside := t.TempDir()
+	dir := tempRoot(t)
+	outside := tempRoot(t)
 	// Broken on purpose: a syntax error is what would quote the outside file's own source
 	// line back into the result.
 	writeGoFile(t, outside, "secret.go", "package secret\n\nfunc Secret() {\n\tapiKey :=\n}\n")
@@ -168,7 +168,7 @@ func TestDiagnostics_RefusesEscapingSymlink(t *testing.T) {
 
 func TestDiagnostics_UnsupportedLanguageDegradesGracefully(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
+	dir := tempRoot(t)
 	// A .rs file has no built-in provider and no probed linter here.
 	if err := os.WriteFile(filepath.Join(dir, "main.rs"), []byte("fn main() {}"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
@@ -190,7 +190,7 @@ func TestDiagnostics_GoSyntaxErrorReportedInProcess(t *testing.T) {
 	// Not parallel: withFakeGo swaps the package-level lookGo var. Proves the syntax
 	// half needs NO toolchain — a syntax error is reported even with go absent.
 	withFakeGo(t, false, "")
-	dir := t.TempDir()
+	dir := tempRoot(t)
 	writeGoFile(t, dir, "broken.go", "package main\n\nfunc main() {\n\tx :=\n}\n")
 	d := NewDiagnostics(dir)
 	res, err := d.Execute(context.Background(), diagnosticsCall("c1", "broken.go"))
@@ -209,7 +209,7 @@ func TestDiagnostics_CleanGoFileWithVetSkipNote(t *testing.T) {
 	// Not parallel: withFakeGo swaps lookGo (force the toolchain-absent branch so the
 	// result is deterministic regardless of the host).
 	withFakeGo(t, false, "")
-	dir := t.TempDir()
+	dir := tempRoot(t)
 	writeGoFile(t, dir, "clean.go", "package main\n\nfunc main() {}\n")
 	d := NewDiagnostics(dir)
 	res, err := d.Execute(context.Background(), diagnosticsCall("c1", "clean.go"))
@@ -234,7 +234,7 @@ func TestDiagnostics_CleanGoFileWithVetSkipNote(t *testing.T) {
 
 func TestDiagnostics_CleanGoFileNoVetRequested(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
+	dir := tempRoot(t)
 	writeGoFile(t, dir, "clean.go", "package main\n\nfunc main() {}\n")
 	d := NewDiagnostics(dir)
 	res, err := d.Execute(context.Background(), diagnosticsCallNoVet("c1", "clean.go"))
@@ -252,7 +252,7 @@ func TestDiagnostics_CleanGoFileNoVetRequested(t *testing.T) {
 func TestDiagnostics_GoVetFindingReported(t *testing.T) {
 	realGo(t)
 	t.Parallel()
-	dir := t.TempDir()
+	dir := tempRoot(t)
 	writeGoModule(t, dir)
 	// A Printf format-string mismatch is a classic go vet finding (parses fine).
 	src := "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Printf(\"%d\\n\", \"not a number\")\n}\n"
@@ -273,7 +273,7 @@ func TestDiagnostics_GoVetFindingReported(t *testing.T) {
 func TestDiagnostics_CleanGoFilePassesVet(t *testing.T) {
 	realGo(t)
 	t.Parallel()
-	dir := t.TempDir()
+	dir := tempRoot(t)
 	writeGoModule(t, dir)
 	writeGoFile(t, dir, "ok.go", "package main\n\nfunc main() {\n\t_ = 1 + 1\n}\n")
 	d := NewDiagnostics(dir)
@@ -315,7 +315,7 @@ func TestDiagnostics_VetSubprocessEnvironmentIsPinned(t *testing.T) {
 	t.Setenv("CC", "/tmp/attacker/cc")
 	t.Setenv("GIT_AUTHOR_NAME", "somebody")
 
-	root := t.TempDir()
+	root := tempRoot(t)
 	abs := filepath.Join(root, "pkg", "file.go")
 	spec := goVetSpec("/usr/bin/go", root, abs)
 
@@ -379,7 +379,7 @@ func TestDiagnostics_VetResultNamesThePackageDirectory(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			root := t.TempDir()
+			root := tempRoot(t)
 			writeGoModule(t, root)
 			pkg := filepath.Join(root, "pkgdir")
 			if err := os.Mkdir(pkg, 0o700); err != nil {
@@ -419,7 +419,7 @@ func TestDiagnostics_RunsWithoutAConfinementHandle(t *testing.T) {
 	// toolchain-absent branch so this stays deterministic and toolchain-free; the syntax
 	// half proves the read path runs.
 	withFakeGo(t, false, "")
-	dir := t.TempDir()
+	dir := tempRoot(t)
 	writeGoFile(t, dir, "clean.go", "package main\n\nfunc main() {}\n")
 	d := NewDiagnostics(dir)
 	res, err := d.Execute(context.Background(), diagnosticsCall("c1", "clean.go"))
@@ -470,7 +470,7 @@ func TestDiagnostics_ApprovalScopeNamesTheSamePackageAsTheResult(t *testing.T) {
 // half at all, and a path that escapes the workspace is a call Execute refuses outright.
 func TestDiagnostics_ApprovalScopeIsEmptyWhenTheCallReadsOnlyWhatItNames(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := tempRoot(t)
 	writeGoFile(t, root, "ok.go", "package main\n\nfunc main() {}\n")
 	writeGoFile(t, root, "app.ts", "export const x = 1;\n")
 	d := NewDiagnostics(root)

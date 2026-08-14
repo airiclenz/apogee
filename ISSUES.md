@@ -67,10 +67,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   (`internal/tui/picker.go:695`), so a user cannot pin the model the heartbeat put them on — faithful
   to the `/server` twin, a feature gap not a defect. (remember-model run)
 
-- [ ] `internal/tools/diagnostics_test.go` keeps 15 further raw `t.TempDir()` roots (e.g. `:318`,
-  `:382`, `:473`) — green today, the same symlinked-TMPDIR hazard if any gains a bare-sentence
-  assertion. (residuals sweep run)
-
 - [ ] `internal/config/configwrite_scalar.go` lands at 803 lines, still double the coding-standards
   ~400-line guide the now-removed ISSUES entry cited; the pure-move split relocated that debt rather
   than closing it, and nothing tracks it now. (configwrite split run)
