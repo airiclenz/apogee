@@ -10,6 +10,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A Mechanism row without an ID is now refused at registration.** `MechanismRegistry.Add`
+  already turned away the reserved experimental sentinel, a duplicate `MechanismID` and a hook
+  implementing no hook interface; it now also turns away a row whose `Descriptor.ID` is empty,
+  which used to become a catalogued Mechanism with a blank canonical ID — attributing its
+  `MechanismFiredEvent`s to nothing and sorting first in the ordering's stable tiebreak, silently.
+  The curated catalogue was never reachable this way (`register` panics at `init()` on an empty
+  ID), so this is a new guard for embedder- and test-built rows.
+
 - **The remember-model decision now has a written record.**
   [ADR 0048](docs/adr/0048-apogee-remembers-the-model-choice-per-server.md) states why the model
   choice is persisted in apogee's own config rather than in llama-launcher's — that file is a curated

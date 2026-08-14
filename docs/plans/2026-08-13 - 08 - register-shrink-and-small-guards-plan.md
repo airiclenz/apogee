@@ -40,7 +40,18 @@ out-of-workspace-write Execute defect (owner call still pending); `hangingPrefix
 
 ---
 
-## 1. `MechanismRegistry.Add` rejects an empty `Descriptor.ID`
+## 1. `MechanismRegistry.Add` rejects an empty `Descriptor.ID` — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the new gate is placed FIRST in `Add`, immediately above the reserved-ID one
+("beside" it, per the item) — an ID that is not there at all cannot meaningfully be reported as
+reserved or as a duplicate.
+
+NOTES (2026-08-14): the refusal reads `apogee: mechanism ID is empty` (`errors.New`, not
+`fmt.Errorf`) — the family's `%q` verb would render the empty ID as a tautological `""`; the
+message keeps the family's `apogee: mechanism ID is …` voice.
+
+NOTES (2026-08-14): also extended the test file's top-of-file comment, which enumerates the gates
+this suite covers, to name the empty-ID one.
 
 **What:** `Add` (`internal/domain/mechanism.go:234`) gates on the reserved experimental ID, on a
 duplicate ID, and on the hook implementing no hook interface — not on the ID being non-empty, so a

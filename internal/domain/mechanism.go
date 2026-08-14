@@ -224,15 +224,20 @@ func NewMechanismRegistry() *MechanismRegistry {
 }
 
 // Add registers a catalogued Mechanism row — its descriptor, its ordering constraints and
-// its hook, joined by the catalogue that built it. It returns an error if the row claims
-// the reserved experimental sentinel ID, re-uses an already-registered MechanismID
-// (topoSort's byID map would otherwise silently drop one of the two — a loud failure
-// instead, phase-4-review-fixes item 5), or carries a Hook implementing no hook interface.
+// its hook, joined by the catalogue that built it. It returns an error if the row carries
+// no MechanismID at all (a blank canonical ID attributes its MechanismFiredEvents to
+// nothing and sorts first in the stable tiebreak), claims the reserved experimental
+// sentinel ID, re-uses an already-registered MechanismID (topoSort's byID map would
+// otherwise silently drop one of the two — a loud failure instead, phase-4-review-fixes
+// item 5), or carries a Hook implementing no hook interface.
 // (The constraint-cycle check is performed by New over the whole graph — a startup gate,
 // ADR 0003 — so a registry under construction can hold constraints that only close a
 // cycle once every Mechanism is present.)
 func (r *MechanismRegistry) Add(m RegisteredMechanism) error {
 	id := m.Descriptor.ID
+	if id == "" {
+		return errors.New("apogee: mechanism ID is empty")
+	}
 	if id == ExperimentalMechanismID {
 		return fmt.Errorf("apogee: mechanism ID %q is reserved for experimental hooks", id)
 	}

@@ -1,9 +1,9 @@
 package domain
 
 // White-box tests for MechanismRegistry.Add's registration gates (phase-4-review-fixes
-// item 5): a duplicate MechanismID and the reserved experimental sentinel are refused
-// loudly at registration, never silently absorbed. The row builder (regd) lives in
-// registry_ordered_test.go.
+// item 5): a duplicate MechanismID, an empty MechanismID and the reserved experimental
+// sentinel are refused loudly at registration, never silently absorbed. The row builder
+// (regd) lives in registry_ordered_test.go.
 
 import (
 	"context"
@@ -49,6 +49,25 @@ func TestAdd_RefusesReservedExperimentalID(t *testing.T) {
 	}
 	if got := len(r.Ordered(HookPreRequest)); got != 0 {
 		t.Errorf("registry holds %d Mechanisms after the refused reserved ID, want 0", got)
+	}
+}
+
+// TestAdd_RefusesEmptyID proves a hand-built row without a canonical ID never becomes a
+// catalogued Mechanism: a blank MechanismID would attribute its MechanismFiredEvents to
+// nothing and sort first in the stable tiebreak, and it would do both silently.
+func TestAdd_RefusesEmptyID(t *testing.T) {
+	t.Parallel()
+	r := NewMechanismRegistry()
+
+	err := r.Add(regd(""))
+	if err == nil {
+		t.Fatal("Add of an empty ID: want an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("empty-ID error = %q, want it to say the ID is empty", err)
+	}
+	if got := len(r.Ordered(HookPreRequest)); got != 0 {
+		t.Errorf("registry holds %d Mechanisms after the refused empty ID, want 0", got)
 	}
 }
 
