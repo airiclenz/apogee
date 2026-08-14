@@ -127,9 +127,9 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
 
 **Remaining:**
 
-- **[P1] Server / model switching** — **every switch SHIPPED (2026-07-28 the two user-facing ones,
-  2026-07-29 the local-server half, 2026-08-12 the profile half); only two request-side knobs
-  remain.** The shipped bodies have
+- **Server / model switching** — **every switch SHIPPED (2026-07-28 the two user-facing ones,
+  2026-07-29 the local-server half, 2026-08-12 the profile half); the request-side remainder
+  below was demoted from `[P1]` on 2026-08-14 (owner call).** The shipped bodies have
   left this file for their authoritative records
   ([ADR 0028](docs/adr/0028-a-server-switch-rehomes-the-session-and-the-first-beat-completes-it.md)
   for `/model` + `/server`,
@@ -137,22 +137,27 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
   for the launcher,
   [ADR 0044](docs/adr/0044-model-profiles-are-per-model-and-mostly-shipped.md) for the profile).
   **Remaining:**
-  - The **request-side knobs the Model profile still does not carry** — sampling params and the
-    context-budget %. The profile itself is per-model and switchable now (a `model-profiles:`
-    pattern map resolved user-entry ▸ shipped table ▸ zero, riding every rebind — ADR 0044), but
-    its two axes are wire dialect only: tool-call format and thinking channel. **Partially answered
-    elsewhere (2026-08-13):** the `MaxTokens` axis shipped with ADR 0046 as a per-`servers:`-entry
-    pin (`max-output-tokens:` / `context-window:`, riding every rebind) — engine behaviour, NOT a
-    Model-profile field. Still open here: the other sampling params (ADR 0046 deliberately leaves
-    temperature et al. unset) and the context-budget % (`ResponseReserve` is code-only,
-    `internal/context/budget.go:53`). Distinct from the
-    launcher's **Launch profiles**, which are **launch-side** (model file, server flags); these
-    knobs are **request-side** — the grill they need must keep the two "profile" namespaces from
-    colliding in the UX. Its one prerequisite is discharged: the field-wise `SetSampling` merge
-    landed 2026-08-13, so a profile that sets only temperature no longer nils the engine's
-    stamped cap.
+  - **Sampling params on the Model profile — deferred, demand-driven (owner call 2026-08-14):
+    covered launch-side for launcher-managed servers.** apogee deliberately sends no sampling
+    params ([ADR 0046](docs/adr/0046-the-engine-bounds-every-reply-with-an-output-cap.md)
+    leaves temperature et al. unset), so the server's own defaults win — and for a
+    llama-launcher-managed server those defaults ARE the Launch profile's flags (`--temp`,
+    `--top-p`, …), which is the owner's whole workflow. Request-side knobs would matter only for
+    an endpoint the launcher did not start (a remote OpenAI-compatible server, LM Studio, a cloud
+    API) or for changing sampling mid-session without a model reload; neither need has appeared.
+    Pick up only on a real ask; the grill it then needs must keep the request-side "Model profile"
+    and launch-side "Launch profile" namespaces from colliding in the UX. Its one prerequisite is
+    already discharged: the field-wise `SetSampling` merge landed 2026-08-13, so a profile that
+    sets only temperature no longer nils the engine's stamped cap.
     [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md) §6 still
     defers the user-after-tool wire risk to this layer by name.
+  - **[P2] Context-budget % config key** — the one piece with no launch-side home:
+    `ResponseReserve` (`internal/context/budget.go:53`) is apogee's own split of the context
+    window between history and the expected response, hardcoded today; a Launch profile's `-c`
+    sets the window size but not this fraction. A small config key is the live remainder. The
+    `MaxTokens` axis already shipped with ADR 0046 as a per-`servers:`-entry pin
+    (`max-output-tokens:` / `context-window:`, riding every rebind) — engine behaviour, NOT a
+    Model-profile field.
 
 - **[P2] Inspector / raw-protocol view** — apogee-code's "Show Code"/Inspector (advanced mode)
   shows wire-level request/response JSON. apogee has only a hidden, non-toggleable debug field in
