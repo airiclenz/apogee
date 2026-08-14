@@ -67,11 +67,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   (`internal/tui/picker.go:695`), so a user cannot pin the model the heartbeat put them on — faithful
   to the `/server` twin, a feature gap not a defect. (remember-model run)
 
-- [ ] `flattenLine`'s widened `\t` / `\r` branches are unreachable through any door today — the
-  bubbles runeutil sanitizer maps both before the fold sees them (`internal/tui/lineeditor.go:171`,
-  `:184`) — so no test exercises the fold itself, only its end state; a direct `lineBreaks.Replace`
-  unit test would pin it. (residuals sweep run)
-
 - [ ] `internal/tools/diagnostics_test.go` keeps 15 further raw `t.TempDir()` roots (e.g. `:318`,
   `:382`, `:473`) — green today, the same symlinked-TMPDIR hazard if any gains a bare-sentence
   assertion. (residuals sweep run)

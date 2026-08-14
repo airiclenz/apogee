@@ -10,6 +10,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The input fold is now pinned at the replacer, not only at the widget's output.**
+  `lineEditor.flattenLine` folds a pasted newline, tab or carriage return to a space before a
+  one-line field can hold one, but no in-package door reaches the `\t` and `\r` branches with the
+  character intact — every write into a bubbles textarea runs through the widget's own rune
+  sanitizer first, which spends a tab as four spaces and a carriage return as a newline — so the
+  only coverage was `TestSettingsPasteLandsInTheOpenField`, which pins that whole pipeline's end
+  state rather than this substitution. A new `internal/tui/lineeditor_test.go` exercises the
+  package-level `lineBreaks` replacer directly: each of the three folds to a single space, the fold
+  is one rune for one rune (a `\r\n` is two spaces, which is what the caret arithmetic around
+  `caretRune`/`caretToRune` rests on), and a folded value survives a second pass unchanged. The
+  field's own invariant is now pinned where it is decided, so it stays pinned if that sanitizer is
+  ever reconfigured or replaced.
+
 - **A Mechanism row without an ID is now refused at registration.** `MechanismRegistry.Add`
   already turned away the reserved experimental sentinel, a duplicate `MechanismID` and a hook
   implementing no hook interface; it now also turns away a row whose `Descriptor.ID` is empty,

@@ -144,7 +144,7 @@ rune-count and idempotence assertions stay.
 
 **Commit:** `fix(tui): flattenField folds carriage returns like the line fold does`
 
-## 5. A direct `lineBreaks.Replace` unit test pins the input fold
+## 5. A direct `lineBreaks.Replace` unit test pins the input fold — ✅ DONE (2026-08-14)
 
 **What:** `flattenLine`'s widened `\t`/`\r` branches (`internal/tui/lineeditor.go:171`, `:184`)
 are unreachable through any in-package door — the bubbles runeutil sanitizer maps both before
