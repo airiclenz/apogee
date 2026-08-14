@@ -600,11 +600,16 @@ it without re-deciding.
 > `internal/tools/write_file.go:88` — and every other member of the family — mutates through
 > `safeWriteFile` (`internal/tools/path_safety.go:62`), which reads the permit off the execution
 > context and hands its `Real` to the security core, where `openMutationRoot`
-> (`internal/security/writepermit.go:62`) is the single place the fence decides which `os.Root`
-> bounds a mutation: the workspace root for an in-workspace target — permit or not, today's
-> behaviour byte-for-byte — the permitted target's deepest **existing** ancestor for an approved
-> escape (missing parents created inside that root, final component acted on by name rather than
-> followed), and a refusal for anything else. Execute *reproduces* dispatch's resolution rather than
+> (`internal/security/writepermit.go:71`) is the single place the fence decides which `os.Root`
+> bounds a mutation. The branch is chosen by **resolved target**, asked first: an argument that
+> re-resolves to exactly the permitted path runs through that target's deepest **existing** ancestor
+> (missing parents created inside that root, final component acted on by name rather than followed).
+> Everything else keeps today's fence byte-for-byte — the workspace root for an in-workspace target,
+> permit or not, and a refusal for anything else. Deciding on the resolved path is what makes the
+> permitted branch **reachable for a workspace-internal symlink** whose target lies outside: the pane
+> disclosed that resolved target, so the family lands on it uniformly, through the permitted ancestor
+> and never through the link — including `delete_file`, which removes the disclosed outside target
+> and leaves the workspace link dangling. Execute *reproduces* dispatch's resolution rather than
 > trusting it, so an argument that has come to mean a different path since the disclosure is refused,
 > never redirected.
 >

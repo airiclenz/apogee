@@ -150,11 +150,104 @@ func TestSafeWriteFile_PermitRefusesADivergedTarget(t *testing.T) {
 	})
 }
 
+// TestSafeWriteFile_PermittedTargetThroughAWorkspaceLink covers the shape the Gate can disclose but
+// the fence could not execute: the argument is spelled INSIDE the workspace and leaves it through a
+// symlink. Dispatch resolves that link to classify the write, so the pane showed — and the permit
+// names — the outside path; the bytes must therefore land THERE, through the permitted ancestor
+// root, with the link left as the link it was. Without the matching permit the same call is refused
+// exactly as it always was, which is the floor this branch may not lower.
+func TestSafeWriteFile_PermittedTargetThroughAWorkspaceLink(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		permit    string // path under the outside directory the permit authorises ("" = no permit)
+		wantWrite bool
+	}{
+		{name: "the matching permit lands the write on the resolved target", permit: "target.md", wantWrite: true},
+		{name: "a permit naming another path is refused", permit: "elsewhere.md"},
+		{name: "no permit refuses as it always did", permit: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			outside := t.TempDir()
+			target := filepath.Join(outside, "target.md")
+			if err := os.WriteFile(target, []byte("original"), 0o644); err != nil {
+				t.Fatalf("setup: %v", err)
+			}
+			link := filepath.Join(root, "link.md")
+			if err := os.Symlink(target, link); err != nil {
+				t.Skipf("symlinks unsupported: %v", err)
+			}
+			permit := ""
+			if tc.permit != "" {
+				permit = permitFor(t, filepath.Join(outside, tc.permit))
+			}
+
+			err := SafeWriteFile(root, "link.md", []byte("approved"), 0o644, permit)
+
+			want := "original"
+			if tc.wantWrite {
+				want = "approved"
+				if err != nil {
+					t.Fatalf("SafeWriteFile through the approved link: %v", err)
+				}
+			} else if !errors.Is(err, ErrPathEscape) {
+				t.Fatalf("SafeWriteFile err = %v, want ErrPathEscape", err)
+			}
+			data, readErr := os.ReadFile(target)
+			if readErr != nil || string(data) != want {
+				t.Fatalf("the resolved target holds %q, want %q (err = %v)", data, want, readErr)
+			}
+			info, statErr := os.Lstat(link)
+			if statErr != nil || info.Mode()&os.ModeSymlink == 0 {
+				t.Fatalf("the workspace link was replaced: lstat mode = %v, err = %v", info.Mode(), statErr)
+			}
+		})
+	}
+}
+
+// TestSafeRemove_PermittedTargetThroughAWorkspaceLink states the delete half of the same shape,
+// which is the one with a surprise in it: the approval disclosed the RESOLVED path, so that is what
+// the delete removes — the outside file, leaving the workspace link behind and dangling. Unlinking
+// the link instead would leave the file the operator agreed to destroy exactly where it was.
+func TestSafeRemove_PermittedTargetThroughAWorkspaceLink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "doomed.md")
+	if err := os.WriteFile(target, []byte("content"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	link := filepath.Join(root, "doomed.md")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	if err := SafeRemove(root, "doomed.md", permitFor(t, target)); err != nil {
+		t.Fatalf("SafeRemove through the approved link: %v", err)
+	}
+
+	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the disclosed target survived its delete (stat err = %v)", err)
+	}
+	info, statErr := os.Lstat(link)
+	if statErr != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the workspace link was removed instead of its target: mode = %v, err = %v", info.Mode(), statErr)
+	}
+}
+
 // TestSafeWriteFile_PermitLeavesWorkspaceWritesUnchanged pins the never-worse floor from the other
-// side: a permit is an EXCEPTION for one path, never a mode. An in-workspace write still lands in
-// the workspace while a permit rides along, and — the case that matters — a workspace path that
-// escapes through a symlink is still refused, because the fence answers the in-workspace question
-// first and the permit is never consulted for a path the workspace root already contains.
+// side: a permit is an EXCEPTION for one path, never a mode. An in-workspace write lands where it
+// always did while an unrelated permit rides along — indistinguishable from the same write with no
+// permit at all — and a workspace path that leaves the fence through a symlink to somewhere the
+// permit does NOT name is still refused, because what a permit authorises is one resolved path,
+// never the act of escaping.
 func TestSafeWriteFile_PermitLeavesWorkspaceWritesUnchanged(t *testing.T) {
 	t.Parallel()
 
@@ -166,22 +259,31 @@ func TestSafeWriteFile_PermitLeavesWorkspaceWritesUnchanged(t *testing.T) {
 	if err := SafeWriteFile(root, "notes.md", []byte("in workspace"), 0o644, permit); err != nil {
 		t.Fatalf("in-workspace write with a permit present: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(root, "notes.md"))
-	if err != nil || string(data) != "in workspace" {
-		t.Fatalf("in-workspace write landed wrong: %q (err = %v)", data, err)
+	if err := SafeWriteFile(root, "plain.md", []byte("in workspace"), 0o644, ""); err != nil {
+		t.Fatalf("the same write with no permit: %v", err)
+	}
+	for _, name := range []string{"notes.md", "plain.md"} {
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil || string(data) != "in workspace" {
+			t.Fatalf("in-workspace write landed wrong for %s: %q (err = %v)", name, data, err)
+		}
 	}
 	if _, statErr := os.Stat(approved); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("the permitted target was written by an in-workspace call (stat err = %v)", statErr)
 	}
 
-	// A workspace-named path that leaves the fence through a symlink stays refused, permit or not:
-	// the permit authorises the disclosed path, not the argument that points at it.
+	// A workspace-named path that leaves the fence through a symlink and lands anywhere but the
+	// permitted target stays refused: the permit answers for the disclosed path, nothing else.
 	if err := os.Symlink(outside, filepath.Join(root, "hop")); err != nil {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
-	err = SafeWriteFile(root, filepath.Join("hop", "approved.md"), []byte("smuggled"), 0o644, permit)
+	smuggled := filepath.Join(outside, "smuggled.md")
+	err := SafeWriteFile(root, filepath.Join("hop", "smuggled.md"), []byte("smuggled"), 0o644, permit)
 	if !errors.Is(err, ErrPathEscape) {
 		t.Fatalf("write through a workspace symlink err = %v, want ErrPathEscape", err)
+	}
+	if _, statErr := os.Stat(smuggled); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("the symlinked hop wrote an unapproved neighbour (stat err = %v)", statErr)
 	}
 	if _, statErr := os.Stat(approved); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("the symlinked hop reached the permitted target (stat err = %v)", statErr)

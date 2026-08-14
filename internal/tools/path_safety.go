@@ -161,12 +161,13 @@ func statWriteTarget(ctx context.Context, path, root string) (os.FileInfo, error
 // escapeTargetPin answers the (input, root) pair a fenced read or stat of THIS CALL'S OWN write
 // target must use, and whether that target is knowably absent.
 //
-// The workspace branch is checked FIRST and is unconditional, exactly as security's mutation root
-// checks it: a permit never moves an in-workspace read, so a call carrying one behaves identically
-// to one that does not for every path inside the fence. Outside it the pair is repointed only when
-// the argument re-resolves to EXACTLY the permitted target — the same equality the write itself
-// insists on — and then only to that target's own parent directory, so the one name reachable
-// through the returned root is the approved one.
+// The workspace branch is checked FIRST and is unconditional: a permit never moves an in-workspace
+// read, so a call carrying one behaves identically to one that does not for every path inside the
+// fence. "Inside" is decided by RESOLUTION, which is why a workspace-spelled path that leaves the
+// fence through a symlink is not inside it. Outside, the pair is repointed only when the argument
+// re-resolves to EXACTLY the permitted target — the same equality security's mutation root routes
+// on (internal/security/writepermit.go) — and then only to that target's own parent directory, so
+// the one name reachable through the returned root is the approved one.
 //
 // absent is true when that parent is not an openable directory. The target cannot exist then, and
 // the caller reports ordinary absence: pinning a root that cannot be opened would surface a fence

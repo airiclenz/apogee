@@ -93,7 +93,10 @@ endpoint identity.
 **Acceptance:** `go build ./internal/tui/ && go test ./internal/tui/ -run 'Server|Settings'`
 **Commit:** `fix(tui): the session's server entry is identified by name, not endpoint`
 
-## 2. A permitted escape through a workspace-internal link reaches its target
+## 2. A permitted escape through a workspace-internal link reaches its target — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the existing `TestSafeWriteFile_PermitLeavesWorkspaceWritesUnchanged` asserted the old (now-fixed) behaviour for its symlinked-hop half — that half was re-pointed at a hop the permit does NOT name, which is the floor case that remains a refusal; the landing case moved to the new `TestSafeWriteFile_PermittedTargetThroughAWorkspaceLink`, and the "identical to no-permit" comparison the item asked for was added to the floor test.
+NOTES (2026-08-14): one file beyond the item's list — `internal/tools/path_safety.go` (doc-only): `escapeTargetPin`'s doc claimed its workspace branch was checked first and unconditional "exactly as security's mutation root checks it", which this item's routing change falsified. Repaired to name the resolved-path equality both sides route on; no code change.
 
 **What:** In `openMutationRoot` (`internal/security/writepermit.go:62-75`), check the permit
 BEFORE the lexical in-workspace branch (ratified call 3): when `permitted != ""`, join `input`

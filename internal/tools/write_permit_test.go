@@ -179,6 +179,33 @@ func TestApprovedEscapeLandsOnTheDisclosedTarget(t *testing.T) {
 	}
 }
 
+// TestApprovedEscapeThroughAWorkspaceLinkLandsOnTheDisclosedTarget drives the same family through
+// the route that used to defeat the approval: an argument spelled INSIDE the workspace that reaches
+// the outside target through a symlink. Dispatch resolves it to classify the call, so the pane
+// disclosed — and the permit names — the outside path; every verb must act on that path, through
+// the permitted root rather than through the link, which survives the call untouched. delete_file is
+// the case worth reading twice: it removes the resolved target the operator agreed to destroy and
+// leaves the workspace link dangling, rather than quietly unlinking the link and sparing the file.
+func TestApprovedEscapeThroughAWorkspaceLinkLandsOnTheDisclosedTarget(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range escapeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root, target := escapeFixtures(t, tc)
+			named, link := linkedPath(t, root, target)
+
+			result := runWrite(t, escapePermit(target), tc.tool(root), tc.args(named))
+			if result.IsError {
+				t.Fatalf("approved escape through a workspace link was refused: %q", result.Content)
+			}
+			tc.landed(t, root, target)
+			mustBeALink(t, link)
+		})
+	}
+}
+
 // TestEscapeRefusedWhenThePermitNamesAnotherPath pins the bound the permit buys: it authorises ONE
 // resolved path, so a call naming a different out-of-workspace target is refused even though a
 // permit rides on the context. This is the property that keeps an approval from becoming a
@@ -335,6 +362,34 @@ func escapeFixtures(t *testing.T, tc escapeCase) (root, target string) {
 	target = filepath.Join(t.TempDir(), "landed.txt")
 	tc.setup(t, root, target)
 	return root, target
+}
+
+// linkedPath renders target as a path INSIDE root that reaches it through a symlink, returning that
+// path beside the link itself. The link is a DIRECTORY link on purpose: it resolves whether or not
+// the target file exists yet, so one helper serves both the verbs that create their target and the
+// verbs that rewrite one — which is exactly the range the permit has to cover.
+func linkedPath(t *testing.T, root, target string) (named, link string) {
+	t.Helper()
+
+	link = filepath.Join(root, "outside")
+	if err := os.Symlink(filepath.Dir(target), link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	return filepath.Join(link, filepath.Base(target)), link
+}
+
+// mustBeALink asserts path is still a symlink — the route a call travelled must never become the
+// thing it acted on.
+func mustBeALink(t *testing.T, path string) {
+	t.Helper()
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("lstat %s: %v", path, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("%s is no longer a symlink (mode %v)", path, info.Mode())
+	}
 }
 
 // mustRefuseEscape asserts a refusal the model can read, carrying the uniform "outside the

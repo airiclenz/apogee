@@ -54,12 +54,25 @@ import (
 // the workspace root for an in-workspace target (permit or no permit), the permitted target's
 // own ancestor for an approved escape, and a refusal for everything else.
 //
-// The in-workspace branch is checked FIRST and is unconditional: a permit never changes where an
-// in-workspace write lands, so a call that would have succeeded — or been refused — without one
-// behaves identically with one.
+// Which branch a call takes is decided by its RESOLVED path, and that question is asked FIRST: an
+// argument that re-resolves to exactly the permitted target takes the permitted branch even when
+// its spelling sits inside the workspace. That case is the workspace-internal symlink whose target
+// lies outside — the path dispatch resolved in order to classify the write and the approval pane
+// disclosed in full, so the yes the operator gave names the outside target and the mutation has to
+// reach it. Sending it down the lexical branch instead would refuse the one call the human read,
+// which is the gate failing to execute its own Allow.
+//
+// The lexical in-workspace branch remains unconditional for every OTHER call: with no permit, or
+// with one naming a different path, a mutation behaves exactly as it did before permits existed —
+// the never-worse floor. Permits are minted only for disclosed escape targets (classifyWriteTarget,
+// internal/agent/dispatch.go), so an ordinary in-workspace write can never meet the match above.
 //
 // The caller owns the returned root and must Close it. On any error nothing is left open.
 func openMutationRoot(root, input, permitted string) (*os.Root, string, error) {
+	if permitted != "" && namesPermittedTarget(root, input, permitted) {
+		return openPermittedRoot(root, input, permitted)
+	}
+
 	rel, err := rootRelative(input, root)
 	if err == nil {
 		r, openErr := os.OpenRoot(root)
@@ -87,10 +100,7 @@ func openMutationRoot(root, input, permitted string) (*os.Root, string, error) {
 // and got an error needs to know which of the two truths applies, that the argument no longer
 // means what the pane showed, or that the target itself has become a link.
 func openPermittedRoot(root, input, permitted string) (*os.Root, string, error) {
-	named := input
-	if !filepath.IsAbs(named) {
-		named = filepath.Join(root, named)
-	}
+	named := permittedName(root, input)
 	target := filepath.Clean(permitted)
 
 	if resolved := EvalRealPath(named); resolved != target {
@@ -116,6 +126,27 @@ func openPermittedRoot(root, input, permitted string) (*os.Root, string, error) 
 		return nil, "", err
 	}
 	return r, rel, nil
+}
+
+// namesPermittedTarget reports whether input means exactly the permitted target — the single
+// question that decides whether a mutation runs through the permitted root instead of the fence.
+//
+// It is asked twice on purpose. openMutationRoot asks it to ROUTE, ahead of the lexical branch;
+// openPermittedRoot asks it again to REFUSE, with the specific message an operator whose approval
+// stopped executing needs. Both ask it of the same string through the same resolution, so a path
+// can never route one way and be judged another.
+func namesPermittedTarget(root, input, permitted string) bool {
+	return EvalRealPath(permittedName(root, input)) == filepath.Clean(permitted)
+}
+
+// permittedName renders input as the absolute path the permit is judged against: a relative
+// argument joins the workspace root exactly as every other mutation resolves it, an absolute one
+// stands as given. Cleaning is left to EvalRealPath, which does it on the way to the real path.
+func permittedName(root, input string) string {
+	if filepath.IsAbs(input) {
+		return input
+	}
+	return filepath.Join(root, input)
 }
 
 // deepestExistingDir returns the deepest EXISTING directory at or above path — the anchor an

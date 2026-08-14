@@ -138,6 +138,16 @@ point is a **minor** bump, not a breaking change.
   names the entry the human actually chose (ADR 0036 decision 1). Sessions with one entry per
   endpoint — every ordinary config — see no change.
 
+- **An approved escape through a workspace-internal symlink now executes.** `openMutationRoot`
+  picks its branch by RESOLVED target and asks that question first, so an argument spelled inside
+  the workspace that reaches an outside target through a link runs through the permitted ancestor
+  root — the path the approval pane disclosed — instead of being refused by the lexical fence after
+  the operator already said yes (ADR 0049; the Gate's Allow was unexecutable for this shape). The
+  whole write family lands on the disclosed target uniformly, never through the link: `delete_file`
+  removes the resolved outside target and leaves the workspace link dangling. The never-worse floor
+  is unchanged by construction — permits are minted only for disclosed escape targets, so with no
+  permit, or with one naming a different path, every call behaves byte-for-byte as before.
+
 ## [0.14.0] — 2026-08-14
 
 ### Added
