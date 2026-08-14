@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Re-selecting the model or the server you are already on now records the pin.** Both accept
+  paths answered the re-selection with a note and returned before the recording seam —
+  `bindPickedModel`'s "already bound to …" and `switchToServer`'s "already on …" — so the one
+  choice a human could NOT pin was the one the heartbeat, or start-up, had already made for them:
+  reaching `model:` / `server:` meant moving away and back. Both branches now offer the name to
+  the same seam the moving path uses and state what came back: `model: saved — this server starts
+  on it next time`, and for the server twin a new `server: saved — this entry starts the next
+  session` line — a line of its own, because there is no move note to carry the ` · server: saved`
+  clause. A failed write stays a footnote under the answer, an unwired seam stays silent, and every
+  other skip (remember off, an unlisted entry, a launcher-fronted one) stays the binary's to make.
+  The `/settings` server row reaches `switchToServer` by the same door, so it pins too.
+
 - **The input fold is now pinned at the replacer, not only at the widget's output.**
   `lineEditor.flattenLine` folds a pasted newline, tab or carriage return to a space before a
   one-line field can hold one, but no in-package door reaches the `\t` and `\r` branches with the

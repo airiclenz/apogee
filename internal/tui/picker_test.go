@@ -443,6 +443,33 @@ func TestHeartbeatObservedRebindRecordsNothing(t *testing.T) {
 	}
 }
 
+// Naming the model already bound rebinds nothing and records everything: it is the ONE pin available
+// to a human the heartbeat (or start-up) put on that model, so the pick reaches the seam anyway and
+// the saved line follows the already-bound answer it is a consequence of.
+func TestModelNamingTheBoundModelRecordsThePin(t *testing.T) {
+	rec := &fakeRecorder{saved: true}
+	m, rb := seededModelRecording(t, rec)
+
+	m, _ = typeCommand(t, m, "/model test-model")
+
+	if len(rb.calls) != 0 {
+		t.Fatalf("rebind calls = %v, want none — the session is already on that model", rb.calls)
+	}
+	if want := []string{"test-model"}; !reflect.DeepEqual(rec.names, want) {
+		t.Fatalf("recorded ids = %v, want %v — pinning what the beat chose is the whole act", rec.names, want)
+	}
+	got := noteTexts(m)
+	if len(got) < 2 {
+		t.Fatalf("notes = %v, want the already-bound answer and the saved line under it", got)
+	}
+	if want := "already bound to test-model"; got[len(got)-2] != want {
+		t.Errorf("notes = %v, want %q stated first", got, want)
+	}
+	if got[len(got)-1] != modelSavedNote {
+		t.Errorf("notes = %v, want %q last", got, modelSavedNote)
+	}
+}
+
 // /model is idle-only by the commandSpecs table, so a line typed mid-run earns the standing answer
 // instead of running — the tag the dropdown shows and what ⏎ does are one rule.
 func TestModelCommandIsIdleOnly(t *testing.T) {
@@ -776,6 +803,62 @@ func TestServerSwitchRecordFailureWarnsAndTheSwitchStands(t *testing.T) {
 	if want := "could not record the server choice: permission denied"; got[len(got)-1] != want {
 		t.Errorf("notes = %v, want %q as the last line", got, want)
 	}
+}
+
+// The /model twin, one server up: naming the server the session is already on switches nothing and
+// records the name anyway, because start-up put this session here and the pin is the only thing left
+// to ask for. The saved line is a line of its own — there is no move's note to carry the clause.
+func TestServerNamingTheActiveServerRecordsThePin(t *testing.T) {
+	sw, rec := &fakeSwitch{}, &fakeRecorder{saved: true}
+	m, _ := seededServersRecording(t, sw, rec)
+
+	m, _ = typeCommand(t, m, "/server test-host")
+
+	if len(sw.calls) != 0 {
+		t.Fatalf("switch calls = %v, want none — the session is already on that server", sw.calls)
+	}
+	if want := []string{"test-host"}; !reflect.DeepEqual(rec.names, want) {
+		t.Fatalf("recorded names = %v, want %v — the entry named is the one to come back on", rec.names, want)
+	}
+	got := noteTexts(m)
+	if len(got) < 2 {
+		t.Fatalf("notes = %v, want the already-on answer and the saved line under it", got)
+	}
+	if want := "already on test-host (http://localhost:1234)"; got[len(got)-2] != want {
+		t.Errorf("notes = %v, want %q stated first", got, want)
+	}
+	if got[len(got)-1] != serverSavedNote {
+		t.Errorf("notes = %v, want %q last", got, serverSavedNote)
+	}
+}
+
+// An unwired seam is the ordinary hand-built Options, and on both twins the re-selection answers
+// exactly as it did before the pin existed: the "already …" note, alone, and no panic reaching for a
+// recorder nobody supplied.
+func TestReSelectionWithNoRecordingSeamAnswersAndNothingMore(t *testing.T) {
+	t.Run("model", func(t *testing.T) {
+		m, _ := seededPicker(t, testOpts) // testOpts wires no RecordModelChoice
+		before := len(noteTexts(m))
+
+		m, _ = typeCommand(t, m, "/model test-model")
+
+		got := noteTexts(m)
+		if len(got) != before+1 || got[len(got)-1] != "already bound to test-model" {
+			t.Errorf("notes = %v, want the already-bound answer and nothing else", got)
+		}
+	})
+
+	t.Run("server", func(t *testing.T) {
+		m, _ := seededServers(t, &fakeSwitch{}) // seededServers wires no RecordServerChoice
+		before := len(noteTexts(m))
+
+		m, _ = typeCommand(t, m, "/server test-host")
+
+		got := noteTexts(m)
+		if len(got) != before+1 || got[len(got)-1] != "already on test-host (http://localhost:1234)" {
+			t.Errorf("notes = %v, want the already-on answer and nothing else", got)
+		}
+	})
 }
 
 // Everything still in flight on the old chain lands inert: the switch retired that generation, so a

@@ -63,10 +63,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   (`internal/config/configwrite_keysource.go:280`), now reachable from a model / launch-profile write.
   (remember-model run)
 
-- [ ] `/model <id>` naming the already-bound model returns early and records nothing
-  (`internal/tui/picker.go:695`), so a user cannot pin the model the heartbeat put them on — faithful
-  to the `/server` twin, a feature gap not a defect. (remember-model run)
-
 - [ ] `internal/config/configwrite_scalar.go` lands at 803 lines, still double the coding-standards
   ~400-line guide the now-removed ISSUES entry cited; the pure-move split relocated that debt rather
   than closing it, and nothing tracks it now. (configwrite split run)

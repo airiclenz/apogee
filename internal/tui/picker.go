@@ -350,7 +350,9 @@ func serverNameList(servers []ServerChoice) string {
 //
 // Choosing the server the session is already on is answered rather than ignored, the already-bound
 // posture: an explicit act deserves a reply, and re-switching would tear down a live binding to
-// arrive back where it started.
+// arrive back where it started. It is still a CHOICE, though, so it is offered to the recording seam
+// on the same terms a move is: naming where you already are is the only way to pin the server
+// start-up put you on, and refusing to record it would leave that human no route to the key at all.
 //
 // A PRE-BOUND session takes the same accept one step lower down (ADR 0036 decision 3): there is no
 // engine to move, so the choice CONSTRUCTS one ([Model.bindToServer], prebound.go). The branch is
@@ -363,6 +365,13 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 	}
 	if choice.Endpoint == m.opts.Endpoint {
 		m.transcript.addNote("already on " + choice.Name + " (" + choice.Endpoint + ")")
+		// The recording is stated on a line of its own here, where the move's own note (which carries
+		// it as savedChoiceClause) is not there to hang it on.
+		record := recordServerChoice(m.opts.RecordServerChoice, choice.Name)
+		if record.saved {
+			m.transcript.addNote(serverSavedNote)
+		}
+		record.warn(&m.transcript)
 		m.layout()
 		return m, nil
 	}
@@ -378,6 +387,12 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 	// skips it silently when it does not (ADR 0036 decision 2, [Options.RecordServerChoice]).
 	return m.foldServerSwitch(from, result, recordServerChoice(m.opts.RecordServerChoice, choice.Name))
 }
+
+// serverSavedNote is what a RECORDED re-selection says: the `server:` key now names the entry this
+// session is already on, so the next session starts here without being asked. It states as a line
+// what [savedChoiceClause] states as a clause, for the one path that has no move to hang a clause on
+// — the same key, named the same way, because the key is what the human will find in config.yaml.
+const serverSavedNote = "server: saved — this entry starts the next session"
 
 // ----------------------------------------------------------------------------
 // /model over the Launch profiles — the launcher's offering (ADR 0029 D3)
@@ -687,13 +702,23 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 // It is also the ONE place a model pick is RECORDED (remember-model), and that is why the recording
 // hangs off this function rather than off the rebind orchestration underneath it: [Model.applyRebind]
 // is shared with the heartbeat, and a passive observation is news about the server rather than a
-// choice — recording there would write config nobody asked for. Only a pick that actually BOUND is
-// offered to the seam, so a refused rebind leaves the file describing the model the session is still
-// on.
+// choice — recording there would write config nobody asked for. Only a model the session is actually
+// ON is offered to the seam: a refused rebind leaves the file describing the model still bound, and
+// naming the bound one records at once, which is the human's only way to pin what the heartbeat (or
+// start-up) chose for them.
 func (m Model) bindPickedModel(id string, window int) (tea.Model, tea.Cmd) {
 	m.picker = picker{}
 	if id == m.opts.Model {
 		m.transcript.addNote("already bound to " + displayModel(id))
+		// Naming the model already bound binds nothing, but it is still a pick, and the only one a human
+		// whose heartbeat (or start-up) put them here can make: the record runs on the bound path's own
+		// terms below, and every skip that is not the renderer's — remember off, an unlisted entry, a
+		// launcher-fronted one — stays the seam's to make silently.
+		record := recordModelChoice(m.opts.RecordModelChoice, id)
+		if record.saved {
+			m.transcript.addNote(modelSavedNote)
+		}
+		record.warn(&m.transcript)
 		m.layout()
 		return m, nil
 	}

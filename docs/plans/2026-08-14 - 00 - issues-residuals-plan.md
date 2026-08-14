@@ -190,7 +190,16 @@ line.
 
 **Commit:** `test(tools): diagnostics tests take symlink-resolved temp roots`
 
-## 7. Re-selecting the bound model or the active server records the pin
+## 7. Re-selecting the bound model or the active server records the pin — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the mirror lands in `switchToServer` as the item directs, which is also the
+`/settings` server row's delegate (`internal/tui/settings.go:607`, `:617`) — so re-selecting the
+active server from the settings pane records the pin as well; behaviour beyond the two verbs the
+item names, and consistent with them.
+NOTES (2026-08-14): two ADR sentences now read narrow — ADR 0048 decision 3's "a `/model` pick that
+BOUND" and ADR 0036 decision 2's "the switch's fold notes the recording" — since a re-selection
+binds and moves nothing yet records. Both ADRs were left untouched (outside the item's Files list);
+ADR 0036 carries an "(Amended … by the implementation: …)" precedent if the owner wants them widened.
 
 **What:** both pickers' early returns skip the remember write, so a user cannot pin what the
 heartbeat (or startup) already put them on:
