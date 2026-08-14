@@ -76,17 +76,6 @@ The still-open findings the ISSUES-sweep plan run left, under the conventions' a
 The still-open findings the security-audit-fixes plan run left, under the conventions'
 actionability bar.
 
-- [ ] The 2026-08-12 batch closeout below still narrates the configured-filter residual as open —
-  "git offers no switch that refuses configured filters, so only the read-path textconv/ext-diff
-  half is closed" (`ISSUES.md:552-555`) — which is now stale for repo-local scopes, since `runGit`
-  refuses a repo-local `filter.*.clean/smudge/process` driver before running. The residual survives
-  only for global config, which is the operator's.
-
-- [ ] `runSubprocess`'s overview bullet still states absolutely that a cancelled or timed-out command
-  "never orphans its children" (`internal/tools/exec_common.go:184`), where the teardown docs that
-  bullet summarises now state the setsid escape (`internal/tools/exec_teardown.go:37`,
-  `internal/tools/doc.go:183`, `internal/tools/exec_pgroup_unix.go:63`).
-
 - [ ] The setsid-escape residual is documented but untested — no test asserts what a descendant that
   called `setsid`/`setpgid(0,0)` does across teardown (nothing in `internal/tools/*_test.go` or
   `internal/platform/confinetest/` exercises it), so the residual the docs now state is unpinned.
@@ -541,12 +530,15 @@ stdio MCP command surface), attacks presupposing the audited workspace *is* the 
 hostile-inference-endpoint set, the gate-reason wording (owned by
 `docs/plans/archived/2026-08-11 - 03 - subprocess-gate-reason-plan.md`), and the human-timing attacks on the
 gate. **Two residuals sit inside items that did land**, documented at the code rather than fixed: a
-`.gitattributes` clean/smudge **filter** driver takes its command from the repository's own
-`.git/config` and git offers no switch that refuses configured filters, so only the read-path
-textconv/ext-diff half is closed (`gitHardeningEnv`'s doc comment); and `GOENV=off` means the
-operator's persisted `GOPROXY`/`GOPRIVATE`/`GOMODCACHE` are unread, so a cold-cache `go vet` can
-fail to resolve dependencies — which degrades to a reported finding, not a tool error (`goVetEnv`'s
-doc comment). L1–L4 above are untouched by the batch; L5 and L6 are its two new accepted costs.
+`.gitattributes` clean/smudge **filter** driver takes its command from config and git offers no
+switch that refuses configured filters — the read-path textconv/ext-diff half is closed by the diff
+refusals, and since 2026-08-14 the repository's own half is closed one level up (`runGit` refuses the
+call outright when the repo-local config defines a filter driver), so the residual survives only for
+the operator's global config, which this threat model trusts (`gitHardeningEnv`'s doc comment); and
+`GOENV=off` means the operator's persisted `GOPROXY`/`GOPRIVATE`/`GOMODCACHE` are unread, so a
+cold-cache `go vet` can fail to resolve dependencies — which degrades to a reported finding, not a
+tool error (`goVetEnv`'s doc comment). L1–L4 above are untouched by the batch; L5 and L6 are its two
+new accepted costs.
 
 ---
 

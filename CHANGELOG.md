@@ -170,6 +170,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Docs: `runSubprocess`'s teardown bullet (`internal/tools/exec_common.go`) no longer claims a
+  cancelled or timed-out command "never orphans its children" — it now states what the teardown
+  docs it summarises state: the group takes down every descendant that has not deliberately left
+  it, and a descendant that calls `setsid`/`setpgid(0,0)` escapes the kill and survives
+  unsupervised, still inside whatever fence the Confiner installed (an accepted residual, not an
+  enforcement gap; Windows' Job Object denies breakaway and has no counterpart). The 2026-08-12
+  security-audit closeout narration in `ISSUES.md` is likewise updated: the configured-filter
+  residual now survives only for the operator's global config, since `runGit` refuses a call whose
+  repo-local config defines a `filter.*.clean/smudge/process` driver.
+
 - `ReadConfigForWrite`'s doc comment now lists its non-splicing caller (`externalEdit.spec`,
   `cmd/apogee/settingsedit.go`) alongside the four splicing writers, so the caller list is
   exhaustive again.

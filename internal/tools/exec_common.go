@@ -181,7 +181,12 @@ type subprocessResult struct {
 //     contract's tool-builds-and-runs-the-cmd model, §2.2).
 //   - It wires the process-tree teardown (Setpgid + a negative-PID kill on POSIX, a Job
 //     Object terminated on cancel on Windows, plus WaitDelay on both) so a cancelled or
-//     timed-out command never orphans its children.
+//     timed-out command takes down every descendant that has not deliberately left the
+//     container. The one documented escape is POSIX's: a descendant that calls
+//     setsid/setpgid(0,0) is outside the group and outside the kill, so it survives the call
+//     unsupervised — still inside whatever fence the Confiner installed, an accepted residual
+//     rather than an enforcement gap (setProcessGroupTeardown states it in full). Windows'
+//     Job Object denies breakaway and has no counterpart.
 //   - If a Confinement handle is on ctx (the dispatch disposition installed it for an
 //     Auto/confine subprocess call), it asks the Confiner to wrap the cmd before running.
 //     A backend that cannot establish the box returns ErrConfinementUnavailable, which this

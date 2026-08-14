@@ -98,7 +98,11 @@ section).
 
 **Commit:** `docs(config): ReadConfigForWrite doc lists its non-splicing caller`
 
-## 4. Teardown and git-filter claims align with the code
+## 4. Teardown and git-filter claims align with the code — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): retry — the prior batch attempt's `exec_common.go` reword was re-checked against `setProcessGroupTeardown` (`internal/tools/exec_pgroup_unix.go:11-38`), `planTreeKill` (`exec_teardown.go`) and `doc.go:175-188`, and corrected: it omitted that the escaped descendant stays inside the Confiner's fence (loss of supervision, not of confinement — the framing doc.go uses), which matters directly above the confinement bullet; the file-path citation was dropped as same-package noise in favour of naming `setProcessGroupTeardown` alone.
+
+NOTES (2026-08-14): the `ISSUES.md` closeout paragraph's untouched tail (the `GOENV=off` residual sentence) was re-wrapped, without wording changes, because the reworded first residual left a ragged short line mid-paragraph.
 
 **What:** Two stale doc claims from the security-audit-fixes run. (a) `runSubprocess`'s
 overview bullet still states absolutely that a cancelled or timed-out command "never orphans
