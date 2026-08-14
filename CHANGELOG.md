@@ -170,6 +170,10 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- `ReadConfigForWrite`'s doc comment now lists its non-splicing caller (`externalEdit.spec`,
+  `cmd/apogee/settingsedit.go`) alongside the four splicing writers, so the caller list is
+  exhaustive again.
+
 - Docs: `internal/security/doc.go`'s `openMutationRoot` summary now describes both routing cases
   since the lexical/resolved split (ADR 0049) — the permit question is asked first and on the
   resolved path (so a workspace-internal symlink pointing at the approved target lands on that

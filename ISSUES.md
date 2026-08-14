@@ -60,10 +60,6 @@ The still-open findings the ISSUES-sweep plan run left, under the conventions' a
   a raw `--endpoint`/`APOGEE_ENDPOINT` override can still equal a configured entry's `name`, and the
   picker then marks two rows `· current`.
 
-- [ ] `ReadConfigForWrite`'s doc comment (`internal/config/configsplice.go:231-235`) enumerates its
-  splicing callers but omits the non-splicing one, `cmd/apogee/settingsedit.go:164`, so the list reads
-  as exhaustive when it is not.
-
 - [ ] `inputContentRows` (`internal/tui/chromelayout.go:44`, the split at `:48`) splits the value on
   `"\n"` only, while the widget it mirrors also folds a bare `"\r"` into a row boundary — a value
   carrying one would size the prompt box a row short. Unreachable from a draft today (nothing puts a

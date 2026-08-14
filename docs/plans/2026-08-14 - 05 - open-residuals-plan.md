@@ -77,7 +77,11 @@ section).
 
 **Commit:** `docs(security): openMutationRoot doc covers the permit case`
 
-## 3. ReadConfigForWrite caller list includes settingsedit
+## 3. ReadConfigForWrite caller list includes settingsedit — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): retry — a prior batch attempt had already written the caller paragraph into `internal/config/configsplice.go`; checked it against `externalEdit.spec` and corrected it. Its "takes the seed and the bytes alone" left the bytes' purpose unstated; the final wording says the read serves the seed and the bytes the key's line is located in (`settingKeyLine`, `cmd/apogee/settingsedit.go:184`), and that the baseline is taken after the seed (`:168-172`). The prior attempt's narrowing of the key-source sentence to "the one exception among the splicers" was correct and kept.
+
+NOTES (2026-08-14): only this item's `ISSUES.md` bullet was removed (3 lines + separator; the ISSUES-sweep section keeps its other bullets). The sibling item's in-flight edit in `internal/tools/exec_common.go` was left untouched per the dispatch DECISION.
 
 **What:** `ReadConfigForWrite`'s doc comment (`internal/config/configsplice.go:231-235`)
 enumerates its splicing callers but omits the non-splicing one,

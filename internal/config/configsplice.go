@@ -231,8 +231,14 @@ func writeConfigAtomically(path string, data []byte) error {
 // ReadConfigForWrite seeds the config from the embedded template if it is not there yet and reads
 // it back — the state the setting writers splice from: SaveConfigSetting and ResetConfigSetting
 // (configwrite_scalar.go), SaveMechanismSetting (configwrite_mechanism.go) and SaveServerEntrySetting
-// (configwrite.go). The server-entry key-source edits are the one exception: they start from
-// readConfigForEntryEdit (configwrite_keysource.go), which deliberately does not seed.
+// (configwrite.go). The server-entry key-source edits are the one exception among the splicers:
+// they start from readConfigForEntryEdit (configwrite_keysource.go), which deliberately does not
+// seed.
+//
+// One caller does not splice at all, and completes the list: externalEdit.spec
+// (cmd/apogee/settingsedit.go) reads for the seed and for the bytes it locates the key's line in,
+// so the file the human is about to open in $EDITOR exists and the return trip's baseline — taken
+// after the seed — does not report the whole template back as an edit they made.
 func ReadConfigForWrite(path string) ([]byte, error) {
 	if path == "" {
 		return nil, errors.New("apogee: cannot write a setting: no config file path is known")
