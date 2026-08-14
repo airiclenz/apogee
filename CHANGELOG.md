@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-08-14
+
 ### Added
 
 - **Re-selecting the model or the server you are already on now records the pin.** Both accept
