@@ -196,6 +196,26 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The block-target, start-up-box and prompt-box-sizing suites move to
+  `internal/tui/blocktarget_test.go`, `internal/tui/startupbox_test.go` and
+  `internal/tui/chromelayout_test.go`, and `render_test.go` settles as the split's shared core.**
+  The final carve lifts the click-surface suite — the `blockMark` type and the `blockMarks`,
+  `headerStar` and `branchIndicator` helpers, whole-block marking, the header indicator's state and
+  styling, the remainder count in the outcome slot, the one-click prompt block, the marks-versus-mouse
+  agreement and the live star's blink table — into `blocktarget_test.go`; the wide and stacked
+  start-up-box paints with their `lineWithLogoAnd` discriminator into `startupbox_test.go`; and the
+  `inputContentRows` sizing suite — the wrap-boundary count, the zero-width edge, the
+  `widgetContentRows` mirror on hand-written and generated drafts, and the prompt-editor row clamp —
+  into `chromelayout_test.go`. What stays in `render_test.go` is exactly the shared core the other
+  ten files reach across the package: the `readCall` folder and the golden-row builders, the firing
+  block's three tests with their `firingBlock` fixture, the whole-scrollback
+  `TestTranscriptLayoutGolden`, and the streaming-preview tail suite. Pure moves: no test renamed,
+  reordered or edited, each new file carrying only the imports it needs and the residual's import
+  block trimmed to what remains. `render_test.go` finishes at 459 lines, down from the 5520 it
+  carried before the split began, with the ten carved files sitting beside the sources they
+  exercise. The `ISSUES.md` bullet asking for the split is removed. Tests only — no behavior
+  change.
+
 - **The tool detail/diff, ask-user and tool-shape suites move to
   `internal/tui/toolbranch_test.go` and `internal/tui/toolshape_test.go`.** The fourth carve of the
   `render_test.go` split lifts the detail/diff suite (the in-flight member, the lone call sharing

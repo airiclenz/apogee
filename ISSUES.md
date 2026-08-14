@@ -32,9 +32,6 @@ The still-open findings the open-residuals plan run left, under the conventions'
   (`internal/tools/exec_pgroup_other.go:24`), and nothing asserts that a descendant cannot leave the
   job, so the POSIX side's pinned residual has no Windows twin. Needs a Windows host.
 
-- [ ] `internal/tui/render_test.go` is 5520 lines, far past the coding-standards ~400-line threshold
-  — a split candidate beside the sources it exercises.
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive

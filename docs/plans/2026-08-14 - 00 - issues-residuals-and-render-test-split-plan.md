@@ -347,7 +347,13 @@ nothing; each moved test name appears exactly once under `internal/tui/`.
 
 ---
 
-## 10. Carve blocktarget, startupbox and chromelayout suites; render_test.go becomes the shared core
+## 10. Carve blocktarget, startupbox and chromelayout suites; render_test.go becomes the shared core — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): banner disposition, same rule as items 6–9 — the four `// ----` banners whose sections move in their entirety travelled with them: "The click surface: which rendered lines toggle a block" and "The live star: which blocks blink their header glyph" now head the two halves of `blocktarget_test.go`, "The one-time start-up box" heads `startupbox_test.go`, and "inputContentRows sizes the prompt box to what the textarea actually draws" heads `chromelayout_test.go`. The four banners of the residual sections ("Grouped same-label tool calls", "The firing block", "The whole-transcript layout golden", "The streaming preview's tail bound") stay in `render_test.go`. No banner text was invented, split or duplicated.
+
+NOTES (2026-08-14): the moved bodies are byte-identical to their `HEAD` originals (verified by diffing each new file's post-import remainder against the corresponding `HEAD` line range), and the residual is `HEAD` minus exactly the moved ranges, differing only in the blank lines gofmt normalizes at the seams where the removed sections used to sit. The set of top-level `func` declarations across the four files is identical to `HEAD`'s `render_test.go` — nothing added, dropped or renamed.
+
+NOTES (2026-08-14): `render_test.go`'s import block loses `math/rand`, `reflect`, `charm.land/bubbles/v2/textarea`, `charm.land/lipgloss/v2` and `github.com/charmbracelet/x/ansi`, which now have no caller in the residual file, and keeps `slices`, `strconv`, `strings`, `testing`, `time`, `domain`, `schedule` and `scheme`.
 
 **Depends on items 6, 7, 8, 9.**
 
