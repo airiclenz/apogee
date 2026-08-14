@@ -35,19 +35,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   `endCancelled` (`internal/agent/turn.go:60`, `:61`) — plan-ratified, narrow window, but a real
   cancel-semantics seam worth tracking. (in-band retry run)
 
-### Run residuals — open (2026-08-14, settings coverage + popup scrollbar)
-
-The still-open findings the settings-coverage + popup-scrollbar plan run left, under the
-conventions' actionability bar.
-
-- [ ] `WriteMechanism`'s error-only signature (`cmd/apogee/wire_options.go:259`) conflates "the
-  splice failed" with "the splice landed and the live apply did not" — both come back as a bare
-  error, and `internal/tui/settings.go:660` puts it on the `mechanisms` row unprefixed, so the
-  human cannot tell whether the file changed. Every registry-key edit distinguishes the two with
-  `settingsApplyFailedNote` ("saved — live apply failed: ", `internal/tui/settings.go:1342`,
-  `:1517`). Nothing in `cmd/apogee` pins the seam either — the package has no `wire_options_test.go`,
-  so the chain is exercised only through the TUI's fakes (pre-existing for every seam in that file).
-
 ### Run residuals — open (2026-08-14, ISSUES sweep)
 
 The still-open findings the ISSUES-sweep plan run left, under the conventions' actionability bar.

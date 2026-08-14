@@ -232,7 +232,13 @@ is not skipped on this Linux host); `go vet ./internal/tools/`.
 
 **Commit:** `test(tools): pin the setsid-escape teardown residual`
 
-## 9. WriteMechanism distinguishes saved-but-apply-failed
+## 9. WriteMechanism distinguishes saved-but-apply-failed — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the `WriteMechanism` closure was lifted out of `rootWiring.options()` into a named
+`writeMechanismFor(configPath, refresh, apply)` constructor — `applySettingFor`'s idiom in the same
+package — because the item's required `cmd/apogee/wire_options_test.go` cannot reach an inline closure
+without constructing a whole `rootWiring` (`options()` dereferences the confiner, live settings and
+launcher seams). Behaviour is unchanged; the `options()` literal now names the constructor.
 
 **What:** `WriteMechanism`'s error-only signature conflates "the splice failed" with "the
 splice landed and the live apply did not". Change the seam

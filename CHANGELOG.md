@@ -10,6 +10,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- The `mechanisms` settings row now tells a refused write apart from one that saved but could not be
+  put in force: `tui.Options.WriteMechanism` answers `(saved bool, err error)`, and a flip whose
+  splice landed under a failed live apply reads "saved — live apply failed: …" on the row — the same
+  sentence every other persisted-but-unapplied key gets — while a refused splice keeps the plain
+  refusal. The binary's write chain is pinned directly for the first time
+  (`cmd/apogee/wire_options_test.go`).
+
 - **The POSIX setsid-escape teardown residual is now pinned by a test.** The §2.4 process-group
   teardown's documented limit — a descendant that calls `setsid`/`setpgid(0,0)` leads a new group,
   so no negative-PID kill aimed at the run's group reaches it — was prose in three places

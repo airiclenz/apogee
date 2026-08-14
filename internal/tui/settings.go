@@ -645,20 +645,28 @@ func (m Model) settingsMechanismKey(msg tea.KeyPressMsg, toggles []MechanismTogg
 // Mechanism id is not a registry key, so there is no path for [Options.ApplySetting] to be handed and
 // no second door to keep in step with this one.
 //
-// The outcomes are settingsPersist's, minus the one this act does not have. No seam wired, or a
-// refusal, leaves the block exactly as it was and says so on the `mechanisms` row the list belongs to
-// — where the human reads it when the list closes, since the list itself is switches and has no note
-// column. A flip that LANDED records nothing at all: the list is re-read from the file on the very
-// next frame ([Model.settingsMechanisms]), so what it paints is what the file now carries rather than
-// what this keypress hoped for, and that is a truer marker than a journal entry could be.
+// The outcomes are settingsPersist's, minus the one this act does not have — and the seam's `saved`
+// half is what keeps the two failing ones apart, exactly as settingsApplied keeps them apart for
+// every registry key. No seam wired, or a REFUSED splice (!saved), leaves the block exactly as it was
+// and says so on the `mechanisms` row the list belongs to — where the human reads it when the list
+// closes, since the list itself is switches and has no note column. A splice that landed under a
+// failed apply says the same sentence prefixed by settingsApplyFailedNote, because the file now
+// carries the flip the session is not running and "unchanged" would be a lie about it. A flip that
+// LANDED WHOLE records nothing at all: the list is re-read from the file on the very next frame
+// ([Model.settingsMechanisms]), so what it paints is what the file now carries rather than what this
+// keypress hoped for, and that is a truer marker than a journal entry could be.
 func (m Model) settingsToggleMechanism(toggle MechanismToggle) (tea.Model, tea.Cmd) {
 	if m.opts.WriteMechanism == nil {
 		m.settings.failure = settingFailure{path: settingKeyMechanisms, msg: noSettingsWriterNote}
 		m.layout()
 		return m, nil
 	}
-	if err := m.opts.WriteMechanism(toggle.ID, !toggle.Enabled); err != nil {
-		m.settings.failure = settingFailure{path: settingKeyMechanisms, msg: err.Error()}
+	if saved, err := m.opts.WriteMechanism(toggle.ID, !toggle.Enabled); err != nil {
+		note := err.Error()
+		if saved {
+			note = settingsApplyFailedNote + note
+		}
+		m.settings.failure = settingFailure{path: settingKeyMechanisms, msg: note}
 		m.layout()
 		return m, nil
 	}

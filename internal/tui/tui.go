@@ -438,10 +438,15 @@ type Options struct {
 	// same call (ADR 0037 decision 1), so the seam returns with the session running what the file now
 	// says.
 	//
-	// An error is REPORTED, never swallowed — the pane shows it and treats the Mechanism as
-	// unchanged. nil ⇒ toggling is unavailable and the pane says so, the same degrade [WriteSetting]
-	// takes.
-	WriteMechanism func(id string, enabled bool) error
+	// An error is REPORTED, never swallowed, and `saved` says which HALF of the call it came from —
+	// the two outcomes an error alone conflates. false ⇒ the splice refused, so the file is what it
+	// was and the pane treats the Mechanism as unchanged; true ⇒ the line LANDED and only the live
+	// apply did not, so the file carries the flip while the session does not, and the pane says so in
+	// those words (the same sentence a persisted-but-unapplied [WriteSetting] key gets). A landed
+	// call returns (true, nil); (false, nil) is not a thing the seam says.
+	//
+	// nil ⇒ toggling is unavailable and the pane says so, the same degrade [WriteSetting] takes.
+	WriteMechanism func(id string, enabled bool) (saved bool, err error)
 
 	// ExternalEditSpec is the command line that opens the config file at path's own line — the
 	// nested structures' whole edit idiom (ADR 0037 decision 5): a `servers:` list or a

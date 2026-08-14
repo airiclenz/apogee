@@ -2922,10 +2922,11 @@ func TestSettingsPaneSaysASchemeSwitchNeedsAResolver(t *testing.T) {
 // rather than a spy — a flip the log accepted is what the next frame reads back, exactly as the real
 // seam re-reads the file it just spliced.
 type mechanismLog struct {
-	ids     []string
-	enabled map[string]bool
-	writes  []MechanismToggle
-	err     error
+	ids      []string
+	enabled  map[string]bool
+	writes   []MechanismToggle
+	err      error
+	applyErr error
 }
 
 func newMechanismLog(ids ...string) *mechanismLog {
@@ -2942,15 +2943,18 @@ func (l *mechanismLog) list() []MechanismToggle {
 	return out
 }
 
-// write is [Options.WriteMechanism]. A refusal records nothing and changes nothing, exactly as a
-// refused splice leaves the file: "the block is unchanged" is then the log's own emptiness.
-func (l *mechanismLog) write(id string, enabled bool) error {
+// write is [Options.WriteMechanism], and it fakes both halves of the seam. err is the SPLICE's
+// refusal: nothing is recorded and nothing changes, exactly as a refused splice leaves the file —
+// "the block is unchanged" is then the log's own emptiness — and it answers saved=false. applyErr is
+// the LIVE APPLY's, which the splice already outran: the block carries the flip and the call answers
+// saved=true beside the error, the outcome the row spells differently.
+func (l *mechanismLog) write(id string, enabled bool) (bool, error) {
 	if l.err != nil {
-		return l.err
+		return false, l.err
 	}
 	l.writes = append(l.writes, MechanismToggle{ID: id, Enabled: enabled})
 	l.enabled[id] = enabled
-	return nil
+	return true, l.applyErr
 }
 
 // mechanismStateLine is the painted line one id sits on, so a state assertion reads the row the human
@@ -3113,9 +3117,10 @@ func TestSettingsMechanismSeamsDegradeWhenUnwired(t *testing.T) {
 	}
 }
 
-// A refusal from the writer lands the same way, and the block is left exactly as it was: the row
-// carries what the seam said, the list stays up so the human can try again, and the state it paints
-// is still the one the file holds.
+// A refusal from the writer — the seam's !saved arm, where the SPLICE itself was refused — lands the
+// same way, and the block is left exactly as it was: the row carries what the seam said and nothing
+// else, the list stays up so the human can try again, and the state it paints is still the one the
+// file holds.
 func TestSettingsMechanismListRefusalLandsOnTheRow(t *testing.T) {
 	rows := []SettingRow{settingsMechanismRow()}
 	log := newMechanismLog("codeinfo")
@@ -3134,6 +3139,35 @@ func TestSettingsMechanismListRefusalLandsOnTheRow(t *testing.T) {
 	// And the row says it once the list is closed, which is where this pane's failures are read.
 	if got := refused.settingsNote(rows[0]); !strings.Contains(got, "config home is read-only") {
 		t.Errorf("note = %q, want the refusal on the mechanisms row", got)
+	}
+}
+
+// The other failing arm, and the reason the seam answers a `saved` at all: the splice LANDED and only
+// the live apply did not, so the file carries a flip the session is not running. That is a different
+// sentence — settingsApplyFailedNote over the seam's own words, exactly as a persisted-but-unapplied
+// registry key reads (settingsApplied) — and the list paints the state the file now holds.
+func TestSettingsMechanismListSaysWhenOnlyTheApplyFailed(t *testing.T) {
+	rows := []SettingRow{settingsMechanismRow()}
+	log := newMechanismLog("codeinfo")
+	log.applyErr = errors.New("engine is busy")
+	m := settingsMechanismModel(t, rows, log, &externalEditLog{})
+
+	failed := step(t, step(t, m, keyEnter()), keyEnter())
+
+	want := settingsApplyFailedNote + "engine is busy"
+	if got := failed.settings.failure; got.path != settingKeyMechanisms || got.msg != want {
+		t.Errorf("failure = %+v, want %q on the mechanisms row", got, want)
+	}
+	if wantWrites := []MechanismToggle{{ID: "codeinfo", Enabled: true}}; !reflect.DeepEqual(log.writes, wantWrites) {
+		t.Fatalf("writes = %+v, want %+v — the splice landed before the apply refused", log.writes, wantWrites)
+	}
+	pane := strip(failed.renderSettings())
+	if line := mechanismStateLine(t, pane, "codeinfo"); !strings.Contains(line, settingsMechanismOn) {
+		t.Errorf("the flipped row reads %q, want the state the file now carries:\n%s", line, pane)
+	}
+	// And the row says it once the list is closed, prefix and all.
+	if got := failed.settingsNote(rows[0]); !strings.Contains(got, want) {
+		t.Errorf("note = %q, want the saved-but-unapplied sentence on the mechanisms row", got)
 	}
 }
 

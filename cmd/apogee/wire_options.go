@@ -251,19 +251,9 @@ func (w *rootWiring) options() tui.Options {
 			}
 			return toggles
 		},
-		// And the write half: one line spliced into that block and put in force on the same call. It
-		// is WriteSetting's shape one level in — the splice, the baseline re-take and the live apply in
-		// the order they are there — with the apply reaching the dispatcher's `mechanisms` arm, which
-		// re-reads the whole block exactly as it does after an edit made in $EDITOR. The value handed
-		// to it is empty because that arm reads none: the block is a shape no single string spells.
-		WriteMechanism: func(id string, enabled bool) error {
-			if err := config.SaveMechanismSetting(configPath, id, enabled); err != nil {
-				return err
-			}
-			w.externalEdits.refresh()
-			_, err := applySetting(settingKeyMechanisms, "")
-			return err
-		},
+		// And the write half: one line spliced into that block and put in force on the same call
+		// (writeMechanismFor).
+		WriteMechanism: writeMechanismFor(configPath, w.externalEdits.refresh, applySetting),
 		// The `$EDITOR` round trip for the keys no row can hold (ADR 0037 decision 5): out through a
 		// command line this binary resolves — the file, the key's own line, the editor this environment
 		// names — and back through a re-read that says which keys changed. The pane applies them
@@ -333,4 +323,31 @@ func mechanismBlock(path string) map[string]bool {
 		return nil
 	}
 	return layer.Mechanisms
+}
+
+// writeMechanismFor builds [tui.Options.WriteMechanism]: one line spliced into the `mechanisms:` block
+// and put in force on the same call. It is WriteSetting's shape one level in — the splice, the baseline
+// re-take and the live apply in the order they are there — with the apply reaching the dispatcher's
+// `mechanisms` arm, which re-reads the whole block exactly as it does after an edit made in $EDITOR.
+// The value handed to it is empty because that arm reads none: the block is a shape no single string
+// spells.
+//
+// The two halves fail differently and the seam says which, because the pane has two sentences for them
+// (ADR 0037 decision 1): a refused splice changed no file and answers (false, err); a splice that
+// landed under a failed apply answers (true, err), the file ahead of the session. It is named here
+// rather than closed over inline for applySettingFor's reason — the chain is the binary's own
+// behaviour and is pinned as such (wire_options_test.go).
+func writeMechanismFor(
+	configPath string,
+	refresh func(),
+	apply func(key, value string) (string, error),
+) func(id string, enabled bool) (bool, error) {
+	return func(id string, enabled bool) (bool, error) {
+		if err := config.SaveMechanismSetting(configPath, id, enabled); err != nil {
+			return false, err
+		}
+		refresh()
+		_, err := apply(settingKeyMechanisms, "")
+		return true, err
+	}
 }
