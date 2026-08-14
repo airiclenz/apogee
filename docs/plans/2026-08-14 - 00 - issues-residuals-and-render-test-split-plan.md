@@ -81,7 +81,14 @@ two comment sites.
 
 ---
 
-## 2. ADR 0049 records the resolved-first permit routing
+## 2. ADR 0049 records the resolved-first permit routing — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): per the dispatch DECISION, this run reused the ADR amendment an earlier batch
+attempt had already left in the working tree (verified line-by-line against `openMutationRoot`,
+`openPermittedRoot`, `namesPermittedTarget`, `deepestExistingDir` and `rootRelative` before keeping
+it) and re-applied only this item's `ISSUES.md` bullet removal, so the ADR edit and the bullet
+removal land in this item's own commit. Items 3 and 4's dirty edits in `internal/tools/` were left
+untouched.
 
 **What:** `docs/adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md`
 never describes two properties its own fix introduced; `internal/security/doc.go:103-104` states

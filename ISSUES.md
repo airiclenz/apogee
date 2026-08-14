@@ -27,12 +27,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 The still-open findings the open-residuals plan run left, under the conventions' actionability bar.
 
-- [ ] [ADR 0049](docs/adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)
-  never describes the resolved-first routing its fix introduced — the permit match is resolved-based
-  while the fallback branch stays lexical (`internal/security/safeio.go:629`) — nor the
-  permit-plus-workspace-internal-symlink case. `internal/security/doc.go:103-104` states both; the
-  ADR that records the decision does not.
-
 - [ ] `setProcessGroupTeardown`'s overview bullet still carries the absolute "never orphans its
   children" phrase (`internal/tools/exec_pgroup_unix.go:19`), which the setsid escape documented in
   the same file's tail (`:63`) contradicts.

@@ -306,6 +306,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **ADR 0049 now records the resolved-first permit routing its own fix introduced.** The decision
+  text describes the write-escape permit as the branch a mutation takes once the workspace fence has
+  refused it; the landed code asks the permit question FIRST and on the RESOLVED path
+  (`openMutationRoot` → `namesPermittedTarget`), with the in-workspace fallback staying lexical
+  (`rootRelative`, `internal/security/safeio.go:629`) and `os.Root` enforcing the symlink-component
+  half at use time. A dated amendment note (2026-08-14) appended to the ADR states both that
+  ordering and the case it makes executable — an argument spelled inside the workspace that resolves
+  outside it through a disclosed link takes the permitted branch and is pinned to the disclosed
+  target's own deepest-existing ancestor, rather than being refused as the one call the operator
+  actually read. The original decision text is untouched; the amendment's claims are derived from
+  `internal/security/doc.go:103-104` and `internal/security/writepermit.go`. Documentation only — no
+  behavior change.
+
 - The `show-scrollbar` doc comments now state the scope the key actually has. `ui.show-scrollbar`
   has gated the scroll bar in the transcript AND in every popup pane since the popup panes gained
   one, but two summaries still framed the bar as the transcript's alone: `uiConfig.ShowScrollbar`

@@ -100,3 +100,33 @@ VM is the box. The dangerous-action floor still overlays this mode unchanged.
 - The realisation is tracked by `docs/plans/2026-08-14 - 01 - approved-escape-write-plan.md`;
   until it lands, contract §4's gap note stays flagged (decided, unbuilt) and the `ISSUES.md`
   defect stays open, marked planned.
+
+## Amendment (2026-08-14) — the permit question is asked FIRST and on the RESOLVED path
+
+Decision 2 above describes the permit as the branch a mutation takes once the fence has refused
+it. The landed fix routes the other way round, and the ordering carries a case the record never
+names. Both properties are stated by `internal/security/doc.go` (lines 103–104) and implemented in
+`internal/security/writepermit.go`; this note brings the record level with them. Nothing decided
+above changes — the permit is still exactly one path wide, and a call without one still meets
+today's fence byte-for-byte.
+
+**The match is resolved-based, and it is asked before the lexical branch.** `openMutationRoot` —
+the one place every mutating primitive decides which root bounds it — first asks
+`namesPermittedTarget`, which resolves the argument (`EvalRealPath` over the root-joined name) and
+compares it to the permitted `Real`. Only when that question answers no does the call fall to the
+in-workspace branch, and that branch stays **lexical**: `rootRelative`
+(`internal/security/safeio.go:629`) judges the argument by `filepath` arithmetic against the
+workspace root, exactly as it did before permits existed, with `os.Root` enforcing the
+symlink-component half at use time. The permitted branch pins its root at the deepest *existing*
+directory above the disclosed target rather than at a nominal parent, so a target whose parents do
+not exist yet is ordinary rather than a refusal.
+
+**Asking first is what makes the workspace-internal symlink case executable.** An argument spelled
+*inside* the workspace can still resolve *outside* it — a disclosed link in the workspace pointing
+out. That path is what dispatch resolved in order to classify the write and what the approval pane
+showed in full, so the operator's yes names the outside target. Because the permit question comes
+first and is asked of the resolved path, such an argument takes the permitted branch and answers
+with that target's own ancestor; sending it down the lexical branch instead would refuse the one
+call the human actually read, which is the gate failing to execute its own Allow. Every OTHER call
+is untouched by the ordering: permits are minted only for disclosed escape targets, so an ordinary
+in-workspace write can never meet the match.
