@@ -170,6 +170,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The `internal/tools` companion test suites now sit beside the sources they cover.** When
+  `delete_file.go` and `path_read.go` were split out of `file_ops.go` and `path_safety.go`, their
+  tests stayed behind in the old files. The `delete_file` suite (seven tests, from the positive
+  control through the dangerous-action classification and the resolved-target disclosure) moves to
+  `internal/tools/delete_file_test.go`, and the read-half suite (`readAllBounded`,
+  `readWorkspaceFileBounded`'s oversize refusal and the seven `readScope` tests with their
+  `scopeFixture`) moves to `internal/tools/path_read_test.go`. Pure moves: no test logic changed and
+  the identical set of test functions runs. The package-wide fixtures every write- and read-side
+  suite reaches for — `writeFixtureFile`, `realPath` and `tempRoot` with its package rule — stay put
+  in `path_safety_test.go`, which is now their home; `writeFixture`, `runFileOp` and
+  `extraRootFixture` likewise stay in `file_ops_test.go`.
+
 - Docs: ADR 0047 §6 now carries a dated note (2026-08-14) saying that the `APOGEE_API_KEY` overlay
   is deliberately dropped when `/server` switches away from a configured start-up entry and back
   onto it. "Before resolution" is scoped to the start-up bind alone: the picker's rows are

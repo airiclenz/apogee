@@ -178,7 +178,11 @@ width-mirror fidelity gap of the kind ADR 0030 tracks. Remove the corresponding 
 
 **Commit:** `fix(tui): inputContentRows folds a bare CR like the widget`
 
-## 7. Companion test suites split beside their sources
+## 7. Companion test suites split beside their sources — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): `internal/tools/file_ops_test.go` does not reach the ~400-line threshold the item aims at — it lands at 746 lines (from 950), and the residual is not a shared-helper block but `file_ops.go` itself, which holds BOTH `CopyFile` and `MoveFile`. Splitting the copy and move suites apart would put tests beside no source of their own, so the item's "note the residual rather than restructure" instruction was followed. The other three files are under the threshold: `delete_file_test.go` 215, `path_read_test.go` 379, `path_safety_test.go` 53.
+
+NOTES (2026-08-14): `path_safety_test.go` now holds the three shared path fixtures and no `Test` function of its own — every suite that exercises `path_safety.go`'s own helpers (`resolveInRoot`, the write-target pins, the escape permits) already lives in `write_permit_test.go`, `write_file_test.go` and `exec_fence_test.go`. Leaving the fixtures there is the item's "shared helpers stay where both halves can reach them"; moving them into `path_read_test.go` would have handed the read half a file 106 `tempRoot` callers across nine test files depend on.
 
 **What:** The companion test suites were not split when their sources were:
 `internal/tools/file_ops_test.go` (950 lines) still holds the `delete_file` tests that belong

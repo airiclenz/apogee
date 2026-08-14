@@ -57,11 +57,6 @@ The still-open findings the ISSUES-sweep plan run left, under the conventions' a
   a raw `--endpoint`/`APOGEE_ENDPOINT` override can still equal a configured entry's `name`, and the
   picker then marks two rows `· current`.
 
-- [ ] The companion test suites were not split when their sources were:
-  `internal/tools/file_ops_test.go` (950 lines) still holds the `delete_file` tests that belong beside
-  `delete_file.go`, and `internal/tools/path_safety_test.go` (425) still holds the read-half tests that
-  belong beside `path_read.go`. Both are over the coding-standards ~400-line threshold.
-
 ### Run residuals — open (2026-08-14, security-audit fixes)
 
 The still-open findings the security-audit-fixes plan run left, under the conventions'
