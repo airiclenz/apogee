@@ -865,6 +865,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The prompt box's width mirrors now weigh a tab the way the textarea itself does.**
+  `wrapRowStarts` — the mirror of the bubbles textarea's own soft-wrap, and through it
+  `inputContentRows`, the count that sizes the prompt box — measured the runes exactly as handed
+  over, while the widget rewrites every `\t` as four spaces before it wraps anything
+  (`runeutil.NewSanitizer`'s default, applied on every write path). A tab therefore weighed one
+  space-like column to the mirrors and four to the widget, so a tab-bearing line broke in different
+  places on the two sides and the box could size itself to a row count the widget never drew — the
+  last divergence the width-authority work left standing. Both mirrors now expand tabs the same way
+  first, in the one place the wrap is derived, so the box's height and the rows the accent overlay
+  paints on stay off one ruler. The expansion is kept apart from the transcript side's `expandTabs`
+  on purpose, though the two spell the same four spaces today: that one follows lipgloss because the
+  PAINTER applies it, this one follows the widget's sanitizer because the WIDGET applied it, and a
+  mirror answers to its widget alone (ADR 0030 §6). No draft can reach this with a tab in it today —
+  the textarea sanitizes tabs out of everything written into it — so nothing on screen moves; what
+  changes is that the mirrors are now right for any caller that hands them text the widget has not
+  already cleaned, and that both widget-oracle suites now carry tab-bearing lines (a leading tab, a
+  tab inside a word, one at the wrap column, a line of nothing but tabs) plus tabs in the generated
+  prompt-draft sweep, so a regression fails against a real textarea rather than sliding quietly.
+
 - **A hook that sets one sampling field no longer erases the other — most consequentially the
   reply ceiling.** `SamplingParams` has said since it was written that "a nil field leaves the
   loop's value untouched", and the loop leans on exactly that: it stamps the output cap into the

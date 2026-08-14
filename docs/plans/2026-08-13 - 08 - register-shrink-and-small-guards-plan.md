@@ -75,7 +75,34 @@ register.
 
 **Commit:** `feat(domain): MechanismRegistry.Add refuses an empty Descriptor.ID`
 
-## 2. The width mirrors expand tabs before measuring
+## 2. The width mirrors expand tabs before measuring — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): design call the item left open — the transcript-side `expandTabs`/`tabCells`
+(wrap.go) is NOT reused; `wrapRowStarts` gets its own `expandInputTabs`/`inputTabCells` in
+inputaccent.go. The two produce identical output today (both a flat four spaces) but answer to
+different oracles — lipgloss's tab width for the painter, `runeutil.NewSanitizer`'s default for the
+widget — and the package's mirror rule (ADR 0030 §6, restated all over inputaccent.go/mouse.go)
+forbids a mirror borrowing the painter's ruler. Both constants carry a comment naming the other.
+
+NOTES (2026-08-14): `wrapRowStarts`' returned offsets are now offsets into the tab-EXPANDED line —
+the line as the widget holds it. No in-tree caller changes behaviour: `inputCellSpans` and
+`inputContentRows` both pass the textarea's own already-sanitized value, where the expansion is the
+identity. The contract is stated in the function's doc comment.
+
+NOTES (2026-08-14): one file beyond the item's Files list — `internal/tui/chromelayout.go`. Its
+`inputContentRows` doc carried a "KNOWN DIVERGENCE: both mirrors are still wrong on tabs" note
+citing the ISSUES entry item 3 removes; it now describes the expansion instead. No code change in
+that file.
+
+NOTES (2026-08-14): the accent overlay's COLUMN math (`inputCellSpans`) still addresses a
+tab-bearing value in unexpanded coordinates. Unreachable by construction — the widget cannot hold a
+tab, documented at `cellToRuneOffset` (mouse.go) — so it is left alone rather than filed; the ROW
+geometry both mirrors share is what this item fixed.
+
+NOTES (2026-08-14): `TestWrapRowStartsMirrorsTheWidget` now reads its oracle runes off `ta.Value()`
+instead of the case's raw line, so the widget is asked about the line it actually kept; identical
+for every pre-existing (tab-free) case. Both new suites' tab cases were confirmed to fail without
+the fix.
 
 **What:** `wrapRowStarts` (`internal/tui/inputaccent.go`, func at `:211`) measures the raw rune
 slice, but the widget's own insertion paths run bubbles' `runeutil.Sanitizer`, which expands tabs —

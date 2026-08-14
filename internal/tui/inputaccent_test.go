@@ -70,6 +70,12 @@ func accentTestModel(t *testing.T, width int, workspace, value string) Model {
 // line too high on. The widget leaves one when a first group overflows its row without ever
 // tripping the hard-word-break, which VS16 makes reachable (that break weighs the last rune with
 // go-runewidth, and U+FE0F weighs nothing there).
+//
+// The tab cases are the reason the oracle's runes are read back OFF the widget rather than taken
+// from the case: what a textarea holds is what its sanitizer let in, and that rewrites each TAB as
+// four spaces. So the widget is asked about the line it actually wrapped, while the mirror is handed
+// the raw line — which is exactly the divergence being pinned, since a mirror that measured the tab
+// as written would wrap a tab-bearing draft where the widget does not.
 func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -90,6 +96,13 @@ func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
 		{"an emoji carrying VS16", "warn ⚠️ here", 7},
 		{"a VS16 run filling the row", "⚠️⚠️⚠️ end", 6},
 		{"VS16 inside a word too wide for the row", "aa⚠️bb⚠️cc", 4},
+		// Tabs: the widget's sanitizer turns each one into four spaces before it wraps, so a
+		// mirror that measured the tab itself would break these lines in the wrong places.
+		{"a leading tab", "\tabc def", 6},
+		{"a tab inside a word", "ab\tcd efgh", 6},
+		{"a tab at the wrap column", "abcd\tefg", 6},
+		{"a line of nothing but tabs", "\t\t", 5},
+		{"a tab in a draft", "/grill-me\tcheck @internal/tui/model.go", 12},
 		{"the acceptance draft", "/grill-me check @internal/tui/model.go and /code-adit", 20},
 	}
 	for _, c := range cases {
@@ -102,8 +115,11 @@ func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
 			ta.SetHeight(10)
 			ta.SetValue(c.line)
 
-			runes := []rune(c.line)
-			got := wrapRowStarts(runes, ta.Width())
+			got := wrapRowStarts([]rune(c.line), ta.Width())
+
+			// The widget's geometry is addressed in the runes it KEPT, which is the raw line
+			// with its tabs expanded — the same space wrapRowStarts answers in.
+			runes := []rune(ta.Value())
 
 			want := make([]int, len(got))
 			addressed := make([]bool, len(got))

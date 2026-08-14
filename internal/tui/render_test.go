@@ -5127,8 +5127,9 @@ func widgetContentRows(t *testing.T, value string, width int) (rows, effWidth in
 // "a-b-c-d" at width 3 (three, it said four). The count now delegates to wrapRowStarts, so the box's
 // height and the rows the accent pass paints on come off one ruler.
 //
-// Tabs are deliberately absent: the widget's sanitizer expands them and neither mirror does, the one
-// divergence left standing (ISSUES.md, "The TUI width authority — what it did not convert").
+// Tabs are in the table because the count now expands them the way the widget's sanitizer does
+// (expandInputTabs, inputaccent.go): the oracle sets the raw value on a real textarea, which keeps
+// four spaces per tab, so a mirror still measuring the tab as written would come up short here.
 func TestInputContentRowsMirrorsTheWidget(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -5158,6 +5159,11 @@ func TestInputContentRowsMirrorsTheWidget(t *testing.T) {
 		{"an emoji carrying VS16", "warn ⚠️ here", 7},
 		{"a VS16 run filling the row", "⚠️⚠️⚠️ end", 6},
 		{"VS16 inside a word too wide for the row", "aa⚠️bb⚠️cc", 4},
+		{"a leading tab", "\tabc def", 6},
+		{"a tab inside a word", "ab\tcd efgh", 6},
+		{"a tab at the wrap column", "abcd\tefg", 6},
+		{"a line of nothing but tabs", "\t\t", 5},
+		{"a tab on the second logical line", "abc\n\tdef ghi", 6},
 		{"a realistic draft", "/grill-me check @internal/tui/model.go and /code-adit", 20},
 		{"a multi-line draft", "fix the wrap bug\n\nsee @internal/tui/render.go — the mirror under-counts", 24},
 		{"one column", "ab cd", 1},
@@ -5179,8 +5185,9 @@ func TestInputContentRowsMirrorsTheWidget(t *testing.T) {
 func TestInputContentRowsMirrorsTheWidgetOnGeneratedDrafts(t *testing.T) {
 	// The alphabet is chosen for the boundaries the two mirrors disagreed at: spaces (the widget's
 	// word/space grouping), hyphens (a breakpoint to ansi.Wordwrap but not to the widget), a wide
-	// rune and a VS16 cluster (grapheme-vs-rune measurement), and newlines (logical lines).
-	glyphs := []string{"a", "b", "c", " ", " ", "-", "@", "/", "あ", "⚠️", "\n"}
+	// rune and a VS16 cluster (grapheme-vs-rune measurement), newlines (logical lines), and tabs
+	// (the widget's sanitizer expands each into four spaces before it wraps).
+	glyphs := []string{"a", "b", "c", " ", " ", "-", "@", "/", "あ", "⚠️", "\n", "\t"}
 	rng := rand.New(rand.NewSource(20260731))
 	for _, width := range []int{1, 2, 3, 5, 8, 13, 40} {
 		for i := 0; i < 300; i++ {

@@ -208,10 +208,18 @@ func inputCellSpans(measure widthAuthority, value string, width, from, to int) [
 // would under-count exactly the sequences (an emoji carrying VARIATION SELECTOR-16) the widget
 // counts as two cells. The two slices measured are the widget's own operands — the runes already on
 // the row, and the pending word — so the mirror weighs the same text at the same moments it does.
+//
+// TABs are expanded before any of that runs (expandInputTabs), because the widget expands them on
+// the way IN: every write path sanitises its runes, and one tab arrives as four spaces. Measuring
+// the raw tab instead weighs it as a single space-like column and wraps a tab-bearing line where the
+// widget does not. The offsets returned are therefore offsets into the line AS THE WIDGET HOLDS IT —
+// post-expansion — which for every caller in the package is the line handed in, since what they hand
+// over is the widget's own already-sanitised value (runesWidth, cellToRuneOffset in mouse.go).
 func wrapRowStarts(line []rune, width int) []int {
 	if width < 1 {
 		width = 1
 	}
+	line = expandInputTabs(line)
 	starts := []int{0}
 	consumed := 0 // runes of line already placed on a row
 	wordLen := 0  // the pending word: a run of non-space runes
@@ -254,7 +262,46 @@ func wrapRowStarts(line []rune, width int) []int {
 //
 // It measures no TABs and needs none of the tab arithmetic the transcript side carries: everything
 // weighed here comes from the textarea's own value, which the widget sanitises tabs out of on the
-// way in — see [cellToRuneOffset] (mouse.go) for why that holds on every write path.
+// way in — see [cellToRuneOffset] (mouse.go) for why that holds on every write path — and a line
+// reaching [wrapRowStarts] from anywhere else has had its tabs expanded the same way first
+// (expandInputTabs).
 func runesWidth(rs []rune) int {
 	return uniseg.StringWidth(string(rs))
+}
+
+// inputTabCells is how many spaces one TAB becomes on its way into the textarea: the widget
+// sanitises every write with runeutil.NewSanitizer's defaults, and that sanitizer rewrites '\t' as
+// four spaces flat — not to the next tab stop (bubbles/v2@v2.1.0/internal/runeutil/runeutil.go:26,
+// textarea.san). It is deliberately its own constant rather than [tabCells] (wrap.go), which is the
+// same number today for an unrelated reason: that one mirrors lipgloss's tab width because the
+// PAINTER will apply it, this one mirrors the widget's sanitizer because the WIDGET applied it. A
+// mirror answers to the widget alone (ADR 0030 §6), so if the two ever diverge each must follow its
+// own oracle.
+const inputTabCells = 4
+
+// expandInputTabs rewrites each TAB in line as the spaces the textarea's sanitizer puts there, so a
+// line is measured as the widget HOLDS it rather than as it was handed over. A line without tabs is
+// returned as-is, unallocated: that is every line the package itself measures — the widget's value
+// cannot hold a tab — so the frame path pays nothing for a case only an outside caller can reach.
+func expandInputTabs(line []rune) []rune {
+	tabs := 0
+	for _, r := range line {
+		if r == '\t' {
+			tabs++
+		}
+	}
+	if tabs == 0 {
+		return line
+	}
+	out := make([]rune, 0, len(line)+tabs*(inputTabCells-1))
+	for _, r := range line {
+		if r == '\t' {
+			for i := 0; i < inputTabCells; i++ {
+				out = append(out, ' ')
+			}
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
