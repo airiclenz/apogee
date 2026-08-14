@@ -29,10 +29,6 @@ The still-open findings the 2026-08-13 plan runs left, merged into one section u
 conventions' actionability bar (the closed and accepted remainder of every run is in
 `CHANGELOG.md`); each bullet names its origin run.
 
-- [ ] The Windows home (`%USERPROFILE%` / drive-letter `/users/`) is still unspelled in the
-  ssh-key and credential patterns; ADR 0020 already reasons about that port, so it is declared
-  debt. (hostile-bytes run)
-
 - [ ] `/server` back onto a configured startup entry resolves that entry's own source, not the
   `APOGEE_API_KEY` overlay (pre-existing; ADR 0036 decision 6). (api-key sources run)
 
@@ -41,64 +37,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   (ErrorEvent, deferred queue cleared) where a cancel 100ms earlier gives the resumable
   `endCancelled` (`internal/agent/turn.go:60`, `:61`) — plan-ratified, narrow window, but a real
   cancel-semantics seam worth tracking. (in-band retry run)
-
-- [ ] The input-width mirror matches the widget's sanitizer on tabs only: `expandInputTabs`
-  (`internal/tui/inputaccent.go:286`) expands `\t`, while `runeutil.NewSanitizer`'s defaults also
-  fold `\r`/`\n` and drop RuneError and other control runes. Unreachable by construction on every
-  in-package path — the widget's own value cannot carry them, the argument `cellToRuneOffset`
-  records at `internal/tui/mouse.go:262` for the accent overlay's column math — and tracked nowhere
-  today. (small-guards run)
-
-### Run residuals — open (2026-08-14)
-
-The still-open findings the ISSUES-residuals plan run left
-(`docs/plans/archived/2026-08-14 - 00 - issues-residuals-plan.md`), under the conventions'
-actionability bar.
-
-- [ ] `/server`'s already-on early return matches on the **endpoint**, not the entry name
-  (`internal/tui/picker.go:366`; `serverRows`' current-row mark does the same at `:1035`), so when
-  two configured entries share one endpoint, picking the entry the session is *not* on still takes
-  that branch — and now that the branch records the pin, it writes that other entry's name as the
-  startup entry without the session ever moving to it. Out of scope of the item that added the
-  recording, which mirrored the existing match rather than changing it.
-
-- [ ] `verifiedEntrySplice`'s first parameter `data []byte` is unused by the function body
-  (`internal/config/configwrite_keysource.go:291`), while all three call sites pass it
-  (`configwrite_keysource.go:134`, `:153`, `configwrite.go:392`) — pre-existing, and a vestigial
-  parameter worth dropping.
-
-- [ ] Cross-file positional doc references the earlier configwrite split run left, beyond the five
-  the prose item repaired: `internal/config/configsplice.go:232` ("the state every splice below
-  starts from"), `internal/config/configwrite_scalarsplice.go:50` ("the flow-style list refusal
-  above" → `spliceHostAcknowledgement` in `configwrite.go`), and
-  `internal/config/configwrite_scalar.go:96` ("the seeding read below" → `ReadConfigForWrite` in
-  `configsplice.go`). Same rule as that item: name the file, and the function where one is meant.
-
-- [ ] `internal/tools`' `tempRoot` (`internal/tools/path_safety_test.go:131`) is now the
-  package-wide default for a symlink-resolved temp root, while several sibling suites outside
-  `diagnostics_test.go` still hold raw `t.TempDir()` roots. No bare-sentence assertion depends on
-  those roots today, so nothing fails now — the inconsistency is what a future one would trip over.
-
-### Run residuals — open (2026-08-14, approved-escape write)
-
-The still-open findings the approved-escape-write plan run left, under the conventions'
-actionability bar.
-
-- [ ] A workspace-internal symlink whose target lies outside the workspace is classified and
-  disclosed as an escape at the Gate, but its approved write is still refused: `openMutationRoot`'s
-  in-workspace branch is lexical and unconditional (`internal/security/writepermit.go:62`), so the
-  write lands through the workspace root and `os.Root` refuses the final link — the permitted branch
-  (`openPermittedRoot`, `internal/security/writepermit.go:89`) is never reached. Consistent with
-  ADR 0049's never-write-through-a-link rule, but that gate's "Allow" is unreachable for this shape.
-
-- [ ] `docs/design/confinement-execution-contract.md:622` states "Reads are not widened:
-  `security.SafeReadFile` takes no permit" without naming the read the read-modify-write verbs do
-  perform through the permitted parent (`readWriteTarget` / `statWriteTarget`,
-  `internal/tools/path_safety.go:139`, `:153`), so a reader can infer that an approved `file_edit`
-  cannot read its own target.
-
-- [ ] `internal/tools/path_safety.go` (407 lines) and `internal/tools/file_ops.go` (418) now sit
-  just over the ~400-line house limit — split candidates.
 
 ### Run residuals — open (2026-08-14, settings coverage + popup scrollbar)
 

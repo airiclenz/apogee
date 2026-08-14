@@ -322,7 +322,16 @@ internal/tools/file_ops.go, internal/tools/delete_file.go, internal/tools/doc.go
 **Acceptance:** `go build ./internal/tools/ && go test -race -count=1 ./internal/tools/`
 **Commit:** `refactor(tools): split path_safety.go and file_ops.go by concern`
 
-## 9. Close the swept entries out of ISSUES.md
+## 9. Close the swept entries out of ISSUES.md — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): `CHANGELOG.md` is in the item's Files list but is untouched — the item edits it
+only to fill a gap, and the `[Unreleased]` section already carries an entry for all eight closed
+items (Added: the Windows-home guard; Changed: the `internal/tools` file split, the `tempRoot` test
+conversion, the cross-file doc references, `verifiedEntrySplice`, the contract's escape section;
+Fixed: `/server` name identity, the permitted symlink escape, the prompt-box width mirror).
+NOTES (2026-08-14): removing the four bullets of "Run residuals — open (2026-08-14)" emptied that
+section, so its heading and its intro paragraph went with them, per the item's "a section left empty
+is removed entirely".
 
 **What:** Depends on items 1–8. Per the house convention (ISSUES holds open work only; the
 changelog is the sole closed trail): remove from `ISSUES.md` the bullets items 1–8 closed —
