@@ -1094,6 +1094,53 @@ func TestApplyConfigEphemeralEntryIsUnnamed(t *testing.T) {
 	}
 }
 
+// And unnamed is not the same as unlabelled: the synthesized alias also names the switch row this
+// run is offered under, so a host that happens to spell a configured entry's name is suffixed
+// rather than left to collide with it. A host that collides with nothing keeps its bare form.
+func TestApplyConfigEphemeralAliasAvoidsConfiguredName(t *testing.T) {
+	t.Parallel()
+	const servers = "servers:\n  - name: workstation\n    endpoint: http://workstation:1111\nserver: workstation\n"
+	tests := []struct {
+		name      string
+		endpoint  string
+		wantAlias string
+	}{
+		{
+			name:      "host equal to a configured name is suffixed",
+			endpoint:  "http://workstation:8080/v1",
+			wantAlias: "workstation (endpoint)",
+		},
+		{
+			name:      "host that collides with nothing stays bare",
+			endpoint:  "http://rented.example:8080/v1",
+			wantAlias: "rented.example",
+		},
+		{
+			name:      "a case-only near-match is not a collision",
+			endpoint:  "http://Workstation:8080/v1",
+			wantAlias: "Workstation",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := Options{ConfigDir: testConfigHome(t, servers)}
+			getenv := func(name string) string {
+				if name == EnvEndpoint {
+					return tt.endpoint
+				}
+				return ""
+			}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.HostAlias != tt.wantAlias {
+				t.Errorf("hostAlias = %q; want %q", opts.HostAlias, tt.wantAlias)
+			}
+		})
+	}
+}
+
 // An explicitly-set flag speaks even when its value is empty: `--endpoint ""` says "nothing from
 // the command line", and letting the variable slip back in underneath would make the flag mean
 // the opposite of what was typed.

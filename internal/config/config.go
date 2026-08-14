@@ -2117,9 +2117,11 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	opts.Overrides = overrideSources(changed, getenv)
 	// A configured entry always has a name (ValidateServers refuses one without), so this fallback
 	// is for the entry that has none: the unnamed startup entry a raw `--endpoint`/`APOGEE_ENDPOINT`
-	// override builds, which has no label but still has to be called something in the footer.
+	// override builds, which has no label but still has to be called something in the footer — and,
+	// since that label is also what its synthesized switch row is called, something no configured
+	// entry already answers to.
 	if opts.HostAlias == "" {
-		opts.HostAlias = hostFromEndpoint(opts.Endpoint)
+		opts.HostAlias = aliasFromEndpoint(opts.Endpoint, opts.Servers)
 	}
 	// Held from the selection step above: everything is resolved, so the caller that can ask a
 	// human has what it needs to ask, and the caller that cannot refuses with the same message it
@@ -2355,6 +2357,27 @@ func hostFromEndpoint(endpoint string) string {
 		return endpoint
 	}
 	return u.Hostname()
+}
+
+// aliasFromEndpoint is that fallback made collision-aware, because the label is not only the
+// footer's: the ephemeral startup entry is also synthesized into a switch row beside the
+// configured `servers:` rows, and a bare host that happens to equal one of their names would make
+// two rows answer to one label — both drawn `· current`, and name-keyed lookups resolving whichever
+// row comes first. The synthesized one takes a `" (endpoint)"` suffix to say which it is. The
+// comparison is the exact one those lookups switch on, so a label that only collides on case is
+// left alone — nothing confuses it. One pass, no loop: a configured name that already spells the
+// suffixed form is an operator who armed the collision by hand, and is accepted as-is.
+func aliasFromEndpoint(endpoint string, servers []ServerEntry) string {
+	alias := hostFromEndpoint(endpoint)
+	if alias == "" {
+		return ""
+	}
+	for _, s := range servers {
+		if s.Name == alias {
+			return alias + " (endpoint)"
+		}
+	}
+	return alias
 }
 
 // ApogeeHome resolves the absolute apogee home directory: the configDir override when

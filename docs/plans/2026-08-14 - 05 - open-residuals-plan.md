@@ -266,7 +266,10 @@ ISSUES bullet (settings-coverage section — this empties that section; remove i
 
 **Commit:** `fix(tui): mechanisms row distinguishes saved-but-apply-failed`
 
-## 10. Ephemeral endpoint alias avoids configured-name collision
+## 10. Ephemeral endpoint alias avoids configured-name collision — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the ISSUES bullet was the only one in the "Run residuals — open (2026-08-14, ISSUES sweep)" section, so its header and intro prose went with it (per the plan's standing requirement).
+NOTES (2026-08-14): the test covers a third case beyond the item's two — a case-only near-match stays bare — pinning the "match what `findServer` does" (exact, case-sensitive) semantics the item specifies.
 
 **What:** Realise ratified call 3. The fallback `opts.HostAlias = hostFromEndpoint(...)`
 (`internal/config/config.go:2118-2122`, `hostFromEndpoint` at `:2349-2358`) can equal a

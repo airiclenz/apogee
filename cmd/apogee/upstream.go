@@ -287,7 +287,10 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 //
 // Deriving the synthesized row from the ephemeral case alone is also what dissolves the edge the
 // endpoint-equality test used to leave open: a configured startup can no longer be offered twice
-// under two labels, and a synthesized label can no longer collide with a configured `name`.
+// under two labels. That the synthesized LABEL does not collide with a configured `name` is not
+// this function's doing but the alias's own: it is kept distinct where it is synthesized, by
+// suffixing a host that equals a configured name `" (endpoint)"` (config.aliasFromEndpoint), so
+// the row findServer resolves below is the row the user picked.
 func upstreamChoices(opts config.Options) []config.ServerEntry {
 	entries := make([]config.ServerEntry, 0, len(opts.Servers)+1)
 	if opts.StartupEphemeral {

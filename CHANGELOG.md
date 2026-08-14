@@ -10,6 +10,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- The alias synthesized for a raw `--endpoint`/`APOGEE_ENDPOINT` override no longer collides with a
+  configured `servers:` entry name: when the endpoint's host equals one, the label takes a
+  `" (endpoint)"` suffix (e.g. `workstation (endpoint)`), so the switch list never draws two rows
+  `· current` and name-keyed lookups resolve the row the user picked. Only the synthesized fallback
+  is affected — an explicit `--server-name`/configured alias is untouched.
+
 - The `mechanisms` settings row now tells a refused write apart from one that saved but could not be
   put in force: `tui.Options.WriteMechanism` answers `(saved bool, err error)`, and a flip whose
   splice landed under a failed live apply reads "saved — live apply failed: …" on the row — the same

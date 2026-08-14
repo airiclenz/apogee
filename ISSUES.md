@@ -35,15 +35,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   `endCancelled` (`internal/agent/turn.go:60`, `:61`) — plan-ratified, narrow window, but a real
   cancel-semantics seam worth tracking. (in-band retry run)
 
-### Run residuals — open (2026-08-14, ISSUES sweep)
-
-The still-open findings the ISSUES-sweep plan run left, under the conventions' actionability bar.
-
-- [ ] The ephemeral-entry doc claim that "a synthesized label can no longer collide with a configured
-  `name`" (`cmd/apogee/upstream.go:288-290`) is asserted, not enforced: `hostFromEndpoint`'s label for
-  a raw `--endpoint`/`APOGEE_ENDPOINT` override can still equal a configured entry's `name`, and the
-  picker then marks two rows `· current`.
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
