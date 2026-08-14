@@ -100,6 +100,24 @@ actionability bar.
 - [ ] `internal/tools/path_safety.go` (407 lines) and `internal/tools/file_ops.go` (418) now sit
   just over the ~400-line house limit — split candidates.
 
+### Run residuals — open (2026-08-14, settings coverage + popup scrollbar)
+
+The still-open findings the settings-coverage + popup-scrollbar plan run left, under the
+conventions' actionability bar.
+
+- [ ] Two places still describe the scroll bar as the transcript's alone, now that every overflowing
+  popup paints one: `internal/config/defaults/config.yaml:539-542` (the `show-scrollbar` prose, and
+  the same claim on the key's own line at `:565`), and `CHANGELOG.md:72`, whose popup-scrollbar
+  entry still ends "No pane opts in yet." — contradicted by the entry directly below it.
+
+- [ ] `WriteMechanism`'s error-only signature (`cmd/apogee/wire_options.go:259`) conflates "the
+  splice failed" with "the splice landed and the live apply did not" — both come back as a bare
+  error, and `internal/tui/settings.go:660` puts it on the `mechanisms` row unprefixed, so the
+  human cannot tell whether the file changed. Every registry-key edit distinguishes the two with
+  `settingsApplyFailedNote` ("saved — live apply failed: ", `internal/tui/settings.go:1342`,
+  `:1517`). Nothing in `cmd/apogee` pins the seam either — the package has no `wire_options_test.go`,
+  so the chain is exercised only through the TUI's fakes (pre-existing for every seam in that file).
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
