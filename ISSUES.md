@@ -23,22 +23,23 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-- [ ] an *approved* out-of-workspace write still errors at Execute — the confinement contract's §4
-  "WS-write, target out of workspace → gate" row is now half-landed: dispatch classifies the target
+- [P] an *approved* out-of-workspace write still errors at Execute — the confinement contract's §4
+  "WS-write, target out of workspace → gate" row is half-landed: dispatch classifies the target
   with `resolveTargetUnbounded` (`internal/tools/workspace_scoped.go:176`), so an out-of-workspace
   write reaches the approval Gate instead of being pre-rejected, but the write tool never learned to
   honour that approval — `internal/tools/write_file.go:88` writes through the os.Root fence pinned
   at the workspace root (`safeWriteFile` → `security.SafeWriteFile`), which refuses the escape
-  regardless of the verdict, so the human approves and then gets an error result. Contract §4 says
-  the same thing in its "Realisation gap — half-landed" note: the row is no longer unreachable, and
-  the `Execute` half is the part still open. Decision pending, and it is an owner call either way:
-  land the P3.7 reconciliation the contract promises (resolve against
-  `WorkspaceRoot ∪ box.WritablePaths` and honour a dispatch-approved target) or ratify strict
-  fencing as the permanent answer and amend §4 to say the Gate's allow is advisory for writes.
-  Surfaced by the 2026-08-10 doc-landscape audit
+  regardless of the verdict, so the human approves and then gets an error result. **Decided
+  2026-08-14 (ADR 0049, grill session):** land the P3.7 reconciliation — the Gate's allow becomes
+  executable through a context write-escape permit pinned to the disclosed resolved target;
+  `WorkspaceRoot ∪ box.WritablePaths` is the in-fence union; the whole WS-write family honours it
+  (move's undisclosed source excepted); the allow-for-session grain stays the argument digest; the
+  Auto · `confine=false` run cell mints the same permit from classification. Planned:
+  `docs/plans/2026-08-14 - 01 - approved-escape-write-plan.md`; this entry closes when that plan
+  executes. Surfaced by the 2026-08-10 doc-landscape audit
   (`docs/reviews/2026-08-10 - 00 - doc-landscape-audit.md`, Flag 1). Cross-reference: the parked
   *Configurable tool × mode security matrix* entry below sits on the same
-  dispatch-gate-vs-tool-level-fence seam; whichever way this call goes constrains that design.
+  dispatch-gate-vs-tool-level-fence seam; ADR 0049's floor now constrains that design.
 
 ### Run residuals — open (2026-08-13)
 

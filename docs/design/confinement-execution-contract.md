@@ -589,19 +589,24 @@ fallback is a **`Refuse`** ("subprocess could not be confined and approval was n
 fallback never carries its own fallback — the demote is a single bounded step, and the executor follows
 it without re-deciding.
 
-> **Realisation gap — half-landed (updated 2026-08-10; flagged, not silent).** The "WS-write, target out
-> of workspace → gate" row needs the write tool to actually *perform* an approved out-of-workspace write.
-> The **classification half has landed**: dispatch resolves the target with `resolveTargetUnbounded`
-> (`internal/tools/workspace_scoped.go:102`), so an out-of-workspace write now **reaches the Gate**
-> instead of being pre-rejected — the row is no longer unreachable, as this paragraph used to say. The
-> **`Execute` half is still open**: `internal/tools/write_file.go:82` writes through an `os.Root` fence
-> pinned at the workspace root, which refuses the escape whatever the verdict was, so the human approves
-> and then gets an error result. Closing it either way is an owner call — land the P3.7 reconciliation
-> (the write tool resolves against `WorkspaceRoot ∪ box.WritablePaths` and honours a dispatch-approved
-> target) or ratify strict fencing as the permanent answer and amend this row to say the Gate's allow is
-> advisory for writes — and it is tracked as the open `ISSUES.md` entry "an *approved* out-of-workspace
-> write still errors at `Execute`". The marker's `workspaceWriteTarget` seam (§3.2) is what makes the
-> richer behaviour a later additive change, not a rework.
+> **Realisation gap — decided, unbuilt (updated 2026-08-14; flagged, not silent).** The "WS-write,
+> target out of workspace → gate" row needs the write tool to actually *perform* an approved
+> out-of-workspace write. The **classification half has landed**: dispatch resolves the target with
+> `resolveTargetUnbounded` (`internal/tools/workspace_scoped.go:102`), so an out-of-workspace write
+> **reaches the Gate** and the pane shows the resolved path. The **`Execute` half is decided but not
+> yet built**: the owner call this note used to name open was ratified 2026-08-14 —
+> [ADR 0049](../adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)
+> lands the P3.7 reconciliation. The Gate's allow becomes executable through a **write-escape permit**
+> on the context (the §10 `SubprocessPermit` idiom), pinned to the disclosed `writeTarget.Real`;
+> `WorkspaceRoot ∪ box.WritablePaths` becomes the in-fence union at classification AND at the
+> Execute fence; the whole WS-write family honours it uniformly (`move_file`'s undisclosed *source*
+> keeps its in-workspace refusal); the allow-for-session grain stays the argument digest; and the
+> Auto · `confine=false` *run* cell mints the same permit from dispatch's own classification, so that
+> cell stops being nullified by an undocumented fence. Until
+> `docs/plans/2026-08-14 - 01 - approved-escape-write-plan.md` executes,
+> `internal/tools/write_file.go:88` still refuses the escape after the yes, and the defect stays open
+> in `ISSUES.md` (marked planned). The marker's `workspaceWriteTarget` seam (§3.2) is what makes the
+> permit an additive change, not a rework.
 
 `AutoEligible()` becomes `FSWrite`-only (§5), so `ErrAutoUnavailable` is now **conditional** — a host
 with no fs-confinement does not refuse Auto; it lands in the "subproc, caps insufficient → gate" row.

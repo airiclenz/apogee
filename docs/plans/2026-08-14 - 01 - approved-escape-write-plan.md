@@ -1,0 +1,163 @@
+# Approved escape writes — the Gate's allow becomes executable
+
+**Goal:** land ADR 0049 — an approved out-of-workspace write actually writes, bounded to exactly
+the resolved target the approval pane disclosed, carried by a context write-escape permit; the
+`confine=false` run cell and the `box.WritablePaths` union stop being nullified by the
+workspace-pinned fence; the whole WS-write family behaves uniformly.
+
+**Date:** 2026-08-14 · **Status:** unexecuted · **sized for:** ~200k-context host
+
+**Authoritative sources** (an item that disagrees with these follows these):
+- [ADR 0049](../adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)
+  — the ratified decision, all seven calls.
+- ADR 0012 — the ladder × blast radius; the Gate is the bound.
+- `docs/design/confinement-execution-contract.md` §4 (the WS-write rows + the "decided, unbuilt"
+  gap note), §10 (the `SubprocessPermit` idiom this permit mirrors).
+- `ISSUES.md`, the `[P]` entry "an *approved* out-of-workspace write still errors at Execute".
+
+**Ratified design calls (owner, 2026-08-14, grill session via AskUserQuestion):**
+
+- **A over B:** honour the approval; strict fencing rejected (Q1).
+- **Channel:** a context **write-escape permit** pinned to the classified `writeTarget.Real` —
+  no permit ⇒ today's fence byte-for-byte; permit ⇒ exact-`Real` match only, written through an
+  `os.Root` pinned at the target's parent, final component non-following (Q2/a).
+- **Union semantics:** `WorkspaceRoot ∪ box.WritablePaths` is in-fence at *classification*
+  (runs ungated in Allow-Edits/Auto); at *Execute* the union is honoured via the same permit,
+  minted by dispatch for a WritablePaths-classified run — the fence itself keeps one rule (Q3/i,
+  mechanism refined at plan-write).
+- **Approval is final:** no hard-deny set; the dangerous-action floor stays a forced look and the
+  yes runs, `~/.apogee` included (Q4/α).
+- **Uniform family:** `write_file`, `file_edit`, `find_replace` (both), `file_ops` copy/move
+  destination **and delete** honour the permit; `move_file`'s undisclosed **source** keeps its
+  unconditional in-workspace refusal (Q5/I).
+- **Cache grain unchanged:** allow-for-session stays tool + canonical-arguments digest; no path
+  grain (Q6/x).
+- **`confine=false` mints too:** the Auto · `confine=false` WS-write-out *run* verdict stamps the
+  permit from dispatch's own classification — one mechanism, two minters (Q7/p).
+
+**Standing requirements:** skills: `coding-standards`. `make check` once at closeout; per-item
+acceptance below. No `VERSION`/CHANGELOG-release-heading change — close with a
+VERSION-SUGGESTION line instead.
+
+**Out of scope (deliberately):** a hard-deny tier above the Gate (rejected Q4); a path-grain
+allow-for-session (rejected Q6, sighting-driven revisit); giving `ConfineWritablePaths` its first
+writer (the parked Windows box-local `%TEMP%` entry); the parked security-matrix design; any
+change to what the approval pane renders (the resolved-path disclosure already landed with the
+hostile-bytes batch).
+
+---
+
+## 1. `domain`: the write-escape permit
+
+**What:** add `WriteEscapePermit{Real string}` beside `SubprocessPermit`, with
+`WithWriteEscapePermit(ctx, p)` / `WriteEscapePermitFrom(ctx) (WriteEscapePermit, bool)`
+mirroring the §10 idiom (unexported context key, zero-value-safe). Doc comment states the
+contract: the permit authorises **one** resolved absolute path for the duration of one tool
+execution; absence means the workspace fence alone governs. No consumer yet — this item is the
+type and its plumbing only.
+
+**Files:** `internal/domain/` (beside the existing permit; follow its file placement)
+
+**Tests:** round-trip through a context; absent key reports `ok=false`; an empty-`Real` permit
+is never returned as present.
+
+**Acceptance:**
+- `go test ./internal/domain/`
+
+**Commit:** `feat(domain): a write-escape permit carries one approved resolved target`
+
+## 2. `security`: the fence honours a permitted target
+
+**What:** extend the shared TOCTOU-safe write core (`security.SafeWriteFile` and the delete/copy
+helpers the family funnels through) with the permitted-target path: callers pass the permit's
+`Real` (empty = none). Behaviour: no permit, or target within the workspace root → existing
+os.Root path, unchanged. Permit present and the input re-resolves to **exactly** the permitted
+`Real` → write through an `os.Root` opened at the deepest **existing** ancestor of `Real`,
+creating missing parents and the final component non-following inside that root; any divergence
+(re-resolution mismatch, symlinked final component) → error, no write. Keep the refusal message
+naming both the resolved path and the rule, matching the fence's existing legibility style.
+
+**Files:** `internal/security/` (the safe-write/path-safety core and its tests)
+
+**Tests:** table-driven — permitted exact match writes (existing and missing parents); mismatch
+refuses; symlinked final component refuses; workspace-internal writes bit-identical to today
+(existing suites stay green); a permit never widens reads.
+
+**Acceptance:**
+- `go test ./internal/security/`
+
+**Commit:** `feat(security): the safe-write fence honours one permitted resolved target`
+
+## 3. `agent`: dispatch mints the permit at its three seams
+
+**What:** the resolution carries the classified `writeTarget.Real` for WS-write targets; the
+execution tails stamp `WithWriteEscapePermit` before `executeTool` in exactly three cases: (1) an
+**approved Gate** on the WS-write-out row (including a cache-cleared allow — same key, same
+target); (2) the **Auto · `confine=false` run** verdict on that row; (3) a **WritablePaths
+in-fence run** — classification treats `WorkspaceRoot ∪ box.WritablePaths` as in-workspace
+(`writeTargetInWorkspace` learns the union), and a union member outside the workspace root gets
+the permit so Execute can land it. No other verdict stamps; a denied or refused call never
+reaches a permit.
+
+**Files:** `internal/agent/resolution.go`, `internal/agent/dispatch.go`, tests beside them
+
+**Tests:** dispatch-level — approved WS-write-out gate executes with permit and the tool sees it;
+Ask-Before deny leaves no permit; `confine=false` run stamps; union-member target classifies
+in-fence and stamps; in-workspace writes never carry one; a Firing's fail-safe denier still
+refuses the gate (existing behaviour pinned).
+
+**Acceptance:**
+- `go test ./internal/agent/`
+
+**Commit:** `feat(agent): approved and confine=false escape writes carry the permit`
+
+## 4. `tools`: the WS-write family honours the permit uniformly
+
+**What:** thread the execution context's permit into the shared funnel — `safeWriteFile` (and
+siblings) take `ctx` and pass the permit's `Real` to the security core — so `write_file`,
+`file_edit` (patch + full), `find_replace` (single + multi) inherit it with no per-tool logic.
+`file_ops`: copy/move **destination** and **delete** honour the permit through the same core;
+`move_file`'s **source** keeps its unconditional in-workspace refusal, now pinned by a test
+stating the ADR 0049 reason (undisclosed at the Gate). The success summary's resolved-target
+note keeps saying the same thing the pane said.
+
+**Files:** `internal/tools/path_safety.go`, `internal/tools/write_file.go`,
+`internal/tools/file_edit.go`, `internal/tools/find_replace.go`, `internal/tools/file_ops.go`,
+tests beside them
+
+**Tests:** per-verb — a permitted out-of-workspace write/patch/find-replace/copy/move/delete
+succeeds against a temp target and refuses on mismatch; unpermitted calls behave exactly as
+today (existing suites green); the move-source refusal test.
+
+**Acceptance:**
+- `go test ./internal/tools/`
+
+**Commit:** `feat(tools): the WS-write family executes a permitted escape`
+
+## 5. Docs realisation + register close
+
+**What:** contract §4's "decided, unbuilt" note becomes the landed description (drop the
+unbuilt flag, keep the ADR 0049 pointer; update the `write_file.go` line reference); §10 gains
+one sentence naming the write-escape permit as the second permit. Remove the `[P]` ISSUES.md
+entry (this file holds open work only); `CHANGELOG.md` `[Unreleased]` records the close in one
+entry. Close with a `VERSION-SUGGESTION:` line in the closeout report — no bump in this plan.
+
+**Files:** `docs/design/confinement-execution-contract.md`, `ISSUES.md`, `CHANGELOG.md`
+
+**Tests:** none — docs only.
+
+**Acceptance:**
+- `grep -n "decided, unbuilt" docs/design/confinement-execution-contract.md` → no matches
+- `grep -n "approved.*out-of-workspace write still errors" ISSUES.md` → no matches
+
+**Commit:** `docs(confinement): the Gate's allow is executable — contract, register, changelog`
+
+---
+
+## Verification (whole plan)
+
+- `make check`
+- Manual: in Ask-Before, `write_file` to a path outside the workspace → approve → file exists
+  with the disclosed content; deny → no file. In Auto (`confine=true`), same call gates; in a
+  `confine=false` session it runs. An in-workspace session transcript is byte-identical to
+  pre-plan behaviour.
