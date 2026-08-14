@@ -196,6 +196,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`internal/tui/render_test.go` begins splitting into per-subject test files.** The first carve
+  lifts the wrap and rail suites into `internal/tui/wrap_test.go` (`railedWidth`'s floor, the
+  absolute width cap, the painter's-measure break, the `clipWrap` row budget, and the sub-agent
+  rail through the inter-block spacers) and the user-block suites into
+  `internal/tui/userblock_test.go` (square user-block rows, the collapsed/expanded prompt paint,
+  and the skill-token accents). Pure moves: no test renamed, reordered or edited, each new file
+  carrying only the imports it needs; `render_test.go` drops from 5520 to 4466 lines. Tests only —
+  no behavior change.
+
 - **The `internal/tools` companion test suites now sit beside the sources they cover.** When
   `delete_file.go` and `path_read.go` were split out of `file_ops.go` and `path_safety.go`, their
   tests stayed behind in the old files. The `delete_file` suite (seven tests, from the positive

@@ -192,7 +192,16 @@ comment (other legitimate uses of the identifier may remain).
 
 ---
 
-## 6. Carve wrap_test.go and userblock_test.go out of render_test.go
+## 6. Carve wrap_test.go and userblock_test.go out of render_test.go — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): banner disposition where a `// ----` section splits across files — the
+"Sub-agent framing reflow safety (P3.14)" banner stays in `render_test.go` with
+`TestSubAgentReflowAtSmallWidths` (item 7 carries it away), so `TestRailedWidthFloors` opens
+`wrap_test.go` under its own doc comment; conversely the "The row-capped clip (clipWrap)" banner
+moved with the clipWrap suite, so `TestUserBlockRowsAreOneSquareLineEach` opens
+`userblock_test.go` under its own doc comment. No banner text was invented or duplicated, and the
+moved bodies are byte-identical to their `HEAD` originals (verified by reconstructing
+`render_test.go` from the removed ranges).
 
 **What:** Create `internal/tui/wrap_test.go` and `internal/tui/userblock_test.go`; move the
 following out of `internal/tui/render_test.go` verbatim (pure moves — see Standing requirements):
