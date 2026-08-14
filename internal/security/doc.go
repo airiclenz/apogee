@@ -100,8 +100,11 @@
 // (ADR 0049). openMutationRoot — the single place every mutating primitive above decides which
 // root bounds it — plus the re-resolution that reproduces dispatch's classification rather than
 // trusting it, the deepest-existing-ancestor anchor the approved write is pinned to, and the
-// symlinked-target refusal. With no permit, or an in-workspace target, it answers with today's
-// workspace root, byte-for-byte.
+// symlinked-target refusal. The permit question is asked FIRST and on the RESOLVED path, so an
+// argument that re-resolves to exactly the permitted target answers with that target's own
+// ancestor even when it is spelled inside the workspace — the disclosed workspace-internal symlink
+// pointing out. Every OTHER call takes the lexical branch unchanged: today's workspace root,
+// byte-for-byte, for a path spelled inside it, and a refusal for one that is not.
 // execsafety.go measures that same boundary in the other direction: RefuseExecFromWritablePath
 // keeps an argv[0] that resolves inside the writable box from ever being executed, so bytes a
 // confined call was allowed to WRITE cannot become the program a later unconfined call RUNS.

@@ -170,6 +170,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Docs: `internal/security/doc.go`'s `openMutationRoot` summary now describes both routing cases
+  since the lexical/resolved split (ADR 0049) — the permit question is asked first and on the
+  resolved path (so a workspace-internal symlink pointing at the approved target lands on that
+  target's own ancestor), and every other call keeps the unchanged lexical branch: the workspace
+  root for a path spelled inside it, a refusal for one that is not.
+
 - **The `show-scrollbar` prose covers the popup panes.** The default config described the bar as the
   transcript's alone, which stopped being true once every overflowing popup started painting one:
   the key's block comment and its commented example now say the bar is painted down the right-hand

@@ -60,11 +60,6 @@ The still-open findings the ISSUES-sweep plan run left, under the conventions' a
   a raw `--endpoint`/`APOGEE_ENDPOINT` override can still equal a configured entry's `name`, and the
   picker then marks two rows `· current`.
 
-- [ ] `internal/security/doc.go:103-104` reads imprecisely now that the lexical and resolved readings
-  were split apart: the sentence on `openMutationRoot` answering "with today's workspace root,
-  byte-for-byte" no longer describes the permit-plus-workspace-internal-target case the fix
-  introduced. Doc-only, same package.
-
 - [ ] `ReadConfigForWrite`'s doc comment (`internal/config/configsplice.go:231-235`) enumerates its
   splicing callers but omits the non-splicing one, `cmd/apogee/settingsedit.go:164`, so the list reads
   as exhaustive when it is not.

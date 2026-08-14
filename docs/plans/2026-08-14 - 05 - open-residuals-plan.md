@@ -55,7 +55,11 @@ entry directly below it. Remove the corresponding ISSUES bullet (settings-covera
 
 **Commit:** `docs(config): scrollbar prose covers popup panes`
 
-## 2. openMutationRoot doc describes the permit case
+## 2. openMutationRoot doc describes the permit case — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): retry — a prior batch attempt had already written a doc.go reword into the tree; checked it against `openMutationRoot`/`rootRelative` and corrected it. Its "It routes on the RESOLVED path, not the spelling" was over-broad (only the permit match is resolved-based; the fallback branch is lexical, `internal/security/safeio.go:629`), and "with no permit it answers with today's workspace root" omitted the no-permit out-of-workspace refusal. Final wording states the resolved-first permit question and the unchanged lexical branch with its refusal.
+
+NOTES (2026-08-14): the sibling items' in-flight edits (`internal/config/configsplice.go`, `internal/tools/exec_common.go`) were left untouched per the dispatch DECISION; only this item's `ISSUES.md` bullet was removed (5 lines, section keeps its other bullets).
 
 **What:** `internal/security/doc.go:103-104` reads imprecisely since the lexical and resolved
 readings were split: the sentence on `openMutationRoot` answering "with today's workspace
