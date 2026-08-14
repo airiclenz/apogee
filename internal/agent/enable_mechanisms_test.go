@@ -85,7 +85,7 @@ func TestEnableMechanisms_DuplicateIDRejected(t *testing.T) {
 
 // TestEnableMechanisms_MergeRejectionCarriesOnePrefix: the merge-time rejection is RETURNED to the
 // host, and cmd/apogee/main.go prints a returned error verbatim — so it has to read as ONE
-// "apogee: "-prefixed line. registry.Add's three rejections already arrive prefixed (house
+// "apogee: "-prefixed line. registry.Add's rejections already arrive prefixed (house
 // convention for a returned error), so the enable-path context is appended rather than wrapping them
 // in a second prefix ("apogee: enable mechanism "validate": apogee: mechanism ID "validate" is
 // already registered").

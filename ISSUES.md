@@ -99,12 +99,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   writers above's contract", "the verification below") plus `configwrite_scalar.go:19` ("the
   acknowledgement writer above") now name text in other files. (configwrite split run)
 
-- [ ] Two comments still count `MechanismRegistry.Add`'s gates as three now that it has four:
-  `internal/agent/construct.go:273` and `internal/agent/enable_mechanisms_test.go:88` both read
-  "Add's three rejections already carry the `apogee: ` prefix". Their substantive claim — every
-  rejection arrives prefixed, so the enable path appends its context rather than wrapping it — still
-  holds; only the count is stale. (small-guards run)
-
 - [ ] The input-width mirror matches the widget's sanitizer on tabs only: `expandInputTabs`
   (`internal/tui/inputaccent.go:286`) expands `\t`, while `runeutil.NewSanitizer`'s defaults also
   fold `\r`/`\n` and drop RuneError and other control runes. Unreachable by construction on every

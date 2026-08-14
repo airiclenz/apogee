@@ -36,7 +36,12 @@ here); any change to `VERSION` or a `CHANGELOG` release heading.
 
 ---
 
-## 1. Drop the stale rejection count from the prefix-once comments
+## 1. Drop the stale rejection count from the prefix-once comments — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the two comment edits were already present in the working tree from a prior
+attempt at this item (dispatch `RETRY: yes`); they match the item's text exactly and were kept.
+`ISSUES.md` was restored (`git checkout --`) per the dispatch DECISION and only this item's bullet
+was removed. `internal/tui/render_test.go` is item 2's work and was left untouched.
 
 **What:** `internal/agent/construct.go:273` and `internal/agent/enable_mechanisms_test.go:88`
 both say "Add's three rejections already carry the `apogee: ` prefix"; `MechanismRegistry.Add`

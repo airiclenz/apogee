@@ -865,6 +865,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The prefix-once comments stop counting `MechanismRegistry.Add`'s rejection gates.**
+  `internal/agent/construct.go` and `internal/agent/enable_mechanisms_test.go` both said "Add's
+  three rejections already carry the `apogee: ` prefix" while `Add` now has four gates (empty ID,
+  reserved sentinel, duplicate ID, no hook interface). Both now say "Add's rejections" — no count,
+  so the next gate cannot re-stale them. The substantive claim is unchanged: every rejection
+  arrives prefixed, so the enable path appends its context rather than wrapping it in a second
+  prefix.
+
 - **The prompt box's width mirrors now weigh a tab the way the textarea itself does.**
   `wrapRowStarts` — the mirror of the bubbles textarea's own soft-wrap, and through it
   `inputContentRows`, the count that sizes the prompt box — measured the runes exactly as handed
