@@ -625,8 +625,15 @@ it without re-deciding.
 > `file_edit` (patch + full), `find_replace` (single + multi), and `file_ops`' copy/move
 > **destination** and delete — while `move_file`'s **source** keeps its unconditional in-workspace
 > refusal, having never been disclosed at the Gate. Reads are not widened: `security.SafeReadFile`
-> takes no permit and none may be added. The marker's `workspaceWriteTarget` seam (§3.2) is what
-> made the permit an additive change rather than a rework.
+> takes no permit and none may be added, and the READ tools are handed no permit ever. What an
+> approved write does read is its own target: the read-modify-write verbs, and the file-operation
+> pre-flights that describe what they are about to touch, reach it through `readWriteTarget` /
+> `statWriteTarget` (`internal/tools/path_safety.go:139`, `:153` — their doc comments carry the
+> rationale), which pin that one read at the permitted target's own parent, the same root the write
+> itself lands through. Without that half, "an approved gate executes" would be false for exactly
+> the verbs a model edits with — a `file_edit` unable to read the bytes it was approved to rewrite.
+> The marker's `workspaceWriteTarget` seam (§3.2) is what made the permit an additive change rather
+> than a rework.
 
 `AutoEligible()` becomes `FSWrite`-only (§5), so `ErrAutoUnavailable` is now **conditional** — a host
 with no fs-confinement does not refuse Auto; it lands in the "subproc, caps insufficient → gate" row.

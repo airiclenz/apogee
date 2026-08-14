@@ -154,7 +154,22 @@ internal/config/configwrite_keysource_test.go
 **Acceptance:** `go build ./internal/config/ && go test ./internal/config/`
 **Commit:** `refactor(config): drop verifiedEntrySplice's vestigial data parameter`
 
-## 4. Cross-file doc references name their file and function
+## 4. Cross-file doc references name their file and function — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): item text lists `configwrite.go`, `configwrite_scalarsplice.go` and
+`configwrite_keysource.go` as where "the splices below" moved. The tree contradicts two thirds of
+that: the key-source entry edits deliberately do NOT start from `ReadConfigForWrite` (they read
+through `readConfigForEntryEdit`, whose own doc says so), and `configwrite_scalarsplice.go` holds a
+text-block helper rather than a writer. Naming those would have reinstated the same class of
+misleading reference the item repairs, so the replacement names the four writers that do start from
+this read — `SaveConfigSetting`/`ResetConfigSetting` (configwrite_scalar.go), `SaveMechanismSetting`
+(configwrite_mechanism.go), `SaveServerEntrySetting` (configwrite.go) — plus the key-source
+exception.
+NOTES (2026-08-14): the item's `go build ./internal/config/` guard could not run against the live
+tree: a concurrent item-3 dispatch has `internal/config/configwrite.go` + `configwrite_keysource.go`
+mid-edit there (`verifiedEntrySplice` signature changed, one call site not yet updated), which is
+another item's work and was left untouched. The guard was run instead on a throwaway worktree at
+HEAD carrying only this item's three config diffs — BUILD_OK — and `gofmt -l` is clean on all three.
 
 **What:** Repair the four positional references left stale by earlier file splits, under the
 same rule the prior repair item used — name the file, and the function where one is meant:

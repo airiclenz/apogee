@@ -114,6 +114,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Docs: the four positional cross-file references left stale by earlier file splits now name their
+  file and function — `ReadConfigForWrite`'s "every splice below" names the setting writers that
+  actually start from it (and the server-entry exception that does not), `ScalarTargetIn`'s
+  "flow-style list refusal above" names `spliceHostAcknowledgement` in `configwrite.go`,
+  `validateSettingValue`'s "seeding read below" names `ReadConfigForWrite` in `configsplice.go`, and
+  the confinement contract's §4 "reads are not widened" sentence now also names the read an approved
+  write does perform through the permitted parent (`readWriteTarget` / `statWriteTarget`).
+
 - **`verifiedEntrySplice` no longer takes the config's original bytes.** The entry-splice gate's
   first parameter `data []byte` was vestigial: the body compares the re-parse of `updated` against
   the parsed `before` its caller already hands it, and never read those bytes. The parameter is gone

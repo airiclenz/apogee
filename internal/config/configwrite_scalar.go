@@ -93,7 +93,7 @@ func ResetConfigSetting(path, key string) error {
 // kind's own check (renderSettingValue — a bool is true or false, an enum is one of its values) and
 // then the key's validate hook, which is the check startup already makes for that key
 // (Key.Validate). A value refused here has touched nothing at all — not even the seeding read
-// below — so "invalid" and "written" can never be the same outcome.
+// (ReadConfigForWrite, configsplice.go) — so "invalid" and "written" can never be the same outcome.
 //
 // It runs HERE rather than inside the splice for the message's sake: SaveConfigSetting qualifies a
 // splice failure with the config's path, which is what a file-shape refusal needs and what a bad

@@ -47,8 +47,8 @@ func (t ScalarTarget) childIndent() int {
 
 // ScalarTargetIn locates the key in the parsed document. Shapes it refuses rather than splices:
 // a top level that is not a mapping of settings, a flow-style mapping (no line to edit — the
-// flow-style list refusal above, one level down), and a block key holding something other than
-// a block. Every one of them means the text and the node tree would disagree about where the
+// flow-style list refusal spliceHostAcknowledgement makes (configwrite.go), one level down), and
+// a block key holding something other than a block. Every one of them means the text and the node tree would disagree about where the
 // key's line is.
 func ScalarTargetIn(doc *yaml.Node, k Key) (ScalarTarget, error) {
 	head, rest, nested := strings.Cut(k.Path, ".")

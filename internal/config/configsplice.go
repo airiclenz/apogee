@@ -229,7 +229,10 @@ func writeConfigAtomically(path string, data []byte) error {
 }
 
 // ReadConfigForWrite seeds the config from the embedded template if it is not there yet and reads
-// it back — the state every splice below starts from.
+// it back — the state the setting writers splice from: SaveConfigSetting and ResetConfigSetting
+// (configwrite_scalar.go), SaveMechanismSetting (configwrite_mechanism.go) and SaveServerEntrySetting
+// (configwrite.go). The server-entry key-source edits are the one exception: they start from
+// readConfigForEntryEdit (configwrite_keysource.go), which deliberately does not seed.
 func ReadConfigForWrite(path string) ([]byte, error) {
 	if path == "" {
 		return nil, errors.New("apogee: cannot write a setting: no config file path is known")
