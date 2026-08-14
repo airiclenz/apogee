@@ -43,11 +43,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
 The still-open findings the settings-coverage + popup-scrollbar plan run left, under the
 conventions' actionability bar.
 
-- [ ] Two places still describe the scroll bar as the transcript's alone, now that every overflowing
-  popup paints one: `internal/config/defaults/config.yaml:539-542` (the `show-scrollbar` prose, and
-  the same claim on the key's own line at `:565`), and `CHANGELOG.md:72`, whose popup-scrollbar
-  entry still ends "No pane opts in yet." — contradicted by the entry directly below it.
-
 - [ ] `WriteMechanism`'s error-only signature (`cmd/apogee/wire_options.go:259`) conflates "the
   splice failed" with "the splice landed and the live apply did not" — both come back as a bare
   error, and `internal/tui/settings.go:660` puts it on the `mechanisms` row unprefixed, so the

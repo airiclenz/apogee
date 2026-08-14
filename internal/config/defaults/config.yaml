@@ -507,7 +507,7 @@ system-prompt-text: |
 
 # =============================================================================
 # How the terminal UI presents itself: the status-line spinner — the animation you watch while a
-# turn runs — whether the transcript shows a scroll bar, and the colour scheme the whole screen is
+# turn runs — whether a scroll bar is shown, and the colour scheme the whole screen is
 # drawn in. Config-file only (no flag or env).
 #
 # The keys are INDEPENDENT: `spinner` picks the glyph animation, `spinner-color` says whether it
@@ -536,10 +536,13 @@ system-prompt-text: |
 # gradient steps visibly, and on a 16-colour one it collapses to a couple of tones — that is what
 # `spinner-color: false` is for.
 #
-# `show-scrollbar` decides whether the transcript is painted with a scroll bar down its right-hand
-# edge (it appears only once there is more transcript than window). Turning it off takes the bar
-# AND the column it hangs in away together, so the transcript text takes that width instead — a
-# hidden bar does not leave an empty stripe behind. Default on.
+# `show-scrollbar` decides whether a scroll bar is painted down the right-hand edge of the
+# transcript AND of every popup pane — `/settings` and its sub-lists, `/usage`, the `/sessions`
+# browser, the `/model` and `/server` pickers, the `/` dropdown, the approval and ask prompts. The
+# bar appears only where there is more content than window, so a pane whose rows all fit shows
+# none. Turning the key off takes the bar AND the column it hangs in away together, everywhere at
+# once, so the text takes that width instead — a hidden bar does not leave an empty stripe behind.
+# Default on.
 #
 # `color-scheme` names the palette every coloured thing on the screen takes its colour from. Two
 # schemes ship in the binary: `dark` (the default — the palette apogee has always drawn, apart from
@@ -562,7 +565,7 @@ system-prompt-text: |
 # ui:
 #   spinner: snake         # snake | glitter | classic
 #   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
-#   show-scrollbar: true   # false = no scroll bar, and the transcript takes back its column
+#   show-scrollbar: true   # false = no bar in the transcript or any popup; they take back the column
 #   color-scheme: dark     # dark | light | any *.yaml in ~/.apogee/schemes/
 
 # =============================================================================

@@ -111,7 +111,7 @@ point is a **minor** bump, not a breaking change.
   and a window that seats the whole list keeps the full inner width and renders byte-for-byte as it
   did before. The thumb is sized and placed from the ROW counts (the seated window over the whole
   list) but drawn in the block's painted LINES, so a pane whose rows wrap gets one unbroken stroke
-  spanning every line of every seated row. No pane opts in yet.
+  spanning every line of every seated row. Which panes opt in is the entry below.
 
 - **Every overflowing popup now paints the scroll bar.** The `/settings` key list, its text field
   and its enum sub-list, `/usage`, the `/sessions` browser, the `/model` · `/server` pickers, the
@@ -169,6 +169,16 @@ point is a **minor** bump, not a breaking change.
   resistance.
 
 ### Changed
+
+- **The `show-scrollbar` prose covers the popup panes.** The default config described the bar as the
+  transcript's alone, which stopped being true once every overflowing popup started painting one:
+  the key's block comment and its commented example now say the bar is painted down the right-hand
+  edge of the transcript AND of every popup pane — `/settings` and its sub-lists, `/usage`, the
+  `/sessions` browser, the `/model` · `/server` pickers, the `/` dropdown, the approval and ask
+  prompts — appearing only where there is more content than window, and that turning the key off
+  takes the bar and its column away everywhere at once. The scroll-bar entry above no longer ends
+  "No pane opts in yet.", a claim the entry directly below it contradicts. Prose only — no behavior
+  change.
 
 - Documentation: the process-group teardown claims now state the POSIX setsid-escape residual —
   the group holds every descendant that has not deliberately left it, and a descendant that calls

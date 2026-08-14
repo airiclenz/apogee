@@ -31,7 +31,11 @@
   `APOGEE_API_KEY` overlay behavior (ratified against, call 1); everything under ISSUES.md
   "Parked / deferred work"; any VERSION/CHANGELOG-release-heading change.
 
-## 1. Scrollbar prose covers popup panes
+## 1. Scrollbar prose covers popup panes — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): retry — restored `ISSUES.md` with `git checkout --` per the dispatch DECISION and re-applied only item 1's own bullet removal; the sibling items' source edits already in the tree (`internal/security/doc.go`, `internal/config/configsplice.go`, `internal/tools/exec_common.go`) were left untouched.
+NOTES (2026-08-14): `CHANGELOG.md` was edited directly because the item's What and Acceptance name that file (the "No pane opts in yet." sentence); the verifier remains the sole writer of the `[Unreleased]` entry above, which is left to it.
+NOTES (2026-08-14): also tightened the `ui:` block's summary line (`internal/config/defaults/config.yaml:510`, "whether the transcript shows a scroll bar" → "whether a scroll bar is shown") — the same transcript-only framing, in the same file and block, one line beyond the two the item names.
 
 **What:** Two places still describe the scroll bar as the transcript's alone, now that every
 overflowing popup paints one. Reword the `show-scrollbar` prose in
