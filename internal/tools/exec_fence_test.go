@@ -65,7 +65,7 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 			run: func(t *testing.T, root string) (string, string, bool) {
 				planted := plantExecutable(t, root, ".venv/bin/python3")
 				withFakeInterpreter(t, true, planted)
-				res, err := NewPythonExec(root).Execute(context.Background(), pythonCall("c1", "print(1)"))
+				res, err := NewPythonExec(root, nil).Execute(context.Background(), pythonCall("c1", "print(1)"))
 				if err != nil {
 					t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
 				}
@@ -132,7 +132,7 @@ func TestPythonExecRefusesAnInRepoVirtualenvByName(t *testing.T) {
 	venv := plantExecutable(t, root, ".venv/bin/python3")
 	withFakeInterpreter(t, true, venv)
 
-	res, err := NewPythonExec(root).Execute(context.Background(), pythonCall("c1", "print(1)"))
+	res, err := NewPythonExec(root, nil).Execute(context.Background(), pythonCall("c1", "print(1)"))
 	if err != nil {
 		t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
 	}
@@ -159,7 +159,7 @@ func TestExecFenceCoversTheConfinementBoxNotOnlyTheRoot(t *testing.T) {
 	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
 		Box: domain.ConfinementBox{WorkspaceRoot: root, WritablePaths: []string{extra}},
 	})
-	res, err := NewPythonExec(root).Execute(ctx, pythonCall("c1", "print(1)"))
+	res, err := NewPythonExec(root, nil).Execute(ctx, pythonCall("c1", "print(1)"))
 	if err != nil {
 		t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
 	}

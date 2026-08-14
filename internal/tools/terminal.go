@@ -46,10 +46,17 @@ type terminalArgs struct {
 type Terminal struct {
 	toolSpec
 	root string
+	// secretEnv names the host-configured credential variables to drop from the child's
+	// environment beside apogee's own (HostTools.SecretEnvVars); nil drops apogee's own alone.
+	secretEnv []string
 }
 
-// NewTerminal returns a terminal tool whose working directory resolves within root.
-func NewTerminal(root string) *Terminal { return &Terminal{toolSpec: terminalSpec, root: root} }
+// NewTerminal returns a terminal tool whose working directory resolves within root and whose
+// child environment drops the secretEnv variables on top of apogee's own credentials (nil ⇒
+// apogee's own alone — the scrub as it was before the host could name any).
+func NewTerminal(root string, secretEnv []string) *Terminal {
+	return &Terminal{toolSpec: terminalSpec, root: root, secretEnv: secretEnv}
+}
 
 // ReadOnly reports that terminal is write-capable (false) — a shell command can write, so
 // the loop must gate/confine it rather than running it freely.
@@ -100,11 +107,11 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		cmdline: cmdline,
 		dir:     dir,
 		timeout: time.Duration(args.TimeoutSeconds) * time.Second,
-		// The command line runs in the operator's own environment — minus apogee's
-		// credentials, which a model-chosen command line has no use for and could exfiltrate,
+		// The command line runs in the operator's own environment — minus the credential
+		// variables, which a model-chosen command line has no use for and could exfiltrate,
 		// and minus the PATH entries that resolve inside the workspace, which would let the
 		// model plant the programs its own command line then executes.
-		env: subprocessEnvScopedPath(t.root),
+		env: subprocessEnvScopedPath(t.root, t.secretEnv),
 	}
 	res, err := runTerminalSubprocess(ctx, spec)
 	if err != nil {

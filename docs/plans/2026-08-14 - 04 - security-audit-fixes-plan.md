@@ -47,7 +47,16 @@
   deferred), any PL-1 enforcement change (subreaper/descendant tracking), any version
   identifier change.
 
-## 1. Exec tools scrub caller-named secret env vars (tools side)
+## 1. Exec tools scrub caller-named secret env vars (tools side) — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): three test files outside the item's Files list — `exec_fence_test.go`,
+`sub_agent_test.go`, `terminal_windows_test.go` — took the mechanical `nil` second argument at the
+changed constructors, without which the package does not compile.
+NOTES (2026-08-14): the python interpreter-version probe (`pythonVersionSpec` /
+`interpreterVersion`) takes the same list, so the probe's environment stays identical to the
+snippet's as its doc comment states; both signatures gained a `secretEnv []string` parameter.
+NOTES (2026-08-14): `isApogeeSecretEnv` is kept unrenamed as the fixed half of the scrub; a new
+sibling `isSecretEnv(entry, configured)` is the full predicate the env builders call.
 
 **What:** `internal/tools/exec_common.go` scrubs only the literal `APOGEE_API_KEY`
 (`apogeeSecretEnvVars`, `subprocessEnv`, `subprocessEnvScopedPath`, `isApogeeSecretEnv`) —

@@ -45,10 +45,11 @@ type subprocessSpec struct {
 	// "KEY=value"); nil means it inherits the caller's environment. EVERY tool that runs
 	// something for the MODEL sets it — none of them inherits whole: git and the Go toolchain
 	// take an allowlist scoped by platform.Host.ScopeEnv; the shell and interpreter tools take
-	// subprocessEnvScopedPath() — the caller's environment minus apogee's own credentials, with
-	// the child's PATH scoped out of the workspace; and the test runner takes subprocessEnv(),
-	// the same minus the credentials, because a test suite needs the toolchain variables its
-	// user's shell has but no subprocess of the model's needs apogee's key.
+	// subprocessEnvScopedPath() — the caller's environment minus every credential variable
+	// (apogee's own and the host-configured ones), with the child's PATH scoped out of the
+	// workspace; and the test runner takes subprocessEnv(), the same minus the credentials,
+	// because a test suite needs the toolchain variables its user's shell has but no subprocess
+	// of the model's needs apogee's key.
 	env []string
 	// cmdline, when non-empty, is the verbatim process command line to launch argv with
 	// instead of letting os/exec join it (platform.Shell.CommandLine). It is empty on
@@ -65,25 +66,30 @@ type subprocessSpec struct {
 // accepts that reading is possible; it does not oblige apogee to hand over its own secrets).
 //
 // The name is a literal rather than internal/config's EnvAPIKey because internal/config imports
-// THIS package (its tool-name reconciliation), so the dependency cannot point back. The
-// CONFIGURED server keys need no entry here: they are file-only by design (config.ServerEntry's
-// "APIKey is FILE-ONLY on purpose"), so they never reach an environment to be dropped from.
+// THIS package (its tool-name reconciliation), so the dependency cannot point back — which is
+// also why the CONFIGURED names reach the tools as plain strings from the host rather than being
+// read from config here. Those names are the reason this list is only HALF the scrub: a server
+// entry's key was file-only when the list was written ("APIKey is FILE-ONLY on purpose"), but
+// `api-key-env:` (ADR 0047) lets an entry name an ENVIRONMENT VARIABLE instead, and a variable
+// the operator exported is inherited by every subprocess unless it is dropped too. The host names
+// those variables (HostTools.SecretEnvVars) and isSecretEnv drops them beside this list.
 var apogeeSecretEnvVars = []string{"APOGEE_API_KEY"}
 
 // subprocessEnv returns the environment an execution tool's subprocess runs with: everything
-// the caller inherited MINUS apogee's own credentials, plus each extra "KEY=value" entry
-// appended — appended, so it wins over an inherited spelling of the same key, which is how
+// the caller inherited MINUS the credentials it must not see — apogee's own, plus the
+// host-configured secretEnv names (nil ⇒ apogee's own alone) — plus each extra "KEY=value" entry
+// appended. Appended, so it wins over an inherited spelling of the same key, which is how
 // every exec implementation resolves a duplicate.
 //
 // It is deliberately NOT git's allowlist (safeEnvKeys): the shell and interpreter tools run
 // what the operator asked for in the developer environment they expect to be in, and an
 // allowlist there would break ordinary tooling. What is removed is only what apogee itself put
-// there.
-func subprocessEnv(extra ...string) []string {
+// there, and what the operator told apogee its own keys are called.
+func subprocessEnv(secretEnv []string, extra ...string) []string {
 	inherited := os.Environ()
 	env := make([]string, 0, len(inherited)+len(extra))
 	for _, entry := range inherited {
-		if isApogeeSecretEnv(entry) {
+		if isSecretEnv(entry, secretEnv) {
 			continue
 		}
 		env = append(env, entry)
@@ -105,11 +111,36 @@ func subprocessEnv(extra ...string) []string {
 // The extras are appended AFTER the scoping — they are apogee's own additions rather than
 // inherited values, and appending keeps them last-wins in the child, which is how every exec
 // implementation resolves a duplicate.
-func subprocessEnvScopedPath(workspaceRoot string, extra ...string) []string {
-	return append(shellHost.ScopeInheritedEnv(workspaceRoot, subprocessEnv()), extra...)
+func subprocessEnvScopedPath(workspaceRoot string, secretEnv []string, extra ...string) []string {
+	return append(shellHost.ScopeInheritedEnv(workspaceRoot, subprocessEnv(secretEnv)), extra...)
 }
 
-// isApogeeSecretEnv reports whether a "KEY=value" entry names one of apogee's own credentials.
+// isSecretEnv reports whether a "KEY=value" entry names a credential no subprocess the model
+// steers may see: one of apogee's own (isApogeeSecretEnv) or one of the configured names the
+// host supplied — the variables its `api-key-env:` key sources read (ADR 0047), which arrive as
+// plain strings because internal/config imports this package and the dependency cannot point
+// back. They are compared the same case-insensitive way, for the same reason.
+//
+// An empty or whitespace-only configured name matches nothing: it is a blank entry in somebody's
+// configuration, never permission to drop every variable in the environment.
+func isSecretEnv(entry string, configured []string) bool {
+	if isApogeeSecretEnv(entry) {
+		return true
+	}
+	key, _, ok := strings.Cut(entry, "=")
+	if !ok {
+		return false
+	}
+	for _, configuredName := range configured {
+		if name := strings.TrimSpace(configuredName); name != "" && strings.EqualFold(key, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// isApogeeSecretEnv reports whether a "KEY=value" entry names one of apogee's own credentials —
+// the fixed half of the scrub, which every execution tool drops whatever the host configured.
 // The name comparison is case-insensitive because Windows environment names are: APOGEE_API_KEY
 // and Apogee_Api_Key are one variable there. On POSIX they are two, and dropping both is the
 // safe direction — a lower-cased spelling is one apogee never reads anyway.

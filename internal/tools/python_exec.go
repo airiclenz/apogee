@@ -98,8 +98,8 @@ const (
 // could not be run or its output could not be read. workspaceRoot is the box the probe's own
 // PATH is scoped out of (pythonVersionSpec). It is a package var so a test can pin either side
 // of the 3.11 boundary without depending on the Python the host happens to ship.
-var interpreterVersion = func(ctx context.Context, interp, workspaceRoot string) (major, minor int, ok bool) {
-	res, err := runSubprocess(ctx, pythonVersionSpec(interp, workspaceRoot))
+var interpreterVersion = func(ctx context.Context, interp, workspaceRoot string, secretEnv []string) (major, minor int, ok bool) {
+	res, err := runSubprocess(ctx, pythonVersionSpec(interp, workspaceRoot, secretEnv))
 	if err != nil || res.exitCode != 0 {
 		return 0, 0, false
 	}
@@ -115,12 +115,12 @@ var interpreterVersion = func(ctx context.Context, interp, workspaceRoot string)
 // would otherwise front sys.path for the -c program. Its environment is the same one the
 // snippet itself gets (minus PYTHONSAFEPATH, which only matters for the snippet): inherited,
 // less apogee's credentials, with the workspace scoped off PATH.
-func pythonVersionSpec(interp, workspaceRoot string) subprocessSpec {
+func pythonVersionSpec(interp, workspaceRoot string, secretEnv []string) subprocessSpec {
 	return subprocessSpec{
 		argv:    []string{interp, "-c", pythonVersionProgram},
 		dir:     filepath.Dir(interp),
 		timeout: pythonVersionProbeTimeout,
-		env:     subprocessEnvScopedPath(workspaceRoot),
+		env:     subprocessEnvScopedPath(workspaceRoot, secretEnv),
 	}
 }
 
@@ -188,10 +188,17 @@ var runPythonSubprocess = runSubprocess
 type PythonExec struct {
 	toolSpec
 	root string
+	// secretEnv names the host-configured credential variables to drop from the interpreter's
+	// environment beside apogee's own (HostTools.SecretEnvVars); nil drops apogee's own alone.
+	secretEnv []string
 }
 
-// NewPythonExec returns a python-exec tool whose working directory resolves within root.
-func NewPythonExec(root string) *PythonExec { return &PythonExec{toolSpec: pythonExecSpec, root: root} }
+// NewPythonExec returns a python-exec tool whose working directory resolves within root and whose
+// interpreter environment drops the secretEnv variables on top of apogee's own credentials (nil ⇒
+// apogee's own alone — the scrub as it was before the host could name any).
+func NewPythonExec(root string, secretEnv []string) *PythonExec {
+	return &PythonExec{toolSpec: pythonExecSpec, root: root, secretEnv: secretEnv}
+}
 
 // ReadOnly reports that python-exec is write-capable (false) — a script can write, so the
 // loop must gate/confine it rather than running it freely.
@@ -244,11 +251,11 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	// Both are decided here rather than in the snippet, so nothing is injected into the `code`
 	// the operator approved.
 	spec := subprocessSpec{
-		argv:    pythonArgv(interp, !honoursSafePath(interpreterVersion(ctx, interp, t.root))),
+		argv:    pythonArgv(interp, !honoursSafePath(interpreterVersion(ctx, interp, t.root, t.secretEnv))),
 		dir:     dir,
 		timeout: time.Duration(args.TimeoutSeconds) * time.Second,
 		stdin:   args.Code,
-		env:     subprocessEnvScopedPath(t.root, pythonSafePathVar),
+		env:     subprocessEnvScopedPath(t.root, t.secretEnv, pythonSafePathVar),
 	}
 	res, err := runPythonSubprocess(ctx, spec)
 	if err != nil {

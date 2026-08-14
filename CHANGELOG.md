@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The exec tools' credential scrub takes host-named variables.** `terminal`, `python_exec` and
+  `run_tests` hand a subprocess the operator's inherited environment minus apogee's own
+  `APOGEE_API_KEY`; that fixed list was written when a configured server key could only live in a
+  file, and `api-key-env:` (ADR 0047) reopened the surface — an exported provider key was inherited
+  by every child whose contents the MODEL chose. The names to drop now arrive from the host:
+  `domain.Config.SecretEnvVars` → `tools.HostTools.SecretEnvVars` → each of the three constructors,
+  compared case-insensitively like apogee's own names, blank entries ignored, and applied to
+  python's interpreter-version probe as well as to the snippet. Empty/nil ⇒ the scrub is
+  byte-identical to what it was. Sourcing the configured `api-key-env:` names into that field
+  follows in the next change.
+
 - **`/settings` switches individual Mechanisms in a sub-list of its own.** `⏎` on the `mechanisms`
   row no longer opens `$EDITOR` — it opens the catalogue, every id this build carries in canonical
   order with `on`/`off` beside it, read from the config FILE's own block on every frame (an id the

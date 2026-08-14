@@ -185,10 +185,17 @@ var npmTestRunner = testRunner{
 type RunTests struct {
 	toolSpec
 	root string
+	// secretEnv names the host-configured credential variables to drop from the runner's
+	// environment beside apogee's own (HostTools.SecretEnvVars); nil drops apogee's own alone.
+	secretEnv []string
 }
 
-// NewRunTests returns a run_tests tool that detects and runs the suite of the project at root.
-func NewRunTests(root string) *RunTests { return &RunTests{toolSpec: runTestsSpec, root: root} }
+// NewRunTests returns a run_tests tool that detects and runs the suite of the project at root,
+// with the secretEnv variables dropped from the runner's environment on top of apogee's own
+// credentials (nil ⇒ apogee's own alone — the scrub as it was before the host could name any).
+func NewRunTests(root string, secretEnv []string) *RunTests {
+	return &RunTests{toolSpec: runTestsSpec, root: root, secretEnv: secretEnv}
+}
 
 // ReadOnly reports that run_tests is write-capable (false): a test suite is the project's own
 // code, which may write files, so the loop must confine or gate it rather than run it freely.
@@ -244,7 +251,7 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	}
 
 	runnerArgs := runner.args(subtree, filter)
-	// The environment is the caller's MINUS apogee's own credentials (subprocessEnv, the same
+	// The environment is the caller's MINUS the credential variables (subprocessEnv, the same
 	// environment terminal and python_exec run in): a test suite reads the toolchain's own
 	// variables (build caches, virtualenv, NODE_PATH) and an allowlist written for git would break
 	// runs that work in the user's shell — but the runner it starts is repo-authored code, which
@@ -254,7 +261,7 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		argv:    append([]string{program}, runnerArgs...),
 		dir:     t.root,
 		timeout: runTestsTimeout,
-		env:     subprocessEnv(),
+		env:     subprocessEnv(t.secretEnv),
 	})
 	if err != nil {
 		return domain.ToolResult{}, err

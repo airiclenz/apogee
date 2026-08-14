@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,5 +106,70 @@ func TestRunSubprocessReportsAWedgedDrain(t *testing.T) {
 	}
 	if res.exitCode == 0 {
 		t.Errorf("exitCode = 0 for a run whose descendants held the pipe and were killed; the operator would read that as a clean success")
+	}
+}
+
+// TestSubprocessEnvDropsTheConfiguredSecretNames pins the caller-named half of the credential
+// scrub: a variable the host named — in whatever case the operator's config spells it — never
+// reaches the child, while the rest of the operator's environment still does. It is the mechanism
+// that keeps an `api-key-env:` credential (ADR 0047) out of a subprocess the model steers.
+func TestSubprocessEnvDropsTheConfiguredSecretNames(t *testing.T) {
+	// Not parallel: t.Setenv.
+	t.Setenv("APOGEE_TEST_PROVIDER_KEY", "sk-configured-value")
+	t.Setenv("APOGEE_TEST_ENDPOINT", "http://192.0.2.1:1111")
+
+	// The configured spelling differs in case from the exported one: the two are one variable on
+	// Windows, and dropping both spellings is the safe direction everywhere else.
+	env := subprocessEnv([]string{"apogee_test_provider_key", "  ", ""})
+
+	if value, ok := envValue(env, "APOGEE_TEST_PROVIDER_KEY"); ok {
+		t.Errorf("APOGEE_TEST_PROVIDER_KEY = %q reached the child environment, want it dropped", value)
+	}
+	for _, entry := range env {
+		if strings.Contains(entry, "sk-configured-value") {
+			t.Errorf("the configured key survived under another name: %q", entry)
+		}
+	}
+	if value, _ := envValue(env, "APOGEE_TEST_ENDPOINT"); value != "http://192.0.2.1:1111" {
+		t.Errorf("APOGEE_TEST_ENDPOINT = %q, want it inherited (only the NAMED variables are dropped)", value)
+	}
+	if _, ok := envValue(env, "PATH"); !ok {
+		t.Error("PATH did not survive: the tools run in the operator's environment, not an allowlist")
+	}
+}
+
+// TestSubprocessEnvDropsApogeeCredentialsWithNoConfiguredNames pins the floor the extensible scrub
+// must not move: with nothing configured, the environment is exactly what it was before a host
+// could name anything — apogee's own key gone, everything else inherited.
+func TestSubprocessEnvDropsApogeeCredentialsWithNoConfiguredNames(t *testing.T) {
+	// Not parallel: t.Setenv.
+	t.Setenv("APOGEE_API_KEY", "sk-secret-value")
+	t.Setenv("APOGEE_TEST_ENDPOINT", "http://192.0.2.1:1111")
+
+	for _, configured := range [][]string{nil, {}} {
+		env := subprocessEnv(configured)
+		if value, ok := envValue(env, "APOGEE_API_KEY"); ok {
+			t.Errorf("configured=%v: APOGEE_API_KEY = %q reached the child, want apogee's own key always dropped", configured, value)
+		}
+		if value, _ := envValue(env, "APOGEE_TEST_ENDPOINT"); value != "http://192.0.2.1:1111" {
+			t.Errorf("configured=%v: APOGEE_TEST_ENDPOINT = %q, want it inherited", configured, value)
+		}
+	}
+}
+
+// TestSubprocessEnvAppendsExtrasAfterTheScrub pins that the extras a tool adds are not themselves
+// filtered by the configured names — they are apogee's own additions (PYTHONSAFEPATH and friends),
+// appended last so they win over an inherited spelling, and the scrub is a subtraction from the
+// INHERITED half alone.
+func TestSubprocessEnvAppendsExtrasAfterTheScrub(t *testing.T) {
+	// Not parallel: t.Setenv.
+	t.Setenv("APOGEE_TEST_PROVIDER_KEY", "sk-configured-value")
+
+	env := subprocessEnv([]string{"APOGEE_TEST_PROVIDER_KEY"}, "PYTHONSAFEPATH=1")
+	if value, ok := envValue(env, "PYTHONSAFEPATH"); !ok || value != "1" {
+		t.Errorf("PYTHONSAFEPATH = %q (present=%v), want the tool's own extra appended", value, ok)
+	}
+	if got := env[len(env)-1]; got != "PYTHONSAFEPATH=1" {
+		t.Errorf("last entry = %q, want the extra last so it wins over an inherited spelling", got)
 	}
 }

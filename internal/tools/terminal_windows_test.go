@@ -21,7 +21,7 @@ func TestTerminal_WindowsQuotedCommandReachesTheShellIntact(t *testing.T) {
 	// A model writes quotes constantly (`git commit -m "..."`). Joined as an argv, the
 	// quotes arrive at cmd.exe escaped as \" and are echoed back literally; delivered as
 	// the process command line they survive.
-	term := NewTerminal(t.TempDir())
+	term := NewTerminal(t.TempDir(), nil)
 	res, err := term.Execute(context.Background(), terminalCall("c1", `echo "hello world"`))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
@@ -49,7 +49,7 @@ func TestTerminal_WindowsRedirectToAQuotedSpacedPath(t *testing.T) {
 	}
 	target := filepath.Join(dir, "out.txt")
 
-	term := NewTerminal(root)
+	term := NewTerminal(root, nil)
 	res, err := term.Execute(context.Background(), terminalCall("c1", "echo x> "+shellHost.Quote(target)))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
@@ -80,7 +80,7 @@ func TestTerminal_WindowsCmdLinesThePOSIXSplitterRejects(t *testing.T) {
 		t.Fatalf("write marker: %v", err)
 	}
 
-	term := NewTerminal(root)
+	term := NewTerminal(root, nil)
 	tests := []struct {
 		name    string
 		command string
@@ -134,7 +134,7 @@ func TestTerminal_WindowsCancelKillsTheProcessTree(t *testing.T) {
 		t.Fatalf("write %q: %v", scriptPath, err)
 	}
 
-	term := NewTerminal(root)
+	term := NewTerminal(root, nil)
 	call := terminalCall("c1", "powershell -NoProfile -ExecutionPolicy Bypass -File "+shellHost.Quote(scriptPath))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -187,7 +187,7 @@ func TestTerminal_WindowsCleanRunReapsADetachedProcess(t *testing.T) {
 		t.Fatalf("write %q: %v", scriptPath, err)
 	}
 
-	term := NewTerminal(root)
+	term := NewTerminal(root, nil)
 	call := terminalCall("c1", "powershell -NoProfile -ExecutionPolicy Bypass -File "+shellHost.Quote(scriptPath))
 	res, err := term.Execute(context.Background(), call)
 	if err != nil {
@@ -209,7 +209,7 @@ func TestTerminal_WindowsCleanRunReapsADetachedProcess(t *testing.T) {
 func TestTerminal_WindowsNonZeroExitIsErrorResult(t *testing.T) {
 	t.Parallel()
 
-	term := NewTerminal(t.TempDir())
+	term := NewTerminal(t.TempDir(), nil)
 	res, err := term.Execute(context.Background(), terminalCall("c1", "exit 3"))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil (a non-zero exit is a result, not a Go error)", err)

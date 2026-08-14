@@ -83,7 +83,7 @@ func TestSubAgentDeclaresBothArgumentsAsDelegationPrompts(t *testing.T) {
 func TestPromptArgKeysAreNoneForAToolThatDeclaresNone(t *testing.T) {
 	t.Parallel()
 
-	got := domain.PromptArgKeys(NewTerminal(t.TempDir()))
+	got := domain.PromptArgKeys(NewTerminal(t.TempDir(), nil))
 
 	if got != nil {
 		t.Errorf("terminal declares prompt keys %v, want none — its command text is acted on", got)

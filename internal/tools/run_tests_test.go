@@ -32,7 +32,7 @@ func writeProject(t *testing.T, files map[string]string) string {
 // runTestsCall drives the tool over root with the given arguments.
 func runTestsCall(t *testing.T, root string, args map[string]any) domain.ToolResult {
 	t.Helper()
-	res, err := NewRunTests(root).Execute(context.Background(), domain.ToolCall{
+	res, err := NewRunTests(root, nil).Execute(context.Background(), domain.ToolCall{
 		ID: "c1", Tool: "run_tests", Arguments: jsonArgs(t, args),
 	})
 	if err != nil {
@@ -383,6 +383,37 @@ func TestRunTestsDropsApogeeCredentialsFromTheRunnerEnvironment(t *testing.T) {
 	}
 	if _, ok := envValue(captured.env, "PATH"); !ok {
 		t.Error("PATH did not survive: a test suite runs in the operator's environment")
+	}
+}
+
+// TestRunTestsDropsTheConfiguredSecretNamesFromTheRunnerEnvironment pins the caller-named half of
+// the same subtraction: a variable the host named — the `api-key-env:` credential an operator
+// exported into the shell apogee was started from (ADR 0047) — is dropped from the runner's
+// environment too, while the toolchain variables a suite needs still travel.
+func TestRunTestsDropsTheConfiguredSecretNamesFromTheRunnerEnvironment(t *testing.T) {
+	// Not parallel: t.Setenv, plus the package-level program/runner swaps.
+	t.Setenv("APOGEE_TEST_PROVIDER_KEY", "sk-configured-value")
+	t.Setenv("APOGEE_TEST_ENDPOINT", "http://192.0.2.1:1111")
+	// A resolver pointing outside the workspace, so neither the exec fence nor the host's own
+	// toolchain decides whether this test runs.
+	program := filepath.Join(t.TempDir(), "go")
+	original := lookTestProgram
+	lookTestProgram = func(string) (string, bool) { return program, true }
+	t.Cleanup(func() { lookTestProgram = original })
+	captured := withCapturedTestRun(t)
+
+	root := writeProject(t, map[string]string{"go.mod": "module example.test/x\n\ngo 1.21\n"})
+	res, err := NewRunTests(root, []string{"apogee_test_provider_key"}).Execute(context.Background(), domain.ToolCall{
+		ID: "c1", Tool: "run_tests", Arguments: jsonArgs(t, nil),
+	})
+	if err != nil {
+		t.Fatalf("Execute returned a Go error (reserved for cancellation): %v (%q)", err, res.Content)
+	}
+	if value, ok := envValue(captured.env, "APOGEE_TEST_PROVIDER_KEY"); ok {
+		t.Errorf("APOGEE_TEST_PROVIDER_KEY = %q reached the runner environment, want the configured name dropped", value)
+	}
+	if value, _ := envValue(captured.env, "APOGEE_TEST_ENDPOINT"); value != "http://192.0.2.1:1111" {
+		t.Errorf("APOGEE_TEST_ENDPOINT = %q, want it inherited (only the NAMED variables are dropped)", value)
 	}
 }
 

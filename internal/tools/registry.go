@@ -51,6 +51,19 @@ type HostTools struct {
 	// its own os.Root fence, so a symlink inside one that escapes it is still refused, and a root
 	// that does not exist yet is skipped rather than failing the call.
 	ExtraReadRoots func() []string
+
+	// SecretEnvVars names environment variables the EXECUTION tools (terminal, python_exec,
+	// run_tests) must drop from the environment they hand a subprocess, on top of apogee's own
+	// credential names, which are always dropped. It is the host's list of the variables its
+	// configured key sources read (`api-key-env:`, ADR 0047): a key the operator exported into the
+	// shell apogee was started from would otherwise be inherited by every child whose contents the
+	// MODEL chose. Empty/nil ⇒ the fixed scrub alone, byte-identical to the behaviour before this
+	// field existed.
+	//
+	// The names arrive as plain strings rather than as config types because internal/config imports
+	// THIS package, so the dependency cannot point back; they are compared case-insensitively
+	// (isSecretEnv), and a name matching nothing in the environment is simply not there to drop.
+	SecretEnvVars []string
 }
 
 // NewDefaultRegistry assembles the built-in tool set — the read/write/list/grep base
@@ -131,6 +144,12 @@ func DefaultTools(root string) []domain.Tool {
 // workspace-only. Nothing else receives it, and no WRITE widens: copy_file's destination, like
 // every other write and execution tool, stays workspace-fenced — see the field's contract.
 //
+// host.SecretEnvVars is threaded into the three EXECUTION tools (terminal, python_exec, run_tests)
+// — the only tools that hand a subprocess the operator's inherited environment — where it joins
+// apogee's own credential names in the scrub each of them applies; nil leaves that scrub exactly
+// as it was. Nothing else receives it: the git and Go-toolchain subprocesses take an allowlist
+// instead, which no configured name can widen.
+//
 // host.Disabled is applied LAST, to the assembled menu: the roster switch subtracts from the set
 // this build offers rather than deciding, per tool, whether to construct it — so a tool's presence
 // stays one line above and its availability one list in the user's config.
@@ -148,15 +167,15 @@ func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 		NewCopyFile(root, host.ExtraReadRoots),
 		NewMoveFile(root),
 		NewDeleteFile(root),
-		NewTerminal(root),
-		NewPythonExec(root),
+		NewTerminal(root, host.SecretEnvVars),
+		NewPythonExec(root, host.SecretEnvVars),
 		NewGitBranch(root),
 		NewGitCommit(root),
 		NewGitDiffRange(root),
 		NewGitStatus(root),
 		NewGitLog(root),
 		NewDiagnostics(root),
-		NewRunTests(root),
+		NewRunTests(root, host.SecretEnvVars),
 		NewWebFetch(host.URLGuard),
 		NewHTTPRequest(host.URLGuard),
 		NewWebSearch(host.URLGuard, host.WebSearchEndpoint),

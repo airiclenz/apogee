@@ -149,6 +149,20 @@ type Config struct {
 	// builds one has already said what it wants).
 	DisabledTools []string
 
+	// SecretEnvVars names environment variables the execution tools (terminal, python_exec,
+	// run_tests) must drop from the environment they hand a subprocess — the caller-named half of
+	// a scrub whose fixed half is apogee's own APOGEE_API_KEY. The host folds in the variables its
+	// configured key sources read (`api-key-env:`, ADR 0047): a key the operator exported into the
+	// shell apogee was started from is otherwise inherited by every subprocess whose contents the
+	// MODEL chose, where reading it and sending it somewhere is one command away. Empty/nil ⇒ only
+	// apogee's own names are dropped, byte-identical to the scrub before this field existed.
+	//
+	// Names are compared case-insensitively (Windows environment names are one variable in either
+	// spelling), and a name nothing in the environment matches is simply not there to drop. Like
+	// DisabledTools it applies to the DEFAULT tool set only: an injected Config.Tools is the host's
+	// own assembly and is taken exactly as given (ADR 0001).
+	SecretEnvVars []string
+
 	// Profile describes how the configured model speaks the wire (CONTEXT: Model profile) —
 	// its tool-call format and inline thinking-channel style — so the loop selects the matching
 	// tool-call parser and content-stripper at the parse seam. A ZERO Profile == native tool
