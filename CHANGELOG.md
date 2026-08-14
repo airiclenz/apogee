@@ -83,6 +83,19 @@ point is a **minor** bump, not a breaking change.
   to the per-model resolution (ADR 0016), so an alias edited in your own editor still reaches the
   session on the same door the row uses.
 
+- `config.SaveMechanismSetting` writes one catalogued Mechanism's line into the top-level
+  `mechanisms:` block — the first config writer addressed by CATALOGUE ID rather than by registry
+  path, since that block's children are the Mechanism catalogue's ids and not the schema's, so
+  which ids exist stays the caller's question. It meets the four shapes the block can be in (no
+  block at all, a bare `mechanisms:`, one already open, a line already there), creating an absent
+  block directly under the commented example the seeded template documents it with (ADR 0035), and
+  turning a Mechanism off writes `<id>: false` rather than removing the line: an explicit "off" is
+  a decision where an absent key is only the default, and a non-empty block is manual control (ADR
+  0016). Every comment, key order and neighbouring setting comes back byte-identical, an id the
+  file could not carry as a plain key is refused before the config is opened, and a splice that
+  moved anything but this one id is refused with the writer's "edit the file by hand" idiom. No
+  surface calls it yet.
+
 ### Changed
 
 - The confinement execution contract now describes the approved escape as **landed**, not as a

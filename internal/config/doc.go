@@ -38,7 +38,9 @@
 // rendered, and where a key the file does not set yet is inserted.
 // configwrite_keysource.go points one `servers:`
 // entry at a key command, or marks the entry as keeping the plaintext key it already carries
-// (ADR 0047).
+// (ADR 0047). configwrite_mechanism.go writes one catalogued Mechanism's line into the
+// `mechanisms:` block — the one writer addressed by catalogue id rather than by registry path,
+// since that block's children are the Mechanism catalogue's and not the schema's (ADR 0016).
 // keyresolve.go turns a `servers:` entry's KEY SOURCE — a
 // literal key, a command whose output is the key, or the name of an environment variable — into the
 // token a seam sends, running it at first use and caching the answer for the session.

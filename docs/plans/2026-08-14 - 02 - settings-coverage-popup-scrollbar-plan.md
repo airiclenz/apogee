@@ -114,7 +114,15 @@ In `cmd/apogee/settingsrows.go`: `settingValues` (~:130-141) drops `"validated-s
 
 commit: `feat(config): validated-sets.enable becomes an editable settings row`
 
-## 5. Per-mechanism config writer
+## 5. Per-mechanism config writer — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the item's Files list names only the writer and its test, but
+`internal/config/doc.go` maps every non-test file in the package and `TestDocMapNamesEveryFile`
+fails on an unmapped one — so doc.go gained the half-line naming `configwrite_mechanism.go`.
+NOTES (2026-08-14): the four parent states are met by CALLING the scalar writer's
+`spliceScalarSet` — which is what drives `scalarInsertion` — with a non-registry
+`Key{Path: "mechanisms.<id>", Kind: KindBool}` built for the one write, rather than by a second
+copy of that switch; same four shapes, no duplication, and the registry stays untouched.
 
 **What:** New `config.SaveMechanismSetting(path, id string, enabled bool) error` in a new file `internal/config/configwrite_mechanism.go`, mirroring the `SaveServerEntrySetting` shape (`configwrite.go:327`): addressed by `(id, value)` OUTSIDE the registry (no registry row — the `mechanisms` row stays `KindStructured`; `zeroConfigPath` and the scalar path stay untouched). It writes `<id>: true|false` inside the top-level `mechanisms:` mapping, handling all four parent states like the scalar splice does (`scalarInsertion`, `configwrite_scalarsplice.go:266`): parent absent → insert after the commented example block (`commentedExampleBlockEnd`; the template carries `# mechanisms:` at `defaults/config.yaml:610-616`), parent null, parent present + key absent, key present → replace the value. Toggling off writes `<id>: false`, never removes a line (ratified call 5). Verification mirrors `verifiedEntrySplice`: re-parse before/after and require the two `fileConfig`s to differ ONLY at `Mechanisms[id]`. The writer accepts any id string; id validation against `mechanisms.KnownIDs()` is the caller's job (item 6), same division as `mechanismIDs` (`cmd/apogee/wire_tools.go:189`).
 
