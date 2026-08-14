@@ -128,6 +128,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`internal/tools` splits its two over-length files by concern.** `path_safety.go` (407 lines)
+  keeps the security aliases, the fenced primitives and the ADR-0049 approved-escape section; its
+  READ half — `workspaceRelative`, `readWorkspaceFileBounded`, `readAllBounded`,
+  `readFileErrorMessage`, `escapeOrMessage`, the `readScope` family, `matchRoot` and `rootUsable` —
+  moves verbatim into a new `path_read.go`. `file_ops.go` (418) keeps `copy_file` and `move_file`
+  with the schema builder, argument shape and pre-flight they share; the delete family
+  (`deleteFileSpec`, `deleteFileArgs`, `DeleteFile`, `checkDeletePath`) moves into a new
+  `delete_file.go`, matching the tool-per-file convention beside `write_file.go` and
+  `file_edit.go`, and the trailing compile-time assertion block splits per type. Pure moves — no
+  signature, wording or behaviour change — leaving all four files under the ~400-line smell
+  threshold (ADR 0043). `doc.go`'s file map names both new files and their concerns.
+
 - Tests: the write-family suites in `internal/tools` now take their workspace from `tempRoot`
   instead of raw `t.TempDir()` — `path_safety_test.go`, `write_permit_test.go`,
   `write_file_test.go`, `file_edit_test.go`, `find_replace_test.go`, `file_ops_test.go` and

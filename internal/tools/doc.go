@@ -145,9 +145,9 @@
 //
 // # The tool files, one line each
 //
-// Twenty-two files carry the built-ins, grouped by what a call to them can do — which is
+// Twenty-nine files carry the built-ins, grouped by what a call to them can do — which is
 // also what the dispatch disposition keys on (ADR 0012). A file holds a tool FAMILY, not
-// always a single tool: the three-tool file_ops.go and the five-tool git.go each keep a
+// always a single tool: the two-tool file_ops.go and the five-tool git.go each keep a
 // family's shared argument shape and error wording in one place.
 //
 // Reading and discovery. read_file.go is read_file, the line-spanned read that attaches a
@@ -160,8 +160,9 @@
 // Writing and editing (the P3.7 family). write_file.go is write_file, the whole-file atomic
 // write. file_edit.go is edit_existing_file, the patch-aware hunk apply. find_replace.go
 // carries the pair single_find_and_replace and multi_find_and_replace. file_ops.go carries the
-// three move-bytes-that-already-exist tools — copy_file, move_file, delete_file — over
-// internal/security's os.Root-pinned primitives. diff.go is view_diff, the pure-Go LCS diff
+// two move-bytes-that-already-exist tools — copy_file and move_file — over internal/security's
+// os.Root-pinned primitives, and delete_file.go is that family's remove-bytes half, delete_file
+// over the same primitives. diff.go is view_diff, the pure-Go LCS diff
 // that reports on that family and is itself read-only.
 //
 // Execution. terminal.go is terminal, the one-shot shell command through platform.Shell.
@@ -201,18 +202,19 @@
 //
 // # The package spine, one line each
 //
-// Four files register no tool. tools.go is the shared toolSpec (name, description, JSON
+// Five files register no tool. tools.go is the shared toolSpec (name, description, JSON
 // schema) every built-in embeds, the size ceilings they all read, and the result helpers —
 // including okSummary, which attaches the structured half. registry.go is HostTools and the
 // two assemblers, NewDefaultRegistry and NewDefaultRegistryWithHost, that turn the built-ins
 // into a domain.ToolRegistry. path_safety.go is the thin alias layer onto internal/security's
 // one symlink-aware boundary (ResolveInRoot, ErrPathEscape), so every tool and test here keeps
-// calling the same names while the rule lives in one place — plus readScope, the READ-only
+// calling the same names while the rule lives in one place — plus the approved escape's
+// tools-side read (ADR 0049), which hands the security core the one permitted out-of-workspace
+// target and pins the write family's own read-back and pre-flight stat to it. path_read.go is
+// the READ half carved out beside it: the one-handle bounded read every read tool goes through,
+// the model-facing wording a fenced failure is rendered as, and readScope — the READ-only
 // multi-root resolver that tries the workspace first and then any extra read-only roots the
-// host mounts, returning the matched root so a caller pins every later fenced operation to it,
-// and the approved escape's tools-side read (ADR 0049), which hands the security core the one
-// permitted out-of-workspace target and pins the write family's own read-back and pre-flight
-// stat to it.
+// host mounts, returning the matched root so a caller pins every later fenced operation to it.
 // workspace_scoped.go is the
 // unexported workspaceScopedWriter marker and the write-target resolvers that say WHICH
 // argument a given writer lands on.

@@ -294,7 +294,11 @@ internal/tools/read_file_test.go
 **Acceptance:** `go test -race -count=1 ./internal/tools/`
 **Commit:** `test(tools): write-family suites adopt the symlink-resolved temp root`
 
-## 8. Split path_safety.go and file_ops.go by concern
+## 8. Split path_safety.go and file_ops.go by concern — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): two doc references beyond the item's file list were repaired because the moves falsified them — `file_ops.go`'s header cited `path_safety.go` as `readScope`'s home (now `path_read.go`), and `internal/agent/resolvedpath_test.go`'s `TestResolvedPathAgreesWithTheResultForEveryWriteKey` comment cited `file_ops.go` alone for three writers' success sentences (now also `delete_file.go`). Prose only, no code change.
+NOTES (2026-08-14): the header paragraph narrating delete_file sat inside the item's "keep lines 1–309" range of `file_ops.go`; it moved with the tool and became `delete_file.go`'s file doc, its first sentence re-anchored to stand alone ("joins them as the family's remove-bytes half" → named beside the move-bytes half). Leaving it behind would have left `file_ops.go` narrating a tool it no longer holds — the stale-reference class item 4 exists to repair.
+NOTES (2026-08-14): `doc.go`'s two group counts were corrected alongside the map entries — "Four files register no tool" → "Five" (falsified by `path_read.go`), and "Twenty-two files carry the built-ins" → "Twenty-nine". The latter was already stale by six before this item (the tree holds 28 carriers, 29 with `delete_file.go`), and it is the same sentence whose "three-tool file_ops.go" clause the item requires reworded to "two-tool".
 
 **What:** Two mechanical splits back under the ~400-line threshold (ADR 0043: a smell
 threshold, not a rule — but both files are tracked in ISSUES.md as split candidates).

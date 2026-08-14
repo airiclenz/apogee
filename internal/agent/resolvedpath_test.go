@@ -82,11 +82,12 @@ func TestResolvedPathRidesTheCallAndTheApproval(t *testing.T) {
 // tool that names its target `path` and writes it directly. Three more writers reach a resolved
 // target by other spellings — copy_file and move_file write their `destination`, delete_file
 // unlinks its `path` — and each states that target a SECOND time in its own success sentence
-// (file_ops.go, resolvedTargetNote). Two independent statements of one fact drift apart silently,
-// so this pins them together: the pane a human approves, the card a Driver renders, and the
-// sentence the model reads all name the same EvalSymlinks-resolved file. The redirect stays
-// inside the workspace on purpose — the divergence is what is under test, not the fence — and
-// Ask-Before is what gates every write, so the approval carrier is populated for all three.
+// (file_ops.go and delete_file.go, resolvedTargetNote). Two independent statements of one fact
+// drift apart silently, so this pins them together: the pane a human approves, the card a Driver
+// renders, and the sentence the model reads all name the same EvalSymlinks-resolved file. The
+// redirect stays inside the workspace on purpose — the divergence is what is under test, not the
+// fence — and Ask-Before is what gates every write, so the approval carrier is populated for all
+// three.
 func TestResolvedPathAgreesWithTheResultForEveryWriteKey(t *testing.T) {
 	t.Parallel()
 
