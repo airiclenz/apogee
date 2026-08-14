@@ -589,24 +589,39 @@ fallback is a **`Refuse`** ("subprocess could not be confined and approval was n
 fallback never carries its own fallback — the demote is a single bounded step, and the executor follows
 it without re-deciding.
 
-> **Realisation gap — decided, unbuilt (updated 2026-08-14; flagged, not silent).** The "WS-write,
-> target out of workspace → gate" row needs the write tool to actually *perform* an approved
-> out-of-workspace write. The **classification half has landed**: dispatch resolves the target with
-> `resolveTargetUnbounded` (`internal/tools/workspace_scoped.go:102`), so an out-of-workspace write
-> **reaches the Gate** and the pane shows the resolved path. The **`Execute` half is decided but not
-> yet built**: the owner call this note used to name open was ratified 2026-08-14 —
-> [ADR 0049](../adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)
-> lands the P3.7 reconciliation. The Gate's allow becomes executable through a **write-escape permit**
-> on the context (the §10 `SubprocessPermit` idiom), pinned to the disclosed `writeTarget.Real`;
-> `WorkspaceRoot ∪ box.WritablePaths` becomes the in-fence union at classification AND at the
-> Execute fence; the whole WS-write family honours it uniformly (`move_file`'s undisclosed *source*
-> keeps its in-workspace refusal); the allow-for-session grain stays the argument digest; and the
-> Auto · `confine=false` *run* cell mints the same permit from dispatch's own classification, so that
-> cell stops being nullified by an undocumented fence. Until
-> `docs/plans/2026-08-14 - 01 - approved-escape-write-plan.md` executes,
-> `internal/tools/write_file.go:88` still refuses the escape after the yes, and the defect stays open
-> in `ISSUES.md` (marked planned). The marker's `workspaceWriteTarget` seam (§3.2) is what makes the
-> permit an additive change, not a rework.
+> **The approved escape executes (landed 2026-08-14 —
+> [ADR 0049](../adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)).**
+> The "WS-write, target out of workspace → gate" row is whole in both halves. **Classification**:
+> dispatch resolves the target with `resolveTargetUnbounded`
+> (`internal/tools/workspace_scoped.go:178`), so an out-of-workspace write **reaches the Gate** and
+> the pane shows the resolved path. **`Execute`** now honours the verdict it was handed, through a
+> **write-escape permit** on the context (`domain.WriteEscapePermit`, the §10 `SubprocessPermit`
+> idiom) pinned to the one disclosed `writeTarget.Real` for the duration of one tool execution.
+> `internal/tools/write_file.go:88` — and every other member of the family — mutates through
+> `safeWriteFile` (`internal/tools/path_safety.go:62`), which reads the permit off the execution
+> context and hands its `Real` to the security core, where `openMutationRoot`
+> (`internal/security/writepermit.go:62`) is the single place the fence decides which `os.Root`
+> bounds a mutation: the workspace root for an in-workspace target — permit or not, today's
+> behaviour byte-for-byte — the permitted target's deepest **existing** ancestor for an approved
+> escape (missing parents created inside that root, final component acted on by name rather than
+> followed), and a refusal for anything else. Execute *reproduces* dispatch's resolution rather than
+> trusting it, so an argument that has come to mean a different path since the disclosure is refused,
+> never redirected.
+>
+> **Three verdicts mint the permit and no others** (`writeEscapeCtx`,
+> `internal/agent/dispatch.go:477`): an **approved Gate** on this row — a remembered
+> allow-for-session included, the grain staying the argument digest, so the remembered yes answers
+> the same call and the target stamped is that call's own fresh resolution; the **Auto ·
+> `confine=false` run**; and a **`WritablePaths` in-fence run** — `classifyWriteTarget`
+> (`internal/agent/dispatch.go:828`) treats `WorkspaceRoot ∪ box.WritablePaths` as in-fence, and a
+> union member outside the workspace root carries the permit so Execute can land it, which is what
+> stops both of those *run* cells being nullified by a fence pinned to the workspace root. A denied
+> or refused call never reaches a permit. The family honours it uniformly — `write_file`,
+> `file_edit` (patch + full), `find_replace` (single + multi), and `file_ops`' copy/move
+> **destination** and delete — while `move_file`'s **source** keeps its unconditional in-workspace
+> refusal, having never been disclosed at the Gate. Reads are not widened: `security.SafeReadFile`
+> takes no permit and none may be added. The marker's `workspaceWriteTarget` seam (§3.2) is what
+> made the permit an additive change rather than a rework.
 
 `AutoEligible()` becomes `FSWrite`-only (§5), so `ErrAutoUnavailable` is now **conditional** — a host
 with no fs-confinement does not refuse Auto; it lands in the "subproc, caps insufficient → gate" row.
@@ -881,7 +896,11 @@ func SubprocessPermitFromContext(ctx context.Context) (SubprocessPermit, bool)
 ```
 
 Both live in `internal/domain/confinement.go`, beside the `Confinement` helpers, so a Mechanism
-(`internal/mechanisms`) reads them without importing the root facade (ADR 0010).
+(`internal/mechanisms`) reads them without importing the root facade (ADR 0010). A **second permit**
+now rides the same idiom in the same file — `WriteEscapePermit{Real string}` (ADR 0049, §4), which
+carries the one approved out-of-workspace write target into the shared write funnel; same
+zero-value-safe shape, different question (*may this hook spawn?* against *may this write land
+here?*), and unlike this one its absence means the workspace fence alone governs rather than refusal.
 
 ### 10.2 The three states, and why absence means refusal
 

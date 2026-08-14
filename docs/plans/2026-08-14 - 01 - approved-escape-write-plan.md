@@ -162,7 +162,11 @@ today (existing suites green); the move-source refusal test.
 
 **Commit:** `feat(tools): the WS-write family executes a permitted escape`
 
-## 5. Docs realisation + register close
+## 5. Docs realisation + register close — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the parked *Configurable tool × mode security matrix* entry in `ISSUES.md` cross-referenced the removed defect ("Open defects above … its pending owner call constrains this design"); removing the defect without it would leave a dangling pointer and a false "pending" claim, so that sentence now points at ADR 0049 as landed and names the floor it imposes (the Gate is the bound, approval is final, no hard-deny tier). Beyond the item's literal three files, but forced by the removal the item requires.
+
+NOTES (2026-08-14): `CHANGELOG.md` is named in the item's Files but is not in this sidecar's FILES list — the run protocol makes the verifier the sole writer of the CHANGELOG, so the entry text sits under this sidecar's `CHANGELOG` heading instead.
 
 **What:** contract §4's "decided, unbuilt" note becomes the landed description (drop the
 unbuilt flag, keep the ADR 0049 pointer; update the `write_file.go` line reference); §10 gains

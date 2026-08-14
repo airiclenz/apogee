@@ -23,24 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-- [P] an *approved* out-of-workspace write still errors at Execute — the confinement contract's §4
-  "WS-write, target out of workspace → gate" row is half-landed: dispatch classifies the target
-  with `resolveTargetUnbounded` (`internal/tools/workspace_scoped.go:176`), so an out-of-workspace
-  write reaches the approval Gate instead of being pre-rejected, but the write tool never learned to
-  honour that approval — `internal/tools/write_file.go:88` writes through the os.Root fence pinned
-  at the workspace root (`safeWriteFile` → `security.SafeWriteFile`), which refuses the escape
-  regardless of the verdict, so the human approves and then gets an error result. **Decided
-  2026-08-14 (ADR 0049, grill session):** land the P3.7 reconciliation — the Gate's allow becomes
-  executable through a context write-escape permit pinned to the disclosed resolved target;
-  `WorkspaceRoot ∪ box.WritablePaths` is the in-fence union; the whole WS-write family honours it
-  (move's undisclosed source excepted); the allow-for-session grain stays the argument digest; the
-  Auto · `confine=false` run cell mints the same permit from classification. Planned:
-  `docs/plans/2026-08-14 - 01 - approved-escape-write-plan.md`; this entry closes when that plan
-  executes. Surfaced by the 2026-08-10 doc-landscape audit
-  (`docs/reviews/2026-08-10 - 00 - doc-landscape-audit.md`, Flag 1). Cross-reference: the parked
-  *Configurable tool × mode security matrix* entry below sits on the same
-  dispatch-gate-vs-tool-level-fence seam; ADR 0049's floor now constrains that design.
-
 ### Run residuals — open (2026-08-13)
 
 The still-open findings the 2026-08-13 plan runs left, merged into one section under the
@@ -225,9 +207,10 @@ bench finds a specific win.
 ### Configurable tool × mode security matrix
 
 **Status:** parked 2026-06-24 (Phase-3 grill). Post-v1, **additive** — config is additive,
-so this is a minor bump, not a freeze break. Cross-reference: the open defect *an approved
-out-of-workspace write still errors at Execute* (Open defects above) sits on the same
-dispatch-gate-vs-tool-level-fence seam; its pending owner call constrains this design.
+so this is a minor bump, not a freeze break. Cross-reference: ADR 0049 (landed 2026-08-14) settled
+the same dispatch-gate-vs-tool-level-fence seam — an approved out-of-workspace write executes
+through a permit pinned to the disclosed target — and its floor constrains this design: the Gate is
+the bound, an approval is final, and there is no hard-deny tier above it.
 
 **The idea (owner, 2026-06-24):** let the user configure precisely how each tool behaves in
 each mode — a `(tool × mode) → disposition` matrix surfaced in config.

@@ -45,6 +45,20 @@ point is a **minor** bump, not a breaking change.
   byte-for-byte, `move_file`'s undisclosed source keeps its unconditional in-workspace refusal,
   and no read tool ever takes a permit (ADR 0049).
 
+### Changed
+
+- The confinement execution contract now describes the approved escape as **landed**, not as a
+  realisation gap: §4's note states the whole mechanism — the write-escape permit pinned to the
+  disclosed `writeTarget.Real`, `openMutationRoot` as the single place the fence picks a root,
+  Execute re-resolving rather than trusting dispatch, the three verdicts that mint a permit
+  (approved Gate including a remembered allow, the Auto · `confine=false` run, a `WritablePaths`
+  in-fence run), the uniform family with `move_file`'s source excepted, and reads unwidened — with
+  its code references refreshed to the landed seams. §10 now names `WriteEscapePermit` as the
+  second permit riding the `SubprocessPermit` idiom, and says how the two differ: an absent
+  subprocess permit refuses, an absent write-escape permit leaves the workspace fence governing.
+  With the work landed, the `ISSUES.md` defect *an approved out-of-workspace write still errors at
+  Execute* is removed from the register (ADR 0049).
+
 ## [0.14.0] — 2026-08-14
 
 ### Added
