@@ -29,9 +29,6 @@ The still-open findings the 2026-08-13 plan runs left, merged into one section u
 conventions' actionability bar (the closed and accepted remainder of every run is in
 `CHANGELOG.md`); each bullet names its origin run.
 
-- [ ] `/server` back onto a configured startup entry resolves that entry's own source, not the
-  `APOGEE_API_KEY` overlay (pre-existing; ADR 0036 decision 6). (api-key sources run)
-
 - [ ] A cancel landing inside the 1s hold-off (`restreamHoldoff` / `holdOffRestream`,
   `internal/agent/loop.go:315`, `:320`, taken at `:382`) now ends the Turn `endAbandoned`
   (ErrorEvent, deferred queue cleared) where a cancel 100ms earlier gives the resumable

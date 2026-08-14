@@ -170,6 +170,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Docs: ADR 0047 §6 now carries a dated note (2026-08-14) saying that the `APOGEE_API_KEY` overlay
+  is deliberately dropped when `/server` switches away from a configured start-up entry and back
+  onto it. "Before resolution" is scoped to the start-up bind alone: the picker's rows are
+  `opts.Servers` verbatim (`upstreamChoices`, `cmd/apogee/upstream.go`) and the move resolves the
+  picked entry through the run's resolver (`sessionMover.move` → `m.keys.Resolve(entry)`), which
+  sees the file's own source rather than the overlay. Owner-ratified as intended, not a defect; the
+  synthesized ephemeral start-up row is the one row that does carry the overlaid key, because it
+  exists nowhere in the file to be re-resolved from. No behavior change.
+
 - Docs: `runSubprocess`'s teardown bullet (`internal/tools/exec_common.go`) no longer claims a
   cancelled or timed-out command "never orphans its children" — it now states what the teardown
   docs it summarises state: the group takes down every descendant that has not deliberately left

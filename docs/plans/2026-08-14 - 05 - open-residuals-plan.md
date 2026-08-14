@@ -126,7 +126,15 @@ ISSUES bullets (security-audit-fixes section).
 
 **Commit:** `docs(tools): qualify the orphan claim; update the git-filter residual narration`
 
-## 5. ADR 0047 notes the overlay drops on switch-back by design
+## 5. ADR 0047 notes the overlay drops on switch-back by design — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the note adds one clause the item text did not name — that the synthesized
+EPHEMERAL start-up row does carry the overlaid key (`opts.APIKey`, `upstreamChoices`) — so the
+"dropped on switch-back" claim is not read as covering the `--endpoint`/`APOGEE_ENDPOINT` override
+case, where it is false. Verified against `cmd/apogee/upstream.go:291-301`.
+
+NOTES (2026-08-14): the 2026-08-13 "Run residuals — open" section header was kept — removing this
+item's bullet leaves the hold-off-cancel bullet (item 11's) in it, so the section is not empty.
 
 **What:** Realise ratified call 1. Add a dated note to ADR 0047
 (`docs/adr/0047-api-keys-resolve-through-a-per-entry-key-source.md`, beside §6 or in

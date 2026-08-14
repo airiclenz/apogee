@@ -91,6 +91,20 @@ the engine stays wire-silent and config-ignorant, and a bench Driver builds the 
 *before* resolution, so an overlaid entry is a literal-source entry for that run whatever the file
 named.
 
+**Note (2026-08-14) — the overlay is dropped on the switch BACK, and that is the intent.** "Before
+resolution" is scoped to the start-up bind and to nothing after it. A `/server` switch away from a
+configured start-up entry and back onto it resolves that entry's OWN configured source, so the
+overlaid key does not survive the round trip: the picker's rows are `opts.Servers` verbatim
+(`upstreamChoices`, `cmd/apogee/upstream.go:291`) and the move hands the picked entry straight to
+the run's resolver (`sessionMover.move` → `m.keys.Resolve(entry)`, `cmd/apogee/upstream.go:248`),
+which sees the file's entry, not the overlay. This is the literal reading of the point above and is
+owner-ratified (2026-08-14) rather than a defect: the overlay names the key for the run's *start-up
+entry*, not a key for the session to carry onto whatever it later switches to and back from. A user
+who wants the overlaid key after a round trip either restarts or names a source on the entry. The
+one row that does carry it is the synthesized EPHEMERAL start-up entry, which is built from the
+resolved options (`opts.APIKey`) precisely because it exists nowhere in the file to be re-resolved
+from.
+
 **7 — A plaintext key earns a start-up OFFER, with consent, per entry.** Entries carrying a literal
 `api-key:` are collected at start-up; in a TUI session on a machine with a usable store, each raises
 one pane (the first-boot picker's posture — an unasked-for question opens under a notice saying
