@@ -27,14 +27,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 The still-open findings the open-residuals plan run left, under the conventions' actionability bar.
 
-- [ ] The `ui:` block intro (`internal/config/defaults/config.yaml:510`, and the defaults line at
-  `:516`) still summarises `show-scrollbar` as the transcript's alone, while the key's own prose now
-  names every popup pane too (`:539`, `:568`) — the summary was not brought along with it.
-
-- [ ] Transcript-only scrollbar framing also survives in two doc comments: `internal/config/config.go:1533`
-  ("gates the transcript's scroll bar and the column it hangs in") and `internal/tui/tui.go:242`
-  ("takes the transcript's scroll bar away"). The key covers every popup pane as well.
-
 - [ ] [ADR 0049](docs/adr/0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)
   never describes the resolved-first routing its fix introduced — the permit match is resolved-based
   while the fallback branch stays lexical (`internal/security/safeio.go:629`) — nor the

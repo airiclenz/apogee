@@ -43,7 +43,13 @@ per-subject test files beside the sources they exercise.
 
 ---
 
-## 1. show-scrollbar prose covers every popup pane
+## 1. show-scrollbar prose covers every popup pane — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): `internal/config/defaults/config.yaml` needed no edit — the `ui:` block intro (`:509–:511`, "whether a scroll bar is shown") and the Defaults line (`:516`, "the scroll bar shown") are already scope-neutral and never frame the bar as the transcript's alone, so the item's "if a line needs no change, leave it" clause applies; the file is not in this item's FILES.
+
+NOTES (2026-08-14): this run reused the prior attempt's `config.go`/`tui.go` wording found in the working tree (per the dispatch DECISION) and rewrapped the `HideScrollbar` comment, whose first edit had left one 130-column line among ~100-column neighbours.
+
+NOTES (2026-08-14): the working tree's `ISSUES.md` arrived with items 1–4's bullet removals already merged into one edit; per the DECISION that each removal lands in its own commit, `ISSUES.md` was restored to HEAD and only this item's two bullets (the config.yaml-intro bullet and the doc-comments bullet) removed. Items 2–4 re-apply their own removals in their own runs.
 
 **What:** The `show-scrollbar` key now gates the scroll bar in the transcript AND every popup
 pane (`internal/config/defaults/config.yaml:539`, `:568` state this); three summaries were not

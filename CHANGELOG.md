@@ -306,6 +306,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The `show-scrollbar` doc comments now state the scope the key actually has. `ui.show-scrollbar`
+  has gated the scroll bar in the transcript AND in every popup pane since the popup panes gained
+  one, but two summaries still framed the bar as the transcript's alone: `uiConfig.ShowScrollbar`
+  ("gates the transcript's scroll bar and the column it hangs in") and `tui.Options.HideScrollbar`
+  ("takes the transcript's scroll bar away"). Both now name the popup panes alongside the
+  transcript, matching the key's own prose in the shipped `config.yaml`. Comments only — no
+  behavior change.
+
 - **A cancel inside the re-stream hold-off now leaves a resumable Turn.** A transient in-band fault
   makes the Turn wait `restreamHoldoff` (1s) before re-sending the same request, and a cancel
   arriving inside that window fell through to the give-up path: an Esc a moment too late ended the

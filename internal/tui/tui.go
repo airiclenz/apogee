@@ -239,14 +239,15 @@ type Options struct {
 	// keeps the terminal's own text colour, which is also the pre-styles look under classic.
 	SpinnerColor bool
 
-	// HideScrollbar takes the transcript's scroll bar away — and with it the column the bar hangs
-	// in, which the body then takes, because a hidden bar that still ate a column would read as a
-	// bug. It is what the `ui.show-scrollbar` config key selected, INVERTED at the composition root
-	// (cmd/apogee's wire.go is the one place the polarity flips): the config key is positive and
-	// defaults to true, while this field must have the zero value mean today's behaviour — the bar
-	// shown — so the hand-built Options of the layout tests keep the width they pin. A `/settings`
-	// edit of the key moves it mid-session (ADR 0037) and re-lays out, so the wrap width it decides
-	// changes exactly when the human changes it and never on its own.
+	// HideScrollbar takes the scroll bar away from the transcript and from every popup pane — and
+	// with it the column the bar hangs in, which the body then takes, because a hidden bar that
+	// still ate a column would read as a bug. It is what the `ui.show-scrollbar` config key
+	// selected, INVERTED at the composition root (cmd/apogee's wire.go is the one place the
+	// polarity flips): the config key is positive and defaults to true, while this field must have
+	// the zero value mean today's behaviour — the bar shown — so the hand-built Options of the
+	// layout tests keep the width they pin. A `/settings` edit of the key moves it mid-session
+	// (ADR 0037) and re-lays out, so the wrap width it decides changes exactly when the human
+	// changes it and never on its own.
 	HideScrollbar bool
 
 	// CursorShape is the shape the prompt's caret is drawn with — what the `cursor-shape` config

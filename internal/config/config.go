@@ -1530,9 +1530,9 @@ type uiConfig struct {
 	// not a property of a style. A pointer so an explicit `spinner-color: false` is distinguishable
 	// from an absent key (which keeps the default true).
 	SpinnerColor *bool `yaml:"spinner-color"`
-	// ShowScrollbar gates the transcript's scroll bar and the column it hangs in. A pointer so an
-	// explicit `show-scrollbar: false` is distinguishable from an absent key (which keeps the
-	// default true).
+	// ShowScrollbar gates the scroll bar — in the transcript and in every popup pane alike — and the
+	// column it hangs in. A pointer so an explicit `show-scrollbar: false` is distinguishable from an
+	// absent key (which keeps the default true).
 	ShowScrollbar *bool `yaml:"show-scrollbar"`
 	// ColorScheme names the palette the screen is drawn in — a built-in or a file in
 	// `<apogee-home>/schemes/`. Empty ⇒ the default scheme. A plain string with no pointer and no
