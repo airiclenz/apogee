@@ -90,7 +90,17 @@ env (via the existing argv/env test seams, e.g. `runPythonSubprocess`).
 
 **Commit:** `feat(tools): exec subprocesses drop configured secret env names`
 
-## 2. Wire configured api-key-env names into the scrub
+## 2. Wire configured api-key-env names into the scrub — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): `README.md` is edited outside the item's Files list — the `api-key-env:`
+paragraph describes what a configured key variable is readable from, and this item is what makes it
+unreadable to a model-chosen subprocess, so the user-facing sentence lands with the behaviour rather
+than a wave later.
+NOTES (2026-08-14): the item's construct-level test asserts on `hostTools(cfg).SecretEnvVars` (the
+"registry's HostTools") rather than on the built registry — `internal/agent` cannot import
+`internal/config`, so the "two servers naming distinct api-key-env vars" half of that case is
+covered in `internal/config`'s own union test, and the tools' `secretEnv` field is unexported, which
+leaves HostTools the only assertable seam on the agent side.
 
 Depends on item 1.
 

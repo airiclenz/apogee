@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -389,5 +390,81 @@ func assertResolved(t *testing.T, got string, err error, wantKey string, wantErr
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not name %q", err, want)
 		}
+	}
+}
+
+// TestAPIKeyEnvNames covers the scrub list the execution tools are handed: the union across every
+// configured entry, deduplicated case-insensitively, trimmed the way the resolver trims, and nil
+// when no entry names a variable at all.
+func TestAPIKeyEnvNames(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		opts Options
+		want []string
+	}{
+		{
+			name: "no entry names a variable",
+			opts: Options{Servers: []ServerEntry{
+				{Name: "local"},
+				{Name: "literal", APIKey: "sk-literal"},
+				{Name: "command", APIKeyCmd: "security find-generic-password -w"},
+			}},
+			want: nil,
+		},
+		{
+			name: "unions across entries in file order, startup entry last",
+			opts: Options{
+				APIKeyEnv: "STARTUP_KEY",
+				Servers: []ServerEntry{
+					{Name: "first", APIKeyEnv: "FIRST_KEY"},
+					{Name: "second", APIKeyEnv: "SECOND_KEY"},
+				},
+			},
+			want: []string{"FIRST_KEY", "SECOND_KEY", "STARTUP_KEY"},
+		},
+		{
+			name: "the startup entry's own name is not repeated",
+			opts: Options{
+				APIKeyEnv: "SHARED_KEY",
+				Servers: []ServerEntry{
+					{Name: "first", APIKeyEnv: "SHARED_KEY"},
+					{Name: "second", APIKeyEnv: "OTHER_KEY"},
+				},
+			},
+			want: []string{"SHARED_KEY", "OTHER_KEY"},
+		},
+		{
+			name: "two entries naming one variable dedupe, whatever the spelling",
+			opts: Options{Servers: []ServerEntry{
+				{Name: "first", APIKeyEnv: "Shared_Key"},
+				{Name: "second", APIKeyEnv: "SHARED_KEY"},
+			}},
+			want: []string{"Shared_Key"},
+		},
+		{
+			name: "surrounding space is trimmed as the resolver trims it",
+			opts: Options{Servers: []ServerEntry{
+				{Name: "padded", APIKeyEnv: "  PADDED_KEY \t"},
+				{Name: "blank", APIKeyEnv: "   "},
+			}},
+			want: []string{"PADDED_KEY"},
+		},
+		{
+			name: "an empty Options names nothing",
+			opts: Options{},
+			want: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := APIKeyEnvNames(tc.opts); !slices.Equal(got, tc.want) {
+				t.Errorf("APIKeyEnvNames = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

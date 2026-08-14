@@ -144,9 +144,9 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 
 // registryWithMCP builds the Agent's tool registry: the built-in default tools scoped to the
 // workspace (with the same host configuration the Agent would derive from Config — the
-// url-safety floor, the web-search endpoint, the Asker, the Presenter) PLUS the dynamically
-// discovered MCP tools registered on top. MCP tools are DYNAMIC (discovered from a server at
-// runtime), so they are NOT in DefaultTools — they ride the registry as classMCP
+// url-safety floor, the web-search endpoint, the Asker, the Presenter, the credential scrub) PLUS
+// the dynamically discovered MCP tools registered on top. MCP tools are DYNAMIC (discovered from a
+// server at runtime), so they are NOT in DefaultTools — they ride the registry as classMCP
 // ExternalEffectTools the dispatch disposition gates in Auto. A duplicate name (an MCP server's
 // qualified tool colliding with a built-in — unlikely given the alias prefix) is dropped with a
 // stderr notice rather than failing startup; the built-in wins.
@@ -161,6 +161,11 @@ func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool
 		Asker:             cfg.Asker,
 		Presenter:         cfg.Presenter,
 		Disabled:          cfg.DisabledTools,
+		// The credential variables the execution tools must drop, off the same Config the engine
+		// would have read them from — this hand-assembly must not be the one place a subprocess
+		// inherits the operator's `api-key-env:` key, or connecting an MCP server would quietly
+		// re-open the exposure a session without MCP is closed against.
+		SecretEnvVars: cfg.SecretEnvVars,
 		// The read-only mounts the session opened up (the skill source dirs), off the same Config
 		// the engine would have read them from — this hand-assembly must not be the one place a
 		// read tool loses them, or the model could read a skill's bundled files in a session

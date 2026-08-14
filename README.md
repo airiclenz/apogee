@@ -687,11 +687,13 @@ manager that already holds it: the line is split on spaces and quotes and run **
 shell** — pipes, redirections and `$VARIABLES` need a wrapper script of your own — and
 the command's stdout, trailing whitespace trimmed, is the key. `api-key-env:` names an
 environment variable rather than holding a key (`api-key-env: OPENROUTER_API_KEY`), read
-from the environment apogee itself was started in. Both resolve the first time this
-session actually needs that server's key — never at startup for entries you do not
-use — and the answer is remembered for the rest of the session. A non-zero exit, a
-60-second timeout, empty output, or an unset or empty variable is an **error** naming the
-entry, never a silent keyless request: "no key" is spelled by leaving all three keys out.
+from the environment apogee itself was started in — and dropped from the environment the
+`terminal`, `python_exec` and `run_tests` tools hand a subprocess, so a command the model
+chose cannot read that key back out. Both resolve the first time this session actually
+needs that server's key — never at startup for entries you do not use — and the answer is
+remembered for the rest of the session. A non-zero exit, a 60-second timeout, empty output,
+or an unset or empty variable is an **error** naming the entry, never a silent keyless
+request: "no key" is spelled by leaving all three keys out.
 
 **A plaintext key earns an offer to move.** When the machine has a secret store
 apogee can use — the macOS Keychain, or a Secret Service keyring via

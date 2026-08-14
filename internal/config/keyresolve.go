@@ -264,6 +264,46 @@ func resolveEnvKey(entry, variable string) (string, error) {
 	return value, nil
 }
 
+// APIKeyEnvNames returns the name of every environment variable this configuration reads an API key
+// out of: each `servers:` entry's `api-key-env:` in file order, then the startup entry's own
+// (Options.APIKeyEnv) when it names one none of them already did. Nil when nothing names a variable
+// at all, which is the ordinary case — the other two key sources read no environment.
+//
+// It answers for the execution tools' credential scrub (domain.Config.SecretEnvVars): a variable the
+// operator exported so apogee could authenticate is otherwise inherited by every `terminal` /
+// `python_exec` / `run_tests` subprocess, whose contents the MODEL chose, where reading it and
+// sending it somewhere is one command away. The union is deliberately wider than the entry this
+// session is bound to — `/server` switches mid-run, and a scrub that tracked the binding would leave
+// the other entries' keys readable in every subprocess until the switch happened.
+//
+// Names are trimmed the way resolveEnvKey trims one before the lookup, so the scrub drops exactly
+// the variable the resolver reads, and deduplicated case-insensitively because that is how the scrub
+// compares them (one Windows variable in either spelling).
+func APIKeyEnvNames(opts Options) []string {
+	var names []string
+	seen := make(map[string]bool)
+	add := func(raw string) {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			return
+		}
+		// Upper-cased as the canonical spelling: environment variable names are upper-case by
+		// convention, and the map only ever holds the fold, never the name that is returned.
+		folded := strings.ToUpper(name)
+		if seen[folded] {
+			return
+		}
+		seen[folded] = true
+		names = append(names, name)
+	}
+
+	for _, entry := range opts.Servers {
+		add(entry.APIKeyEnv)
+	}
+	add(opts.APIKeyEnv)
+	return names
+}
+
 // runKeyCommand runs an entry's `api-key-cmd:` and returns what it printed as the key.
 //
 // The command line is split by the POSIX splitter and executed DIRECTLY — argv[0] resolved the way

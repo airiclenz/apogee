@@ -390,8 +390,9 @@ func resolveTools(cfg domain.Config) *domain.ToolRegistry {
 // web-search endpoint (empty ⇒ web_search's built-in DuckDuckGo default; "off" disables it),
 // the Asker delegate (nil ⇒ ask_user is not registered), the Presenter delegate (nil ⇒
 // present_document is not registered — ADR 0019), the disabled-tool roster (empty ⇒ the
-// whole built-in set), and the extra read-only roots the read tools may reach (nil ⇒
-// workspace-only).
+// whole built-in set), the credential variable names the execution tools scrub from a
+// subprocess environment (empty ⇒ apogee's own alone), and the extra read-only roots the read
+// tools may reach (nil ⇒ workspace-only).
 //
 // The url-safety policy is deliberately the default floor, NOT seeded from ConfineNetworkAllow:
 // that field is the OS confinement box's network allow-list (CIDRs the confined SUBPROCESS may
@@ -408,6 +409,11 @@ func hostTools(cfg domain.Config) tools.HostTools {
 		// builds, which is the whole of the key — an Agent cannot offer or dispatch a tool its
 		// registry does not hold.
 		Disabled: cfg.DisabledTools,
+		// The caller-named half of the execution tools' credential scrub (`api-key-env:`, ADR 0047):
+		// the variables the host's configured key sources read, dropped from every subprocess
+		// environment beside apogee's own APOGEE_API_KEY. Empty ⇒ apogee's own alone, the scrub as
+		// it was before the host could name any.
+		SecretEnvVars: cfg.SecretEnvVars,
 		// The read-only mounts beside the workspace fence, handed through verbatim: the engine
 		// carries the func without evaluating it, so WHICH dirs are mounted stays the host's
 		// question and stays live per call (Config.ExtraReadRoots). nil ⇒ workspace-only.

@@ -177,6 +177,13 @@ func (w *rootWiring) resolveConfig() error {
 		// Config rather than passed to the assembly alone so every Driver — this session, a headless
 		// run, an embedder — prunes the same roster from the same value.
 		DisabledTools: w.opts.ToolsDisabled,
+		// Every variable this configuration reads an API key out of (`api-key-env:`, ADR 0047),
+		// which the execution tools drop from the environment they hand a subprocess. It is the
+		// union across ALL configured entries rather than the bound one's: `/server` switches
+		// mid-session, and a scrub that followed the binding would leave the other entries' keys
+		// readable in every `terminal` / `python_exec` / `run_tests` child until it happened. Empty
+		// ⇒ apogee's own APOGEE_API_KEY alone, exactly the scrub before this key existed.
+		SecretEnvVars: config.APIKeyEnvNames(w.opts),
 		// The Model profile (CONTEXT: Model profile) — tool-call format + thinking channel —
 		// resolved above for THIS model out of the `model-profiles:` map and the shipped shape
 		// table. A model neither tier knows gets the zero profile: native tool calls with no inline
