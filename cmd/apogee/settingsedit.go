@@ -3,7 +3,7 @@ package main
 // The `$EDITOR` round trip: the composition root's half of ADR 0037 decision 5.
 //
 // Six keys of the schema hold a structure no row can express — `servers:`, `system-prompt-models:`,
-// `mcp-servers:`, `mechanisms:`, `validated-sets:` and `model-profiles:`. The settings pane edits them
+// `mcp-servers:`, `mechanisms:`, `validated-sets: alias:` and `model-profiles:`. The settings pane edits them
 // by handing the human the file itself, opened in their own editor on that key's line, and re-reading
 // it when they come back. Both halves are the binary's, for the reason every other settings seam is
 // (ADR 0011's thin renderer): where the config lives, which line a key sits on, which editor this
@@ -112,7 +112,7 @@ type externalEdit struct {
 // rows the pane paints, and the resolved values behind them.
 //
 // Both, rather than the rows alone, because a row is a DISPLAY of a key and six of them display a
-// summary — "1 server", "on, 2 aliases", "harmony, thinking delimited". A summary is the right thing
+// summary — "1 server", "2 aliases", "harmony, thinking delimited". A summary is the right thing
 // to paint and the wrong thing to diff: repointing the one `mcp-servers:` entry at another machine
 // leaves it character-for-character identical. So the rows say what a changed key carries back
 // (appliedValue) and the values say WHETHER it changed (settingChanged).
@@ -269,10 +269,11 @@ var settingStructures = map[string]func(config.Options) any{
 	"unconfined-hosts":     func(o config.Options) any { return o.UnconfinedHosts },
 	"mcp-servers":          func(o config.Options) any { return o.MCPServers },
 	"mechanisms":           func(o config.Options) any { return o.Mechanisms },
-	// The block's two resolved facts together: the off-switch decides whether the aliases do
-	// anything, and it is the pair that `validated-sets` applies.
-	"validated-sets": func(o config.Options) any { return []any{o.ValidatedSetsEnable, o.ValidatedSetsAlias} },
-	"model-profiles": func(o config.Options) any { return o.ModelProfiles },
+	// The alias map alone: the block's other half is the `validated-sets.enable` row, a bool whose
+	// row shows its whole value and which is therefore answered by the row (settingChanged's first
+	// clause) rather than by a projection here.
+	"validated-sets.alias": func(o config.Options) any { return o.ValidatedSetsAlias },
+	"model-profiles":       func(o config.Options) any { return o.ModelProfiles },
 }
 
 // settingChanged reports whether the key at registry index i came back holding something else.

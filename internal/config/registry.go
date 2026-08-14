@@ -330,8 +330,17 @@ var KeyRegistry = []Key{
 		Desc: "Catalogued small-model Mechanisms to enable by canonical ID; every one defaults off.",
 	},
 	{
-		Path: "validated-sets", Kind: KindStructured,
-		Desc: "The per-model Validated-set surface: its off-switch and explicit model aliases.",
+		// The block's off-switch is a row of its own, for the `context-files.*` reason: it is a bool
+		// the pane can write, and leaving it inside a structured summary would send a human to their
+		// editor to flip a single true/false. The alias map below stays structured — a map of model
+		// labels to entry keys is a shape no row holds.
+		Path: "validated-sets.enable", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Apply the Validated Mechanism set measured for the bound model when one matches.",
+	},
+	{
+		Path: "validated-sets.alias", Kind: KindStructured,
+		Desc: "Explicit carry-over from a runtime model label to the Validated-set entry it applies.",
 	},
 	{
 		Path: "model-profiles", Kind: KindStructured,

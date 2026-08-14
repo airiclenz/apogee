@@ -258,6 +258,66 @@ func TestSpliceScalarSettingRoundTripsEveryEditableKey(t *testing.T) {
 	}
 }
 
+// The `validated-sets:` off-switch, in every state the block it lives in can be in: absent from the
+// file, present as the template's commented example, and live — with the alias map already under it,
+// or with the off-switch itself already written. It is the one key of that block a surface writes
+// (its alias map stays an editor's job), and the alias map is what must survive the write: the two
+// keys are one block, and a write that took the aliases with it would silently unbind a model.
+func TestSpliceScalarSettingWritesTheValidatedSetsOffSwitch(t *testing.T) {
+	t.Parallel()
+	k := mustKey("validated-sets.enable")
+	for _, tt := range []struct {
+		name    string
+		content string
+		aliases int
+	}{
+		{name: "no block at all", content: readFixture(t, editedConfigFixture)},
+		{name: "the template's commented example", content: string(defaultConfigYAML)},
+		{
+			name:    "a live block carrying the alias map",
+			content: "mode: auto\nvalidated-sets:\n  alias:\n    my-gemma: gemma-4\n",
+			aliases: 1,
+		},
+		{
+			name:    "a live block whose off-switch is already written",
+			content: "validated-sets:\n  enable: true\n  alias:\n    my-gemma: gemma-4\n",
+			aliases: 1,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			updated, err := setScalarSetting([]byte(tt.content), k, "false")
+			if err != nil {
+				t.Fatalf("splice %s: %v", k.Path, err)
+			}
+			if updated == nil {
+				t.Fatalf("splice %s reported nothing to write", k.Path)
+			}
+			if got, ok, err := scalarAtPath(updated, k.Path); err != nil || !ok || got != "false" {
+				t.Fatalf("after the write %s reads %q (ok=%v, err=%v), want %q", k.Path, got, ok, err, "false")
+			}
+			assertOnlyKeyChanged(t, tt.content, string(updated), k.Path)
+
+			// The read-back that matters is the one the session does: the loader's own, off the file
+			// as written, rather than a second parse of the text by the test.
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, updated, 0o600); err != nil {
+				t.Fatalf("write the spliced config: %v", err)
+			}
+			layer, err := LoadFileConfig(path, os.ReadFile, noNotify)
+			if err != nil {
+				t.Fatalf("load the spliced config: %v", err)
+			}
+			if layer.ValidatedSetsEnable == nil || *layer.ValidatedSetsEnable {
+				t.Errorf("the loaded off-switch is %v, want an explicit false", layer.ValidatedSetsEnable)
+			}
+			if got := len(layer.ValidatedSetsAlias); got != tt.aliases {
+				t.Errorf("the write left %d aliases, want %d", got, tt.aliases)
+			}
+		})
+	}
+}
+
 // The block-scalar writer, against the file it will actually meet: the seeded template, whose
 // `system-prompt-text:` block is its ONE active key and the only multi-line value the schema has. The
 // template is the hardest case the writer has — the prompt sits in the middle of twenty lines of

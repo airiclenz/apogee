@@ -395,8 +395,8 @@ func TestApplySettingMechanismBlocksRideTheRebind(t *testing.T) {
 	})
 
 	writeSettingsFixture(t, path, "validated-sets:\n  enable: false\n")
-	if _, err := apply("validated-sets", "off"); err != nil {
-		t.Fatalf("apply validated-sets: %v", err)
+	if _, err := apply("validated-sets.enable", "false"); err != nil {
+		t.Fatalf("apply validated-sets.enable: %v", err)
 	}
 	base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
 	if base.ValidatedSetsEnable {
@@ -406,13 +406,28 @@ func TestApplySettingMechanismBlocksRideTheRebind(t *testing.T) {
 		t.Errorf("rebind drives = %+v, want the one re-drive that commits the block", probe.calls)
 	}
 
+	// The block's two rows are one apply: an alias map edited in the human's own editor comes back as
+	// `validated-sets.alias` and has to reach the same re-read, or a carry-over would sit in the file
+	// until the next launch.
+	writeSettingsFixture(t, path, "validated-sets:\n  alias:\n    my-gemma: gemma-4\n")
+	if _, err := apply("validated-sets.alias", "1 alias"); err != nil {
+		t.Fatalf("apply validated-sets.alias: %v", err)
+	}
+	base, _, _, _ = live.rebindInputs(config.Options{}, upstreamBinding{})
+	if base.ValidatedSetsAlias["my-gemma"] != "gemma-4" {
+		t.Errorf("alias map = %v, want the re-read carry-over", base.ValidatedSetsAlias)
+	}
+	if len(probe.calls) != 2 {
+		t.Errorf("rebind drives = %+v, want the alias edit to ride the rebind too", probe.calls)
+	}
+
 	// A `mechanisms:` block naming an id this build does not have is refused by the startup producer,
 	// before it can replace a list that arms something.
 	writeSettingsFixture(t, path, "mechanisms:\n  no-such-mechanism: true\n")
 	if _, err := apply("mechanisms", "1 mechanism"); err == nil {
 		t.Fatal("apply of an unknown mechanism id: want the refusal, got none")
 	}
-	if len(probe.calls) != 1 {
+	if len(probe.calls) != 2 {
 		t.Errorf("rebind drives = %+v, want no drive for a block that never installed", probe.calls)
 	}
 }

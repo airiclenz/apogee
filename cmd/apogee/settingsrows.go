@@ -133,11 +133,12 @@ var settingValues = map[string]func(config.Options) string{
 	// The command AS WRITTEN, blank when the key names none — the answer every other editable string
 	// row gives, and the only safe one here too: this value SEEDS the edit field, so a word standing
 	// in for emptiness ("$EDITOR", "the OS opener") would be a word the next ⏎ persisted as a command.
-	"editor":         func(o config.Options) string { return o.Editor },
-	"bypass":         func(o config.Options) string { return boolValue(o.Bypass) },
-	"mechanisms":     func(o config.Options) string { return countSummary(enabledCount(o.Mechanisms), "mechanism") },
-	"validated-sets": func(o config.Options) string { return validatedSetsSummary(o) },
-	"model-profiles": func(o config.Options) string { return countSummary(len(o.ModelProfiles), "model profile") },
+	"editor":                func(o config.Options) string { return o.Editor },
+	"bypass":                func(o config.Options) string { return boolValue(o.Bypass) },
+	"mechanisms":            func(o config.Options) string { return countSummary(enabledCount(o.Mechanisms), "mechanism") },
+	"validated-sets.enable": func(o config.Options) string { return boolValue(o.ValidatedSetsEnable) },
+	"validated-sets.alias":  func(o config.Options) string { return countSummary(len(o.ValidatedSetsAlias), "alias") },
+	"model-profiles":        func(o config.Options) string { return countSummary(len(o.ModelProfiles), "model profile") },
 }
 
 // settingTexts is the RAW value of the keys whose displayed value is only a summary of it — the
@@ -327,18 +328,10 @@ func enabledCount(mechanisms map[string]bool) int {
 	return n
 }
 
-// validatedSetsSummary summarizes the `validated-sets:` block: its off-switch first, because that
-// is the fact that decides whether the rest of the block does anything, then how many explicit
-// carry-over aliases are configured.
-func validatedSetsSummary(o config.Options) string {
-	if !o.ValidatedSetsEnable {
-		return "off"
-	}
-	if n := len(o.ValidatedSetsAlias); n > 0 {
-		return "on, " + countSummary(n, "alias")
-	}
-	return "on"
-}
+// The `validated-sets:` block is two rows rather than one summary of both: the off-switch is the
+// fact that decides whether the rest of the block does anything, and it is a bool the pane writes
+// (boolValue above), while the carry-over aliases stay a counted structured row (countSummary) that
+// ⏎ opens the file on — a map of runtime labels to entry keys is a shape no row holds.
 
 // The `model-profiles:` map is summarized by its COUNT (countSummary above), like every other block
 // of entries the pane cannot hold on a row. What it does not say — which model each pattern matches,

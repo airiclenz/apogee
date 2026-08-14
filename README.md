@@ -339,7 +339,7 @@ instead of being pinned to a copy of it. The default is applied on the same keyp
 row reports it with the same marker: `default *`.
 
 **The blocks no row can hold open your editor.** `servers:`, `mcp-servers:`, `mechanisms:`,
-`validated-sets:`, `system-prompt-models:` and the model profile render as a summary with an
+`validated-sets: alias:`, `system-prompt-models:` and the model profile render as a summary with an
 `· ⏎ opens $EDITOR` pointer, and that is what `⏎` does — in the editor the
 [four-rung ladder](#configuration) `editor:` heads, with the cursor on that key's line where the
 editor takes a line argument. A **terminal** editor (`vi`, `vim`, `nvim`, `nano`, `pico`,

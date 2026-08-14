@@ -651,7 +651,11 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 				return "", err
 			}
 			return "", a.rideTheRebind()
-		case "validated-sets":
+		case "validated-sets.enable", "validated-sets.alias":
+			// Two rows, one apply: the block's off-switch and its alias map are a single input to the
+			// per-model resolution (ADR 0016 — a set applies whole or not at all), so the re-read
+			// installs both whichever row asked for it. The pane writes only the off-switch; the alias
+			// map arrives from the human's own editor and comes back through this same door.
 			if err := a.reloadValidatedSets(); err != nil {
 				return "", err
 			}
@@ -721,7 +725,7 @@ func (a settingsApplier) unreachable(key string) error {
 	case "present.auto-open", "present.command", "present.port", "present.host":
 		reaches = a.present != nil
 	case "context-window", "system-prompt-text", "system-prompt-file", "system-prompt-models",
-		"mechanisms", "validated-sets":
+		"mechanisms", "validated-sets.enable", "validated-sets.alias":
 		reaches = a.rides()
 	case "servers":
 		// The holder alone is enough to ACCEPT this key: the list itself reaches no engine seam (ADR

@@ -205,17 +205,18 @@ func TestSettingsRowsCarryTheirSection(t *testing.T) {
 
 	byPath := rowsByPath(t, rows)
 	for path, want := range map[string]string{
-		"servers":             "Upstream",
-		"mode":                "Autonomy",
-		"context-files.names": "System prompt",
-		"unconfined-hosts":    "Confinement",
-		"use-project-skills":  "Tools & skills",
-		"context-window":      "Session",
-		"present.host":        "Presentation",
-		"cursor-shape":        "Interface",
-		"editor":              "Interface",
-		"validated-sets":      "Mechanisms",
-		"model-profiles":      "Model profiles",
+		"servers":               "Upstream",
+		"mode":                  "Autonomy",
+		"context-files.names":   "System prompt",
+		"unconfined-hosts":      "Confinement",
+		"use-project-skills":    "Tools & skills",
+		"context-window":        "Session",
+		"present.host":          "Presentation",
+		"cursor-shape":          "Interface",
+		"editor":                "Interface",
+		"validated-sets.enable": "Mechanisms",
+		"validated-sets.alias":  "Mechanisms",
+		"model-profiles":        "Model profiles",
 	} {
 		if got := byPath[path].Section; got != want {
 			t.Errorf("row %q is in section %q; want %q", path, got, want)
@@ -231,38 +232,39 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 
 	byPath := rowsByPath(t, settingsRows(fabricatedSettings()))
 	want := map[string]string{
-		"servers":              "3 servers",
-		"server":               "rented-box",
-		"mode":                 "auto",
-		"system-prompt-text":   "2 lines",
-		"system-prompt-file":   "", // unset, and an editable string row's blank is what the field seeds from
-		"system-prompt-models": "1 model",
-		"context-files.enable": "true",
-		"context-files.names":  "[AGENTS.md, CLAUDE.md]",
-		"confine-to-workspace": "false",
-		"unconfined-hosts":     "1 host",
-		"web-search-endpoint":  "off",
-		"mcp-servers":          noneSettingValue,
-		"tools.disabled":       "[view_diff]",
-		"use-project-skills":   "false",
-		"auto-compact":         "true",
-		"auto-title":           "false",
-		"remember-model":       "true",
-		"context-window":       "32768",
-		"present.auto-open":    "true",
-		"present.command":      "zed {path}",
-		"present.port":         "8080",
-		"present.host":         "",
-		"ui.spinner":           "glitter",
-		"ui.spinner-color":     "true",
-		"ui.show-scrollbar":    "false",
-		"ui.color-scheme":      "dark",
-		"cursor-shape":         "block", // unset, so the declared default is what is in force
-		"editor":               "code -w",
-		"bypass":               "true",
-		"mechanisms":           "2 mechanisms", // the explicit `false` entry is not an enabled one
-		"validated-sets":       "on, 1 alias",
-		"model-profiles":       "1 model profile",
+		"servers":               "3 servers",
+		"server":                "rented-box",
+		"mode":                  "auto",
+		"system-prompt-text":    "2 lines",
+		"system-prompt-file":    "", // unset, and an editable string row's blank is what the field seeds from
+		"system-prompt-models":  "1 model",
+		"context-files.enable":  "true",
+		"context-files.names":   "[AGENTS.md, CLAUDE.md]",
+		"confine-to-workspace":  "false",
+		"unconfined-hosts":      "1 host",
+		"web-search-endpoint":   "off",
+		"mcp-servers":           noneSettingValue,
+		"tools.disabled":        "[view_diff]",
+		"use-project-skills":    "false",
+		"auto-compact":          "true",
+		"auto-title":            "false",
+		"remember-model":        "true",
+		"context-window":        "32768",
+		"present.auto-open":     "true",
+		"present.command":       "zed {path}",
+		"present.port":          "8080",
+		"present.host":          "",
+		"ui.spinner":            "glitter",
+		"ui.spinner-color":      "true",
+		"ui.show-scrollbar":     "false",
+		"ui.color-scheme":       "dark",
+		"cursor-shape":          "block", // unset, so the declared default is what is in force
+		"editor":                "code -w",
+		"bypass":                "true",
+		"mechanisms":            "2 mechanisms", // the explicit `false` entry is not an enabled one
+		"validated-sets.enable": "true",
+		"validated-sets.alias":  "1 alias",
+		"model-profiles":        "1 model profile",
 	}
 	for path, wantValue := range want {
 		if got := byPath[path].Value; got != wantValue {
@@ -428,10 +430,18 @@ func TestSettingsRowsSummarizeStructuredBlocks(t *testing.T) {
 			want: "1 server",
 		},
 		{
-			name: "the validated-set off-switch leads its summary",
+			// The off-switch is its OWN row now, so it is spelled the way the file spells it rather
+			// than folded into a summary of the block — and it is the one row of the pair the pane writes.
+			name: "the validated-set off-switch is a bool row of its own",
 			mut:  func(o *config.Options) { o.ValidatedSetsEnable = false },
-			path: "validated-sets",
-			want: "off",
+			path: "validated-sets.enable",
+			want: "false",
+		},
+		{
+			name: "the alias map is counted, and an empty one reads none",
+			mut:  func(o *config.Options) { o.ValidatedSetsAlias = nil },
+			path: "validated-sets.alias",
+			want: noneSettingValue,
 		},
 		{
 			// The count and nothing else: which pattern applies depends on the model that is bound

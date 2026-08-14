@@ -74,6 +74,15 @@ point is a **minor** bump, not a breaking change.
   and every other key, a printable one included, still reaches the input box — and its hint now
   reads `↑/↓ scroll · esc close`.
 
+- The `validated-sets:` block is now TWO `/settings` rows instead of one structured summary.
+  `validated-sets.enable` is an editable bool row — the surface's off-switch is flipped on the row
+  and applied to the running session (ADR 0037) rather than sending you to `$EDITOR` to change one
+  true/false — and `validated-sets.alias` keeps the `· ⏎ opens $EDITOR` pointer with an alias count
+  for its value, since a map of runtime labels to entry keys is a shape no row holds. Both rows
+  apply through the same re-read of the whole block: the off-switch and the alias map are one input
+  to the per-model resolution (ADR 0016), so an alias edited in your own editor still reaches the
+  session on the same door the row uses.
+
 ### Changed
 
 - The confinement execution contract now describes the approved escape as **landed**, not as a

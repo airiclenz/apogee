@@ -78,7 +78,27 @@ would leave the transcript unscrollable.
 
 commit: `feat(tui): /usage scrolls from the keyboard`
 
-## 4. validated-sets.enable and .alias registry rows
+## 4. validated-sets.enable and .alias registry rows — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the item said "alias stays non-applyable" beside "both routing to
+`reloadValidatedSets()`"; the second reading is the one implemented — `validated-sets.alias` keeps an
+apply arm (and a line in the `unreachable` guard). Without it the `$EDITOR` round trip would report
+the changed key `validated-sets.alias` to a dispatcher with no arm for it, so a hand-edited alias map
+would come back as "cannot be applied to the running session" — a regression on today's behaviour,
+where the whole block applies. "Non-applyable" is taken as "not in-pane editable", which it is.
+NOTES (2026-08-14): three files outside the item's Files list had to move with the split, all
+mechanically. `cmd/apogee/settingsedit.go`: `settingStructures` is rekeyed `validated-sets` →
+`validated-sets.alias` (projecting the alias map alone), or `TestSettingStructuresCoverEveryStructuredKey`
+fails on both a structured key with no projection and a bool key with one; two of its prose comments
+naming the old key/summary followed. `cmd/apogee/settingsedit_test.go`: the apply-arm test drove the
+retired key. `internal/config/configwrite_scalar_test.go`: the item asks for write + read-back over
+three file states, and the registry sweep only supplies two of them for free (the seeded template's
+commented block, and the edited fixture, which carries no `validated-sets:` block at all) — the live
+block needed a test of its own, which also pins the alias map surviving the write.
+NOTES (2026-08-14): README.md and docs/layout/settings-screen-layout.md both listed
+`validated-sets` among the blocks that open `$EDITOR`; that is now the alias row alone, so both
+lines name `validated-sets: alias:` / `validated-sets.alias`. User-facing behaviour changed, so
+these are the docs step 6 requires rather than drive-by edits.
 
 **What:** Replace the single `validated-sets` `KindStructured` row (`internal/config/registry.go:333-336`) with two rows in the same registry position, following the `context-files.*` precedent (registry.go:192-207 — no parent row remains, or the bijection test fails):
 - `{ Path: "validated-sets.enable", Kind: KindBool, Default: "true", Editable: true }` — desc in the registry's house style.

@@ -160,7 +160,7 @@ A paste lands here with its lines intact, which is what this field is for.
 ### The external edit (`· ⏎ opens $EDITOR`)
 
 The sixth key class has no field at all: the blocks no row can hold — `servers`, `mcp-servers`,
-`mechanisms`, `validated-sets`, `system-prompt-models`, `model-profile` — carry the
+`mechanisms`, `validated-sets.alias`, `system-prompt-models`, `model-profile` — carry the
 `· ⏎ opens $EDITOR` pointer in their last cell, and `⏎` opens the file itself on that key's line
 where the editor takes a line argument.
 
