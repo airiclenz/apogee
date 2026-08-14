@@ -269,7 +269,10 @@ nothing; each moved test name appears exactly once under `internal/tui/`.
 
 ---
 
-## 8. Carve toolleader_test.go and toolblock_test.go out of render_test.go
+## 8. Carve toolleader_test.go and toolblock_test.go out of render_test.go — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): banner disposition, same rule items 6 and 7 recorded — the `// ----` banner "The tool header's label styling" heads a section whose only test (`TestToolHeaderLabelStyled`) this item moves, so it travelled with it and now opens `toolleader_test.go`; the grouping and group-member suites sit under the "Grouped same-label tool calls (tool-call layout item 4)" banner, which stays in `render_test.go` with `readCall` and the tests still filed there, so those suites arrive bannerless under their own doc comments. No banner text was invented or duplicated.
+NOTES (2026-08-14): `render_test.go`'s import block is unchanged — every import still has callers in the residual file. The moved bodies are byte-identical to their `HEAD` originals and the residual is `HEAD` minus exactly the moved ranges (verified by reconstructing `HEAD`'s `render_test.go` from residual + moved chunks: exact match).
 
 **What:** Create `internal/tui/toolleader_test.go` (~385 lines) and
 `internal/tui/toolblock_test.go` (~500 lines); move verbatim from `render_test.go`:

@@ -196,6 +196,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The tool leader-row and tool-block grouping suites move to `internal/tui/toolleader_test.go`
+  and `internal/tui/toolblock_test.go`.** The third carve of the `render_test.go` split lifts the
+  header-label styling test and the leader-row arithmetic suite (the outcome slot reserved first,
+  the promote guard's fifteen cells of target, the demoted line's spelling, the git-commit short
+  hash at every width) into `toolleader_test.go`, and the same-label grouping suite plus the
+  group-member suite with its `runGroup` fixture (body-carrying calls, the faint header count,
+  clipped member targets, the expanded member's sketch shape and see-less footer, the member
+  gutter that is not the sub-agent rail) into `toolblock_test.go`. The widely shared `readCall`
+  fixture and the golden-row builders
+  (`groupMemberLine`/`leaderEdgeRow`/`memberEdgeRow`/`seeLessFooterLine`) stay in `render_test.go`,
+  where their cross-file callers already reach them. Pure moves: no test renamed, reordered or
+  edited, each new file carrying only the imports it needs; `render_test.go` drops from 3532 to
+  2715 lines. Tests only — no behavior change.
+
 - **The sub-agent block suites move to `internal/tui/subagentblock_test.go`.** The second carve of
   the `render_test.go` split lifts the sub-agent framing reflow-safety test (P3.14), the sub-agent
   group sketch-state suite with its `targetedRender`/`rowWith` click-surface helpers, the
