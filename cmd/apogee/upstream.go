@@ -280,10 +280,10 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 // The one server the list cannot contain is the EPHEMERAL entry a raw `--endpoint`/`APOGEE_ENDPOINT`
 // override builds for this run alone (ADR 0036 decision 6): it is unnamed, deliberately unwritten,
 // and nowhere in the file. Only then is a row synthesized, prepended, carrying the resolved facts
-// that run was built from — the endpoint's host as its label (hostFromEndpoint, the same fallback
-// the footer uses), the override key, and the override hint. That keeps ADR 0028's "the startup
-// server is always offered" invariant true, so a user who overrides their way onto a rented box can
-// still switch to a listed server and come back, without the override becoming config.
+// that run was built from — the endpoint's host as its label (config.aliasFromEndpoint, the same
+// fallback the footer uses), the override key, and the override hint. That keeps ADR 0028's "the
+// startup server is always offered" invariant true, so a user who overrides their way onto a rented
+// box can still switch to a listed server and come back, without the override becoming config.
 //
 // Deriving the synthesized row from the ephemeral case alone is also what dissolves the edge the
 // endpoint-equality test used to leave open: a configured startup can no longer be offered twice

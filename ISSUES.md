@@ -35,9 +35,6 @@ The still-open findings the open-residuals plan run left, under the conventions'
 - [ ] `internal/tui/render_test.go` is 5520 lines, far past the coding-standards ~400-line threshold
   — a split candidate beside the sources it exercises.
 
-- [ ] `cmd/apogee/upstream.go:283` still credits `hostFromEndpoint` for the synthesized ephemeral
-  row's label, which `config.aliasFromEndpoint` (`:292`) now produces.
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive

@@ -306,6 +306,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The `upstreamChoices` overview now credits the helper that actually builds the synthesized
+  ephemeral row's label. Its second paragraph still named `hostFromEndpoint` as the source of "the
+  endpoint's host as its label", but since the alias gained its collision suffix that label comes
+  from `config.aliasFromEndpoint` (`opts.HostAlias`) — the same helper the paragraph below already
+  credits for keeping the synthesized label distinct from a configured `name`. Comment only — no
+  behavior change.
+
 - The `tempRoot` package-rule comment no longer names a suite that is not there. Its rule sentence
   ended "plus this file's own fixtures", but `internal/tools/path_safety_test.go` holds no `Test`
   function at all — it is the shared fixture home (`writeFixtureFile`, `realPath`, `tempRoot`) the

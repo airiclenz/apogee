@@ -169,7 +169,11 @@ fixture home), dropping the reference to a suite that is not there. Remove the c
 
 ---
 
-## 5. upstream.go credits aliasFromEndpoint for the ephemeral row's label
+## 5. upstream.go credits aliasFromEndpoint for the ephemeral row's label — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the longer identifier pushed the edited line past the file's ~100-column comment
+wrap, so the four lines of that sentence (`cmd/apogee/upstream.go:282-286`) were rewrapped; no
+wording changed apart from the credited helper name.
 
 **What:** `cmd/apogee/upstream.go:283` still credits `hostFromEndpoint` for the synthesized
 ephemeral row's label, which `config.aliasFromEndpoint` (`:292` names it) now produces. Fix the
