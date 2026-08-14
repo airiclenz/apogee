@@ -146,7 +146,11 @@ corresponding `ISSUES.md` bullet.
 
 ---
 
-## 4. tempRoot comment drops the absent fixture suite
+## 4. tempRoot comment drops the absent fixture suite — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): per the dispatch DECISION this run kept the `path_safety_test.go` comment edit an earlier batch attempt had already left in the working tree (verified first that the file really declares no `Test` function — only `writeFixtureFile`, `realPath`, `tempRoot`) and re-applied only this item's `ISSUES.md` bullet removal, so both land in this item's own commit.
+
+NOTES (2026-08-14): the kept edit had left the paragraph's tail ragged (one ~73-column line among ~100-column neighbours), so the rest of that comment paragraph was rewrapped to the file's ~100-column wrap; wording after the edited clause is unchanged.
 
 **What:** `internal/tools/path_safety_test.go:44-45` — `tempRoot`'s package-rule comment ends
 "plus this file's own fixtures", but the file now holds the shared path fixtures and no `Test`

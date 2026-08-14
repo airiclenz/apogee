@@ -306,6 +306,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The `tempRoot` package-rule comment no longer names a suite that is not there. Its rule sentence
+  ended "plus this file's own fixtures", but `internal/tools/path_safety_test.go` holds no `Test`
+  function at all — it is the shared fixture home (`writeFixtureFile`, `realPath`, `tempRoot`) the
+  write-family suites take those helpers from. The trailing clause now says that instead of
+  claiming a local suite. Comment only — no behavior change.
+
 - **The `setProcessGroupTeardown` overview no longer claims an absolute the same file refutes.** Its
   `cmd.Cancel` bullet said a cancelled or timed-out command "never orphans its children (or, when
   confined, an orphaned sandbox-exec wrapper)", which the setsid escape documented a few lines below

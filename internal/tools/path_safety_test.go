@@ -41,11 +41,12 @@ func realPath(t *testing.T, path string) string {
 //
 // The package rule: a suite whose paths can reach a tool's BARE success sentence or the safety
 // fence takes its workspace from tempRoot — that is the whole write family (write_file, file_edit,
-// find_replace, the file operations, read_file, the approved-escape permits) plus this file's own
-// fixtures. Every other suite here holds its workspace incidentally — registry, terminal, git,
-// python, grep, find_files, list_dir, diff, network, exec, present_document, workspace-scoped and
-// sub-agent among them — and needs no resolution: its assertions never depend on the root's
-// spelling, so raw t.TempDir() stays correct there.
+// find_replace, the file operations, read_file, the approved-escape permits). This file carries no
+// suite of its own: it is the shared fixture home those suites take these helpers from. Every other
+// suite here holds its workspace incidentally — registry, terminal, git, python, grep, find_files,
+// list_dir, diff, network, exec, present_document, workspace-scoped and sub-agent among them — and
+// needs no resolution: its assertions never depend on the root's spelling, so raw t.TempDir() stays
+// correct there.
 func tempRoot(t *testing.T) string {
 	t.Helper()
 

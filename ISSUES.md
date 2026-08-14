@@ -35,10 +35,6 @@ The still-open findings the open-residuals plan run left, under the conventions'
 - [ ] `internal/tui/render_test.go` is 5520 lines, far past the coding-standards ~400-line threshold
   — a split candidate beside the sources it exercises.
 
-- [ ] `tempRoot`'s package-rule comment (`internal/tools/path_safety_test.go:44-45`) still ends
-  "plus this file's own fixtures", but the file now holds the shared path fixtures and no `Test`
-  function of its own, so the trailing clause names a suite that is not there.
-
 - [ ] `cmd/apogee/upstream.go:283` still credits `hostFromEndpoint` for the synthesized ephemeral
   row's label, which `config.aliasFromEndpoint` (`:292`) now produces.
 
