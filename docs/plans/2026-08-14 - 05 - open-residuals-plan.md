@@ -203,7 +203,13 @@ restructuring helpers. Remove the corresponding ISSUES bullet (ISSUES-sweep sect
 
 **Commit:** `refactor(tools): split companion test suites beside their sources`
 
-## 8. Pin the setsid-escape teardown residual with a test
+## 8. Pin the setsid-escape teardown residual with a test — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the observed behavior matches the docs — the escapee survives both the clean-exit reap and `cmd.Cancel` — so there was nothing to report as a contradiction. Verified non-vacuous by a negative control: dropping `setsid ` from the script makes both subtests fail on the process-group assertion.
+
+NOTES (2026-08-14): the item's illustrative script (`sh -c 'setsid sleep 30 & echo $!'`) was not used literally. `echo $!` names the backgrounded `setsid` process, whose PID only coincidentally survives the tool's optional fork, and — worse — the leader can exit before `setsid(2)` has run, so the clean-exit reap would race and kill a descendant that had not yet escaped. Instead the escapee writes its OWN pid to a FIFO the leader blocks on, which orders the escape strictly before teardown. `sleep 60` rather than `sleep 30`, long past the test but short enough that a straggler whose PID no assertion ever learned expires on its own.
+
+NOTES (2026-08-14): the item says "triggers teardown"; both teardown paths are covered as subtests, because the documented claim is that the escapee survives both the clean-exit reap and `cmd.Cancel`.
 
 **What:** The setsid-escape residual is documented (`internal/tools/exec_teardown.go:37`,
 `internal/tools/doc.go:183`, `internal/tools/exec_pgroup_unix.go:63`) but untested — nothing

@@ -57,15 +57,6 @@ The still-open findings the ISSUES-sweep plan run left, under the conventions' a
   a raw `--endpoint`/`APOGEE_ENDPOINT` override can still equal a configured entry's `name`, and the
   picker then marks two rows `· current`.
 
-### Run residuals — open (2026-08-14, security-audit fixes)
-
-The still-open findings the security-audit-fixes plan run left, under the conventions'
-actionability bar.
-
-- [ ] The setsid-escape residual is documented but untested — no test asserts what a descendant that
-  called `setsid`/`setpgid(0,0)` does across teardown (nothing in `internal/tools/*_test.go` or
-  `internal/platform/confinetest/` exercises it), so the residual the docs now state is unpinned.
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive

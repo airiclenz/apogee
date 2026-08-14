@@ -10,6 +10,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The POSIX setsid-escape teardown residual is now pinned by a test.** The §2.4 process-group
+  teardown's documented limit — a descendant that calls `setsid`/`setpgid(0,0)` leads a new group,
+  so no negative-PID kill aimed at the run's group reaches it — was prose in three places
+  (`setProcessGroupTeardown`, `planTreeKill`, `doc.go`) and asserted nowhere.
+  `internal/tools/exec_teardown_unix_test.go` (build-tagged `!windows`, skipped when `setsid` is not
+  on `PATH`) drives a real escapee through BOTH teardown paths: the clean-exit reap and
+  `cmd.Cancel`. The leader and the escapee rendezvous over a FIFO, so the escape has provably
+  already happened before teardown fires and the test cannot race what it observes; each half then
+  checks the escapee leads its own process group — without which a `setsid` that silently did
+  nothing would leave the survival check proving nothing — and that it is still alive afterwards,
+  killing it in cleanup so the suite leaks no straggler. Behavior confirmed as documented: the
+  escapee survives both paths while the tool reports the leader's own exit status.
+
 - **The exec tools' credential scrub takes host-named variables.** `terminal`, `python_exec` and
   `run_tests` hand a subprocess the operator's inherited environment minus apogee's own
   `APOGEE_API_KEY`; that fixed list was written when a configured server key could only live in a
