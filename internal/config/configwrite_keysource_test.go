@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -298,6 +299,38 @@ func TestSaveServerPlaintextKeyOK_RefusesAnUnknownEntry(t *testing.T) {
 	}
 	if got := readTestConfig(t, path); got != config {
 		t.Errorf("a refused edit rewrote the file\n%s", got)
+	}
+}
+
+// verifiedEntrySplice is the gate under every entry writer, not only the two key-source ones, so its
+// refusal takes the noun from its caller: a model or launch-profile write that missed its entry must
+// not tell the reader "the key source" did not land. Driven directly, because the refusal is the
+// backstop for a splice that landed somewhere unexpected — no reachable fixture produces it.
+func TestVerifiedEntrySpliceNamesWhatTheEditFailedToPlace(t *testing.T) {
+	const config = "server: box\nservers:\n  - name: box\n    api-key: sk-1\n"
+	var before fileConfig
+	if err := yaml.Unmarshal([]byte(config), &before); err != nil {
+		t.Fatalf("the fixture does not parse: %v", err)
+	}
+	// The "edit" is the unchanged file, so the result cannot hold the entry the caller asked for.
+	want := before.Servers[0]
+	want.Model = "qwen3-30b"
+
+	for _, noun := range []string{"the key source", "the model"} {
+		t.Run(noun, func(t *testing.T) {
+			out, err := verifiedEntrySplice([]byte(config), []byte(config), before, 0, want, noun)
+
+			if out != nil {
+				t.Errorf("a refused splice returned bytes to write:\n%s", out)
+			}
+			if err == nil {
+				t.Fatal("want a refusal when the edit did not land on the entry")
+			}
+			msg := fmt.Sprintf("the edit did not put %s on the %q entry", noun, want.Name)
+			if got := err.Error(); !strings.Contains(got, msg) {
+				t.Errorf("want a refusal containing %q, got %q", msg, got)
+			}
+		})
 	}
 }
 

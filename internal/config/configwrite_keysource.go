@@ -38,6 +38,12 @@ const (
 	plaintextKeyOKKey = "plaintext-key-ok"
 )
 
+// keySourceNoun is what these two edits tell verifiedEntrySplice they were placing. Both write a
+// DECLARATION of where the key comes from rather than one named key — an `api-key:` swapped for an
+// `api-key-cmd:`, or the acknowledgement that the literal stays — so the refusal names the thing
+// rather than the line.
+const keySourceNoun = "the key source"
+
 // SaveServerKeyCommand points the `servers:` entry named name at command as its key source: the
 // entry's literal `api-key:` line is replaced, in place, by the `api-key-cmd:` line that runs
 // command for the key. It is what a consented key migration persists once the secret is in the
@@ -124,7 +130,7 @@ func setEntryKeyCommand(data []byte, name, command string) ([]byte, error) {
 	}
 	want := before.Servers[at]
 	want.APIKey, want.APIKeyCmd = "", command
-	return verifiedEntrySplice(data, updated, before, at, want)
+	return verifiedEntrySplice(data, updated, before, at, want, keySourceNoun)
 }
 
 // setEntryPlaintextKeyOK returns the config bytes with the named entry marked `plaintext-key-ok:
@@ -143,7 +149,7 @@ func setEntryPlaintextKeyOK(data []byte, name string) ([]byte, error) {
 	}
 	want := before.Servers[at]
 	want.PlaintextKeyOK = true
-	return verifiedEntrySplice(data, updated, before, at, want)
+	return verifiedEntrySplice(data, updated, before, at, want, keySourceNoun)
 }
 
 // serverEntryAt parses the config the way apogee reads it and reports the whole parsed file plus the
@@ -272,12 +278,16 @@ func serverEntryNode(data []byte, name string) ([]string, *yaml.Node, error) {
 	return nil, nil, fmt.Errorf("its servers: list has no entry block named %q; edit the file by hand", name)
 }
 
-// verifiedEntrySplice is the gate a key-source splice passes before it reaches the disk: the result
-// must parse, must hold the old `servers:` list with the entry at `at` changed to exactly want and
-// every other entry untouched, must agree with the original on every setting outside the list, and
-// must still LOAD — the exactly-one key-source rule is what an edit that swaps sources has to leave
+// verifiedEntrySplice is the gate an entry splice passes before it reaches the disk: the result must
+// parse, must hold the old `servers:` list with the entry at `at` changed to exactly want and every
+// other entry untouched, must agree with the original on every setting outside the list, and must
+// still LOAD — the exactly-one key-source rule is what an edit that swaps sources has to leave
 // satisfied, and asking ValidateServers is how this writer knows it did.
-func verifiedEntrySplice(data, updated []byte, before fileConfig, at int, want ServerEntry) ([]byte, error) {
+//
+// what names the thing the edit was supposed to place, in the caller's own words ("the key source",
+// "the model"), because the gate serves every entry writer: the refusal has to say what did not land
+// where the reader would look, and only the caller knows which line that was.
+func verifiedEntrySplice(data, updated []byte, before fileConfig, at int, want ServerEntry, what string) ([]byte, error) {
 	var after fileConfig
 	if err := yaml.Unmarshal(updated, &after); err != nil {
 		return nil, fmt.Errorf("the edited file would not parse: %w", err)
@@ -285,8 +295,8 @@ func verifiedEntrySplice(data, updated []byte, before fileConfig, at int, want S
 	switch {
 	case !serversChangedOnlyAt(before.Servers, after.Servers, at, want):
 		return nil, fmt.Errorf(
-			"the edit did not put the key source on the %q entry where a reader would look for it; "+
-				"edit the file by hand", want.Name)
+			"the edit did not put %s on the %q entry where a reader would look for it; "+
+				"edit the file by hand", what, want.Name)
 	case !sameApartFrom(before, after, serversKey):
 		return nil, errors.New("the edit would have changed more than the servers: list; edit the file by hand")
 	}

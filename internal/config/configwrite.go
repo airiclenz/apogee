@@ -286,14 +286,19 @@ const (
 	entryLaunchProfileKey = "launch-profile"
 )
 
-// entrySetting is one writable per-entry key: its spelling in the file, the value an entry already
-// holds for it (what makes a re-set a no-op), and how it stands on the entry the splice is verified
-// against. Reading and writing the field are two halves of one row, so the allow-list cannot come
-// apart from the schema it addresses.
+// entrySetting is one writable per-entry key: its spelling in the file, the noun a refusal calls it
+// by, the value an entry already holds for it (what makes a re-set a no-op), and how it stands on the
+// entry the splice is verified against. Reading and writing the field are two halves of one row, so
+// the allow-list cannot come apart from the schema it addresses.
+//
+// The row spells its own Noun rather than deriving one from Key, because the key is YAML and the noun
+// is English: a reader told the edit did not place "the launch profile" is being spoken to, not shown
+// a field name with its hyphens taken out.
 type entrySetting struct {
-	Key string
-	get func(ServerEntry) string
-	set func(*ServerEntry, string)
+	Key  string
+	Noun string
+	get  func(ServerEntry) string
+	set  func(*ServerEntry, string)
 }
 
 // entrySettings is the whole of what apogee writes into a `servers:` entry on the user's behalf. It
@@ -301,14 +306,16 @@ type entrySetting struct {
 // choice made at the keyboard, and those stay the user's to edit.
 var entrySettings = []entrySetting{
 	{
-		Key: entryModelKey,
-		get: func(s ServerEntry) string { return s.Model },
-		set: func(s *ServerEntry, value string) { s.Model = value },
+		Key:  entryModelKey,
+		Noun: "the model",
+		get:  func(s ServerEntry) string { return s.Model },
+		set:  func(s *ServerEntry, value string) { s.Model = value },
 	},
 	{
-		Key: entryLaunchProfileKey,
-		get: func(s ServerEntry) string { return s.LaunchProfile },
-		set: func(s *ServerEntry, value string) { s.LaunchProfile = value },
+		Key:  entryLaunchProfileKey,
+		Noun: "the launch profile",
+		get:  func(s ServerEntry) string { return s.LaunchProfile },
+		set:  func(s *ServerEntry, value string) { s.LaunchProfile = value },
 	},
 }
 
@@ -388,7 +395,7 @@ func setEntrySetting(data []byte, name string, setting entrySetting, value strin
 	}
 	want := before.Servers[at]
 	setting.set(&want, value)
-	return verifiedEntrySplice(data, updated, before, at, want)
+	return verifiedEntrySplice(data, updated, before, at, want, setting.Noun)
 }
 
 // spliceEntrySetting writes the key into the entry's block: over the line the entry already spells it

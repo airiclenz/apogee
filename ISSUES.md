@@ -59,10 +59,6 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   `endCancelled` (`internal/agent/turn.go:60`, `:61`) — plan-ratified, narrow window, but a real
   cancel-semantics seam worth tracking. (in-band retry run)
 
-- [ ] `verifiedEntrySplice`'s refusal message still says "did not put the key source on the %q entry"
-  (`internal/config/configwrite_keysource.go:280`), now reachable from a model / launch-profile write.
-  (remember-model run)
-
 - [ ] `internal/config/configwrite_scalar.go` lands at 803 lines, still double the coding-standards
   ~400-line guide the now-removed ISSUES entry cited; the pure-move split relocated that debt rather
   than closing it, and nothing tracks it now. (configwrite split run)

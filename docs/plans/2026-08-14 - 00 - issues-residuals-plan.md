@@ -235,7 +235,18 @@ panic, no extra note).
 
 **Commit:** `feat(tui): re-selecting the bound model or active server records the pin`
 
-## 8. The entry-splice refusal names what the edit failed to place
+## 8. The entry-splice refusal names what the edit failed to place — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the item says `setEntrySetting` derives the noun "from its `entrySetting` row";
+that was implemented by giving the row a `Noun` field (`"the model"` / `"the launch profile"`) rather
+than transforming `Key`'s YAML spelling into English, so a later row cannot inherit a garbled noun by
+default — the struct's doc comment records the reason.
+NOTES (2026-08-14): the two key-source call sites pass a new package constant `keySourceNoun`
+(`= "the key source"`, declared beside the entry-key constants) rather than repeating the literal;
+the emitted message is byte-identical to the old one for both.
+NOTES (2026-08-14): `verifiedEntrySplice`'s own doc comment was reworded from "the gate a key-source
+splice passes" to "the gate an entry splice passes" and gained a paragraph documenting the new `what`
+parameter — the old wording named a caller set the signature change contradicts.
 
 **What:** `verifiedEntrySplice`'s refusal (`internal/config/configwrite_keysource.go:286–289`)
 reads "the edit did not put the key source on the %q entry where a reader would look for it;

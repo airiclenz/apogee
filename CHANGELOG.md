@@ -901,6 +901,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The entry-splice refusal names what the edit failed to place.** `verifiedEntrySplice`
+  (`internal/config/configwrite_keysource.go`) is the gate every `servers:`-entry write passes
+  before it reaches the disk, and its "did not land where a reader would look" refusal spelled the
+  thing it had been placing as "the key source" — true of the two writers it was written for (the
+  `api-key-cmd:` swap and the `plaintext-key-ok:` acknowledgement) and wrong of the per-entry
+  setting writer that later joined them, where a splice that missed its entry while recording a
+  picked `model:` or a committed `launch-profile:` told the reader a key source had gone astray.
+  The refusal now takes the noun from its caller: the key-source pair pass "the key source", so
+  their message is unchanged, and the setting writer passes the noun its allow-list row spells —
+  "the model" or "the launch profile" — one field beside the key so a future writable key cannot
+  be added without saying what to call it. A direct unit test drives the gate with a splice that
+  did not land and pins both nouns.
+
 - **A carriage return in a displayed FIELD is folded like a newline.** `flattenField` — the
   display seam that folds an argument key, a skill name or summary, a pop-up title or a gate's
   reason onto the one row the pane drew for it — guarded on `\n` and `\t` only, while its input-side
