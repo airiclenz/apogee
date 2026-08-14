@@ -128,7 +128,23 @@ must produce the same row count and row starts the widget itself uses.
 
 **Commit:** `fix(tui): the width mirrors expand tabs the way the widget sanitizer does`
 
-## 3. ISSUES sweep — the two parked entries this plan resolves leave the register
+## 3. ISSUES sweep — the two parked entries this plan resolves leave the register — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): one edit beyond the item's literal text — the *Two doors left open by the
+Mechanism-registration collapse* HEADING was reworded to *A door left open by the
+Mechanism-registration collapse*. The item names only the intro's "Both were named out of scope"
+sentence, but a title still counting two doors over a single remaining bullet is exactly the
+narration of a done item that `AGENTS.md` forbids leaving in the register.
+
+NOTES (2026-08-14): the width entry's preceding sentence ("each is a place the package still
+measures in a measure the painter may not be using, or mirrors a widget imperfectly") was left
+as-is even though only `hangingPrefixes` — a measurement case, not a mirror one — remains open:
+the *Standing rules* paragraph directly below still speaks about the ADR 0030 §6 widget-mirror
+exception, so the mirror vocabulary in the intro is not orphaned.
+
+NOTES (2026-08-14): both "(Planned in `docs/plans/2026-08-13 - 08 - …`.)" pointers left the
+register with their paragraphs; `grep -n "2026-08-13 - 08" ISSUES.md` now returns nothing, so this
+plan leaves no dangling citation behind.
 
 Depends on items 1 and 2.
 

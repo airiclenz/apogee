@@ -333,25 +333,12 @@ an extra prompt rather than a broken tool, and the export is purely additive whe
 
 ---
 
-### Two doors left open by the Mechanism-registration collapse
+### A door left open by the Mechanism-registration collapse
 
 **Status:** parked 2026-07-25 (`docs/plans/archived/2026-07-25 - 01 - mechanism-registration-collapse-plan.md`,
 "Explicit non-goals" + D4; [ADR 0003](docs/adr/0003-mechanisms-are-a-constraint-declared-registry-not-a-fixed-pipeline.md)
-amendment 2026-07-25). Both were named out of scope by that plan and recorded here so the door is
-documented rather than silently shut. **Neither is a live gap.**
-
-- **`MechanismRegistry.Add` does not reject an empty `Descriptor.ID`.** `Add` gates on the reserved
-  `experimental` ID, on a duplicate ID, and on the value implementing at least one hook interface —
-  not on the ID being non-empty. A row registered with a zero descriptor therefore gets a catalogued
-  Mechanism with an empty canonical ID: it sorts first in the stable tiebreak, and `MechanismFiredEvent`
-  attribution for it is blank. This is **pre-existing, not introduced by the row shape** — a Mechanism
-  whose `Descriptor()` returned the zero value could do exactly the same before — which is why adding
-  the guard was refused as a behaviour change riding on a refactor. It is unreachable from the
-  catalogue (`register` already panics at `init()` on an empty `descriptor.ID`, and the ID keys the
-  table), so the only way in is a hand-built row from an embedder or a test. Worth a guard later, as
-  its own small change with its own test: reject an empty `Descriptor.ID` in `Add` alongside the
-  reserved-ID gate, with a message in the same voice as the other three. (Planned in
-  `docs/plans/2026-08-13 - 08 - register-shrink-and-small-guards-plan.md`.)
+amendment 2026-07-25). It was named out of scope by that plan and recorded here so the door is
+documented rather than silently shut. **It is not a live gap.**
 
 - **`internal/mechanisms` declares which `Deps` a row needs, but does not construct them.** A row now
   carries `needs DepNeeds`, and `DepsNeeded(ids)` ORs the flags for an enabled set, so the engine
@@ -764,9 +751,9 @@ moment to give `ConfineWritablePaths` its first writer.
 `docs/plans/`, archived on completion) —
 [ADR 0030](docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md). Nothing
 here breaks the absolute width cap; each is a place the package still measures in a measure the
-painter may not be using, or mirrors a widget imperfectly. What is open here is the two width
-entries below: the widget mirrors' tab handling, and `hangingPrefixes` at block width 1–2. The rest
-of the residue is closed — see `CHANGELOG.md` for what landed.
+painter may not be using, or mirrors a widget imperfectly. What is open here is the one width entry
+below: `hangingPrefixes` at block width 1–2. The rest of the residue is closed — see `CHANGELOG.md`
+for what landed.
 
 **Standing rules the closed work left behind** (they bind future work, so they are not in the
 changelog alone): the one `lipgloss.Style.Width` still in the package — the prompt box framing a
@@ -774,12 +761,6 @@ widget that wraps in GraphemeWidth itself — is ADR 0030 §6's widget-mirror ex
 re-file it, and never put a `Width` style on a *bordered* surface (§5). `inputContentRows`' taller
 counts need no clamping change: `promptEditor.rows` and `layout()` already clamp
 (`TestPromptEditorRowsClampsTheWidgetCount`).
-
-**The widget mirrors mis-measure tabs:** both are still wrong on **tabs**, which the widget's input
-sanitizer expands and neither mirror does. Fixing it means expanding tabs the same way before
-measuring, in `wrapRowStarts` (now `internal/tui/inputaccent.go:211`; both mirrors then inherit
-it — `inputContentRows` itself moved to `internal/tui/chromelayout.go:39`). (Planned in
-`docs/plans/2026-08-13 - 08 - register-shrink-and-small-guards-plan.md`.)
 
 **`hangingPrefixes` can draw three cells at block width 1–2** (now `internal/tui/wrap.go:31`). It floors its wrap
 width at 1 column and then prepends a two-column marker, so a bullet list in a two-column block
