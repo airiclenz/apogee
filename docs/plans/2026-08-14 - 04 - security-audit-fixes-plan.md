@@ -208,7 +208,7 @@ omits it for native tools; a hostile alias with escapes/newlines renders flatten
 
 **Commit:** `feat(tui): approval pane discloses MCP server-grain session grant`
 
-## 5. Cap provider error-body reads
+## 5. Cap provider error-body reads — ✅ DONE (2026-08-14)
 
 **What:** both non-2xx error paths buffer the whole upstream body before any cap:
 `(*Client).statusDelta` (`internal/provider/stream.go`, `io.ReadAll(resp.Body)`) and

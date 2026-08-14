@@ -224,6 +224,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A hostile upstream's error body can no longer exhaust memory.** Both non-2xx paths —
+  `(*Client).statusError` on the unary round-trip and `(*Client).statusDelta` on the stream — read
+  the upstream body with `io.ReadAll` before anything caps it, and the request timeouts default to
+  0, so a server answering a multi-GB error body was buffered whole into the agent process. Each
+  read is now wrapped in an `io.LimitReader` at `maxErrorBodyBytes` (64 KiB), far past any genuine
+  error payload. What is read flows through the same path as before — the context-overflow sniff
+  and `sanitize`'s key redaction plus 500-byte truncation — so a truncated body needs no error kind
+  of its own: it surfaces as the same `ErrContextOverflow` / `*StatusError` / `DeltaError` it
+  always did. A marker that would have classified a reply as a context overflow but sits past the
+  cap is simply not read, which is what the new tests assert on both surfaces.
+
 - **`/server` identifies the session's entry by NAME, not by endpoint.** The five sites that decide
   "which configured entry is this session on" — the picker's already-on branch, the row it opens on,
   the `· current` mark, and `/settings`' server-row twin of the first and its `(current)` mark — now

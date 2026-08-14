@@ -176,6 +176,49 @@ func TestStream_ErrorStatus(t *testing.T) {
 	}
 }
 
+// TestStream_ErrorBodyIsCapped covers the hostile-upstream case: an error body far larger
+// than maxErrorBodyBytes must not be buffered whole. The proof is positional — an overflow
+// marker sitting past the cap never reaches the sniff (so the delta stays a plain error),
+// while the same marker inside the cap still classifies as it always did.
+func TestStream_ErrorBodyIsCapped(t *testing.T) {
+	t.Parallel()
+
+	const marker = "context length exceeded"
+	filler := strings.Repeat("A", maxErrorBodyBytes)
+
+	tests := []struct {
+		name string
+		body string
+		want DeltaKind
+	}{
+		{name: "marker past the cap is never read", body: filler + marker, want: DeltaError},
+		{name: "marker within the cap still fires", body: marker + filler, want: DeltaContextOverflow},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, tt.body)
+			}))
+			defer srv.Close()
+
+			deltas := collectStream(NewClient(srv.URL, "m"), Request{})
+			if len(deltas) != 1 {
+				t.Fatalf("deltas = %+v, want a single terminal delta", deltas)
+			}
+			if deltas[0].Kind != tt.want {
+				t.Errorf("kind = %q, want %q", deltas[0].Kind, tt.want)
+			}
+			if len(deltas[0].Err) > maxErrorLength+100 {
+				t.Errorf("error text is %d bytes, want the sanitised bound", len(deltas[0].Err))
+			}
+		})
+	}
+}
+
 // TestStream_InBandError covers the aggregator failure mode where an HTTP 200 stream
 // carries the provider's error as a data event: it must end in a terminal fault, never in
 // the Done that would commit a silent empty reply.

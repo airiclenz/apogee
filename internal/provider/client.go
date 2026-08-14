@@ -21,6 +21,14 @@ const (
 	maxErrorLength   = 500
 	maxToolCallBytes = 1 << 20 // 1 MiB — cap on accumulated streamed tool-call arguments
 
+	// maxErrorBodyBytes caps how much of a non-2xx body is read before it is classified. The
+	// request timeouts default to 0, so a hostile or broken upstream answering a multi-GB
+	// error body would otherwise be buffered whole and exhaust the agent's memory. 64 KiB is
+	// far past any genuine error payload; what is read still flows through the same
+	// context-overflow sniff and sanitize path, so a truncated body needs no error kind of
+	// its own.
+	maxErrorBodyBytes = 64 << 10
+
 	// topLogProbsCount is how many alternatives a Request that asks for LogProbs requests per
 	// token position. Five is enough for the candidate set to identify a model's distribution
 	// while staying inside every server's top_logprobs cap.
@@ -332,11 +340,12 @@ func parseRetryAfter(h string) (time.Duration, bool) {
 	return 0, true
 }
 
-// statusError reads a non-2xx body and classifies it: a 400 overflow → ErrContextOverflow,
-// anything else → a *StatusError carrying the code. The body is sanitised (API key
-// redacted, length capped) before it reaches the caller.
+// statusError reads a non-2xx body — at most maxErrorBodyBytes of it, so an oversized one
+// cannot exhaust memory — and classifies it: a 400 overflow → ErrContextOverflow, anything
+// else → a *StatusError carrying the code. The body is sanitised (API key redacted, length
+// capped) before it reaches the caller.
 func (c *Client) statusError(resp *http.Response) error {
-	raw, _ := io.ReadAll(resp.Body)
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	text := c.sanitize(string(raw))
 	if resp.StatusCode == http.StatusBadRequest && isContextOverflow(string(raw)) {
 		return fmt.Errorf("%w: %s", ErrContextOverflow, text)

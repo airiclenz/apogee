@@ -193,6 +193,49 @@ func TestRespond_InBandErrorSurfaces(t *testing.T) {
 	}
 }
 
+// TestRespond_ErrorBodyIsCapped is the unary counterpart of TestStream_ErrorBodyIsCapped:
+// a non-2xx body far larger than maxErrorBodyBytes must not be buffered whole. The proof is
+// positional — an overflow marker sitting past the cap never reaches the sniff (the error
+// stays a *StatusError), while the same marker inside the cap classifies as it always did.
+func TestRespond_ErrorBodyIsCapped(t *testing.T) {
+	t.Parallel()
+
+	const marker = "context length exceeded"
+	filler := strings.Repeat("A", maxErrorBodyBytes)
+
+	tests := []struct {
+		name         string
+		body         string
+		wantOverflow bool
+	}{
+		{name: "marker past the cap is never read", body: filler + marker},
+		{name: "marker within the cap still fires", body: marker + filler, wantOverflow: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+
+			_, err := NewClient(srv.URL, "m").Respond(context.Background(), Request{})
+			if err == nil {
+				t.Fatal("Respond returned no error, want the capped body surfaced as one")
+			}
+			if got := errors.Is(err, ErrContextOverflow); got != tc.wantOverflow {
+				t.Errorf("errors.Is(err, ErrContextOverflow) = %t, want %t (error = %q)", got, tc.wantOverflow, err)
+			}
+			if len(err.Error()) > maxErrorLength+100 {
+				t.Errorf("error text is %d bytes, want the sanitised bound", len(err.Error()))
+			}
+		})
+	}
+}
+
 // TestRespond_InBandErrorRedactsAPIKey proves the surfaced body goes through the same
 // sanitiser as the non-2xx path — a server that echoes the key must not leak it into an error.
 func TestRespond_InBandErrorRedactsAPIKey(t *testing.T) {

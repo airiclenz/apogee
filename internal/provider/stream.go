@@ -86,9 +86,9 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 }
 
 // statusDelta classifies a non-2xx streamed response into a terminal Delta, mirroring
-// statusError but on the streaming surface.
+// statusError but on the streaming surface — including its maxErrorBodyBytes read cap.
 func (c *Client) statusDelta(resp *http.Response) Delta {
-	raw, _ := io.ReadAll(resp.Body)
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	text := c.sanitize(string(raw))
 	if resp.StatusCode == http.StatusBadRequest && isContextOverflow(string(raw)) {
 		return Delta{Kind: DeltaContextOverflow, Err: "apogee: context window exceeded: " + text}
