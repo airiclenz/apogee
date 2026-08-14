@@ -16,7 +16,9 @@ import (
 //     modes, or confine-to-workspace=false) the same clean teardown.
 //   - cmd.Cancel signals the whole group — SIGKILL to the negative PID (-pgid) — when
 //     the run's context is cancelled or times out, so a cancelled/timed-out command
-//     never orphans its children (or, when confined, an orphaned sandbox-exec wrapper).
+//     orphans nothing the group still holds: its children go with it, and when confined
+//     so does the sandbox-exec wrapper. A descendant that has left the group is outside
+//     that reach — see the setsid escape below.
 //   - cmd.WaitDelay bounds how long Wait blocks for I/O to drain after the process exits
 //     or is killed, so a child that leaves a pipe open cannot wedge the tool forever.
 //

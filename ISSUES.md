@@ -27,14 +27,10 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 The still-open findings the open-residuals plan run left, under the conventions' actionability bar.
 
-- [ ] `setProcessGroupTeardown`'s overview bullet still carries the absolute "never orphans its
-  children" phrase (`internal/tools/exec_pgroup_unix.go:19`), which the setsid escape documented in
-  the same file's tail (`:63`) contradicts.
-
-- [ ] The Windows counterpart to that setsid escape is prose-only and untested: the job object
-  "does not permit breakaway" (`internal/tools/exec_pgroup_other.go:24`), and nothing asserts that a
-  descendant cannot leave the job, so the POSIX side's pinned residual has no Windows twin. Needs a
-  Windows host.
+- [ ] The Windows counterpart to the POSIX setsid escape (`internal/tools/exec_pgroup_unix.go:63`)
+  is prose-only and untested: the job object "does not permit breakaway"
+  (`internal/tools/exec_pgroup_other.go:24`), and nothing asserts that a descendant cannot leave the
+  job, so the POSIX side's pinned residual has no Windows twin. Needs a Windows host.
 
 - [ ] `internal/tui/render_test.go` is 5520 lines, far past the coding-standards ~400-line threshold
   — a split candidate beside the sources it exercises.

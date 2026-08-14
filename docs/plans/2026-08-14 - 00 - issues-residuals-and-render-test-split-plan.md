@@ -115,7 +115,18 @@ hits the new amendment; the amendment's claims match `internal/security/doc.go:1
 
 ---
 
-## 3. setProcessGroupTeardown overview admits the setsid escape
+## 3. setProcessGroupTeardown overview admits the setsid escape — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): per the dispatch DECISION, this run kept the `internal/tools/exec_pgroup_unix.go`
+comment edit an earlier batch attempt had already left in the working tree (verified against the
+file's own setsid-escape paragraph at `:25-34` and the `killProcessGroup` note at `:63-68` before
+keeping it) and applied only this item's `ISSUES.md` bullet removal, so both land in this item's own
+commit. Item 4's dirty `internal/tools/path_safety_test.go` was left untouched.
+
+NOTES (2026-08-14): removing this item's bullet stranded the neighbouring Windows bullet's "that
+setsid escape" antecedent, so that bullet's opener was repointed to name the POSIX escape and its
+code site directly (`internal/tools/exec_pgroup_unix.go:63`); the bullet itself stays open, per the
+plan's Out-of-scope note.
 
 **What:** `internal/tools/exec_pgroup_unix.go:19` — the overview bullet's absolute "never orphans
 its children (or, when confined, an orphaned sandbox-exec wrapper)" contradicts the setsid escape

@@ -306,6 +306,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The `setProcessGroupTeardown` overview no longer claims an absolute the same file refutes.** Its
+  `cmd.Cancel` bullet said a cancelled or timed-out command "never orphans its children (or, when
+  confined, an orphaned sandbox-exec wrapper)", which the setsid escape documented a few lines below
+  contradicts — a descendant that calls `setsid`/`setpgid(0,0)` leads a new group that no
+  negative-PID kill aimed at this one reaches. The bullet now scopes the promise to what the group
+  still holds (its children, and when confined the sandbox-exec wrapper) and points at the escape
+  note for what leaves it. Comment only — no behavior change.
+
 - **ADR 0049 now records the resolved-first permit routing its own fix introduced.** The decision
   text describes the write-escape permit as the branch a mutation takes once the workspace fence has
   refused it; the landed code asks the permit question FIRST and on the RESOLVED path
