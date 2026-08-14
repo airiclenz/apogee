@@ -455,6 +455,27 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The issues register records only actionable findings, in one run-residuals section.**
+  `ISSUES.md`'s conventions now carry the bar a run residual must clear to be recorded — a defect,
+  or a concrete missing test or doc with `file:line` evidence to act on; narration of how an item's
+  text and its landed change differ, costs a plan already ratified, and cosmetic observations stop
+  at the run's closing report. The eight per-run residual sections of 2026-08-13 merged into a
+  single "Run residuals — open" section, each surviving bullet naming its origin run, so the file
+  stops accreting a heading per executed plan. Closed under the bar (owner-ratified 2026-08-13),
+  each accepted as intended or already recorded elsewhere: the two sub-agent prompt-guard
+  item-text-vs-landed notes; `read_file`'s extra-read-root note (the comment at
+  `internal/tools/read_file.go:104-109` already documents that an absolute path's root argument is
+  unused); the missing `doc.go` file maps for `internal/context` and `internal/title` (both under
+  the house ~10-file docmap threshold — the threshold working as designed); the misleading message
+  on the already-pushed plan-doc commit `70c3586`; `run_tests`' inherited PATH (deliberate: the
+  workspace-resident test runner IS the test command); the unexercised EXDEV copy-then-remove
+  fallback in `MoveFile.move` (unreachable on a single-device tmpdir, as its item's hedge allowed);
+  and the absent `internal/agent/prompts/` wording-drift README (its plan's design call 9 scoped
+  that README to `internal/title` alone). The Darwin `/dev/null` seatbelt live check did not close:
+  it moved into the Phase-5 owner-run leftovers entry, where the other hardware-gated passes live.
+  The README accept paragraph the in-band-retry run left with a ragged wrap was reflowed to the
+  file's width, wording unchanged.
+
 - Repointed the open `verifiedEntrySplice` refusal-message issue in `ISSUES.md` at its post-split
   home (`internal/config/configwrite_keysource.go:280`), replacing the stale
   `internal/config/configwrite.go:1602` citation left behind by the configwrite split.

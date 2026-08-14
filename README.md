@@ -233,11 +233,11 @@ cursor is on, so you can start typing a message and reach for a command halfway
 through, or go back and fix a misspelled name. Accepting a command from the menu
 **runs it and keeps the rest of your draft** — unless the command takes arguments, in
 which case the menu completes it to `/command ` and waits for you to type them; `/model`
-and `/server` are the exception to that exception and run straight away, since bare they
-only open a picker. The menu stays open while the model is
-working, too — commands that need a quiet engine wear an `— idle only` tag for as long
-as the engine is busy, and say so if you pick one anyway, while `/version`, `/skills`,
-`/usage` and `/confine`'s status report answer immediately. Once the engine is idle that tag is
+and `/server` are the exception to that exception and run straight away, since bare
+they only open a picker. The menu stays open while the model is working, too —
+commands that need a quiet engine wear an `— idle only` tag for as long as the engine
+is busy, and say so if you pick one anyway, while `/version`, `/skills`, `/usage` and
+`/confine`'s status report answer immediately. Once the engine is idle that tag is
 gone from the menu entirely — there is nothing left for it to warn about. A token
 lights up in the box exactly when it resolves — the `skill` role for a skill your catalog
 has, the `file-ref` role for a file your workspace has (violet and green under `dark`) — so
