@@ -6,14 +6,14 @@
   </picture>
 </p>
 
-A **terminal coding agent**, built **local-first**: <br>
+A **terminal coding agent**, built with **local models in mind**: <br>
 capable with frontier models, engineered so even small, locally-run LLMs (~4B–35B) deliver.
 
 <p align="center">
   <img src="graphics/demo.gif" alt="Apogee finding and fixing a failing Go test against a local model, with a follow-up instruction queued mid-run and delivered at the next tool boundary">
 </p>
 
-Apogee is a single, cross-platform tool that drops into any IDE's integrated
+Apogee is a single, cross-platform tool that drops into any IDE's integrated 
 terminal — or any standalone terminal — on Windows, macOS, and Linux. It runs
 against any OpenAI-compatible endpoint: a local LLM server (llama.cpp, Ollama,
 LM Studio, vLLM) keeps your code on your machine and needs no API key, and a
@@ -26,7 +26,7 @@ autonomy fenced at the operating-system level rather than on trust.
 Apogee is built on three commitments:
 
 - **A complete agent with a UX that gets out of your way.** The full agentic
-  loop — provider abstraction, a 28-tool suite (file ops, grep, git, terminal,
+  loop — provider abstraction, a 27-tool suite (file ops, grep, git, terminal,
   tests, web, sub-agents, showing you a finished document), an MCP client,
   sessions that survive a crash — inside a terminal UI built with care: type
   your next message while the model streams and queue it into the running task,
@@ -67,15 +67,14 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 
 ## Status
 
-**`v0.12.x` on `main` — pre-production.** The release line was deliberately reset
-from `1.x` to `0.x` (2026-07-23): the old numbering overstated maturity, and under
-SemVer a `0.x` version makes no API-stability promise — the Go API is still allowed
-to move while the tool hardens. That is a statement about the *API*, not about how
-you get the tool: every release now ships prebuilt binaries for all six targets and
-a Homebrew formula installs them — see [Install](#install). One carve-out outlives
-the reset: `go install github.com/airiclenz/apogee/cmd/apogee@main` works, but
-**not** `go install …@latest` — proxy.golang.org retains the retired `v1.x` module
-versions immutably, so `@latest` still resolves to the stale `v1.7.0`.
+**`v0.14.x` on `main` — pre-production.** Under SemVer a `0.x` version makes no
+API-stability promise — the Go API may still move while the tool hardens. That
+says nothing about how you get the tool: every release ships prebuilt binaries
+for all six targets and a Homebrew formula installs them — see
+[Install](#install). One warning:
+`go install github.com/airiclenz/apogee/cmd/apogee@main` works, but **not**
+`go install …@latest` — proxy.golang.org immutably retains retired `v1.x` module
+versions, so `@latest` resolves to the stale `v1.7.0`.
 
 Functionally the loop is complete: full tool suite, MCP client, sub-agents, skills,
 and OS-confined Auto mode on **all three** platforms — Linux landlock, macOS
@@ -87,13 +86,20 @@ unbounded; apogee says so at startup, `apogee probe` answers "what would Auto do
 this box?" without running an agent, and `/confine` is the way out (see
 [Auto mode's blast radius](#auto-modes-blast-radius)).
 
-Newest on `main`: **colour schemes** — every colour on screen comes from a
-28-role scheme file, `dark` and `light` ship in the binary, and `/color-scheme`
-switches, saves or exports one for editing — plus **sub-agents that run in
-parallel** under a per-server cap, a **watched `config.yaml`** where saving the
-file is what applies an edit (with a new `editor:` key naming the program that
-opens it), and type-to-filter in every selector pop-up. Released just before
-those: the [`/settings`](#the-settings-screen--settings) screen,
+Newest on `main`: **apogee can remember your model choice per server** — with
+`remember-model: true`, an explicit `/model` pick is written into that server's
+entry and the next session there starts on it; a launcher-fronted server records
+its Launch profile instead and reloads it at startup, unless a server is already
+running there (ADR 0048). Alongside it: **API keys can live outside the config
+file** — `api-key-cmd:` / `api-key-env:` name a source instead of a token, and
+at startup apogee offers to move a plaintext key into the machine's secret store
+and rewrite the entry itself — plus **delegations on a server of their own**
+(`sub-agents: true` routes every sub-agent there), replies bounded so a thinking
+model cannot reason its way into the context wall, and a retry that survives a
+transient upstream error mid-stream instead of failing the turn. Released just
+before those: colour schemes and `/color-scheme`, sub-agents that run in
+parallel, the watched `config.yaml`, the
+[`/settings`](#the-settings-screen--settings) screen,
 [`apogee headless`](#running-one-prompt--apogee-headless), and scheduled prompts
 (`/schedule`, each firing saving its own browsable session). The mechanism catalogue
 is complete at 21 mechanisms — the predecessor's twenty, all ported, plus
@@ -247,7 +253,7 @@ a typo is visible before you send.
 |---|---|---|
 | `/<skill-id>` | Invoke a skill — type its id anywhere in your message | ✅ rides the queued message |
 | `@<path>` | Hand a workspace file to the model | ✅ rides the queued message |
-| `/skills` | List the discovered skills — id, name and summary | ✅ |
+| `/skills` | List the discovered skills — id, name, summary and where each came from | ✅ |
 | `/version` | Show the apogee version | ✅ |
 | `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total | ✅ |
 | `/confine` | Report or change Auto's blast radius — see [below](#auto-modes-blast-radius) | ✅ report only |
@@ -556,9 +562,9 @@ An entry's `name` is the label `/server` lists it under, the argument
 `/server <name>` takes, the value `server:` points at, and the host name the status
 footer shows while the session is on it — one name for all four jobs, so no two
 entries may share one. `endpoint` is required; `api-key` (or `api-key-cmd` /
-`api-key-env` — exactly one of the three), `model` and `parallel-agents` are optional, as
-is `llama-launcher`, which lets apogee start, switch and stop that server itself —
-[below](#local-servers--llama-launcher).
+`api-key-env` — exactly one of the three), `model`, `parallel-agents` and
+`sub-agents` are optional, as is `llama-launcher`, which lets apogee start,
+switch and stop that server itself — [below](#local-servers--llama-launcher).
 
 **Several sub-agents at once.** When one reply asks for several delegations, apogee
 runs them concurrently — as many at a time as that server's cap allows. Unset, the cap
@@ -574,11 +580,29 @@ server advertises, taken once as the run is composed. A scheduled firing runs at
 width the session it fires beneath is running at, read when it fires — so a `/server`
 switch carries the new server's cap into the next firing.
 
+**Delegations can run on a server of their own.** `sub-agents: true` on one
+entry (a file-only key) sends every delegation there: your conversation stays on
+the session's server while sub-agents fill the flagged one, and each delegated
+run says which model it ran on. If that server's API key cannot be resolved,
+delegations fall back to the session's own server and the reason is reported
+once.
+
 **`server:` keeps itself current.** Every `/server` switch onto a listed entry
 splices `server: <name>` back into the file — that one key, your comments and layout
 untouched — so your next start begins where you left off. A move onto a server the
 list does not name (an `--endpoint` URL, a llama-launcher profile) has no name to
 record and writes nothing.
+
+**And it can remember the model too.** `remember-model: true` (a file-only key,
+off by default) makes an explicit `/model` pick write itself into that entry's
+`model:` key, so your next session on that server starts bound to it. A
+launcher-fronted entry records the Launch profile name in `launch-profile:`
+instead, and an interactive session that starts there loads that profile again —
+unless any server is already running under that launcher, which apogee joins
+rather than replaces. Only an explicit pick or a committed load records: a model
+change the heartbeat merely observed, and the `--model` / `APOGEE_MODEL`
+overrides, never write anything. See
+[ADR 0048](docs/adr/0048-apogee-remembers-the-model-choice-per-server.md).
 
 **The first run asks.** With `server:` unset, apogee starts with **no server
 bound** — no engine constructed, nothing pointed anywhere — opens the `/server`
@@ -661,6 +685,16 @@ session actually needs that server's key — never at startup for entries you do
 use — and the answer is remembered for the rest of the session. A non-zero exit, a
 60-second timeout, empty output, or an unset or empty variable is an **error** naming the
 entry, never a silent keyless request: "no key" is spelled by leaving all three keys out.
+
+**A plaintext key earns an offer to move.** When the machine has a secret store
+apogee can use — the macOS Keychain, or a Secret Service keyring via
+`secret-tool` — startup offers to move each plaintext `api-key:` into it. Taking
+the offer stores the key, reads it back through the very `api-key-cmd:` line
+about to be written, and only on a match rewrites the entry — one line, comments
+and layout untouched. "Not now" asks again next start; "never for this entry"
+writes `plaintext-key-ok: true` beside the key and is not asked again. A machine
+with no usable store — and every unattended `apogee headless` run — gets a notice
+naming the entries and the alternatives instead.
 
 ### Local servers — llama-launcher
 
