@@ -60,7 +60,7 @@ conventions' actionability bar (the closed and accepted remainder of every run i
   cancel-semantics seam worth tracking. (in-band retry run)
 
 - [ ] `verifiedEntrySplice`'s refusal message still says "did not put the key source on the %q entry"
-  (`internal/config/configwrite.go:1602`), now reachable from a model / launch-profile write.
+  (`internal/config/configwrite_keysource.go:280`), now reachable from a model / launch-profile write.
   (remember-model run; the fix waits for plan `2026-08-13 - 07`'s configwrite split)
 
 - [ ] `/model <id>` naming the already-bound model returns early and records nothing

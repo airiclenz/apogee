@@ -455,6 +455,10 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Repointed the open `verifiedEntrySplice` refusal-message issue in `ISSUES.md` at its post-split
+  home (`internal/config/configwrite_keysource.go:280`), replacing the stale
+  `internal/config/configwrite.go:1602` citation left behind by the configwrite split.
+
 - Docs: swept the accept-behaviour prose that predated `runsBareAtAccept` — ADR 0028's decision 7
   carries a dated amendment note, `internal/tui/doc.go` states the argument-taking carve-out and
   now calls `/confine` one of the two argument-taking verbs with a grammar of its own
