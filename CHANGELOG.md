@@ -196,6 +196,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The sub-agent block suites move to `internal/tui/subagentblock_test.go`.** The second carve of
+  the `render_test.go` split lifts the sub-agent framing reflow-safety test (P3.14), the sub-agent
+  group sketch-state suite with its `targetedRender`/`rowWith` click-surface helpers, the
+  delegation suite with `loneDelegation`/`delegateWithPrompt`/`delegateAsked` (the `┊` closer rule,
+  the lone run's group frame, and the expanded delegation's details/prompt framing), and the
+  spanless-delegation grouping test out of `render_test.go`. Pure moves: no test renamed, reordered
+  or edited, the new file carrying only the imports it needs; `render_test.go` drops from 4466 to
+  3532 lines. Tests only — no behavior change.
+
 - **`internal/tui/render_test.go` begins splitting into per-subject test files.** The first carve
   lifts the wrap and rail suites into `internal/tui/wrap_test.go` (`railedWidth`'s floor, the
   absolute width cap, the painter's-measure break, the `clipWrap` row budget, and the sub-agent

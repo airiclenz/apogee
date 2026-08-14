@@ -241,7 +241,10 @@ nothing; every moved test name appears exactly once under `internal/tui/`
 
 ---
 
-## 7. Carve subagentblock_test.go out of render_test.go
+## 7. Carve subagentblock_test.go out of render_test.go — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): banner disposition — the `// ----` banner "Sub-agent framing reflow safety (P3.14)" heads a section whose only test (`TestSubAgentReflowAtSmallWidths`) this item moves, so the banner travelled with it and now opens `subagentblock_test.go`; the sketch-state, delegation and spanless suites sit under the "The tool call block" and ask-user banners, which stay in `render_test.go` with the tests still filed there, so those suites arrive bannerless under their own doc comments (same disposition rule item 6 recorded). No banner text was invented or duplicated.
+NOTES (2026-08-14): `render_test.go`'s import block lost `encoding/json`, which only the moved delegation helpers used; every other import still has callers in the file. The moved bodies are byte-identical to their `HEAD` originals and the residual `render_test.go` is `HEAD` minus exactly the moved ranges and that one import line (verified by reconstruction diff).
 
 **What:** Create `internal/tui/subagentblock_test.go` (~890 lines); move verbatim from
 `render_test.go`: `TestSubAgentReflowAtSmallWidths` (binding — exercises `railedWidth` via
