@@ -230,7 +230,16 @@ still fires when the marker sits within the cap.
 
 **Commit:** `fix(provider): cap error-body reads at 64 KiB`
 
-## 6. State the setsid-escape residual in the teardown claims
+## 6. State the setsid-escape residual in the teardown claims — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): two comments beyond the two named in the item's text were weakened in the same
+files for consistency — the `treeKillTree` constant doc in `exec_teardown.go` ("a cancelled command
+orphans nothing") and the `pgroupTeardown.reap` doc in `exec_pgroup_unix.go` ("does not outlive the
+one-shot call"): both state the same absolute the item exists to correct, and leaving them would have
+left the file self-contradicting.
+NOTES (2026-08-14): the contract's 2026-08-12 amendment line ("does **not** outlive the call, on either
+OS") also gained the residual's qualifier, so the backend-obligation section carries no un-qualified
+claim.
 
 **What:** the docs claim the process group "always holds the whole tree"
 (`internal/tools/exec_pgroup_unix.go` — the `setProcessGroupTeardown` doc comment and the

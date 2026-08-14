@@ -170,6 +170,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Documentation: the process-group teardown claims now state the POSIX setsid-escape residual —
+  the group holds every descendant that has not deliberately left it, and a descendant that calls
+  `setsid`/`setpgid(0,0)` survives the call unsupervised while staying inside any confinement
+  write-fence. Windows is unaffected (its Job Object denies breakaway). No behaviour change.
+
 - **`internal/tools` splits its two over-length files by concern.** `path_safety.go` (407 lines)
   keeps the security aliases, the fenced primitives and the ADR-0049 approved-escape section; its
   READ half — `workspaceRelative`, `readWorkspaceFileBounded`, `readAllBounded`,

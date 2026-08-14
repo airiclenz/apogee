@@ -19,17 +19,24 @@ const (
 	// is reached on Windows when the Job Object could not be created or the assignment was
 	// refused. POSIX never reaches it (see planTreeKill).
 	treeKillLeader
-	// treeKillTree: a container holds the whole tree — a POSIX process group (Setpgid, killed
-	// as the negative PID) or a Windows Job Object (TerminateJobObject) — so one call reaps
-	// the descendants too. This is the contract's intent: a cancelled command orphans nothing.
+	// treeKillTree: a container holds the descendants — a POSIX process group (Setpgid,
+	// killed as the negative PID) or a Windows Job Object (TerminateJobObject) — so one call
+	// reaps them too. This is the contract's intent: a cancelled command orphans nothing the
+	// container still holds. On POSIX a descendant that deliberately left the group (setsid)
+	// is no longer in it and survives the kill; see setProcessGroupTeardown.
 	treeKillTree
 )
 
 // planTreeKill decides how a cancelled run is reaped. started reports whether the process was
 // launched at all (cmd.Process != nil); treeHeld reports whether this platform is holding the
-// whole tree. POSIX passes treeHeld=true unconditionally because the kernel establishes the
+// descendants. POSIX passes treeHeld=true unconditionally because the kernel establishes the
 // process group at fork, before the child can spawn anything; Windows can only assign to its
 // Job Object after CreateProcess returns, so it passes whether that assignment succeeded.
+//
+// treeHeld is about the container, not about escape from it: a POSIX descendant that calls
+// setsid/setpgid(0,0) leaves the group and survives either rung, which is why that residual is
+// documented at setProcessGroupTeardown rather than modelled here. Windows has no counterpart —
+// its job denies breakaway.
 func planTreeKill(started, treeHeld bool) treeKillAction {
 	switch {
 	case !started:

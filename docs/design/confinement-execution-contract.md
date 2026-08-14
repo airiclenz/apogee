@@ -212,8 +212,9 @@ device is not label-fenced.
 The wrapping changes the process tree (`sandbox-exec` is the parent of the real child on macOS; the
 re-exec helper execs-in-place on Linux, preserving the PID; on Windows there is no wrapper process at
 all — §9.2 — but a shell still spawns descendants). A naïve `cmd.Process.Kill()` may leave descendants.
-The contract makes teardown OS-agnostic for the tool: **one container holds the whole tree, and cancel
-kills the container.** What the container *is* is the only per-OS part.
+The contract makes teardown OS-agnostic for the tool: **one container holds the descendants, and cancel
+kills the container.** What the container *is* is the only per-OS part — as is, on POSIX, what a
+descendant can do to leave it (the residual below).
 
 - **Backend obligation (POSIX):** `Confine` sets `cmd.SysProcAttr.Setpgid = true` so the wrapped child
   and its descendants share a process group. The Windows backend sets **no** `SysProcAttr` field other
@@ -227,6 +228,15 @@ kills the container.** What the container *is* is the only per-OS part.
   clean exit either — the one-shot contract holds on all three paths, not two. A `cmd.WaitDelay`
   that expires is now reported (`exec.ErrWaitDelay`) instead of falling through to the leader's own
   exit code, which rendered a wedged drain as a success.
+  **Residual — POSIX only (stated 2026-08-14, security audit PL-1):** a process group holds every
+  descendant that has not *deliberately left it*. A descendant that calls `setsid` / `setpgid(0,0)`
+  becomes its own group leader, so no negative-PID kill aimed at the run's group reaches it: it escapes
+  both `cmd.Cancel` and the clean-exit reap and survives the call, while the tool reports the leader's
+  own exit status. It remains inside whatever write-fence the Confiner installed — changing process
+  group sheds no landlock ruleset and no seatbelt profile — so what is lost is supervision, not
+  confinement. Enforcing against it (a subreaper, descendant tracking) was **rejected**: deliberately
+  backgrounding a process is legitimate `terminal` use. Windows has no counterpart — its Job Object
+  holds a descendant unless the job permits breakaway, which this one does not.
 - **Tool obligation — Windows (Phase 5):** Windows has no process groups, so the container is a **Job
   Object** created before `Start` with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, which the started process is
   assigned to and which `cmd.Cancel` **terminates** (`TerminateJobObject`) instead of killing the leader;
@@ -242,7 +252,7 @@ kills the container.** What the container *is* is the only per-OS part.
     mid-run with nobody left to make the call; every path that started a process terminates the job
     explicitly first, `cmd.Cancel` on the cancelled one and `reap` on the clean one (amended
     2026-08-12, item 18: a process the command deliberately left running does **not** outlive the
-    call, on either OS).
+    call, on either OS — subject, on POSIX, to the setsid residual stated above).
 
 The tool never needs to know *how* the command was wrapped, and the two backends' observable behaviour
 is the same: the container contract abstracts both. The run is governed by the **cmd's own context**

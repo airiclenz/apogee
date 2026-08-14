@@ -179,8 +179,12 @@
 // contract (§2.4): planTreeKill, the treeKillAction it returns, and the processTeardown seam —
 // including the reap that runs when a command completes rather than being cancelled.
 // exec_pgroup_unix.go realises that teardown as a POSIX process group — Setpgid, a
-// negative-PID kill, a bounded WaitDelay — and exec_pgroup_other.go realises it on Windows
-// with a Job Object, the only facility there that holds a whole tree.
+// negative-PID kill, a bounded WaitDelay — which holds every descendant that has not
+// deliberately left it; one that calls setsid escapes the kill and survives the call,
+// unsupervised but still inside any confinement write-fence (an accepted residual, not an
+// enforcement gap). exec_pgroup_other.go realises it on Windows with a Job Object, the only
+// facility there that holds a whole tree — and, breakaway being denied, one with no matching
+// escape.
 // exec_cmdline_unix.go is a no-op because execve takes a real argv;
 // exec_cmdline_other.go hands Windows the raw command line verbatim through
 // SysProcAttr.CmdLine, bypassing the argv joining cmd.exe cannot read.
