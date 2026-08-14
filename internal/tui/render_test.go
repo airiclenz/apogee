@@ -5127,9 +5127,12 @@ func widgetContentRows(t *testing.T, value string, width int) (rows, effWidth in
 // "a-b-c-d" at width 3 (three, it said four). The count now delegates to wrapRowStarts, so the box's
 // height and the rows the accent pass paints on come off one ruler.
 //
-// Tabs are in the table because the count now expands them the way the widget's sanitizer does
-// (expandInputTabs, inputaccent.go): the oracle sets the raw value on a real textarea, which keeps
-// four spaces per tab, so a mirror still measuring the tab as written would come up short here.
+// Tabs are in the table because the count now sanitises each line the way the widget's own sanitizer
+// did (sanitizeInputLine, inputaccent.go): the oracle sets the raw value on a real textarea, which
+// keeps four spaces per tab, so a mirror still measuring the tab as written would come up short here.
+// The runes that sanitizer DROPS — utf8.RuneError and the other control runes — are in the table for
+// the mirror image of that reason: the textarea keeps none of them, so a mirror that measured one
+// would come up long.
 func TestInputContentRowsMirrorsTheWidget(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -5164,6 +5167,7 @@ func TestInputContentRowsMirrorsTheWidget(t *testing.T) {
 		{"a tab at the wrap column", "abcd\tefg", 6},
 		{"a line of nothing but tabs", "\t\t", 5},
 		{"a tab on the second logical line", "abc\n\tdef ghi", 6},
+		{"a replacement character and a control rune", "ab\uFFFDcd\x07ef gh", 5},
 		{"a realistic draft", "/grill-me check @internal/tui/model.go and /code-adit", 20},
 		{"a multi-line draft", "fix the wrap bug\n\nsee @internal/tui/render.go — the mirror under-counts", 24},
 		{"one column", "ab cd", 1},

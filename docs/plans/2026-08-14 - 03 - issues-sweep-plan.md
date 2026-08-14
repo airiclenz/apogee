@@ -233,7 +233,16 @@ non-path backslash string does not trip a home rule.
 **Acceptance:** `go build ./internal/security/ && go test ./internal/security/ -run 'Rules|Dangerous|Normalize'`
 **Commit:** `feat(security): dangerous-rule patterns recognise the Windows home`
 
-## 6. The input-width mirror matches the widget sanitizer in full
+## 6. The input-width mirror matches the widget sanitizer in full — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): one file beyond the item's list — `internal/tui/chromelayout.go` (doc-only): the
+`inputContentRows` contract named `expandInputTabs` by name, which the item's authorized rename
+(`sanitizeInputLine`) falsified; repaired to the new name and its widened rule. No code change.
+NOTES (2026-08-14): the item asks for oracle cases "carrying `utf8.RuneError`", and the obvious ones
+pass against the OLD code by coincidence — a kept `U+FFFD` is one cell wide, so a row still holds the
+same number of runes and the row starts agree. The RuneError cases were therefore chosen for shapes
+where the extra rune actually moves a boundary (a space-group break past it, and a word too wide for
+the row); each new case was verified to FAIL with the drop rule disabled and pass with it on.
 
 **What:** Extend `expandInputTabs` (`internal/tui/inputaccent.go:286`) into a full per-line
 mirror of the widget's default `runeutil.NewSanitizer()` (bubbles v2.1.0,

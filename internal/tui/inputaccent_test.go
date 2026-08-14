@@ -71,11 +71,13 @@ func accentTestModel(t *testing.T, width int, workspace, value string) Model {
 // tripping the hard-word-break, which VS16 makes reachable (that break weighs the last rune with
 // go-runewidth, and U+FE0F weighs nothing there).
 //
-// The tab cases are the reason the oracle's runes are read back OFF the widget rather than taken
-// from the case: what a textarea holds is what its sanitizer let in, and that rewrites each TAB as
-// four spaces. So the widget is asked about the line it actually wrapped, while the mirror is handed
-// the raw line — which is exactly the divergence being pinned, since a mirror that measured the tab
-// as written would wrap a tab-bearing draft where the widget does not.
+// The sanitizer cases are the reason the oracle's runes are read back OFF the widget rather than
+// taken from the case: what a textarea holds is what its sanitizer let in, and that rewrites each
+// TAB as four spaces and drops utf8.RuneError and every other control rune. So the widget is asked
+// about the line it actually wrapped, while the mirror is handed the raw line — which is exactly the
+// divergence being pinned, since a mirror that measured those runes as written would wrap such a
+// draft where the widget does not: a tab weighed as one column instead of four, a dropped rune
+// weighed as a column the widget never drew.
 func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -103,6 +105,14 @@ func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
 		{"a tab at the wrap column", "abcd\tefg", 6},
 		{"a line of nothing but tabs", "\t\t", 5},
 		{"a tab in a draft", "/grill-me\tcheck @internal/tui/model.go", 12},
+		// The runes the sanitizer drops outright: a mirror that kept them would carry a phantom
+		// column per rune and break these lines one glyph early.
+		{"a replacement character ahead of a wrap boundary", "abc\uFFFDdefgh ij", 5},
+		{"replacement characters inside a word too wide for the row", "aa\uFFFDbb\uFFFDcc dd", 4},
+		{"a control rune inside a word", "ab\x07cd efg", 5},
+		{"a control rune at the wrap column", "abcd\x07efg", 5},
+		{"a line of nothing but dropped runes", "\uFFFD\x07", 1},
+		{"dropped runes around a tab", "ab\x07\tcd\uFFFD efgh", 6},
 		{"the acceptance draft", "/grill-me check @internal/tui/model.go and /code-adit", 20},
 	}
 	for _, c := range cases {
@@ -118,7 +128,8 @@ func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
 			got := wrapRowStarts([]rune(c.line), ta.Width())
 
 			// The widget's geometry is addressed in the runes it KEPT, which is the raw line
-			// with its tabs expanded — the same space wrapRowStarts answers in.
+			// sanitised — tabs expanded, dropped runes gone — the same space wrapRowStarts
+			// answers in.
 			runes := []rune(ta.Value())
 
 			want := make([]int, len(got))

@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/mattn/go-runewidth"
 	"github.com/rivo/uniseg"
@@ -209,17 +210,19 @@ func inputCellSpans(measure widthAuthority, value string, width, from, to int) [
 // counts as two cells. The two slices measured are the widget's own operands — the runes already on
 // the row, and the pending word — so the mirror weighs the same text at the same moments it does.
 //
-// TABs are expanded before any of that runs (expandInputTabs), because the widget expands them on
-// the way IN: every write path sanitises its runes, and one tab arrives as four spaces. Measuring
-// the raw tab instead weighs it as a single space-like column and wraps a tab-bearing line where the
-// widget does not. The offsets returned are therefore offsets into the line AS THE WIDGET HOLDS IT —
-// post-expansion — which for every caller in the package is the line handed in, since what they hand
-// over is the widget's own already-sanitised value (runesWidth, cellToRuneOffset in mouse.go).
+// The line is sanitised before any of that runs (sanitizeInputLine), because the widget sanitises on
+// the way IN: every write path passes its runes through one sanitizer, so a tab arrives as four
+// spaces and a control rune or a utf8.RuneError arrives not at all. Measuring the raw rune instead
+// weighs a tab as a single space-like column, and a rune the widget dropped as a column it never
+// drew, and wraps such a line where the widget does not. The offsets returned are therefore offsets
+// into the line AS THE WIDGET HOLDS IT — post-sanitising — which for every caller in the package is
+// the line handed in, since what they hand over is the widget's own already-sanitised value
+// (runesWidth, cellToRuneOffset in mouse.go).
 func wrapRowStarts(line []rune, width int) []int {
 	if width < 1 {
 		width = 1
 	}
-	line = expandInputTabs(line)
+	line = sanitizeInputLine(line)
 	starts := []int{0}
 	consumed := 0 // runes of line already placed on a row
 	wordLen := 0  // the pending word: a run of non-space runes
@@ -263,8 +266,8 @@ func wrapRowStarts(line []rune, width int) []int {
 // It measures no TABs and needs none of the tab arithmetic the transcript side carries: everything
 // weighed here comes from the textarea's own value, which the widget sanitises tabs out of on the
 // way in — see [cellToRuneOffset] (mouse.go) for why that holds on every write path — and a line
-// reaching [wrapRowStarts] from anywhere else has had its tabs expanded the same way first
-// (expandInputTabs).
+// reaching [wrapRowStarts] from anywhere else has been through the same sanitising first
+// (sanitizeInputLine).
 func runesWidth(rs []rune) int {
 	return uniseg.StringWidth(string(rs))
 }
@@ -279,29 +282,60 @@ func runesWidth(rs []rune) int {
 // own oracle.
 const inputTabCells = 4
 
-// expandInputTabs rewrites each TAB in line as the spaces the textarea's sanitizer puts there, so a
-// line is measured as the widget HOLDS it rather than as it was handed over. A line without tabs is
-// returned as-is, unallocated: that is every line the package itself measures — the widget's value
-// cannot hold a tab — so the frame path pays nothing for a case only an outside caller can reach.
-func expandInputTabs(line []rune) []rune {
-	tabs := 0
+// sanitizeInputLine rewrites line the way the textarea rewrote everything ever written into it, so a
+// line is measured as the widget HOLDS it rather than as it was handed over. The widget's rule is
+// runeutil.NewSanitizer's default (bubbles/v2@v2.1.0/internal/runeutil/runeutil.go:26-29, :56-95),
+// and this is the whole of it per line: a utf8.RuneError is dropped, a TAB becomes [inputTabCells]
+// spaces, every other control rune is dropped, and anything else is kept. Mirroring only the tab
+// leaves the mirror one rune out of step with the widget for every rune it drops: the offsets
+// returned index the value the widget HOLDS, so an accent past such a rune is seated on the wrong
+// run of cells — and a utf8.RuneError, one cell wide to the ruler and absent from the widget, moves
+// the wrap itself.
+//
+// '\r' and '\n' are the sanitizer's remaining case (both become '\n') and are deliberately not
+// handled here, because neither can reach a LINE: the widget sanitises BEFORE it splits its input
+// into logical rows (bubbles/v2@v2.1.0/textarea/textarea.go:504, :519-529), so a '\r' has already
+// become a row boundary rather than a rune inside a row, and the callers split on '\n' for the same
+// reason ([inputCellSpans], inputContentRows in chromelayout.go). That the widget's value is
+// sanitised on every write path at all is argued once, from the caret's side, at [cellToRuneOffset]
+// (mouse.go).
+//
+// A line the sanitizer would leave alone is returned as-is, unallocated: that is every line the
+// package itself measures — the widget's value has already been through this — so the frame path
+// pays nothing for a case only an outside caller can reach.
+func sanitizeInputLine(line []rune) []rune {
+	tabs, dropped := 0, 0
 	for _, r := range line {
-		if r == '\t' {
+		switch {
+		case r == '\t':
 			tabs++
+		case sanitizerDropsRune(r):
+			dropped++
 		}
 	}
-	if tabs == 0 {
+	if tabs == 0 && dropped == 0 {
 		return line
 	}
-	out := make([]rune, 0, len(line)+tabs*(inputTabCells-1))
+	out := make([]rune, 0, len(line)+tabs*(inputTabCells-1)-dropped)
 	for _, r := range line {
-		if r == '\t' {
+		switch {
+		case r == '\t':
 			for i := 0; i < inputTabCells; i++ {
 				out = append(out, ' ')
 			}
-			continue
+		case sanitizerDropsRune(r):
+			// Kept by neither the widget nor the mirror.
+		default:
+			out = append(out, r)
 		}
-		out = append(out, r)
 	}
 	return out
+}
+
+// sanitizerDropsRune reports whether the textarea's sanitizer drops r outright instead of keeping or
+// rewriting it: utf8.RuneError, and every control rune it has no replacement for — which is all of
+// them but '\t' (four spaces) and '\r'/'\n' (a row boundary, never a rune within a line — see
+// [sanitizeInputLine]).
+func sanitizerDropsRune(r rune) bool {
+	return r == utf8.RuneError || (r != '\t' && unicode.IsControl(r))
 }

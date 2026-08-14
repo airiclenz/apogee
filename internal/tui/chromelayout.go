@@ -26,8 +26,9 @@ import (
 // The count is deliberately unclamped: [promptEditor.rows] holds it to [minInputRows, maxInputRows],
 // and past that cap the widget scrolls internally rather than the box growing further.
 //
-// TABs are the widget's four spaces here too: wrapRowStarts expands them the way the textarea's own
-// sanitizer does before it measures (expandInputTabs), so this count inherits that with the rest of
+// TABs are the widget's four spaces here too: wrapRowStarts sanitises each line the way the
+// textarea's own sanitizer did before it measures (sanitizeInputLine — which drops utf8.RuneError
+// and the other control runes with the same authority), so this count inherits that with the rest of
 // the wrap.
 //
 // WIDGET MIRROR — deliberately NOT the width authority. This is one of the package's mirrors of a

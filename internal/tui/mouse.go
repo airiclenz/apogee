@@ -253,12 +253,16 @@ func visualSubline(value string, row, start, width int) []rune {
 //
 // A TAB never reaches here, which is why nothing on this path expands one (expandTabs, render.go)
 // before measuring it. The textarea sanitises everything written into it — runeutil.NewSanitizer,
-// whose default rewrites each '\t' as four spaces — and every write path funnels through that one
-// sanitiser: SetValue and InsertString, InsertRune, both paste messages, and the key-press default.
-// A draft therefore cannot HOLD a tab, so the value this reads (and the value the accent overlay
-// reads, inputaccent.go) is tab-free by construction. The tab-measurement defects fixed elsewhere in
-// the package — where text arriving from the model or the disk still carried its tabs past a ruler
-// that counts them as nothing — have no instance on the prompt box's side of the line.
+// whose default rewrites each '\t' as four spaces and drops utf8.RuneError and every other control
+// rune — and every write path funnels through that one sanitiser: SetValue and InsertString,
+// InsertRune, both paste messages, and the key-press default. A draft therefore cannot HOLD a tab —
+// nor a control rune, nor a utf8.RuneError — so the value this reads (and the value the accent
+// overlay reads, inputaccent.go) is tab-free by construction. A line arriving from OUTSIDE the
+// widget carries no such guarantee, which is why the wrap mirror re-applies that whole per-rune rule
+// itself ([sanitizeInputLine], inputaccent.go, where it is stated in full). The tab-measurement
+// defects fixed elsewhere in the package — where text arriving from the model or the disk still
+// carried its tabs past a ruler that counts them as nothing — have no instance on the prompt box's
+// side of the line.
 func cellToRuneOffset(runes []rune, cells int) int {
 	for i := range runes {
 		if runesWidth(runes[:i+1]) > cells {

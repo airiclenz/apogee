@@ -178,6 +178,22 @@ point is a **minor** bump, not a breaking change.
   is unchanged by construction — permits are minted only for disclosed escape targets, so with no
   permit, or with one naming a different path, every call behaves byte-for-byte as before.
 
+- **The prompt box's width mirror sanitises a line exactly as the widget does.** `wrapRowStarts`
+  (`internal/tui/inputaccent.go`) — the mirror of the textarea's own soft-wrap that both sizes the
+  prompt box and seats the inline token accents — expanded TABs the way the widget's sanitizer does
+  but kept the two rune classes that sanitizer DROPS: `utf8.RuneError` and every non-tab control
+  rune. A line reaching the mirror from outside the widget carrying one of those was measured one
+  rune longer than the value the widget holds, so an accent past it was seated on the wrong run of
+  cells, and a `U+FFFD` — one cell wide to the ruler, absent from the widget — could move the wrap
+  itself and the box's row count with it. The step is now the whole per-line rule
+  (`sanitizeInputLine`): a `utf8.RuneError` dropped, a TAB expanded to four spaces, every other
+  control rune dropped, anything else kept. `\r`/`\n` need no per-line handling because the widget
+  folds them into row boundaries before it ever splits its input into lines — an argument now
+  recorded at the mirror's own contract rather than only on the caret path. The two widget-oracle
+  tables (`TestWrapRowStartsMirrorsTheWidget`, `TestInputContentRowsMirrorsTheWidget`) gained cases
+  for both dropped classes. A draft typed into the box can hold none of these runes, so ordinary
+  sessions see no change.
+
 ## [0.14.0] — 2026-08-14
 
 ### Added
