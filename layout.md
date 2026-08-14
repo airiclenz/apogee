@@ -1380,7 +1380,7 @@ spend, and a row of empty cells under the totals would read as one.
 a token count — a fresh session, or a server that omits usage — the pane shows one line of prose
 saying so, with no header row and no columns.
 
-**The pointer does the two things the keyboard has no key for.** A click **outside** the box dismisses
+**The pointer dismisses it, and the wheel scrolls it.** A click **outside** the box dismisses
 the report — and, because the pane is not modal, that click still lands where it was aimed: it seats
 the caret in the prompt or starts a transcript selection exactly as it would have with no report up. A
 click **inside** the box does nothing at all, and is swallowed rather than dragging a selection across
@@ -1389,9 +1389,17 @@ out to more delegates than the pane was granted rows for, clamped at both ends �
 past the last row and land back on the first — and the column header scrolls with them, being a row of
 the list like any other.
 
-**It is the lightest pane in the frame.** No filter, no selection, and `esc` its only key: it is a
-question already answered rather than a decision surface, so the input box behind it stays live and
-every other key goes where it always went. Its verb is safe while the agent works — the pane reads
+**The keyboard scrolls the same rows.** `↑`/`↓` move the window a row and `PgUp`/`PgDn` a whole
+window, through the same window and the same two ends the wheel stops at — the first row, and the
+last FULL one — so a reader with no mouse is never left with a report they cannot see the bottom of,
+and the two ways in cannot disagree about which rows are on the screen. The hint under the rows reads
+`↑/↓ scroll · esc close`. While the report is up the page keys are ITS, not the transcript's: the
+conversation behind the pane is the one list the human is not reading, and a `PgDn` that moved it
+would scroll what is hidden.
+
+**It is the lightest pane in the frame.** No filter, no selection, and no keys but `esc` and those
+four: it is a question already answered rather than a decision surface, so the input box behind it
+stays live and every other key — a printable one included — goes where it always went. Its verb is safe while the agent works — the pane reads
 what the frame already holds and calls nothing — which is exactly when the question gets asked, so
 it is the one pane that can be up beside an approval or ask prompt, seated below it, nearest the
 chrome. In the give-way order it sits between the `/settings` pane and the dropdown: it yields to

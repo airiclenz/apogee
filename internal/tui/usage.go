@@ -26,14 +26,16 @@ import (
 // compaction (whose tokens arrive as a flagged maintenance event the gauge skips and the totals
 // take).
 //
-// It is the lightest pane in the frame: no filter, no selection, no keys of its own but esc. The
-// verb is whileRunning — the pane reads Model state and calls nothing — so it opens over a working
-// agent, which is exactly when the question gets asked.
+// It is the lightest pane in the frame: no filter, no selection, and the only keys it owns are esc
+// and the four that scroll it (usageKey). The verb is whileRunning — the pane reads Model state and
+// calls nothing — so it opens over a working agent, which is exactly when the question gets asked.
 //
 // The POINTER does what the keyboard has no key for (mouse.go): a click outside the box dismisses
-// the report, a click inside it is swallowed rather than starting a selection on the transcript
-// underneath, and the wheel scrolls a session that fanned out to more delegates than the frame can
-// seat rows for. It is a scroll and not a walk, because there is nothing here to select.
+// the report, and a click inside it is swallowed rather than starting a selection on the transcript
+// underneath. The wheel scrolls what ↑/↓ and the page keys scroll — a session that fanned out to
+// more delegates than the frame can seat rows for — through the same window and the same clamp, so
+// the two ways in can never disagree about which rows are on the screen. It is a scroll and not a
+// walk, because there is nothing here to select.
 
 // usagePane is the /usage report overlay's state: whether it is up, and how far its row list is
 // scrolled. The rows themselves are derived at render time from the folds, so there is nothing here
@@ -41,13 +43,13 @@ import (
 // value-copied Model like the picker and the settings pane (ADR 0011).
 type usagePane struct {
 	open bool
-	top  int // the first row the window shows (popupSpec.rowTop) — the wheel's, and nothing else's
+	top  int // the first row the window shows (popupSpec.rowTop) — what the wheel and the scroll keys move
 }
 
-// usageTitle names the pane, and usageHint spells the one key it owns.
+// usageTitle names the pane, and usageHint spells the keys it owns.
 const (
 	usageTitle = "session token usage"
-	usageHint  = "esc close"
+	usageHint  = "↑/↓ scroll · esc close"
 )
 
 // usageEmptyBody is what the pane says when no agent has reported a token count yet — a fresh
@@ -97,7 +99,59 @@ func (m Model) runUsageCommand() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// closeUsagePane dismisses the report. It is the whole of the pane's key handling (handleKey).
+// usageKey is the pane's whole key contract: esc closes the report, ↑/↓ scroll it a row at a time
+// and pgup/pgdown a drawn window at a time. handled is false for every other key, because the pane
+// is NOT modal — it answers a question rather than asking one, so the box behind it stays live and a
+// printable key opens a message exactly as it would with no report up (handleKey).
+//
+// The rows it moves are the ones the frame DREW (usageWindow, mouse.go), which is what makes a key
+// and a wheel notch move the same list by the same arithmetic and stop at the same two ends: the
+// first row, and the last FULL window. A pane the frame could not seat claims neither key — there is
+// nothing on the screen for them to mean anything against, and swallowing pgup there would leave the
+// transcript unscrollable behind a report that is not drawn.
+func (m Model) usageKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
+	if !m.usagePane.open {
+		return false, m, nil
+	}
+	key := msg.String()
+	if key == "esc" {
+		next, cmd := m.closeUsagePane()
+		return true, next, cmd
+	}
+	step, byPage, scrolls := usageScrollStep(key)
+	if !scrolls {
+		return false, m, nil
+	}
+	win, drawn := m.usageWindow()
+	if !drawn {
+		return false, m, nil
+	}
+	shown := win.end - win.start
+	if byPage {
+		step *= max(1, shown)
+	}
+	m.usagePane.top = clampInt(win.start+step, 0, max(0, win.total-shown))
+	return true, m, nil
+}
+
+// usageScrollStep spells how far each scroll key moves the report: one row for the arrows, one
+// window for the page keys — byPage rather than a number, because how big a page is is the frame's
+// answer for this paint and not this table's. ok is false for every key the pane does not scroll on.
+func usageScrollStep(key string) (step int, byPage, ok bool) {
+	switch key {
+	case "up":
+		return -1, false, true
+	case "down":
+		return 1, false, true
+	case "pgup":
+		return -1, true, true
+	case "pgdown":
+		return 1, true, true
+	}
+	return 0, false, false
+}
+
+// closeUsagePane dismisses the report — the esc of the key contract above.
 func (m Model) closeUsagePane() (tea.Model, tea.Cmd) {
 	return m.dismissUsage(), nil
 }

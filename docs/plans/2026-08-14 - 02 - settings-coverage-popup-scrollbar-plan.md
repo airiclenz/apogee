@@ -57,7 +57,16 @@ Depends on item 1.
 
 commit: `feat(tui): every overflowing popup paints the scrollbar`
 
-## 3. Keyboard scrolling for /usage
+## 3. Keyboard scrolling for /usage — ✅ DONE (2026-08-14)
+
+NOTES (2026-08-14): the item's Files list names only model.go / usage.go / usage_test.go, but
+`layout.md`'s `## The /usage popup` section asserted the pane had "`esc` its only key" and that the
+pointer "does the two things the keyboard has no key for" — both false after this item, so that
+section gained the keyboard paragraph and lost the two claims.
+NOTES (2026-08-14): the four scroll keys are NOT claimed when the frame could not seat the pane
+(`usageWindow` reports no window). `usageWheel` claims the notch there because its hit-test already
+proved the pane is drawn; a keypress has no such proof, and swallowing `PgUp` for an undrawn report
+would leave the transcript unscrollable.
 
 **What:** Broaden the `/usage` key claim at `internal/tui/model.go:1092-1098`: while `m.usagePane.open`, claim `esc` (close, as today), `up`/`down` (step `m.usagePane.top` by ∓1) and `pgup`/`pgdown` (step by the drawn window height `win.end-win.start`), clamping exactly like `usageWheel` (`mouse.go:1338-1354`) via `m.usageWindow()` (`mouse.go:1305`); the paint-time clamp at `usage.go:155` backstops overshoot. The claim MUST stay above the global transcript `pgup`/`pgdown` interception at `model.go:1192-1194`. All other keys fall through — the pane stays non-modal; update the comment accordingly. Change `usageHint` (`usage.go:52`) to exactly `"↑/↓ scroll · esc close"`.
 

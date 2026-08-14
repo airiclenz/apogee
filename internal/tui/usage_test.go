@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/airiclenz/apogee/internal/format"
 )
 
@@ -187,5 +189,111 @@ func TestUsageVerbOpensThePaneAndEscCloses(t *testing.T) {
 	}
 	if got := m.input.Value(); got != "half a draft" {
 		t.Errorf("draft = %q, want it untouched — the report is a note, not a modal", got)
+	}
+}
+
+// usageScrollModel opens the report over more delegates than the pane can seat rows for, on a
+// transcript long enough to scroll behind it — the state every keyboard assertion below is about.
+// The two lists are deliberately both scrollable: what the keys must do is move the one in front.
+func usageScrollModel(t *testing.T) Model {
+	t.Helper()
+	m := usageReportModel(t, 40)
+	m.transcript.addUser("a question", nil)
+	for range 40 {
+		m.transcript.commitAssistant("reply paragraph "+strings.Repeat("x", 10), runRef{})
+	}
+	m.refreshViewport()
+	return m
+}
+
+// keyPgUp and keyPgDown are the page keys the report and the transcript both answer to.
+func keyPgUp() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyPgUp} }
+func keyPgDown() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyPgDown} }
+
+// TestUsageKeysScrollTheReport pins the keyboard the wheel used to be alone in doing: ↑/↓ move the
+// window a row, pgup/pgdown a drawn window, and both clamp at the two ends the wheel clamps at — the
+// first row, and the last FULL window. The hint says so on the pane itself.
+func TestUsageKeysScrollTheReport(t *testing.T) {
+	m := usageScrollModel(t)
+	win, ok := m.usageWindow()
+	if !ok {
+		t.Fatal("the report reports no window")
+	}
+	seats := win.end - win.start
+	if win.start != 0 || win.total < 2*seats {
+		t.Fatalf("precondition: window [%d,%d) of %d rows — the report must open at the top with more than a page below it",
+			win.start, win.end, win.total)
+	}
+	if pane := strip(m.renderUsage()); !strings.Contains(pane, "↑/↓ scroll · esc close") {
+		t.Errorf("the pane does not spell the keys it now owns:\n%s", pane)
+	}
+
+	t.Run("the arrows move one row and clamp at the top", func(t *testing.T) {
+		down := step(t, m, keyDown())
+		if down.usagePane.top != 1 {
+			t.Fatalf("top = %d after ↓, want 1", down.usagePane.top)
+		}
+		if back := step(t, step(t, down, keyUp()), keyUp()); back.usagePane.top != 0 {
+			t.Errorf("top = %d after stepping past the first row, want it clamped at 0", back.usagePane.top)
+		}
+	})
+
+	t.Run("the page keys move a window and clamp at the end", func(t *testing.T) {
+		page := step(t, m, keyPgDown())
+		if page.usagePane.top != seats {
+			t.Errorf("top = %d after pgdn, want a full window of %d rows", page.usagePane.top, seats)
+		}
+		if up := step(t, m, keyPgUp()); up.usagePane.top != 0 {
+			t.Errorf("top = %d after pgup at the top, want it clamped at 0", up.usagePane.top)
+		}
+
+		end := m
+		for range win.total {
+			end = step(t, end, keyPgDown())
+		}
+		last, ok := end.usageWindow()
+		if !ok {
+			t.Fatal("the scrolled report reports no window")
+		}
+		if last.end != last.total || last.end-last.start != seats {
+			t.Errorf("paged to the end the window is [%d,%d) of %d rows, want a full %d ending on the last row",
+				last.start, last.end, last.total, seats)
+		}
+	})
+
+	t.Run("esc closes the scrolled report and leaves nothing behind", func(t *testing.T) {
+		closed := step(t, step(t, m, keyDown()), keyEsc())
+		if closed.usagePane.open {
+			t.Error("esc did not close the report")
+		}
+		if closed.usagePane.top != 0 {
+			t.Errorf("top = %d after closing, want the next report opened at the first row", closed.usagePane.top)
+		}
+	})
+}
+
+// TestUsageKeysLeaveTheRestOfTheFrameAlone pins the other half of the claim: the page keys scroll the
+// REPORT rather than the conversation hidden behind it — the transcript owns them again the moment it
+// is closed — and a printable key still reaches the input box, because the pane is not modal.
+func TestUsageKeysLeaveTheRestOfTheFrameAlone(t *testing.T) {
+	m := usageScrollModel(t)
+
+	if control := step(t, m.dismissUsage(), keyPgUp()); !control.detached {
+		t.Fatalf("precondition: with the report closed pgup did not scroll the transcript (offset %d)",
+			control.viewport.YOffset())
+	}
+
+	open := step(t, m, keyPgUp())
+	if open.detached || open.viewport.YOffset() != m.viewport.YOffset() {
+		t.Errorf("pgup moved the transcript behind the report to offset %d (detached=%v), want it untouched at %d",
+			open.viewport.YOffset(), open.detached, m.viewport.YOffset())
+	}
+
+	typed := step(t, m, keyRune('x'))
+	if got := typed.input.Value(); got != "x" {
+		t.Errorf("the box holds %q after typing over the report, want %q — the pane is not modal", got, "x")
+	}
+	if !typed.usagePane.open {
+		t.Error("typing closed the report")
 	}
 }

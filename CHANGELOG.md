@@ -65,6 +65,15 @@ point is a **minor** bump, not a breaking change.
   exactly as it did before — and switching `ui.show-scrollbar` off takes every popup's bar away
   with the transcript's, which is what the key's `/settings` description now says.
 
+- **`/usage` now scrolls from the keyboard.** While the report is up, `↑`/`↓` move its window one
+  row and `PgUp`/`PgDn` a whole window, clamped at the first row and at the last FULL window exactly
+  as the wheel is — both read the window the frame DREW (`usageWindow`), so a key and a notch can
+  never disagree about which rows are on the screen. The page keys are the report's for as long as
+  it is open, claimed ahead of the transcript's own `PgUp`/`PgDn` interception, so a page key never
+  scrolls the conversation hidden behind the pane. The pane stays non-modal — `esc` still closes it
+  and every other key, a printable one included, still reaches the input box — and its hint now
+  reads `↑/↓ scroll · esc close`.
+
 ### Changed
 
 - The confinement execution contract now describes the approved escape as **landed**, not as a

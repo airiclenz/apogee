@@ -1088,13 +1088,18 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// The /usage report claims esc and nothing else (usage.go). It is not modal — it says something
-	// rather than asking, so the box behind it stays live and every other key goes where it always
-	// went — and the claim sits below the overlays above precisely because they ARE modal: a pane
-	// that owns the keyboard answers its own esc first. Below the dropdown for the same reason one
-	// rung down: a menu a keystroke opened is dismissed by the esc the human means for it.
-	if m.usagePane.open && msg.String() == "esc" {
-		return m.closeUsagePane()
+	// The /usage report claims esc and the four keys that scroll it, and nothing else (usage.go). It
+	// is not modal — it says something rather than asking, so the box behind it stays live and every
+	// other key goes where it always went — and the claim sits below the overlays above precisely
+	// because they ARE modal: a pane that owns the keyboard answers its own esc first. Below the
+	// dropdown for the same reason one rung down: a menu a keystroke opened is dismissed by the esc
+	// the human means for it.
+	//
+	// It must stay ABOVE the transcript's PgUp/PgDn interception further down, which claims those two
+	// keys in every state: the pane is what the human is reading, and a page key that scrolled the
+	// conversation hidden BEHIND the report would move the one list they cannot see.
+	if handled, next, cmd := m.usageKey(msg); handled {
+		return next, cmd
 	}
 
 	// The transcript's modal block cursor claims its keys here, ahead of the switch below, because
