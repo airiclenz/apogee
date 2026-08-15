@@ -317,6 +317,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Docs: the command-menu prose in `README.md` now names every busy-safe command. It listed four —
+  `/version`, `/skills`, `/usage` and `/confine`'s status report — while the table below it marks
+  `/effort`, `/schedule` and `/schedule-stop` ✅ too, so the sentence understated what answers while
+  the model works. It now enumerates all seven. `/<skill-id>` and `@<path>` stay out of that
+  sentence deliberately: they ride the queued message rather than answering immediately, and the
+  table already says so. The `ISSUES.md` bullet is removed. Prose only — no behaviour change.
+
 - Docs: the fold-coverage prose no longer counts Events. `internal/tui/doc.go` said "so a twelfth
   Event has to be answered for" and `foldCases`'s comment said the table asserts "there is no
   twelfth" — both stale (`internal/domain/events.go` declares 12 variants and the table carries 13

@@ -145,7 +145,12 @@ Remove the doc.go bullet from `ISSUES.md`'s stall-guard residuals section.
 
 ---
 
-## 5. README busy-command prose catches up with the table
+## 5. README busy-command prose catches up with the table — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): per the dispatch DECISION the README prose edit already present in the working
+tree from the batched attempt was kept as-is (it satisfies the item's Acceptance); this pass
+restored `ISSUES.md` from HEAD and removed only this item's bullet, leaving item 6's bullet for its
+own dispatch.
 
 **What:** The prose sentence at `README.md:243-246` lists the commands that answer while the
 model works as `/version`, `/skills`, `/usage` and `/confine`'s status report — but the

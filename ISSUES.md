@@ -77,10 +77,6 @@ bar.
   must pass untyped string constants to `Agent.SetEffortOverride` (`internal/agent/agent.go:543`).
   [ADR 0031](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md)'s
   Driver-sufficiency invariant is what makes this worth closing.
-- [ ] `README.md:246`'s prose enumerates the commands that answer while the model works — `/version`,
-  `/skills`, `/usage` and `/confine`'s status report — but the table below it marks `/effort`
-  (`README.md:260`) and `/schedule` (`:261`) ✅ too. Pre-existing incompleteness the effort row
-  widened.
 
 ## Parked / deferred work
 
