@@ -314,6 +314,22 @@ Harmony is a *content-stripping* concern only — a harmony model's tool calls a
 _Avoid_: "chain-of-thought" (a prompting technique, not the wire channel), "commentary" (that is
 one harmony sub-channel, not the whole concept).
 
+**Thinking effort** (how hard a model thinks):
+The **emit-side dial** on the [Model profile](#identity-and-shape)'s thinking axis — `off | low |
+medium | high` — forwarded to the server's chat template with the request, where a family that
+reads it thinks less, briefer, or not at all. **Absent means send nothing**: the request stays
+byte-identical, and a model whose template reads no dial simply ignores a sent one. A session can
+overlay the resolved profile with the **`/effort` override** — the human's "keep it brief" intent,
+which rides above whatever profile each model switch resolves and is never persisted. Effort is
+**configuration, not a Mechanism** — it holds under Bypass. The deliberate contrast is the
+[Thinking channel](#identity-and-shape): the channel says what the reasoning stream *is* and how
+apogee parses it; effort says how much of it to ask for. See
+[ADR 0050](docs/adr/0050-thinking-effort-is-a-profile-axis-with-one-canonical-wire-mapping.md).
+_Avoid_: "reasoning effort" as the term (that is a wire kwarg's spelling, not the concept),
+"thinking budget" (llama.cpp's `--reasoning-budget` is a launch flag — launcher territory, not
+this per-request dial), "/thinking" for the command (reserved for the deferred thinking-display
+feature).
+
 ### Turns and stepping
 
 **Turn**:
