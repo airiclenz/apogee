@@ -613,6 +613,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A workspace root that will not open is now reported as `security: workspace root is not
+  accessible`, not as a path escape.** Every Safe I/O primitive pins an `os.Root` at the root
+  before it touches anything, and a failure to pin it — the root deleted or renamed under a live
+  session, its permissions changed, a configured root that is not a directory — was wrapped as
+  `ErrPathEscape`, so the operator and the model were told that a path resolving perfectly well
+  inside the workspace "resolves outside the workspace root", and the one thing that had actually
+  broken went unsaid. The new `security.ErrRootInaccessible` sentinel wraps exactly the
+  could-not-open-the-root branch (`SafeReadFile`, `SafeOpen`, `SafeCopyFileFrom`'s source root,
+  `SafeRename`, and the mutation-root pins `SafeWriteFile` / `SafeRemove` / the approved-escape
+  anchor go through); every path-escape wrap, permit resolution included, stays on `ErrPathEscape`
+  byte-for-byte. The caller sites that key off the escape gained a distinct arm ahead of it:
+  `move_file` stops retrying an unopenable root as copy-then-remove, the copy/move pre-flight no
+  longer reads a stat that never happened as "free to land", a read tool says the root's own words
+  instead of "file not found", the multi-root read scope no longer falls through to an extra root
+  when the workspace could not answer at all, and a workspace context file reports the lost root
+  rather than blaming the file. Tests pin the split in both directions, so the two sentinels
+  cannot be collapsed back into one.
+
 - **`NormalizeURL` now strips the whole trailing run of root dots, so a `DenyHosts` entry cannot be
   dotted around.** The normaliser removed exactly one trailing dot, so `https://denied.example.com../x`
   normalised to the host `denied.example.com.` — a residual dot that matches no deny entry

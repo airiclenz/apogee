@@ -90,7 +90,11 @@ keep judging the same bytes. Record both under `[Unreleased]` in `CHANGELOG.md`.
 
 **Commit:** `fix(security): strip every trailing dot so DenyHosts matching cannot be dotted around`
 
-## 2. A broken workspace root is `ErrRootInaccessible`, not a path escape
+## 2. A broken workspace root is `ErrRootInaccessible`, not a path escape — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the sentinel is declared in `internal/security/pathsafety.go` — literally "beside `ErrPathEscape`" per the item text — a file the item's Files list does not name.
+NOTES (2026-08-15): `internal/tools/path_safety.go` got the one comment line the item asked for and no second alias: the new sentinel is matched as `security.ErrRootInaccessible` at the sites that distinguish it, since the existing alias exists only to keep legacy `ErrPathEscape` checks compiling.
+NOTES (2026-08-15): the new error mode is documented once in `safeio.go`'s package header (it governs every primitive there) rather than repeated in six function doc comments.
 
 **What:** In `internal/security`, an `os.OpenRoot(root)` failure (root deleted, permissions
 changed, not a directory) is today wrapped as `fmt.Errorf("%w: %v", ErrPathEscape, err)` —

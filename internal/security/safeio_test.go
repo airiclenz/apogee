@@ -105,16 +105,87 @@ func TestSafeWriteFile_WritesWithinRoot(t *testing.T) {
 }
 
 // TestSafeWriteFile_RejectsTraversal proves a "../" escape is refused with ErrPathEscape
-// before any fd is opened (the containment check), matching ResolveInRoot's behaviour.
+// before any fd is opened (the containment check), matching ResolveInRoot's behaviour. It
+// also asserts the escape does NOT match ErrRootInaccessible — the reverse half of the
+// pairing TestSafePrimitives_UnopenableRootIsInaccessibleNotAnEscape asserts, so the two
+// sentinels cannot be collapsed back into one later.
 func TestSafeWriteFile_RejectsTraversal(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	if err := SafeWriteFile(root, "../escape.txt", []byte("x"), 0o644, ""); !errors.Is(err, ErrPathEscape) {
+	err := SafeWriteFile(root, "../escape.txt", []byte("x"), 0o644, "")
+	if !errors.Is(err, ErrPathEscape) {
 		t.Fatalf("traversal write err = %v, want ErrPathEscape", err)
+	}
+	if errors.Is(err, ErrRootInaccessible) {
+		t.Fatalf("traversal write err = %v, want it NOT to match ErrRootInaccessible (the root is fine, the path escaped)", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(filepath.Dir(root), "escape.txt")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("traversal write escaped the fence (stat err = %v)", statErr)
+	}
+}
+
+// TestSafePrimitives_UnopenableRootIsInaccessibleNotAnEscape pins the split between the two
+// path sentinels at every primitive that pins a root. When the ROOT itself will not open — it
+// was deleted, or the name is not a directory — the caller's argument was never judged, so the
+// answer is ErrRootInaccessible and never ErrPathEscape: a caller matching only the escape
+// would tell the operator (and the model) that a perfectly good path resolves outside the
+// workspace, and the one thing that actually broke would go unsaid.
+func TestSafePrimitives_UnopenableRootIsInaccessibleNotAnEscape(t *testing.T) {
+	t.Parallel()
+
+	roots := []struct {
+		name string
+		make func(t *testing.T) string
+	}{
+		{
+			name: "root does not exist",
+			make: func(t *testing.T) string {
+				t.Helper()
+				return filepath.Join(t.TempDir(), "withdrawn")
+			},
+		},
+		{
+			name: "root is a file",
+			make: func(t *testing.T) string {
+				t.Helper()
+				path := filepath.Join(t.TempDir(), "not-a-directory")
+				if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+					t.Fatalf("setup: %v", err)
+				}
+				return path
+			},
+		},
+	}
+	primitives := []struct {
+		name string
+		call func(root string) error
+	}{
+		{"SafeReadFile", func(root string) error { _, err := SafeReadFile(root, "note.txt"); return err }},
+		{"SafeOpen", func(root string) error { _, err := SafeOpen(root, "note.txt"); return err }},
+		{"SafeWriteFile", func(root string) error {
+			return SafeWriteFile(root, "note.txt", []byte("x"), 0o644, "")
+		}},
+		{"SafeRename", func(root string) error { return SafeRename(root, "note.txt", "moved.txt") }},
+		{"SafeRemove", func(root string) error { return SafeRemove(root, "note.txt", "") }},
+		{"SafeCopyFile", func(root string) error { return SafeCopyFile(root, "note.txt", "copy.txt", "") }},
+	}
+
+	for _, rootCase := range roots {
+		for _, primitive := range primitives {
+			t.Run(rootCase.name+"/"+primitive.name, func(t *testing.T) {
+				t.Parallel()
+
+				err := primitive.call(rootCase.make(t))
+
+				if !errors.Is(err, ErrRootInaccessible) {
+					t.Fatalf("err = %v, want ErrRootInaccessible", err)
+				}
+				if errors.Is(err, ErrPathEscape) {
+					t.Fatalf("err = %v, want it NOT to match ErrPathEscape (nothing escaped — the root would not open)", err)
+				}
+			})
+		}
 	}
 }
 

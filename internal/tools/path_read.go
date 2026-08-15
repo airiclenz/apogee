@@ -93,7 +93,14 @@ func readFileErrorMessage(err error, path string) string {
 // as "not found" reads to the model as a missing file and invites a retry, hiding the one
 // thing the host wants said out loud. Any other error keeps the caller's own phrasing for an
 // absent path, which differs per tool ("file not found", "directory not found").
+//
+// A workspace root that will not open is answered in its OWN words, ahead of both: the file
+// the model named may well exist, and "file not found" would send it hunting for a path while
+// the real fault — a root deleted or made unreadable under the session — goes unsaid.
 func escapeOrMessage(err error, absent string) string {
+	if errors.Is(err, security.ErrRootInaccessible) {
+		return err.Error()
+	}
 	if errors.Is(err, ErrPathEscape) {
 		return err.Error()
 	}
@@ -159,10 +166,17 @@ func (s readScope) resolve(input string) (root, resolved string, err error) {
 // returns that root beside the handle. A containment refusal falls through to the next root;
 // a genuine I/O failure under a root that DOES contain the path is returned as it is, so a
 // missing file is never disguised as an escape (nor an escape as a missing file).
+//
+// A workspace root that will not open is not a containment refusal and does NOT fall through:
+// the workspace could not answer the question at all, so an extra root that happened to accept
+// the path would silently substitute a different file for the one the caller asked about.
 func (s readScope) open(input string) (*os.File, string, error) {
 	f, err := safeOpen(input, s.root)
 	if err == nil {
 		return f, s.root, nil
+	}
+	if errors.Is(err, security.ErrRootInaccessible) {
+		return nil, "", err
 	}
 	if !errors.Is(err, ErrPathEscape) {
 		return nil, "", err

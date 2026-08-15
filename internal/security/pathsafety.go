@@ -16,6 +16,15 @@ import (
 // workspace" message rather than leaking the resolved absolute path's structure.
 var ErrPathEscape = errors.New("security: path resolves outside the workspace root")
 
+// ErrRootInaccessible is returned when the ROOT ITSELF cannot be opened — it was deleted or
+// renamed, its permissions changed, or the name is not a directory. It is deliberately NOT
+// ErrPathEscape: nothing escaped anything, and the caller's path may be perfectly fine, so
+// reporting it as an escape tells the operator (and the model) to fix an argument that is not
+// the problem and hides the one thing that is. Callers that distinguish the two match this
+// first and render the root's own words; callers that only print the error say the true thing
+// either way.
+var ErrRootInaccessible = errors.New("security: workspace root is not accessible")
+
 // ResolveInRoot resolves input (relative to root, or absolute) to a real path and
 // confirms it stays within root, following symlinks so an in-workspace symlink to an
 // outside target is rejected (a faithful port of the TS oracle's path-safety). A

@@ -50,6 +50,12 @@ import (
 // out-of-root absolute paths via the rootRelative containment check below. They never
 // widen the fence.
 //
+// A ROOT THAT WILL NOT OPEN is a different answer from a path that escaped, and every
+// primitive here gives it: pinning the root can fail on its own (the root deleted, its
+// permissions changed, a name that is not a directory), and that failure returns an error
+// wrapping ErrRootInaccessible (pathsafety.go), never ErrPathEscape. The argument was never
+// judged in that case, so calling it an escape would send the caller after a path that is fine.
+//
 // SYMLINK POLICY — what os.Root does NOT decide. os.Root judges one question only: does
 // resolution leave the root. A symlink pointing INSIDE the root is therefore followed, and
 // following it silently moves the operation somewhere the argument never named — an in-root
@@ -341,7 +347,7 @@ func SafeReadFile(root, input string) ([]byte, error) {
 	}
 	r, err := os.OpenRoot(root)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrPathEscape, err)
+		return nil, fmt.Errorf("%w: %v", ErrRootInaccessible, err)
 	}
 	defer r.Close()
 
@@ -369,7 +375,7 @@ func SafeOpen(root, input string) (*os.File, error) {
 	}
 	r, err := os.OpenRoot(root)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrPathEscape, err)
+		return nil, fmt.Errorf("%w: %v", ErrRootInaccessible, err)
 	}
 	defer r.Close()
 
@@ -428,7 +434,7 @@ func SafeCopyFileFrom(srcRoot, srcInput, dstRoot, dstInput, permitted string) er
 	defer dr.Close()
 	sr, err := os.OpenRoot(srcRoot)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrPathEscape, err)
+		return fmt.Errorf("%w: %v", ErrRootInaccessible, err)
 	}
 	defer sr.Close()
 
@@ -558,7 +564,7 @@ func SafeRename(root, oldInput, newInput string) error {
 	}
 	r, err := os.OpenRoot(root)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrPathEscape, err)
+		return fmt.Errorf("%w: %v", ErrRootInaccessible, err)
 	}
 	defer r.Close()
 

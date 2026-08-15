@@ -58,8 +58,14 @@ func loadContextFiles(workspaceDir string, names []string) []contextFile {
 	for _, name := range names {
 		data, err := readContextFile(workspaceDir, name)
 		switch {
-		// The escape case LEADS so a refusal can never be mistaken for absence and dropped in
-		// silence: a hostile repo's escaping symlink must cost the user a visible notice.
+		// An unopenable workspace root LEADS: it is the one failure that will hit every name in
+		// the list, and reporting it in the escape's words would blame the file rather than the
+		// root the session lost.
+		case errors.Is(err, security.ErrRootInaccessible):
+			files = append(files, contextFile{name: name, err: err})
+		// The escape case leads the rest so a refusal can never be mistaken for absence and
+		// dropped in silence: a hostile repo's escaping symlink must cost the user a visible
+		// notice.
 		case errors.Is(err, security.ErrPathEscape):
 			files = append(files, contextFile{name: name, err: err})
 		case errors.Is(err, fs.ErrNotExist):

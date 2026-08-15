@@ -221,6 +221,12 @@ func (t *MoveFile) move(ctx context.Context, args fileOpsArgs) string {
 	if errors.Is(err, security.ErrSymlinkedParent) {
 		return err.Error()
 	}
+	// A root that would not open is terminal too, and it comes FIRST because it is not a fence
+	// refusal at all: the copy-then-remove fallback runs through that same unopenable root, so
+	// retrying it would only restate the failure in the escape's words.
+	if errors.Is(err, security.ErrRootInaccessible) {
+		return err.Error()
+	}
 	if errors.Is(err, ErrPathEscape) && permitted == "" {
 		return err.Error()
 	}
@@ -283,6 +289,10 @@ func checkFileOpsPathsFrom(ctx context.Context, args fileOpsArgs, sourceRoot, de
 
 	destination, err := statWriteTarget(ctx, args.Destination, destinationRoot)
 	switch {
+	// A root that will not open leads, ahead of both the escape arm and the free-to-land arm:
+	// a stat that never reached the destination says nothing about whether something is there.
+	case errors.Is(err, security.ErrRootInaccessible):
+		return err.Error()
 	case errors.Is(err, ErrPathEscape):
 		return err.Error()
 	case err != nil:

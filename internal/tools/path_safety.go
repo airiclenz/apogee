@@ -18,6 +18,9 @@ import (
 // ErrPathEscape is returned when a tool argument resolves to a path outside the
 // sandbox root. It is the security guard's sentinel, re-exported here so existing
 // errors.Is(err, ErrPathEscape) checks in the tools and their tests keep matching.
+// Its counterpart security.ErrRootInaccessible — the ROOT itself would not open, which
+// says nothing about the argument — is matched by its own qualified name at the few
+// sites that distinguish the two, always ahead of this one.
 var ErrPathEscape = security.ErrPathEscape
 
 // resolveInRoot resolves input within root via the shared path-safety guard, returning

@@ -77,7 +77,7 @@ func openMutationRoot(root, input, permitted string) (*os.Root, string, error) {
 	if err == nil {
 		r, openErr := os.OpenRoot(root)
 		if openErr != nil {
-			return nil, "", fmt.Errorf("%w: %v", ErrPathEscape, openErr)
+			return nil, "", fmt.Errorf("%w: %v", ErrRootInaccessible, openErr)
 		}
 		return r, rel, nil
 	}
@@ -119,7 +119,7 @@ func openPermittedRoot(root, input, permitted string) (*os.Root, string, error) 
 	}
 	r, err := os.OpenRoot(anchor)
 	if err != nil {
-		return nil, "", fmt.Errorf("%w: %v", ErrPathEscape, err)
+		return nil, "", fmt.Errorf("%w: %v", ErrRootInaccessible, err)
 	}
 	if err := refusePermittedSymlinkTarget(r, rel, target); err != nil {
 		_ = r.Close()
