@@ -41,6 +41,30 @@ The still-open findings the render_test.go split left, under the conventions' ac
   `internal/tui/model_test.go:1` (4916 lines), `internal/tui/settings_test.go:1` (3217) and
   `internal/tui/mouse_test.go:1` (3168). Same carve treatment; out of this plan's scope.
 
+### Run residuals — open (2026-08-15, residuals + response-reserve sweep)
+
+The still-open findings that run left, under the conventions' actionability bar.
+
+- [ ] Both shipped scheme files still call `warning`'s first consumer "the status line's 'quiet'
+  suffix" (`internal/scheme/schemes/dark.yaml:28`, `internal/scheme/schemes/light.yaml:27`); the
+  status line renders it as a quiet *qualifier* before the activity clock, the form
+  `internal/scheme/scheme.go:44` now carries.
+- [ ] `internal/tui/blockstate.go:1` has no `blockstate_test.go` — the only free 1:1 test-file name
+  left among the two TUI suites' sources. Pre-existing.
+- [ ] `internal/context.Allocate`'s own unset guard (`internal/context/budget.go:76`,
+  `fraction <= 0 || fraction >= 1`) lets NaN through for a non-config caller; the config-path
+  validator closes only that path.
+- [ ] The kind-projection map at `cmd/apogee/settingsrows_test.go:409` omits `KindFloat` (as it
+  already omits `KindText`/`KindScheme`), and the row-level loop above it asserts through
+  `settingKind()`, so it is tautological — the projection for the float kind has only indirect
+  coverage.
+- [ ] The `response-reserve:` rebind sites carry no reserve-specific test although their
+  `context-window:` / `max-output-tokens:` analogues have one (`cmd/apogee/schedule_test.go:345`,
+  `cmd/apogee/delegation_test.go:90`). Related: an edit that moves only the bound entry's
+  `response-reserve:` does not ride a beat rebind — `apogee.RebindSpec`
+  (`internal/agent/rebind.go:66`) carries no share — the same gap `max-output-tokens:` had before
+  its ceiling field.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
