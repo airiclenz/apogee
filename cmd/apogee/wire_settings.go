@@ -330,33 +330,40 @@ func (s *liveSettings) setContextFileNames(names []string) bool {
 // human deleted while the session was on it — and an entry that has DROPPED one resolves back to
 // what answers without it: the top-level key for the window, the engine's own derivation for the cap.
 //
-// It reports whether that re-derivation MOVED either token bound this session is held to — the
+// It reports whether that re-derivation MOVED any of the three bounds this session is held to — the
 // RESOLVED answers, compared across the install rather than the entry's own fields. That is what the
 // caller's ride turns on (applySettingFor's `servers` case): a latch nobody re-reads describes the
 // session only from the next rebind onwards, so an edit that moves one has to drive one, and an edit
-// that moves neither must not. Resolved-not-raw is what makes "moves neither" honest for the window:
+// that moves none must not. Resolved-not-raw is what makes "moves none" honest for the window:
 // an entry that drops a 65,536 pin onto a top-level key already saying 65,536 has changed the file
 // without changing this session's window. For the CAP the resolved answer is the entry's own field —
 // ADR 0046 grew no top-level key to fall back to — so the two comparisons read differently while
-// asking one question.
+// asking one question. The SHARE compares the entry's own override for a third reason: the top-level
+// `response-reserve:` key it resolves against is file-only and cannot move mid-session (pinnedReserve
+// has no setter), so the raw and resolved answers part only where an entry DROPS an override the
+// top-level key already matches — and there this errs toward riding, which reinstalls the number the
+// session already holds rather than leaving a moved share waiting for the next bind.
 func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	window, outputCap := config.ResolveContextWindow(s.entryWindow, s.pinnedWindow), s.entryCap
+	reserve := s.entryReserve
 	s.servers = servers
 	for _, e := range servers {
 		if e.Name != "" && e.Name == s.entryName {
 			s.entryWindow, s.entryCap = e.ContextWindow, e.MaxOutputTokens
 			// The re-read entry's own share travels with the two bounds so the next bind, move or
-			// Firing divides this server's window the way the file says NOW. It is deliberately not
-			// part of the moved-answer below: a rebind carries no share (apogee.RebindSpec states
-			// none), so an edit that moves only this reaches the engine at the next of those three
-			// rather than through the ride this return value drives.
+			// Firing divides this server's window the way the file says NOW — and it is part of the
+			// moved-answer below, because a rebind now carries the share too
+			// (apogee.RebindSpec.ResponseReserveFraction). An edit that moves only this one is in
+			// force the moment it commits, through the ride this return value drives, rather than
+			// waiting for whichever of those three comes first.
 			s.entryReserve = e.ResponseReserve
 			break
 		}
 	}
-	return config.ResolveContextWindow(s.entryWindow, s.pinnedWindow) != window || s.entryCap != outputCap
+	return config.ResolveContextWindow(s.entryWindow, s.pinnedWindow) != window ||
+		s.entryCap != outputCap || s.entryReserve != reserve
 }
 
 // setMechanisms installs a re-read `mechanisms:` block: the validated enabled ids and the block
@@ -665,16 +672,16 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			if err != nil {
 				return "", err
 			}
-			// The rest of it is two numbers the engine is already holding: the window the BOUND entry
-			// pins (ADR 0045 decision 3) and the reply ceiling it pins beside it (ADR 0046). Installing
-			// those on the latches alone would leave an edited bound describing the session only from
-			// the next rebind onwards — the next beat that happens to observe a change, seconds or
-			// minutes away — so this key rides the rebind exactly as the top-level `context-window:`
-			// key above does, through the same door, for the same reason: neither pin has an engine
-			// setter of its own.
+			// The rest of it is three numbers the engine is already holding: the window the BOUND entry
+			// pins (ADR 0045 decision 3), the reply ceiling it pins beside it (ADR 0046) and the share
+			// of that window it holds back for the reply. Installing those on the latches alone would
+			// leave an edited bound describing the session only from the next rebind onwards — the next
+			// beat that happens to observe a change, seconds or minutes away — so this key rides the
+			// rebind exactly as the top-level `context-window:` key above does, through the same door,
+			// for the same reason: not one of the three has an engine setter of its own.
 			//
-			// Only when a resolved bound actually MOVED, though — EITHER of them, since both ride the
-			// one spec and one ride carries both. A rebind is not free: it re-resolves every per-model
+			// Only when a resolved bound actually MOVED, though — ANY of them, since all three ride the
+			// one spec and one ride carries them all. A rebind is not free: it re-resolves every per-model
 			// binding, resets the token estimator and the compaction latch, and is idle-only, so an
 			// edit to some OTHER entry that drove one would refuse mid-Exchange to install numbers
 			// nobody changed. And a Driver that composed no rebind to ride installs the list and stands
@@ -1010,6 +1017,10 @@ func settingBool(key, value string) (bool, error) {
 //     the zero that means "derive the cap again" rather than as silence. The spec's field is a
 //     pointer so silence is still expressible; this resolver simply never has anything to be silent
 //     about, since it always knows what the bound entry says;
+//   - the response-reserve share, for the ceiling's reason and on the ceiling's terms: the split is
+//     not per-model either, has no engine setter of its own, and is re-stated on EVERY spec so a
+//     `response-reserve:` edited on the bound entry is in force at once — an edit that DROPS the
+//     override arriving as the stated 0 that hands the split back to apogee's own default;
 //   - the Model profile, because `model-profiles:` keys on the model name and the shipped shape
 //     table matches on it too (ADR 0044) — the shape a model speaks the wire in travels with the
 //     model, so it rides the same atomic Rebind as the prompt and the Mechanisms.
@@ -1057,12 +1068,19 @@ func rebindSpecFor(
 		notices = append(notices, notice)
 	}
 
+	// The share the bound entry resolves to, which rebindInputs already wrote onto the copy this
+	// resolver was handed. Taken into a local because the spec states it by pointer, the ceiling's
+	// contract: nil would mean "the current share stands", and this resolver always has something to
+	// say — including the 0 that says the override is gone and apogee's own default divides again.
+	reserve := next.ResponseReserve
+
 	return apogee.RebindSpec{
-		Model:            model,
-		SystemPrompt:     sysPrompt,
-		MaxContextTokens: bound,
-		MaxOutputTokens:  &outputCap,
-		EnableMechanisms: enable,
-		Profile:          profile,
+		Model:                   model,
+		SystemPrompt:            sysPrompt,
+		MaxContextTokens:        bound,
+		MaxOutputTokens:         &outputCap,
+		ResponseReserveFraction: &reserve,
+		EnableMechanisms:        enable,
+		Profile:                 profile,
 	}, notices, nil
 }

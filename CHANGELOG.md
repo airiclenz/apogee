@@ -10,6 +10,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A `response-reserve:` edited on the bound `servers:` entry now rides the rebind, in force the
+  moment it commits.** The re-read already installed the entry's share on the live latch, but the
+  ride a `servers:` commit drives asked only whether the window or the reply ceiling had moved — so
+  a share edited on the server this session is on described the session only from the next bind,
+  `/server` move or scheduled Firing onwards, seconds or minutes away, while the two bounds edited
+  in the same block of the same file were live at once. `liveSettings.setServers` now reports a
+  moved share as the third arm of that condition, and the composition root's `rebindSpecFor` states
+  the resolved share on every spec it builds (`RebindSpec.ResponseReserveFraction`, the field the
+  engine half added) — so dropping the override is the same act as stating one: the stated `0` hands
+  the split back to apogee's own default share without waiting for a bind. The TOP-LEVEL
+  `response-reserve:` key stays file-only for a running session by design, and a `/set` of it is
+  still refused by name.
+
 - **A `RebindSpec` can now carry the response-reserve share, so a live edit of it reaches the
   engine.** The reply ceiling already rode the rebind's atomic commit because `max-output-tokens:`
   has no engine setter of its own; `response-reserve:` has exactly the same gap and had no field to

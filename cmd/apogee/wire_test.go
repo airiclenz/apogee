@@ -4505,6 +4505,207 @@ func TestApplySettingServersDoesNotRebindForACapEditThatMovesNothing(t *testing.
 	}
 }
 
+// The share that DIVIDES that window is the third bound the bound entry decides, and it was the last
+// one still waiting: the re-read installed it on the latch, but `RebindSpec` carried no share, so a
+// `response-reserve:` edited on the entry this session is on reached the engine only at the next bind,
+// `/server` move or scheduled Firing — while the window and the ceiling edited in the same block of
+// the same file were in force the moment they committed. It rides now, on the same spec through the
+// same door, and dropping the override is the same act: the stated 0 that hands the split back to
+// apogee's own default is in force at once, which is why the spec's field is a pointer and this
+// resolver always fills it in.
+func TestApplySettingServersRidesTheRebindForTheBoundEntrysResponseReserve(t *testing.T) {
+	t.Parallel()
+
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	path := filepath.Join(roots.config, "config.yaml")
+	write := func(share string) {
+		t.Helper()
+		body := "servers:\n  - name: here\n    endpoint: http://127.0.0.1:1111\n" + share
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+	}
+
+	// The holder as a startup bind onto `here` leaves it: that entry's own quarter-window share, the
+	// top-level window key, and a beat that has since reported what the server advertises.
+	launchOpts := config.Options{ContextWindow: 16384, HostAlias: "here", StartupResponseReserve: 0.25}
+	live := newLiveSettings(launchOpts, nil)
+	live.observe(131072)
+
+	// The rebind closure the composition root wires: it re-resolves through the holder, so the spec it
+	// builds is what the engine would be handed.
+	var spec apogee.RebindSpec
+	drives := 0
+	rebind := func(model string, window int) (tui.RebindResult, error) {
+		drives++
+		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
+		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
+		if err != nil {
+			return tui.RebindResult{}, err
+		}
+		spec = got
+		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
+	}
+	apply := applySettingFor(settingsApplier{
+		engine:     &applySettingSpy{},
+		live:       live,
+		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
+		rebind:     rebind,
+		configPath: path,
+	})
+
+	write("    response-reserve: 0.35\n")
+	if _, err := apply("servers", ""); err != nil {
+		t.Fatalf("apply servers: %v", err)
+	}
+	if drives != 1 {
+		t.Fatalf("rebind drives = %d, want 1: the edited share must not wait for the next bind", drives)
+	}
+	if spec.ResponseReserveFraction == nil {
+		t.Fatalf("RebindSpec.ResponseReserveFraction is nil; want the edited share stated on the spec")
+	}
+	if *spec.ResponseReserveFraction != 0.35 {
+		t.Errorf("RebindSpec.ResponseReserveFraction = %v; want the edited 0.35 in force at once",
+			*spec.ResponseReserveFraction)
+	}
+	// The other two bounds are untouched throughout, which is what makes this the SHARE's own arm of
+	// the ride condition rather than the window's or the ceiling's firing for it.
+	if spec.MaxContextTokens != 16384 {
+		t.Errorf("RebindSpec.MaxContextTokens = %d; want the unmoved top-level 16384", spec.MaxContextTokens)
+	}
+	if spec.MaxOutputTokens == nil || *spec.MaxOutputTokens != 0 {
+		t.Errorf("RebindSpec.MaxOutputTokens = %v; want the unmoved 0 this entry never pinned",
+			spec.MaxOutputTokens)
+	}
+
+	write("")
+	if _, err := apply("servers", ""); err != nil {
+		t.Fatalf("apply servers with the share removed: %v", err)
+	}
+	if drives != 2 {
+		t.Fatalf("rebind drives = %d, want 2: dropping the share moves it as much as stating one", drives)
+	}
+	if spec.ResponseReserveFraction == nil || *spec.ResponseReserveFraction != 0 {
+		t.Errorf("RebindSpec.ResponseReserveFraction = %v; want the stated 0 that hands the split back "+
+			"to apogee's own default share", spec.ResponseReserveFraction)
+	}
+}
+
+// And the other side of the share's ride, the guard the two bounds beside it already state: a
+// `servers:` edit that leaves this session's split exactly where it was must not rebind for it. The
+// list still installs; only the ride is conditional.
+func TestApplySettingServersDoesNotRebindForAReserveEditThatMovesNothing(t *testing.T) {
+	t.Parallel()
+
+	const bound = "servers:\n  - name: here\n    endpoint: http://127.0.0.1:1111\n"
+	tests := []struct {
+		name         string
+		entryReserve float64
+		list         string
+		wantReserve  float64
+	}{
+		{
+			name:         "a share edited on an entry this session is not on",
+			entryReserve: 0.25,
+			list: bound + "    response-reserve: 0.25\n  - name: elsewhere\n" +
+				"    endpoint: http://127.0.0.1:2222\n    response-reserve: 0.4\n",
+			wantReserve: 0.25,
+		},
+		{
+			name:         "a share restating the number already in force",
+			entryReserve: 0.25,
+			list:         bound + "    response-reserve: 0.25\n",
+			wantReserve:  0.25,
+		},
+		{
+			name:         "an entry that stated no share and still states none",
+			entryReserve: 0,
+			list:         bound + "    parallel-agents: 5\n",
+			wantReserve:  0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.list), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			live := newLiveSettings(config.Options{
+				HostAlias: "here", StartupResponseReserve: tt.entryReserve,
+			}, nil)
+			probe := &rebindProbe{}
+			apply := applySettingFor(settingsApplier{
+				engine:     &applySettingSpy{},
+				live:       live,
+				binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
+				rebind:     probe.rebind,
+				configPath: path,
+			})
+
+			if _, err := apply("servers", ""); err != nil {
+				t.Fatalf("apply servers: %v", err)
+			}
+			if len(probe.calls) != 0 {
+				t.Errorf("rebind drives = %+v, want none: this edit moved no bound this session holds",
+					probe.calls)
+			}
+			if len(live.serverList()) == 0 {
+				t.Error("the re-read list was not installed: the list applies whether or not a ride does")
+			}
+			base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
+			if base.ResponseReserve != tt.wantReserve {
+				t.Errorf("the next rebind's share = %v; want the unchanged %v",
+					base.ResponseReserve, tt.wantReserve)
+			}
+		})
+	}
+}
+
+// The TOP-LEVEL `response-reserve:` key is the deliberate counter-case to the ride above: the pane
+// offers it (a registry row like any other) and the write puts it in the file, but nothing applies it
+// to a session already running — the holder latches it at construction and grows no setter, because
+// the share a session divides its window by belongs to the server it is BOUND to and the entry
+// override is the live door. So the dispatcher refuses it by name, the same sentence every key
+// without a live seam gets, and the share the next rebind resolves is exactly the one the session
+// launched with. This pins current behaviour; it is not a defect waiting for a seam.
+func TestApplySettingRefusesTheTopLevelResponseReserve(t *testing.T) {
+	t.Parallel()
+
+	live := newLiveSettings(config.Options{HostAlias: "here", StartupResponseReserve: 0.25}, nil)
+	probe := &rebindProbe{}
+	spy := &applySettingSpy{}
+	apply := applySettingFor(settingsApplier{
+		engine:     spy,
+		live:       live,
+		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
+		rebind:     probe.rebind,
+		configPath: filepath.Join(t.TempDir(), "config.yaml"),
+	})
+
+	note, err := apply("response-reserve", "0.35")
+	if err == nil {
+		t.Fatalf("apply response-reserve: want a refusal naming the key, got note %q", note)
+	}
+	if !strings.Contains(err.Error(), "response-reserve") {
+		t.Errorf("error = %q, want it to name the key it refused", err)
+	}
+	if len(probe.calls) != 0 {
+		t.Errorf("a refused key still drove a rebind: %+v", probe.calls)
+	}
+	if spy.drove() != 0 {
+		t.Errorf("a refused key still drove an engine seam: %+v", spy)
+	}
+	base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
+	if base.ResponseReserve != 0.25 {
+		t.Errorf("the next rebind's share = %v; want the launch share 0.25, untouched by the refusal",
+			base.ResponseReserve)
+	}
+}
+
 // The three bounds the entry decides reach the engine through the Config the Agent is CONSTRUCTED
 // from — not through a push afterwards, because at a bind there is nothing yet to push at. That
 // Config is written onto a copy no caller keeps, which is what serverBinder.build exists for: the

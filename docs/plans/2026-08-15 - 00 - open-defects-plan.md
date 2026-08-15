@@ -152,7 +152,11 @@ three states asserted through `a.budget().ResponseReserve` the way
 
 **Commit:** `feat(agent): RebindSpec carries the response-reserve share`
 
-## 4. A bound-entry `response-reserve:` edit rides the beat rebind (TUI half)
+## 4. A bound-entry `response-reserve:` edit rides the beat rebind (TUI half) — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): CHANGELOG.md is listed in the item's Files but the implementer never edits it — the entry text above is for the verifier to apply.
+NOTES (2026-08-15): besides the `:350-354` comment the item names, three neighbouring comments the change makes false were refreshed — `setServers`' own doc paragraph ("MOVED either token bound" → any of three, plus a sentence on why the share compares the entry's own override), the `case "servers"` dispatcher comment ("two numbers ... EITHER of them" → three, any), and `rebindSpecFor`'s "What it re-resolves:" list, which gained the share's bullet beside the ceiling's.
+NOTES (2026-08-15): the ride comparison is the item's literal `s.entryReserve != reserve` (raw entry field, not the resolved share). It differs from the resolved answer in exactly one case — an entry DROPPING an override that the top-level `response-reserve:` key already matches — where it errs toward riding; documented in the refreshed `setServers` doc and reported on the run's DEFER line.
 
 Depends on item 3.
 
